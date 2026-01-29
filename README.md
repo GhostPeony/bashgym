@@ -41,6 +41,9 @@ ACT (Arena) → VERIFY (Judge) → SYNTHESIZE (Factory) → TRAIN (Gym) → DEPL
 
 ---
 
+<img width="1563" height="908" alt="dashbros home" src="https://github.com/user-attachments/assets/472d7ada-d57b-4e79-8604-c27e4fc99348" />
+
+
 ## Key Features
 
 | Feature | Description |
@@ -376,6 +379,9 @@ for model_name, result in results.items():
 ```
 
 ---
+
+<img width="1567" height="906" alt="bashgym data" src="https://github.com/user-attachments/assets/79c83388-68b7-4be4-a81d-e7900c5ae987" />
+
 
 ## Data Creation & Synthesis
 

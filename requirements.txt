@@ -1,0 +1,42 @@
+# Ghost Gym - Python Dependencies
+# =========================================
+# Core dependencies for running the system
+
+# Core Framework
+anthropic>=0.20.0          # Claude API client
+httpx>=0.26.0              # Async HTTP client
+python-dotenv>=1.0.0       # Environment variable loading
+
+# Docker Integration (optional - for sandbox mode)
+docker>=7.0.0              # Docker SDK for Python
+
+# API Server (for frontend integration)
+fastapi>=0.109.0           # REST API framework
+uvicorn>=0.27.0            # ASGI server
+pydantic>=2.5.0            # Data validation
+
+# =========================================
+# Benchmark Datasets
+# =========================================
+datasets>=2.14.0           # HuggingFace datasets for benchmarks
+
+# =========================================
+# Testing Dependencies
+# =========================================
+pytest>=7.4.0              # Test framework
+pytest-asyncio>=0.23.0     # Async test support
+pytest-cov>=4.1.0          # Code coverage
+
+# =========================================
+# Training Dependencies (Optional)
+# Install with: pip install -r requirements-training.txt
+# These are heavy ML dependencies not needed for basic operation
+# =========================================
+# See requirements-training.txt for:
+# - torch
+# - transformers
+# - trl
+# - datasets
+# - peft
+# - bitsandbytes
+# - unsloth

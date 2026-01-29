@@ -1,0 +1,28 @@
+# Ghost Gym - Training Dependencies
+# =========================================
+# Heavy ML dependencies for model fine-tuning
+# Install with: pip install -r requirements-training.txt
+#
+# NOTE: These require significant disk space and GPU support
+
+# PyTorch (install appropriate version for your CUDA)
+torch>=2.1.0
+
+# Hugging Face Ecosystem
+transformers>=4.36.0       # Model loading and tokenization
+datasets>=2.16.0           # Dataset handling
+peft>=0.7.0                # Parameter-efficient fine-tuning (LoRA)
+trl>=0.7.0                 # Reinforcement learning for LLMs (SFT, DPO, PPO)
+accelerate>=0.25.0         # Distributed training support
+
+# NVIDIA NeMo Microservices SDK
+# Provides unified access to NeMo Customizer, Evaluator, and NIM
+nemo-microservices>=0.1.0  # Official NVIDIA SDK
+# For better async performance:
+# nemo-microservices[aiohttp]>=0.1.0
+
+# Quantization (Linux only)
+# bitsandbytes>=0.41.0     # 4-bit quantization - uncomment on Linux
+
+# Optional: Fast LoRA fine-tuning
+# unsloth                  # Requires separate installation, see: https://github.com/unslothai/unsloth

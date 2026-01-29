@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Environment files
+.env
+frontend.env.local
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.DS_Store
+
+# Data and models (large/local)
+data/
+unsloth_compiled_cache/
+result.json
+
+# Node
+node_modules/
+
+# Misc
+nul
+=2.14.0

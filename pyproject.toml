@@ -1,0 +1,79 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bashgym"
+version = "0.1.0"
+description = "A Self-Improving Agentic Development Gym"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Bash Gym Team"}
+]
+keywords = ["ai", "agents", "training", "rl", "llm", "fine-tuning"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "anthropic>=0.20.0",
+    "httpx>=0.26.0",
+    "docker>=7.0.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+training = [
+    "torch>=2.1.0",
+    "transformers>=4.36.0",
+    "datasets>=2.16.0",
+    "peft>=0.7.0",
+    "trl>=0.7.0",
+    "accelerate>=0.25.0",
+]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+]
+all = ["bashgym[training,dev]"]
+
+[project.scripts]
+bashgym = "main:main"
+
+[project.urls]
+Homepage = "https://github.com/your-org/project-bashgym"
+Documentation = "https://github.com/your-org/project-bashgym#readme"
+Repository = "https://github.com/your-org/project-bashgym.git"
+Issues = "https://github.com/your-org/project-bashgym/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["."]
+python_files = ["test_*.py", "*_test.py"]
+addopts = "-v --tb=short"
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311", "py312"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+select = ["E", "F", "I", "N", "W", "UP"]
+ignore = ["E501"]  # Line too long - handled by black

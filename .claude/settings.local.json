@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(head:*)",
+      "WebFetch(domain:docs.nvidia.com)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(npx tsc:*)",
+      "Bash(python:*)",
+      "WebFetch(domain:platform.openai.com)",
+      "WebFetch(domain:arxiv.org)",
+      "Bash(dir /s /b \"%USERPROFILE%\\\\.bashgym\\\\traces\\\\*.json\")",
+      "WebFetch(domain:docs.unsloth.ai)",
+      "WebFetch(domain:unsloth.ai)",
+      "Bash(\"C:\\\\Users\\\\Cade\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python312\\\\python.exe\" -c \"import torch; print\\(f''PyTorch: {torch.__version__}''\\); print\\(f''CUDA: {torch.cuda.is_available\\(\\)}''\\)\")",
+      "Bash(\"C:\\\\Users\\\\Cade\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python312\\\\python.exe\" -m pip install torch==2.10.0+cu130 torchvision --index-url https://download.pytorch.org/whl/cu130 --force-reinstall --no-deps)",
+      "Bash(curl:*)",
+      "Bash(powershell -Command:*)",
+      "Bash(wmic process:*)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "Bash(dir /b \"C:\\\\Users\\\\Cade\\\\projects\\\\ghostwork\\\\bashgym\")",
+      "Bash(git -C \"C:\\\\Users\\\\Cade\\\\projects\\\\ghostwork\" log --oneline -20)",
+      "Bash(dir \"C:\\\\Users\\\\Cade\\\\projects\\\\ghostwork\\\\tests\")",
+      "Bash(wc:*)",
+      "WebFetch(domain:vercel.com)",
+      "WebFetch(domain:developer.nvidia.com)",
+      "Bash(cmd /c \"cd C:\\\\Users\\\\Cade\\\\projects\\\\ghostwork\\\\tests && ren test_bashgym.py test_bashgym.py\")"
+    ]
+  }
+}

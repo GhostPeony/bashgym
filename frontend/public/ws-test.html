@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Test</title>
+</head>
+<body>
+    <h1>WebSocket Test</h1>
+    <div id="output"></div>
+    <script>
+        const output = document.getElementById('output');
+        function log(msg) {
+            output.innerHTML += msg + '<br>';
+            console.log(msg);
+        }
+
+        log('Testing WebSocket connection to ws://localhost:8003/ws');
+
+        try {
+            const ws = new WebSocket('ws://localhost:8003/ws');
+            log('WebSocket created, readyState: ' + ws.readyState);
+
+            ws.onopen = () => {
+                log('Connected!');
+            };
+
+            ws.onmessage = (event) => {
+                log('Message: ' + event.data);
+            };
+
+            ws.onerror = (error) => {
+                log('Error: ' + JSON.stringify(error));
+                log('readyState: ' + ws.readyState);
+            };
+
+            ws.onclose = (event) => {
+                log('Closed: code=' + event.code + ', reason=' + event.reason);
+            };
+        } catch (e) {
+            log('Exception: ' + e.message);
+        }
+    </script>
+</body>
+</html>

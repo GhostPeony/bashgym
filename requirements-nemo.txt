@@ -1,0 +1,85 @@
+# Ghost Gym - NVIDIA NeMo Microservices Dependencies
+# =================================================
+# Install with: pip install -r requirements-nemo.txt
+#
+# These are optional dependencies for enhanced NeMo integration.
+# The core system works without these, but they enable:
+# - NeMo Evaluator (comprehensive model evaluation)
+# - Safe Synthesizer (privacy-preserving data)
+# - Data Designer (synthetic data generation)
+# - Prompt Optimization (MIPROv2)
+# - Guardrails (safety checks)
+# - Agent Toolkit (profiling and observability)
+
+# =================================================
+# NeMo Microservices SDK
+# =================================================
+# Note: Install from NVIDIA's repository when available
+# pip install nemo-microservices[data-designer,evaluator,safe-synthesizer]
+
+# Alternative: Individual components
+nemo-sdk>=0.1.0                # NeMo base SDK (when available)
+
+# =================================================
+# Prompt Optimization
+# =================================================
+dspy-ai>=2.4.0                 # DSPy for MIPROv2 optimization
+
+# =================================================
+# Agent Toolkit (NAT)
+# =================================================
+# pip install nvidia-nat[all]
+# Provides: profiling, MCP client/server, A2A protocol
+
+# =================================================
+# Observability Backends
+# =================================================
+arize-phoenix>=4.0.0           # Phoenix for local observability
+langfuse>=2.0.0                # Langfuse tracing (optional)
+opentelemetry-api>=1.20.0      # OpenTelemetry support
+opentelemetry-sdk>=1.20.0
+opentelemetry-exporter-otlp>=1.20.0
+
+# =================================================
+# Additional ML Dependencies
+# =================================================
+# These extend the training capabilities
+
+# Knowledge Distillation
+# (uses existing transformers/trl from requirements-training.txt)
+
+# Evaluation
+lm-eval>=0.4.0                 # Language Model Evaluation Harness
+bigcode-evaluation-harness>=0.1.0  # BigCode benchmarks (optional)
+
+# =================================================
+# Privacy & Security
+# =================================================
+presidio-analyzer>=2.2.0       # PII detection (fallback)
+presidio-anonymizer>=2.2.0     # PII anonymization
+
+# =================================================
+# Development & Testing
+# =================================================
+pytest-benchmark>=4.0.0        # Benchmark testing
+memory-profiler>=0.61.0        # Memory profiling
+
+# =================================================
+# Notes
+# =================================================
+# 1. NVIDIA NeMo Microservices SDK may require:
+#    - NVIDIA API key (set NVIDIA_API_KEY environment variable)
+#    - Access to NVIDIA's package repository
+#
+# 2. For local development without NeMo services:
+#    - The Ghost Gym modules provide fallback implementations
+#    - Core functionality works with just httpx for API calls
+#
+# 3. GPU requirements for full functionality:
+#    - NVIDIA GPU with CUDA support
+#    - CUDA 12.x recommended
+#    - cuDNN 8.x
+#
+# 4. For production deployment:
+#    - Consider running NeMo services in containers
+#    - See docker/docker-compose.yml for service definitions

@@ -1,0 +1,311 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* CSS Custom Properties for Theme System */
+:root {
+  /* Light Mode */
+  --color-primary: #0066CC;
+  --color-accent: #76B900;
+
+  --bg-primary: #FFFFFF;
+  --bg-secondary: #F5F5F7;
+  --bg-tertiary: #E8E8ED;
+  --bg-terminal: #1E1E1E;
+
+  --text-primary: #1D1D1F;
+  --text-secondary: #6E6E73;
+  --text-muted: #86868B;
+
+  --border-color: #D2D2D7;
+  --border-subtle: #E5E5EA;
+
+  --shadow-color: rgba(0, 0, 0, 0.1);
+
+  /* Chart colors */
+  --chart-1: #0066CC;
+  --chart-2: #76B900;
+  --chart-3: #FF9500;
+  --chart-4: #AF52DE;
+  --chart-5: #FF3B30;
+}
+
+.dark {
+  /* Dark Mode (NVIDIA-inspired) */
+  --color-primary: #76B900;
+  --color-accent: #00A6FF;
+
+  --bg-primary: #0D0D0D;
+  --bg-secondary: #1A1A1A;
+  --bg-tertiary: #242424;
+  --bg-terminal: #0D0D0D;
+
+  --text-primary: #FFFFFF;
+  --text-secondary: #A1A1A6;
+  --text-muted: #6E6E73;
+
+  --border-color: #38383A;
+  --border-subtle: #2C2C2E;
+
+  --shadow-color: rgba(0, 0, 0, 0.3);
+
+  /* Chart colors for dark mode */
+  --chart-1: #76B900;
+  --chart-2: #00A6FF;
+  --chart-3: #FFD60A;
+  --chart-4: #BF5AF2;
+  --chart-5: #FF453A;
+}
+
+/* Base styles */
+@layer base {
+  html {
+    font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, system-ui, 'Segoe UI', Roboto, sans-serif;
+  }
+
+  body {
+    @apply bg-background-primary text-text-primary;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Electron window controls area */
+  .titlebar-drag {
+    -webkit-app-region: drag;
+  }
+
+  .titlebar-no-drag {
+    -webkit-app-region: no-drag;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-border rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-text-secondary;
+  }
+
+  /* Selection styling */
+  ::selection {
+    background-color: rgba(0, 102, 204, 0.3);
+  }
+
+  .dark ::selection {
+    background-color: rgba(118, 185, 0, 0.3);
+  }
+}
+
+/* Component utilities */
+@layer components {
+
+  /* Card styles */
+  .card {
+    @apply bg-background-secondary rounded-xl border border-border-subtle;
+  }
+
+  .card-elevated {
+    @apply card shadow-card;
+  }
+
+  /* Button base */
+  .btn {
+    @apply px-4 py-2 rounded-lg font-medium transition-all duration-200;
+    @apply focus:outline-none focus:ring-2;
+    --tw-ring-color: var(--color-primary);
+    --tw-ring-opacity: 0.5;
+  }
+
+  .btn-primary {
+    @apply btn bg-primary text-white;
+    @apply hover:opacity-90 active:opacity-80;
+  }
+
+  .btn-secondary {
+    @apply btn bg-background-tertiary text-text-primary;
+    @apply hover:bg-border active:bg-border-subtle;
+  }
+
+  .btn-ghost {
+    @apply btn bg-transparent text-text-secondary;
+    @apply hover:bg-background-tertiary hover:text-text-primary;
+  }
+
+  /* Input styles */
+  .input {
+    @apply px-3 py-2 bg-background-primary border border-border rounded-lg;
+    @apply text-text-primary placeholder:text-text-muted;
+    @apply focus:outline-none focus:ring-2 focus:border-primary;
+    @apply transition-all duration-200;
+    --tw-ring-color: var(--color-primary);
+    --tw-ring-opacity: 0.5;
+  }
+
+  /* Status indicators */
+  .status-dot {
+    @apply w-2 h-2 rounded-full;
+  }
+
+  .status-success {
+    @apply bg-status-success;
+    box-shadow: 0 0 8px rgba(52, 199, 89, 0.5);
+  }
+
+  .status-warning {
+    @apply bg-status-warning;
+    box-shadow: 0 0 8px rgba(255, 149, 0, 0.5);
+  }
+
+  .status-error {
+    @apply bg-status-error;
+    box-shadow: 0 0 8px rgba(255, 59, 48, 0.5);
+  }
+
+  /* Glow effects for dark mode */
+  .dark .glow-green {
+    box-shadow: 0 0 20px rgba(118, 185, 0, 0.3);
+  }
+
+  .dark .glow-blue {
+    box-shadow: 0 0 20px rgba(0, 166, 255, 0.3);
+  }
+
+  /* Terminal attention states */
+  .terminal-attention-success {
+    @apply ring-2;
+    --tw-ring-color: rgba(52, 199, 89, 0.5);
+  }
+
+  .terminal-attention-error {
+    @apply ring-2;
+    --tw-ring-color: rgba(255, 59, 48, 0.5);
+  }
+
+  .terminal-attention-waiting {
+    @apply ring-2 animate-pulse;
+    --tw-ring-color: rgba(0, 122, 255, 0.5);
+  }
+
+  /* Menu item */
+  .menu-item {
+    @apply flex items-center gap-3 px-3 py-2 rounded-lg;
+    @apply text-text-secondary hover:text-text-primary;
+    @apply hover:bg-background-tertiary;
+    @apply transition-colors duration-150 cursor-pointer;
+  }
+
+  .menu-item-active {
+    @apply text-primary;
+    background-color: rgba(var(--color-primary-rgb, 0, 102, 204), 0.1);
+  }
+
+  .dark .menu-item-active {
+    background-color: rgba(118, 185, 0, 0.1);
+  }
+}
+
+/* Utility classes */
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  /* Glass effect */
+  .glass {
+    @apply backdrop-blur-xl;
+    background-color: rgba(255, 255, 255, 0.8);
+  }
+
+  .dark .glass {
+    background-color: rgba(13, 13, 13, 0.8);
+  }
+
+  /* Gradient text */
+  .gradient-text {
+    @apply bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent;
+  }
+
+  /* Hide scrollbar */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Transition utilities */
+  .transition-theme {
+    @apply transition-colors duration-200;
+  }
+}
+
+/* xterm.js overrides */
+.xterm {
+  padding: 8px;
+}
+
+.xterm-viewport {
+  overflow-y: auto !important;
+}
+
+/* Recharts customization */
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical line {
+  stroke: var(--border-subtle);
+}
+
+.recharts-text {
+  fill: var(--text-secondary);
+  font-family: 'SF Mono', monospace;
+  font-size: 11px;
+}
+
+.recharts-tooltip-wrapper {
+  outline: none;
+}
+
+/* Animation for flywheel */
+@keyframes flywheel-rotate {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.flywheel-animate {
+  animation: flywheel-rotate 20s linear infinite;
+}
+
+/* Stage glow animation */
+@keyframes stage-glow {
+
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+}
+
+.stage-active {
+  animation: stage-glow 2s ease-in-out infinite;
+}

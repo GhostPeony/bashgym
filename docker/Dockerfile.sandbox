@@ -1,0 +1,59 @@
+# =============================================================================
+# Project Ouroboros - Sandbox Container
+# =============================================================================
+# Isolated execution environment for agent tasks.
+# Network-restricted, resource-limited container for safe code execution.
+#
+# Build: docker build -t ouroboros-sandbox -f docker/Dockerfile.sandbox .
+# =============================================================================
+
+FROM python:3.10-slim
+
+LABEL maintainer="Project Ouroboros Team"
+LABEL description="Isolated sandbox for agent task execution"
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
+
+# Install common development tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    wget \
+    vim \
+    nano \
+    jq \
+    tree \
+    htop \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install common Python packages for development tasks
+RUN pip install --no-cache-dir \
+    pytest \
+    black \
+    ruff \
+    mypy \
+    requests \
+    pyyaml \
+    toml
+
+# Create workspace directory
+WORKDIR /workspace
+
+# Create non-root user (can be overridden for specific tasks)
+RUN groupadd -r sandbox && useradd -r -g sandbox sandbox
+RUN chown -R sandbox:sandbox /workspace
+
+# Copy hook scripts
+COPY post_tool_use.py /hooks/
+COPY session_end.py /hooks/
+RUN chmod +x /hooks/*.py
+
+# Default to non-root user
+USER sandbox
+
+# Keep container running (for exec)
+CMD ["tail", "-f", "/dev/null"]

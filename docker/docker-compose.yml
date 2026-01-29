@@ -1,0 +1,96 @@
+# =============================================================================
+# Bash Gym - Docker Compose Configuration
+# =============================================================================
+# Multi-service orchestration for the complete training loop.
+#
+# Usage:
+#   docker-compose up -d          # Start all services
+#   docker-compose logs -f arena  # Follow arena logs
+#   docker-compose down           # Stop all services
+# =============================================================================
+
+services:
+  # -------------------------------------------------------------------------
+  # Arena: Main execution environment
+  # -------------------------------------------------------------------------
+  arena:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.arena
+    container_name: bashgym-arena
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
+      - NEMO_ENDPOINT=${NEMO_ENDPOINT:-http://nemo:8000}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - arena-data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock  # For creating sandboxes
+    depends_on:
+      - sandbox-base
+    networks:
+      - bashgym-network
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------
+  # Sandbox Base: Template container for isolated execution
+  # -------------------------------------------------------------------------
+  sandbox-base:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.sandbox
+    container_name: bashgym-sandbox-base
+    # This container just needs to exist as a base image
+    # Individual sandboxes are created dynamically
+    command: ["echo", "Sandbox base image ready"]
+    networks:
+      - bashgym-network
+
+  # -------------------------------------------------------------------------
+  # Metrics: Prometheus metrics collection (optional)
+  # -------------------------------------------------------------------------
+  # Uncomment to enable metrics collection
+  # prometheus:
+  #   image: prom/prometheus:latest
+  #   container_name: bashgym-prometheus
+  #   ports:
+  #     - "9090:9090"
+  #   volumes:
+  #     - ./prometheus.yml:/etc/prometheus/prometheus.yml
+  #     - prometheus-data:/prometheus
+  #   networks:
+  #     - bashgym-network
+
+  # -------------------------------------------------------------------------
+  # Grafana: Metrics visualization (optional)
+  # -------------------------------------------------------------------------
+  # Uncomment to enable Grafana dashboards
+  # grafana:
+  #   image: grafana/grafana:latest
+  #   container_name: bashgym-grafana
+  #   ports:
+  #     - "3000:3000"
+  #   volumes:
+  #     - grafana-data:/var/lib/grafana
+  #   environment:
+  #     - GF_SECURITY_ADMIN_PASSWORD=admin
+  #   networks:
+  #     - bashgym-network
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  bashgym-network:
+    driver: bridge
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  arena-data:
+    driver: local
+  # prometheus-data:
+  #   driver: local
+  # grafana-data:
+  #   driver: local

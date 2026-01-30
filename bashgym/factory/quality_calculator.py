@@ -91,12 +91,11 @@ def calculate_success_rate(steps: List[Dict[str, Any]]) -> tuple[float, int, int
             failed += 1
         elif error is not None:
             failed += 1
-        else:
-            # No explicit indicator - assume success if no error field
-            successful += 1
+        # else: no explicit indicator, don't count (avoids inflating success rate)
 
-    total = len(steps)
-    rate = successful / total if total > 0 else 0.0
+    # Calculate rate from steps with known outcomes only
+    counted = successful + failed
+    rate = successful / counted if counted > 0 else 0.0
 
     return rate, successful, failed
 

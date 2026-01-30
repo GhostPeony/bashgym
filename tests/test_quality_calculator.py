@@ -60,14 +60,15 @@ class TestSuccessRate:
         assert failed == 0
 
     def test_implicit_success(self):
-        """Test steps without explicit success field assume success."""
+        """Test steps without explicit indicators are not counted (avoids inflating rate)."""
         steps = [
             {"output": "some output"},  # No success or exit_code
             {"output": "more output"},
         ]
         rate, successful, failed = calculate_success_rate(steps)
-        assert successful == 2
+        assert successful == 0
         assert failed == 0
+        assert rate == 0.0
 
 
 class TestComplexity:

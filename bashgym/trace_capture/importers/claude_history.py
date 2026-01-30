@@ -339,7 +339,7 @@ class ClaudeSessionImporter:
         session = TraceSession.from_steps(
             steps,
             source_tool="claude_code",
-            verification_passed=True,  # Assume successful for imports
+            verification_passed=None,  # Unknown until actually verified
             imported=True,
             import_source=str(session_file),
             user_initial_prompt=user_initial_prompt or "Imported session"
@@ -482,7 +482,7 @@ class ClaudeSessionImporter:
             session = TraceSession.from_steps(
                 steps,
                 source_tool="claude_code",
-                verification_passed=True,
+                verification_passed=None,  # Unknown until actually verified
                 imported=True,
                 import_source=str(session_file),
                 user_initial_prompt=sanitized_prompt or "Imported session"

@@ -1808,8 +1808,8 @@ def create_app() -> FastAPI:
         - BRONZE (≥60% success, ≥0.40 quality): DPO rejected responses, review candidates
         - REJECTED (<60% success): Not suitable for training, archive only
 
-        Verification overrides:
-        - verification_passed=True -> Gold (verified successful)
+        Verification adjustments:
+        - verification_passed=True -> One-tier boost (e.g. silver→gold, bronze→silver)
         - verification_passed=False AND has_verification=True -> Failed (verified unsuccessful)
 
         Args:
@@ -1919,34 +1919,44 @@ def create_app() -> FastAPI:
                         "file_path": str(trace_file)
                     }
 
-                    # Determine tier (verification overrides apply first)
+                    # Determine tier
+                    # Step 1: Check for explicit verification failure
+                    # Step 2: Classify by quality metrics
+                    # Step 3: Apply verification_passed as a one-tier boost (not a blanket override)
                     tier = None
                     target_dir = None
 
-                    if metrics["verification_passed"]:
-                        # Verified successful -> Gold regardless of metrics
-                        tier = "gold"
-                        target_dir = data_dir / "gold_traces"
-                    elif metrics["has_verification"] and not metrics["verification_passed"]:
-                        # Verified failed -> Failed
+                    if metrics["has_verification"] and not metrics["verification_passed"]:
+                        # Verified failed -> Failed (explicit failure overrides all)
                         tier = "failed"
                         target_dir = data_dir / "failed_traces"
-                    elif success_rate >= gold_success_rate and quality_score >= gold_quality_score:
-                        # Gold tier: ≥90% success, ≥0.75 quality
-                        tier = "gold"
-                        target_dir = data_dir / "gold_traces"
-                    elif success_rate >= silver_success_rate and quality_score >= silver_quality_score:
-                        # Silver tier: ≥75% success, ≥0.55 quality
-                        tier = "silver"
-                        target_dir = data_dir / "silver_traces"
-                    elif success_rate >= bronze_success_rate and quality_score >= bronze_quality_score:
-                        # Bronze tier: ≥60% success, ≥0.40 quality
-                        tier = "bronze"
-                        target_dir = data_dir / "bronze_traces"
                     else:
-                        # Below bronze threshold -> Rejected
-                        tier = "rejected"
-                        target_dir = data_dir / "failed_traces"
+                        # Determine base tier from quality metrics
+                        if success_rate >= gold_success_rate and quality_score >= gold_quality_score:
+                            base_tier = "gold"
+                        elif success_rate >= silver_success_rate and quality_score >= silver_quality_score:
+                            base_tier = "silver"
+                        elif success_rate >= bronze_success_rate and quality_score >= bronze_quality_score:
+                            base_tier = "bronze"
+                        else:
+                            base_tier = "rejected"
+
+                        # Apply verification_passed boost: promote one tier (max gold)
+                        # This rewards traces where tests passed but doesn't skip quality checks
+                        if metrics["verification_passed"] and base_tier != "gold":
+                            tier_promotion = {"silver": "gold", "bronze": "silver", "rejected": "bronze"}
+                            tier = tier_promotion.get(base_tier, base_tier)
+                        else:
+                            tier = base_tier
+
+                        # Map tier to directory
+                        tier_dirs = {
+                            "gold": data_dir / "gold_traces",
+                            "silver": data_dir / "silver_traces",
+                            "bronze": data_dir / "bronze_traces",
+                            "rejected": data_dir / "failed_traces",
+                        }
+                        target_dir = tier_dirs.get(tier, data_dir / "failed_traces")
 
                     # Add to classification lists
                     classifications[tier].append(trace_id)

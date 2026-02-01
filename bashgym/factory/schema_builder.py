@@ -528,9 +528,13 @@ class DataDesignerClient:
         params = column.params
         prompt = params["prompt"]
 
-        # Substitute context variables
-        for key, value in context.items():
-            prompt = prompt.replace(f"{{{{ {key} }}}}", str(value))
+        # Substitute context variables using Jinja2
+        try:
+            from jinja2 import Environment
+            prompt = Environment().from_string(prompt).render(**context)
+        except ImportError:
+            for key, value in context.items():
+                prompt = prompt.replace(f"{{{{ {key} }}}}", str(value))
 
         try:
             response = await self.client.post(
@@ -558,14 +562,19 @@ class DataDesignerClient:
         context: Dict[str, Any]
     ) -> str:
         """Evaluate a Jinja2 expression."""
-        template = column.params.get("expression") or column.params.get("template", "")
+        template_str = column.params.get("expression") or column.params.get("template", "")
 
-        # Simple variable substitution
-        result = template
-        for key, value in context.items():
-            result = result.replace(f"{{{{ {key} }}}}", str(value))
-
-        return result
+        try:
+            from jinja2 import Environment
+            env = Environment()
+            template = env.from_string(template_str)
+            return template.render(**context)
+        except ImportError:
+            # Fallback: simple variable substitution (no control flow)
+            result = template_str
+            for key, value in context.items():
+                result = result.replace(f"{{{{ {key} }}}}", str(value))
+            return result
 
     def _run_validator(
         self,

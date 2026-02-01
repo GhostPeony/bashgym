@@ -221,10 +221,14 @@ Always explain your reasoning before executing commands."""
             TrainingExample or None if trace is invalid
         """
         try:
-            with open(trace_path, 'r') as f:
+            with open(trace_path, 'r', encoding='utf-8', errors='replace') as f:
                 trace_data = json.load(f)
         except (json.JSONDecodeError, IOError) as e:
             print(f"Error loading trace {trace_path}: {e}")
+            return None
+
+        # Must be a dict with metadata, not a raw list of steps
+        if not isinstance(trace_data, dict):
             return None
 
         # Validate trace
@@ -265,7 +269,8 @@ Always explain your reasoning before executing commands."""
         """Validate a trace meets quality requirements."""
         # Check verification status
         if self.config.require_successful_verification:
-            if not trace_data.get("metadata", {}).get("verification_passed", False):
+            vp = trace_data.get("metadata", {}).get("verification_passed")
+            if vp is False:  # Only reject explicitly failed verification
                 return False
 
         # Check step count

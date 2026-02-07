@@ -39,6 +39,13 @@ export interface TrainingRequest {
   auto_export_gguf?: boolean
   gguf_quantization?: string
   use_nemo_gym?: boolean  // Use NVIDIA NeMo cloud training
+  // Data source selection
+  data_source?: 'traces' | 'dataset_path' | 'security_dataset'
+  security_dataset_type?: string
+  security_dataset_path?: string
+  security_conversion_mode?: string
+  security_max_samples?: number
+  security_balance_classes?: boolean
 }
 
 export interface TrainingResponse {
@@ -1690,6 +1697,71 @@ export const integrationApi = {
     request<{ base_path: string; directories: Record<string, string>; exists: boolean }>(
       '/integration/directory'
     )
+}
+
+// =============================================================================
+// Security Dataset API
+// =============================================================================
+
+export interface SecurityDatasetInfo {
+  dataset_type: string
+  name: string
+  domain: string
+  description: string
+  input_formats: string[]
+  example_sources: string[]
+}
+
+export interface SecurityIngestRequest {
+  dataset_type: string
+  input_path: string
+  mode?: 'direct' | 'enriched'
+  max_samples?: number
+  balance_classes?: boolean
+  benign_ratio?: number
+  output_dir?: string
+  train_split?: number
+  enrichment_provider?: string
+  enrichment_model?: string
+}
+
+export interface SecurityIngestResponse {
+  job_id: string
+  status: string
+  message: string
+}
+
+export interface SecurityJobStatus {
+  job_id: string
+  status: 'queued' | 'running' | 'completed' | 'failed'
+  dataset_type: string
+  mode: string
+  created_at: string
+  completed_at?: string
+  total_samples_read: number
+  examples_generated: number
+  train_path?: string
+  val_path?: string
+  train_count: number
+  val_count: number
+  error?: string
+}
+
+export const securityApi = {
+  listDatasets: () =>
+    request<SecurityDatasetInfo[]>('/security/datasets'),
+
+  startIngestion: (req: SecurityIngestRequest) =>
+    request<SecurityIngestResponse>('/security/ingest', {
+      method: 'POST',
+      body: JSON.stringify(req)
+    }),
+
+  getJobStatus: (jobId: string) =>
+    request<SecurityJobStatus>(`/security/jobs/${jobId}`),
+
+  listJobs: () =>
+    request<SecurityJobStatus[]>('/security/jobs')
 }
 
 // Achievements API

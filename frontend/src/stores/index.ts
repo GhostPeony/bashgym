@@ -21,7 +21,8 @@ export type {
   TrainingStatus,
   TrainingMetrics,
   TrainingConfig,
-  TrainingRun
+  TrainingRun,
+  DataSource
 } from './trainingStore'
 export { useRouterStore } from './routerStore'
 export type { RoutingStrategy, RoutingStats, RoutingDecision } from './routerStore'

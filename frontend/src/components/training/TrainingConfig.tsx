@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
-import { X, FolderGit2, Database, Sparkles, Info, Cloud, Monitor } from 'lucide-react'
-import type { TrainingConfig as TrainingConfigType, TrainingStrategy } from '../../stores'
-import { tracesApi, RepoInfo } from '../../services/api'
+import { X, FolderGit2, Database, Sparkles, Info, Cloud, Monitor, Shield, FileText } from 'lucide-react'
+import type { TrainingConfig as TrainingConfigType, TrainingStrategy, DataSource } from '../../stores'
+import { tracesApi, securityApi, RepoInfo, SecurityDatasetInfo } from '../../services/api'
 import { useTutorialComplete } from '../../hooks'
 import { clsx } from 'clsx'
 
@@ -18,6 +18,8 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
   const [trainingScope, setTrainingScope] = useState<TrainingScope>('all')
   const [selectedRepos, setSelectedRepos] = useState<string[]>([])
   const [trainingBackend, setTrainingBackend] = useState<TrainingBackend>('local')
+  const [dataSource, setDataSource] = useState<DataSource>('traces')
+  const [securityDatasets, setSecurityDatasets] = useState<SecurityDatasetInfo[]>([])
   const { complete: completeTutorialStep } = useTutorialComplete()
 
   const [config, setConfig] = useState<TrainingConfigType>({
@@ -35,14 +37,25 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
     // KD defaults
     teacherModel: 'meta-llama/Llama-3.1-70B-Instruct',
     temperature: 2.0,
-    kdAlpha: 0.5
+    kdAlpha: 0.5,
+    // Security dataset defaults
+    securityDatasetType: '',
+    securityDatasetPath: '',
+    securityConversionMode: 'direct' as const,
+    securityMaxSamples: undefined,
+    securityBalanceClasses: true
   })
 
-  // Fetch available repos on mount
+  // Fetch available repos and security datasets on mount
   useEffect(() => {
     tracesApi.listRepos().then((result) => {
       if (result.ok && result.data) {
         setAvailableRepos(result.data)
+      }
+    })
+    securityApi.listDatasets().then((result) => {
+      if (result.ok && result.data) {
+        setSecurityDatasets(result.data)
       }
     })
   }, [])
@@ -58,7 +71,7 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
     e.preventDefault()
     // Include selected repos based on training scope
     const reposToUse = trainingScope === 'all' ? [] : selectedRepos
-    onStart({ ...config, selectedRepos: reposToUse })
+    onStart({ ...config, dataSource, selectedRepos: reposToUse })
     completeTutorialStep('start_training')
   }
 
@@ -78,8 +91,133 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="p-6 space-y-6 overflow-y-auto max-h-[calc(90vh-140px)]">
-          {/* Training Scope - NEW */}
+          {/* Data Source */}
           <div>
+            <label className="block text-sm font-medium text-text-primary mb-2">
+              Data Source
+            </label>
+            <div className="grid grid-cols-3 gap-2 mb-3">
+              <button
+                type="button"
+                onClick={() => setDataSource('traces')}
+                className={clsx(
+                  'p-3 rounded-lg border text-center transition-all',
+                  dataSource === 'traces'
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border-color hover:border-primary/50 text-text-secondary'
+                )}
+              >
+                <Database className="w-5 h-5 mx-auto mb-1" />
+                <span className="block font-semibold text-sm">Gold Traces</span>
+                <span className="block text-xs mt-1 text-text-muted">Default</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setDataSource('dataset_path')}
+                className={clsx(
+                  'p-3 rounded-lg border text-center transition-all',
+                  dataSource === 'dataset_path'
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border-color hover:border-primary/50 text-text-secondary'
+                )}
+              >
+                <FileText className="w-5 h-5 mx-auto mb-1" />
+                <span className="block font-semibold text-sm">Custom JSONL</span>
+                <span className="block text-xs mt-1 text-text-muted">User-provided</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setDataSource('security_dataset')}
+                className={clsx(
+                  'p-3 rounded-lg border text-center transition-all',
+                  dataSource === 'security_dataset'
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border-color hover:border-primary/50 text-text-secondary'
+                )}
+              >
+                <Shield className="w-5 h-5 mx-auto mb-1" />
+                <span className="block font-semibold text-sm">Security Dataset</span>
+                <span className="block text-xs mt-1 text-text-muted">Public datasets</span>
+              </button>
+            </div>
+
+            {/* Security Dataset Config */}
+            {dataSource === 'security_dataset' && (
+              <div className="border border-border-color rounded-lg p-3 bg-background-tertiary space-y-3">
+                <div>
+                  <label className="block text-xs text-text-muted mb-1">Dataset Type</label>
+                  <select
+                    value={config.securityDatasetType}
+                    onChange={(e) => setConfig({ ...config, securityDatasetType: e.target.value })}
+                    className="input w-full"
+                  >
+                    <option value="">Select a dataset...</option>
+                    {securityDatasets.map((ds) => (
+                      <option key={ds.dataset_type} value={ds.dataset_type}>
+                        {ds.name} ({ds.domain})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-text-muted mb-1">Input File Path</label>
+                  <input
+                    type="text"
+                    value={config.securityDatasetPath}
+                    onChange={(e) => setConfig({ ...config, securityDatasetPath: e.target.value })}
+                    className="input w-full"
+                    placeholder="/path/to/dataset.json"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-text-muted mb-1">Mode</label>
+                    <select
+                      value={config.securityConversionMode}
+                      onChange={(e) => setConfig({ ...config, securityConversionMode: e.target.value as 'direct' | 'enriched' })}
+                      className="input w-full"
+                    >
+                      <option value="direct">Direct (fast, no API)</option>
+                      <option value="enriched">Enriched (LLM reasoning)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-text-muted mb-1">Max Samples</label>
+                    <input
+                      type="number"
+                      value={config.securityMaxSamples ?? ''}
+                      onChange={(e) => setConfig({ ...config, securityMaxSamples: e.target.value ? parseInt(e.target.value) : undefined })}
+                      className="input w-full"
+                      placeholder="All"
+                      min={10}
+                    />
+                  </div>
+                </div>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={config.securityBalanceClasses ?? true}
+                    onChange={(e) => setConfig({ ...config, securityBalanceClasses: e.target.checked })}
+                    className="accent-primary"
+                  />
+                  <span className="text-sm text-text-secondary">Balance malicious/benign classes</span>
+                </label>
+              </div>
+            )}
+
+            {/* Data source info */}
+            <div className="flex items-start gap-2 mt-3 p-2 rounded-lg bg-status-info/10 border border-status-info/20">
+              <Info className="w-4 h-4 text-status-info flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-text-secondary">
+                {dataSource === 'traces' && 'Auto-generate training data from your collected gold traces.'}
+                {dataSource === 'dataset_path' && 'Provide a pre-formatted JSONL file for training.'}
+                {dataSource === 'security_dataset' && 'Ingest a public security dataset (EMBER, PhishTank, etc.) directly into training examples.'}
+              </p>
+            </div>
+          </div>
+
+          {/* Training Scope - only shown for trace-based training */}
+          {dataSource === 'traces' && <div>
             <label className="block text-sm font-medium text-text-primary mb-2">
               Training Data Scope
             </label>
@@ -182,7 +320,7 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
                 {trainingScope === 'single' && 'Train on a single repo for a highly specialized codebase expert.'}
               </p>
             </div>
-          </div>
+          </div>}
 
           {/* Training Backend */}
           <div>
@@ -287,19 +425,21 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
             </select>
           </div>
 
-          {/* Dataset Path */}
-          <div>
-            <label className="block text-sm font-medium text-text-primary mb-2">
-              Dataset Path
-            </label>
-            <input
-              type="text"
-              value={config.datasetPath}
-              onChange={(e) => setConfig({ ...config, datasetPath: e.target.value })}
-              className="input w-full"
-              placeholder="Leave empty to auto-generate from traces"
-            />
-          </div>
+          {/* Dataset Path - only for traces/custom JSONL modes */}
+          {dataSource !== 'security_dataset' && (
+            <div>
+              <label className="block text-sm font-medium text-text-primary mb-2">
+                Dataset Path
+              </label>
+              <input
+                type="text"
+                value={config.datasetPath}
+                onChange={(e) => setConfig({ ...config, datasetPath: e.target.value })}
+                className="input w-full"
+                placeholder={dataSource === 'dataset_path' ? '/path/to/train.jsonl' : 'Leave empty to auto-generate from traces'}
+              />
+            </div>
+          )}
 
           {/* Hyperparameters Grid */}
           <div className="grid grid-cols-2 gap-4">

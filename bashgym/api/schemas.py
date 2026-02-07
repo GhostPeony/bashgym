@@ -114,6 +114,13 @@ class TaskResponse(BaseModel):
 # Training Schemas
 # =============================================================================
 
+class DataSource(str, Enum):
+    """Source of training data."""
+    TRACES = "traces"
+    DATASET_PATH = "dataset_path"
+    SECURITY_DATASET = "security_dataset"
+
+
 class TrainingRequest(BaseModel):
     """Request to start a training run."""
     strategy: TrainingStrategy = Field(TrainingStrategy.SFT, description="Training strategy")
@@ -131,6 +138,13 @@ class TrainingRequest(BaseModel):
     gguf_quantization: str = Field("q4_k_m", description="GGUF quantization level")
     use_nemo_gym: bool = Field(False, description="Use NVIDIA NeMo cloud training instead of local")
     selected_repos: Optional[List[str]] = Field(None, description="Repos to include (None or empty = all repos)")
+    # Data source selection
+    data_source: DataSource = Field(DataSource.TRACES, description="Source of training data")
+    security_dataset_type: Optional[str] = Field(None, description="Security dataset type (ember, phishtank, etc.)")
+    security_dataset_path: Optional[str] = Field(None, description="Path to security dataset file")
+    security_conversion_mode: Optional[str] = Field("direct", description="Security dataset conversion mode (direct/enriched)")
+    security_max_samples: Optional[int] = Field(None, description="Max samples for security dataset ingestion")
+    security_balance_classes: bool = Field(True, description="Balance classes in security dataset")
 
     class Config:
         json_schema_extra = {
@@ -138,7 +152,8 @@ class TrainingRequest(BaseModel):
                 "strategy": "sft",
                 "num_epochs": 3,
                 "batch_size": 4,
-                "auto_export_gguf": True
+                "auto_export_gguf": True,
+                "data_source": "traces"
             }
         }
 

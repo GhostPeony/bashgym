@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 from bashgym.api.schemas import (
     TaskRequest, TaskResponse, TaskStatus,
     TrainingRequest, TrainingResponse, TrainingStatus, TrainingStrategy,
+    DataSource,
     ModelInfo, ExportRequest, ExportResponse, ExportFormat,
     SystemStats, HealthCheck,
     TraceInfo, TraceStatus, TraceQuality, TraceQualityTier, RepoInfo,
@@ -54,6 +55,7 @@ from bashgym.api.hf_routes import router as hf_router
 from bashgym.api.factory_routes import router as factory_router
 from bashgym.api.integration_routes import router as integration_router
 from bashgym.api.achievements_routes import router as achievements_router
+from bashgym.api.security_routes import router as security_router
 from bashgym.factory.quality_calculator import calculate_quality_breakdown
 
 
@@ -572,9 +574,28 @@ def create_app() -> FastAPI:
 
                 settings = get_settings()
 
-                # Auto-generate training data from gold traces if no dataset specified
+                # Determine training data source
                 dataset_path = None
-                if request.dataset_path:
+                if request.data_source == DataSource.SECURITY_DATASET:
+                    # Ingest security dataset directly
+                    logger.info(f"Ingesting security dataset: {request.security_dataset_type}")
+                    from bashgym.factory.security_ingester import (
+                        SecurityIngester, IngestionConfig, DatasetType, ConversionMode
+                    )
+                    sec_config = IngestionConfig(
+                        dataset_type=DatasetType(request.security_dataset_type),
+                        input_path=request.security_dataset_path,
+                        mode=ConversionMode(request.security_conversion_mode or "direct"),
+                        max_samples=request.security_max_samples,
+                        balance_classes=request.security_balance_classes,
+                        output_dir=str(Path(settings.data.training_batches_dir) / run_id),
+                        train_split=0.9,
+                    )
+                    sec_ingester = SecurityIngester(sec_config)
+                    result = sec_ingester.ingest_direct()
+                    dataset_path = Path(result.train_path)
+                    logger.info(f"Security ingestion complete: {result.examples_generated} examples -> {dataset_path}")
+                elif request.data_source == DataSource.DATASET_PATH or request.dataset_path:
                     dataset_path = Path(request.dataset_path)
                 else:
                     # Generate training data from gold traces automatically
@@ -3141,6 +3162,9 @@ def create_app() -> FastAPI:
 
     # Include Achievement routes (stats + achievements)
     app.include_router(achievements_router)
+
+    # Include Security Dataset routes
+    app.include_router(security_router)
 
     return app
 

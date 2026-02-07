@@ -8,6 +8,7 @@ Includes:
 - SchemaBuilder: Rich synthetic data generation
 - PatternExtractor: Pattern extraction from traces for synthetic data generation
 - SyntheticGenerator: Synthetic task generation from extracted patterns
+- SecurityIngester: Public security dataset ingestion (EMBER, PhishTank, etc.)
 """
 
 from bashgym.factory.data_factory import DataFactory, DataFactoryConfig, TrainingExample, DPOExample, SynthesisStrategy
@@ -17,6 +18,7 @@ from bashgym.factory.safe_synthesizer import SafeSynthesizer, SafeSynthesizerCon
 from bashgym.factory.schema_builder import SchemaBuilder, DataDesignerClient, DataSchema, ColumnType
 from bashgym.factory.pattern_extractor import TracePatterns, FileCluster, ToolSequence
 from bashgym.factory.synthetic_generator import SyntheticTask, GenerationStrategy, GenerationPreset, PRESETS, SyntheticGenerator
+from bashgym.factory.security_ingester import SecurityIngester, IngestionConfig, IngestionResult, DatasetType, ConversionMode, SecurityDomain
 
 __all__ = [
     # Data Factory
@@ -53,4 +55,11 @@ __all__ = [
     "GenerationPreset",
     "PRESETS",
     "SyntheticGenerator",
+    # Security Dataset Ingester
+    "SecurityIngester",
+    "IngestionConfig",
+    "IngestionResult",
+    "DatasetType",
+    "ConversionMode",
+    "SecurityDomain",
 ]

@@ -16,6 +16,8 @@ export interface TrainingMetrics {
   timestamp: number
 }
 
+export type DataSource = 'traces' | 'dataset_path' | 'security_dataset'
+
 export interface TrainingConfig {
   strategy: TrainingStrategy
   baseModel: string
@@ -36,6 +38,13 @@ export interface TrainingConfig {
   teacherModel?: string
   temperature?: number
   kdAlpha?: number  // Weight for distillation loss vs task loss
+  // Data source selection
+  dataSource?: DataSource
+  securityDatasetType?: string
+  securityDatasetPath?: string
+  securityConversionMode?: 'direct' | 'enriched'
+  securityMaxSamples?: number
+  securityBalanceClasses?: boolean
 }
 
 export interface TrainingRun {
@@ -121,7 +130,13 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
         warmup_steps: config.warmupSteps,
         max_seq_length: config.maxSeqLength,
         selected_repos: config.selectedRepos,
-        use_nemo_gym: config.useNemoGym
+        use_nemo_gym: config.useNemoGym,
+        data_source: config.dataSource,
+        security_dataset_type: config.securityDatasetType,
+        security_dataset_path: config.securityDatasetPath,
+        security_conversion_mode: config.securityConversionMode,
+        security_max_samples: config.securityMaxSamples,
+        security_balance_classes: config.securityBalanceClasses
       })
 
       if (response.ok && response.data) {

@@ -28,6 +28,7 @@ from bashgym.orchestrator.task_dag import TaskDAG, CyclicDependencyError
 from bashgym.orchestrator.dispatcher import WorkerPool
 from bashgym.orchestrator.worktree import WorktreeManager
 from bashgym.orchestrator.agent import OrchestrationAgent
+from bashgym.orchestrator.synthesizer import ResultSynthesizer, SynthesisReport
 
 __all__ = [
     # Provider config
@@ -47,4 +48,6 @@ __all__ = [
     "WorkerPool",
     "WorktreeManager",
     "OrchestrationAgent",
+    "ResultSynthesizer",
+    "SynthesisReport",
 ]

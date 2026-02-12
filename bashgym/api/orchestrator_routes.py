@@ -158,6 +158,7 @@ async def _decompose_spec(job_id: str, spec, llm_config):
             max_workers=spec.max_workers,
             repo_path=repo_path,
             use_worktrees=repo_path is not None,
+            job_id=job_id,
         )
 
         dag = await agent.submit_spec(spec)
@@ -204,9 +205,15 @@ async def _execute_dag(job_id: str, base_branch: str):
     """Background task: execute approved DAG."""
     job = _jobs[job_id]
     agent = job["agent"]
+    spec = job.get("spec")
+    budget = spec.max_budget_usd if spec else None
 
     try:
-        results = await agent.execute(dag=job["dag"], base_branch=base_branch)
+        results = await agent.execute(
+            dag=job["dag"],
+            base_branch=base_branch,
+            budget_usd=budget,
+        )
         job["results"] = results
         job["status"] = "completed"
     except Exception as e:
@@ -243,6 +250,16 @@ async def get_status(job_id: str):
         response["total_time"] = sum(r.duration_seconds for r in results)
         response["completed"] = sum(1 for r in results if r.success)
         response["failed"] = sum(1 for r in results if not r.success)
+
+    # Budget tracking
+    agent = job.get("agent")
+    if agent:
+        response["budget"] = agent.budget_status
+
+    # Synthesis report
+    report = getattr(agent, "_last_report", None) if agent else None
+    if report:
+        response["synthesis"] = report.to_dict()
 
     return response
 

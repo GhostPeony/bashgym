@@ -38,3 +38,40 @@ Please try again with a different approach. Consider:
 
 Original task:
 {original_prompt}"""
+
+
+RETRY_ANALYSIS_SYSTEM = """You are an expert at analyzing software development failures and producing improved task prompts.
+
+Given a failed task attempt, analyze the root cause and produce an improved prompt that avoids the same failure."""
+
+
+RETRY_ANALYSIS_TEMPLATE = """A Claude Code worker failed to complete this task.
+
+## Original Task
+Title: {task_title}
+Prompt: {original_prompt}
+
+## Error
+{error}
+
+## Worker Output (last 1500 chars)
+{previous_output}
+
+## Attempt Number
+{attempt} of {max_attempts}
+
+## Instructions
+Analyze why the task failed and produce an improved prompt. Your response should be ONLY the new prompt text — no explanations.
+
+Common failure patterns and fixes:
+- "command not found" → Add explicit tool installation steps
+- Test failures → Add "read existing tests first" instruction
+- Import errors → Add "check existing imports and module structure" instruction
+- Timeout → Simplify the scope, break into smaller steps
+- Permission denied → Add "use appropriate file permissions" instruction
+- Merge conflicts in scope files → Add "do not modify files outside your scope"
+
+The improved prompt should:
+1. Include the original task goal
+2. Add specific guidance to avoid the identified failure
+3. Be self-contained (the worker has no context from previous attempts)"""

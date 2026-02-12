@@ -58,6 +58,18 @@ class MessageType(str, Enum):
     HF_SPACE_READY = "hf:space:ready"
     HF_SPACE_ERROR = "hf:space:error"
 
+    # Orchestration events
+    ORCHESTRATION_DECOMPOSING = "orchestration:decomposing"
+    ORCHESTRATION_READY = "orchestration:ready"
+    ORCHESTRATION_TASK_STARTED = "orchestration:task:started"
+    ORCHESTRATION_TASK_COMPLETED = "orchestration:task:completed"
+    ORCHESTRATION_TASK_FAILED = "orchestration:task:failed"
+    ORCHESTRATION_TASK_RETRYING = "orchestration:task:retrying"
+    ORCHESTRATION_MERGE_RESULT = "orchestration:merge:result"
+    ORCHESTRATION_BUDGET_UPDATE = "orchestration:budget:update"
+    ORCHESTRATION_COMPLETE = "orchestration:complete"
+    ORCHESTRATION_CANCELLED = "orchestration:cancelled"
+
     # Bashbros Integration events
     INTEGRATION_TRACE_RECEIVED = "integration:trace:received"
     INTEGRATION_TRACE_PROCESSED = "integration:trace:processed"
@@ -636,6 +648,98 @@ async def broadcast_integration_training_triggered(
             "gold_traces": gold_traces,
             "threshold": threshold,
             "run_id": run_id,
+        }
+    )
+    await manager.broadcast(message)
+
+
+# =============================================================================
+# Orchestration Broadcasts
+# =============================================================================
+
+async def broadcast_orchestration_task_started(
+    job_id: str, task_id: str, task_title: str, worker_count: int = 0
+) -> None:
+    """Broadcast when an orchestration task worker is spawned."""
+    message = WSMessage(
+        type=MessageType.ORCHESTRATION_TASK_STARTED,
+        payload={
+            "job_id": job_id,
+            "task_id": task_id,
+            "task_title": task_title,
+            "active_workers": worker_count,
+        }
+    )
+    await manager.broadcast(message)
+
+
+async def broadcast_orchestration_task_completed(
+    job_id: str, task_id: str, cost_usd: float,
+    duration_seconds: float, newly_unblocked: int = 0
+) -> None:
+    """Broadcast when an orchestration task completes successfully."""
+    message = WSMessage(
+        type=MessageType.ORCHESTRATION_TASK_COMPLETED,
+        payload={
+            "job_id": job_id,
+            "task_id": task_id,
+            "cost_usd": round(cost_usd, 4),
+            "duration_seconds": round(duration_seconds, 1),
+            "newly_unblocked": newly_unblocked,
+        }
+    )
+    await manager.broadcast(message)
+
+
+async def broadcast_orchestration_task_failed(
+    job_id: str, task_id: str, error: str, will_retry: bool = False
+) -> None:
+    """Broadcast when an orchestration task fails."""
+    message = WSMessage(
+        type=MessageType.ORCHESTRATION_TASK_FAILED,
+        payload={
+            "job_id": job_id,
+            "task_id": task_id,
+            "error": error[:500],
+            "will_retry": will_retry,
+        }
+    )
+    await manager.broadcast(message)
+
+
+async def broadcast_orchestration_budget_update(
+    job_id: str, spent_usd: float, budget_usd: float, task_count: int = 0
+) -> None:
+    """Broadcast budget status update during orchestration."""
+    message = WSMessage(
+        type=MessageType.ORCHESTRATION_BUDGET_UPDATE,
+        payload={
+            "job_id": job_id,
+            "spent_usd": round(spent_usd, 4),
+            "budget_usd": round(budget_usd, 2),
+            "remaining_usd": round(budget_usd - spent_usd, 4),
+            "tasks_completed": task_count,
+        }
+    )
+    await manager.broadcast(message)
+
+
+async def broadcast_orchestration_complete(
+    job_id: str, completed: int, failed: int,
+    total_cost: float, total_time: float,
+    merge_successes: int = 0, merge_failures: int = 0,
+) -> None:
+    """Broadcast when entire orchestration job finishes."""
+    message = WSMessage(
+        type=MessageType.ORCHESTRATION_COMPLETE,
+        payload={
+            "job_id": job_id,
+            "completed": completed,
+            "failed": failed,
+            "total_cost_usd": round(total_cost, 4),
+            "total_time_seconds": round(total_time, 1),
+            "merge_successes": merge_successes,
+            "merge_failures": merge_failures,
         }
     )
     await manager.broadcast(message)

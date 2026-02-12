@@ -33,7 +33,11 @@ from bashgym.orchestrator.models import (
 from bashgym.orchestrator.task_dag import TaskDAG
 from bashgym.orchestrator.dispatcher import WorkerPool
 from bashgym.orchestrator.worktree import WorktreeManager
-from bashgym.orchestrator.prompts import WORKER_SYSTEM_PROMPT, RETRY_PROMPT_TEMPLATE
+from bashgym.orchestrator.synthesizer import ResultSynthesizer, SynthesisReport
+from bashgym.orchestrator.prompts import (
+    WORKER_SYSTEM_PROMPT, RETRY_PROMPT_TEMPLATE,
+    RETRY_ANALYSIS_SYSTEM, RETRY_ANALYSIS_TEMPLATE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +69,7 @@ class OrchestrationAgent:
         max_workers: int = 5,
         repo_path: Optional[Path] = None,
         use_worktrees: bool = True,
+        job_id: Optional[str] = None,
         on_task_started: Optional[Callable[[TaskNode], Awaitable[None]]] = None,
         on_task_completed: Optional[Callable[[TaskNode, WorkerResult], Awaitable[None]]] = None,
         on_task_failed: Optional[Callable[[TaskNode, WorkerResult], Awaitable[None]]] = None,
@@ -86,6 +91,7 @@ class OrchestrationAgent:
             max_workers: Maximum parallel workers
             repo_path: Repository path for worktree management
             use_worktrees: Whether to use git worktrees for isolation
+            job_id: Optional job ID for WebSocket broadcasts
             on_task_started: Callback when a task starts
             on_task_completed: Callback when a task completes
             on_task_failed: Callback when a task fails
@@ -93,6 +99,7 @@ class OrchestrationAgent:
         self.llm_config = llm_config or LLMConfig()
         self.pool = WorkerPool(max_workers=max_workers)
         self.use_worktrees = use_worktrees
+        self.job_id = job_id or ""
 
         if repo_path and use_worktrees:
             self.worktrees = WorktreeManager(repo_path)
@@ -100,6 +107,11 @@ class OrchestrationAgent:
             self.worktrees = None
 
         self.dag: Optional[TaskDAG] = None
+
+        # Budget tracking
+        self._total_spent_usd: float = 0.0
+        self._budget_limit_usd: float = 0.0  # Set from spec during execute()
+        self._budget_exceeded: bool = False
 
         # Callbacks
         self._on_task_started = on_task_started
@@ -149,6 +161,7 @@ class OrchestrationAgent:
         self,
         dag: Optional[TaskDAG] = None,
         base_branch: str = "main",
+        budget_usd: Optional[float] = None,
     ) -> List[WorkerResult]:
         """Execute an approved TaskDAG.
 
@@ -156,14 +169,16 @@ class OrchestrationAgent:
         2. Create worktrees for each
         3. Spawn workers up to max_workers
         4. As workers complete, mark done and spawn newly unblocked tasks
-        5. On failure, retry with modified prompt (up to max_retries)
-        6. Collect all results
-        7. Merge worktrees
-        8. Feed traces to training pipeline
+        5. On failure, retry with LLM-rewritten prompt (up to max_retries)
+        6. Track budget — auto-cancel remaining if exceeded
+        7. Collect all results
+        8. Synthesize: merge worktrees with LLM conflict resolution
+        9. Feed traces to training pipeline
 
         Args:
             dag: TaskDAG to execute (uses self.dag if None)
             base_branch: Git branch to base worktrees on
+            budget_usd: Total budget cap (overrides spec's max_budget_usd)
 
         Returns:
             List of all WorkerResults
@@ -175,9 +190,24 @@ class OrchestrationAgent:
         results: List[WorkerResult] = []
         total_tasks = len(dag.nodes)
 
-        logger.info(f"Starting execution of {total_tasks} tasks")
+        # Initialize budget tracking
+        self._total_spent_usd = 0.0
+        self._budget_exceeded = False
+        self._budget_limit_usd = budget_usd or 0.0
+
+        logger.info(
+            f"Starting execution of {total_tasks} tasks"
+            + (f" (budget: ${self._budget_limit_usd:.2f})"
+               if self._budget_limit_usd else "")
+        )
 
         while not dag.is_complete():
+            # Budget check before spawning more
+            if self._budget_exceeded:
+                logger.warning("Budget exceeded — cancelling remaining tasks")
+                await self._cancel_remaining(dag)
+                break
+
             # Get tasks ready to run
             ready = dag.get_ready_tasks()
 
@@ -212,44 +242,73 @@ class OrchestrationAgent:
 
             results.append(result)
 
+            # Update budget tracking
+            self._total_spent_usd += result.cost_usd
+            await self._broadcast_budget_update(dag, results)
+
+            if self._budget_limit_usd and self._total_spent_usd >= self._budget_limit_usd:
+                self._budget_exceeded = True
+                logger.warning(
+                    f"Budget limit reached: ${self._total_spent_usd:.2f} "
+                    f">= ${self._budget_limit_usd:.2f}"
+                )
+
             if result.success:
                 newly_ready = dag.mark_completed(result.task_id, result)
                 logger.info(
                     f"Task {result.task_id} completed. "
                     f"{len(newly_ready)} tasks unblocked."
                 )
+                await self._broadcast_task_completed(result, len(newly_ready))
                 if self._on_task_completed:
                     task_node = dag.nodes[result.task_id]
                     await self._on_task_completed(task_node, result)
             else:
                 await self._handle_failure(dag, result)
 
-        # Merge all worktrees
-        merge_results = []
-        if self.worktrees:
-            for task_id in dag.completed_tasks():
-                merge_result = await self.worktrees.merge(task_id)
-                merge_results.append(merge_result)
-                if not merge_result.success:
-                    logger.warning(
-                        f"Merge failed for task {task_id}: "
-                        f"{merge_result.conflicts}"
-                    )
-
-            await self.worktrees.cleanup_all()
+        # Synthesize: merge worktrees with conflict resolution
+        synthesizer = ResultSynthesizer(
+            worktrees=self.worktrees,
+            llm_config=self.llm_config,
+            auto_resolve_conflicts=True,
+        )
+        report = await synthesizer.synthesize(dag, results, base_branch)
 
         # Summary
-        completed = sum(1 for r in results if r.success)
-        failed = sum(1 for r in results if not r.success)
-        total_cost = sum(r.cost_usd for r in results)
-        total_time = sum(r.duration_seconds for r in results)
+        completed = report.completed_tasks
+        failed = report.failed_tasks
 
         logger.info(
             f"Execution complete: {completed}/{total_tasks} tasks succeeded, "
-            f"{failed} failed. Cost: ${total_cost:.2f}, Time: {total_time:.0f}s"
+            f"{failed} failed. Cost: ${self._total_spent_usd:.2f}, "
+            f"Merges: {report.merge_successes} ok / {report.merge_failures} failed"
         )
 
+        await self._broadcast_complete(report)
+
+        # Store report for API access
+        self._last_report = report
+
         return results
+
+    @property
+    def budget_status(self) -> dict:
+        """Current budget tracking status."""
+        return {
+            "spent_usd": round(self._total_spent_usd, 4),
+            "limit_usd": round(self._budget_limit_usd, 2),
+            "remaining_usd": round(
+                max(0, self._budget_limit_usd - self._total_spent_usd), 4
+            ) if self._budget_limit_usd else None,
+            "exceeded": self._budget_exceeded,
+        }
+
+    async def _cancel_remaining(self, dag: TaskDAG) -> None:
+        """Cancel all active workers and mark pending tasks as cancelled."""
+        await self.pool.cancel_all()
+        for task in dag.nodes.values():
+            if task.status in (TaskStatus.PENDING, TaskStatus.BLOCKED):
+                task.status = TaskStatus.CANCELLED
 
     async def _spawn_task_worker(
         self,
@@ -258,6 +317,17 @@ class OrchestrationAgent:
         base_branch: str,
     ) -> None:
         """Create worktree and spawn worker for a task."""
+        # Budget pre-check: don't spawn if budget is nearly exhausted
+        if self._budget_limit_usd:
+            remaining = self._budget_limit_usd - self._total_spent_usd
+            if remaining < task.budget_usd * 0.1:
+                logger.warning(
+                    f"Skipping task {task.id} — insufficient budget "
+                    f"(${remaining:.2f} remaining, task needs ${task.budget_usd:.2f})"
+                )
+                task.status = TaskStatus.CANCELLED
+                return
+
         # Create worktree if enabled
         if self.worktrees:
             try:
@@ -271,10 +341,15 @@ class OrchestrationAgent:
                 task.status = TaskStatus.FAILED
                 return
 
-        # Build worker config
+        # Build worker config — cap per-worker budget to remaining job budget
+        worker_budget = task.budget_usd
+        if self._budget_limit_usd:
+            remaining = self._budget_limit_usd - self._total_spent_usd
+            worker_budget = min(task.budget_usd, remaining)
+
         config = WorkerConfig(
             max_turns=task.estimated_turns,
-            max_budget_usd=task.budget_usd,
+            max_budget_usd=worker_budget,
             system_prompt_append=WORKER_SYSTEM_PROMPT,
             worktree_path=task.worktree_path,
         )
@@ -285,6 +360,7 @@ class OrchestrationAgent:
             task.status = TaskStatus.RUNNING
             dag.nodes[task.id].status = TaskStatus.RUNNING
 
+            await self._broadcast_task_started(task)
             if self._on_task_started:
                 await self._on_task_started(task)
         except Exception as e:
@@ -296,29 +372,163 @@ class OrchestrationAgent:
         dag: TaskDAG,
         result: WorkerResult,
     ) -> None:
-        """Handle a failed worker: retry or mark as failed."""
+        """Handle a failed worker: retry with LLM-rewritten prompt or mark as failed."""
         task = dag.nodes[result.task_id]
 
         if task.retry_count < task.max_retries:
             task.retry_count += 1
-            task.worker_prompt = RETRY_PROMPT_TEMPLATE.format(
-                error=result.error or "Unknown error",
-                previous_output=result.output[:1000],
-                original_prompt=task.worker_prompt or task.description,
-            )
+
+            # Try LLM-assisted prompt rewriting for smarter retries
+            new_prompt = await self._rewrite_prompt_for_retry(task, result)
+            task.worker_prompt = new_prompt
+
             task.status = TaskStatus.PENDING
+
+            await self._broadcast_task_failed(
+                result, will_retry=True
+            )
             logger.info(
                 f"Retrying task {task.id} "
                 f"(attempt {task.retry_count}/{task.max_retries})"
             )
         else:
             blocked = dag.mark_failed(result.task_id, result.error or "")
+
+            await self._broadcast_task_failed(
+                result, will_retry=False
+            )
             logger.warning(
                 f"Task {task.id} failed after {task.retry_count} retries. "
                 f"{len(blocked)} tasks blocked."
             )
             if self._on_task_failed:
                 await self._on_task_failed(task, result)
+
+    async def _rewrite_prompt_for_retry(
+        self,
+        task: TaskNode,
+        result: WorkerResult,
+    ) -> str:
+        """Use the LLM to analyze the failure and generate an improved prompt.
+
+        Falls back to the static RETRY_PROMPT_TEMPLATE if the LLM call fails.
+        """
+        original_prompt = task.worker_prompt or task.description
+
+        # Try LLM-assisted rewriting
+        try:
+            from bashgym.orchestrator.task_dag import _call_llm
+
+            improved = await _call_llm(
+                self.llm_config,
+                RETRY_ANALYSIS_SYSTEM,
+                RETRY_ANALYSIS_TEMPLATE.format(
+                    task_title=task.title,
+                    original_prompt=original_prompt[:2000],
+                    error=result.error or "Unknown error",
+                    previous_output=result.output[-1500:],
+                    attempt=task.retry_count,
+                    max_attempts=task.max_retries,
+                ),
+            )
+
+            if improved and len(improved.strip()) > 20:
+                logger.info(
+                    f"LLM rewrote retry prompt for task {task.id} "
+                    f"({len(improved)} chars)"
+                )
+                return improved.strip()
+
+        except Exception as e:
+            logger.debug(f"LLM retry rewrite failed, using template: {e}")
+
+        # Fallback to static template
+        return RETRY_PROMPT_TEMPLATE.format(
+            error=result.error or "Unknown error",
+            previous_output=result.output[:1000],
+            original_prompt=original_prompt,
+        )
+
+    # =========================================================================
+    # WebSocket Broadcasting
+    # =========================================================================
+
+    async def _broadcast_task_started(self, task: TaskNode) -> None:
+        """Broadcast task started event via WebSocket."""
+        try:
+            from bashgym.api.websocket import broadcast_orchestration_task_started
+            await broadcast_orchestration_task_started(
+                job_id=self.job_id,
+                task_id=task.id,
+                task_title=task.title,
+                worker_count=self.pool.active_count,
+            )
+        except Exception:
+            pass  # WebSocket not available (e.g., CLI mode)
+
+    async def _broadcast_task_completed(
+        self, result: WorkerResult, newly_unblocked: int
+    ) -> None:
+        """Broadcast task completed event via WebSocket."""
+        try:
+            from bashgym.api.websocket import broadcast_orchestration_task_completed
+            await broadcast_orchestration_task_completed(
+                job_id=self.job_id,
+                task_id=result.task_id,
+                cost_usd=result.cost_usd,
+                duration_seconds=result.duration_seconds,
+                newly_unblocked=newly_unblocked,
+            )
+        except Exception:
+            pass
+
+    async def _broadcast_task_failed(
+        self, result: WorkerResult, will_retry: bool
+    ) -> None:
+        """Broadcast task failed event via WebSocket."""
+        try:
+            from bashgym.api.websocket import broadcast_orchestration_task_failed
+            await broadcast_orchestration_task_failed(
+                job_id=self.job_id,
+                task_id=result.task_id,
+                error=result.error or "Unknown error",
+                will_retry=will_retry,
+            )
+        except Exception:
+            pass
+
+    async def _broadcast_budget_update(
+        self, dag: TaskDAG, results: List[WorkerResult]
+    ) -> None:
+        """Broadcast budget status via WebSocket."""
+        if not self._budget_limit_usd:
+            return
+        try:
+            from bashgym.api.websocket import broadcast_orchestration_budget_update
+            await broadcast_orchestration_budget_update(
+                job_id=self.job_id,
+                spent_usd=self._total_spent_usd,
+                budget_usd=self._budget_limit_usd,
+                task_count=sum(1 for r in results if r.success),
+            )
+        except Exception:
+            pass
+
+    async def _broadcast_complete(self, report: SynthesisReport) -> None:
+        """Broadcast orchestration complete event via WebSocket."""
+        try:
+            from bashgym.api.websocket import broadcast_orchestration_complete
+            await broadcast_orchestration_complete(
+                job_id=self.job_id,
+                completed=report.completed_tasks,
+                failed=report.failed_tasks,
+                total_cost=self._total_spent_usd,
+                total_time=report.total_duration_seconds,
+                merge_successes=report.merge_successes,
+                merge_failures=report.merge_failures,
+            )
+        except Exception:
+            pass
 
     # =========================================================================
     # Trace Ingestion (for training pipeline)

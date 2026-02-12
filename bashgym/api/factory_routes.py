@@ -275,3 +275,373 @@ def extract_seed_prompts(traces: List[Dict]) -> List[str]:
         if prompt:
             prompts.append(prompt)
     return prompts
+
+
+# =============================================================================
+# DataDesigner Integration Endpoints
+# =============================================================================
+
+class DesignerPreviewRequest(BaseModel):
+    """Request to preview DataDesigner pipeline output."""
+    pipeline: str = "coding_agent_sft"
+    num_records: int = 5
+    provider: str = "nvidia"
+    provider_endpoint: str = "https://integrate.api.nvidia.com/v1"
+    text_model: Optional[str] = None
+    code_model: Optional[str] = None
+    judge_model: Optional[str] = None
+
+
+class DesignerCreateRequest(BaseModel):
+    """Request to start full DataDesigner generation."""
+    pipeline: str = "coding_agent_sft"
+    num_records: int = 100
+    seed_source: Optional[str] = None
+    seed_type: str = "traces"  # traces, huggingface, file, unstructured
+    column_mapping: Optional[Dict[str, str]] = None
+    provider: str = "nvidia"
+    provider_endpoint: str = "https://integrate.api.nvidia.com/v1"
+    text_model: Optional[str] = None
+    code_model: Optional[str] = None
+    judge_model: Optional[str] = None
+    output_dir: Optional[str] = None
+    export_nemo: bool = True
+    train_val_split: float = 0.9
+
+
+class DesignerValidateRequest(BaseModel):
+    """Request to validate a DataDesigner pipeline config."""
+    pipeline: str = "coding_agent_sft"
+
+
+class DesignerJobResponse(BaseModel):
+    """Response from a DataDesigner job."""
+    job_id: str
+    status: str
+    pipeline: str
+    num_records: int
+    progress: Optional[Dict[str, int]] = None
+    output_dir: Optional[str] = None
+    export_result: Optional[Dict] = None
+    error: Optional[str] = None
+
+
+class DesignerPipelineInfo(BaseModel):
+    """Info about an available DataDesigner pipeline."""
+    name: str
+    description: str
+    columns: List[str]
+
+
+class DesignerHuggingFaceRequest(BaseModel):
+    """Request to generate from a HuggingFace dataset."""
+    dataset: str
+    subset: Optional[str] = None
+    split: str = "train"
+    num_records: int = 100
+    pipeline: str = "coding_agent_sft"
+    column_mapping: Optional[Dict[str, str]] = None
+    provider: str = "nvidia"
+
+
+class DesignerPushToHubRequest(BaseModel):
+    """Request to publish dataset to HuggingFace Hub."""
+    job_id: str
+    repo_id: str
+    private: bool = True
+
+
+# DataDesigner job tracking
+designer_jobs: Dict[str, Dict] = {}
+
+
+@router.post("/designer/preview")
+async def designer_preview(request: DesignerPreviewRequest):
+    """Preview generated data with any pipeline config.
+
+    Returns a small sample of generated records for inspection
+    before committing to a full generation run.
+    """
+    try:
+        from bashgym.factory.data_designer import DataDesignerPipeline, PipelineConfig
+
+        config = PipelineConfig(
+            pipeline=request.pipeline,
+            provider=request.provider,
+            provider_endpoint=request.provider_endpoint,
+            num_records=request.num_records,
+        )
+        if request.text_model:
+            config.text_model = request.text_model
+        if request.code_model:
+            config.code_model = request.code_model
+        if request.judge_model:
+            config.judge_model = request.judge_model
+
+        pipeline = DataDesignerPipeline(config)
+        df = pipeline.preview(num_records=request.num_records)
+
+        return {
+            "records": df.to_dict(orient="records"),
+            "columns": list(df.columns),
+            "count": len(df),
+        }
+    except ImportError as e:
+        raise HTTPException(status_code=501, detail=str(e))
+    except Exception as e:
+        logger.error(f"Designer preview failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/designer/create", response_model=DesignerJobResponse)
+async def designer_create(
+    request: DesignerCreateRequest,
+    background_tasks: BackgroundTasks,
+):
+    """Start a full DataDesigner generation job.
+
+    Runs in the background. Poll /designer/jobs/{job_id} for status.
+    """
+    job_id = f"dd_{uuid.uuid4().hex[:8]}"
+
+    designer_jobs[job_id] = {
+        "status": "queued",
+        "pipeline": request.pipeline,
+        "num_records": request.num_records,
+        "progress": {"current": 0, "total": request.num_records},
+        "config": request.model_dump(),
+    }
+
+    background_tasks.add_task(run_designer_job, job_id, request)
+
+    return DesignerJobResponse(
+        job_id=job_id,
+        status="queued",
+        pipeline=request.pipeline,
+        num_records=request.num_records,
+    )
+
+
+@router.get("/designer/jobs/{job_id}", response_model=DesignerJobResponse)
+async def designer_job_status(job_id: str):
+    """Get DataDesigner generation job progress."""
+    if job_id not in designer_jobs:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    job = designer_jobs[job_id]
+    return DesignerJobResponse(
+        job_id=job_id,
+        status=job["status"],
+        pipeline=job["pipeline"],
+        num_records=job["num_records"],
+        progress=job.get("progress"),
+        output_dir=job.get("output_dir"),
+        export_result=job.get("export_result"),
+        error=job.get("error"),
+    )
+
+
+@router.get("/designer/pipelines")
+async def list_designer_pipelines():
+    """List available DataDesigner pipeline builders."""
+    try:
+        from bashgym.factory.designer_pipelines import PIPELINES
+    except ImportError:
+        return {"pipelines": [], "available": False}
+
+    pipelines = []
+    for name, builder_fn in PIPELINES.items():
+        doc = builder_fn.__doc__ or ""
+        first_line = doc.strip().split("\n")[0] if doc.strip() else name
+        pipelines.append(DesignerPipelineInfo(
+            name=name,
+            description=first_line,
+            columns=[],  # Would need to introspect builder
+        ))
+
+    return {"pipelines": [p.model_dump() for p in pipelines], "available": True}
+
+
+@router.post("/designer/validate")
+async def designer_validate(request: DesignerValidateRequest):
+    """Validate a DataDesigner pipeline config without running generation."""
+    try:
+        from bashgym.factory.data_designer import DataDesignerPipeline, PipelineConfig
+
+        config = PipelineConfig(pipeline=request.pipeline)
+        pipeline = DataDesignerPipeline(config)
+        result = pipeline.validate()
+        return result
+    except ImportError as e:
+        return {"valid": False, "errors": [str(e)], "columns": []}
+    except Exception as e:
+        return {"valid": False, "errors": [str(e)], "columns": []}
+
+
+@router.post("/designer/from-hf")
+async def designer_from_huggingface(
+    request: DesignerHuggingFaceRequest,
+    background_tasks: BackgroundTasks,
+):
+    """Generate training data from a HuggingFace dataset.
+
+    Starts a background job that downloads the HF dataset, uses it as
+    seed data for the DataDesigner pipeline, and exports results.
+    """
+    job_id = f"dd_hf_{uuid.uuid4().hex[:8]}"
+
+    designer_jobs[job_id] = {
+        "status": "queued",
+        "pipeline": request.pipeline,
+        "num_records": request.num_records,
+        "progress": {"current": 0, "total": request.num_records},
+        "config": request.model_dump(),
+    }
+
+    background_tasks.add_task(run_designer_hf_job, job_id, request)
+
+    return DesignerJobResponse(
+        job_id=job_id,
+        status="queued",
+        pipeline=request.pipeline,
+        num_records=request.num_records,
+    )
+
+
+@router.post("/designer/push-to-hub")
+async def designer_push_to_hub(request: DesignerPushToHubRequest):
+    """Publish a generated dataset to HuggingFace Hub."""
+    if request.job_id not in designer_jobs:
+        raise HTTPException(status_code=404, detail=f"Job {request.job_id} not found")
+
+    job = designer_jobs[request.job_id]
+    if job["status"] != "completed":
+        raise HTTPException(status_code=400, detail="Job must be completed before publishing")
+
+    try:
+        import pandas as pd
+        from bashgym.factory.data_designer import DataDesignerPipeline, PipelineConfig
+
+        output_dir = job.get("output_dir")
+        if not output_dir:
+            raise HTTPException(status_code=400, detail="No output data found for this job")
+
+        # Load the generated data
+        train_path = Path(output_dir) / "train.jsonl"
+        if train_path.exists():
+            df = pd.read_json(train_path, lines=True)
+        else:
+            raise HTTPException(status_code=400, detail="No generated data found")
+
+        pipeline = DataDesignerPipeline(PipelineConfig())
+        url = pipeline.push_to_hub(df, request.repo_id, request.private)
+
+        return {"url": url, "repo_id": request.repo_id}
+    except ImportError as e:
+        raise HTTPException(status_code=501, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# DataDesigner Background Tasks
+# =============================================================================
+
+async def run_designer_job(job_id: str, request: DesignerCreateRequest):
+    """Background task for DataDesigner generation."""
+    try:
+        from bashgym.factory.data_designer import DataDesignerPipeline, PipelineConfig
+
+        designer_jobs[job_id]["status"] = "running"
+
+        config = PipelineConfig(
+            pipeline=request.pipeline,
+            num_records=request.num_records,
+            provider=request.provider,
+            provider_endpoint=request.provider_endpoint,
+            output_dir=Path(request.output_dir or f"data/designer_output/{job_id}"),
+            train_val_split=request.train_val_split,
+        )
+        if request.text_model:
+            config.text_model = request.text_model
+        if request.code_model:
+            config.code_model = request.code_model
+        if request.judge_model:
+            config.judge_model = request.judge_model
+
+        pipeline = DataDesignerPipeline(config)
+
+        # Route to appropriate entry point
+        seed = request.seed_source or "data/gold_traces"
+
+        if request.seed_type == "traces":
+            df = pipeline.from_traces(Path(seed), request.num_records)
+        elif request.seed_type == "huggingface":
+            df = pipeline.from_dataset(
+                seed, request.num_records,
+                column_mapping=request.column_mapping,
+            )
+        elif request.seed_type == "file":
+            df = pipeline.from_dataset(seed, request.num_records)
+        elif request.seed_type == "unstructured":
+            df = pipeline.from_unstructured(Path(seed), request.num_records)
+        else:
+            raise ValueError(f"Unknown seed_type: {request.seed_type}")
+
+        designer_jobs[job_id]["progress"]["current"] = len(df)
+
+        # Export to NeMo format if requested
+        export_result = None
+        if request.export_nemo:
+            export_result = pipeline.export_nemo(df)
+            designer_jobs[job_id]["export_result"] = export_result
+
+        designer_jobs[job_id]["status"] = "completed"
+        designer_jobs[job_id]["output_dir"] = str(config.output_dir)
+
+        logger.info(f"Designer job {job_id} completed: {len(df)} records generated")
+
+    except Exception as e:
+        logger.error(f"Designer job {job_id} failed: {e}")
+        designer_jobs[job_id]["status"] = "failed"
+        designer_jobs[job_id]["error"] = str(e)
+
+
+async def run_designer_hf_job(job_id: str, request: DesignerHuggingFaceRequest):
+    """Background task for DataDesigner HuggingFace generation."""
+    try:
+        from bashgym.factory.data_designer import DataDesignerPipeline, PipelineConfig
+
+        designer_jobs[job_id]["status"] = "running"
+
+        config = PipelineConfig(
+            pipeline=request.pipeline,
+            num_records=request.num_records,
+            provider=request.provider,
+            output_dir=Path(f"data/designer_output/{job_id}"),
+        )
+
+        pipeline = DataDesignerPipeline(config)
+        df = pipeline.from_dataset(
+            request.dataset,
+            request.num_records,
+            column_mapping=request.column_mapping,
+            subset=request.subset,
+            split=request.split,
+        )
+
+        designer_jobs[job_id]["progress"]["current"] = len(df)
+
+        # Export to NeMo format
+        export_result = pipeline.export_nemo(df)
+        designer_jobs[job_id]["export_result"] = export_result
+
+        designer_jobs[job_id]["status"] = "completed"
+        designer_jobs[job_id]["output_dir"] = str(config.output_dir)
+
+        logger.info(f"Designer HF job {job_id} completed: {len(df)} records")
+
+    except Exception as e:
+        logger.error(f"Designer HF job {job_id} failed: {e}")
+        designer_jobs[job_id]["status"] = "failed"
+        designer_jobs[job_id]["error"] = str(e)

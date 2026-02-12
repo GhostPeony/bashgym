@@ -21,6 +21,13 @@ pydantic>=2.5.0            # Data validation
 datasets>=2.14.0           # HuggingFace datasets for benchmarks
 
 # =========================================
+# DataDesigner Integration (Optional)
+# =========================================
+# data-designer>=0.5.0      # NVIDIA NeMo DataDesigner for synthetic data generation
+# Install with: pip install data-designer>=0.5.0
+# Requires: pandas (included as transitive dep)
+
+# =========================================
 # Testing Dependencies
 # =========================================
 pytest>=7.4.0              # Test framework

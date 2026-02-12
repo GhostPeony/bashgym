@@ -9,6 +9,7 @@ Includes:
 - PatternExtractor: Pattern extraction from traces for synthetic data generation
 - SyntheticGenerator: Synthetic task generation from extracted patterns
 - SecurityIngester: Public security dataset ingestion (EMBER, PhishTank, etc.)
+- DataDesignerPipeline: NVIDIA NeMo DataDesigner v0.5.0 integration
 """
 
 from bashgym.factory.data_factory import DataFactory, DataFactoryConfig, TrainingExample, DPOExample, SynthesisStrategy
@@ -19,6 +20,7 @@ from bashgym.factory.schema_builder import SchemaBuilder, DataDesignerClient, Da
 from bashgym.factory.pattern_extractor import TracePatterns, FileCluster, ToolSequence
 from bashgym.factory.synthetic_generator import SyntheticTask, GenerationStrategy, GenerationPreset, PRESETS, SyntheticGenerator
 from bashgym.factory.security_ingester import SecurityIngester, IngestionConfig, IngestionResult, DatasetType, ConversionMode, SecurityDomain
+from bashgym.factory.data_designer import DataDesignerPipeline, PipelineConfig
 
 __all__ = [
     # Data Factory
@@ -62,4 +64,7 @@ __all__ = [
     "DatasetType",
     "ConversionMode",
     "SecurityDomain",
+    # DataDesigner Integration
+    "DataDesignerPipeline",
+    "PipelineConfig",
 ]

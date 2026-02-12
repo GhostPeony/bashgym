@@ -30,9 +30,15 @@ def register_pipeline(name: str):
 try:
     from bashgym.factory.designer_pipelines.coding_agent_sft import build_sft_pipeline
     from bashgym.factory.designer_pipelines.coding_agent_dpo import build_dpo_pipeline
+    from bashgym.factory.designer_pipelines.tool_use_sft import build_tool_use_pipeline
+    from bashgym.factory.designer_pipelines.from_external import build_external_pipeline
+    from bashgym.factory.designer_pipelines.from_unstructured import build_unstructured_pipeline
 
     PIPELINES["coding_agent_sft"] = build_sft_pipeline
     PIPELINES["coding_agent_dpo"] = build_dpo_pipeline
+    PIPELINES["tool_use_sft"] = build_tool_use_pipeline
+    PIPELINES["from_external"] = build_external_pipeline
+    PIPELINES["from_unstructured"] = build_unstructured_pipeline
 except ImportError:
     # data-designer not installed - pipelines unavailable
     pass

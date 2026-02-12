@@ -70,6 +70,7 @@ class OrchestrationAgent:
         repo_path: Optional[Path] = None,
         use_worktrees: bool = True,
         job_id: Optional[str] = None,
+        model_router=None,
         on_task_started: Optional[Callable[[TaskNode], Awaitable[None]]] = None,
         on_task_completed: Optional[Callable[[TaskNode, WorkerResult], Awaitable[None]]] = None,
         on_task_failed: Optional[Callable[[TaskNode, WorkerResult], Awaitable[None]]] = None,
@@ -77,10 +78,11 @@ class OrchestrationAgent:
         """Initialize the orchestration agent.
 
         The LLM config controls which provider decomposes specs into task DAGs.
-        Workers always use Claude Code CLI regardless of this setting.
+        Workers use Claude Code CLI by default, but low-priority/simple tasks
+        can be routed to a fine-tuned student model via the model_router.
 
-        Supported providers:
-        - anthropic: Claude models (Opus recommended for planning)
+        Supported providers for planning:
+        - anthropic: Claude models (Opus recommended)
         - openai: GPT-4o, o1, etc.
         - gemini: Gemini 2.5 Pro, etc.
         - ollama: Any local model (qwen2.5-coder, llama3, etc.)
@@ -92,6 +94,9 @@ class OrchestrationAgent:
             repo_path: Repository path for worktree management
             use_worktrees: Whether to use git worktrees for isolation
             job_id: Optional job ID for WebSocket broadcasts
+            model_router: Optional ModelRouter for student model routing.
+                         When set, LOW priority tasks are routed through
+                         the router's confidence-based strategy.
             on_task_started: Callback when a task starts
             on_task_completed: Callback when a task completes
             on_task_failed: Callback when a task fails
@@ -100,6 +105,7 @@ class OrchestrationAgent:
         self.pool = WorkerPool(max_workers=max_workers)
         self.use_worktrees = use_worktrees
         self.job_id = job_id or ""
+        self.model_router = model_router
 
         if repo_path and use_worktrees:
             self.worktrees = WorktreeManager(repo_path)
@@ -112,6 +118,10 @@ class OrchestrationAgent:
         self._total_spent_usd: float = 0.0
         self._budget_limit_usd: float = 0.0  # Set from spec during execute()
         self._budget_exceeded: bool = False
+
+        # Routing stats
+        self._tasks_routed_student: int = 0
+        self._tasks_routed_teacher: int = 0
 
         # Callbacks
         self._on_task_started = on_task_started
@@ -347,7 +357,18 @@ class OrchestrationAgent:
             remaining = self._budget_limit_usd - self._total_spent_usd
             worker_budget = min(task.budget_usd, remaining)
 
+        # Student model routing: low-priority tasks can use fine-tuned models
+        worker_model = "sonnet"
+        use_student = self._should_route_to_student(task)
+        if use_student:
+            worker_model = "student"
+            self._tasks_routed_student += 1
+            logger.info(f"Routing task {task.id} to student model")
+        else:
+            self._tasks_routed_teacher += 1
+
         config = WorkerConfig(
+            model=worker_model,
             max_turns=task.estimated_turns,
             max_budget_usd=worker_budget,
             system_prompt_append=WORKER_SYSTEM_PROMPT,
@@ -450,6 +471,77 @@ class OrchestrationAgent:
         )
 
     # =========================================================================
+    # Student Model Routing
+    # =========================================================================
+
+    def _should_route_to_student(self, task: TaskNode) -> bool:
+        """Decide whether a task should use the student model.
+
+        Routes to student when:
+        1. A model_router is configured
+        2. The router has a registered student model
+        3. The task is LOW priority (simple tasks)
+        4. The router's confidence threshold is met
+
+        CRITICAL and HIGH priority tasks always use Claude (teacher).
+        """
+        if not self.model_router:
+            return False
+
+        from bashgym.orchestrator.models import TaskPriority
+
+        # Only route LOW priority tasks to student
+        if task.priority != TaskPriority.LOW:
+            return False
+
+        try:
+            # Check if student model is registered and has sufficient confidence
+            student = self.model_router.get_student_model()
+            if not student:
+                return False
+
+            # Use the router's confidence-based decision
+            decision = self.model_router.route(
+                prompt=task.worker_prompt or task.description,
+                task_complexity=self._estimate_complexity(task),
+            )
+
+            # ModelType.STUDENT means the router chose the student
+            from bashgym.gym.router import ModelType
+            return decision.model_type == ModelType.STUDENT
+
+        except Exception as e:
+            logger.debug(f"Student routing check failed: {e}")
+            return False
+
+    @staticmethod
+    def _estimate_complexity(task: TaskNode) -> float:
+        """Estimate task complexity as 0.0-1.0 for the router.
+
+        Simple heuristic based on task properties.
+        """
+        score = 0.0
+
+        # More files = more complex
+        file_count = len(task.files_touched)
+        if file_count <= 1:
+            score += 0.1
+        elif file_count <= 3:
+            score += 0.3
+        else:
+            score += 0.6
+
+        # More estimated turns = more complex
+        if task.estimated_turns <= 10:
+            score += 0.1
+        elif task.estimated_turns <= 25:
+            score += 0.3
+        else:
+            score += 0.4
+
+        return min(1.0, score)
+
+    # =========================================================================
     # WebSocket Broadcasting
     # =========================================================================
 
@@ -535,7 +627,10 @@ class OrchestrationAgent:
     # =========================================================================
 
     async def ingest_traces(self, results: List[WorkerResult]) -> int:
-        """Feed orchestration traces into the Factory pipeline.
+        """Feed orchestration traces into the Factory training pipeline.
+
+        Imports Claude Code session traces from completed workers using
+        the existing ClaudeSessionImporter infrastructure.
 
         Multi-agent traces are high-value training signal:
         - Task decomposition patterns
@@ -546,18 +641,68 @@ class OrchestrationAgent:
             results: Worker results to ingest
 
         Returns:
-            Number of traces ingested
+            Number of traces successfully ingested
         """
-        count = 0
-        for result in results:
-            if result.session_id and result.success:
-                # The session trace lives in ~/.claude/projects/
-                # The trace import pipeline picks these up automatically
-                count += 1
-                logger.debug(
-                    f"Trace available for task {result.task_id}: "
-                    f"session {result.session_id}"
-                )
+        try:
+            from bashgym.trace_capture.importers import ClaudeSessionImporter
+        except ImportError:
+            logger.debug("trace_capture not available, skipping ingestion")
+            return 0
 
-        logger.info(f"Marked {count} traces for training pipeline ingestion")
+        importer = ClaudeSessionImporter()
+        count = 0
+
+        for result in results:
+            if not result.session_id or not result.success:
+                continue
+
+            # Find the session file in Claude's projects directory
+            session_file = self._find_session_file(importer, result.session_id)
+            if not session_file:
+                logger.debug(
+                    f"Session file not found for {result.task_id} "
+                    f"(session {result.session_id})"
+                )
+                continue
+
+            try:
+                import_result = await importer.import_session_async(
+                    session_file, force=False
+                )
+                if import_result.error:
+                    logger.warning(
+                        f"Trace import failed for {result.task_id}: "
+                        f"{import_result.error}"
+                    )
+                elif import_result.skipped:
+                    logger.debug(
+                        f"Trace already imported for {result.task_id}: "
+                        f"{import_result.skip_reason}"
+                    )
+                else:
+                    count += 1
+                    logger.debug(
+                        f"Imported {import_result.steps_imported} steps "
+                        f"from task {result.task_id}"
+                    )
+            except Exception as e:
+                logger.warning(f"Trace ingestion error for {result.task_id}: {e}")
+
+        logger.info(f"Ingested {count} traces into training pipeline")
         return count
+
+    @staticmethod
+    def _find_session_file(importer, session_id: str):
+        """Find a Claude Code session file by session ID."""
+        from pathlib import Path
+
+        projects_dir = importer.find_projects_dir()
+        if not projects_dir:
+            return None
+
+        # Session files are at ~/.claude/projects/<slug>/<session_id>.jsonl
+        for session_file, _ in importer.find_session_files():
+            if session_id in session_file.stem:
+                return session_file
+
+        return None

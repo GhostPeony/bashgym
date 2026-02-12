@@ -323,6 +323,11 @@ Always explain your reasoning before executing commands."""
         """
         Generate variations of a training example using configured provider.
 
+        .. deprecated::
+            Use DataDesignerPipeline instead for higher-quality synthetic data
+            generation with LLM-as-Judge validation. This method will be removed
+            in a future version. See bashgym/factory/data_designer.py.
+
         Uses LLM to create semantically similar but syntactically different
         versions of the task and solution.
 
@@ -330,6 +335,14 @@ Always explain your reasoning before executing commands."""
         - ANTHROPIC: Higher quality, better instruction following
         - NIM: Cost-effective, good for code
         """
+        import warnings
+        warnings.warn(
+            "augment_example() is deprecated. Use DataDesignerPipeline for "
+            "synthetic data generation with LLM-as-Judge quality validation. "
+            "See bashgym/factory/data_designer.py",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         # Route to appropriate provider
         if self.config.augmentation_provider == AugmentationProvider.ANTHROPIC:
             return await self._augment_with_anthropic(example, num_variations)
@@ -341,7 +354,11 @@ Always explain your reasoning before executing commands."""
         example: TrainingExample,
         num_variations: int = 3
     ) -> List[TrainingExample]:
-        """Generate variations using Anthropic Claude."""
+        """Generate variations using Anthropic Claude.
+
+        .. deprecated::
+            Use DataDesignerPipeline with coding_agent_sft pipeline instead.
+        """
         if not self.config.anthropic_api_key:
             print("No Anthropic API key, falling back to NIM")
             return await self._augment_with_nim(example, num_variations)
@@ -422,6 +439,11 @@ Output ONLY a JSON array with {num_variations} objects, each having "task" and "
         example: TrainingExample,
         num_variations: int = 3
     ) -> List[TrainingExample]:
+        """Generate variations using NVIDIA NIM.
+
+        .. deprecated::
+            Use DataDesignerPipeline with coding_agent_sft pipeline instead.
+        """
         """Generate variations using NVIDIA NIM."""
         if not self.config.nim_api_key:
             return [example]  # Return original if no API key

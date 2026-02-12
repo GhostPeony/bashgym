@@ -56,6 +56,7 @@ from bashgym.api.factory_routes import router as factory_router
 from bashgym.api.integration_routes import router as integration_router
 from bashgym.api.achievements_routes import router as achievements_router
 from bashgym.api.security_routes import router as security_router
+from bashgym.api.orchestrator_routes import router as orchestrator_router
 from bashgym.factory.quality_calculator import calculate_quality_breakdown
 
 
@@ -3165,6 +3166,9 @@ def create_app() -> FastAPI:
 
     # Include Security Dataset routes
     app.include_router(security_router)
+
+    # Include Orchestrator routes (multi-agent orchestration)
+    app.include_router(orchestrator_router)
 
     return app
 

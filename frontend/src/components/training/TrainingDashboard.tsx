@@ -80,11 +80,10 @@ export function TrainingDashboard() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-semibold text-text-primary">Training Monitor</h1>
+            <h1 className="font-brand text-2xl text-text-primary">Training Monitor</h1>
+            <span className="tag"><span>TRAINING</span></span>
             {metrics?.simulation && (
-              <span className="px-2 py-0.5 text-xs font-medium bg-status-warning/20 text-status-warning rounded-full">
-                Simulation Mode
-              </span>
+              <span className="tag"><span>SIMULATION</span></span>
             )}
           </div>
           <p className="text-sm text-text-secondary mt-1">
@@ -110,48 +109,50 @@ export function TrainingDashboard() {
               {isRunning ? (
                 <button
                   onClick={pauseTraining}
-                  className="btn-secondary flex items-center gap-2"
+                  className="btn-icon flex items-center justify-center"
+                  title="Pause"
                 >
                   <Pause className="w-4 h-4" />
-                  Pause
                 </button>
               ) : isPaused ? (
                 <button
                   onClick={resumeTraining}
-                  className="btn-primary flex items-center gap-2"
+                  className="btn-icon flex items-center justify-center"
+                  title="Resume"
                 >
                   <Play className="w-4 h-4" />
-                  Resume
                 </button>
               ) : null}
               <button
                 onClick={stopTraining}
-                className="btn-secondary flex items-center gap-2 text-status-error"
+                className="btn-icon flex items-center justify-center text-status-error"
+                title="Stop"
               >
                 <Square className="w-4 h-4" />
-                Stop
               </button>
             </>
           )}
           <button
-            className="btn-ghost p-2"
+            className="btn-icon flex items-center justify-center"
             title="Settings"
             onClick={() => setShowConfig(true)}
           >
-            <Settings className="w-5 h-5" />
+            <Settings className="w-4 h-4" />
           </button>
         </div>
       </div>
 
+      <div className="section-divider mb-6" />
+
       {/* Main Grid */}
       <div className="grid grid-cols-12 gap-4">
         {/* Loss Curve - Main Chart */}
-        <div className="col-span-8 card-elevated p-4">
+        <div className="col-span-8 card p-4">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-medium text-text-primary">Loss Curve</h2>
+            <h2 className="font-brand text-xl text-text-primary">Loss Curve</h2>
             {lossHistory.length > 0 && (
               <button
-                className="btn-ghost p-1.5"
+                className="btn-icon flex items-center justify-center"
                 onClick={handleRefreshLossData}
                 disabled={isRefreshing}
                 title="Refresh data"
@@ -166,15 +167,15 @@ export function TrainingDashboard() {
             ) : (
               <div className="h-full flex flex-col items-center justify-center text-text-muted">
                 <BarChart3 className="w-12 h-12 mb-3 opacity-30" />
-                <p className="text-sm">Start training to see loss curve</p>
+                <p className="font-mono text-xs uppercase tracking-widest">Start training to see loss curve</p>
               </div>
             )}
           </div>
         </div>
 
         {/* Epoch Progress */}
-        <div className="col-span-4 card-elevated p-4">
-          <h2 className="text-lg font-medium text-text-primary mb-4">Progress</h2>
+        <div className="col-span-4 card p-4">
+          <h2 className="font-brand text-xl text-text-primary mb-4">Progress</h2>
           <EpochProgress
             currentEpoch={metrics?.epoch ?? 0}
             totalEpochs={currentRun?.config.epochs ?? 1}
@@ -201,53 +202,58 @@ export function TrainingDashboard() {
           </div>
         )}
 
+        {/* Section divider before config/system panels */}
+        {currentRun && (
+          <div className="col-span-12 section-divider my-2" />
+        )}
+
         {/* Training Config Card */}
         {currentRun && (
-          <div className="col-span-6 card-elevated p-4">
-            <h2 className="text-lg font-medium text-text-primary mb-4">Configuration</h2>
+          <div className="col-span-6 card p-4">
+            <h2 className="font-brand text-xl text-text-primary mb-4">Configuration</h2>
             <div className="grid grid-cols-2 gap-4 text-sm">
-              <div>
-                <span className="text-text-muted">Strategy</span>
-                <p className="font-medium text-text-primary uppercase">
+              <div className="card p-4">
+                <span className="font-mono text-xs uppercase tracking-widest text-text-muted">Strategy</span>
+                <p className="font-brand text-2xl text-text-primary uppercase mt-1">
                   {currentRun.config.strategy}
                 </p>
               </div>
-              <div>
-                <span className="text-text-muted">Base Model</span>
-                <p className="font-medium text-text-primary">{currentRun.config.baseModel}</p>
+              <div className="card p-4">
+                <span className="font-mono text-xs uppercase tracking-widest text-text-muted">Base Model</span>
+                <p className="font-brand text-2xl text-text-primary mt-1 truncate">{currentRun.config.baseModel}</p>
               </div>
-              <div>
-                <span className="text-text-muted">Batch Size</span>
-                <p className="font-medium text-text-primary">{currentRun.config.batchSize}</p>
+              <div className="card p-4">
+                <span className="font-mono text-xs uppercase tracking-widest text-text-muted">Batch Size</span>
+                <p className="font-brand text-2xl text-text-primary mt-1">{currentRun.config.batchSize}</p>
               </div>
-              <div>
-                <span className="text-text-muted">Learning Rate</span>
-                <p className="font-medium text-text-primary">{currentRun.config.learningRate}</p>
+              <div className="card p-4">
+                <span className="font-mono text-xs uppercase tracking-widest text-text-muted">Learning Rate</span>
+                <p className="font-brand text-2xl text-text-primary mt-1">{currentRun.config.learningRate}</p>
               </div>
               {currentRun.config.loraRank && (
-                <div>
-                  <span className="text-text-muted">LoRA Rank</span>
-                  <p className="font-medium text-text-primary">{currentRun.config.loraRank}</p>
+                <div className="card p-4">
+                  <span className="font-mono text-xs uppercase tracking-widest text-text-muted">LoRA Rank</span>
+                  <p className="font-brand text-2xl text-text-primary mt-1">{currentRun.config.loraRank}</p>
                 </div>
               )}
               {currentRun.config.loraAlpha && (
-                <div>
-                  <span className="text-text-muted">LoRA Alpha</span>
-                  <p className="font-medium text-text-primary">{currentRun.config.loraAlpha}</p>
+                <div className="card p-4">
+                  <span className="font-mono text-xs uppercase tracking-widest text-text-muted">LoRA Alpha</span>
+                  <p className="font-brand text-2xl text-text-primary mt-1">{currentRun.config.loraAlpha}</p>
                 </div>
               )}
               {currentRun.config.selectedRepos && currentRun.config.selectedRepos.length > 0 && (
-                <div className="col-span-2">
-                  <span className="text-text-muted">Training Repos</span>
-                  <p className="font-medium text-text-primary">
+                <div className="col-span-2 card p-4">
+                  <span className="font-mono text-xs uppercase tracking-widest text-text-muted">Training Repos</span>
+                  <p className="font-brand text-lg text-text-primary mt-1">
                     {currentRun.config.selectedRepos.join(', ')}
                   </p>
                 </div>
               )}
               {(!currentRun.config.selectedRepos || currentRun.config.selectedRepos.length === 0) && (
-                <div className="col-span-2">
-                  <span className="text-text-muted">Training Repos</span>
-                  <p className="font-medium text-text-primary">All repos (Generalist)</p>
+                <div className="col-span-2 card p-4">
+                  <span className="font-mono text-xs uppercase tracking-widest text-text-muted">Training Repos</span>
+                  <p className="font-brand text-lg text-text-primary mt-1">All repos (Generalist)</p>
                 </div>
               )}
             </div>
@@ -255,11 +261,11 @@ export function TrainingDashboard() {
         )}
 
         {/* System Stats */}
-        <div className="col-span-6 card-elevated p-4">
+        <div className={clsx('card p-4', currentRun ? 'col-span-6' : 'col-span-6')}>
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-medium text-text-primary">System Resources</h2>
+            <h2 className="font-brand text-xl text-text-primary">System Resources</h2>
             {currentRun && (
-              <div className="flex items-center gap-2 text-sm text-text-muted">
+              <div className="flex items-center gap-2 font-mono text-xs uppercase tracking-widest text-text-muted">
                 <Clock className="w-4 h-4" />
                 <span>Runtime: {Math.floor((Date.now() - currentRun.startTime) / 60000)}m</span>
               </div>
@@ -274,13 +280,13 @@ export function TrainingDashboard() {
 
         {/* Getting Started Section - Show when no training */}
         {!currentRun && (
-          <div className="col-span-6 card-elevated p-6">
+          <div className="col-span-6 card p-6">
             <div className="flex items-start gap-6">
               {/* Left - Info */}
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-3">
                   <Rocket className="w-6 h-6 text-primary" />
-                  <h2 className="text-xl font-semibold text-text-primary">Ready to Train</h2>
+                  <h2 className="font-brand text-xl text-text-primary">Ready to Train</h2>
                 </div>
                 <p className="text-text-secondary mb-4">
                   Train a custom model on your coding traces. Choose between a generalist agent
@@ -291,14 +297,14 @@ export function TrainingDashboard() {
                 <div className="space-y-3">
                   <div className="flex items-center gap-3">
                     <div className={clsx(
-                      'w-8 h-8 rounded-full flex items-center justify-center',
-                      goldTraceCount > 0 ? 'bg-status-success/20 text-status-success' : 'bg-background-tertiary text-text-muted'
+                      'w-8 h-8 border-brutal border-border rounded-brutal flex items-center justify-center font-mono text-xs font-bold',
+                      goldTraceCount > 0 ? 'bg-status-success text-white' : 'bg-background-tertiary text-text-muted'
                     )}>
                       {goldTraceCount > 0 ? <CheckCircle2 className="w-4 h-4" /> : '1'}
                     </div>
                     <div className="flex-1">
                       <p className="text-sm font-medium text-text-primary">Collect Traces</p>
-                      <p className="text-xs text-text-muted">
+                      <p className="font-mono text-xs text-text-muted">
                         {goldTraceCount > 0
                           ? `${goldTraceCount} gold traces from ${availableRepos.length} repo${availableRepos.length !== 1 ? 's' : ''}`
                           : 'Work with Claude Code to automatically capture traces'
@@ -308,22 +314,22 @@ export function TrainingDashboard() {
                   </div>
 
                   <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-background-tertiary text-text-muted flex items-center justify-center">
+                    <div className="w-8 h-8 border-brutal border-border rounded-brutal bg-background-tertiary text-text-muted flex items-center justify-center font-mono text-xs font-bold">
                       2
                     </div>
                     <div className="flex-1">
                       <p className="text-sm font-medium text-text-primary">Choose Scope</p>
-                      <p className="text-xs text-text-muted">Generalist (all repos), Mixed (select repos), or Specialist (one repo)</p>
+                      <p className="font-mono text-xs text-text-muted">Generalist (all repos), Mixed (select repos), or Specialist (one repo)</p>
                     </div>
                   </div>
 
                   <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-background-tertiary text-text-muted flex items-center justify-center">
+                    <div className="w-8 h-8 border-brutal border-border rounded-brutal bg-background-tertiary text-text-muted flex items-center justify-center font-mono text-xs font-bold">
                       3
                     </div>
                     <div className="flex-1">
                       <p className="text-sm font-medium text-text-primary">Start Training</p>
-                      <p className="text-xs text-text-muted">Configure strategy (SFT, DPO, GRPO) and hyperparameters</p>
+                      <p className="font-mono text-xs text-text-muted">Configure strategy (SFT, DPO, GRPO) and hyperparameters</p>
                     </div>
                   </div>
                 </div>
@@ -343,28 +349,30 @@ export function TrainingDashboard() {
               </div>
 
               {/* Right - Repo Summary */}
-              <div className="w-64 p-4 bg-background-tertiary rounded-lg">
+              <div className="w-64 card p-4">
                 <div className="flex items-center gap-2 mb-3">
                   <FolderGit2 className="w-4 h-4 text-text-muted" />
-                  <span className="text-sm font-medium text-text-primary">Available Data</span>
+                  <span className="font-mono text-xs uppercase tracking-widest text-text-primary">Available Data</span>
                 </div>
+
+                <div className="border-t border-border mb-3" />
 
                 {availableRepos.length === 0 ? (
                   <div className="text-center py-4">
                     <FileStack className="w-8 h-8 text-text-muted mx-auto mb-2" />
-                    <p className="text-sm text-text-muted">No traces yet</p>
+                    <p className="font-mono text-xs uppercase tracking-widest text-text-muted">No traces yet</p>
                     <p className="text-xs text-text-muted mt-1">Start coding to collect data</p>
                   </div>
                 ) : (
                   <div className="space-y-2">
                     {availableRepos.slice(0, 5).map((repo) => (
-                      <div key={repo.name} className="flex items-center justify-between py-1">
+                      <div key={repo.name} className="flex items-center justify-between py-1 border-b border-border-subtle">
                         <span className="text-sm text-text-secondary truncate">{repo.name}</span>
-                        <span className="text-xs text-text-muted">{repo.trace_count}</span>
+                        <span className="font-mono text-xs text-text-muted">{repo.trace_count}</span>
                       </div>
                     ))}
                     {availableRepos.length > 5 && (
-                      <p className="text-xs text-text-muted pt-1">+{availableRepos.length - 5} more</p>
+                      <p className="font-mono text-xs text-text-muted pt-1">+{availableRepos.length - 5} more</p>
                     )}
                   </div>
                 )}
@@ -375,11 +383,11 @@ export function TrainingDashboard() {
 
         {/* Export Section */}
         {!currentRun && goldTraceCount > 0 && (
-          <div className="col-span-12 card-elevated p-4">
+          <div className="col-span-12 card p-4">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-medium text-text-primary">Export Model</h2>
-                <p className="text-sm text-text-muted mt-1">
+                <h2 className="font-brand text-xl text-text-primary">Export Model</h2>
+                <p className="font-mono text-xs uppercase tracking-widest text-text-muted mt-1">
                   Export your trained model in various formats
                 </p>
               </div>

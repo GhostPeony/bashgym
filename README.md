@@ -2,7 +2,7 @@
 
 **A Self-Improving Agentic Development Gym**
 
-![bashgym](https://github.com/user-attachments/assets/607684ce-da38-4013-a656-44e294660864)
+![bashgym](docs/bashgym-screenshot.png)
 
 Bash Gym trains smaller language models (SLMs) from agent execution traces. It implements a continuous improvement flywheel where your daily Claude Code usage automatically generates training data for your own personalized coding assistant.
 

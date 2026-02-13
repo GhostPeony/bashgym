@@ -76,25 +76,25 @@ export function KeyboardShortcutsModal() {
       <div className="grid grid-cols-2 gap-6">
         {shortcutGroups.map((group) => (
           <div key={group.title}>
-            <h3 className="text-sm font-semibold text-text-primary mb-3 flex items-center gap-2">
+            <h3 className="font-brand text-sm text-text-primary mb-3 flex items-center gap-2">
               <Keyboard className="w-4 h-4 text-text-muted" />
               {group.title}
             </h3>
-            <div className="space-y-2">
+            <div className="border-brutal border-border rounded-brutal overflow-hidden">
               {group.shortcuts.map((shortcut, idx) => (
                 <div
                   key={idx}
-                  className="flex items-center justify-between py-1.5 border-b border-border-subtle last:border-0"
+                  className="flex items-center justify-between px-3 py-2 border-b border-border last:border-b-0 bg-background-card"
                 >
                   <span className="text-sm text-text-secondary">{shortcut.description}</span>
                   <div className="flex items-center gap-1">
                     {shortcut.keys.map((key, kidx) => (
                       <span key={kidx}>
-                        <kbd className="px-2 py-1 text-xs rounded bg-background-tertiary border border-border-subtle text-text-muted font-mono">
-                          {key}
+                        <kbd className="tag text-[10px] py-0.5 px-1.5">
+                          <span>{key}</span>
                         </kbd>
                         {kidx < shortcut.keys.length - 1 && (
-                          <span className="text-text-muted mx-0.5">+</span>
+                          <span className="text-text-muted mx-0.5 font-mono">+</span>
                         )}
                       </span>
                     ))}
@@ -106,14 +106,14 @@ export function KeyboardShortcutsModal() {
         ))}
       </div>
 
-      <div className="mt-6 pt-4 border-t border-border-subtle">
-        <p className="text-xs text-text-muted text-center">
-          Press <kbd className="px-1.5 py-0.5 text-xs rounded bg-background-tertiary border border-border-subtle">Ctrl</kbd>
-          <span className="mx-1">+</span>
-          <kbd className="px-1.5 py-0.5 text-xs rounded bg-background-tertiary border border-border-subtle">?</kbd>
-          {' '}anytime to show this dialog
-        </p>
-      </div>
+      <div className="section-divider mt-6 mb-4" />
+      <p className="text-xs text-text-muted text-center font-mono">
+        Press{' '}
+        <kbd className="tag text-[10px] py-0.5 px-1.5"><span>Ctrl</span></kbd>
+        <span className="mx-1 font-mono">+</span>
+        <kbd className="tag text-[10px] py-0.5 px-1.5"><span>?</span></kbd>
+        {' '}anytime to show this dialog
+      </p>
     </Modal>
   )
 }

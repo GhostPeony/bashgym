@@ -231,11 +231,11 @@ export function TerminalGrid() {
     return (
       <div className="h-full flex items-center justify-center bg-background-primary">
         <div className="text-center">
-          <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-background-secondary flex items-center justify-center">
+          <div className="w-16 h-16 mx-auto mb-4 border-brutal border-border rounded-brutal bg-background-secondary flex items-center justify-center shadow-brutal-sm">
             <Terminal className="w-8 h-8 text-text-muted" />
           </div>
-          <h3 className="text-lg font-medium text-text-primary mb-2">No terminals open</h3>
-          <p className="text-sm text-text-muted mb-4">
+          <h3 className="text-lg font-brand font-semibold text-text-primary mb-2">No terminals open</h3>
+          <p className="text-sm text-text-muted mb-4 font-mono">
             Create a terminal to start working
           </p>
           <button
@@ -252,7 +252,7 @@ export function TerminalGrid() {
 
   // Toolbar component (shared between views)
   const renderToolbar = () => (
-    <div className="flex items-center gap-1 px-2 py-1 bg-background-secondary border-b border-border-subtle overflow-x-auto">
+    <div className="flex items-center gap-1 px-2 py-1 bg-background-secondary border-b border-brutal border-border overflow-x-auto">
       {panels.map((panel) => {
         const isActive = panel.id === activePanelId
         const isDragging = draggedPanelId === panel.id
@@ -268,16 +268,17 @@ export function TerminalGrid() {
             onDrop={(e) => handleDrop(e, panel.id)}
             onDragEnd={handleDragEnd}
             className={clsx(
-              'flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-pointer transition-all group min-w-0',
+              'flex items-center gap-1.5 px-2 py-1.5 cursor-pointer group min-w-0 font-mono text-xs',
+              'border-brutal rounded-brutal transition-press',
               isActive
-                ? 'bg-background-primary text-text-primary'
-                : 'text-text-secondary hover:text-text-primary hover:bg-background-tertiary',
-              isDragging && 'opacity-50 scale-95',
-              isDragOver && 'ring-2 ring-primary ring-offset-1 ring-offset-background-secondary'
+                ? 'bg-background-card text-text-primary border-border shadow-brutal-sm'
+                : 'text-text-secondary border-transparent hover:text-text-primary hover:bg-background-tertiary hover:border-border-subtle',
+              isDragging && 'scale-95',
+              isDragOver && 'border-accent shadow-brutal-sm'
             )}
             onClick={() => !isEditing && setActivePanel(panel.id)}
           >
-            <GripVertical className="w-3 h-3 text-text-muted opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing flex-shrink-0" />
+            <GripVertical className="w-3 h-3 text-text-muted hidden group-hover:block cursor-grab active:cursor-grabbing flex-shrink-0" />
             {getPanelIcon(panel.type)}
             {isEditing ? (
               <input
@@ -295,12 +296,12 @@ export function TerminalGrid() {
                   e.stopPropagation()
                 }}
                 onClick={(e) => e.stopPropagation()}
-                className="text-sm bg-background-tertiary border border-border-subtle rounded px-1 py-0.5 w-24 focus:outline-none focus:ring-1 focus:ring-primary"
+                className="input !text-xs !py-0.5 !px-1 w-24 font-mono"
                 autoFocus
               />
             ) : (
               <span
-                className="text-sm truncate max-w-[120px]"
+                className="text-sm truncate max-w-[120px] font-mono"
                 onDoubleClick={(e) => {
                   e.stopPropagation()
                   startEditing(panel.id, panel.title)
@@ -315,7 +316,7 @@ export function TerminalGrid() {
                 e.stopPropagation()
                 removePanel(panel.id)
               }}
-              className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-background-tertiary"
+              className="p-0.5 hidden group-hover:block hover:text-status-error"
             >
               <X className="w-3 h-3" />
             </button>
@@ -326,7 +327,7 @@ export function TerminalGrid() {
       {/* Add new terminal button */}
       <button
         onClick={() => createTerminal()}
-        className="p-1.5 rounded-md text-text-muted hover:text-text-primary hover:bg-background-tertiary"
+        className="btn-icon !w-7 !h-7 text-text-muted hover:text-text-primary"
         title="New Terminal"
       >
         <Plus className="w-4 h-4" />
@@ -335,7 +336,7 @@ export function TerminalGrid() {
       {/* Add file browser button */}
       <button
         onClick={openFileBrowser}
-        className="p-1.5 rounded-md text-text-muted hover:text-text-primary hover:bg-background-tertiary"
+        className="btn-icon !w-7 !h-7 text-text-muted hover:text-text-primary"
         title="Open File Browser"
       >
         <FolderTree className="w-4 h-4" />
@@ -345,14 +346,14 @@ export function TerminalGrid() {
       <div className="flex-1" />
 
       {/* View mode buttons */}
-      <div className="flex items-center gap-0.5 p-0.5 bg-background-tertiary rounded-md">
+      <div className="flex items-center gap-0.5 p-0.5 border-brutal border-border rounded-brutal bg-background-tertiary">
         <button
           onClick={() => setViewMode('grid')}
           className={clsx(
-            'p-1.5 rounded transition-colors',
+            'p-1.5 rounded-brutal transition-press',
             viewMode === 'grid'
-              ? 'bg-background-primary text-text-primary shadow-sm'
-              : 'text-text-muted hover:text-text-secondary'
+              ? 'bg-background-card text-text-primary shadow-brutal-sm border-brutal border-border'
+              : 'text-text-muted hover:text-text-secondary border border-transparent'
           )}
           title="Grid view"
         >
@@ -361,10 +362,10 @@ export function TerminalGrid() {
         <button
           onClick={() => setViewMode('single')}
           className={clsx(
-            'p-1.5 rounded transition-colors',
+            'p-1.5 rounded-brutal transition-press',
             viewMode === 'single'
-              ? 'bg-background-primary text-text-primary shadow-sm'
-              : 'text-text-muted hover:text-text-secondary'
+              ? 'bg-background-card text-text-primary shadow-brutal-sm border-brutal border-border'
+              : 'text-text-muted hover:text-text-secondary border border-transparent'
           )}
           title="Single view"
         >
@@ -373,10 +374,10 @@ export function TerminalGrid() {
         <button
           onClick={() => setViewMode('canvas')}
           className={clsx(
-            'p-1.5 rounded transition-colors',
+            'p-1.5 rounded-brutal transition-press',
             viewMode === 'canvas'
-              ? 'bg-background-primary text-text-primary shadow-sm'
-              : 'text-text-muted hover:text-text-secondary'
+              ? 'bg-background-card text-text-primary shadow-brutal-sm border-brutal border-border'
+              : 'text-text-muted hover:text-text-secondary border border-transparent'
           )}
           title="Canvas view"
         >
@@ -440,7 +441,7 @@ export function TerminalGrid() {
         {/* Canvas popup backdrop - only when popup is open */}
         {viewMode === 'canvas' && canvasPopupPanelId && (
           <div
-            className="absolute inset-0 z-50 bg-black/50 backdrop-blur-sm cursor-pointer"
+            className="absolute inset-0 z-50 bg-black/60 cursor-pointer"
             onClick={closeCanvasPopup}
           />
         )}
@@ -460,10 +461,10 @@ export function TerminalGrid() {
             const gridStyle = getGridStyle(index, panels.length)
             containerStyle = gridStyle
             containerClass = clsx(
-              'rounded-lg overflow-hidden border transition-all',
+              'rounded-brutal overflow-hidden border-brutal transition-press',
               spanClass,
               isActive
-                ? 'border-primary/50 ring-1 ring-primary/20'
+                ? 'border-accent shadow-brutal-sm'
                 : 'border-border-subtle hover:border-border'
             )
           } else if (viewMode === 'single') {
@@ -483,12 +484,11 @@ export function TerminalGrid() {
               justifyContent: 'center',
               zIndex: 55
             }
-            containerClass = 'rounded-lg shadow-2xl border border-border-subtle overflow-hidden bg-background-primary'
-            // Override: the inner content needs specific sizing
+            containerClass = 'rounded-brutal shadow-brutal border-brutal border-border overflow-hidden bg-background-primary'
           } else {
             // Canvas view - hide terminals not in popup
             containerStyle = { position: 'absolute', inset: 0 }
-            containerClass = 'opacity-0 pointer-events-none'
+            containerClass = 'invisible pointer-events-none'
           }
 
           // For popup mode, we need a sized inner container inside the flex centering container
@@ -512,7 +512,7 @@ export function TerminalGrid() {
             >
               <div
                 className={needsPopupWrapper
-                  ? 'rounded-lg shadow-2xl border border-border-subtle overflow-hidden bg-background-primary pointer-events-auto'
+                  ? 'rounded-brutal shadow-brutal border-brutal border-border overflow-hidden bg-background-primary pointer-events-auto'
                   : 'h-full w-full'
                 }
                 style={needsPopupWrapper ? { width: '90%', maxWidth: '1280px', height: '85%' } : undefined}

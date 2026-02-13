@@ -38,17 +38,17 @@ import { TabId, COLUMN_TYPES, RISK_LEVELS, DEFAULT_CONFIG } from './types'
 
 function HowItWorks({ isCollapsed, onToggle }: { isCollapsed: boolean; onToggle: () => void }) {
   return (
-    <div className="card-elevated bg-gradient-to-r from-primary/5 to-transparent border-primary/20 mb-6">
+    <div className="card p-0 mb-6">
       <button
         onClick={onToggle}
         className="w-full p-5 flex items-start gap-4 text-left"
       >
-        <div className="p-2 rounded-lg bg-primary/10">
-          <Sparkles className="w-6 h-6 text-primary" />
+        <div className="w-10 h-10 flex items-center justify-center border-brutal border-border rounded-brutal bg-accent-light">
+          <Sparkles className="w-6 h-6 text-accent-dark" />
         </div>
         <div className="flex-1">
           <div className="flex items-center gap-2">
-            <h3 className="font-semibold text-text-primary">
+            <h3 className="font-brand text-lg text-text-primary">
               How Data Creator Works
             </h3>
             <ChevronDown className={clsx(
@@ -63,33 +63,41 @@ function HowItWorks({ isCollapsed, onToggle }: { isCollapsed: boolean; onToggle:
       </button>
 
       {!isCollapsed && (
-        <div className="px-5 pb-5 space-y-4">
-          <p className="text-sm text-text-secondary">
+        <div className="px-5 pb-5 space-y-4 border-t-2 border-border">
+          <p className="text-sm text-text-secondary mt-4">
             Data Creator uses NVIDIA NeMo Data Designer to generate high-quality synthetic training data from your gold traces,
             expanding limited real data into larger, diverse training sets.
           </p>
 
-          <div className="flex items-center justify-between text-xs text-text-secondary bg-background-tertiary rounded-lg p-3">
-            <span className="font-medium text-text-primary">Gold Traces</span>
-            <ChevronRight className="w-4 h-4 text-text-muted" />
-            <span>Extract Patterns</span>
-            <ChevronRight className="w-4 h-4 text-text-muted" />
-            <span>Generate via NIM/Claude</span>
-            <ChevronRight className="w-4 h-4 text-text-muted" />
-            <span>Validate & Dedupe</span>
-            <ChevronRight className="w-4 h-4 text-text-muted" />
-            <span className="font-medium text-text-primary">NeMo JSONL</span>
+          <div className="terminal-chrome">
+            <div className="terminal-header">
+              <div className="terminal-dot terminal-dot-red" />
+              <div className="terminal-dot terminal-dot-yellow" />
+              <div className="terminal-dot terminal-dot-green" />
+              <span className="font-mono text-xs text-text-muted ml-2">pipeline</span>
+            </div>
+            <div className="flex items-center justify-between text-xs p-3 font-mono text-text-secondary">
+              <span className="terminal-prompt font-semibold">Gold Traces</span>
+              <ChevronRight className="w-4 h-4 text-text-muted" />
+              <span>Extract Patterns</span>
+              <ChevronRight className="w-4 h-4 text-text-muted" />
+              <span>Generate via NIM/Claude</span>
+              <ChevronRight className="w-4 h-4 text-text-muted" />
+              <span>Validate & Dedupe</span>
+              <ChevronRight className="w-4 h-4 text-text-muted" />
+              <span className="terminal-prompt font-semibold">NeMo JSONL</span>
+            </div>
           </div>
 
           <div className="text-xs text-text-muted">
-            <span className="font-medium text-text-secondary">Supported column types: </span>
+            <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">Supported column types: </span>
             LLM, Sampler, Category, Person, DateTime, Expression, UUID, Gaussian, Validator
             <span className="mx-2">&middot;</span>
             <a
               href="https://docs.nvidia.com/nemo/microservices/latest/design-synthetic-data-from-scratch-or-seeds/"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-primary hover:underline inline-flex items-center gap-1"
+              className="text-accent-dark hover:underline inline-flex items-center gap-1"
             >
               <BookOpen className="w-3 h-3" />
               Learn more
@@ -253,22 +261,30 @@ export function FactoryDashboard() {
 
   if (isLoading) {
     return (
-      <div className="h-full flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      <div className="h-full flex items-center justify-center bg-background-primary">
+        <div className="border-brutal border-border rounded-brutal bg-background-card p-8 shadow-brutal-sm text-center">
+          <Loader2 className="w-8 h-8 animate-spin text-accent mx-auto mb-3" />
+          <p className="font-mono text-xs uppercase tracking-widest text-text-muted">Loading factory...</p>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col bg-background-primary">
       {/* Header */}
-      <div className="p-6 border-b border-border-subtle">
+      <div className="p-6 border-b-2 border-border bg-background-card">
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold text-text-primary">Data Creator</h1>
-            <p className="text-sm text-text-secondary mt-1">
-              Generate high-quality synthetic training data with NVIDIA NeMo
-            </p>
+          <div className="flex items-center gap-4">
+            <div>
+              <div className="flex items-center gap-3">
+                <h1 className="font-brand text-2xl text-text-primary">Data Creator</h1>
+                <span className="tag"><span>DATA FACTORY</span></span>
+              </div>
+              <p className="text-sm text-text-secondary mt-1">
+                Generate high-quality synthetic training data with NVIDIA NeMo
+              </p>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             {/* Hidden file input for import */}
@@ -302,19 +318,19 @@ export function FactoryDashboard() {
               <>
                 <button
                   onClick={handleImportClick}
-                  className="btn-ghost p-2"
+                  className="btn-icon flex items-center justify-center"
                   title="Import config"
                 >
-                  <Upload className="w-5 h-5" />
+                  <Upload className="w-4 h-4" />
                 </button>
                 <button
                   onClick={exportConfig}
-                  className="btn-ghost p-2"
+                  className="btn-icon flex items-center justify-center"
                   title="Export config"
                 >
-                  <Download className="w-5 h-5" />
+                  <Download className="w-4 h-4" />
                 </button>
-                <div className="w-px h-6 bg-border-subtle mx-1" />
+                <div className="w-px h-6 border-l-2 border-border mx-1" />
                 <button
                   onClick={() => runSynthesis(false)}
                   disabled={config.columns.length === 0}
@@ -348,17 +364,18 @@ export function FactoryDashboard() {
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={clsx(
-                'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap',
+                'flex items-center gap-2 px-4 py-2 text-sm font-mono font-semibold tracking-wide uppercase transition-all whitespace-nowrap border-brutal',
+                'rounded-brutal',
                 activeTab === tab.id
-                  ? 'bg-primary text-white'
-                  : 'text-text-secondary hover:text-text-primary hover:bg-background-tertiary'
+                  ? 'bg-accent-light text-accent-dark border-border shadow-brutal-sm'
+                  : 'bg-transparent text-text-secondary border-transparent hover:text-text-primary hover:border-border hover:bg-background-secondary'
               )}
             >
               <tab.icon className="w-4 h-4" />
               {tab.label}
               {tab.badge !== undefined && tab.badge > 0 && (
-                <span className="px-1.5 py-0.5 text-xs rounded-full bg-white/20">
-                  {tab.badge}
+                <span className="tag text-[10px] py-0 px-1.5">
+                  <span>{tab.badge}</span>
                 </span>
               )}
             </button>
@@ -377,20 +394,22 @@ export function FactoryDashboard() {
             />
 
             {/* Main Generator Card */}
-            <div className="card-elevated p-6 mb-6">
+            <div className="card p-6 mb-6">
               <SyntheticGenerator onStateChange={setSyntheticState} />
             </div>
 
             {/* Advanced Configuration - Collapsible */}
-            <div className="card-elevated">
+            <div className="card p-0">
               <button
                 onClick={() => setAdvancedConfigOpen(!advancedConfigOpen)}
-                className="w-full p-4 flex items-center justify-between text-left hover:bg-background-tertiary/50 transition-colors"
+                className="w-full p-4 flex items-center justify-between text-left hover:bg-background-secondary transition-colors"
               >
                 <div className="flex items-center gap-3">
-                  <Settings className="w-5 h-5 text-text-muted" />
+                  <div className="w-8 h-8 flex items-center justify-center border-brutal border-border rounded-brutal bg-background-secondary">
+                    <Settings className="w-4 h-4 text-text-muted" />
+                  </div>
                   <div>
-                    <h3 className="font-medium text-text-primary">Advanced Configuration</h3>
+                    <h3 className="font-brand text-lg text-text-primary">Advanced Configuration</h3>
                     <p className="text-sm text-text-muted">Schema columns, model settings, and output format</p>
                   </div>
                 </div>
@@ -401,18 +420,18 @@ export function FactoryDashboard() {
               </button>
 
               {advancedConfigOpen && (
-                <div className="border-t border-border-subtle p-6 space-y-6">
+                <div className="border-t-2 border-border p-6 space-y-6">
                   {/* Two Column Layout for Model + Output */}
                   <div className="grid grid-cols-2 gap-6">
                     {/* Default Model Config */}
-                    <div className="space-y-4">
-                      <div className="flex items-center gap-2">
-                        <Cpu className="w-4 h-4 text-primary" />
-                        <h4 className="font-medium text-text-primary text-sm">Default Model</h4>
-                      </div>
+                    <fieldset className="space-y-4 border-brutal border-border rounded-brutal p-4 bg-background-card">
+                      <legend className="flex items-center gap-2 px-2">
+                        <Cpu className="w-4 h-4 text-accent" />
+                        <span className="font-brand text-lg text-text-primary">Default Model</span>
+                      </legend>
                       <div className="space-y-3">
                         <div>
-                          <label className="block text-xs font-medium text-text-secondary mb-1">Model</label>
+                          <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Model</label>
                           <select
                             value={config.default_model.model_id}
                             onChange={(e) => setConfig({
@@ -428,7 +447,7 @@ export function FactoryDashboard() {
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                           <div>
-                            <label className="block text-xs font-medium text-text-secondary mb-1">Temperature</label>
+                            <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Temperature</label>
                             <input
                               type="number"
                               min="0"
@@ -443,7 +462,7 @@ export function FactoryDashboard() {
                             />
                           </div>
                           <div>
-                            <label className="block text-xs font-medium text-text-secondary mb-1">Max Tokens</label>
+                            <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Max Tokens</label>
                             <input
                               type="number"
                               min="1"
@@ -458,17 +477,17 @@ export function FactoryDashboard() {
                           </div>
                         </div>
                       </div>
-                    </div>
+                    </fieldset>
 
                     {/* Output Settings */}
-                    <div className="space-y-4">
-                      <div className="flex items-center gap-2">
-                        <FileJson className="w-4 h-4 text-primary" />
-                        <h4 className="font-medium text-text-primary text-sm">Output Settings</h4>
-                      </div>
+                    <fieldset className="space-y-4 border-brutal border-border rounded-brutal p-4 bg-background-card">
+                      <legend className="flex items-center gap-2 px-2">
+                        <FileJson className="w-4 h-4 text-accent" />
+                        <span className="font-brand text-lg text-text-primary">Output Settings</span>
+                      </legend>
                       <div className="space-y-3">
                         <div>
-                          <label className="block text-xs font-medium text-text-secondary mb-1">Task Name</label>
+                          <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Task Name</label>
                           <input
                             type="text"
                             value={config.output.task_name}
@@ -482,7 +501,7 @@ export function FactoryDashboard() {
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                           <div>
-                            <label className="block text-xs font-medium text-text-secondary mb-1">Format</label>
+                            <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Format</label>
                             <select
                               value={config.output.format}
                               onChange={(e) => setConfig({
@@ -496,7 +515,7 @@ export function FactoryDashboard() {
                             </select>
                           </div>
                           <div>
-                            <label className="block text-xs font-medium text-text-secondary mb-1">Train/Val Split</label>
+                            <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Train/Val Split</label>
                             <input
                               type="number"
                               min="0.5"
@@ -512,16 +531,18 @@ export function FactoryDashboard() {
                           </div>
                         </div>
                       </div>
-                    </div>
+                    </fieldset>
                   </div>
+
+                  <div className="section-divider" />
 
                   {/* Column Schema - Full Width */}
                   <div>
                     <div className="flex items-center justify-between mb-4">
                       <div className="flex items-center gap-2">
-                        <Database className="w-4 h-4 text-primary" />
-                        <h4 className="font-medium text-text-primary text-sm">Column Schema</h4>
-                        <span className="text-xs text-text-muted">({config.columns.length} columns)</span>
+                        <Database className="w-4 h-4 text-accent" />
+                        <h4 className="font-brand text-lg text-text-primary">Column Schema</h4>
+                        <span className="tag text-[10px] py-0 px-1.5"><span>{config.columns.length} cols</span></span>
                       </div>
                       <button onClick={addColumn} className="btn-secondary text-xs flex items-center gap-1 py-1 px-2">
                         <Plus className="w-3 h-3" />
@@ -529,14 +550,14 @@ export function FactoryDashboard() {
                       </button>
                     </div>
 
-                    <div className="border border-border-subtle rounded-lg divide-y divide-border-subtle">
+                    <div className="border-brutal border-border rounded-brutal divide-y-2 divide-border">
                 {config.columns.map((column) => (
                   <div key={column.id} className="p-4">
                     {/* Column Header */}
                     <div className="flex items-center gap-3">
                       <button
                         onClick={() => setExpandedColumn(expandedColumn === column.id ? null : column.id)}
-                        className="p-1 hover:bg-background-tertiary rounded"
+                        className="p-1 border-brutal border-border rounded-brutal bg-background-secondary hover:bg-accent-light hover:shadow-brutal-sm transition-all"
                       >
                         {expandedColumn === column.id ? (
                           <ChevronDown className="w-4 h-4 text-text-muted" />
@@ -571,12 +592,12 @@ export function FactoryDashboard() {
                           ))}
                         </select>
                         <div className="flex items-center gap-2">
-                          <label className="flex items-center gap-1 text-sm text-text-secondary">
+                          <label className="flex items-center gap-1 text-sm text-text-secondary font-mono">
                             <input
                               type="checkbox"
                               checked={column.required}
                               onChange={(e) => updateColumn(column.id, { required: e.target.checked })}
-                              className="rounded"
+                              className="rounded-brutal"
                             />
                             Required
                           </label>
@@ -584,7 +605,7 @@ export function FactoryDashboard() {
                       </div>
                       <button
                         onClick={() => removeColumn(column.id)}
-                        className="p-2 text-text-muted hover:text-status-error transition-colors"
+                        className="btn-icon w-8 h-8 flex items-center justify-center text-text-muted hover:text-status-error"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -592,10 +613,10 @@ export function FactoryDashboard() {
 
                     {/* Expanded Column Config */}
                     {expandedColumn === column.id && (
-                      <div className="mt-4 ml-8 p-4 bg-background-tertiary rounded-lg space-y-4">
+                      <div className="mt-4 ml-8 p-4 border-brutal border-border rounded-brutal bg-background-secondary space-y-4">
                         {/* Description */}
                         <div>
-                          <label className="block text-xs font-medium text-text-secondary mb-1">Description</label>
+                          <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Description</label>
                           <input
                             type="text"
                             value={column.description || ''}
@@ -609,7 +630,7 @@ export function FactoryDashboard() {
                         {column.type === 'llm' && (
                           <div className="space-y-3">
                             <div>
-                              <label className="block text-xs font-medium text-text-secondary mb-1">Prompt Template</label>
+                              <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Prompt Template</label>
                               <textarea
                                 value={column.config.prompt || ''}
                                 onChange={(e) => updateColumn(column.id, { config: { ...column.config, prompt: e.target.value } })}
@@ -617,11 +638,11 @@ export function FactoryDashboard() {
                                 rows={3}
                                 className="input text-sm w-full font-mono"
                               />
-                              <p className="text-xs text-text-muted mt-1">Use {'{{column_name}}'} to reference other columns</p>
+                              <p className="text-xs text-text-muted mt-1 font-mono">Use {'{{column_name}}'} to reference other columns</p>
                             </div>
                             <div className="grid grid-cols-3 gap-3">
                               <div>
-                                <label className="block text-xs font-medium text-text-secondary mb-1">Model Override</label>
+                                <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Model Override</label>
                                 <select
                                   value={column.config.model?.model_id || ''}
                                   onChange={(e) => updateColumn(column.id, {
@@ -639,7 +660,7 @@ export function FactoryDashboard() {
                                 </select>
                               </div>
                               <div>
-                                <label className="block text-xs font-medium text-text-secondary mb-1">Temperature</label>
+                                <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Temperature</label>
                                 <input
                                   type="number"
                                   min="0"
@@ -659,7 +680,7 @@ export function FactoryDashboard() {
                                 />
                               </div>
                               <div>
-                                <label className="block text-xs font-medium text-text-secondary mb-1">Max Tokens</label>
+                                <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Max Tokens</label>
                                 <input
                                   type="number"
                                   min="1"
@@ -683,7 +704,7 @@ export function FactoryDashboard() {
 
                         {column.type === 'category' && (
                           <div>
-                            <label className="block text-xs font-medium text-text-secondary mb-1">Values (comma-separated)</label>
+                            <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Values (comma-separated)</label>
                             <input
                               type="text"
                               value={column.config.values?.join(', ') || ''}
@@ -698,7 +719,7 @@ export function FactoryDashboard() {
 
                         {column.type === 'expression' && (
                           <div>
-                            <label className="block text-xs font-medium text-text-secondary mb-1">Jinja2 Template</label>
+                            <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Jinja2 Template</label>
                             <textarea
                               value={column.config.template || ''}
                               onChange={(e) => updateColumn(column.id, { config: { ...column.config, template: e.target.value } })}
@@ -712,7 +733,7 @@ export function FactoryDashboard() {
                         {column.type === 'gaussian' && (
                           <div className="grid grid-cols-2 gap-3">
                             <div>
-                              <label className="block text-xs font-medium text-text-secondary mb-1">Mean</label>
+                              <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Mean</label>
                               <input
                                 type="number"
                                 value={column.config.mean ?? 0}
@@ -721,7 +742,7 @@ export function FactoryDashboard() {
                               />
                             </div>
                             <div>
-                              <label className="block text-xs font-medium text-text-secondary mb-1">Std Dev</label>
+                              <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Std Dev</label>
                               <input
                                 type="number"
                                 value={column.config.std ?? 1}
@@ -735,7 +756,7 @@ export function FactoryDashboard() {
                         {column.type === 'datetime' && (
                           <div className="grid grid-cols-3 gap-3">
                             <div>
-                              <label className="block text-xs font-medium text-text-secondary mb-1">Format</label>
+                              <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Format</label>
                               <input
                                 type="text"
                                 value={column.config.format || '%Y-%m-%d'}
@@ -745,7 +766,7 @@ export function FactoryDashboard() {
                               />
                             </div>
                             <div>
-                              <label className="block text-xs font-medium text-text-secondary mb-1">Min Date</label>
+                              <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Min Date</label>
                               <input
                                 type="date"
                                 value={column.config.min_date || ''}
@@ -754,7 +775,7 @@ export function FactoryDashboard() {
                               />
                             </div>
                             <div>
-                              <label className="block text-xs font-medium text-text-secondary mb-1">Max Date</label>
+                              <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Max Date</label>
                               <input
                                 type="date"
                                 value={column.config.max_date || ''}
@@ -767,7 +788,7 @@ export function FactoryDashboard() {
 
                         {/* Constraints */}
                         <div>
-                          <label className="block text-xs font-medium text-text-secondary mb-2">Constraints</label>
+                          <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-2">Constraints</label>
                           <div className="space-y-2">
                             {column.constraints?.map((constraint, idx) => (
                               <div key={idx} className="flex items-center gap-2">
@@ -808,7 +829,7 @@ export function FactoryDashboard() {
                                     const updated = column.constraints?.filter((_, i) => i !== idx) || []
                                     updateColumn(column.id, { constraints: updated })
                                   }}
-                                  className="p-1 text-text-muted hover:text-status-error"
+                                  className="btn-icon w-8 h-8 flex items-center justify-center text-text-muted hover:text-status-error"
                                 >
                                   <X className="w-4 h-4" />
                                 </button>
@@ -819,7 +840,7 @@ export function FactoryDashboard() {
                                 const updated = [...(column.constraints || []), { type: 'regex', value: '', error_message: '' }]
                                 updateColumn(column.id, { constraints: updated })
                               }}
-                              className="text-xs text-primary hover:underline"
+                              className="font-mono text-xs uppercase tracking-widest text-accent-dark hover:underline"
                             >
                               + Add constraint
                             </button>
@@ -832,8 +853,10 @@ export function FactoryDashboard() {
 
                       {config.columns.length === 0 && (
                         <div className="p-6 text-center">
-                          <Database className="w-8 h-8 text-text-muted mx-auto mb-2" />
-                          <p className="text-sm text-text-muted mb-3">No columns defined yet</p>
+                          <div className="w-12 h-12 border-brutal border-border rounded-brutal bg-background-secondary flex items-center justify-center mx-auto mb-3">
+                            <Database className="w-6 h-6 text-text-muted" />
+                          </div>
+                          <p className="text-sm text-text-muted mb-3 font-mono">No columns defined yet</p>
                           <button onClick={addColumn} className="btn-secondary text-sm">
                             <Plus className="w-4 h-4 mr-1" />
                             Add First Column
@@ -844,9 +867,10 @@ export function FactoryDashboard() {
                   </div>
 
                   {/* Column Type Reference - Compact */}
-                  <div className="border-t border-border-subtle pt-4 mt-4">
-                    <p className="text-xs text-text-muted mb-2">
-                      <span className="font-medium text-text-secondary">Column Types: </span>
+                  <div className="section-divider" />
+                  <div className="pt-4">
+                    <p className="text-xs text-text-muted">
+                      <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">Column Types: </span>
                       {COLUMN_TYPES.map((type, i) => (
                         <span key={type.id}>
                           {type.label}
@@ -883,9 +907,11 @@ export function FactoryDashboard() {
         {activeTab === 'jobs' && (
           <div className="p-6 space-y-4">
             {jobs.length === 0 && syntheticJobs.length === 0 ? (
-              <div className="card-elevated p-12 text-center">
-                <RefreshCw className="w-12 h-12 text-text-muted mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-text-primary mb-2">No synthesis jobs yet</h3>
+              <div className="card p-12 text-center">
+                <div className="w-16 h-16 border-brutal border-border rounded-brutal bg-background-secondary flex items-center justify-center mx-auto mb-4">
+                  <RefreshCw className="w-8 h-8 text-text-muted" />
+                </div>
+                <h3 className="font-brand text-xl text-text-primary mb-2">No synthesis jobs yet</h3>
                 <p className="text-text-muted mb-4">Run synthesis to generate training data</p>
                 <button onClick={() => setActiveTab('create')} className="btn-primary">
                   <Wand2 className="w-4 h-4 mr-2" />
@@ -897,27 +923,38 @@ export function FactoryDashboard() {
                 {/* Synthetic Jobs */}
                 {syntheticJobs.length > 0 && (
                   <div className="space-y-3">
-                    <h3 className="text-sm font-medium text-text-secondary uppercase tracking-wider">Synthetic Generation Jobs</h3>
+                    <h3 className="font-brand text-lg text-text-primary">Synthetic Generation Jobs</h3>
                     {syntheticJobs.map(job => (
-                      <div key={job.job_id} className="card-elevated p-4">
+                      <div key={job.job_id} className={clsx(
+                        'card p-4',
+                        job.status === 'running' && 'card-accent'
+                      )}>
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-3">
-                            {job.status === 'running' && <Loader2 className="w-5 h-5 animate-spin text-primary" />}
-                            {job.status === 'completed' && <CheckCircle className="w-5 h-5 text-status-success" />}
-                            {job.status === 'failed' && <AlertCircle className="w-5 h-5 text-status-error" />}
-                            {job.status === 'queued' && <RefreshCw className="w-5 h-5 text-text-muted" />}
+                            <div className={clsx(
+                              'w-8 h-8 flex items-center justify-center border-brutal rounded-brutal',
+                              job.status === 'running' && 'border-accent bg-accent-light',
+                              job.status === 'completed' && 'border-status-success bg-background-secondary',
+                              job.status === 'failed' && 'border-status-error bg-background-secondary',
+                              job.status === 'queued' && 'border-border bg-background-secondary'
+                            )}>
+                              {job.status === 'running' && <Loader2 className="w-4 h-4 animate-spin text-accent" />}
+                              {job.status === 'completed' && <CheckCircle className="w-4 h-4 text-status-success" />}
+                              {job.status === 'failed' && <AlertCircle className="w-4 h-4 text-status-error" />}
+                              {job.status === 'queued' && <RefreshCw className="w-4 h-4 text-text-muted" />}
+                            </div>
                             <div>
                               <div className="flex items-center gap-2">
-                                <p className="font-medium text-text-primary">AI-Powered Generation</p>
-                                <span className="text-xs px-2 py-0.5 rounded-full bg-primary/20 text-primary">Synthetic</span>
+                                <p className="font-brand text-lg text-text-primary">AI-Powered Generation</p>
+                                <span className="tag text-[10px] py-0 px-1.5"><span>Synthetic</span></span>
                               </div>
                               <p className="text-sm text-text-muted font-mono">{job.job_id}</p>
                             </div>
                           </div>
                           <div className="text-right">
                             <p className={clsx(
-                              'text-sm font-medium capitalize',
-                              job.status === 'running' && 'text-primary',
+                              'font-mono text-xs uppercase tracking-widest font-semibold',
+                              job.status === 'running' && 'text-accent',
                               job.status === 'completed' && 'text-status-success',
                               job.status === 'failed' && 'text-status-error',
                               job.status === 'queued' && 'text-text-muted'
@@ -925,17 +962,17 @@ export function FactoryDashboard() {
                               {job.status}
                             </p>
                             {job.progress && job.progress.total > 0 && (
-                              <p className="text-sm text-text-muted">
-                                {job.progress.current} / {job.progress.total} examples
+                              <p className="font-brand text-xl text-text-primary">
+                                {job.progress.current} / {job.progress.total}
                               </p>
                             )}
                           </div>
                         </div>
                         {(job.status === 'running' || job.status === 'completed') && job.progress && job.progress.total > 0 && (
                           <div className="mt-3">
-                            <div className="h-1.5 bg-background-tertiary rounded-full overflow-hidden">
+                            <div className="progress-bar">
                               <div
-                                className="h-full bg-primary rounded-full transition-all"
+                                className="progress-fill"
                                 style={{
                                   width: `${(job.progress.current / job.progress.total) * 100}%`
                                 }}
@@ -944,13 +981,13 @@ export function FactoryDashboard() {
                           </div>
                         )}
                         {job.output_dir && (
-                          <div className="mt-3 pt-3 border-t border-border-subtle">
-                            <p className="text-xs text-text-muted">Output: {job.output_dir}</p>
+                          <div className="mt-3 pt-3 border-t-2 border-border">
+                            <p className="text-xs text-text-muted font-mono">Output: {job.output_dir}</p>
                           </div>
                         )}
                         {job.error && (
-                          <div className="mt-3 pt-3 border-t border-border-subtle">
-                            <p className="text-xs text-status-error">{job.error}</p>
+                          <div className="mt-3 pt-3 border-t-2 border-border">
+                            <p className="text-xs text-status-error font-mono">{job.error}</p>
                           </div>
                         )}
                       </div>
@@ -961,29 +998,40 @@ export function FactoryDashboard() {
                 {/* Schema-based Factory Jobs */}
                 {jobs.length > 0 && (
                   <div className="space-y-3">
-                    <h3 className="text-sm font-medium text-text-secondary uppercase tracking-wider">Schema-Based Synthesis Jobs</h3>
+                    <h3 className="font-brand text-lg text-text-primary">Schema-Based Synthesis Jobs</h3>
                     {jobs.map(job => (
-                      <div key={job.id} className="card-elevated p-4">
+                      <div key={job.id} className={clsx(
+                        'card p-4',
+                        job.status === 'running' && 'card-accent'
+                      )}>
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-3">
-                            {job.status === 'running' && <Loader2 className="w-5 h-5 animate-spin text-primary" />}
-                            {job.status === 'completed' && <CheckCircle className="w-5 h-5 text-status-success" />}
-                            {job.status === 'failed' && <AlertCircle className="w-5 h-5 text-status-error" />}
-                            {job.status === 'pending' && <RefreshCw className="w-5 h-5 text-text-muted" />}
+                            <div className={clsx(
+                              'w-8 h-8 flex items-center justify-center border-brutal rounded-brutal',
+                              job.status === 'running' && 'border-accent bg-accent-light',
+                              job.status === 'completed' && 'border-status-success bg-background-secondary',
+                              job.status === 'failed' && 'border-status-error bg-background-secondary',
+                              job.status === 'pending' && 'border-border bg-background-secondary'
+                            )}>
+                              {job.status === 'running' && <Loader2 className="w-4 h-4 animate-spin text-accent" />}
+                              {job.status === 'completed' && <CheckCircle className="w-4 h-4 text-status-success" />}
+                              {job.status === 'failed' && <AlertCircle className="w-4 h-4 text-status-error" />}
+                              {job.status === 'pending' && <RefreshCw className="w-4 h-4 text-text-muted" />}
+                            </div>
                             <div>
                               <div className="flex items-center gap-2">
-                                <p className="font-medium text-text-primary">
+                                <p className="font-brand text-lg text-text-primary">
                                   {job.job_type === 'preview' ? 'Preview' : 'Full Synthesis'}
                                 </p>
-                                <span className="text-xs px-2 py-0.5 rounded-full bg-background-tertiary text-text-muted">Schema</span>
+                                <span className="tag text-[10px] py-0 px-1.5"><span>Schema</span></span>
                               </div>
-                              <p className="text-sm text-text-muted">{job.id}</p>
+                              <p className="text-sm text-text-muted font-mono">{job.id}</p>
                             </div>
                           </div>
                           <div className="text-right">
                             <p className={clsx(
-                              'text-sm font-medium capitalize',
-                              job.status === 'running' && 'text-primary',
+                              'font-mono text-xs uppercase tracking-widest font-semibold',
+                              job.status === 'running' && 'text-accent',
                               job.status === 'completed' && 'text-status-success',
                               job.status === 'failed' && 'text-status-error',
                               job.status === 'pending' && 'text-text-muted'
@@ -991,21 +1039,23 @@ export function FactoryDashboard() {
                               {job.status}
                             </p>
                             {job.examples_created !== undefined && (
-                              <p className="text-sm text-text-muted">
+                              <p className="font-brand text-xl text-text-primary">
                                 {job.examples_created} examples
-                                {job.valid_examples !== undefined && ` (${job.valid_examples} valid)`}
+                                {job.valid_examples !== undefined && (
+                                  <span className="text-sm text-text-muted ml-1">({job.valid_examples} valid)</span>
+                                )}
                               </p>
                             )}
                           </div>
                         </div>
                         {job.output_path && (
-                          <div className="mt-3 pt-3 border-t border-border-subtle">
-                            <p className="text-xs text-text-muted">Output: {job.output_path}</p>
+                          <div className="mt-3 pt-3 border-t-2 border-border">
+                            <p className="text-xs text-text-muted font-mono">Output: {job.output_path}</p>
                           </div>
                         )}
                         {job.error && (
-                          <div className="mt-3 pt-3 border-t border-border-subtle">
-                            <p className="text-xs text-status-error">{job.error}</p>
+                          <div className="mt-3 pt-3 border-t-2 border-border">
+                            <p className="text-xs text-status-error font-mono">{job.error}</p>
                           </div>
                         )}
                       </div>

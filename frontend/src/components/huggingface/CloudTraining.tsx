@@ -102,7 +102,7 @@ export function CloudTraining({ className }: CloudTrainingProps) {
       case 'pending':
         return <Clock className="w-4 h-4 text-status-warning" />
       case 'running':
-        return <Loader2 className="w-4 h-4 text-accent-primary animate-spin" />
+        return <Loader2 className="w-4 h-4 text-accent animate-spin" />
       case 'completed':
         return <CheckCircle2 className="w-4 h-4 text-status-success" />
       case 'failed':
@@ -118,7 +118,7 @@ export function CloudTraining({ className }: CloudTrainingProps) {
     return (
       <div className={clsx('p-6', className)}>
         <div className="flex items-center justify-center py-12">
-          <Loader2 className="w-6 h-6 animate-spin text-accent-primary" />
+          <Loader2 className="w-6 h-6 animate-spin text-accent" />
         </div>
       </div>
     )
@@ -129,22 +129,22 @@ export function CloudTraining({ className }: CloudTrainingProps) {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-lg font-semibold text-text-primary">Cloud Training</h2>
-          <p className="text-sm text-text-secondary mt-1">
+          <h2 className="text-lg font-brand text-text-primary">Cloud Training</h2>
+          <p className="text-sm text-text-secondary mt-1 font-mono">
             Train models on HuggingFace GPUs
           </p>
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={fetchJobs}
-            className="p-2 rounded-lg hover:bg-background-tertiary transition-colors"
+            className="btn-icon"
             title="Refresh"
           >
             <RefreshCw className="w-4 h-4 text-text-secondary" />
           </button>
           <button
             onClick={() => setShowForm(!showForm)}
-            className="flex items-center gap-2 px-3 py-2 bg-accent-primary text-white rounded-lg hover:bg-accent-primary/90 transition-colors"
+            className="btn-primary flex items-center gap-2"
           >
             <Play className="w-4 h-4" />
             New Job
@@ -153,46 +153,46 @@ export function CloudTraining({ className }: CloudTrainingProps) {
       </div>
 
       {error && (
-        <div className="mb-4 p-3 bg-status-error/10 border border-status-error/30 rounded-lg flex items-center gap-2 text-status-error">
+        <div className="mb-4 p-3 bg-background-card border-2 border-status-error rounded-brutal flex items-center gap-2 text-status-error">
           <AlertCircle className="w-4 h-4 flex-shrink-0" />
-          <span className="text-sm">{error}</span>
+          <span className="text-sm font-mono">{error}</span>
         </div>
       )}
 
       {/* Job Submission Form */}
       {showForm && (
-        <form onSubmit={handleSubmit} className="mb-6 p-4 bg-background-secondary rounded-lg border border-border">
-          <h3 className="text-sm font-medium text-text-primary mb-4">Submit Training Job</h3>
+        <form onSubmit={handleSubmit} className="mb-6 p-4 border-brutal shadow-brutal-sm rounded-brutal bg-background-card">
+          <h3 className="text-sm font-brand text-text-primary mb-4">Submit Training Job</h3>
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm text-text-secondary mb-1">Dataset Repo</label>
+              <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">Dataset Repo</label>
               <input
                 type="text"
                 value={formData.dataset_repo}
                 onChange={(e) => setFormData({ ...formData, dataset_repo: e.target.value })}
                 placeholder="username/dataset-name"
-                className="w-full px-3 py-2 bg-background-primary border border-border rounded-lg text-text-primary text-sm"
+                className="input w-full text-sm"
                 required
               />
             </div>
             <div>
-              <label className="block text-sm text-text-secondary mb-1">Output Repo</label>
+              <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">Output Repo</label>
               <input
                 type="text"
                 value={formData.output_repo}
                 onChange={(e) => setFormData({ ...formData, output_repo: e.target.value })}
                 placeholder="username/model-name"
-                className="w-full px-3 py-2 bg-background-primary border border-border rounded-lg text-text-primary text-sm"
+                className="input w-full text-sm"
                 required
               />
             </div>
             <div>
-              <label className="block text-sm text-text-secondary mb-1">Hardware</label>
+              <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">Hardware</label>
               <select
                 value={formData.hardware}
                 onChange={(e) => setFormData({ ...formData, hardware: e.target.value })}
-                className="w-full px-3 py-2 bg-background-primary border border-border rounded-lg text-text-primary text-sm"
+                className="input w-full text-sm"
               >
                 {HARDWARE_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>
@@ -202,33 +202,33 @@ export function CloudTraining({ className }: CloudTrainingProps) {
               </select>
             </div>
             <div>
-              <label className="block text-sm text-text-secondary mb-1">Base Model</label>
+              <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">Base Model</label>
               <input
                 type="text"
                 value={formData.base_model}
                 onChange={(e) => setFormData({ ...formData, base_model: e.target.value })}
-                className="w-full px-3 py-2 bg-background-primary border border-border rounded-lg text-text-primary text-sm"
+                className="input w-full text-sm"
               />
             </div>
             <div>
-              <label className="block text-sm text-text-secondary mb-1">Epochs</label>
+              <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">Epochs</label>
               <input
                 type="number"
                 value={formData.num_epochs}
                 onChange={(e) => setFormData({ ...formData, num_epochs: parseInt(e.target.value) })}
                 min={1}
                 max={100}
-                className="w-full px-3 py-2 bg-background-primary border border-border rounded-lg text-text-primary text-sm"
+                className="input w-full text-sm"
               />
             </div>
             <div>
-              <label className="block text-sm text-text-secondary mb-1">Learning Rate</label>
+              <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">Learning Rate</label>
               <input
                 type="number"
                 value={formData.learning_rate}
                 onChange={(e) => setFormData({ ...formData, learning_rate: parseFloat(e.target.value) })}
                 step={0.00001}
-                className="w-full px-3 py-2 bg-background-primary border border-border rounded-lg text-text-primary text-sm"
+                className="input w-full text-sm"
               />
             </div>
           </div>
@@ -237,14 +237,14 @@ export function CloudTraining({ className }: CloudTrainingProps) {
             <button
               type="button"
               onClick={() => setShowForm(false)}
-              className="px-4 py-2 text-text-secondary hover:text-text-primary transition-colors"
+              className="btn-ghost"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={submitting}
-              className="flex items-center gap-2 px-4 py-2 bg-accent-primary text-white rounded-lg hover:bg-accent-primary/90 disabled:opacity-50 transition-colors"
+              className="btn-primary flex items-center gap-2 disabled:opacity-50"
             >
               {submitting ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -260,30 +260,30 @@ export function CloudTraining({ className }: CloudTrainingProps) {
       {/* Jobs List */}
       {jobs.length === 0 ? (
         <div className="text-center py-12 text-text-secondary">
-          <Server className="w-12 h-12 mx-auto mb-3 opacity-50" />
-          <p>No training jobs yet</p>
-          <p className="text-sm mt-1">Submit a job to train on HuggingFace GPUs</p>
+          <Server className="w-12 h-12 mx-auto mb-3 text-text-muted" />
+          <p className="font-brand text-lg">No training jobs yet</p>
+          <p className="text-sm mt-1 font-mono">Submit a job to train on HuggingFace GPUs</p>
         </div>
       ) : (
         <div className="space-y-3">
           {jobs.map((job) => (
             <div
               key={job.job_id}
-              className="p-4 bg-background-secondary rounded-lg border border-border"
+              className="card p-4"
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   {getStatusIcon(job.status)}
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-text-primary">
+                      <span className="text-sm font-mono text-text-primary">
                         {job.job_id}
                       </span>
-                      <span className="px-2 py-0.5 text-xs bg-background-tertiary text-text-secondary rounded">
-                        {job.hardware}
+                      <span className="tag">
+                        <span>{job.hardware}</span>
                       </span>
                     </div>
-                    <span className="text-xs text-text-secondary">
+                    <span className="text-xs text-text-secondary font-mono">
                       {new Date(job.created_at).toLocaleString()}
                     </span>
                   </div>
@@ -294,7 +294,7 @@ export function CloudTraining({ className }: CloudTrainingProps) {
                       href={job.logs_url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="p-2 rounded-lg hover:bg-background-tertiary transition-colors"
+                      className="btn-icon"
                       title="View Logs"
                     >
                       <ExternalLink className="w-4 h-4 text-text-secondary" />
@@ -303,7 +303,7 @@ export function CloudTraining({ className }: CloudTrainingProps) {
                   {(job.status === 'pending' || job.status === 'running') && (
                     <button
                       onClick={() => handleCancel(job.job_id)}
-                      className="p-2 rounded-lg hover:bg-background-tertiary transition-colors"
+                      className="btn-icon"
                       title="Cancel Job"
                     >
                       <Trash2 className="w-4 h-4 text-status-error" />
@@ -312,7 +312,7 @@ export function CloudTraining({ className }: CloudTrainingProps) {
                 </div>
               </div>
               {job.error_message && (
-                <div className="mt-2 p-2 bg-status-error/10 rounded text-sm text-status-error">
+                <div className="mt-2 p-2 border-2 border-status-error rounded-brutal bg-background-card text-sm text-status-error font-mono">
                   {job.error_message}
                 </div>
               )}

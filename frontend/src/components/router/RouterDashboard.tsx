@@ -80,20 +80,23 @@ export function RouterDashboard() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-semibold text-text-primary">Router Dashboard</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="font-brand text-2xl text-text-primary">Router Dashboard</h1>
+            <span className="tag"><span>ROUTER</span></span>
+          </div>
           <p className="text-sm text-text-secondary mt-1">
-            Strategy: <span className="font-medium capitalize">{strategy.replace('_', ' ')}</span>
+            Strategy: <span className="font-mono text-xs uppercase tracking-widest text-accent-dark">{strategy.replace('_', ' ')}</span>
           </p>
         </div>
 
         <div className="flex items-center gap-2">
           <button
-            className="btn-ghost p-2"
+            className="btn-icon flex items-center justify-center"
             onClick={handleRefresh}
             disabled={isRefreshing}
             title="Refresh stats"
           >
-            <RefreshCw className={clsx('w-5 h-5', isRefreshing && 'animate-spin')} />
+            <RefreshCw className={clsx('w-4 h-4', isRefreshing && 'animate-spin')} />
           </button>
           <button onClick={() => setShowSettings(!showSettings)} className="btn-secondary flex items-center gap-2">
             <Settings className="w-4 h-4" />
@@ -102,11 +105,13 @@ export function RouterDashboard() {
         </div>
       </div>
 
+      <div className="section-divider mb-6" />
+
       {/* Main Grid */}
       <div className="grid grid-cols-12 gap-4">
         {/* Traffic Split Chart */}
-        <div className="col-span-5 card-elevated p-4">
-          <h2 className="text-lg font-medium text-text-primary mb-4">Traffic Distribution</h2>
+        <div className="col-span-5 card p-4">
+          <h2 className="font-brand text-xl text-text-primary mb-4">Traffic Distribution</h2>
           <div className="h-64 flex items-center justify-center">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
@@ -125,9 +130,11 @@ export function RouterDashboard() {
                 </Pie>
                 <Tooltip
                   contentStyle={{
-                    backgroundColor: theme === 'dark' ? '#242424' : '#F5F5F7',
-                    border: `1px solid ${colors.grid}`,
-                    borderRadius: '8px'
+                    backgroundColor: 'var(--bg-card)',
+                    border: 'var(--border-weight) solid var(--border-color)',
+                    borderRadius: 'var(--radius)',
+                    fontFamily: 'JetBrains Mono, monospace',
+                    fontSize: '12px'
                   }}
                   formatter={(value: number) => [`${value}%`, 'Traffic']}
                 />
@@ -138,19 +145,19 @@ export function RouterDashboard() {
           {/* Legend */}
           <div className="flex items-center justify-center gap-6 mt-4">
             <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: colors.teacher }} />
-              <span className="text-sm text-text-secondary">Teacher ({100 - studentRate}%)</span>
+              <div className="status-dot" style={{ backgroundColor: colors.teacher, borderColor: colors.teacher }} />
+              <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">Teacher ({100 - studentRate}%)</span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: colors.student }} />
-              <span className="text-sm text-text-secondary">Student ({studentRate}%)</span>
+              <div className="status-dot" style={{ backgroundColor: colors.student, borderColor: colors.student }} />
+              <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">Student ({studentRate}%)</span>
             </div>
           </div>
 
           {/* Slider Control */}
-          <div className="mt-6">
-            <label className="block text-sm text-text-muted mb-2">
-              Student Traffic Rate: {studentRate}%
+          <div className="mt-6 border-t border-border-subtle pt-4">
+            <label className="block font-mono text-xs uppercase tracking-widest text-text-muted mb-2">
+              Student Traffic Rate: <span className="font-brand text-lg text-text-primary">{studentRate}%</span>
             </label>
             <input
               type="range"
@@ -158,9 +165,9 @@ export function RouterDashboard() {
               max={100}
               value={studentRate}
               onChange={(e) => setStudentRate(parseInt(e.target.value))}
-              className="w-full h-2 bg-background-tertiary rounded-lg appearance-none cursor-pointer accent-primary"
+              className="w-full h-2 bg-background-secondary border-brutal border-border rounded-brutal appearance-none cursor-pointer accent-primary"
             />
-            <div className="flex justify-between text-xs text-text-muted mt-1">
+            <div className="flex justify-between font-mono text-xs text-text-muted mt-1">
               <span>0% (Teacher only)</span>
               <span>100% (Student only)</span>
             </div>
@@ -168,8 +175,8 @@ export function RouterDashboard() {
         </div>
 
         {/* Performance Comparison */}
-        <div className="col-span-7 card-elevated p-4">
-          <h2 className="text-lg font-medium text-text-primary mb-4">Performance Comparison</h2>
+        <div className="col-span-7 card p-4">
+          <h2 className="font-brand text-xl text-text-primary mb-4">Performance Comparison</h2>
           <div className="h-64">
             {performanceData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -185,80 +192,82 @@ export function RouterDashboard() {
                   />
                   <Tooltip
                     contentStyle={{
-                      backgroundColor: theme === 'dark' ? '#242424' : '#F5F5F7',
-                      border: `1px solid ${colors.grid}`,
-                      borderRadius: '8px'
+                      backgroundColor: 'var(--bg-card)',
+                      border: 'var(--border-weight) solid var(--border-color)',
+                      borderRadius: 'var(--radius)',
+                      fontFamily: 'JetBrains Mono, monospace',
+                      fontSize: '12px'
                     }}
                     formatter={(value: number) => [`${value}%`, 'Success Rate']}
                   />
                   <Bar
                     dataKey="success"
                     fill={colors.teacher}
-                    radius={[0, 4, 4, 0]}
+                    radius={[0, 2, 2, 0]}
                     barSize={24}
                   />
                 </BarChart>
               </ResponsiveContainer>
             ) : (
               <div className="h-full flex flex-col items-center justify-center text-text-muted">
-                <TrendingUp className="w-12 h-12 mb-3 opacity-30" />
-                <p className="text-sm">Router metrics will appear once models are deployed</p>
+                <TrendingUp className="w-12 h-12 mb-3" />
+                <p className="font-mono text-xs uppercase tracking-widest">Router metrics will appear once models are deployed</p>
               </div>
             )}
           </div>
         </div>
 
         {/* Stats Cards */}
-        <div className="col-span-3 card-elevated p-4">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-10 h-10 rounded-lg bg-status-success/10 flex items-center justify-center">
+        <div className="col-span-3 card p-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 border-brutal border-border rounded-brutal flex items-center justify-center">
               <CheckCircle className="w-5 h-5 text-status-success" />
             </div>
             <div>
-              <p className="text-sm text-text-muted">Teacher Success</p>
-              <p className="text-2xl font-semibold text-text-primary">
+              <p className="font-mono text-xs uppercase tracking-widest text-text-muted">Teacher Success</p>
+              <p className="font-brand text-2xl text-text-primary">
                 {hasStats ? `${stats.teacherSuccessRate}%` : '--'}
               </p>
             </div>
           </div>
         </div>
 
-        <div className="col-span-3 card-elevated p-4">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center">
+        <div className="col-span-3 card p-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 border-brutal border-border rounded-brutal flex items-center justify-center">
               <TrendingUp className="w-5 h-5 text-accent" />
             </div>
             <div>
-              <p className="text-sm text-text-muted">Student Success</p>
-              <p className="text-2xl font-semibold text-text-primary">
+              <p className="font-mono text-xs uppercase tracking-widest text-text-muted">Student Success</p>
+              <p className="font-brand text-2xl text-text-primary">
                 {hasStats ? `${stats.studentSuccessRate}%` : '--'}
               </p>
             </div>
           </div>
         </div>
 
-        <div className="col-span-3 card-elevated p-4">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-              <Clock className="w-5 h-5 text-primary" />
+        <div className="col-span-3 card p-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 border-brutal border-border rounded-brutal flex items-center justify-center">
+              <Clock className="w-5 h-5 text-accent-dark" />
             </div>
             <div>
-              <p className="text-sm text-text-muted">Avg Teacher Latency</p>
-              <p className="text-2xl font-semibold text-text-primary">
+              <p className="font-mono text-xs uppercase tracking-widest text-text-muted">Avg Teacher Latency</p>
+              <p className="font-brand text-2xl text-text-primary">
                 {hasStats ? `${stats.avgTeacherLatency}ms` : '--'}
               </p>
             </div>
           </div>
         </div>
 
-        <div className="col-span-3 card-elevated p-4">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-10 h-10 rounded-lg bg-status-info/10 flex items-center justify-center">
+        <div className="col-span-3 card p-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 border-brutal border-border rounded-brutal flex items-center justify-center">
               <Clock className="w-5 h-5 text-status-info" />
             </div>
             <div>
-              <p className="text-sm text-text-muted">Avg Student Latency</p>
-              <p className="text-2xl font-semibold text-text-primary">
+              <p className="font-mono text-xs uppercase tracking-widest text-text-muted">Avg Student Latency</p>
+              <p className="font-brand text-2xl text-text-primary">
                 {hasStats ? `${stats.avgStudentLatency}ms` : '--'}
               </p>
             </div>
@@ -266,8 +275,8 @@ export function RouterDashboard() {
         </div>
 
         {/* Latency Over Time */}
-        <div className="col-span-12 card-elevated p-4">
-          <h2 className="text-lg font-medium text-text-primary mb-4">Latency Over Time</h2>
+        <div className="col-span-12 card p-4">
+          <h2 className="font-brand text-xl text-text-primary mb-4">Latency Over Time</h2>
           <div className="h-48">
             {latencyHistory.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -277,9 +286,11 @@ export function RouterDashboard() {
                   <YAxis stroke={colors.text} fontSize={11} />
                   <Tooltip
                     contentStyle={{
-                      backgroundColor: theme === 'dark' ? '#242424' : '#F5F5F7',
-                      border: `1px solid ${colors.grid}`,
-                      borderRadius: '8px'
+                      backgroundColor: 'var(--bg-card)',
+                      border: 'var(--border-weight) solid var(--border-color)',
+                      borderRadius: 'var(--radius)',
+                      fontFamily: 'JetBrains Mono, monospace',
+                      fontSize: '12px'
                     }}
                     formatter={(value: number) => [`${value}ms`, 'Latency']}
                   />
@@ -303,8 +314,8 @@ export function RouterDashboard() {
               </ResponsiveContainer>
             ) : (
               <div className="h-full flex flex-col items-center justify-center text-text-muted">
-                <Clock className="w-10 h-10 mb-3 opacity-30" />
-                <p className="text-sm">Collecting latency data...</p>
+                <Clock className="w-10 h-10 mb-3" />
+                <p className="font-mono text-xs uppercase tracking-widest">Collecting latency data...</p>
               </div>
             )}
           </div>

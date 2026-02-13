@@ -196,10 +196,10 @@ export function ProfilerDashboard() {
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="p-6 border-b border-border-subtle">
+      <div className="p-6 border-b-brutal border-border">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-semibold text-text-primary">Agent Profiler</h1>
+            <h1 className="font-brand text-3xl text-text-primary">Agent Profiler</h1>
             <p className="text-sm text-text-secondary mt-1">
               Real-time performance monitoring and bottleneck detection
             </p>
@@ -208,15 +208,15 @@ export function ProfilerDashboard() {
             <button
               onClick={() => setIsLive(!isLive)}
               className={clsx(
-                'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors',
+                'flex items-center gap-2 px-4 py-2 font-mono text-xs uppercase tracking-widest border-brutal rounded-brutal transition-press',
                 isLive
-                  ? 'bg-status-success text-white'
-                  : 'bg-background-tertiary text-text-secondary hover:text-text-primary'
+                  ? 'bg-status-success text-white border-status-success shadow-brutal-sm'
+                  : 'bg-background-card text-text-secondary border-border hover-press'
               )}
             >
               {isLive ? (
                 <>
-                  <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
+                  <span className="status-dot status-success animate-pulse" />
                   Live
                 </>
               ) : (
@@ -242,7 +242,7 @@ export function ProfilerDashboard() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 mt-6">
+        <div className="flex gap-2 mt-6">
           {[
             { id: 'overview' as const, label: 'Overview', icon: BarChart3 },
             { id: 'traces' as const, label: 'Traces', icon: Activity, badge: traces.length },
@@ -253,16 +253,16 @@ export function ProfilerDashboard() {
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={clsx(
-                'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors',
+                'flex items-center gap-2 px-4 py-2 font-mono text-xs uppercase tracking-widest border-brutal rounded-brutal transition-press',
                 activeTab === tab.id
-                  ? 'bg-primary text-white'
-                  : 'text-text-secondary hover:text-text-primary hover:bg-background-tertiary'
+                  ? 'bg-accent text-white border-border shadow-brutal-sm'
+                  : 'bg-background-card text-text-secondary border-border-subtle hover:border-border hover-press'
               )}
             >
               <tab.icon className="w-4 h-4" />
               {tab.label}
               {tab.badge !== undefined && tab.badge > 0 && (
-                <span className="ml-1 px-1.5 py-0.5 text-xs rounded-full bg-white/20">
+                <span className="ml-1 px-1.5 py-0.5 text-xs border-brutal rounded-brutal bg-background-card text-text-primary">
                   {tab.badge}
                 </span>
               )}
@@ -278,22 +278,22 @@ export function ProfilerDashboard() {
             {displayMetrics.length > 0 ? (
               <div className="grid grid-cols-4 gap-4">
                 {displayMetrics.map(metric => (
-                  <div key={metric.name} className="card-elevated p-4">
+                  <div key={metric.name} className="card card-accent border-brutal shadow-brutal-sm rounded-brutal bg-background-card p-4">
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm text-text-muted">{metric.name}</span>
+                      <span className="font-mono text-xs uppercase tracking-widest text-text-muted">{metric.name}</span>
                       {metric.trend === 'up' && <TrendingUp className="w-4 h-4 text-status-success" />}
                       {metric.trend === 'down' && <TrendingDown className="w-4 h-4 text-status-error" />}
                       {metric.trend === 'stable' && <Activity className="w-4 h-4 text-text-muted" />}
                     </div>
                     <div className="flex items-baseline gap-2">
-                      <span className="text-2xl font-semibold text-text-primary">
+                      <span className="font-brand text-3xl text-text-primary">
                         {metric.value.toLocaleString()}
                       </span>
-                      {metric.unit && <span className="text-sm text-text-muted">{metric.unit}</span>}
+                      {metric.unit && <span className="font-mono text-xs text-text-muted">{metric.unit}</span>}
                     </div>
                     {metric.change !== 0 && (
                       <span className={clsx(
-                        'text-xs',
+                        'font-mono text-xs',
                         metric.change > 0 ? 'text-status-success' : 'text-status-error'
                       )}>
                         {metric.change > 0 ? '+' : ''}{metric.change}% from last hour
@@ -303,9 +303,9 @@ export function ProfilerDashboard() {
                 ))}
               </div>
             ) : (
-              <div className="card-elevated p-8 text-center">
-                <Activity className="w-12 h-12 text-text-muted mx-auto mb-3 opacity-30" />
-                <h3 className="text-lg font-medium text-text-primary mb-2">
+              <div className="card border-brutal shadow-brutal-sm rounded-brutal bg-background-card p-8 text-center">
+                <Activity className="w-12 h-12 text-text-muted mx-auto mb-3" />
+                <h3 className="font-brand text-xl text-text-primary mb-2">
                   {isLoadingMetrics ? 'Loading metrics...' : 'No profiler data yet'}
                 </h3>
                 <p className="text-sm text-text-muted">
@@ -316,30 +316,31 @@ export function ProfilerDashboard() {
 
             {/* Guardrail Stats Summary */}
             {metrics?.guardrails && (
-              <div className="card-elevated p-4">
-                <h3 className="font-medium text-text-primary mb-4">Guardrails Summary</h3>
+              <div className="card border-brutal shadow-brutal-sm rounded-brutal bg-background-card p-4">
+                <h3 className="font-brand text-xl text-text-primary mb-4">Guardrails Summary</h3>
+                <div className="section-divider mb-4" />
                 <div className="grid grid-cols-4 gap-4">
-                  <div className="p-3 bg-background-tertiary rounded-lg">
-                    <div className="text-sm text-text-muted">Total Events</div>
-                    <div className="text-xl font-semibold text-text-primary">
+                  <div className="p-3 bg-background-secondary border-brutal border-border rounded-brutal">
+                    <div className="font-mono text-xs uppercase tracking-widest text-text-muted">Total Events</div>
+                    <div className="font-brand text-2xl text-text-primary">
                       {metrics.guardrails.total_events}
                     </div>
                   </div>
-                  <div className="p-3 bg-background-tertiary rounded-lg">
-                    <div className="text-sm text-text-muted">Block Rate</div>
-                    <div className="text-xl font-semibold text-status-error">
+                  <div className="p-3 bg-background-secondary border-brutal border-border rounded-brutal">
+                    <div className="font-mono text-xs uppercase tracking-widest text-text-muted">Block Rate</div>
+                    <div className="font-brand text-2xl text-status-error">
                       {(metrics.guardrails.block_rate * 100).toFixed(1)}%
                     </div>
                   </div>
-                  <div className="p-3 bg-background-tertiary rounded-lg">
-                    <div className="text-sm text-text-muted">Blocked</div>
-                    <div className="text-xl font-semibold text-status-error">
+                  <div className="p-3 bg-background-secondary border-brutal border-border rounded-brutal">
+                    <div className="font-mono text-xs uppercase tracking-widest text-text-muted">Blocked</div>
+                    <div className="font-brand text-2xl text-status-error">
                       {metrics.guardrails.by_action?.block || 0}
                     </div>
                   </div>
-                  <div className="p-3 bg-background-tertiary rounded-lg">
-                    <div className="text-sm text-text-muted">Warnings</div>
-                    <div className="text-xl font-semibold text-status-warning">
+                  <div className="p-3 bg-background-secondary border-brutal border-border rounded-brutal">
+                    <div className="font-mono text-xs uppercase tracking-widest text-text-muted">Warnings</div>
+                    <div className="font-brand text-2xl text-status-warning">
                       {metrics.guardrails.by_action?.warn || 0}
                     </div>
                   </div>
@@ -349,30 +350,30 @@ export function ProfilerDashboard() {
 
             {/* Recent Traces */}
             {traces.length > 0 && (
-              <div className="card-elevated">
-                <div className="p-4 border-b border-border-subtle">
-                  <h3 className="font-medium text-text-primary">Recent Traces</h3>
+              <div className="card border-brutal shadow-brutal-sm rounded-brutal bg-background-card">
+                <div className="p-4 border-b-brutal border-border">
+                  <h3 className="font-brand text-xl text-text-primary">Recent Traces</h3>
                 </div>
-                <div className="divide-y divide-border-subtle">
+                <div className="divide-y divide-border">
                   {traces.slice(0, 5).map(trace => (
                     <button
                       key={trace.trace_id}
                       onClick={() => setSelectedTrace(trace)}
                       className={clsx(
-                        'w-full p-4 text-left hover:bg-background-tertiary transition-colors',
-                        selectedTrace?.trace_id === trace.trace_id && 'bg-primary/5'
+                        'w-full p-4 text-left hover:bg-background-secondary transition-press',
+                        selectedTrace?.trace_id === trace.trace_id && 'bg-accent-light'
                       )}
                     >
                       <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-2">
-                          <span className="w-2 h-2 rounded-full bg-status-info" />
+                          <span className="status-dot status-success" />
                           <span className="font-medium text-text-primary">{trace.name}</span>
                         </div>
-                        <span className="text-xs text-text-muted">
+                        <span className="font-mono text-xs text-text-muted">
                           {trace.trace_id.slice(0, 8)}...
                         </span>
                       </div>
-                      <div className="flex items-center gap-4 text-sm text-text-muted">
+                      <div className="flex items-center gap-4 font-mono text-xs text-text-muted">
                         <span className="flex items-center gap-1">
                           <Clock className="w-3 h-3" />
                           {trace.duration_ms.toFixed(0)}ms
@@ -399,29 +400,29 @@ export function ProfilerDashboard() {
         {activeTab === 'traces' && (
           <div className="space-y-4">
             {traces.length === 0 ? (
-              <div className="card-elevated p-12 text-center">
-                <Terminal className="w-12 h-12 text-text-muted mx-auto mb-4 opacity-30" />
-                <h3 className="text-lg font-medium text-text-primary mb-2">No traces recorded</h3>
-                <p className="text-text-muted">Run tasks to capture execution traces</p>
+              <div className="card border-brutal shadow-brutal-sm rounded-brutal bg-background-card p-12 text-center">
+                <Terminal className="w-12 h-12 text-text-muted mx-auto mb-4" />
+                <h3 className="font-brand text-xl text-text-primary mb-2">No traces recorded</h3>
+                <p className="text-text-muted text-sm">Run tasks to capture execution traces</p>
               </div>
             ) : (
-              <div className="card-elevated">
-                <div className="p-4 border-b border-border-subtle flex items-center justify-between">
-                  <h3 className="font-medium text-text-primary">Execution Traces</h3>
-                  <span className="text-sm text-text-muted">{traces.length} traces</span>
+              <div className="card border-brutal shadow-brutal-sm rounded-brutal bg-background-card">
+                <div className="p-4 border-b-brutal border-border flex items-center justify-between">
+                  <h3 className="font-brand text-xl text-text-primary">Execution Traces</h3>
+                  <span className="font-mono text-xs uppercase tracking-widest text-text-muted">{traces.length} traces</span>
                 </div>
-                <div className="divide-y divide-border-subtle max-h-[600px] overflow-y-auto">
+                <div className="divide-y divide-border max-h-[600px] overflow-y-auto">
                   {traces.map(trace => (
-                    <div key={trace.trace_id} className="p-4 hover:bg-background-tertiary">
+                    <div key={trace.trace_id} className="p-4 hover:bg-background-secondary transition-press">
                       <div className="flex items-center gap-3">
                         <div className="flex-1">
                           <div className="flex items-center gap-2 mb-1">
                             <span className="font-medium text-text-primary">{trace.name}</span>
-                            <span className="text-xs px-2 py-0.5 rounded bg-primary/20 text-primary">
-                              {trace.total_spans} spans
+                            <span className="tag">
+                              <span>{trace.total_spans} spans</span>
                             </span>
                           </div>
-                          <div className="flex items-center gap-4 text-xs text-text-muted">
+                          <div className="flex items-center gap-4 font-mono text-xs text-text-muted">
                             <span>ID: {trace.trace_id.slice(0, 12)}...</span>
                             <span>Duration: {trace.duration_ms.toFixed(0)}ms</span>
                             {trace.llm_calls?.count && (
@@ -444,7 +445,7 @@ export function ProfilerDashboard() {
                       {trace.bottlenecks && trace.bottlenecks.length > 0 && (
                         <div className="mt-2 flex items-center gap-2">
                           <AlertTriangle className="w-4 h-4 text-status-warning" />
-                          <span className="text-sm text-status-warning">
+                          <span className="font-mono text-xs text-status-warning">
                             {trace.bottlenecks.length} bottleneck(s) detected
                           </span>
                         </div>
@@ -457,43 +458,44 @@ export function ProfilerDashboard() {
 
             {/* Selected Trace Details */}
             {selectedTrace && (
-              <div className="card-elevated p-4">
+              <div className="card card-accent border-brutal shadow-brutal-sm rounded-brutal bg-background-card p-4">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-medium text-text-primary">Trace Details: {selectedTrace.name}</h3>
+                  <h3 className="font-brand text-xl text-text-primary">Trace Details: {selectedTrace.name}</h3>
                   <button
                     onClick={() => setSelectedTrace(null)}
-                    className="text-text-muted hover:text-text-primary"
+                    className="btn-ghost font-mono text-xs uppercase tracking-widest"
                   >
                     Close
                   </button>
                 </div>
+                <div className="section-divider mb-4" />
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="p-3 bg-background-tertiary rounded-lg">
-                    <div className="text-xs text-text-muted mb-1">Trace ID</div>
+                  <div className="p-3 bg-background-secondary border-brutal border-border rounded-brutal">
+                    <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Trace ID</div>
                     <div className="text-sm text-text-primary font-mono">{selectedTrace.trace_id}</div>
                   </div>
-                  <div className="p-3 bg-background-tertiary rounded-lg">
-                    <div className="text-xs text-text-muted mb-1">Duration</div>
-                    <div className="text-sm text-text-primary">{selectedTrace.duration_ms.toFixed(2)}ms</div>
+                  <div className="p-3 bg-background-secondary border-brutal border-border rounded-brutal">
+                    <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Duration</div>
+                    <div className="font-brand text-xl text-text-primary">{selectedTrace.duration_ms.toFixed(2)}ms</div>
                   </div>
-                  <div className="p-3 bg-background-tertiary rounded-lg">
-                    <div className="text-xs text-text-muted mb-1">Total Spans</div>
-                    <div className="text-sm text-text-primary">{selectedTrace.total_spans}</div>
+                  <div className="p-3 bg-background-secondary border-brutal border-border rounded-brutal">
+                    <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Total Spans</div>
+                    <div className="font-brand text-xl text-text-primary">{selectedTrace.total_spans}</div>
                   </div>
-                  <div className="p-3 bg-background-tertiary rounded-lg">
-                    <div className="text-xs text-text-muted mb-1">LLM Calls</div>
-                    <div className="text-sm text-text-primary">{selectedTrace.llm_calls?.count || 0}</div>
+                  <div className="p-3 bg-background-secondary border-brutal border-border rounded-brutal">
+                    <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">LLM Calls</div>
+                    <div className="font-brand text-xl text-text-primary">{selectedTrace.llm_calls?.count || 0}</div>
                   </div>
                   {selectedTrace.llm_calls?.total_tokens && (
-                    <div className="p-3 bg-background-tertiary rounded-lg">
-                      <div className="text-xs text-text-muted mb-1">Total Tokens</div>
-                      <div className="text-sm text-text-primary">{selectedTrace.llm_calls.total_tokens.toLocaleString()}</div>
+                    <div className="p-3 bg-background-secondary border-brutal border-border rounded-brutal">
+                      <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Total Tokens</div>
+                      <div className="font-brand text-xl text-text-primary">{selectedTrace.llm_calls.total_tokens.toLocaleString()}</div>
                     </div>
                   )}
                   {selectedTrace.tool_calls?.count && (
-                    <div className="p-3 bg-background-tertiary rounded-lg">
-                      <div className="text-xs text-text-muted mb-1">Tool Calls</div>
-                      <div className="text-sm text-text-primary">{selectedTrace.tool_calls.count}</div>
+                    <div className="p-3 bg-background-secondary border-brutal border-border rounded-brutal">
+                      <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Tool Calls</div>
+                      <div className="font-brand text-xl text-text-primary">{selectedTrace.tool_calls.count}</div>
                     </div>
                   )}
                 </div>
@@ -505,43 +507,44 @@ export function ProfilerDashboard() {
         {activeTab === 'tools' && (
           <div className="space-y-6">
             {Object.keys(toolStats).length === 0 ? (
-              <div className="card-elevated p-12 text-center">
-                <Zap className="w-12 h-12 text-text-muted mx-auto mb-4 opacity-30" />
-                <h3 className="text-lg font-medium text-text-primary mb-2">No tool analytics yet</h3>
-                <p className="text-text-muted">Run tasks to collect tool performance data</p>
+              <div className="card border-brutal shadow-brutal-sm rounded-brutal bg-background-card p-12 text-center">
+                <Zap className="w-12 h-12 text-text-muted mx-auto mb-4" />
+                <h3 className="font-brand text-xl text-text-primary mb-2">No tool analytics yet</h3>
+                <p className="text-text-muted text-sm">Run tasks to collect tool performance data</p>
               </div>
             ) : (
               <>
-                <div className="card-elevated">
-                  <div className="p-4 border-b border-border-subtle">
-                    <h3 className="font-medium text-text-primary">Tool Performance</h3>
+                <div className="card border-brutal shadow-brutal-sm rounded-brutal bg-background-card">
+                  <div className="p-4 border-b-brutal border-border">
+                    <h3 className="font-brand text-xl text-text-primary">Tool Performance</h3>
                   </div>
                   <div className="overflow-x-auto">
                     <table className="w-full">
-                      <thead className="bg-background-tertiary">
+                      <thead className="bg-background-secondary border-b-brutal border-border">
                         <tr>
-                          <th className="px-4 py-3 text-left text-sm font-medium text-text-muted">Tool</th>
-                          <th className="px-4 py-3 text-right text-sm font-medium text-text-muted">Calls</th>
-                          <th className="px-4 py-3 text-right text-sm font-medium text-text-muted">Avg Duration</th>
-                          <th className="px-4 py-3 text-right text-sm font-medium text-text-muted">Success Rate</th>
-                          <th className="px-4 py-3 text-left text-sm font-medium text-text-muted">Performance</th>
+                          <th className="px-4 py-3 text-left font-mono text-xs uppercase tracking-widest text-text-muted">Tool</th>
+                          <th className="px-4 py-3 text-right font-mono text-xs uppercase tracking-widest text-text-muted">Calls</th>
+                          <th className="px-4 py-3 text-right font-mono text-xs uppercase tracking-widest text-text-muted">Avg Duration</th>
+                          <th className="px-4 py-3 text-right font-mono text-xs uppercase tracking-widest text-text-muted">Success Rate</th>
+                          <th className="px-4 py-3 text-left font-mono text-xs uppercase tracking-widest text-text-muted">Performance</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-border-subtle">
+                      <tbody className="divide-y divide-border">
                         {Object.values(toolStats).map(stat => {
                           const Icon = getToolIcon(stat.tool)
                           return (
-                            <tr key={stat.tool} className="hover:bg-background-tertiary">
+                            <tr key={stat.tool} className="hover:bg-background-secondary transition-press">
                               <td className="px-4 py-3">
                                 <div className="flex items-center gap-2">
-                                  <Icon className="w-4 h-4 text-primary" />
+                                  <Icon className="w-4 h-4 text-accent" />
                                   <span className="font-medium text-text-primary">{stat.tool}</span>
                                 </div>
                               </td>
-                              <td className="px-4 py-3 text-right text-text-primary">{stat.calls}</td>
-                              <td className="px-4 py-3 text-right text-text-primary">{stat.avg_duration}ms</td>
+                              <td className="px-4 py-3 text-right font-brand text-lg text-text-primary">{stat.calls}</td>
+                              <td className="px-4 py-3 text-right font-mono text-sm text-text-primary">{stat.avg_duration}ms</td>
                               <td className="px-4 py-3 text-right">
                                 <span className={clsx(
+                                  'font-mono text-sm',
                                   stat.success_rate >= 95 ? 'text-status-success' :
                                   stat.success_rate >= 85 ? 'text-status-warning' :
                                   'text-status-error'
@@ -550,13 +553,13 @@ export function ProfilerDashboard() {
                                 </span>
                               </td>
                               <td className="px-4 py-3">
-                                <div className="w-24 h-2 bg-background-tertiary rounded-full overflow-hidden">
+                                <div className="progress-bar w-24">
                                   <div
                                     className={clsx(
-                                      'h-full rounded-full',
-                                      stat.success_rate >= 95 ? 'bg-status-success' :
-                                      stat.success_rate >= 85 ? 'bg-status-warning' :
-                                      'bg-status-error'
+                                      'progress-fill',
+                                      stat.success_rate >= 95 ? '!bg-status-success' :
+                                      stat.success_rate >= 85 ? '!bg-status-warning' :
+                                      '!bg-status-error'
                                     )}
                                     style={{ width: `${stat.success_rate}%` }}
                                   />
@@ -577,17 +580,17 @@ export function ProfilerDashboard() {
         {activeTab === 'bottlenecks' && (
           <div className="space-y-4">
             {bottlenecks.length === 0 ? (
-              <div className="card-elevated p-12 text-center">
-                <AlertTriangle className="w-12 h-12 text-text-muted mx-auto mb-4 opacity-30" />
-                <h3 className="text-lg font-medium text-text-primary mb-2">No bottlenecks detected</h3>
-                <p className="text-text-muted">Great! Your agent tasks are running efficiently</p>
+              <div className="card border-brutal shadow-brutal-sm rounded-brutal bg-background-card p-12 text-center">
+                <AlertTriangle className="w-12 h-12 text-text-muted mx-auto mb-4" />
+                <h3 className="font-brand text-xl text-text-primary mb-2">No bottlenecks detected</h3>
+                <p className="text-text-muted text-sm">Great! Your agent tasks are running efficiently</p>
               </div>
             ) : (
               bottlenecks.map((bottleneck, idx) => (
                 <div
                   key={idx}
                   className={clsx(
-                    'card-elevated p-4 border-l-4',
+                    'card border-brutal shadow-brutal-sm rounded-brutal bg-background-card p-4 border-l-[4px]',
                     bottleneck.severity === 'high' ? 'border-l-status-error' :
                     bottleneck.severity === 'medium' ? 'border-l-status-warning' :
                     'border-l-status-info'
@@ -604,16 +607,16 @@ export function ProfilerDashboard() {
                       <div className="flex items-center gap-2 mb-1">
                         <span className="font-medium text-text-primary">{bottleneck.description}</span>
                         <span className={clsx(
-                          'text-xs px-2 py-0.5 rounded-full',
-                          bottleneck.severity === 'high' ? 'bg-status-error/20 text-status-error' :
-                          bottleneck.severity === 'medium' ? 'bg-status-warning/20 text-status-warning' :
-                          'bg-status-info/20 text-status-info'
+                          'font-mono text-xs uppercase tracking-widest px-2 py-0.5 border-brutal rounded-brutal',
+                          bottleneck.severity === 'high' ? 'bg-status-error/20 text-status-error border-status-error' :
+                          bottleneck.severity === 'medium' ? 'bg-status-warning/20 text-status-warning border-status-warning' :
+                          'bg-status-info/20 text-status-info border-status-info'
                         )}>
                           {bottleneck.severity}
                         </span>
                       </div>
                       <p className="text-sm text-text-muted mb-2">{bottleneck.recommendation}</p>
-                      <button className="text-sm text-primary hover:underline">
+                      <button className="font-mono text-xs uppercase tracking-widest text-accent hover:text-accent-dark">
                         View details
                       </button>
                     </div>
@@ -623,23 +626,24 @@ export function ProfilerDashboard() {
             )}
 
             {/* Optimization Tips */}
-            <div className="card-elevated p-4 bg-status-info/5 border-status-info/20">
-              <h3 className="font-medium text-text-primary mb-3">Optimization Tips</h3>
+            <div className="card border-brutal shadow-brutal-sm rounded-brutal bg-background-card p-4 border-l-[4px] border-l-status-info">
+              <h3 className="font-brand text-xl text-text-primary mb-3">Optimization Tips</h3>
+              <div className="section-divider mb-3" />
               <ul className="space-y-2 text-sm text-text-secondary">
                 <li className="flex items-start gap-2">
-                  <span className="text-status-info">•</span>
+                  <span className="status-dot status-success mt-1.5 flex-shrink-0" />
                   Use file line limits when reading large files to reduce token usage
                 </li>
                 <li className="flex items-start gap-2">
-                  <span className="text-status-info">•</span>
+                  <span className="status-dot status-success mt-1.5 flex-shrink-0" />
                   Batch related file operations together when possible
                 </li>
                 <li className="flex items-start gap-2">
-                  <span className="text-status-info">•</span>
+                  <span className="status-dot status-success mt-1.5 flex-shrink-0" />
                   Set appropriate timeouts for long-running bash commands
                 </li>
                 <li className="flex items-start gap-2">
-                  <span className="text-status-info">•</span>
+                  <span className="status-dot status-success mt-1.5 flex-shrink-0" />
                   Use Grep with file type filters instead of globbing everything
                 </li>
               </ul>

@@ -76,28 +76,28 @@ function getStatusIcon(status?: AgentStatus, isPaused?: boolean) {
   }
   switch (status) {
     case 'running':
-      return <Loader2 className="w-3 h-3 animate-spin text-primary" />
+      return <Loader2 className="w-3 h-3 animate-spin text-accent" />
     case 'waiting_input':
       return <MessageSquare className="w-3 h-3 text-status-warning" />
     case 'tool_calling':
-      return <Wrench className="w-3 h-3 text-info animate-pulse" />
+      return <Wrench className="w-3 h-3 text-accent animate-pulse" />
     case 'idle':
     default:
       return <Coffee className="w-3 h-3 text-text-muted" />
   }
 }
 
-// Get attention border color
+// Get attention border color — brutalist: hard borders, no rings
 function getAttentionStyle(attention?: AttentionState) {
   switch (attention) {
     case 'success':
-      return 'border-status-success ring-2 ring-status-success/20'
+      return 'border-status-success shadow-brutal-sm'
     case 'error':
-      return 'border-status-error ring-2 ring-status-error/20'
+      return 'border-status-error shadow-brutal-sm'
     case 'waiting':
-      return 'border-status-warning ring-2 ring-status-warning/20 animate-pulse'
+      return 'border-status-warning shadow-brutal-sm animate-attention-pulse'
     default:
-      return 'border-border-subtle hover:border-border'
+      return 'border-border hover:border-border'
   }
 }
 
@@ -191,9 +191,9 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: Termi
   return (
     <div
       className={clsx(
-        'bg-background-secondary rounded-lg border-2 shadow-lg transition-all cursor-pointer',
+        'card !rounded-brutal border-brutal cursor-pointer',
         getAttentionStyle(attention),
-        selected && 'ring-2 ring-primary border-primary',
+        selected && 'border-accent shadow-brutal',
         isPaused && 'opacity-75'
       )}
       style={{ width: nodeWidth }}
@@ -203,31 +203,31 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: Termi
       <Handle
         type="target"
         position={Position.Left}
-        className="!bg-primary !w-2 !h-2"
+        className="!bg-accent !w-2 !h-2 !border-brutal !border-border"
       />
       <Handle
         type="source"
         position={Position.Right}
-        className="!bg-primary !w-2 !h-2"
+        className="!bg-accent !w-2 !h-2 !border-brutal !border-border"
       />
 
-      {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-2 bg-background-tertiary/50 rounded-t-lg">
+      {/* Header — terminal style */}
+      <div className="flex items-center gap-2 px-3 py-2 bg-background-secondary border-b border-brutal border-border rounded-t-brutal">
         <div className={clsx(
-          'p-1.5 rounded-md',
-          status === 'running' && !isPaused && 'bg-primary/20',
-          status === 'waiting_input' && 'bg-status-warning/20',
-          status === 'tool_calling' && !isPaused && 'bg-info/20',
-          (isPaused || !status || status === 'idle') && 'bg-background-tertiary'
+          'p-1.5 border-brutal rounded-brutal',
+          status === 'running' && !isPaused && 'bg-accent-light border-accent',
+          status === 'waiting_input' && 'bg-status-warning/20 border-status-warning',
+          status === 'tool_calling' && !isPaused && 'bg-accent-light border-accent',
+          (isPaused || !status || status === 'idle') && 'bg-background-tertiary border-border-subtle'
         )}>
           {getPanelIcon(type)}
         </div>
         <div className="flex-1 min-w-0">
-          <span className="text-sm font-medium text-text-primary truncate block">
+          <span className="text-sm font-mono font-semibold text-text-primary truncate block">
             {title}
           </span>
           {relativeTime && (
-            <span className="text-[10px] text-text-muted flex items-center gap-1">
+            <span className="text-[10px] text-text-muted flex items-center gap-1 font-mono">
               <Clock className="w-2.5 h-2.5" />
               {relativeTime}
             </span>
@@ -236,11 +236,13 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: Termi
         {/* Metrics badge in header */}
         {showMetrics && metrics && totalTokens > 0 && (
           <div
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-background-tertiary text-[10px] text-text-muted"
+            className="tag !text-[9px] !py-0 !px-1.5 !transform-none !bg-background-tertiary !border-border-subtle !text-text-muted"
             title={`Input: ${formatTokens(metrics.inputTokens)} | Output: ${formatTokens(metrics.outputTokens)} | Cost: ${formatCost(metrics.cost)}`}
           >
-            <Coins className="w-2.5 h-2.5" />
-            <span>{formatTokens(totalTokens)}</span>
+            <span className="flex items-center gap-1">
+              <Coins className="w-2.5 h-2.5" />
+              {formatTokens(totalTokens)}
+            </span>
           </div>
         )}
         <div className="flex items-center gap-0.5">
@@ -248,8 +250,8 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: Termi
             <button
               onClick={handleTogglePause}
               className={clsx(
-                'p-1 rounded text-text-muted',
-                isPaused ? 'hover:bg-status-success/20 hover:text-status-success' : 'hover:bg-status-warning/20 hover:text-status-warning'
+                'p-1 text-text-muted transition-press',
+                isPaused ? 'hover:text-status-success' : 'hover:text-status-warning'
               )}
               title={isPaused ? 'Resume' : 'Pause'}
             >
@@ -258,14 +260,14 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: Termi
           )}
           <button
             onClick={handleFocus}
-            className="p-1 rounded hover:bg-background-tertiary text-text-muted hover:text-text-secondary"
+            className="p-1 hover:bg-background-tertiary text-text-muted hover:text-text-secondary transition-press"
             title="Focus panel"
           >
             <Maximize2 className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={handleClose}
-            className="p-1 rounded hover:bg-status-error/20 text-text-muted hover:text-status-error"
+            className="p-1 hover:bg-status-error/20 text-text-muted hover:text-status-error transition-press"
             title="Close"
           >
             <X className="w-3.5 h-3.5" />
@@ -275,20 +277,20 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: Termi
 
       {/* Status bar */}
       <div className={clsx(
-        'flex items-center gap-2 px-3 py-1.5 text-xs border-b border-border-subtle',
-        !isPaused && status === 'running' && 'bg-primary/5',
-        !isPaused && status === 'waiting_input' && 'bg-status-warning/5',
-        !isPaused && status === 'tool_calling' && 'bg-info/5',
+        'flex items-center gap-2 px-3 py-1.5 text-xs border-b border-brutal border-border font-mono',
+        !isPaused && status === 'running' && 'bg-accent-light',
+        !isPaused && status === 'waiting_input' && 'bg-status-warning/10',
+        !isPaused && status === 'tool_calling' && 'bg-accent-light',
         isPaused && 'bg-status-warning/10'
       )}>
         {getStatusIcon(status, isPaused)}
         <div className="flex-1 min-w-0">
           <span className={clsx(
-            'font-medium block',
+            'font-semibold block',
             isPaused && 'text-status-warning',
-            !isPaused && status === 'running' && 'text-primary',
+            !isPaused && status === 'running' && 'text-accent-dark',
             !isPaused && status === 'waiting_input' && 'text-status-warning',
-            !isPaused && status === 'tool_calling' && 'text-info',
+            !isPaused && status === 'tool_calling' && 'text-accent-dark',
             !isPaused && (!status || status === 'idle') && 'text-text-muted'
           )}>
             {isPaused ? 'Paused' :
@@ -298,20 +300,20 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: Termi
              'Idle'}
           </span>
           {currentTool && status === 'tool_calling' && !isPaused && (
-            <span className="text-[10px] text-info/80 truncate block">
+            <span className="text-[10px] text-accent-dark truncate block">
               {currentTool}
             </span>
           )}
         </div>
         {!isPaused && (status === 'running' || status === 'tool_calling') && (
-          <Activity className="w-3 h-3 text-primary animate-pulse flex-shrink-0" />
+          <Activity className="w-3 h-3 text-accent animate-pulse flex-shrink-0" />
         )}
       </div>
 
       {/* Error message */}
       {errorMessage && (
-        <div className="px-3 py-1.5 bg-status-error/10 border-b border-status-error/20">
-          <span className="text-[10px] text-status-error line-clamp-2">{errorMessage}</span>
+        <div className="px-3 py-1.5 bg-status-error/10 border-b border-brutal border-status-error">
+          <span className="text-[10px] text-status-error line-clamp-2 font-mono">{errorMessage}</span>
         </div>
       )}
 
@@ -319,16 +321,16 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: Termi
       <div className="px-3 py-2 space-y-2">
         {/* Task summary */}
         {taskSummary && (
-          <div className="bg-background-tertiary/50 rounded px-2 py-1.5">
-            <div className="text-[10px] text-text-muted uppercase tracking-wide mb-0.5">Current Task</div>
-            <div className="text-xs text-text-primary line-clamp-2">
+          <div className="border-brutal border-border-subtle rounded-brutal px-2 py-1.5 bg-background-secondary">
+            <div className="text-[10px] text-text-muted uppercase tracking-wider mb-0.5 font-mono font-semibold">Current Task</div>
+            <div className="text-xs text-text-primary line-clamp-2 font-mono">
               {taskSummary}
             </div>
           </div>
         )}
 
         {/* Info grid */}
-        <div className="space-y-1.5 text-xs">
+        <div className="space-y-1.5 text-xs font-mono">
           {shortPath && (
             <div className="flex items-center gap-1.5">
               <Folder className="w-3 h-3 text-text-muted flex-shrink-0" />
@@ -341,8 +343,8 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: Termi
           <div className="flex items-center gap-3">
             {gitBranch && (
               <div className="flex items-center gap-1.5">
-                <GitBranch className="w-3 h-3 text-primary flex-shrink-0" />
-                <span className="text-primary truncate">{gitBranch}</span>
+                <GitBranch className="w-3 h-3 text-accent flex-shrink-0" />
+                <span className="text-accent truncate">{gitBranch}</span>
               </div>
             )}
 
@@ -357,27 +359,44 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: Termi
 
         {/* Tool history breadcrumbs */}
         {showToolHistory && toolHistory && toolHistory.length > 0 && (
-          <div className="pt-1 border-t border-border-subtle">
+          <div className="pt-1 border-t border-brutal border-border-subtle">
             <ToolBreadcrumbs history={toolHistory} maxItems={5} />
           </div>
         )}
 
         {/* Recent files (collapsible) */}
         {showRecentFiles && recentFiles && recentFiles.length > 0 && (
-          <div className="pt-1 border-t border-border-subtle">
+          <div className="pt-1 border-t border-brutal border-border-subtle">
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation()
                 setFilesExpanded(!filesExpanded)
               }}
-              className="w-full flex items-center gap-1 text-[10px] text-text-muted hover:text-text-secondary py-0.5"
+              className="w-full flex items-center gap-1 text-[10px] text-text-muted hover:text-text-secondary py-0.5 font-mono"
             >
-              {filesExpanded ? (
-                <ChevronDown className="w-2.5 h-2.5" />
-              ) : (
-                <ChevronRight className="w-2.5 h-2.5" />
-              )}
+              {/* Triangular chevron */}
+              <span className="flex-shrink-0 w-2.5 h-2.5 flex items-center justify-center">
+                {filesExpanded ? (
+                  <span
+                    className="block w-0 h-0"
+                    style={{
+                      borderLeft: '3px solid transparent',
+                      borderRight: '3px solid transparent',
+                      borderTop: '4px solid currentColor'
+                    }}
+                  />
+                ) : (
+                  <span
+                    className="block w-0 h-0"
+                    style={{
+                      borderTop: '3px solid transparent',
+                      borderBottom: '3px solid transparent',
+                      borderLeft: '4px solid currentColor'
+                    }}
+                  />
+                )}
+              </span>
               <FileText className="w-2.5 h-2.5" />
               <span>Recent Files ({recentFiles.length})</span>
             </button>
@@ -386,14 +405,14 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: Termi
                 {recentFiles.slice(0, 5).map((file, idx) => (
                   <div
                     key={idx}
-                    className="text-[10px] text-text-secondary truncate pl-4"
+                    className="text-[10px] text-text-secondary truncate pl-4 font-mono"
                     title={file}
                   >
                     {shortenPath(file)}
                   </div>
                 ))}
                 {recentFiles.length > 5 && (
-                  <div className="text-[10px] text-text-muted pl-4">
+                  <div className="text-[10px] text-text-muted pl-4 font-mono">
                     +{recentFiles.length - 5} more
                   </div>
                 )}
@@ -404,20 +423,20 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: Termi
 
         {/* Empty state hint */}
         {!shortPath && !gitBranch && !model && !currentTool && !toolHistory?.length && (
-          <div className="text-[10px] text-text-muted text-center py-1">
+          <div className="text-[10px] text-text-muted text-center py-1 font-mono">
             Run a command to see details
           </div>
         )}
       </div>
 
-      {/* Visual indicator bar */}
+      {/* Visual indicator bar — solid colors, no gradients */}
       <div
         className={clsx(
-          'h-1.5 rounded-b-lg transition-colors',
-          isPaused && 'bg-status-warning/50',
-          !isPaused && status === 'running' && 'bg-gradient-to-r from-primary to-primary/50 animate-pulse',
+          'h-1.5 rounded-b-brutal',
+          isPaused && 'bg-status-warning',
+          !isPaused && status === 'running' && 'bg-accent animate-pulse',
           !isPaused && status === 'waiting_input' && 'bg-status-warning',
-          !isPaused && status === 'tool_calling' && 'bg-gradient-to-r from-info to-info/50 animate-pulse',
+          !isPaused && status === 'tool_calling' && 'bg-accent animate-pulse',
           !isPaused && (!status || status === 'idle') && 'bg-background-tertiary',
           attention === 'error' && 'bg-status-error',
           attention === 'success' && 'bg-status-success'

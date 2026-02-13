@@ -25,11 +25,14 @@ export function FlywheelVisualization({
   const { theme } = useThemeStore()
 
   const colors = {
-    active: theme === 'dark' ? '#76B900' : '#0066CC',
-    inactive: theme === 'dark' ? '#2C2C2E' : '#E5E5EA',
-    text: theme === 'dark' ? '#FFFFFF' : '#1D1D1F',
-    mutedText: theme === 'dark' ? '#6E6E73' : '#86868B',
-    glow: theme === 'dark' ? 'rgba(118, 185, 0, 0.4)' : 'rgba(0, 102, 204, 0.3)'
+    active: 'var(--accent)',
+    activeDark: 'var(--accent-dark)',
+    inactive: 'var(--border-subtle)',
+    border: 'var(--border-color)',
+    text: 'var(--text-primary)',
+    mutedText: 'var(--text-muted)',
+    card: 'var(--bg-card)',
+    bg: 'var(--bg-secondary)',
   }
 
   const radius = 120
@@ -50,9 +53,9 @@ export function FlywheelVisualization({
   const currentIndex = stages.findIndex((s) => s.id === currentStage)
 
   return (
-    <div className="relative">
+    <div className="relative flywheel-animate">
       <svg width="300" height="300" viewBox="0 0 300 300">
-        {/* Background Circle */}
+        {/* Background Circle — dashed brutalist */}
         <circle
           cx={centerX}
           cy={centerY}
@@ -60,26 +63,23 @@ export function FlywheelVisualization({
           fill="none"
           stroke={colors.inactive}
           strokeWidth="2"
-          strokeDasharray="5,5"
+          strokeDasharray="8,4"
         />
 
-        {/* Progress Arc */}
+        {/* Progress Arc — bold accent stroke */}
         <circle
           cx={centerX}
           cy={centerY}
           r={radius}
           fill="none"
           stroke={colors.active}
-          strokeWidth="3"
-          strokeLinecap="round"
+          strokeWidth="4"
+          strokeLinecap="butt"
           strokeDasharray={`${(progress / 100) * 2 * Math.PI * radius} ${2 * Math.PI * radius}`}
           transform={`rotate(-90 ${centerX} ${centerY})`}
-          style={{
-            filter: theme === 'dark' ? `drop-shadow(0 0 8px ${colors.glow})` : 'none'
-          }}
         />
 
-        {/* Connection Lines */}
+        {/* Connection Lines — bold straight lines */}
         {stages.map((stage, i) => {
           const pos1 = getPosition(stage.angle)
           const pos2 = getPosition(stages[(i + 1) % stages.length].angle)
@@ -93,13 +93,12 @@ export function FlywheelVisualization({
               x2={pos2.x}
               y2={pos2.y}
               stroke={isActive ? colors.active : colors.inactive}
-              strokeWidth="2"
-              strokeOpacity={isActive ? 0.6 : 0.3}
+              strokeWidth={isActive ? 3 : 2}
             />
           )
         })}
 
-        {/* Stage Nodes */}
+        {/* Stage Nodes — hard-bordered with triangular markers */}
         {stages.map((stage, i) => {
           const pos = getPosition(stage.angle)
           const isActive = stage.id === currentStage
@@ -107,30 +106,25 @@ export function FlywheelVisualization({
 
           return (
             <g key={stage.id}>
-              {/* Glow effect for active node */}
+              {/* Triangular marker for active node */}
               {isActive && (
-                <circle
-                  cx={pos.x}
-                  cy={pos.y}
-                  r={nodeRadius + 8}
-                  fill={colors.glow}
-                  className="animate-pulse"
+                <polygon
+                  points={`${pos.x},${pos.y - nodeRadius - 12} ${pos.x - 6},${pos.y - nodeRadius - 4} ${pos.x + 6},${pos.y - nodeRadius - 4}`}
+                  fill={colors.active}
                 />
               )}
 
-              {/* Node circle */}
+              {/* Node circle — hard border */}
               <circle
                 cx={pos.x}
                 cy={pos.y}
                 r={nodeRadius}
-                fill={isActive ? colors.active : isPast ? colors.active : colors.inactive}
-                fillOpacity={isActive ? 1 : isPast ? 0.6 : 1}
-                stroke={isActive ? colors.active : 'none'}
-                strokeWidth="3"
-                className={isActive ? 'stage-active' : ''}
+                fill={isActive ? colors.active : isPast ? colors.activeDark : colors.card}
+                stroke={colors.border}
+                strokeWidth={isActive ? 3 : 2}
               />
 
-              {/* Node text */}
+              {/* Node text — mono */}
               <text
                 x={pos.x}
                 y={pos.y}
@@ -139,7 +133,7 @@ export function FlywheelVisualization({
                 fill={isActive || isPast ? '#FFFFFF' : colors.mutedText}
                 fontSize="11"
                 fontWeight="bold"
-                fontFamily="SF Mono, monospace"
+                fontFamily="'JetBrains Mono', monospace"
               >
                 {stage.shortLabel}
               </text>
@@ -147,7 +141,7 @@ export function FlywheelVisualization({
           )
         })}
 
-        {/* Center Text */}
+        {/* Center Text — serif brand font */}
         <text
           x={centerX}
           y={centerY - 8}
@@ -155,6 +149,7 @@ export function FlywheelVisualization({
           fill={colors.text}
           fontSize="14"
           fontWeight="600"
+          fontFamily="'Cormorant Garamond', serif"
         >
           OUROBOROS
         </text>
@@ -164,8 +159,9 @@ export function FlywheelVisualization({
           textAnchor="middle"
           fill={colors.mutedText}
           fontSize="11"
+          fontFamily="'JetBrains Mono', monospace"
         >
-          {progress.toFixed(0)}% Complete
+          {progress.toFixed(0)}%
         </text>
       </svg>
 
@@ -191,8 +187,8 @@ export function FlywheelVisualization({
               <div
                 key={`label-${stage.id}`}
                 className={clsx(
-                  'absolute text-xs whitespace-nowrap transition-opacity',
-                  isActive ? 'text-primary font-medium' : 'text-text-muted'
+                  'absolute text-xs font-mono whitespace-nowrap',
+                  isActive ? 'text-accent-dark font-semibold' : 'text-text-muted'
                 )}
                 style={{
                   left: `${(labelX / 300) * 100}%`,

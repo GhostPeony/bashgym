@@ -26,10 +26,8 @@ export function MainLayout() {
   const [modelSubView, setModelSubView] = useState<ModelSubView>('browser')
   const [compareModelIds, setCompareModelIds] = useState<string[]>([])
 
-  // Determine what to show: home, workspace (terminals), or an overlay
   const showHome = overlayView === 'home'
   const showWorkspace = overlayView === null
-  const showOverlay = overlayView && overlayView !== 'home'
 
   return (
     <div className="h-screen flex flex-col bg-background-primary">
@@ -42,11 +40,7 @@ export function MainLayout() {
         <Sidebar />
 
         {/* Workspace Area */}
-        <main
-          className={`flex-1 flex flex-col transition-all duration-250 ${
-            isSidebarOpen ? 'ml-0' : 'ml-0'
-          }`}
-        >
+        <main className="flex-1 flex flex-col">
           {/* Home Screen */}
           {showHome && (
             <div className="flex-1 overflow-auto">
@@ -59,7 +53,7 @@ export function MainLayout() {
             <TerminalGrid />
           </div>
 
-          {/* Dashboard Overlays - Terminals continue running behind */}
+          {/* Dashboard Overlays */}
           {overlayView === 'training' && (
             <div className="flex-1 overflow-auto">
               <TrainingDashboard />

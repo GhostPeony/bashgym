@@ -550,6 +550,8 @@ def _parse_decomposition(content: str) -> "TaskDAG":
             priority=priority_map.get(priority_str, TaskPriority.NORMAL),
             dependencies=task_data.get("dependencies", []),
             files_touched=task_data.get("files_touched", []),
+            provides=task_data.get("provides", []),
+            consumes=task_data.get("consumes", []),
             estimated_turns=task_data.get("estimated_turns", 20),
             budget_usd=task_data.get("budget_usd", 2.0),
             worker_prompt=task_data.get("worker_prompt", ""),
@@ -576,6 +578,7 @@ Given a development specification, produce a JSON array of tasks. Each task shou
 - Small enough for a single Claude Code session (10-50 tool calls)
 - Have clear dependencies on other tasks
 - Include estimated files it will touch
+- Declare what it provides to other tasks and what it consumes from dependencies
 
 Output ONLY a JSON array with this schema:
 ```json
@@ -587,6 +590,12 @@ Output ONLY a JSON array with this schema:
     "priority": "critical|high|normal|low",
     "dependencies": ["task_id_1", "task_id_2"],
     "files_touched": ["src/foo.py", "tests/test_foo.py"],
+    "provides": [
+      {"file": "src/foo.py", "exports": ["FooClass", "helper_func"], "description": "Core Foo implementation"}
+    ],
+    "consumes": [
+      {"from_task": "task_id_1", "file": "src/bar.py", "imports": ["BarClass"], "description": "Depends on Bar model"}
+    ],
     "estimated_turns": 20,
     "budget_usd": 2.0,
     "worker_prompt": "Specific instructions for the Claude Code worker"
@@ -601,4 +610,6 @@ Rules:
 - Each task should be completable in under 15 minutes
 - worker_prompt should be detailed enough for a Claude Code session to execute independently
 - Keep the total number of tasks between 3 and 15
-- Total budget should not exceed the spec's max budget"""
+- Total budget should not exceed the spec's max budget
+- provides: list what functions/classes/interfaces this task creates that other tasks depend on
+- consumes: list what this task imports from its dependencies (reference the providing task ID)"""

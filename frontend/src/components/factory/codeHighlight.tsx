@@ -28,7 +28,7 @@ const HIGHLIGHT_RULES: [RegExp, string][] = [
   // Strings
   [/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)/g, 'text-status-success'],
   // Keywords
-  [/\b(import|from|export|const|let|var|function|class|def|return|if|else|for|while|try|catch|async|await|yield|raise|except|finally|with|as)\b/g, 'text-primary'],
+  [/\b(import|from|export|const|let|var|function|class|def|return|if|else|for|while|try|catch|async|await|yield|raise|except|finally|with|as)\b/g, 'text-accent'],
   // Numbers
   [/\b(\d+\.?\d*)\b/g, 'text-status-warning'],
 ]

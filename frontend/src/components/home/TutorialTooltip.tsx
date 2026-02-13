@@ -151,23 +151,24 @@ export function TutorialTooltip() {
 
   return (
     <>
-      {/* Backdrop - subtle overlay */}
+      {/* Backdrop — solid overlay, no blur */}
       <div
-        className="fixed inset-0 z-[60] bg-black/10"
+        className="fixed inset-0 z-[60]"
+        style={{ backgroundColor: 'rgba(27, 32, 64, 0.15)' }}
         onClick={handleGotIt}
       />
 
-      {/* Tooltip */}
+      {/* Tooltip — brutalist card with accent border */}
       <div
-        className="fixed z-[61] w-70 bg-background-secondary border border-primary/30 rounded-xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-200"
+        className="fixed z-[61] border-brutal border-accent rounded-brutal shadow-brutal bg-background-card overflow-hidden"
         style={{ top: position.top, left: position.left, width: 280 }}
       >
         {/* Header */}
-        <div className="flex items-center justify-between p-3 bg-primary/10 border-b border-primary/20">
-          <h4 className="text-sm font-semibold text-text-primary">{tooltipConfig.title}</h4>
+        <div className="flex items-center justify-between p-3 bg-accent-light border-b border-border">
+          <h4 className="font-brand text-sm text-text-primary">{tooltipConfig.title}</h4>
           <button
             onClick={handleGotIt}
-            className="p-1 rounded hover:bg-background-tertiary transition-colors text-text-muted"
+            className="btn-icon w-7 h-7 text-text-muted"
           >
             <X className="w-4 h-4" />
           </button>
@@ -179,31 +180,40 @@ export function TutorialTooltip() {
         </div>
 
         {/* Actions */}
-        <div className="flex items-center justify-between p-3 border-t border-border-subtle bg-background-tertiary">
+        <div className="flex items-center justify-between p-3 border-t border-border bg-background-secondary">
           <button
             onClick={handleSkipStep}
-            className="text-xs text-text-muted hover:text-text-secondary transition-colors"
+            className="text-xs font-mono text-text-muted hover:text-text-secondary transition-press"
           >
             Skip this step
           </button>
           <button
             onClick={handleGotIt}
-            className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary text-white hover:bg-primary/90 transition-colors"
+            className="btn-primary flex items-center gap-1 px-3 py-1.5 text-xs"
           >
             Got it
             <ArrowRight className="w-3 h-3" />
           </button>
         </div>
 
-        {/* Arrow pointer */}
+        {/* Arrow pointer — CSS triangle */}
         <div
           className={clsx(
-            'absolute w-3 h-3 bg-background-secondary border-primary/30 transform rotate-45',
-            tooltipConfig.position === 'top' && 'bottom-[-7px] left-1/2 -translate-x-1/2 border-b border-r',
-            tooltipConfig.position === 'bottom' && 'top-[-7px] left-1/2 -translate-x-1/2 border-t border-l',
-            tooltipConfig.position === 'left' && 'right-[-7px] top-1/2 -translate-y-1/2 border-t border-r',
-            tooltipConfig.position === 'right' && 'left-[-7px] top-1/2 -translate-y-1/2 border-b border-l'
+            'absolute w-0 h-0',
+            tooltipConfig.position === 'top' && 'bottom-[-8px] left-1/2 -translate-x-1/2',
+            tooltipConfig.position === 'bottom' && 'top-[-8px] left-1/2 -translate-x-1/2',
+            tooltipConfig.position === 'left' && 'right-[-8px] top-1/2 -translate-y-1/2',
+            tooltipConfig.position === 'right' && 'left-[-8px] top-1/2 -translate-y-1/2'
           )}
+          style={
+            tooltipConfig.position === 'top'
+              ? { borderLeft: '8px solid transparent', borderRight: '8px solid transparent', borderTop: '8px solid var(--accent)' }
+              : tooltipConfig.position === 'bottom'
+              ? { borderLeft: '8px solid transparent', borderRight: '8px solid transparent', borderBottom: '8px solid var(--accent)' }
+              : tooltipConfig.position === 'left'
+              ? { borderTop: '8px solid transparent', borderBottom: '8px solid transparent', borderLeft: '8px solid var(--accent)' }
+              : { borderTop: '8px solid transparent', borderBottom: '8px solid transparent', borderRight: '8px solid var(--accent)' }
+          }
         />
       </div>
     </>

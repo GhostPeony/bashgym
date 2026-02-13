@@ -39,21 +39,23 @@ export function SeedEditor({ seed, seedIndex, columns, onUpdate, onDelete, onNav
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="p-4 border-b border-border-subtle flex items-center justify-between">
+      <div className="p-4 border-b-2 border-border flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <span className="text-sm font-medium text-text-primary">Seed #{seedIndex + 1}</span>
+          <span className="font-brand text-lg text-text-primary">Seed #{seedIndex + 1}</span>
           <span className={clsx(
-            'text-xs px-2 py-0.5 rounded-full',
-            seed.source === 'gold_trace' ? 'bg-status-success/20 text-status-success' :
-            seed.source === 'imported' ? 'bg-status-info/20 text-status-info' :
-            'bg-background-tertiary text-text-muted'
+            'tag',
+            seed.source === 'gold_trace' ? 'text-status-success' :
+            seed.source === 'imported' ? 'text-status-info' :
+            'text-text-muted'
           )}>
-            {seed.source === 'gold_trace' ? 'Gold Trace' : seed.source === 'imported' ? 'Imported' : 'Manual'}
+            <span>
+              {seed.source === 'gold_trace' ? 'Gold Trace' : seed.source === 'imported' ? 'Imported' : 'Manual'}
+            </span>
           </span>
         </div>
         <button
           onClick={() => onDelete(seed.id)}
-          className="p-1.5 text-text-muted hover:text-status-error transition-colors rounded hover:bg-background-tertiary"
+          className="btn-icon w-8 h-8 flex items-center justify-center text-text-muted hover:text-status-error"
         >
           <Trash2 className="w-4 h-4" />
         </button>
@@ -63,7 +65,7 @@ export function SeedEditor({ seed, seedIndex, columns, onUpdate, onDelete, onNav
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {/* Tags */}
         <div>
-          <label className="block text-xs font-medium text-text-secondary mb-1.5">Tags</label>
+          <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1.5">Tags</label>
           <TagEditor tags={seed.tags || []} onChange={handleTagsChange} />
         </div>
 
@@ -78,7 +80,7 @@ export function SeedEditor({ seed, seedIndex, columns, onUpdate, onDelete, onNav
 
               return (
                 <div key={col.id}>
-                  <label className="block text-xs font-medium text-text-secondary mb-1.5">
+                  <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1.5">
                     {col.name}
                     <span className="text-text-muted ml-1.5">({col.type})</span>
                   </label>
@@ -90,8 +92,14 @@ export function SeedEditor({ seed, seedIndex, columns, onUpdate, onDelete, onNav
                     placeholder={`Enter ${col.name}...`}
                   />
                   {isCode && value.length > 0 && (
-                    <div className="mt-2 p-3 bg-background-tertiary rounded-lg overflow-x-auto">
-                      <pre className="text-xs font-mono text-text-primary whitespace-pre-wrap">
+                    <div className="terminal-chrome mt-2">
+                      <div className="terminal-header">
+                        <div className="terminal-dot terminal-dot-red" />
+                        <div className="terminal-dot terminal-dot-yellow" />
+                        <div className="terminal-dot terminal-dot-green" />
+                        <span className="font-mono text-xs text-text-muted ml-2">preview</span>
+                      </div>
+                      <pre className="text-xs font-mono text-text-primary whitespace-pre-wrap p-3">
                         {highlightCode(value)}
                       </pre>
                     </div>
@@ -101,9 +109,9 @@ export function SeedEditor({ seed, seedIndex, columns, onUpdate, onDelete, onNav
             })}
           </div>
         ) : (
-          <div className="text-sm text-text-muted py-8 text-center">
+          <div className="text-sm text-text-muted py-8 text-center font-mono">
             No columns defined.{' '}
-            <button onClick={onNavigateToCreate} className="text-primary hover:underline">
+            <button onClick={onNavigateToCreate} className="text-accent-dark hover:underline">
               Configure schema
             </button>{' '}
             in Advanced Configuration first.
@@ -112,20 +120,20 @@ export function SeedEditor({ seed, seedIndex, columns, onUpdate, onDelete, onNav
 
         {/* Quality assessment */}
         {columns.length > 0 && (
-          <div className="card-elevated p-3">
+          <div className="card p-3">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium text-text-secondary">Completeness</span>
-              <span className="text-xs text-text-muted">
+              <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">Completeness</span>
+              <span className="text-xs text-text-muted font-mono">
                 {quality.filled}/{quality.total} fields
               </span>
             </div>
-            <div className="h-1.5 bg-background-tertiary rounded-full overflow-hidden">
+            <div className="progress-bar">
               <div
                 className={clsx(
-                  'h-full rounded-full transition-all',
-                  quality.percent === 100 ? 'bg-status-success' :
-                  quality.percent >= 50 ? 'bg-status-warning' :
-                  'bg-status-error'
+                  'progress-fill',
+                  quality.percent === 100 ? '!bg-status-success' :
+                  quality.percent >= 50 ? '!bg-status-warning' :
+                  '!bg-status-error'
                 )}
                 style={{ width: `${quality.percent}%` }}
               />
@@ -134,12 +142,12 @@ export function SeedEditor({ seed, seedIndex, columns, onUpdate, onDelete, onNav
               {quality.percent === 100 ? (
                 <>
                   <CheckCircle className="w-3.5 h-3.5 text-status-success" />
-                  <span className="text-xs text-status-success">All fields populated</span>
+                  <span className="text-xs text-status-success font-mono">All fields populated</span>
                 </>
               ) : (
                 <>
                   <AlertCircle className="w-3.5 h-3.5 text-text-muted" />
-                  <span className="text-xs text-text-muted">
+                  <span className="text-xs text-text-muted font-mono">
                     {quality.total - quality.filled} empty field{quality.total - quality.filled !== 1 ? 's' : ''}
                   </span>
                 </>
@@ -150,7 +158,7 @@ export function SeedEditor({ seed, seedIndex, columns, onUpdate, onDelete, onNav
 
         {/* Metadata */}
         {seed.created_at && (
-          <div className="text-xs text-text-muted pt-2 border-t border-border-subtle">
+          <div className="text-xs text-text-muted pt-2 border-t-2 border-border font-mono">
             Created: {new Date(seed.created_at).toLocaleDateString()}
             {seed.trace_id && <span className="ml-3">Trace: {seed.trace_id.slice(0, 8)}...</span>}
           </div>

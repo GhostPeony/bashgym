@@ -57,31 +57,36 @@ export function AchievementsView() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-semibold text-text-primary">Achievements</h1>
-          <p className="text-sm text-text-secondary mt-1">
+          <h1 className="font-brand text-display text-text-primary">Achievements</h1>
+          <p className="font-mono text-xs uppercase tracking-widest text-text-secondary mt-1">
             {earnedCount} / {totalCount} unlocked &middot; {totalPoints} points
           </p>
         </div>
         <button
           onClick={handleRefresh}
           disabled={refreshing}
-          className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg bg-background-secondary border border-border-subtle hover:border-border-color transition-colors disabled:opacity-50"
+          className={clsx(
+            'btn btn-secondary flex items-center gap-2',
+            refreshing && 'opacity-50 pointer-events-none',
+          )}
         >
           <RefreshCw className={clsx('w-4 h-4', refreshing && 'animate-spin')} />
-          Refresh
+          <span>Refresh</span>
         </button>
       </div>
+
+      <div className="section-divider mb-6" />
 
       <div className="grid grid-cols-12 gap-6">
         {/* Left: Lifetime Stats */}
         <div className="col-span-12 lg:col-span-4">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-text-muted mb-3">Lifetime Stats</h2>
+          <h2 className="font-mono text-xs uppercase tracking-widest text-text-muted mb-3">Lifetime Stats</h2>
 
           {stats ? (
             <div className="space-y-6">
               {/* Traces */}
               <div>
-                <h3 className="text-xs text-text-muted mb-2 px-1">Traces</h3>
+                <h3 className="font-brand text-lg text-text-secondary mb-2 px-1">Traces</h3>
                 <div className="grid grid-cols-2 gap-2">
                   <StatCard icon={<FileStack className="w-4 h-4" />} label="Total Traces" value={stats.traces.total} color="blue" />
                   <StatCard icon={<Award className="w-4 h-4" />} label="Gold" value={stats.traces.gold} color="green" />
@@ -90,9 +95,11 @@ export function AchievementsView() {
                 </div>
               </div>
 
+              <div className="section-divider" />
+
               {/* Training */}
               <div>
-                <h3 className="text-xs text-text-muted mb-2 px-1">Training</h3>
+                <h3 className="font-brand text-lg text-text-secondary mb-2 px-1">Training</h3>
                 <div className="grid grid-cols-2 gap-2">
                   <StatCard icon={<Dumbbell className="w-4 h-4" />} label="Runs" value={stats.training.runs_completed} color="green" />
                   <StatCard
@@ -106,9 +113,11 @@ export function AchievementsView() {
                 </div>
               </div>
 
+              <div className="section-divider" />
+
               {/* Activity */}
               <div>
-                <h3 className="text-xs text-text-muted mb-2 px-1">Activity</h3>
+                <h3 className="font-brand text-lg text-text-secondary mb-2 px-1">Activity</h3>
                 <div className="grid grid-cols-2 gap-2">
                   <StatCard icon={<Trophy className="w-4 h-4" />} label="Points" value={totalPoints} color="purple" />
                   <StatCard icon={<FileStack className="w-4 h-4" />} label="Days Active" value={stats.days_active} color="blue" />
@@ -116,8 +125,8 @@ export function AchievementsView() {
               </div>
             </div>
           ) : (
-            <div className="card-elevated p-8 text-center">
-              <p className="text-sm text-text-muted">{loading ? 'Loading stats...' : 'No data yet'}</p>
+            <div className="card p-8 text-center">
+              <p className="font-mono text-sm text-text-muted">{loading ? 'Loading stats...' : 'No data yet'}</p>
             </div>
           )}
         </div>
@@ -131,10 +140,10 @@ export function AchievementsView() {
                 key={tab.id}
                 onClick={() => setCategory(tab.id)}
                 className={clsx(
-                  'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap',
+                  'flex items-center gap-1.5 px-3 py-1.5 font-mono text-xs uppercase tracking-widest border-brutal rounded-brutal transition-press whitespace-nowrap',
                   category === tab.id
-                    ? 'bg-primary/10 text-primary'
-                    : 'text-text-muted hover:text-text-secondary hover:bg-background-tertiary'
+                    ? 'bg-accent-light text-accent-dark border-border shadow-brutal-sm'
+                    : 'bg-background-card text-text-muted border-border-subtle hover:border-border hover-press'
                 )}
               >
                 {tab.icon}
@@ -145,12 +154,12 @@ export function AchievementsView() {
 
           {/* Achievement Grid */}
           {loading && achievements.length === 0 ? (
-            <div className="card-elevated p-8 text-center">
-              <p className="text-sm text-text-muted">Loading achievements...</p>
+            <div className="card p-8 text-center">
+              <p className="font-mono text-sm text-text-muted">Loading achievements...</p>
             </div>
           ) : sorted.length === 0 ? (
-            <div className="card-elevated p-8 text-center">
-              <p className="text-sm text-text-muted">No achievements in this category</p>
+            <div className="card p-8 text-center">
+              <p className="font-mono text-sm text-text-muted">No achievements in this category</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

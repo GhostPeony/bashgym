@@ -126,7 +126,7 @@ export function SpaceManager({ className }: SpaceManagerProps) {
     return (
       <div className={clsx('p-6', className)}>
         <div className="flex items-center justify-center py-12">
-          <Loader2 className="w-6 h-6 animate-spin text-accent-primary" />
+          <Loader2 className="w-6 h-6 animate-spin text-accent" />
         </div>
       </div>
     )
@@ -137,22 +137,22 @@ export function SpaceManager({ className }: SpaceManagerProps) {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-lg font-semibold text-text-primary">ZeroGPU Spaces</h2>
-          <p className="text-sm text-text-secondary mt-1">
+          <h2 className="text-lg font-brand text-text-primary">ZeroGPU Spaces</h2>
+          <p className="text-sm text-text-secondary mt-1 font-mono">
             Deploy models to HuggingFace Spaces with free GPU
           </p>
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={fetchSpaces}
-            className="p-2 rounded-lg hover:bg-background-tertiary transition-colors"
+            className="btn-icon"
             title="Refresh"
           >
             <RefreshCw className="w-4 h-4 text-text-secondary" />
           </button>
           <button
             onClick={() => setShowForm(!showForm)}
-            className="flex items-center gap-2 px-3 py-2 bg-accent-primary text-white rounded-lg hover:bg-accent-primary/90 transition-colors"
+            className="btn-primary flex items-center gap-2"
           >
             <Plus className="w-4 h-4" />
             New Space
@@ -161,51 +161,51 @@ export function SpaceManager({ className }: SpaceManagerProps) {
       </div>
 
       {error && (
-        <div className="mb-4 p-3 bg-status-error/10 border border-status-error/30 rounded-lg flex items-center gap-2 text-status-error">
+        <div className="mb-4 p-3 bg-background-card border-2 border-status-error rounded-brutal flex items-center gap-2 text-status-error">
           <AlertCircle className="w-4 h-4 flex-shrink-0" />
-          <span className="text-sm">{error}</span>
+          <span className="text-sm font-mono">{error}</span>
         </div>
       )}
 
       {/* Space Creation Form */}
       {showForm && (
-        <form onSubmit={handleSubmit} className="mb-6 p-4 bg-background-secondary rounded-lg border border-border">
-          <h3 className="text-sm font-medium text-text-primary mb-4">Create Inference Space</h3>
+        <form onSubmit={handleSubmit} className="mb-6 p-4 border-brutal shadow-brutal-sm rounded-brutal bg-background-card">
+          <h3 className="text-sm font-brand text-text-primary mb-4">Create Inference Space</h3>
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm text-text-secondary mb-1">Model Repo</label>
+              <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">Model Repo</label>
               <input
                 type="text"
                 value={formData.model_repo}
                 onChange={(e) => setFormData({ ...formData, model_repo: e.target.value })}
                 placeholder="username/model-name"
-                className="w-full px-3 py-2 bg-background-primary border border-border rounded-lg text-text-primary text-sm"
+                className="input w-full text-sm"
                 required
               />
             </div>
             <div>
-              <label className="block text-sm text-text-secondary mb-1">Space Name</label>
+              <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">Space Name</label>
               <input
                 type="text"
                 value={formData.space_name}
                 onChange={(e) => setFormData({ ...formData, space_name: e.target.value })}
                 placeholder="my-inference-space"
-                className="w-full px-3 py-2 bg-background-primary border border-border rounded-lg text-text-primary text-sm"
+                className="input w-full text-sm"
                 required
               />
             </div>
             <div>
-              <label className="block text-sm text-text-secondary mb-1">GPU Duration (seconds)</label>
+              <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">GPU Duration (seconds)</label>
               <input
                 type="number"
                 value={formData.gpu_duration}
                 onChange={(e) => setFormData({ ...formData, gpu_duration: parseInt(e.target.value) })}
                 min={30}
                 max={300}
-                className="w-full px-3 py-2 bg-background-primary border border-border rounded-lg text-text-primary text-sm"
+                className="input w-full text-sm"
               />
-              <p className="text-xs text-text-secondary mt-1">30-300 seconds per request</p>
+              <p className="text-xs text-text-secondary mt-1 font-mono">30-300 seconds per request</p>
             </div>
             <div className="flex items-center">
               <label className="flex items-center gap-2 cursor-pointer">
@@ -213,9 +213,9 @@ export function SpaceManager({ className }: SpaceManagerProps) {
                   type="checkbox"
                   checked={formData.private}
                   onChange={(e) => setFormData({ ...formData, private: e.target.checked })}
-                  className="w-4 h-4 rounded border-border"
+                  className="w-4 h-4 border-brutal rounded-brutal"
                 />
-                <span className="text-sm text-text-primary">Private Space</span>
+                <span className="text-sm text-text-primary font-mono">Private Space</span>
               </label>
             </div>
           </div>
@@ -224,14 +224,14 @@ export function SpaceManager({ className }: SpaceManagerProps) {
             <button
               type="button"
               onClick={() => setShowForm(false)}
-              className="px-4 py-2 text-text-secondary hover:text-text-primary transition-colors"
+              className="btn-ghost"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={creating}
-              className="flex items-center gap-2 px-4 py-2 bg-accent-primary text-white rounded-lg hover:bg-accent-primary/90 disabled:opacity-50 transition-colors"
+              className="btn-primary flex items-center gap-2 disabled:opacity-50"
             >
               {creating ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -247,33 +247,33 @@ export function SpaceManager({ className }: SpaceManagerProps) {
       {/* Spaces List */}
       {spaces.length === 0 ? (
         <div className="text-center py-12 text-text-secondary">
-          <Layers className="w-12 h-12 mx-auto mb-3 opacity-50" />
-          <p>No Spaces deployed</p>
-          <p className="text-sm mt-1">Create a Space to deploy your model for inference</p>
+          <Layers className="w-12 h-12 mx-auto mb-3 text-text-muted" />
+          <p className="font-brand text-lg">No Spaces deployed</p>
+          <p className="text-sm mt-1 font-mono">Create a Space to deploy your model for inference</p>
         </div>
       ) : (
         <div className="space-y-3">
           {spaces.map((space) => (
             <div
               key={space.space_name}
-              className="p-4 bg-background-secondary rounded-lg border border-border"
+              className="card p-4"
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   {getStatusIcon(space.status)}
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-text-primary">
+                      <span className="text-sm font-mono text-text-primary">
                         {space.space_name}
                       </span>
                       <span className={clsx(
-                        'px-2 py-0.5 text-xs rounded',
-                        space.status === 'running' ? 'bg-status-success/20 text-status-success' :
-                        space.status === 'building' ? 'bg-status-warning/20 text-status-warning' :
-                        space.status === 'error' ? 'bg-status-error/20 text-status-error' :
-                        'bg-background-tertiary text-text-secondary'
+                        'tag',
+                        space.status === 'running' ? 'text-status-success' :
+                        space.status === 'building' ? 'text-status-warning' :
+                        space.status === 'error' ? 'text-status-error' :
+                        'text-text-secondary'
                       )}>
-                        {getStatusText(space.status)}
+                        <span>{getStatusText(space.status)}</span>
                       </span>
                     </div>
                   </div>
@@ -283,14 +283,14 @@ export function SpaceManager({ className }: SpaceManagerProps) {
                     href={space.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="p-2 rounded-lg hover:bg-background-tertiary transition-colors"
+                    className="btn-icon"
                     title="Open Space"
                   >
                     <ExternalLink className="w-4 h-4 text-text-secondary" />
                   </a>
                   <button
                     onClick={() => handleDelete(space.space_name)}
-                    className="p-2 rounded-lg hover:bg-background-tertiary transition-colors"
+                    className="btn-icon"
                     title="Delete Space"
                   >
                     <Trash2 className="w-4 h-4 text-status-error" />

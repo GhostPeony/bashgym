@@ -21,28 +21,30 @@ function SpaceCard({ icon, title, description, stats, onClick, primary, accentCo
     <button
       onClick={onClick}
       className={clsx(
-        'group relative flex flex-col p-6 rounded-2xl border transition-all duration-200 text-left',
-        'hover:scale-[1.02] hover:shadow-lg',
-        primary
-          ? 'bg-gradient-to-br from-primary/10 to-primary/5 border-primary/30 hover:border-primary/50'
-          : 'bg-background-secondary border-border-subtle hover:border-border-color'
+        'card card-accent group relative flex flex-col p-6 text-left',
+        primary && 'card-elevated'
       )}
     >
       <div
-        className={clsx(
-          'w-12 h-12 rounded-xl flex items-center justify-center mb-4',
-          `bg-gradient-to-br ${accentColor}`
-        )}
+        className="w-12 h-12 border-brutal border-border rounded-brutal bg-accent-light flex items-center justify-center mb-4"
       >
         {icon}
       </div>
-      <h3 className="text-lg font-semibold text-text-primary mb-1">{title}</h3>
+      <h3 className="font-brand text-lg text-text-primary mb-1">{title}</h3>
       <p className="text-sm text-text-secondary mb-4 flex-1">{description}</p>
       {stats && (
-        <p className="text-xs text-text-muted">{stats}</p>
+        <p className="font-mono text-xs uppercase tracking-widest text-text-muted">{stats}</p>
       )}
-      <div className="absolute bottom-6 right-6 opacity-0 group-hover:opacity-100 transition-opacity">
-        <ArrowRight className="w-5 h-5 text-text-muted" />
+      {/* CSS triangle arrow — always visible */}
+      <div className="absolute bottom-6 right-6">
+        <div
+          className="w-0 h-0"
+          style={{
+            borderTop: '6px solid transparent',
+            borderBottom: '6px solid transparent',
+            borderLeft: '8px solid var(--text-muted)',
+          }}
+        />
       </div>
     </button>
   )
@@ -99,14 +101,14 @@ export function HomeScreen() {
       <div className="max-w-5xl mx-auto px-6 py-12">
         {/* Header */}
         <div className="text-center mb-12">
-          <div className="mx-auto mb-6 h-32 w-36 overflow-hidden rounded-2xl">
+          <div className="mx-auto mb-6 h-32 w-36 overflow-hidden border-brutal border-border rounded-brutal shadow-brutal">
             <img
               src="/bb.png"
               alt="Bash Gym"
               className="h-full w-auto object-cover object-right"
             />
           </div>
-          <h1 className="text-3xl font-bold text-text-primary mb-3">
+          <h1 className="font-brand text-3xl text-text-primary mb-3">
             Turn your coding sessions into smarter AI assistants
           </h1>
           <p className="text-text-secondary max-w-2xl mx-auto">
@@ -117,10 +119,13 @@ export function HomeScreen() {
 
         {/* First-time user prompt */}
         {!hasSeenIntro && (
-          <div className="mb-10 p-6 rounded-2xl bg-gradient-to-r from-primary/10 to-accent/10 border border-primary/20">
+          <div className="card mb-10 p-6">
             <div className="flex items-center justify-between flex-wrap gap-4">
               <div>
-                <h2 className="text-lg font-semibold text-text-primary mb-1">
+                <div className="mb-2">
+                  <span className="tag"><span>New Here</span></span>
+                </div>
+                <h2 className="font-brand text-lg text-text-primary mb-1">
                   First time here?
                 </h2>
                 <p className="text-sm text-text-secondary">
@@ -130,13 +135,13 @@ export function HomeScreen() {
               <div className="flex items-center gap-3">
                 <button
                   onClick={skipTutorial}
-                  className="px-4 py-2 text-sm font-medium text-text-secondary hover:text-text-primary transition-colors"
+                  className="btn btn-ghost"
                 >
                   Skip
                 </button>
                 <button
                   onClick={startTutorial}
-                  className="px-5 py-2.5 text-sm font-semibold rounded-lg bg-primary text-white hover:bg-primary/90 transition-colors"
+                  className="btn btn-primary"
                 >
                   Let's Go
                 </button>
@@ -145,51 +150,57 @@ export function HomeScreen() {
           </div>
         )}
 
+        {/* Section label */}
+        <div className="mb-4">
+          <span className="tag"><span>Spaces</span></span>
+        </div>
+        <h2 className="font-brand text-2xl text-text-primary mb-6">Choose Your Workspace</h2>
+
         {/* Space Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
           <SpaceCard
-            icon={<Terminal className="w-6 h-6 text-white" />}
+            icon={<Terminal className="w-6 h-6 text-accent-dark" />}
             title="Workspace"
             description="Code with AI assistance. Your sessions are automatically captured for training."
             stats={stats.sessions > 0 ? `${stats.sessions} active sessions` : 'Start coding'}
             onClick={handleEnterWorkspace}
             primary
-            accentColor="from-blue-500 to-blue-600"
+            accentColor=""
           />
           <SpaceCard
-            icon={<Sparkles className="w-6 h-6 text-white" />}
+            icon={<Sparkles className="w-6 h-6 text-accent-dark" />}
             title="Data Factory"
             description="Transform captured traces into high-quality training examples."
-            stats={stats.traces > 0 ? `${stats.traces} traces → ${stats.examples} examples` : 'No traces yet'}
+            stats={stats.traces > 0 ? `${stats.traces} traces / ${stats.examples} examples` : 'No traces yet'}
             onClick={() => openOverlay('factory')}
-            accentColor="from-purple-500 to-purple-600"
+            accentColor=""
           />
           <SpaceCard
-            icon={<BarChart3 className="w-6 h-6 text-white" />}
+            icon={<BarChart3 className="w-6 h-6 text-accent-dark" />}
             title="Training"
             description="Fine-tune models on your data using SFT, DPO, or GRPO strategies."
             stats={stats.models > 0 ? `${stats.models} models trained` : 'Ready to train'}
             onClick={() => openOverlay('training')}
-            accentColor="from-green-500 to-green-600"
+            accentColor=""
           />
         </div>
 
         {/* Quick Stats Bar */}
         {(stats.traces > 0 || stats.models > 0) && (
-          <div className="flex items-center justify-center gap-8 p-4 rounded-xl bg-background-secondary border border-border-subtle">
+          <div className="card flex items-center justify-center gap-8 p-4 mb-8">
             <div className="text-center">
-              <p className="text-2xl font-bold text-text-primary">{stats.traces}</p>
-              <p className="text-xs text-text-muted">Traces Captured</p>
+              <p className="font-brand text-3xl text-text-primary">{stats.traces}</p>
+              <p className="font-mono text-xs uppercase tracking-widest text-text-muted">Traces Captured</p>
             </div>
-            <div className="w-px h-8 bg-border-subtle" />
+            <div className="w-px h-8 bg-border" />
             <div className="text-center">
-              <p className="text-2xl font-bold text-text-primary">{stats.examples}</p>
-              <p className="text-xs text-text-muted">Training Examples</p>
+              <p className="font-brand text-3xl text-text-primary">{stats.examples}</p>
+              <p className="font-mono text-xs uppercase tracking-widest text-text-muted">Training Examples</p>
             </div>
-            <div className="w-px h-8 bg-border-subtle" />
+            <div className="w-px h-8 bg-border" />
             <div className="text-center">
-              <p className="text-2xl font-bold text-text-primary">{stats.models}</p>
-              <p className="text-xs text-text-muted">Models Trained</p>
+              <p className="font-brand text-3xl text-text-primary">{stats.models}</p>
+              <p className="font-mono text-xs uppercase tracking-widest text-text-muted">Models Trained</p>
             </div>
           </div>
         )}

@@ -40,13 +40,13 @@ function StatusCard({ title, value, icon, status = 'neutral' }: StatusCardProps)
   }
 
   return (
-    <div className="bg-background-secondary rounded-lg border border-border p-4">
+    <div className="border-brutal shadow-brutal-sm rounded-brutal bg-background-card p-4">
       <div className="flex items-start justify-between">
         <div>
-          <p className="text-xs text-text-muted uppercase tracking-wider">{title}</p>
-          <p className={clsx('text-2xl font-bold mt-1', statusColors[status])}>{value}</p>
+          <p className="font-mono text-xs text-text-muted uppercase tracking-widest">{title}</p>
+          <p className={clsx('text-2xl font-brand mt-1', statusColors[status])}>{value}</p>
         </div>
-        <div className={clsx('p-2 rounded-lg bg-background-tertiary', statusColors[status])}>
+        <div className={clsx('p-2 border-2 border-border rounded-brutal bg-background-secondary', statusColors[status])}>
           {icon}
         </div>
       </div>
@@ -152,7 +152,7 @@ export function IntegrationDashboard() {
   if (loading) {
     return (
       <div className="h-full flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-accent-primary" />
+        <Loader2 className="w-8 h-8 animate-spin text-accent" />
       </div>
     )
   }
@@ -166,8 +166,8 @@ export function IntegrationDashboard() {
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
             <div className={clsx(
-              'p-3 rounded-xl',
-              isLinked ? 'bg-status-success/10' : 'bg-background-secondary'
+              'p-3 border-2 rounded-brutal',
+              isLinked ? 'border-status-success bg-background-card' : 'border-border bg-background-secondary'
             )}>
               {isLinked ? (
                 <Link2 className="w-6 h-6 text-status-success" />
@@ -176,8 +176,8 @@ export function IntegrationDashboard() {
               )}
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-text-primary">Bashbros Integration</h1>
-              <p className="text-text-secondary">
+              <h1 className="text-2xl font-brand text-text-primary">Bashbros Integration</h1>
+              <p className="text-text-secondary font-mono text-sm">
                 {isLinked ? 'Connected - traces flowing, model sync enabled' : 'Not linked - standalone mode'}
               </p>
             </div>
@@ -186,7 +186,7 @@ export function IntegrationDashboard() {
           <div className="flex items-center gap-3">
             <button
               onClick={fetchData}
-              className="p-2 rounded-lg bg-background-secondary hover:bg-background-tertiary text-text-secondary transition-colors"
+              className="btn-icon"
               title="Refresh"
             >
               <RefreshCw className="w-4 h-4" />
@@ -195,7 +195,7 @@ export function IntegrationDashboard() {
               <button
                 onClick={handleUnlink}
                 disabled={linking}
-                className="px-4 py-2 rounded-lg bg-status-error/10 text-status-error hover:bg-status-error/20 transition-colors disabled:opacity-50"
+                className="btn-secondary text-status-error border-status-error hover:bg-background-secondary disabled:opacity-50"
               >
                 {linking ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Unlink'}
               </button>
@@ -203,7 +203,7 @@ export function IntegrationDashboard() {
               <button
                 onClick={handleLink}
                 disabled={linking}
-                className="px-4 py-2 rounded-lg bg-status-success/10 text-status-success hover:bg-status-success/20 transition-colors disabled:opacity-50"
+                className="btn-secondary text-status-success border-status-success hover:bg-background-secondary disabled:opacity-50"
               >
                 {linking ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Link Integration'}
               </button>
@@ -212,16 +212,16 @@ export function IntegrationDashboard() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 mb-6 p-1 bg-background-secondary rounded-lg w-fit">
+        <div className="flex gap-1 mb-6">
           {(['status', 'settings', 'models', 'traces'] as Tab[]).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
               className={clsx(
-                'px-4 py-2 rounded-md text-sm font-medium transition-colors capitalize',
+                'px-4 py-2 text-sm font-mono border-2 rounded-brutal capitalize transition-press',
                 activeTab === tab
-                  ? 'bg-background-primary text-text-primary shadow-sm'
-                  : 'text-text-secondary hover:text-text-primary'
+                  ? 'bg-accent text-white border-accent-dark shadow-brutal-sm'
+                  : 'text-text-secondary border-border hover:text-text-primary hover:bg-background-secondary hover-press'
               )}
             >
               {tab}
@@ -262,21 +262,21 @@ export function IntegrationDashboard() {
 
             {/* Training Status */}
             {status?.training_in_progress && (
-              <div className="p-4 bg-status-warning/10 border border-status-warning/30 rounded-lg flex items-center gap-3">
+              <div className="p-4 border-2 border-status-warning rounded-brutal bg-background-card flex items-center gap-3">
                 <Loader2 className="w-5 h-5 animate-spin text-status-warning" />
                 <div>
-                  <p className="font-medium text-status-warning">Training in Progress</p>
-                  <p className="text-sm text-text-secondary">A new model is being trained...</p>
+                  <p className="font-brand text-status-warning">Training in Progress</p>
+                  <p className="text-sm text-text-secondary font-mono">A new model is being trained...</p>
                 </div>
               </div>
             )}
 
             {/* Trace Watcher */}
-            <div className="bg-background-secondary rounded-lg border border-border p-4">
+            <div className="border-brutal shadow-brutal-sm rounded-brutal bg-background-card p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="font-medium text-text-primary">Trace Watcher</h3>
-                  <p className="text-sm text-text-secondary">
+                  <h3 className="font-brand text-text-primary">Trace Watcher</h3>
+                  <p className="text-sm text-text-secondary font-mono">
                     Automatically process traces from bashbros
                   </p>
                 </div>
@@ -284,7 +284,7 @@ export function IntegrationDashboard() {
                   {!watching ? (
                     <button
                       onClick={handleStartWatcher}
-                      className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-status-success/10 text-status-success hover:bg-status-success/20 text-sm"
+                      className="btn-secondary flex items-center gap-2 text-status-success border-status-success text-sm"
                     >
                       <Play className="w-4 h-4" />
                       Start
@@ -292,7 +292,7 @@ export function IntegrationDashboard() {
                   ) : (
                     <button
                       onClick={handleStopWatcher}
-                      className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-status-error/10 text-status-error hover:bg-status-error/20 text-sm"
+                      className="btn-secondary flex items-center gap-2 text-status-error border-status-error text-sm"
                     >
                       <Square className="w-4 h-4" />
                       Stop
@@ -301,7 +301,7 @@ export function IntegrationDashboard() {
                   <button
                     onClick={handleProcessTraces}
                     disabled={processing}
-                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-accent-primary/10 text-accent-primary hover:bg-accent-primary/20 text-sm disabled:opacity-50"
+                    className="btn-secondary flex items-center gap-2 text-accent border-accent text-sm disabled:opacity-50"
                   >
                     {processing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
                     Process Now
@@ -311,14 +311,21 @@ export function IntegrationDashboard() {
             </div>
 
             {/* Integration Directory */}
-            <div className="bg-background-secondary rounded-lg border border-border p-4">
+            <div className="border-brutal shadow-brutal-sm rounded-brutal bg-background-card p-4">
               <div className="flex items-center gap-2 mb-3">
                 <Folder className="w-4 h-4 text-text-secondary" />
-                <h3 className="font-medium text-text-primary">Integration Directory</h3>
+                <h3 className="font-brand text-text-primary">Integration Directory</h3>
               </div>
-              <code className="text-sm font-mono text-text-secondary bg-background-tertiary px-2 py-1 rounded">
-                ~/.bashgym/integration/
-              </code>
+              <div className="terminal-chrome">
+                <div className="terminal-header">
+                  <div className="terminal-dot-red" />
+                  <div className="terminal-dot-yellow" />
+                  <div className="terminal-dot-green" />
+                </div>
+                <code className="block text-sm font-mono text-text-secondary px-3 py-2">
+                  ~/.bashgym/integration/
+                </code>
+              </div>
             </div>
           </div>
         )}
@@ -327,19 +334,19 @@ export function IntegrationDashboard() {
         {activeTab === 'settings' && settings && (
           <div className="space-y-6">
             {/* Capture Settings */}
-            <div className="bg-background-secondary rounded-lg border border-border p-4">
-              <h3 className="font-medium text-text-primary mb-4 flex items-center gap-2">
+            <div className="border-brutal shadow-brutal-sm rounded-brutal bg-background-card p-4">
+              <h3 className="font-brand text-text-primary mb-4 flex items-center gap-2">
                 <Database className="w-4 h-4" />
                 Capture Settings
               </h3>
 
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm text-text-secondary mb-2">Capture Mode</label>
+                  <label className="block text-xs font-mono text-text-secondary mb-2 uppercase tracking-widest">Capture Mode</label>
                   <select
                     value={settings.capture_mode}
                     onChange={(e) => handleUpdateSetting('capture', 'mode', e.target.value)}
-                    className="w-full px-3 py-2 bg-background-primary border border-border rounded-lg text-text-primary text-sm"
+                    className="input w-full text-sm"
                   >
                     <option value="everything">Everything - Capture all sessions</option>
                     <option value="successful_only">Successful Only - Only verified traces</option>
@@ -352,16 +359,16 @@ export function IntegrationDashboard() {
                     type="checkbox"
                     checked={settings.auto_stream}
                     onChange={(e) => handleUpdateSetting('capture', 'auto_stream', e.target.checked)}
-                    className="w-4 h-4 rounded border-border"
+                    className="w-4 h-4 border-brutal rounded-brutal"
                   />
-                  <span className="text-text-primary">Auto-stream traces</span>
+                  <span className="text-text-primary font-mono text-sm">Auto-stream traces</span>
                 </label>
               </div>
             </div>
 
             {/* Training Settings */}
-            <div className="bg-background-secondary rounded-lg border border-border p-4">
-              <h3 className="font-medium text-text-primary mb-4 flex items-center gap-2">
+            <div className="border-brutal shadow-brutal-sm rounded-brutal bg-background-card p-4">
+              <h3 className="font-brand text-text-primary mb-4 flex items-center gap-2">
                 <Cpu className="w-4 h-4" />
                 Training Settings
               </h3>
@@ -372,13 +379,13 @@ export function IntegrationDashboard() {
                     type="checkbox"
                     checked={settings.auto_training_enabled}
                     onChange={(e) => handleUpdateSetting('training', 'auto_enabled', e.target.checked)}
-                    className="w-4 h-4 rounded border-border"
+                    className="w-4 h-4 border-brutal rounded-brutal"
                   />
-                  <span className="text-text-primary">Enable auto-training</span>
+                  <span className="text-text-primary font-mono text-sm">Enable auto-training</span>
                 </label>
 
                 <div>
-                  <label className="block text-sm text-text-secondary mb-2">
+                  <label className="block text-xs font-mono text-text-secondary mb-2 uppercase tracking-widest">
                     Quality Threshold (gold traces needed)
                   </label>
                   <input
@@ -387,16 +394,16 @@ export function IntegrationDashboard() {
                     onChange={(e) => handleUpdateSetting('training', 'quality_threshold', parseInt(e.target.value))}
                     min={10}
                     max={500}
-                    className="w-32 px-3 py-2 bg-background-primary border border-border rounded-lg text-text-primary text-sm"
+                    className="input w-32 text-sm"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm text-text-secondary mb-2">Training Trigger</label>
+                  <label className="block text-xs font-mono text-text-secondary mb-2 uppercase tracking-widest">Training Trigger</label>
                   <select
                     value={settings.trigger}
                     onChange={(e) => handleUpdateSetting('training', 'trigger', e.target.value)}
-                    className="w-full px-3 py-2 bg-background-primary border border-border rounded-lg text-text-primary text-sm"
+                    className="input w-full text-sm"
                   >
                     <option value="manual">Manual - Only on request</option>
                     <option value="quality_based">Quality Based - When threshold reached</option>
@@ -407,8 +414,8 @@ export function IntegrationDashboard() {
             </div>
 
             {/* Model Sync Settings */}
-            <div className="bg-background-secondary rounded-lg border border-border p-4">
-              <h3 className="font-medium text-text-primary mb-4 flex items-center gap-2">
+            <div className="border-brutal shadow-brutal-sm rounded-brutal bg-background-card p-4">
+              <h3 className="font-brand text-text-primary mb-4 flex items-center gap-2">
                 <Package className="w-4 h-4" />
                 Model Sync Settings
               </h3>
@@ -419,18 +426,18 @@ export function IntegrationDashboard() {
                     type="checkbox"
                     checked={settings.auto_export_ollama}
                     onChange={(e) => handleUpdateSetting('model_sync', 'auto_export_ollama', e.target.checked)}
-                    className="w-4 h-4 rounded border-border"
+                    className="w-4 h-4 border-brutal rounded-brutal"
                   />
-                  <span className="text-text-primary">Auto-export to Ollama</span>
+                  <span className="text-text-primary font-mono text-sm">Auto-export to Ollama</span>
                 </label>
 
                 <div>
-                  <label className="block text-sm text-text-secondary mb-2">Ollama Model Name</label>
+                  <label className="block text-xs font-mono text-text-secondary mb-2 uppercase tracking-widest">Ollama Model Name</label>
                   <input
                     type="text"
                     value={settings.ollama_model_name}
                     onChange={(e) => handleUpdateSetting('model_sync', 'ollama_model_name', e.target.value)}
-                    className="w-64 px-3 py-2 bg-background-primary border border-border rounded-lg text-text-primary text-sm font-mono"
+                    className="input w-64 text-sm font-mono"
                   />
                 </div>
 
@@ -439,16 +446,16 @@ export function IntegrationDashboard() {
                     type="checkbox"
                     checked={settings.notify_on_update}
                     onChange={(e) => handleUpdateSetting('model_sync', 'notify_on_update', e.target.checked)}
-                    className="w-4 h-4 rounded border-border"
+                    className="w-4 h-4 border-brutal rounded-brutal"
                   />
-                  <span className="text-text-primary">Notify on model update</span>
+                  <span className="text-text-primary font-mono text-sm">Notify on model update</span>
                 </label>
               </div>
             </div>
 
             {/* Security Settings */}
-            <div className="bg-background-secondary rounded-lg border border-border p-4">
-              <h3 className="font-medium text-text-primary mb-4 flex items-center gap-2">
+            <div className="border-brutal shadow-brutal-sm rounded-brutal bg-background-card p-4">
+              <h3 className="font-brand text-text-primary mb-4 flex items-center gap-2">
                 <Settings className="w-4 h-4" />
                 Security Settings
               </h3>
@@ -459,11 +466,11 @@ export function IntegrationDashboard() {
                     type="checkbox"
                     checked={settings.bashbros_primary}
                     onChange={(e) => handleUpdateSetting('security', 'bashbros_primary', e.target.checked)}
-                    className="w-4 h-4 rounded border-border"
+                    className="w-4 h-4 border-brutal rounded-brutal"
                   />
                   <div>
-                    <span className="text-text-primary">Bashbros as primary security</span>
-                    <p className="text-sm text-text-secondary">
+                    <span className="text-text-primary font-mono text-sm">Bashbros as primary security</span>
+                    <p className="text-sm text-text-secondary font-mono">
                       Defer security checks to bashbros when linked
                     </p>
                   </div>
@@ -478,24 +485,24 @@ export function IntegrationDashboard() {
           <div className="space-y-4">
             {modelVersions.length === 0 ? (
               <div className="text-center py-12 text-text-secondary">
-                <Package className="w-12 h-12 mx-auto opacity-50 mb-4" />
-                <p>No model versions available</p>
-                <p className="text-sm">Train your first model to see versions here</p>
+                <Package className="w-12 h-12 mx-auto text-text-muted mb-4" />
+                <p className="font-brand text-lg">No model versions available</p>
+                <p className="text-sm font-mono">Train your first model to see versions here</p>
               </div>
             ) : (
               modelVersions.map((model) => (
                 <div
                   key={model.version}
                   className={clsx(
-                    'bg-background-secondary rounded-lg border p-4',
-                    model.is_latest ? 'border-status-success' : 'border-border'
+                    'border-brutal shadow-brutal-sm rounded-brutal bg-background-card p-4',
+                    model.is_latest && 'border-status-success'
                   )}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <div className={clsx(
-                        'p-2 rounded-lg',
-                        model.is_latest ? 'bg-status-success/10' : 'bg-background-tertiary'
+                        'p-2 border-2 rounded-brutal',
+                        model.is_latest ? 'border-status-success bg-background-card' : 'border-border bg-background-secondary'
                       )}>
                         <Package className={clsx(
                           'w-5 h-5',
@@ -504,14 +511,14 @@ export function IntegrationDashboard() {
                       </div>
                       <div>
                         <div className="flex items-center gap-2">
-                          <span className="font-medium text-text-primary">{model.version}</span>
+                          <span className="font-mono text-text-primary">{model.version}</span>
                           {model.is_latest && (
-                            <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-status-success/20 text-status-success">
-                              Latest
+                            <span className="tag text-status-success">
+                              <span>Latest</span>
                             </span>
                           )}
                         </div>
-                        <div className="flex items-center gap-4 text-sm text-text-secondary">
+                        <div className="flex items-center gap-4 text-sm text-text-secondary font-mono">
                           <span className="flex items-center gap-1">
                             <Clock className="w-3.5 h-3.5" />
                             {new Date(model.created).toLocaleDateString()}
@@ -532,13 +539,13 @@ export function IntegrationDashboard() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="text-sm text-text-secondary">
+                      <span className="text-sm text-text-secondary font-mono">
                         Quality: {(model.quality_avg * 100).toFixed(0)}%
                       </span>
                       {!model.is_latest && model.gguf_available && (
                         <button
                           onClick={() => handleRollback(model.version)}
-                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-background-tertiary text-text-secondary hover:text-text-primary text-sm"
+                          className="btn-secondary flex items-center gap-1 text-sm"
                         >
                           <RotateCcw className="w-3.5 h-3.5" />
                           Rollback
@@ -556,11 +563,11 @@ export function IntegrationDashboard() {
         {activeTab === 'traces' && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="font-medium text-text-primary">Pending Traces from Bashbros</h3>
+              <h3 className="font-brand text-text-primary">Pending Traces from Bashbros</h3>
               <button
                 onClick={handleProcessTraces}
                 disabled={processing || pendingTraces.length === 0}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-accent-primary/10 text-accent-primary hover:bg-accent-primary/20 text-sm disabled:opacity-50"
+                className="btn-secondary flex items-center gap-2 text-accent border-accent text-sm disabled:opacity-50"
               >
                 {processing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
                 Process All
@@ -569,21 +576,21 @@ export function IntegrationDashboard() {
 
             {pendingTraces.length === 0 ? (
               <div className="text-center py-12 text-text-secondary">
-                <Database className="w-12 h-12 mx-auto opacity-50 mb-4" />
-                <p>No pending traces</p>
-                <p className="text-sm">Traces from bashbros will appear here</p>
+                <Database className="w-12 h-12 mx-auto text-text-muted mb-4" />
+                <p className="font-brand text-lg">No pending traces</p>
+                <p className="text-sm font-mono">Traces from bashbros will appear here</p>
               </div>
             ) : (
               <div className="space-y-2">
                 {pendingTraces.map((trace, index) => (
                   <div
                     key={`${trace.filename}-${index}`}
-                    className="bg-background-secondary rounded-lg border border-border p-3"
+                    className="card p-3"
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex-1 min-w-0">
-                        <p className="font-medium text-text-primary truncate">{trace.task}</p>
-                        <div className="flex items-center gap-3 text-sm text-text-secondary mt-1">
+                        <p className="font-mono text-text-primary truncate">{trace.task}</p>
+                        <div className="flex items-center gap-3 text-sm text-text-secondary font-mono mt-1">
                           <span>{trace.filename}</span>
                           <span>{trace.steps} steps</span>
                           {trace.verified ? (
@@ -599,8 +606,8 @@ export function IntegrationDashboard() {
                           )}
                         </div>
                       </div>
-                      <span className="text-xs text-text-muted bg-background-tertiary px-2 py-1 rounded">
-                        {trace.source}
+                      <span className="tag">
+                        <span>{trace.source}</span>
                       </span>
                     </div>
                   </div>

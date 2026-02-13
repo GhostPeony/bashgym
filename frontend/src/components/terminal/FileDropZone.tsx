@@ -47,40 +47,42 @@ export function FileDropZone({
     >
       {children}
 
-      {/* Drop overlay */}
+      {/* Drop overlay — brutalist dashed border with solid bg */}
       {isDragOver && (
         <div
           className={clsx(
-            'absolute inset-0 z-50 flex items-center justify-center transition-all',
-            'bg-background-primary/90 backdrop-blur-sm',
-            'border-2 border-dashed rounded-lg',
+            'absolute inset-0 z-50 flex items-center justify-center',
+            'bg-background-primary border-3 border-dashed rounded-brutal',
             isValidDrag
-              ? 'border-primary bg-primary/5'
-              : 'border-status-error bg-status-error/5'
+              ? 'border-accent bg-accent-light'
+              : 'border-status-error'
           )}
         >
           <div className="text-center">
             <div
               className={clsx(
-                'w-16 h-16 mx-auto mb-3 rounded-full flex items-center justify-center',
-                isValidDrag ? 'bg-primary/10' : 'bg-status-error/10'
+                'w-16 h-16 mx-auto mb-3 flex items-center justify-center',
+                'border-brutal rounded-brutal',
+                isValidDrag
+                  ? 'border-accent bg-accent-light text-accent-dark'
+                  : 'border-status-error bg-background-secondary text-status-error'
               )}
             >
               {isValidDrag ? (
-                <FolderInput className="w-8 h-8 text-primary" />
+                <FolderInput className="w-8 h-8" />
               ) : (
-                <FileDown className="w-8 h-8 text-status-error" />
+                <FileDown className="w-8 h-8" />
               )}
             </div>
             <p
               className={clsx(
-                'text-sm font-medium',
-                isValidDrag ? 'text-primary' : 'text-status-error'
+                'text-sm font-mono font-semibold uppercase tracking-wider',
+                isValidDrag ? 'text-accent-dark' : 'text-status-error'
               )}
             >
               {isValidDrag ? 'Drop files here' : 'Invalid file type'}
             </p>
-            <p className="text-xs text-text-muted mt-1">
+            <p className="text-xs text-text-muted mt-1 font-mono">
               {isValidDrag
                 ? 'File paths will be inserted at cursor'
                 : 'This file type is not supported'}
@@ -131,21 +133,20 @@ export function GenericDropZone({
         <div
           className={clsx(
             'absolute inset-0 z-50 flex items-center justify-center',
-            'bg-background-primary/80 backdrop-blur-sm',
-            'border-2 border-dashed rounded-lg',
-            isValidDrag ? 'border-primary' : 'border-status-error'
+            'bg-background-primary border-3 border-dashed rounded-brutal',
+            isValidDrag ? 'border-accent' : 'border-status-error'
           )}
         >
           <div className="text-center">
             <FolderInput
               className={clsx(
                 'w-8 h-8 mx-auto mb-2',
-                isValidDrag ? 'text-primary' : 'text-status-error'
+                isValidDrag ? 'text-accent' : 'text-status-error'
               )}
             />
             <p
               className={clsx(
-                'text-sm font-medium',
+                'text-sm font-mono font-semibold',
                 isValidDrag ? 'text-text-primary' : 'text-status-error'
               )}
             >

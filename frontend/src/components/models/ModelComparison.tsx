@@ -47,7 +47,7 @@ const COMPARISON_METRICS: ComparisonMetric[] = [
 ]
 
 function formatValue(value: number | null | undefined, format: string): string {
-  if (value === null || value === undefined) return '—'
+  if (value === null || value === undefined) return '\u2014'
   switch (format) {
     case 'percent':
       return `${value.toFixed(1)}%`
@@ -103,7 +103,7 @@ function ComparisonIndicator({ value, bestValue, metric }: {
 
   if (isBest) {
     return (
-      <div className="flex items-center gap-1 text-status-success text-xs">
+      <div className="flex items-center gap-1 text-status-success font-mono text-xs uppercase tracking-widest">
         <CheckCircle className="w-3 h-3" />
         Best
       </div>
@@ -115,7 +115,7 @@ function ComparisonIndicator({ value, bestValue, metric }: {
   const color = isWorse ? 'text-status-error' : 'text-status-warning'
 
   return (
-    <div className={clsx('flex items-center gap-1 text-xs', color)}>
+    <div className={clsx('flex items-center gap-1 font-mono text-xs', color)}>
       <Icon className="w-3 h-3" />
       {diffPercent > 0.1 ? `${diffPercent.toFixed(1)}%` : '<0.1%'}
     </div>
@@ -179,8 +179,8 @@ export function ModelComparison({ modelIds, onBack, onAddModel, onRemoveModel }:
   if (modelIds.length === 0) {
     return (
       <div className="h-full flex flex-col items-center justify-center">
-        <BarChart3 className="w-16 h-16 text-text-muted mb-4 opacity-30" />
-        <h2 className="text-xl font-medium text-text-primary mb-2">No Models Selected</h2>
+        <BarChart3 className="w-16 h-16 text-text-muted mb-4" />
+        <h2 className="font-brand text-2xl text-text-primary mb-2">No Models Selected</h2>
         <p className="text-text-muted mb-6">Select 2-3 models to compare</p>
         <button onClick={onBack} className="btn-primary">
           <ArrowLeft className="w-4 h-4 mr-2" />
@@ -193,15 +193,15 @@ export function ModelComparison({ modelIds, onBack, onAddModel, onRemoveModel }:
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="p-6 border-b border-border-subtle">
+      <div className="p-6 border-b border-border">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-4">
-            <button onClick={onBack} className="p-2 rounded-lg hover:bg-background-tertiary text-text-muted">
+            <button onClick={onBack} className="btn-icon flex items-center justify-center">
               <ArrowLeft className="w-5 h-5" />
             </button>
             <div>
-              <h1 className="text-2xl font-semibold text-text-primary">Model Comparison</h1>
-              <p className="text-sm text-text-muted mt-1">
+              <h1 className="font-brand text-3xl text-text-primary">Model Comparison</h1>
+              <p className="font-mono text-xs uppercase tracking-widest text-text-muted mt-1">
                 Comparing {modelIds.length} model{modelIds.length !== 1 ? 's' : ''}
               </p>
             </div>
@@ -227,10 +227,10 @@ export function ModelComparison({ modelIds, onBack, onAddModel, onRemoveModel }:
               key={value}
               onClick={() => setActiveCategory(value as typeof activeCategory)}
               className={clsx(
-                'flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition-colors',
+                'flex items-center gap-2 px-4 py-2 font-mono text-xs uppercase tracking-widest transition-colors border-brutal rounded-brutal',
                 activeCategory === value
-                  ? 'bg-primary text-white'
-                  : 'bg-background-tertiary text-text-muted hover:text-text-primary'
+                  ? 'bg-accent text-white border-border shadow-brutal-sm'
+                  : 'bg-background-card text-text-muted border-border-subtle hover:text-text-primary hover:border-border'
               )}
             >
               <Icon className="w-4 h-4" />
@@ -244,7 +244,7 @@ export function ModelComparison({ modelIds, onBack, onAddModel, onRemoveModel }:
       <div className="flex-1 overflow-auto p-6">
         {isLoading ? (
           <div className="flex items-center justify-center h-64">
-            <Loader2 className="w-8 h-8 text-primary animate-spin" />
+            <Loader2 className="w-8 h-8 text-accent animate-spin" />
           </div>
         ) : error ? (
           <div className="flex flex-col items-center justify-center h-64">
@@ -252,30 +252,30 @@ export function ModelComparison({ modelIds, onBack, onAddModel, onRemoveModel }:
             <p className="text-text-muted">{error}</p>
           </div>
         ) : (
-          <div className="card-elevated overflow-hidden">
+          <div className="card card-elevated overflow-hidden">
             <table className="w-full">
-              <thead className="bg-background-tertiary">
-                <tr>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-text-muted w-48">Metric</th>
+              <thead>
+                <tr className="bg-background-secondary border-b border-border">
+                  <th className="px-4 py-3 text-left font-mono text-xs uppercase tracking-widest text-text-muted w-48">Metric</th>
                   {modelIds.map(modelId => {
                     const profile = profiles[modelId]
                     return (
-                      <th key={modelId} className="px-4 py-3 text-center relative">
+                      <th key={modelId} className="px-4 py-3 text-center relative border-l border-border">
                         {profile && (
                           <button
                             onClick={() => onRemoveModel(modelId)}
-                            className="absolute top-2 right-2 p-1 rounded hover:bg-background-secondary text-text-muted hover:text-text-primary"
+                            className="absolute top-2 right-2 btn-icon w-6 h-6 flex items-center justify-center"
                           >
-                            <X className="w-4 h-4" />
+                            <X className="w-3 h-3" />
                           </button>
                         )}
                         <div className="pr-6">
-                          <div className="font-medium text-text-primary">
+                          <div className="font-brand text-lg text-text-primary">
                             {profile?.display_name || modelId}
                           </div>
                           {profile && (
-                            <div className="text-xs text-text-muted mt-1">
-                              {profile.training_strategy.toUpperCase()} • {profile.base_model.split('/').pop()}
+                            <div className="font-mono text-xs text-text-muted mt-1">
+                              {profile.training_strategy.toUpperCase()} | {profile.base_model.split('/').pop()}
                             </div>
                           )}
                         </div>
@@ -286,10 +286,10 @@ export function ModelComparison({ modelIds, onBack, onAddModel, onRemoveModel }:
               </thead>
               <tbody className="divide-y divide-border-subtle">
                 {filteredMetrics.map(metric => (
-                  <tr key={metric.key} className="hover:bg-background-tertiary/50">
+                  <tr key={metric.key} className="hover:bg-background-secondary transition-colors">
                     <td className="px-4 py-3">
-                      <div className="font-medium text-text-primary">{metric.label}</div>
-                      <div className="text-xs text-text-muted capitalize">{metric.category}</div>
+                      <div className="font-brand text-text-primary">{metric.label}</div>
+                      <div className="font-mono text-xs uppercase tracking-widest text-text-muted">{metric.category}</div>
                     </td>
                     {modelIds.map(modelId => {
                       const profile = profiles[modelId]
@@ -297,9 +297,9 @@ export function ModelComparison({ modelIds, onBack, onAddModel, onRemoveModel }:
                       const isBest = value === bestValues[metric.key]
 
                       return (
-                        <td key={modelId} className="px-4 py-3 text-center">
+                        <td key={modelId} className="px-4 py-3 text-center border-l border-border-subtle">
                           <div className={clsx(
-                            'text-lg font-semibold',
+                            'font-brand text-xl',
                             isBest ? 'text-status-success' : 'text-text-primary'
                           )}>
                             {formatValue(value, metric.format)}
@@ -316,8 +316,8 @@ export function ModelComparison({ modelIds, onBack, onAddModel, onRemoveModel }:
                 ))}
 
                 {/* Benchmark Results Section */}
-                <tr className="bg-background-tertiary">
-                  <td colSpan={modelIds.length + 1} className="px-4 py-2 text-sm font-semibold text-text-primary">
+                <tr className="bg-background-secondary">
+                  <td colSpan={modelIds.length + 1} className="px-4 py-2 font-mono text-xs uppercase tracking-widest text-text-primary">
                     Benchmark Breakdown
                   </td>
                 </tr>
@@ -329,10 +329,10 @@ export function ModelComparison({ modelIds, onBack, onAddModel, onRemoveModel }:
                   })
 
                   return Array.from(benchmarkNames).map(benchName => (
-                    <tr key={benchName} className="hover:bg-background-tertiary/50">
+                    <tr key={benchName} className="hover:bg-background-secondary transition-colors">
                       <td className="px-4 py-3">
-                        <div className="font-medium text-text-primary">{benchName}</div>
-                        <div className="text-xs text-text-muted">Benchmark</div>
+                        <div className="font-brand text-text-primary">{benchName}</div>
+                        <div className="font-mono text-xs uppercase tracking-widest text-text-muted">Benchmark</div>
                       </td>
                       {modelIds.map(modelId => {
                         const profile = profiles[modelId]
@@ -345,21 +345,21 @@ export function ModelComparison({ modelIds, onBack, onAddModel, onRemoveModel }:
                         const isBest = bench?.score === bestBenchScore
 
                         return (
-                          <td key={modelId} className="px-4 py-3 text-center">
+                          <td key={modelId} className="px-4 py-3 text-center border-l border-border-subtle">
                             {bench ? (
                               <>
                                 <div className={clsx(
-                                  'text-lg font-semibold',
+                                  'font-brand text-xl',
                                   isBest ? 'text-status-success' : 'text-text-primary'
                                 )}>
                                   {bench.score.toFixed(1)}%
                                 </div>
-                                <div className="text-xs text-text-muted">
+                                <div className="font-mono text-xs text-text-muted">
                                   {bench.passed}/{bench.total}
                                 </div>
                               </>
                             ) : (
-                              <span className="text-text-muted">—</span>
+                              <span className="text-text-muted">\u2014</span>
                             )}
                           </td>
                         )
@@ -369,8 +369,8 @@ export function ModelComparison({ modelIds, onBack, onAddModel, onRemoveModel }:
                 })()}
 
                 {/* Custom Eval Results Section */}
-                <tr className="bg-background-tertiary">
-                  <td colSpan={modelIds.length + 1} className="px-4 py-2 text-sm font-semibold text-text-primary">
+                <tr className="bg-background-secondary">
+                  <td colSpan={modelIds.length + 1} className="px-4 py-2 font-mono text-xs uppercase tracking-widest text-text-primary">
                     Custom Evaluations
                   </td>
                 </tr>
@@ -384,7 +384,7 @@ export function ModelComparison({ modelIds, onBack, onAddModel, onRemoveModel }:
                   if (evalSetIds.size === 0) {
                     return (
                       <tr>
-                        <td colSpan={modelIds.length + 1} className="px-4 py-6 text-center text-text-muted">
+                        <td colSpan={modelIds.length + 1} className="px-4 py-6 text-center text-text-muted font-mono text-xs">
                           No custom evaluations available
                         </td>
                       </tr>
@@ -392,10 +392,10 @@ export function ModelComparison({ modelIds, onBack, onAddModel, onRemoveModel }:
                   }
 
                   return Array.from(evalSetIds).map(evalId => (
-                    <tr key={evalId} className="hover:bg-background-tertiary/50">
+                    <tr key={evalId} className="hover:bg-background-secondary transition-colors">
                       <td className="px-4 py-3">
-                        <div className="font-medium text-text-primary">{evalId}</div>
-                        <div className="text-xs text-text-muted">Custom Eval</div>
+                        <div className="font-brand text-text-primary">{evalId}</div>
+                        <div className="font-mono text-xs uppercase tracking-widest text-text-muted">Custom Eval</div>
                       </td>
                       {modelIds.map(modelId => {
                         const profile = profiles[modelId]
@@ -408,21 +408,21 @@ export function ModelComparison({ modelIds, onBack, onAddModel, onRemoveModel }:
                         const isBest = eval_?.pass_rate === bestEvalScore
 
                         return (
-                          <td key={modelId} className="px-4 py-3 text-center">
+                          <td key={modelId} className="px-4 py-3 text-center border-l border-border-subtle">
                             {eval_ ? (
                               <>
                                 <div className={clsx(
-                                  'text-lg font-semibold',
+                                  'font-brand text-xl',
                                   isBest ? 'text-status-success' : 'text-text-primary'
                                 )}>
                                   {eval_.pass_rate.toFixed(1)}%
                                 </div>
-                                <div className="text-xs text-text-muted">
+                                <div className="font-mono text-xs text-text-muted">
                                   {eval_.passed}/{eval_.total}
                                 </div>
                               </>
                             ) : (
-                              <span className="text-text-muted">—</span>
+                              <span className="text-text-muted">\u2014</span>
                             )}
                           </td>
                         )

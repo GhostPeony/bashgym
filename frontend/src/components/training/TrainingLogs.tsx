@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Terminal, ChevronDown, ChevronUp, Trash2, Download } from 'lucide-react'
+import { ChevronDown, ChevronUp, Trash2, Download } from 'lucide-react'
 import { useTrainingStore, TrainingLog } from '../../stores'
 import { clsx } from 'clsx'
 
@@ -56,43 +56,42 @@ export function TrainingLogs({ maxHeight = 300, defaultExpanded = true }: Traini
   }
 
   return (
-    <div className="card-elevated">
-      {/* Header */}
-      <div
-        className="flex items-center justify-between p-3 cursor-pointer hover:bg-background-tertiary transition-colors"
-        onClick={() => setExpanded(!expanded)}
-      >
-        <div className="flex items-center gap-2">
-          <Terminal className="w-4 h-4 text-text-muted" />
-          <h3 className="text-sm font-medium text-text-primary">Training Logs</h3>
-          <span className="px-2 py-0.5 text-xs bg-background-tertiary text-text-muted rounded-full">
-            {logs.length}
-          </span>
+    <div className="terminal-chrome relative">
+      {/* Terminal Header */}
+      <div className="terminal-header">
+        <div className="flex items-center gap-2 flex-1 cursor-pointer" onClick={() => setExpanded(!expanded)}>
+          <div className="terminal-dot terminal-dot-red" />
+          <div className="terminal-dot terminal-dot-yellow" />
+          <div className="terminal-dot terminal-dot-green" />
+          <span className="font-mono text-xs uppercase tracking-widest text-text-muted ml-2">Training Logs</span>
+          <span className="tag ml-2"><span>{logs.length}</span></span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           {expanded && logs.length > 0 && (
             <>
               <button
                 onClick={(e) => { e.stopPropagation(); handleDownload() }}
-                className="p-1.5 hover:bg-background-elevated rounded transition-colors"
+                className="btn-ghost p-1.5"
                 title="Download logs"
               >
                 <Download className="w-4 h-4 text-text-muted" />
               </button>
               <button
                 onClick={(e) => { e.stopPropagation(); clearLogs() }}
-                className="p-1.5 hover:bg-background-elevated rounded transition-colors"
+                className="btn-ghost p-1.5"
                 title="Clear logs"
               >
                 <Trash2 className="w-4 h-4 text-text-muted" />
               </button>
             </>
           )}
-          {expanded ? (
-            <ChevronUp className="w-4 h-4 text-text-muted" />
-          ) : (
-            <ChevronDown className="w-4 h-4 text-text-muted" />
-          )}
+          <button onClick={() => setExpanded(!expanded)} className="btn-ghost p-1.5">
+            {expanded ? (
+              <ChevronUp className="w-4 h-4 text-text-muted" />
+            ) : (
+              <ChevronDown className="w-4 h-4 text-text-muted" />
+            )}
+          </button>
         </div>
       </div>
 
@@ -101,12 +100,12 @@ export function TrainingLogs({ maxHeight = 300, defaultExpanded = true }: Traini
         <div
           ref={containerRef}
           onScroll={handleScroll}
-          className="bg-background-primary border-t border-border overflow-auto font-mono text-xs"
+          className="bg-background-terminal overflow-auto font-mono text-xs"
           style={{ maxHeight }}
         >
           {logs.length === 0 ? (
             <div className="p-4 text-center text-text-muted">
-              No training logs yet. Logs will appear here when training starts.
+              <span className="terminal-prompt">$</span> No training logs yet. Logs will appear here when training starts.
             </div>
           ) : (
             <div className="p-2 space-y-0.5">
@@ -114,13 +113,14 @@ export function TrainingLogs({ maxHeight = 300, defaultExpanded = true }: Traini
                 <div
                   key={index}
                   className={clsx(
-                    'py-0.5 px-2 rounded hover:bg-background-tertiary',
+                    'py-0.5 px-2',
                     getLevelColor(log.level)
                   )}
                 >
                   <span className="text-text-muted mr-2">
                     {new Date(log.timestamp).toLocaleTimeString()}
                   </span>
+                  <span className="terminal-prompt mr-1">{'>'}</span>
                   <span className="whitespace-pre-wrap break-all">{log.message}</span>
                 </div>
               ))}
@@ -133,13 +133,13 @@ export function TrainingLogs({ maxHeight = 300, defaultExpanded = true }: Traini
       {/* Auto-scroll indicator */}
       {expanded && logs.length > 0 && !autoScroll && (
         <div
-          className="absolute bottom-2 right-4 px-2 py-1 bg-primary text-white text-xs rounded cursor-pointer"
+          className="absolute bottom-2 right-4 tag cursor-pointer"
           onClick={() => {
             setAutoScroll(true)
             logsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
           }}
         >
-          Scroll to bottom
+          <span>Scroll to bottom</span>
         </div>
       )}
     </div>

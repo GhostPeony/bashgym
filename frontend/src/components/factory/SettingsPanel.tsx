@@ -45,13 +45,14 @@ export function SettingsPanel({ config, onConfigChange }: SettingsPanelProps) {
       {/* 2x2 Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Privacy Card - top-left */}
-        <div className="card-elevated p-4">
+        <div className="card p-4">
+          <div className="card-accent" />
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
-              <Shield className="w-5 h-5 text-primary" />
+              <Shield className="w-5 h-5 text-accent" />
               <div>
-                <h3 className="text-sm font-medium text-text-primary">Privacy (Safe Synthesizer)</h3>
-                <p className="text-xs text-text-muted">Differential privacy for PII protection</p>
+                <h3 className="font-brand text-lg text-text-primary">Privacy (Safe Synthesizer)</h3>
+                <p className="text-xs text-text-muted font-mono">Differential privacy for PII protection</p>
               </div>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
@@ -64,13 +65,13 @@ export function SettingsPanel({ config, onConfigChange }: SettingsPanelProps) {
                 })}
                 className="sr-only peer"
               />
-              <div className="w-11 h-6 bg-background-tertiary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+              <div className="w-11 h-6 bg-background-secondary border-brutal border-border rounded-brutal peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-brutal after:border-border after:rounded-brutal after:h-5 after:w-5 after:transition-all peer-checked:bg-accent"></div>
             </label>
           </div>
 
           <div className={clsx('space-y-3', !config.privacy.enabled && 'opacity-50 pointer-events-none')}>
             <div>
-              <label className="block text-xs font-medium text-text-primary mb-1.5">Privacy Budget (Epsilon)</label>
+              <label className="block font-mono text-xs uppercase tracking-widest text-text-primary mb-1.5">Privacy Budget (Epsilon)</label>
               <div className="flex items-center gap-3">
                 <input
                   type="range"
@@ -82,28 +83,28 @@ export function SettingsPanel({ config, onConfigChange }: SettingsPanelProps) {
                     ...config,
                     privacy: { ...config.privacy, epsilon: parseFloat(e.target.value) }
                   })}
-                  className="flex-1"
+                  className="flex-1 accent-accent"
                 />
-                <span className="text-xs font-mono text-text-primary w-10 text-center">{config.privacy.epsilon}</span>
+                <span className="text-xs font-mono text-text-primary w-10 text-center border-brutal border-border rounded-brutal px-1 py-0.5 bg-background-secondary">{config.privacy.epsilon}</span>
               </div>
-              <p className="text-[10px] text-text-muted mt-0.5">Lower = more privacy. Recommended: 4-12</p>
+              <p className="text-[10px] text-text-muted mt-0.5 font-mono">Lower = more privacy. Recommended: 4-12</p>
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-text-primary mb-1.5">PII Types to Detect</label>
+              <label className="block font-mono text-xs uppercase tracking-widest text-text-primary mb-1.5">PII Types to Detect</label>
               <div className="flex flex-wrap gap-1.5">
                 {PII_TYPES.map(type => (
                   <button
                     key={type}
                     onClick={() => togglePiiType(type)}
                     className={clsx(
-                      'px-2 py-1 rounded-full text-xs transition-colors',
+                      'tag transition-colors cursor-pointer',
                       config.privacy.pii_types.includes(type)
-                        ? 'bg-primary text-white'
-                        : 'bg-background-tertiary text-text-secondary hover:text-text-primary'
+                        ? 'bg-accent text-white'
+                        : ''
                     )}
                   >
-                    {type.replace('_', ' ')}
+                    <span>{type.replace('_', ' ')}</span>
                   </button>
                 ))}
               </div>
@@ -112,13 +113,14 @@ export function SettingsPanel({ config, onConfigChange }: SettingsPanelProps) {
         </div>
 
         {/* Safety Card - top-right */}
-        <div className="card-elevated p-4">
+        <div className="card p-4">
+          <div className="card-accent" />
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
-              <ShieldAlert className="w-5 h-5 text-primary" />
+              <ShieldAlert className="w-5 h-5 text-accent" />
               <div>
-                <h3 className="text-sm font-medium text-text-primary">Safety Configuration</h3>
-                <p className="text-xs text-text-muted">Control risk levels and blocked patterns</p>
+                <h3 className="font-brand text-lg text-text-primary">Safety Configuration</h3>
+                <p className="text-xs text-text-muted font-mono">Control risk levels and blocked patterns</p>
               </div>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
@@ -131,7 +133,7 @@ export function SettingsPanel({ config, onConfigChange }: SettingsPanelProps) {
                 })}
                 className="sr-only peer"
               />
-              <div className="w-11 h-6 bg-background-tertiary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+              <div className="w-11 h-6 bg-background-secondary border-brutal border-border rounded-brutal peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-brutal after:border-border after:rounded-brutal after:h-5 after:w-5 after:transition-all peer-checked:bg-accent"></div>
             </label>
           </div>
 
@@ -145,11 +147,11 @@ export function SettingsPanel({ config, onConfigChange }: SettingsPanelProps) {
                     ...config,
                     safety: { ...config.safety, block_dangerous_commands: e.target.checked }
                   })}
-                  className="rounded"
+                  className="rounded-brutal"
                 />
                 <div>
-                  <span className="text-xs font-medium text-text-primary">Block Dangerous Commands</span>
-                  <p className="text-[10px] text-text-muted">Prevent rm -rf, sudo, etc.</p>
+                  <span className="font-mono text-xs font-semibold text-text-primary">Block Dangerous Commands</span>
+                  <p className="text-[10px] text-text-muted font-mono">Prevent rm -rf, sudo, etc.</p>
                 </div>
               </label>
 
@@ -161,17 +163,17 @@ export function SettingsPanel({ config, onConfigChange }: SettingsPanelProps) {
                     ...config,
                     safety: { ...config.safety, require_confirmation_for_high_risk: e.target.checked }
                   })}
-                  className="rounded"
+                  className="rounded-brutal"
                 />
                 <div>
-                  <span className="text-xs font-medium text-text-primary">Require High-Risk Confirmation</span>
-                  <p className="text-[10px] text-text-muted">Flag high-risk outputs for review</p>
+                  <span className="font-mono text-xs font-semibold text-text-primary">Require High-Risk Confirmation</span>
+                  <p className="text-[10px] text-text-muted font-mono">Flag high-risk outputs for review</p>
                 </div>
               </label>
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-text-primary mb-1.5">Max Risk Level</label>
+              <label className="block font-mono text-xs uppercase tracking-widest text-text-primary mb-1.5">Max Risk Level</label>
               <div className="flex gap-2">
                 {RISK_LEVELS.map(level => (
                   <button
@@ -181,12 +183,12 @@ export function SettingsPanel({ config, onConfigChange }: SettingsPanelProps) {
                       safety: { ...config.safety, max_risk_level: level.id as 'normal' | 'elevated' | 'high' }
                     })}
                     className={clsx(
-                      'flex-1 py-1.5 px-3 rounded-lg text-xs font-medium transition-colors',
+                      'flex-1 py-1.5 px-3 rounded-brutal text-xs font-mono font-semibold uppercase tracking-widest transition-all border-brutal',
                       config.safety.max_risk_level === level.id
-                        ? level.id === 'normal' ? 'bg-status-success text-white' :
-                          level.id === 'elevated' ? 'bg-status-warning text-white' :
-                          'bg-status-error text-white'
-                        : 'bg-background-tertiary text-text-secondary hover:text-text-primary'
+                        ? level.id === 'normal' ? 'bg-status-success text-white border-status-success shadow-brutal-sm' :
+                          level.id === 'elevated' ? 'bg-status-warning text-white border-status-warning shadow-brutal-sm' :
+                          'bg-status-error text-white border-status-error shadow-brutal-sm'
+                        : 'bg-background-secondary text-text-secondary border-border hover:text-text-primary'
                     )}
                   >
                     {level.label}
@@ -196,7 +198,7 @@ export function SettingsPanel({ config, onConfigChange }: SettingsPanelProps) {
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-text-primary mb-1.5">Blocked Patterns</label>
+              <label className="block font-mono text-xs uppercase tracking-widest text-text-primary mb-1.5">Blocked Patterns</label>
               <div className="space-y-1.5">
                 {config.safety.blocked_patterns.map((pattern, idx) => (
                   <div key={idx} className="flex items-center gap-1.5">
@@ -222,7 +224,7 @@ export function SettingsPanel({ config, onConfigChange }: SettingsPanelProps) {
                           safety: { ...config.safety, blocked_patterns: updated }
                         })
                       }}
-                      className="p-1 text-text-muted hover:text-status-error"
+                      className="btn-icon w-7 h-7 flex items-center justify-center text-text-muted hover:text-status-error"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
@@ -230,7 +232,7 @@ export function SettingsPanel({ config, onConfigChange }: SettingsPanelProps) {
                 ))}
                 <button
                   onClick={addBlockedPattern}
-                  className="text-xs text-primary hover:underline"
+                  className="font-mono text-xs uppercase tracking-widest text-accent-dark hover:underline"
                 >
                   + Add pattern
                 </button>
@@ -240,13 +242,14 @@ export function SettingsPanel({ config, onConfigChange }: SettingsPanelProps) {
         </div>
 
         {/* Prompt Optimization Card - bottom-left */}
-        <div className="card-elevated p-4">
+        <div className="card p-4">
+          <div className="card-accent" />
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-primary" />
+              <Sparkles className="w-5 h-5 text-accent" />
               <div>
-                <h3 className="text-sm font-medium text-text-primary">Prompt Optimization (MIPROv2)</h3>
-                <p className="text-xs text-text-muted">Auto-optimize prompts before synthesis</p>
+                <h3 className="font-brand text-lg text-text-primary">Prompt Optimization (MIPROv2)</h3>
+                <p className="text-xs text-text-muted font-mono">Auto-optimize prompts before synthesis</p>
               </div>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
@@ -259,13 +262,13 @@ export function SettingsPanel({ config, onConfigChange }: SettingsPanelProps) {
                 })}
                 className="sr-only peer"
               />
-              <div className="w-11 h-6 bg-background-tertiary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+              <div className="w-11 h-6 bg-background-secondary border-brutal border-border rounded-brutal peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-brutal after:border-border after:rounded-brutal after:h-5 after:w-5 after:transition-all peer-checked:bg-accent"></div>
             </label>
           </div>
 
           <div className={clsx('space-y-3', !config.prompt_optimization.enabled && 'opacity-50 pointer-events-none')}>
             <div>
-              <label className="block text-xs font-medium text-text-primary mb-1.5">Intensity</label>
+              <label className="block font-mono text-xs uppercase tracking-widest text-text-primary mb-1.5">Intensity</label>
               <div className="flex gap-2">
                 {['light', 'medium', 'heavy'].map(intensity => (
                   <button
@@ -275,10 +278,10 @@ export function SettingsPanel({ config, onConfigChange }: SettingsPanelProps) {
                       prompt_optimization: { ...config.prompt_optimization, intensity }
                     })}
                     className={clsx(
-                      'flex-1 py-1.5 px-3 rounded-lg text-xs font-medium transition-colors',
+                      'flex-1 py-1.5 px-3 rounded-brutal text-xs font-mono font-semibold uppercase tracking-widest transition-all border-brutal',
                       config.prompt_optimization.intensity === intensity
-                        ? 'bg-primary text-white'
-                        : 'bg-background-tertiary text-text-secondary hover:text-text-primary'
+                        ? 'bg-accent-light text-accent-dark border-border shadow-brutal-sm'
+                        : 'bg-background-secondary text-text-secondary border-border hover:text-text-primary'
                     )}
                   >
                     {intensity.charAt(0).toUpperCase() + intensity.slice(1)}
@@ -288,7 +291,7 @@ export function SettingsPanel({ config, onConfigChange }: SettingsPanelProps) {
             </div>
 
             <div className="flex items-center justify-between">
-              <label className="text-xs font-medium text-text-primary">Max Demos</label>
+              <label className="font-mono text-xs uppercase tracking-widest text-text-primary">Max Demos</label>
               <input
                 type="number"
                 min="1"
@@ -298,12 +301,12 @@ export function SettingsPanel({ config, onConfigChange }: SettingsPanelProps) {
                   ...config,
                   prompt_optimization: { ...config.prompt_optimization, max_demos: parseInt(e.target.value) }
                 })}
-                className="input w-20 text-xs text-center"
+                className="input w-20 text-xs text-center font-mono"
               />
             </div>
 
             <div className="flex items-center justify-between">
-              <label className="text-xs font-medium text-text-primary">Stop Threshold</label>
+              <label className="font-mono text-xs uppercase tracking-widest text-text-primary">Stop Threshold</label>
               <input
                 type="number"
                 min="0"
@@ -314,7 +317,7 @@ export function SettingsPanel({ config, onConfigChange }: SettingsPanelProps) {
                   ...config,
                   prompt_optimization: { ...config.prompt_optimization, metric_threshold: parseFloat(e.target.value) }
                 })}
-                className="input w-20 text-xs text-center"
+                className="input w-20 text-xs text-center font-mono"
               />
             </div>
           </div>
@@ -325,12 +328,12 @@ export function SettingsPanel({ config, onConfigChange }: SettingsPanelProps) {
       </div>
 
       {/* Safety Best Practices - full width below */}
-      <div className="card-elevated p-4 bg-status-warning/5 border-status-warning/20">
+      <div className="card p-4 border-status-warning">
         <div className="flex gap-3">
           <AlertTriangle className="w-5 h-5 text-status-warning flex-shrink-0" />
-          <div className="text-sm">
-            <p className="font-medium text-text-primary mb-1">Safety Best Practices</p>
-            <ul className="text-text-secondary space-y-1 list-disc list-inside text-xs">
+          <div>
+            <p className="font-brand text-lg text-text-primary mb-1">Safety Best Practices</p>
+            <ul className="text-text-secondary space-y-1 list-disc list-inside text-xs font-mono">
               <li>Mark columns that generate commands as "elevated" or "high" risk</li>
               <li>Include negative examples to train verifiers</li>
               <li>Use blocked patterns to prevent dangerous command synthesis</li>
@@ -396,13 +399,14 @@ function CLICommandCard({ config }: { config: FactoryConfig }) {
   }
 
   return (
-    <div className="card-elevated p-4">
+    <div className="card p-4">
+      <div className="card-accent" />
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <Code className="w-5 h-5 text-primary" />
+          <Code className="w-5 h-5 text-accent" />
           <div>
-            <h3 className="text-sm font-medium text-text-primary">CLI Command</h3>
-            <p className="text-xs text-text-muted">Run from command line</p>
+            <h3 className="font-brand text-lg text-text-primary">CLI Command</h3>
+            <p className="text-xs text-text-muted font-mono">Run from command line</p>
           </div>
         </div>
         <button
@@ -422,11 +426,19 @@ function CLICommandCard({ config }: { config: FactoryConfig }) {
           )}
         </button>
       </div>
-      <pre className="bg-background-tertiary p-3 rounded-lg overflow-x-auto text-xs text-text-primary font-mono">
-        {command}
-      </pre>
-      <p className="text-[10px] text-text-muted mt-2">
-        Export seeds to JSON first. Use <code className="px-1 py-0.5 bg-background-tertiary rounded">--help</code> for all options.
+      <div className="terminal-chrome">
+        <div className="terminal-header">
+          <div className="terminal-dot terminal-dot-red" />
+          <div className="terminal-dot terminal-dot-yellow" />
+          <div className="terminal-dot terminal-dot-green" />
+          <span className="font-mono text-xs text-text-muted ml-2">command</span>
+        </div>
+        <pre className="text-xs text-text-primary font-mono p-3 overflow-x-auto">
+          <span className="terminal-prompt">$</span> {command}
+        </pre>
+      </div>
+      <p className="text-[10px] text-text-muted mt-2 font-mono">
+        Export seeds to JSON first. Use <code className="px-1 py-0.5 border-brutal border-border rounded-brutal bg-background-secondary">--help</code> for all options.
       </p>
     </div>
   )

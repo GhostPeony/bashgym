@@ -112,17 +112,17 @@ const DEFAULT_RULES: GuardrailRule[] = [
 const CATEGORY_INFO = {
   content: { label: 'Content Safety', icon: ShieldAlert, color: 'text-status-error' },
   injection: { label: 'Injection Prevention', icon: Lock, color: 'text-status-warning' },
-  topic: { label: 'Topic Control', icon: MessageSquare, color: 'text-primary' },
+  topic: { label: 'Topic Control', icon: MessageSquare, color: 'text-accent' },
   pii: { label: 'PII Protection', icon: Eye, color: 'text-status-info' },
   custom: { label: 'Custom Rules', icon: Code, color: 'text-text-secondary' }
 }
 
 const ACTION_COLORS = {
-  block: 'bg-status-error/20 text-status-error',
-  warn: 'bg-status-warning/20 text-status-warning',
-  log: 'bg-status-info/20 text-status-info',
-  modify: 'bg-primary/20 text-primary',
-  allow: 'bg-status-success/20 text-status-success'
+  block: 'bg-status-error/20 text-status-error border-brutal border-status-error',
+  warn: 'bg-status-warning/20 text-status-warning border-brutal border-status-warning',
+  log: 'bg-status-info/20 text-status-info border-brutal border-status-info',
+  modify: 'bg-accent-light text-accent-dark border-brutal border-accent',
+  allow: 'bg-status-success/20 text-status-success border-brutal border-status-success'
 }
 
 export function GuardrailsDashboard() {
@@ -367,14 +367,14 @@ export function GuardrailsDashboard() {
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="p-6 border-b border-border-subtle">
+      <div className="p-6 border-b-brutal border-border">
         <div className="flex items-center justify-between">
           <div>
             <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-semibold text-text-primary">Guardrails</h1>
+              <h1 className="font-brand text-3xl text-text-primary">Guardrails</h1>
               {isDefaultConfig && (
-                <span className="text-xs px-2 py-1 rounded-full bg-status-info/20 text-status-info">
-                  Default Configuration
+                <span className="tag">
+                  <span>Default Configuration</span>
                 </span>
               )}
             </div>
@@ -382,9 +382,9 @@ export function GuardrailsDashboard() {
               Configure input/output safety filters powered by NemoGuard
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-text-muted mr-2">
-              {enabledCount} of {rules.length} rules active
+          <div className="flex items-center gap-3">
+            <span className="font-mono text-xs uppercase tracking-widest text-text-muted mr-2">
+              {enabledCount} of {rules.length} active
             </span>
             <button
               onClick={handleSave}
@@ -398,7 +398,7 @@ export function GuardrailsDashboard() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 mt-6">
+        <div className="flex gap-2 mt-6">
           {[
             { id: 'rules' as const, label: 'Rules', icon: Shield },
             { id: 'colang' as const, label: 'Colang Config', icon: Code },
@@ -408,16 +408,16 @@ export function GuardrailsDashboard() {
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={clsx(
-                'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors',
+                'flex items-center gap-2 px-4 py-2 font-mono text-xs uppercase tracking-widest border-brutal rounded-brutal transition-press',
                 activeTab === tab.id
-                  ? 'bg-primary text-white'
-                  : 'text-text-secondary hover:text-text-primary hover:bg-background-tertiary'
+                  ? 'bg-accent text-white border-border shadow-brutal-sm'
+                  : 'bg-background-card text-text-secondary border-border-subtle hover:border-border hover-press'
               )}
             >
               <tab.icon className="w-4 h-4" />
               {tab.label}
               {tab.badge !== undefined && tab.badge > 0 && (
-                <span className="ml-1 px-1.5 py-0.5 text-xs rounded-full bg-white/20">
+                <span className="ml-1 px-1.5 py-0.5 text-xs border-brutal rounded-brutal bg-background-card text-text-primary">
                   {tab.badge}
                 </span>
               )}
@@ -431,11 +431,11 @@ export function GuardrailsDashboard() {
           <div className="grid grid-cols-3 gap-6">
             {/* Rules List */}
             <div className="col-span-2 space-y-4">
-              <div className="card-elevated">
-                <div className="flex items-center justify-between p-4 border-b border-border-subtle">
+              <div className="card border-brutal shadow-brutal-sm rounded-brutal bg-background-card">
+                <div className="flex items-center justify-between p-4 border-b-brutal border-border">
                   <div className="flex items-center gap-3">
-                    <Shield className="w-5 h-5 text-primary" />
-                    <h3 className="font-medium text-text-primary">Guardrail Rules</h3>
+                    <Shield className="w-5 h-5 text-accent" />
+                    <h3 className="font-brand text-xl text-text-primary">Guardrail Rules</h3>
                   </div>
                   <button onClick={addRule} className="btn-secondary text-sm flex items-center gap-1">
                     <Plus className="w-4 h-4" />
@@ -443,7 +443,7 @@ export function GuardrailsDashboard() {
                   </button>
                 </div>
 
-                <div className="divide-y divide-border-subtle">
+                <div className="divide-y divide-border">
                   {rules.map(rule => {
                     const CategoryIcon = CATEGORY_INFO[rule.category].icon
                     const isExpanded = expandedRule === rule.id
@@ -453,7 +453,7 @@ export function GuardrailsDashboard() {
                         <div className="flex items-center gap-3 p-4">
                           <button
                             onClick={() => setExpandedRule(isExpanded ? null : rule.id)}
-                            className="p-1 hover:bg-background-tertiary rounded"
+                            className="p-1 hover:bg-background-secondary rounded-brutal border-brutal border-transparent hover:border-border transition-press"
                           >
                             {isExpanded ? (
                               <ChevronDown className="w-4 h-4 text-text-muted" />
@@ -465,19 +465,19 @@ export function GuardrailsDashboard() {
                           <div className="flex-1">
                             <div className="flex items-center gap-2">
                               <span className="font-medium text-text-primary">{rule.name}</span>
-                              <span className="text-xs px-2 py-0.5 rounded-full bg-background-tertiary text-text-muted">
-                                {rule.type}
+                              <span className="tag">
+                                <span>{rule.type}</span>
                               </span>
                               <span className={clsx(
-                                'text-xs px-2 py-0.5 rounded-full',
-                                rule.config.action === 'block' ? 'bg-status-error/20 text-status-error' :
-                                rule.config.action === 'warn' ? 'bg-status-warning/20 text-status-warning' :
-                                'bg-status-info/20 text-status-info'
+                                'font-mono text-xs uppercase tracking-widest px-2 py-0.5 border-brutal rounded-brutal',
+                                rule.config.action === 'block' ? 'bg-status-error/20 text-status-error border-status-error' :
+                                rule.config.action === 'warn' ? 'bg-status-warning/20 text-status-warning border-status-warning' :
+                                'bg-status-info/20 text-status-info border-status-info'
                               )}>
                                 {rule.config.action}
                               </span>
                             </div>
-                            <p className="text-xs text-text-muted">{CATEGORY_INFO[rule.category].label}</p>
+                            <p className="text-xs text-text-muted font-mono">{CATEGORY_INFO[rule.category].label}</p>
                           </div>
                           <label className="relative inline-flex items-center cursor-pointer">
                             <input
@@ -486,11 +486,19 @@ export function GuardrailsDashboard() {
                               onChange={() => toggleRule(rule.id)}
                               className="sr-only peer"
                             />
-                            <div className="w-9 h-5 bg-background-tertiary rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+                            <div className={clsx(
+                              'w-10 h-5 border-brutal rounded-brutal transition-colors',
+                              rule.enabled ? 'bg-accent border-accent' : 'bg-background-tertiary border-border'
+                            )}>
+                              <div className={clsx(
+                                'absolute top-[3px] w-3.5 h-3.5 bg-white border-brutal border-border rounded-brutal transition-transform',
+                                rule.enabled ? 'translate-x-[22px]' : 'translate-x-[3px]'
+                              )} />
+                            </div>
                           </label>
                           <button
                             onClick={() => deleteRule(rule.id)}
-                            className="p-2 text-text-muted hover:text-status-error transition-colors"
+                            className="btn-icon w-8 h-8 flex items-center justify-center text-text-muted hover:text-status-error hover:border-status-error"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -498,10 +506,10 @@ export function GuardrailsDashboard() {
 
                         {isExpanded && (
                           <div className="px-4 pb-4 ml-12 space-y-4">
-                            <div className="p-4 bg-background-tertiary rounded-lg space-y-4">
+                            <div className="p-4 bg-background-secondary border-brutal border-border rounded-brutal space-y-4">
                               {/* Rule Name */}
                               <div>
-                                <label className="block text-xs font-medium text-text-secondary mb-1">Rule Name</label>
+                                <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Rule Name</label>
                                 <input
                                   type="text"
                                   value={rule.name}
@@ -513,7 +521,7 @@ export function GuardrailsDashboard() {
                               {/* Type and Action */}
                               <div className="grid grid-cols-3 gap-3">
                                 <div>
-                                  <label className="block text-xs font-medium text-text-secondary mb-1">Apply To</label>
+                                  <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Apply To</label>
                                   <select
                                     value={rule.type}
                                     onChange={(e) => updateRule(rule.id, { type: e.target.value as 'input' | 'output' | 'both' })}
@@ -525,7 +533,7 @@ export function GuardrailsDashboard() {
                                   </select>
                                 </div>
                                 <div>
-                                  <label className="block text-xs font-medium text-text-secondary mb-1">Category</label>
+                                  <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Category</label>
                                   <select
                                     value={rule.category}
                                     onChange={(e) => updateRule(rule.id, { category: e.target.value as GuardrailRule['category'] })}
@@ -537,7 +545,7 @@ export function GuardrailsDashboard() {
                                   </select>
                                 </div>
                                 <div>
-                                  <label className="block text-xs font-medium text-text-secondary mb-1">Action</label>
+                                  <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Action</label>
                                   <select
                                     value={rule.config.action}
                                     onChange={(e) => updateRule(rule.id, {
@@ -555,7 +563,7 @@ export function GuardrailsDashboard() {
                               {/* Patterns */}
                               {(rule.category === 'injection' || rule.category === 'custom' || rule.category === 'pii') && (
                                 <div>
-                                  <label className="block text-xs font-medium text-text-secondary mb-1">
+                                  <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">
                                     Patterns (one per line)
                                   </label>
                                   <textarea
@@ -573,7 +581,7 @@ export function GuardrailsDashboard() {
                               {/* Topics */}
                               {rule.category === 'topic' && (
                                 <div>
-                                  <label className="block text-xs font-medium text-text-secondary mb-1">
+                                  <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">
                                     Allowed Topics (comma-separated)
                                   </label>
                                   <input
@@ -591,7 +599,7 @@ export function GuardrailsDashboard() {
                               {/* Threshold */}
                               {rule.category === 'content' && (
                                 <div>
-                                  <label className="block text-xs font-medium text-text-secondary mb-1">
+                                  <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">
                                     Confidence Threshold
                                   </label>
                                   <div className="flex items-center gap-3">
@@ -606,7 +614,7 @@ export function GuardrailsDashboard() {
                                       })}
                                       className="flex-1"
                                     />
-                                    <span className="text-sm text-text-primary w-12 text-right">
+                                    <span className="font-brand text-xl text-text-primary w-14 text-right">
                                       {((rule.config.threshold || 0.8) * 100).toFixed(0)}%
                                     </span>
                                   </div>
@@ -624,8 +632,8 @@ export function GuardrailsDashboard() {
 
             {/* Test Panel */}
             <div className="space-y-4">
-              <div className="card-elevated p-4">
-                <h3 className="font-medium text-text-primary mb-4">Test Guardrails</h3>
+              <div className="card border-brutal shadow-brutal-sm rounded-brutal bg-background-card p-4">
+                <h3 className="font-brand text-xl text-text-primary mb-4">Test Guardrails</h3>
                 <textarea
                   value={testInput}
                   onChange={(e) => setTestInput(e.target.value)}
@@ -653,19 +661,19 @@ export function GuardrailsDashboard() {
               </div>
 
               {testResults && (
-                <div className="card-elevated p-4">
-                  <h3 className="font-medium text-text-primary mb-3">Test Results</h3>
+                <div className="card border-brutal shadow-brutal-sm rounded-brutal bg-background-card p-4">
+                  <h3 className="font-brand text-xl text-text-primary mb-3">Test Results</h3>
                   <div className="space-y-2">
                     {testResults.map(result => (
                       <div
                         key={result.rule_id}
                         className={clsx(
-                          'p-3 rounded-lg',
+                          'p-3 border-brutal rounded-brutal',
                           result.triggered
-                            ? result.action === 'block' ? 'bg-status-error/10' :
-                              result.action === 'warn' ? 'bg-status-warning/10' :
-                              'bg-status-info/10'
-                            : 'bg-status-success/10'
+                            ? result.action === 'block' ? 'bg-status-error/10 border-status-error' :
+                              result.action === 'warn' ? 'bg-status-warning/10 border-status-warning' :
+                              'bg-status-info/10 border-status-info'
+                            : 'bg-status-success/10 border-status-success'
                         )}
                       >
                         <div className="flex items-center gap-2 mb-1">
@@ -678,7 +686,7 @@ export function GuardrailsDashboard() {
                           )}
                           <span className="text-sm font-medium text-text-primary">{result.rule_name}</span>
                         </div>
-                        <p className="text-xs text-text-muted ml-6">{result.details}</p>
+                        <p className="text-xs text-text-muted ml-6 font-mono">{result.details}</p>
                       </div>
                     ))}
                   </div>
@@ -686,42 +694,48 @@ export function GuardrailsDashboard() {
               )}
 
               {/* Quick Stats */}
-              <div className="card-elevated p-4">
+              <div className="card card-accent border-brutal shadow-brutal-sm rounded-brutal bg-background-card p-4">
                 <div className="flex items-center justify-between mb-3">
-                  <h3 className="font-medium text-text-primary">Statistics</h3>
+                  <h3 className="font-brand text-xl text-text-primary">Statistics</h3>
                   <button
                     onClick={fetchStats}
                     disabled={isLoadingStats}
-                    className="p-1 hover:bg-background-tertiary rounded"
+                    className="btn-icon w-8 h-8 flex items-center justify-center"
                   >
                     <RefreshCw className={clsx('w-4 h-4 text-text-muted', isLoadingStats && 'animate-spin')} />
                   </button>
                 </div>
                 {stats ? (
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between p-2 bg-background-tertiary rounded">
-                      <span className="text-sm text-text-secondary">Total Events</span>
-                      <span className="text-sm text-text-primary font-medium">{stats.total_events}</span>
+                    <div className="flex items-center justify-between p-3 bg-background-secondary border-brutal border-border rounded-brutal">
+                      <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">Total Events</span>
+                      <span className="font-brand text-2xl text-text-primary">{stats.total_events}</span>
                     </div>
-                    <div className="flex items-center justify-between p-2 bg-background-tertiary rounded">
-                      <span className="text-sm text-text-secondary">Block Rate</span>
-                      <span className="text-sm text-status-error font-medium">
+                    <div className="flex items-center justify-between p-3 bg-background-secondary border-brutal border-border rounded-brutal">
+                      <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">Block Rate</span>
+                      <span className="font-brand text-2xl text-status-error">
                         {(stats.block_rate * 100).toFixed(1)}%
                       </span>
                     </div>
+
+                    <div className="section-divider" />
+
                     {Object.entries(stats.by_action).map(([action, count]) => (
-                      <div key={action} className="flex items-center justify-between p-2 bg-background-tertiary rounded">
+                      <div key={action} className="flex items-center justify-between p-3 bg-background-secondary border-brutal border-border rounded-brutal">
                         <div className="flex items-center gap-2">
-                          <span className={clsx('px-2 py-0.5 text-xs rounded', ACTION_COLORS[action as keyof typeof ACTION_COLORS] || 'bg-background-tertiary')}>
+                          <span className={clsx(
+                            'font-mono text-xs uppercase tracking-widest px-2 py-0.5 border-brutal rounded-brutal',
+                            ACTION_COLORS[action as keyof typeof ACTION_COLORS] || 'bg-background-tertiary border-border'
+                          )}>
                             {action}
                           </span>
                         </div>
-                        <span className="text-sm text-text-primary font-medium">{count}</span>
+                        <span className="font-brand text-xl text-text-primary">{count}</span>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <p className="text-sm text-text-muted">No statistics available yet</p>
+                  <p className="text-sm text-text-muted font-mono">No statistics available yet</p>
                 )}
               </div>
             </div>
@@ -729,18 +743,25 @@ export function GuardrailsDashboard() {
         )}
 
         {activeTab === 'colang' && (
-          <div className="card-elevated p-6">
+          <div className="card border-brutal shadow-brutal-sm rounded-brutal bg-background-card p-6">
             <div className="flex items-center gap-3 mb-4">
-              <Code className="w-5 h-5 text-primary" />
+              <Code className="w-5 h-5 text-accent" />
               <div>
-                <h3 className="font-medium text-text-primary">Colang Configuration</h3>
+                <h3 className="font-brand text-xl text-text-primary">Colang Configuration</h3>
                 <p className="text-sm text-text-muted">Advanced guardrail rules using NeMo Colang syntax</p>
               </div>
             </div>
-            <textarea
-              className="input w-full font-mono text-sm"
-              rows={20}
-              placeholder={`# Define user intents
+            <div className="terminal-chrome">
+              <div className="terminal-header">
+                <div className="terminal-dot terminal-dot-red" />
+                <div className="terminal-dot terminal-dot-yellow" />
+                <div className="terminal-dot terminal-dot-green" />
+                <span className="font-mono text-xs text-text-muted ml-2">colang.config</span>
+              </div>
+              <textarea
+                className="w-full font-mono text-sm bg-background-terminal text-green-400 p-4 border-none outline-none resize-y"
+                rows={18}
+                placeholder={`# Define user intents
 define user ask about coding
   "how do I write code"
   "help me program"
@@ -758,10 +779,11 @@ define flow
 define flow
   user ask off topic
   bot refuse off topic`}
-            />
+              />
+            </div>
             <div className="flex justify-end mt-4">
-              <button className="btn-primary">
-                <Save className="w-4 h-4 mr-2" />
+              <button className="btn-primary flex items-center gap-2">
+                <Save className="w-4 h-4" />
                 Save Colang Config
               </button>
             </div>
@@ -769,10 +791,10 @@ define flow
         )}
 
         {activeTab === 'logs' && (
-          <div className="card-elevated">
-            <div className="p-4 border-b border-border-subtle">
+          <div className="card border-brutal shadow-brutal-sm rounded-brutal bg-background-card">
+            <div className="p-4 border-b-brutal border-border">
               <div className="flex items-center justify-between">
-                <h3 className="font-medium text-text-primary">Activity Log</h3>
+                <h3 className="font-brand text-xl text-text-primary">Activity Log</h3>
                 <div className="flex items-center gap-2">
                   <select
                     value={eventFilter.action || ''}
@@ -810,45 +832,45 @@ define flow
 
             {events.length === 0 ? (
               <div className="p-12 text-center">
-                <FileText className="w-12 h-12 text-text-muted mx-auto mb-4 opacity-30" />
-                <h3 className="text-lg font-medium text-text-primary mb-2">No activity recorded yet</h3>
-                <p className="text-text-muted">Guardrail events will appear here in real-time</p>
+                <FileText className="w-12 h-12 text-text-muted mx-auto mb-4" />
+                <h3 className="font-brand text-xl text-text-primary mb-2">No activity recorded yet</h3>
+                <p className="text-text-muted text-sm">Guardrail events will appear here in real-time</p>
               </div>
             ) : (
-              <div className="divide-y divide-border-subtle max-h-[600px] overflow-y-auto">
+              <div className="divide-y divide-border max-h-[600px] overflow-y-auto">
                 {events.map((event, idx) => (
-                  <div key={`${event.timestamp}-${idx}`} className="p-4 hover:bg-background-tertiary">
+                  <div key={`${event.timestamp}-${idx}`} className="p-4 hover:bg-background-secondary transition-press">
                     <div className="flex items-start gap-3">
                       {event.action_taken === 'block' ? (
                         <ShieldX className="w-5 h-5 text-status-error mt-0.5" />
                       ) : event.action_taken === 'warn' ? (
                         <ShieldAlert className="w-5 h-5 text-status-warning mt-0.5" />
                       ) : event.action_taken === 'modify' ? (
-                        <Eye className="w-5 h-5 text-primary mt-0.5" />
+                        <Eye className="w-5 h-5 text-accent mt-0.5" />
                       ) : (
                         <ShieldCheck className="w-5 h-5 text-status-success mt-0.5" />
                       )}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
                           <span className={clsx(
-                            'px-2 py-0.5 text-xs rounded',
-                            ACTION_COLORS[event.action_taken as keyof typeof ACTION_COLORS] || 'bg-background-tertiary'
+                            'font-mono text-xs uppercase tracking-widest px-2 py-0.5 border-brutal rounded-brutal',
+                            ACTION_COLORS[event.action_taken as keyof typeof ACTION_COLORS] || 'bg-background-tertiary border-border'
                           )}>
                             {event.action_taken}
                           </span>
-                          <span className="text-xs px-2 py-0.5 rounded bg-background-tertiary text-text-muted">
-                            {event.check_type.replace(/_/g, ' ')}
+                          <span className="tag">
+                            <span>{event.check_type.replace(/_/g, ' ')}</span>
                           </span>
                           {event.model_source && (
-                            <span className="text-xs px-2 py-0.5 rounded bg-primary/20 text-primary">
-                              {event.model_source}
+                            <span className="tag">
+                              <span>{event.model_source}</span>
                             </span>
                           )}
                         </div>
                         <p className="text-sm text-text-primary mb-1 truncate">
                           {event.original_content}
                         </p>
-                        <div className="flex items-center gap-4 text-xs text-text-muted">
+                        <div className="flex items-center gap-4 font-mono text-xs text-text-muted">
                           <span>{event.location}</span>
                           <span>Confidence: {(event.confidence * 100).toFixed(0)}%</span>
                           <span>{new Date(event.timestamp).toLocaleString()}</span>

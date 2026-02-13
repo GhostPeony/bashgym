@@ -287,7 +287,7 @@ function CanvasViewInner({ onFocusPanel }: CanvasViewProps) {
     setEdges((eds) => addEdge({
       ...connection,
       animated: true,
-      style: { stroke: 'var(--color-primary)', strokeWidth: 2 }
+      style: { stroke: 'var(--accent)', strokeWidth: 2 }
     }, eds))
   }, [setEdges])
 
@@ -375,25 +375,25 @@ function CanvasViewInner({ onFocusPanel }: CanvasViewProps) {
           />
         )}
         <Controls
-          className="!bg-background-secondary !border-border-subtle !shadow-lg [&>button]:!bg-background-tertiary [&>button]:!border-border-subtle [&>button]:!text-text-primary [&>button:hover]:!bg-background-primary [&>button>svg]:!fill-text-primary"
+          className="!bg-background-card !border-brutal !border-border !shadow-brutal-sm [&>button]:!bg-background-card [&>button]:!border-brutal [&>button]:!border-border [&>button]:!text-text-primary [&>button:hover]:!bg-background-secondary [&>button>svg]:!fill-text-primary"
           showZoom
           showFitView
           showInteractive={false}
         />
         {showMiniMap && (
           <MiniMap
-            className="!bg-background-secondary !border-border-subtle"
+            className="!bg-background-card !border-brutal !border-border !shadow-brutal-sm"
             nodeColor={(node) => {
               const data = node.data as TerminalNodeData
-              if (data.attention === 'error') return 'var(--color-status-error)'
-              if (data.attention === 'success') return 'var(--color-status-success)'
-              if (data.status === 'running') return 'var(--color-primary)'
-              return 'var(--color-text-muted)'
+              if (data.attention === 'error') return 'var(--status-error)'
+              if (data.attention === 'success') return 'var(--status-success)'
+              if (data.status === 'running') return 'var(--accent)'
+              return 'var(--text-muted)'
             }}
             maskColor="rgba(0, 0, 0, 0.5)"
           />
         )}
-        <FlowPanel position="bottom-center" className="text-xs text-text-muted bg-background-secondary/80 px-2 py-1 rounded">
+        <FlowPanel position="bottom-center" className="text-xs font-mono text-text-muted bg-background-card border-brutal border-border shadow-brutal-sm px-2 py-1 rounded-brutal">
           Drag nodes to reposition
         </FlowPanel>
       </ReactFlow>
@@ -427,11 +427,13 @@ export function CanvasViewWrapper({ onFocusPanel }: CanvasViewProps) {
     return (
       <div className="h-full w-full flex items-center justify-center bg-background-primary">
         <div className="text-center">
-          <AlertCircle className="w-12 h-12 mx-auto mb-2 text-status-error" />
-          <p className="text-sm text-status-error">Failed to load canvas view</p>
+          <div className="w-16 h-16 mx-auto mb-3 border-brutal border-status-error rounded-brutal flex items-center justify-center bg-background-secondary">
+            <AlertCircle className="w-8 h-8 text-status-error" />
+          </div>
+          <p className="text-sm text-status-error font-mono">Failed to load canvas view</p>
           <button
             onClick={() => setHasError(false)}
-            className="mt-2 text-xs text-primary hover:underline"
+            className="btn-ghost mt-2 !text-xs font-mono text-accent"
           >
             Try again
           </button>

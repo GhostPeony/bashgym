@@ -38,18 +38,17 @@ function MenuItem({ icon, label, onClick, active, badge, primary }: MenuItemProp
     <button
       onClick={onClick}
       className={clsx(
-        'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-left',
+        'w-full flex items-center gap-3 px-3 py-2.5 rounded-brutal transition-colors text-left',
         active
-          ? 'bg-primary/10 text-primary'
-          : primary
-          ? 'text-text-primary hover:bg-background-tertiary'
-          : 'text-text-secondary hover:text-text-primary hover:bg-background-tertiary'
+          ? 'menu-item-active rounded-brutal'
+          : 'text-text-secondary hover:text-text-primary hover:bg-background-secondary',
+        primary && 'font-medium'
       )}
     >
       <span className="flex-shrink-0">{icon}</span>
       <span className={clsx('flex-1 text-sm', primary && 'font-medium')}>{label}</span>
       {badge !== undefined && (
-        <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-primary/20 text-primary">
+        <span className="font-mono text-xs border border-border bg-accent-light text-accent-dark px-2 py-0.5 rounded-brutal">
           {badge}
         </span>
       )}
@@ -61,7 +60,7 @@ function MenuSection({ title, children }: { title?: string; children: React.Reac
   return (
     <div className="mb-4">
       {title && (
-        <h3 className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-text-muted">
+        <h3 className="px-3 py-2 font-mono text-xs uppercase tracking-widest text-text-muted">
           {title}
         </h3>
       )}
@@ -97,8 +96,8 @@ function CollapsibleSection({ title, items, defaultExpanded = false }: Collapsib
       <button
         onClick={() => setIsExpanded(!isExpanded)}
         className={clsx(
-          'w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold uppercase tracking-wider transition-colors',
-          hasActiveItem ? 'text-primary' : 'text-text-muted hover:text-text-secondary'
+          'w-full flex items-center gap-2 px-3 py-2 font-mono text-xs uppercase tracking-widest transition-colors',
+          hasActiveItem ? 'text-accent-dark' : 'text-text-muted hover:text-text-secondary'
         )}
       >
         <ChevronRight className={clsx('w-3 h-3 transition-transform', isExpanded && 'rotate-90')} />
@@ -144,7 +143,7 @@ function SecondarySections() {
   ]
 
   return (
-    <div className="mb-4 pt-2 border-t border-border-subtle">
+    <div className="mb-4 pt-2 border-t border-border">
       <CollapsibleSection title="Library" items={libraryItems} defaultExpanded />
       <CollapsibleSection title="Tools" items={toolsItems} defaultExpanded />
       <CollapsibleSection title="Progress" items={progressItems} defaultExpanded />
@@ -198,21 +197,24 @@ export function Sidebar() {
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/20 z-40"
+        className="fixed inset-0 z-40"
+        style={{ backgroundColor: 'rgba(27, 32, 64, 0.3)' }}
         onClick={() => setSidebarOpen(false)}
       />
 
       {/* Sidebar */}
-      <aside className="fixed left-0 top-12 bottom-8 w-64 bg-background-secondary border-r border-border-subtle z-50 overflow-y-auto">
+      <aside className="fixed left-0 top-12 bottom-8 w-64 bg-background-card border-r border-border z-50 overflow-y-auto">
         <div className="p-4">
           {/* Header - Clickable to go home */}
           <button
             onClick={() => handleNavClick('home')}
-            className="flex items-center gap-3 mb-6 w-full text-left hover:opacity-80 transition-opacity"
+            className="flex items-center gap-3 mb-6 w-full text-left hover-press transition-press"
           >
-            <img src="/ghost-icon.png" alt="BashGym" className="w-10 h-10 rounded-xl object-cover shadow-lg" />
+            <img src="/ghost-icon.png" alt="BashGym" className="w-10 h-10 object-cover" />
             <div>
-              <h2 className="font-semibold" style={{ color: '#70A6C1' }}>/BashGym</h2>
+              <h2 className="font-brand font-semibold text-lg">
+                <span className="text-accent">/</span>BashGym
+              </h2>
               <p className="text-xs text-text-muted">Agentic Development</p>
             </div>
           </button>
@@ -264,11 +266,13 @@ export function Sidebar() {
                   ) : (
                     <WifiOff className="w-3.5 h-3.5 text-status-error" />
                   )}
-                  <span className="text-xs text-text-secondary">API</span>
+                  <span className="font-mono text-xs text-text-secondary">API</span>
                 </div>
                 <span className={clsx(
-                  'text-xs',
-                  apiConnected ? 'text-status-success' : 'text-status-error'
+                  'font-mono text-xs border rounded-brutal px-2 py-0.5',
+                  apiConnected
+                    ? 'border-status-success text-status-success'
+                    : 'border-status-error text-status-error'
                 )}>
                   {apiConnected === null ? '...' : apiConnected ? 'Connected' : 'Offline'}
                 </span>
@@ -282,11 +286,13 @@ export function Sidebar() {
                   ) : (
                     <XCircle className="w-3.5 h-3.5 text-status-warning" />
                   )}
-                  <span className="text-xs text-text-secondary">Hooks</span>
+                  <span className="font-mono text-xs text-text-secondary">Hooks</span>
                 </div>
                 <span className={clsx(
-                  'text-xs',
-                  hooksInstalled ? 'text-status-success' : 'text-status-warning'
+                  'font-mono text-xs border rounded-brutal px-2 py-0.5',
+                  hooksInstalled
+                    ? 'border-status-success text-status-success'
+                    : 'border-status-warning text-status-warning'
                 )}>
                   {hooksInstalled === null ? '...' : hooksInstalled ? 'Installed' : 'Not installed'}
                 </span>
@@ -299,7 +305,7 @@ export function Sidebar() {
                     setSettingsOpen(true)
                     setSidebarOpen(false)
                   }}
-                  className="mt-2 w-full text-xs text-center py-1.5 rounded bg-status-warning/10 text-status-warning hover:bg-status-warning/20 transition-colors"
+                  className="btn-secondary mt-2 w-full font-mono text-xs text-center py-1.5"
                 >
                   Setup Hooks →
                 </button>
@@ -308,7 +314,7 @@ export function Sidebar() {
           </MenuSection>
 
           {/* Settings */}
-          <div className="pt-2 border-t border-border-subtle">
+          <div className="pt-2 border-t border-border">
             <MenuItem
               icon={<Settings className="w-4 h-4" />}
               label="Settings"

@@ -86,11 +86,11 @@ export const MasterControlPanel = memo(function MasterControlPanel({
       <div className="absolute top-3 right-3 z-10">
         <button
           onClick={togglePanelCollapsed}
-          className="flex items-center gap-2 px-3 py-2 bg-background-secondary border border-border-subtle rounded-lg shadow-lg hover:bg-background-tertiary transition-colors"
+          className="btn-secondary !px-3 !py-2 flex items-center gap-2 !text-xs"
           title="Expand control panel"
         >
           <Settings2 className="w-4 h-4 text-text-muted" />
-          <span className="text-xs text-text-secondary">Controls</span>
+          <span className="font-mono text-text-secondary uppercase tracking-wider">Controls</span>
           <ChevronDown className="w-3 h-3 text-text-muted" />
         </button>
       </div>
@@ -98,160 +98,165 @@ export const MasterControlPanel = memo(function MasterControlPanel({
   }
 
   return (
-    <div className="absolute top-3 right-3 z-10 w-[240px] bg-background-secondary border border-border-subtle rounded-lg shadow-lg overflow-hidden">
+    <div className="absolute top-3 right-3 z-10 w-[240px] card overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 bg-background-tertiary/50 border-b border-border-subtle">
-        <span className="text-xs font-semibold text-text-primary uppercase tracking-wide">
+      <div className="terminal-header !py-2 !px-3">
+        <div className="flex items-center gap-1.5">
+          <span className="terminal-dot terminal-dot-red" />
+          <span className="terminal-dot terminal-dot-yellow" />
+          <span className="terminal-dot terminal-dot-green" />
+        </div>
+        <span className="text-[10px] font-mono font-semibold text-text-primary uppercase tracking-wider ml-2 flex-1">
           Master Control
         </span>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={togglePanelCollapsed}
-            className="p-1 rounded hover:bg-background-tertiary text-text-muted hover:text-text-secondary"
-            title="Collapse"
-          >
-            <ChevronUp className="w-3.5 h-3.5" />
-          </button>
-        </div>
+        <button
+          onClick={togglePanelCollapsed}
+          className="p-1 hover:bg-background-tertiary text-text-muted hover:text-text-secondary transition-press"
+          title="Collapse"
+        >
+          <ChevronUp className="w-3.5 h-3.5" />
+        </button>
       </div>
 
       {/* Session controls */}
-      <div className="px-3 py-2 border-b border-border-subtle">
+      <div className="px-3 py-2 border-b border-brutal border-border">
         <div className="flex items-center gap-2 mb-2">
           <button
             onClick={handleResumeAll}
             disabled={!globalPaused}
             className={clsx(
-              'flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded text-xs font-medium transition-colors',
+              'flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs font-mono font-semibold uppercase tracking-wider',
+              'border-brutal rounded-brutal transition-press',
               globalPaused
-                ? 'bg-status-success/20 text-status-success hover:bg-status-success/30'
-                : 'bg-background-tertiary text-text-muted cursor-not-allowed'
+                ? 'bg-status-success text-white border-status-success hover-press shadow-brutal-sm'
+                : 'bg-background-secondary text-text-muted border-border-subtle cursor-not-allowed'
             )}
           >
             <Play className="w-3 h-3" />
-            Resume All
+            Resume
           </button>
           <button
             onClick={handlePauseAll}
             disabled={globalPaused}
             className={clsx(
-              'flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded text-xs font-medium transition-colors',
+              'flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs font-mono font-semibold uppercase tracking-wider',
+              'border-brutal rounded-brutal transition-press',
               !globalPaused
-                ? 'bg-status-warning/20 text-status-warning hover:bg-status-warning/30'
-                : 'bg-background-tertiary text-text-muted cursor-not-allowed'
+                ? 'bg-status-warning text-white border-status-warning hover-press shadow-brutal-sm'
+                : 'bg-background-secondary text-text-muted border-border-subtle cursor-not-allowed'
             )}
           >
             <Pause className="w-3 h-3" />
-            Pause All
+            Pause
           </button>
         </div>
-        <div className="flex items-center gap-3 text-[10px] text-text-muted">
+        <div className="flex items-center gap-3 text-[10px] font-mono text-text-muted">
           <span>
-            <span className="text-status-success font-medium">{sessionStats.active}</span> active
+            <span className="text-status-success font-semibold">{sessionStats.active}</span> active
           </span>
           <span>
-            <span className="text-status-warning font-medium">{sessionStats.waiting}</span> waiting
+            <span className="text-status-warning font-semibold">{sessionStats.waiting}</span> waiting
           </span>
           <span>
-            <span className="text-text-secondary font-medium">{sessionStats.idle}</span> idle
+            <span className="text-text-secondary font-semibold">{sessionStats.idle}</span> idle
           </span>
         </div>
       </div>
 
       {/* View options */}
-      <div className="px-3 py-2 border-b border-border-subtle">
-        <div className="text-[10px] text-text-muted uppercase tracking-wide mb-2">View Options</div>
+      <div className="px-3 py-2 border-b border-brutal border-border">
+        <div className="text-[10px] text-text-muted uppercase tracking-wider mb-2 font-mono font-semibold">View Options</div>
         <div className="space-y-1.5">
           <label className="flex items-center gap-2 cursor-pointer group">
             <input
               type="checkbox"
               checked={showMetrics}
               onChange={(e) => setShowMetrics(e.target.checked)}
-              className="w-3.5 h-3.5 rounded border-border-subtle bg-background-tertiary checked:bg-primary checked:border-primary"
+              className="w-3.5 h-3.5 border-brutal border-border bg-background-card accent-accent"
             />
-            <span className="text-xs text-text-secondary group-hover:text-text-primary">Metrics</span>
+            <span className="text-xs font-mono text-text-secondary group-hover:text-text-primary">Metrics</span>
           </label>
           <label className="flex items-center gap-2 cursor-pointer group">
             <input
               type="checkbox"
               checked={showToolHistory}
               onChange={(e) => setShowToolHistory(e.target.checked)}
-              className="w-3.5 h-3.5 rounded border-border-subtle bg-background-tertiary checked:bg-primary checked:border-primary"
+              className="w-3.5 h-3.5 border-brutal border-border bg-background-card accent-accent"
             />
-            <span className="text-xs text-text-secondary group-hover:text-text-primary">Tool History</span>
+            <span className="text-xs font-mono text-text-secondary group-hover:text-text-primary">Tool History</span>
           </label>
           <label className="flex items-center gap-2 cursor-pointer group">
             <input
               type="checkbox"
               checked={showRecentFiles}
               onChange={(e) => setShowRecentFiles(e.target.checked)}
-              className="w-3.5 h-3.5 rounded border-border-subtle bg-background-tertiary checked:bg-primary checked:border-primary"
+              className="w-3.5 h-3.5 border-brutal border-border bg-background-card accent-accent"
             />
-            <span className="text-xs text-text-secondary group-hover:text-text-primary">Recent Files</span>
+            <span className="text-xs font-mono text-text-secondary group-hover:text-text-primary">Recent Files</span>
           </label>
         </div>
       </div>
 
       {/* Canvas settings */}
-      <div className="px-3 py-2 border-b border-border-subtle">
-        <div className="text-[10px] text-text-muted uppercase tracking-wide mb-2">Canvas</div>
+      <div className="px-3 py-2 border-b border-brutal border-border">
+        <div className="text-[10px] text-text-muted uppercase tracking-wider mb-2 font-mono font-semibold">Canvas</div>
         <div className="space-y-1.5">
           <label className="flex items-center gap-2 cursor-pointer group">
             <input
               type="checkbox"
               checked={gridEnabled}
               onChange={(e) => setGridEnabled(e.target.checked)}
-              className="w-3.5 h-3.5 rounded border-border-subtle bg-background-tertiary checked:bg-primary checked:border-primary"
+              className="w-3.5 h-3.5 border-brutal border-border bg-background-card accent-accent"
             />
             <Grid3X3 className="w-3 h-3 text-text-muted" />
-            <span className="text-xs text-text-secondary group-hover:text-text-primary">Grid</span>
+            <span className="text-xs font-mono text-text-secondary group-hover:text-text-primary">Grid</span>
           </label>
           <label className="flex items-center gap-2 cursor-pointer group">
             <input
               type="checkbox"
               checked={snapToGrid}
               onChange={(e) => setSnapToGrid(e.target.checked)}
-              className="w-3.5 h-3.5 rounded border-border-subtle bg-background-tertiary checked:bg-primary checked:border-primary"
+              className="w-3.5 h-3.5 border-brutal border-border bg-background-card accent-accent"
             />
             <Magnet className="w-3 h-3 text-text-muted" />
-            <span className="text-xs text-text-secondary group-hover:text-text-primary">Snap</span>
+            <span className="text-xs font-mono text-text-secondary group-hover:text-text-primary">Snap</span>
           </label>
           <label className="flex items-center gap-2 cursor-pointer group">
             <input
               type="checkbox"
               checked={showMiniMap}
               onChange={(e) => setShowMiniMap(e.target.checked)}
-              className="w-3.5 h-3.5 rounded border-border-subtle bg-background-tertiary checked:bg-primary checked:border-primary"
+              className="w-3.5 h-3.5 border-brutal border-border bg-background-card accent-accent"
             />
             <Map className="w-3 h-3 text-text-muted" />
-            <span className="text-xs text-text-secondary group-hover:text-text-primary">Minimap</span>
+            <span className="text-xs font-mono text-text-secondary group-hover:text-text-primary">Minimap</span>
           </label>
         </div>
 
         {/* Zoom controls */}
         <div className="flex items-center gap-2 mt-3">
-          <span className="text-[10px] text-text-muted">Zoom:</span>
+          <span className="text-[10px] text-text-muted font-mono">Zoom:</span>
           <div className="flex items-center gap-1 flex-1">
             <button
               onClick={onZoomOut}
-              className="p-1 rounded hover:bg-background-tertiary text-text-muted hover:text-text-secondary"
+              className="btn-icon !w-5 !h-5 !border-1"
               title="Zoom out"
             >
               <Minus className="w-3 h-3" />
             </button>
-            <span className="text-xs text-text-secondary min-w-[40px] text-center">
+            <span className="text-xs font-mono text-text-secondary min-w-[40px] text-center">
               {Math.round(currentZoom * 100)}%
             </span>
             <button
               onClick={onZoomIn}
-              className="p-1 rounded hover:bg-background-tertiary text-text-muted hover:text-text-secondary"
+              className="btn-icon !w-5 !h-5 !border-1"
               title="Zoom in"
             >
               <Plus className="w-3 h-3" />
             </button>
             <button
               onClick={onFitView}
-              className="p-1 rounded hover:bg-background-tertiary text-text-muted hover:text-text-secondary ml-1"
+              className="btn-icon !w-5 !h-5 !border-1 ml-1"
               title="Fit view"
             >
               <Maximize className="w-3 h-3" />
@@ -261,12 +266,12 @@ export const MasterControlPanel = memo(function MasterControlPanel({
       </div>
 
       {/* Actions */}
-      <div className="px-3 py-2 border-b border-border-subtle">
+      <div className="px-3 py-2 border-b border-brutal border-border">
         <div className="flex items-center gap-2">
           {onNewSession && (
             <button
               onClick={onNewSession}
-              className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded text-xs font-medium bg-primary/20 text-primary hover:bg-primary/30 transition-colors"
+              className="btn-primary !py-1.5 !px-3 !text-xs flex-1"
             >
               <Plus className="w-3 h-3" />
               New Session
@@ -275,29 +280,29 @@ export const MasterControlPanel = memo(function MasterControlPanel({
           {onAutoArrange && (
             <button
               onClick={onAutoArrange}
-              className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded text-xs font-medium bg-background-tertiary text-text-secondary hover:bg-background-primary transition-colors"
+              className="btn-secondary !py-1.5 !px-3 !text-xs flex-1"
             >
               <LayoutGrid className="w-3 h-3" />
-              Auto-Arrange
+              Arrange
             </button>
           )}
         </div>
       </div>
 
       {/* Keyboard shortcuts hint */}
-      <div className="px-3 py-2 bg-background-tertiary/30">
-        <div className="flex items-center gap-1.5 text-[10px] text-text-muted">
+      <div className="px-3 py-2 bg-background-secondary">
+        <div className="flex items-center gap-1.5 text-[10px] text-text-muted font-mono">
           <Keyboard className="w-3 h-3" />
           <span>
-            <kbd className="px-1 py-0.5 rounded bg-background-tertiary border border-border-subtle text-[9px]">1-9</kbd>
+            <kbd className="px-1 py-0.5 border-brutal border-border rounded-brutal bg-background-card text-[9px] font-mono">1-9</kbd>
             =focus
           </span>
           <span>
-            <kbd className="px-1 py-0.5 rounded bg-background-tertiary border border-border-subtle text-[9px]">Tab</kbd>
+            <kbd className="px-1 py-0.5 border-brutal border-border rounded-brutal bg-background-card text-[9px] font-mono">Tab</kbd>
             =cycle
           </span>
           <span>
-            <kbd className="px-1 py-0.5 rounded bg-background-tertiary border border-border-subtle text-[9px]">F</kbd>
+            <kbd className="px-1 py-0.5 border-brutal border-border rounded-brutal bg-background-card text-[9px] font-mono">F</kbd>
             =fit
           </span>
         </div>

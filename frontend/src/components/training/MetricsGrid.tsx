@@ -20,29 +20,33 @@ interface MetricCardProps {
 }
 
 function MetricCard({ icon, label, value, subvalue, trend, color, isWaiting }: MetricCardProps) {
-  const colorClasses = {
-    green: 'bg-nvidia-green/10 text-nvidia-green',
-    blue: 'bg-status-info/10 text-status-info',
-    orange: 'bg-status-warning/10 text-status-warning',
-    purple: 'bg-[#BF5AF2]/10 text-[#BF5AF2]'
+  const iconColorClasses = {
+    green: 'text-status-success',
+    blue: 'text-accent',
+    orange: 'text-status-warning',
+    purple: 'text-accent-dark'
   }
 
-  const waitingClasses = isWaiting ? 'opacity-50' : ''
-
   return (
-    <div className={clsx('card-elevated p-4 flex items-center gap-4', waitingClasses)}>
-      <div className={clsx('w-12 h-12 rounded-xl flex items-center justify-center', colorClasses[color])}>
+    <div className={clsx(
+      'card p-4 flex items-center gap-4',
+      isWaiting && 'opacity-50'
+    )}>
+      <div className={clsx(
+        'w-12 h-12 border-brutal border-border rounded-brutal flex items-center justify-center bg-background-secondary',
+        iconColorClasses[color]
+      )}>
         {icon}
       </div>
       <div className="flex-1">
-        <p className="text-sm text-text-muted">{label}</p>
+        <p className="font-mono text-xs uppercase tracking-widest text-text-secondary">{label}</p>
         <div className="flex items-baseline gap-2">
-          <p className="text-2xl font-semibold text-text-primary">{value}</p>
-          {subvalue && <span className="text-sm text-text-muted">{subvalue}</span>}
+          <p className="font-brand text-3xl text-text-primary">{value}</p>
+          {subvalue && <span className="font-mono text-xs text-text-muted">{subvalue}</span>}
           {trend && !isWaiting && (
             <span
               className={clsx(
-                'text-xs',
+                'font-mono text-xs font-bold',
                 trend === 'down' && 'text-status-success',
                 trend === 'up' && 'text-status-error',
                 trend === 'neutral' && 'text-text-muted'

@@ -33,20 +33,20 @@ function ProviderCard({ provider }: { provider: ProviderStatus }) {
 
   return (
     <div className={clsx(
-      'flex items-center gap-2 p-2 rounded-lg border',
+      'flex items-center gap-2 p-2 border-brutal border-border rounded-brutal transition-press',
       provider.available
-        ? 'bg-background-secondary border-border-color'
-        : 'bg-background-tertiary/50 border-border-subtle opacity-50'
+        ? 'bg-background-card shadow-brutal-sm'
+        : 'bg-background-secondary border-border-subtle'
     )}>
       <div className={clsx(
-        'p-1.5 rounded-md flex-shrink-0',
-        provider.available ? 'bg-status-success/20 text-status-success' : 'bg-background-tertiary text-text-muted'
+        'w-8 h-8 border-brutal border-border rounded-brutal flex items-center justify-center flex-shrink-0',
+        provider.available ? 'bg-accent-light text-accent-dark' : 'bg-background-secondary text-text-muted'
       )}>
         {isLocal ? <HardDrive className="w-3.5 h-3.5" /> : <Cloud className="w-3.5 h-3.5" />}
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
-          <span className="text-xs font-medium text-text-primary truncate">{provider.name}</span>
+          <span className="text-xs font-mono font-semibold text-text-primary truncate">{provider.name}</span>
           {provider.available ? (
             <CheckCircle className="w-3 h-3 text-status-success flex-shrink-0" />
           ) : (
@@ -54,7 +54,7 @@ function ProviderCard({ provider }: { provider: ProviderStatus }) {
           )}
         </div>
         {provider.model_count !== undefined && provider.model_count > 0 && (
-          <p className="text-[10px] text-text-muted">{provider.model_count} model{provider.model_count > 1 ? 's' : ''}</p>
+          <p className="text-[10px] text-text-muted font-mono">{provider.model_count} model{provider.model_count > 1 ? 's' : ''}</p>
         )}
       </div>
     </div>
@@ -71,32 +71,32 @@ function OllamaModelCard({
   isDeleting: boolean
 }) {
   return (
-    <div className="flex items-center gap-2 p-2.5 rounded-lg bg-background-tertiary">
+    <div className="flex items-center gap-2 p-2.5 border-brutal border-border rounded-brutal bg-background-card shadow-brutal-sm">
       <div className={clsx(
-        'p-1.5 rounded-md flex-shrink-0',
-        model.is_code_model ? 'bg-primary/20 text-primary' : 'bg-background-secondary text-text-muted'
+        'w-8 h-8 border-brutal border-border rounded-brutal flex items-center justify-center flex-shrink-0',
+        model.is_code_model ? 'bg-accent-light text-accent-dark' : 'bg-background-secondary text-text-muted'
       )}>
         {model.is_code_model ? <Code className="w-4 h-4" /> : <Cpu className="w-4 h-4" />}
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
-          <span className="text-sm font-medium text-text-primary truncate">{model.name}</span>
+          <span className="text-sm font-mono font-semibold text-text-primary truncate">{model.name}</span>
           {model.is_code_model && (
-            <span className="text-[10px] px-1 py-0.5 rounded bg-primary/20 text-primary flex-shrink-0">code</span>
+            <span className="tag text-[10px] py-0 px-1.5"><span>code</span></span>
           )}
         </div>
-        <div className="flex items-center gap-2 text-[11px] text-text-muted">
+        <div className="flex items-center gap-2 text-[11px] text-text-muted font-mono">
           <span>{model.size_gb.toFixed(1)} GB</span>
-          <span className="text-text-muted/50">•</span>
+          <span className="text-border-subtle">|</span>
           <span>{model.parameter_size}</span>
-          <span className="text-text-muted/50">•</span>
+          <span className="text-border-subtle">|</span>
           <span>{model.quantization}</span>
         </div>
       </div>
       <button
         onClick={() => onDelete(model.name)}
         disabled={isDeleting}
-        className="p-1.5 rounded-md hover:bg-status-error/20 text-text-muted hover:text-status-error transition-colors flex-shrink-0"
+        className="btn-icon w-8 h-8 text-text-muted hover:text-status-error flex-shrink-0"
         title="Delete model"
       >
         {isDeleting ? (
@@ -194,10 +194,10 @@ export function ModelsSection() {
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium text-text-primary">Model Providers</h3>
+        <h3 className="font-brand text-lg text-text-primary">Model Providers</h3>
         <button
           onClick={fetchData}
-          className="p-1 rounded hover:bg-background-tertiary text-text-muted"
+          className="btn-icon w-8 h-8 text-text-muted"
           title="Refresh"
         >
           <RefreshCw className="w-4 h-4" />
@@ -212,14 +212,15 @@ export function ModelsSection() {
       </div>
 
       {/* Ollama Section */}
-      <div className="space-y-2.5 pt-2 border-t border-border-subtle">
+      <div className="section-divider" />
+      <div className="space-y-2.5">
         <div className="flex items-center justify-between">
-          <h4 className="text-xs font-medium text-text-primary">Local Models (Ollama)</h4>
+          <h4 className="font-brand text-sm text-text-primary">Local Models (Ollama)</h4>
           <a
             href="https://ollama.com/library"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-[10px] text-primary flex items-center gap-0.5 hover:underline"
+            className="text-[10px] font-mono text-accent-dark flex items-center gap-0.5 hover:text-accent"
           >
             Browse library
             <ExternalLink className="w-2.5 h-2.5" />
@@ -227,12 +228,12 @@ export function ModelsSection() {
         </div>
 
         {!ollamaAvailable ? (
-          <div className="flex items-start gap-2 p-2.5 rounded-lg bg-status-warning/10 border border-status-warning/20">
+          <div className="flex items-start gap-2 p-3 border-brutal border-status-warning rounded-brutal bg-background-card">
             <AlertTriangle className="w-3.5 h-3.5 text-status-warning flex-shrink-0 mt-0.5" />
             <div className="text-[11px] text-text-secondary">
-              <p className="font-medium text-text-primary">Ollama Not Running</p>
+              <p className="font-mono font-semibold text-text-primary">Ollama Not Running</p>
               <p className="text-text-muted">{error || 'Start Ollama to use local models'}</p>
-              <code className="inline-block mt-1 px-1.5 py-0.5 bg-background-tertiary rounded text-[10px] text-text-muted">
+              <code className="inline-block mt-1 px-2 py-1 bg-background-secondary border-brutal border-border rounded-brutal text-[10px] font-mono text-text-muted">
                 ollama serve
               </code>
             </div>
@@ -252,7 +253,7 @@ export function ModelsSection() {
                 ))}
               </div>
             ) : (
-              <p className="text-xs text-text-muted text-center py-3">
+              <p className="text-xs text-text-muted text-center py-3 font-mono">
                 No models installed. Download one below.
               </p>
             )}
@@ -268,7 +269,7 @@ export function ModelsSection() {
                 <div className="space-y-1.5">
                   <button
                     onClick={() => setShowMoreModels(!showMoreModels)}
-                    className="flex items-center gap-1 text-xs text-text-muted hover:text-text-secondary"
+                    className="flex items-center gap-1 text-xs font-mono text-text-muted hover:text-text-secondary transition-press"
                   >
                     {showMoreModels ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
                     Download models ({availableModels.length} available)
@@ -280,15 +281,15 @@ export function ModelsSection() {
                           key={model.name}
                           onClick={() => handlePullModel(model.name)}
                           disabled={!!isPulling}
-                          className="w-full flex items-center gap-2 p-1.5 rounded-md border border-border-subtle hover:border-primary hover:bg-primary/5 transition-colors text-left"
+                          className="w-full flex items-center gap-2 p-1.5 border-brutal border-border rounded-brutal bg-background-card hover:shadow-brutal-sm transition-press text-left disabled:opacity-50"
                         >
                           {isPulling === model.name ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin text-primary flex-shrink-0" />
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-accent flex-shrink-0" />
                           ) : (
                             <Download className="w-3.5 h-3.5 text-text-muted flex-shrink-0" />
                           )}
-                          <span className="text-xs text-text-primary flex-1">{model.name}</span>
-                          <span className="text-[10px] text-text-muted">{model.size}</span>
+                          <span className="text-xs font-mono text-text-primary flex-1">{model.name}</span>
+                          <span className="text-[10px] font-mono text-text-muted">{model.size}</span>
                         </button>
                       ))}
                     </div>
@@ -304,7 +305,7 @@ export function ModelsSection() {
                 value={customModel}
                 onChange={(e) => setCustomModel(e.target.value)}
                 placeholder="Custom model (e.g., mistral:7b)"
-                className="input flex-1 text-xs py-1.5 px-2"
+                className="input flex-1 text-xs py-1.5 px-2 font-mono"
                 onKeyDown={(e) => e.key === 'Enter' && handlePullCustom()}
               />
               <button
@@ -324,8 +325,8 @@ export function ModelsSection() {
       </div>
 
       {/* Info */}
-      <div className="text-[11px] text-text-muted p-2.5 rounded-lg bg-background-tertiary">
-        <strong>Local models</strong> run on your machine for privacy and zero API costs.
+      <div className="text-[11px] text-text-secondary p-3 border-brutal border-border rounded-brutal bg-background-card">
+        <strong className="font-mono text-text-primary">Local models</strong> run on your machine for privacy and zero API costs.
         BashGym can fine-tune these using collected traces.
       </div>
     </div>

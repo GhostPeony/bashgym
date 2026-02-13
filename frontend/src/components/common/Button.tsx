@@ -2,7 +2,7 @@ import { forwardRef } from 'react'
 import { clsx } from 'clsx'
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: 'primary' | 'secondary' | 'ghost' | 'danger'
+  variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'icon' | 'cta'
   size?: 'sm' | 'md' | 'lg'
   isLoading?: boolean
   leftIcon?: React.ReactNode
@@ -25,29 +25,36 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     ref
   ) => {
     const baseStyles =
-      'inline-flex items-center justify-center font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed'
+      'inline-flex items-center justify-center font-mono font-semibold tracking-wide transition-press disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none'
 
     const variants = {
       primary:
-        'bg-primary text-white hover:opacity-90 active:opacity-80 focus:ring-primary/50',
+        'btn-primary text-white',
       secondary:
-        'bg-background-tertiary text-text-primary hover:bg-border-color active:bg-border-subtle focus:ring-border-color',
+        'btn-secondary',
       ghost:
-        'bg-transparent text-text-secondary hover:bg-background-tertiary hover:text-text-primary focus:ring-border-color',
+        'btn-ghost',
       danger:
-        'bg-status-error text-white hover:opacity-90 active:opacity-80 focus:ring-status-error/50'
+        'bg-status-error text-white border-brutal border-border box-shadow-brutal-sm hover:translate-x-0.5 hover:translate-y-0.5',
+      icon:
+        'btn-icon',
+      cta:
+        'btn-cta',
     }
 
     const sizes = {
-      sm: 'px-3 py-1.5 text-sm gap-1.5',
-      md: 'px-4 py-2 text-sm gap-2',
-      lg: 'px-6 py-3 text-base gap-2'
+      sm: 'px-3 py-1.5 text-xs gap-1.5',
+      md: 'px-5 py-2 text-sm gap-2',
+      lg: 'px-7 py-3 text-sm gap-2'
     }
+
+    // Icon variant ignores size padding
+    const sizeStyles = variant === 'icon' ? '' : sizes[size]
 
     return (
       <button
         ref={ref}
-        className={clsx(baseStyles, variants[variant], sizes[size], className)}
+        className={clsx(baseStyles, variants[variant], sizeStyles, className)}
         disabled={disabled || isLoading}
         {...props}
       >

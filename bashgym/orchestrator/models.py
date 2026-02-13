@@ -169,6 +169,8 @@ class TaskNode:
     status: TaskStatus = TaskStatus.PENDING
     dependencies: List[str] = field(default_factory=list)  # Task IDs
     files_touched: List[str] = field(default_factory=list)  # Expected files
+    provides: List[Dict[str, Any]] = field(default_factory=list)  # Exports for other tasks
+    consumes: List[Dict[str, Any]] = field(default_factory=list)  # Imports from dependencies
     estimated_turns: int = 20
     budget_usd: float = 2.0
     worker_prompt: str = ""
@@ -188,6 +190,8 @@ class TaskNode:
             "status": self.status.value,
             "dependencies": self.dependencies,
             "files_touched": self.files_touched,
+            "provides": self.provides,
+            "consumes": self.consumes,
             "estimated_turns": self.estimated_turns,
             "budget_usd": self.budget_usd,
             "worker_id": self.worker_id,

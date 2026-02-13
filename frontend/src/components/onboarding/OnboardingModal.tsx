@@ -147,18 +147,19 @@ export function OnboardingModal() {
       size="lg"
     >
       <div className="space-y-6">
-        {/* Progress indicator */}
+        {/* Progress indicator — hard-bordered step circles */}
         <div className="flex items-center justify-between px-4">
           {steps.map((step, idx) => (
             <div key={step.id} className="flex items-center">
               <div
                 className={clsx(
-                  'w-8 h-8 rounded-full flex items-center justify-center transition-colors',
+                  'w-8 h-8 flex items-center justify-center font-mono font-semibold text-sm',
+                  'border-brutal rounded-brutal',
                   step.completed
-                    ? 'bg-status-success text-white'
+                    ? 'bg-status-success text-white border-status-success'
                     : idx === currentStep
-                    ? 'bg-primary text-white'
-                    : 'bg-background-tertiary text-text-muted'
+                    ? 'bg-accent text-white border-accent'
+                    : 'bg-background-secondary text-text-muted border-border'
                 )}
               >
                 {step.completed ? <Check className="w-4 h-4" /> : step.id}
@@ -175,19 +176,19 @@ export function OnboardingModal() {
           ))}
         </div>
 
-        {/* Current step content */}
-        <div className="bg-background-tertiary rounded-xl p-6">
+        {/* Current step content — brutalist card */}
+        <div className="border-brutal border-border rounded-brutal bg-background-secondary p-6">
           <div className="flex items-start gap-4">
             <div
               className={clsx(
-                'p-3 rounded-xl',
-                steps[currentStep].completed ? 'bg-status-success/20 text-status-success' : 'bg-primary/20 text-primary'
+                'w-12 h-12 border-brutal border-border rounded-brutal flex items-center justify-center',
+                steps[currentStep].completed ? 'bg-status-success text-white border-status-success' : 'bg-accent-light text-accent-dark'
               )}
             >
               {steps[currentStep].icon}
             </div>
             <div className="flex-1">
-              <h3 className="text-lg font-semibold text-text-primary">
+              <h3 className="font-brand text-lg text-text-primary">
                 {steps[currentStep].title}
               </h3>
               <p className="text-sm text-text-secondary mt-1">
@@ -199,7 +200,7 @@ export function OnboardingModal() {
                 {currentStep === 0 && (
                   <div className="space-y-4">
                     {hooksInstalled ? (
-                      <div className="flex items-center gap-2 text-status-success">
+                      <div className="flex items-center gap-2 text-status-success font-mono">
                         <CheckCircle2 className="w-5 h-5" />
                         <span>Hooks are installed and ready</span>
                       </div>
@@ -224,10 +225,10 @@ export function OnboardingModal() {
                               'Install Hooks'
                             )}
                           </Button>
-                          <span className="text-text-muted text-sm">or</span>
+                          <span className="text-text-muted text-sm font-mono">or</span>
                           <button
                             onClick={copyCommand}
-                            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-background-secondary border border-border-subtle hover:border-border-color transition-colors text-sm"
+                            className="btn-secondary flex items-center gap-2 px-3 py-2 text-sm"
                           >
                             {copied ? (
                               <>
@@ -249,10 +250,10 @@ export function OnboardingModal() {
 
                 {currentStep === 1 && (
                   <div className="space-y-4">
-                    <div className="flex items-center justify-between p-3 rounded-lg bg-background-secondary">
-                      <span className="text-sm text-text-secondary">Traces collected</span>
+                    <div className="flex items-center justify-between p-3 border-brutal border-border rounded-brutal bg-background-card">
+                      <span className="text-sm text-text-secondary font-mono">Traces collected</span>
                       <span className={clsx(
-                        'text-lg font-semibold',
+                        'text-lg font-brand',
                         traceCount >= 10 ? 'text-status-success' : 'text-text-primary'
                       )}>
                         {traceCount} / 10 minimum
@@ -260,10 +261,10 @@ export function OnboardingModal() {
                     </div>
 
                     {traceCount < 10 ? (
-                      <div className="flex items-start gap-2 p-3 rounded-lg bg-status-warning/10 border border-status-warning/20">
+                      <div className="flex items-start gap-2 p-3 border-brutal border-status-warning rounded-brutal bg-background-card">
                         <AlertCircle className="w-4 h-4 text-status-warning flex-shrink-0 mt-0.5" />
                         <div className="text-sm text-text-secondary">
-                          <p className="font-medium text-text-primary mb-1">Keep working with Claude Code</p>
+                          <p className="font-mono font-semibold text-text-primary mb-1">Keep working with Claude Code</p>
                           <p>
                             Each completed task generates a trace. Aim for at least 10-20 diverse traces
                             before training for best results.
@@ -271,7 +272,7 @@ export function OnboardingModal() {
                         </div>
                       </div>
                     ) : (
-                      <div className="flex items-center gap-2 text-status-success">
+                      <div className="flex items-center gap-2 text-status-success font-mono">
                         <CheckCircle2 className="w-5 h-5" />
                         <span>You have enough traces to start training!</span>
                       </div>
@@ -291,13 +292,13 @@ export function OnboardingModal() {
                       Gold traces are used for training your model.
                     </p>
                     <div className="grid grid-cols-2 gap-3">
-                      <div className="p-3 rounded-lg bg-background-secondary">
-                        <p className="text-xs text-text-muted">Total Traces</p>
-                        <p className="text-xl font-semibold text-text-primary">{traceCount}</p>
+                      <div className="p-3 border-brutal border-border rounded-brutal bg-background-card">
+                        <p className="text-xs text-text-muted font-mono">Total Traces</p>
+                        <p className="font-brand text-xl text-text-primary">{traceCount}</p>
                       </div>
-                      <div className="p-3 rounded-lg bg-background-secondary">
-                        <p className="text-xs text-text-muted">Gold Traces</p>
-                        <p className="text-xl font-semibold text-status-success">0</p>
+                      <div className="p-3 border-brutal border-border rounded-brutal bg-background-card">
+                        <p className="text-xs text-text-muted font-mono">Gold Traces</p>
+                        <p className="font-brand text-xl text-status-success">0</p>
                       </div>
                     </div>
                     <Button
@@ -321,8 +322,8 @@ export function OnboardingModal() {
                     </p>
                     <div className="grid grid-cols-4 gap-2">
                       {['SFT', 'DPO', 'GRPO', 'KD'].map((strategy) => (
-                        <div key={strategy} className="p-2 text-center rounded-lg bg-background-secondary border border-border-subtle">
-                          <span className="text-sm font-medium text-text-primary">{strategy}</span>
+                        <div key={strategy} className="p-2 text-center border-brutal border-border rounded-brutal bg-background-card">
+                          <span className="tag text-xs"><span>{strategy}</span></span>
                         </div>
                       ))}
                     </div>
@@ -344,7 +345,8 @@ export function OnboardingModal() {
         </div>
 
         {/* Navigation */}
-        <div className="flex items-center justify-between pt-4 border-t border-border-subtle">
+        <div className="section-divider" />
+        <div className="flex items-center justify-between pt-2">
           <Button
             variant="ghost"
             onClick={() => setCurrentStep(Math.max(0, currentStep - 1))}
@@ -376,19 +378,19 @@ export function OnboardingModal() {
         </div>
 
         {/* Quick links */}
-        <div className="flex items-center justify-center gap-6 pt-2 text-xs text-text-muted">
+        <div className="flex items-center justify-center gap-6 pt-2 text-xs font-mono text-text-muted">
           <a
             href="https://github.com/anthropics/claude-code"
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-1 hover:text-primary transition-colors"
+            className="flex items-center gap-1 hover:text-accent-dark transition-press"
           >
             <ExternalLink className="w-3 h-3" />
             Claude Code Docs
           </a>
           <a
             href="#"
-            className="flex items-center gap-1 hover:text-primary transition-colors"
+            className="flex items-center gap-1 hover:text-accent-dark transition-press"
             onClick={(e) => {
               e.preventDefault()
               setOnboardingOpen(false)

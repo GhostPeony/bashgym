@@ -57,7 +57,7 @@ export function DatasetBrowser({ className }: DatasetBrowserProps) {
     return (
       <div className={clsx('p-6', className)}>
         <div className="flex items-center justify-center py-12">
-          <Loader2 className="w-6 h-6 animate-spin text-accent-primary" />
+          <Loader2 className="w-6 h-6 animate-spin text-accent" />
         </div>
       </div>
     )
@@ -68,25 +68,25 @@ export function DatasetBrowser({ className }: DatasetBrowserProps) {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-lg font-semibold text-text-primary">Datasets</h2>
-          <p className="text-sm text-text-secondary mt-1">
+          <h2 className="text-lg font-brand text-text-primary">Datasets</h2>
+          <p className="text-sm text-text-secondary mt-1 font-mono">
             Training datasets stored on HuggingFace Hub
           </p>
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-2">
-            <span className="text-sm text-text-secondary">Filter:</span>
+            <span className="text-xs font-mono text-text-secondary uppercase tracking-widest">Filter:</span>
             <input
               type="text"
               value={prefix}
               onChange={(e) => setPrefix(e.target.value)}
               placeholder="bashgym"
-              className="w-32 px-2 py-1 bg-background-primary border border-border rounded text-text-primary text-sm"
+              className="input w-32 text-sm"
             />
           </div>
           <button
             onClick={fetchDatasets}
-            className="p-2 rounded-lg hover:bg-background-tertiary transition-colors"
+            className="btn-icon"
             title="Refresh"
           >
             <RefreshCw className="w-4 h-4 text-text-secondary" />
@@ -95,19 +95,19 @@ export function DatasetBrowser({ className }: DatasetBrowserProps) {
       </div>
 
       {error && (
-        <div className="mb-4 p-3 bg-status-error/10 border border-status-error/30 rounded-lg flex items-center gap-2 text-status-error">
+        <div className="mb-4 p-3 bg-background-card border-2 border-status-error rounded-brutal flex items-center gap-2 text-status-error">
           <AlertCircle className="w-4 h-4 flex-shrink-0" />
-          <span className="text-sm">{error}</span>
+          <span className="text-sm font-mono">{error}</span>
         </div>
       )}
 
       {/* Info Box */}
-      <div className="mb-6 p-4 bg-background-secondary rounded-lg border border-border">
+      <div className="mb-6 p-4 border-brutal shadow-brutal-sm rounded-brutal bg-background-card">
         <div className="flex items-start gap-3">
-          <Upload className="w-5 h-5 text-accent-primary flex-shrink-0 mt-0.5" />
+          <Upload className="w-5 h-5 text-accent flex-shrink-0 mt-0.5" />
           <div>
-            <h3 className="text-sm font-medium text-text-primary">Upload from Training Dashboard</h3>
-            <p className="text-sm text-text-secondary mt-1">
+            <h3 className="text-sm font-brand text-text-primary">Upload from Training Dashboard</h3>
+            <p className="text-sm text-text-secondary mt-1 font-mono">
               Datasets are uploaded automatically when you export training examples from the Training Dashboard.
               Use the "Export to HuggingFace" option to push your training data to the Hub.
             </p>
@@ -118,9 +118,9 @@ export function DatasetBrowser({ className }: DatasetBrowserProps) {
       {/* Datasets List */}
       {datasets.length === 0 ? (
         <div className="text-center py-12 text-text-secondary">
-          <Database className="w-12 h-12 mx-auto mb-3 opacity-50" />
-          <p>No datasets found</p>
-          <p className="text-sm mt-1">
+          <Database className="w-12 h-12 mx-auto mb-3 text-text-muted" />
+          <p className="font-brand text-lg">No datasets found</p>
+          <p className="text-sm mt-1 font-mono">
             {prefix ? `No datasets matching "${prefix}"` : 'Export training data to see datasets here'}
           </p>
         </div>
@@ -129,25 +129,25 @@ export function DatasetBrowser({ className }: DatasetBrowserProps) {
           {datasets.map((datasetId) => (
             <div
               key={datasetId}
-              className="flex items-center justify-between p-3 bg-background-secondary rounded-lg border border-border hover:border-border-subtle transition-colors"
+              className="card flex items-center justify-between p-3"
             >
               <div className="flex items-center gap-3">
-                <FolderOpen className="w-5 h-5 text-accent-primary" />
-                <span className="text-sm text-text-primary font-medium">{datasetId}</span>
+                <FolderOpen className="w-5 h-5 text-accent" />
+                <span className="text-sm text-text-primary font-mono">{datasetId}</span>
               </div>
               <div className="flex items-center gap-2">
                 <a
                   href={getDatasetUrl(datasetId)}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-1 px-2 py-1 text-xs text-accent-primary hover:bg-accent-primary/10 rounded transition-colors"
+                  className="btn-ghost flex items-center gap-1 px-2 py-1 text-xs text-accent"
                 >
                   <ExternalLink className="w-3 h-3" />
                   Data Studio
                 </a>
                 <button
                   onClick={() => handleDelete(datasetId)}
-                  className="p-1.5 rounded hover:bg-background-tertiary transition-colors"
+                  className="btn-icon"
                   title="Delete Dataset"
                 >
                   <Trash2 className="w-4 h-4 text-status-error" />
@@ -159,12 +159,12 @@ export function DatasetBrowser({ className }: DatasetBrowserProps) {
       )}
 
       {/* Pro Storage Info */}
-      <div className="mt-6 p-4 bg-accent-primary/10 rounded-lg border border-accent-primary/30">
+      <div className="mt-6 p-4 border-2 border-accent rounded-brutal bg-accent-light">
         <div className="flex items-center gap-2">
-          <Database className="w-4 h-4 text-accent-primary" />
-          <span className="text-sm text-text-primary">HuggingFace Pro Storage</span>
+          <Database className="w-4 h-4 text-accent" />
+          <span className="text-sm font-brand text-text-primary">HuggingFace Pro Storage</span>
         </div>
-        <p className="text-xs text-text-secondary mt-2">
+        <p className="text-xs text-text-secondary mt-2 font-mono">
           Pro subscribers get 1TB of private dataset storage with Data Studio access for exploring and visualizing your training data.
         </p>
       </div>

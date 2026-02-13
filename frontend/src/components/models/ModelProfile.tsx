@@ -32,12 +32,12 @@ interface ModelProfilePageProps {
   onCompare: (modelIds: string[]) => void
 }
 
-const STATUS_STYLES: Record<string, { bg: string; text: string }> = {
-  ready: { bg: 'bg-status-success/20', text: 'text-status-success' },
-  needs_eval: { bg: 'bg-status-warning/20', text: 'text-status-warning' },
-  training: { bg: 'bg-status-info/20', text: 'text-status-info' },
-  archived: { bg: 'bg-text-muted/20', text: 'text-text-muted' },
-  regression_detected: { bg: 'bg-status-error/20', text: 'text-status-error' },
+const STATUS_CLASSES: Record<string, string> = {
+  ready: 'quality-gold text-status-success',
+  needs_eval: 'quality-pending text-status-warning',
+  training: 'text-status-info',
+  archived: 'text-text-muted',
+  regression_detected: 'quality-failed text-status-error',
 }
 
 export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePageProps) {
@@ -174,7 +174,7 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
   if (isLoading) {
     return (
       <div className="h-full flex items-center justify-center">
-        <Loader2 className="w-8 h-8 text-primary animate-spin" />
+        <Loader2 className="w-8 h-8 text-accent animate-spin" />
       </div>
     )
   }
@@ -183,7 +183,7 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
     return (
       <div className="h-full flex flex-col items-center justify-center">
         <AlertCircle className="w-12 h-12 text-status-error mb-4" />
-        <h2 className="text-lg font-medium text-text-primary mb-2">Error Loading Model</h2>
+        <h2 className="font-brand text-xl text-text-primary mb-2">Error Loading Model</h2>
         <p className="text-text-muted mb-4">{error || 'Model not found'}</p>
         <button onClick={onBack} className="btn-secondary">
           <ArrowLeft className="w-4 h-4 mr-2" />
@@ -193,14 +193,14 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
     )
   }
 
-  const statusStyle = STATUS_STYLES[profile.status] || STATUS_STYLES.ready
+  const statusClass = STATUS_CLASSES[profile.status] || STATUS_CLASSES.ready
 
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="p-6 border-b border-border-subtle">
+      <div className="p-6 border-b border-border">
         <div className="flex items-center gap-4 mb-4">
-          <button onClick={onBack} className="p-2 rounded-lg hover:bg-background-tertiary text-text-muted">
+          <button onClick={onBack} className="btn-icon flex items-center justify-center">
             <ArrowLeft className="w-5 h-5" />
           </button>
 
@@ -210,24 +210,24 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
                 type="text"
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
-                className="input text-xl font-semibold"
+                className="input font-brand text-2xl"
               />
             ) : (
               <div className="flex items-center gap-3">
-                <h1 className="text-2xl font-semibold text-text-primary">{profile.display_name}</h1>
-                {profile.starred && <Star className="w-5 h-5 text-yellow-500 fill-yellow-500" />}
-                <span className={clsx('px-2 py-0.5 rounded text-xs', statusStyle.bg, statusStyle.text)}>
+                <h1 className="font-brand text-3xl text-text-primary">{profile.display_name}</h1>
+                {profile.starred && <Star className="w-5 h-5 text-status-warning fill-current" />}
+                <span className={clsx('font-mono text-xs uppercase tracking-widest', statusClass)}>
                   {profile.status.replace('_', ' ')}
                 </span>
               </div>
             )}
-            <div className="flex items-center gap-2 mt-1 text-sm text-text-muted">
+            <div className="flex items-center gap-2 mt-1 font-mono text-xs text-text-muted">
               <span>Based on {profile.base_model}</span>
-              <span className="text-text-muted/50">•</span>
-              <span className="px-1.5 py-0.5 rounded bg-primary/20 text-primary text-xs">
-                {profile.training_strategy.toUpperCase()}
+              <span>|</span>
+              <span className="tag">
+                <span>{profile.training_strategy.toUpperCase()}</span>
               </span>
-              <span className="text-text-muted/50">•</span>
+              <span>|</span>
               <span>Trained {new Date(profile.created_at).toLocaleDateString()}</span>
             </div>
           </div>
@@ -255,7 +255,7 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
                   Edit
                 </button>
                 <button onClick={handleStar} className="btn-secondary">
-                  <Star className={clsx('w-4 h-4 mr-2', profile.starred && 'fill-current text-yellow-500')} />
+                  <Star className={clsx('w-4 h-4 mr-2', profile.starred && 'fill-current text-status-warning')} />
                   {profile.starred ? 'Starred' : 'Star'}
                 </button>
                 <button onClick={() => onCompare([modelId])} className="btn-secondary">
@@ -278,7 +278,7 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
         {/* Description (editable) */}
         {isEditing ? (
           <div className="mb-4">
-            <label className="block text-sm text-text-muted mb-1">Description</label>
+            <label className="block font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Description</label>
             <textarea
               value={editDescription}
               onChange={(e) => setEditDescription(e.target.value)}
@@ -293,7 +293,7 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
         {/* Tags (editable) */}
         {isEditing ? (
           <div className="mb-4">
-            <label className="block text-sm text-text-muted mb-1">Tags (comma-separated)</label>
+            <label className="block font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Tags (comma-separated)</label>
             <input
               type="text"
               value={editTags}
@@ -305,8 +305,8 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
         ) : profile.tags.length > 0 && (
           <div className="flex items-center gap-2 mb-4">
             {profile.tags.map(tag => (
-              <span key={tag} className="px-2 py-0.5 rounded bg-background-tertiary text-text-muted text-sm">
-                {tag}
+              <span key={tag} className="tag">
+                <span>{tag}</span>
               </span>
             ))}
           </div>
@@ -314,39 +314,39 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
 
         {/* Quick Stats */}
         <div className="grid grid-cols-6 gap-4">
-          <div className="p-3 bg-background-tertiary rounded-lg">
-            <div className="text-xs text-text-muted mb-1">Custom Eval</div>
-            <div className="text-xl font-semibold text-text-primary">
-              {profile.custom_eval_pass_rate !== null ? `${profile.custom_eval_pass_rate.toFixed(1)}%` : '—'}
+          <div className="p-3 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
+            <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Custom Eval</div>
+            <div className="font-brand text-2xl text-text-primary">
+              {profile.custom_eval_pass_rate !== null ? `${profile.custom_eval_pass_rate.toFixed(1)}%` : '\u2014'}
             </div>
           </div>
-          <div className="p-3 bg-background-tertiary rounded-lg">
-            <div className="text-xs text-text-muted mb-1">Benchmark Avg</div>
-            <div className="text-xl font-semibold text-text-primary">
-              {profile.benchmark_avg_score !== null ? `${profile.benchmark_avg_score.toFixed(1)}%` : '—'}
+          <div className="p-3 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
+            <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Benchmark Avg</div>
+            <div className="font-brand text-2xl text-text-primary">
+              {profile.benchmark_avg_score !== null ? `${profile.benchmark_avg_score.toFixed(1)}%` : '\u2014'}
             </div>
           </div>
-          <div className="p-3 bg-background-tertiary rounded-lg">
-            <div className="text-xs text-text-muted mb-1">Model Size</div>
-            <div className="text-xl font-semibold text-text-primary">{profile.model_size_display}</div>
+          <div className="p-3 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
+            <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Model Size</div>
+            <div className="font-brand text-2xl text-text-primary">{profile.model_size_display}</div>
             {profile.model_size_params && (
-              <div className="text-xs text-text-muted">{profile.model_size_params}</div>
+              <div className="font-mono text-xs text-text-muted">{profile.model_size_params}</div>
             )}
           </div>
-          <div className="p-3 bg-background-tertiary rounded-lg">
-            <div className="text-xs text-text-muted mb-1">Latency</div>
-            <div className="text-xl font-semibold text-text-primary">
-              {profile.inference_latency_ms ? `${profile.inference_latency_ms.toFixed(0)}ms` : '—'}
+          <div className="p-3 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
+            <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Latency</div>
+            <div className="font-brand text-2xl text-text-primary">
+              {profile.inference_latency_ms ? `${profile.inference_latency_ms.toFixed(0)}ms` : '\u2014'}
             </div>
           </div>
-          <div className="p-3 bg-background-tertiary rounded-lg">
-            <div className="text-xs text-text-muted mb-1">Training Time</div>
-            <div className="text-xl font-semibold text-text-primary">{profile.training_duration_display}</div>
+          <div className="p-3 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
+            <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Training Time</div>
+            <div className="font-brand text-2xl text-text-primary">{profile.training_duration_display}</div>
           </div>
-          <div className="p-3 bg-background-tertiary rounded-lg">
-            <div className="text-xs text-text-muted mb-1">Final Loss</div>
-            <div className="text-xl font-semibold text-text-primary">
-              {profile.final_metrics.final_loss?.toFixed(4) || '—'}
+          <div className="p-3 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
+            <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Final Loss</div>
+            <div className="font-brand text-2xl text-text-primary">
+              {profile.final_metrics.final_loss?.toFixed(4) || '\u2014'}
             </div>
           </div>
         </div>
@@ -354,8 +354,8 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
         {/* Action Message */}
         {actionMessage && (
           <div className={clsx(
-            'mt-4 p-3 rounded-lg text-sm flex items-center gap-2',
-            actionMessage.type === 'success' ? 'bg-status-success/20 text-status-success' : 'bg-status-error/20 text-status-error'
+            'mt-4 p-3 border-brutal rounded-brutal font-mono text-sm flex items-center gap-2',
+            actionMessage.type === 'success' ? 'border-status-success text-status-success bg-background-card' : 'border-status-error text-status-error bg-background-card'
           )}>
             {actionMessage.type === 'success' ? <CheckCircle className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
             {actionMessage.text}
@@ -375,10 +375,10 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
           <div className="grid grid-cols-2 gap-6">
             {/* Config */}
             <div>
-              <h4 className="text-sm font-medium text-text-primary mb-3">Configuration</h4>
+              <h4 className="font-mono text-xs uppercase tracking-widest text-text-primary mb-3">Configuration</h4>
               <div className="space-y-2 text-sm">
                 {Object.entries(profile.config).slice(0, 10).map(([key, value]) => (
-                  <div key={key} className="flex justify-between">
+                  <div key={key} className="flex justify-between border-b border-border-subtle pb-1">
                     <span className="text-text-muted">{key.replace(/_/g, ' ')}</span>
                     <span className="text-text-primary font-mono">
                       {typeof value === 'object' ? JSON.stringify(value) : String(value)}
@@ -390,10 +390,9 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
 
             {/* Loss Curve */}
             <div>
-              <h4 className="text-sm font-medium text-text-primary mb-3">Loss Curve</h4>
+              <h4 className="font-mono text-xs uppercase tracking-widest text-text-primary mb-3">Loss Curve</h4>
               {profile.loss_curve.length > 0 ? (
-                <div className="h-48 bg-background-tertiary rounded-lg p-4">
-                  {/* Simple ASCII-style representation - replace with chart library */}
+                <div className="h-48 border-brutal border-border-subtle rounded-brutal bg-background-secondary p-4">
                   <div className="h-full flex items-end gap-1">
                     {profile.loss_curve.slice(-50).map((point, i) => {
                       const maxLoss = Math.max(...profile.loss_curve.map(p => p.loss))
@@ -401,7 +400,7 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
                       return (
                         <div
                           key={i}
-                          className="flex-1 bg-primary/50 rounded-t"
+                          className="flex-1 bg-accent"
                           style={{ height: `${height}%` }}
                           title={`Step ${point.step}: ${point.loss.toFixed(4)}`}
                         />
@@ -410,7 +409,7 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
                   </div>
                 </div>
               ) : (
-                <div className="h-48 bg-background-tertiary rounded-lg flex items-center justify-center text-text-muted">
+                <div className="h-48 border-brutal border-border-subtle rounded-brutal bg-background-secondary flex items-center justify-center text-text-muted font-mono text-xs">
                   No loss curve data
                 </div>
               )}
@@ -419,12 +418,12 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
 
           {/* Training Metrics */}
           <div className="mt-4">
-            <h4 className="text-sm font-medium text-text-primary mb-3">Final Metrics</h4>
+            <h4 className="font-mono text-xs uppercase tracking-widest text-text-primary mb-3">Final Metrics</h4>
             <div className="grid grid-cols-4 gap-4">
               {Object.entries(profile.final_metrics).map(([key, value]) => (
-                <div key={key} className="p-3 bg-background-tertiary rounded-lg">
-                  <div className="text-xs text-text-muted">{key.replace(/_/g, ' ')}</div>
-                  <div className="text-lg font-semibold text-text-primary">
+                <div key={key} className="p-3 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
+                  <div className="font-mono text-xs uppercase tracking-widest text-text-muted">{key.replace(/_/g, ' ')}</div>
+                  <div className="font-brand text-xl text-text-primary">
                     {typeof value === 'number' ? value.toFixed(4) : value}
                   </div>
                 </div>
@@ -444,25 +443,25 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
           {Object.keys(profile.benchmarks).length > 0 ? (
             <div className="space-y-4">
               <table className="w-full">
-                <thead className="bg-background-tertiary">
-                  <tr>
-                    <th className="px-4 py-2 text-left text-sm font-medium text-text-muted">Benchmark</th>
-                    <th className="px-4 py-2 text-right text-sm font-medium text-text-muted">Score</th>
-                    <th className="px-4 py-2 text-right text-sm font-medium text-text-muted">Passed</th>
-                    <th className="px-4 py-2 text-right text-sm font-medium text-text-muted">Total</th>
-                    <th className="px-4 py-2 text-left text-sm font-medium text-text-muted">Evaluated</th>
+                <thead>
+                  <tr className="bg-background-secondary border-b border-border">
+                    <th className="px-4 py-2 text-left font-mono text-xs uppercase tracking-widest text-text-muted">Benchmark</th>
+                    <th className="px-4 py-2 text-right font-mono text-xs uppercase tracking-widest text-text-muted">Score</th>
+                    <th className="px-4 py-2 text-right font-mono text-xs uppercase tracking-widest text-text-muted">Passed</th>
+                    <th className="px-4 py-2 text-right font-mono text-xs uppercase tracking-widest text-text-muted">Total</th>
+                    <th className="px-4 py-2 text-left font-mono text-xs uppercase tracking-widest text-text-muted">Evaluated</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border-subtle">
                   {Object.values(profile.benchmarks).map(bench => (
                     <tr key={bench.benchmark_name}>
-                      <td className="px-4 py-3 font-medium text-text-primary">{bench.benchmark_name}</td>
-                      <td className="px-4 py-3 text-right text-lg font-semibold text-text-primary">
+                      <td className="px-4 py-3 font-brand text-text-primary">{bench.benchmark_name}</td>
+                      <td className="px-4 py-3 text-right font-brand text-xl text-text-primary">
                         {bench.score.toFixed(1)}%
                       </td>
-                      <td className="px-4 py-3 text-right text-status-success">{bench.passed}</td>
-                      <td className="px-4 py-3 text-right text-text-muted">{bench.total}</td>
-                      <td className="px-4 py-3 text-text-muted text-sm">
+                      <td className="px-4 py-3 text-right font-mono text-status-success">{bench.passed}</td>
+                      <td className="px-4 py-3 text-right font-mono text-text-muted">{bench.total}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-text-muted">
                         {new Date(bench.evaluated_at).toLocaleDateString()}
                       </td>
                     </tr>
@@ -472,7 +471,7 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
             </div>
           ) : (
             <div className="text-center py-8">
-              <BarChart3 className="w-12 h-12 text-text-muted mx-auto mb-3 opacity-30" />
+              <BarChart3 className="w-12 h-12 text-text-muted mx-auto mb-3" />
               <p className="text-text-muted mb-4">No benchmark results yet</p>
               <button onClick={handleEvaluate} className="btn-primary">
                 <Play className="w-4 h-4 mr-2" />
@@ -493,19 +492,19 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
           {Object.keys(profile.custom_evals).length > 0 ? (
             <div className="space-y-4">
               {Object.values(profile.custom_evals).map(evalResult => (
-                <div key={evalResult.eval_set_id} className="p-4 bg-background-tertiary rounded-lg">
+                <div key={evalResult.eval_set_id} className="p-4 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
-                      <span className="font-medium text-text-primary">{evalResult.eval_set_id}</span>
-                      <span className="px-2 py-0.5 rounded bg-primary/20 text-primary text-xs">
-                        {evalResult.eval_type}
+                      <span className="font-brand text-lg text-text-primary">{evalResult.eval_set_id}</span>
+                      <span className="tag">
+                        <span>{evalResult.eval_type}</span>
                       </span>
                     </div>
-                    <span className="text-lg font-semibold text-text-primary">
+                    <span className="font-brand text-2xl text-text-primary">
                       {evalResult.pass_rate.toFixed(1)}%
                     </span>
                   </div>
-                  <div className="flex items-center gap-4 text-sm text-text-muted">
+                  <div className="flex items-center gap-4 font-mono text-xs text-text-muted">
                     <span>{evalResult.passed}/{evalResult.total} passed</span>
                     <span>Evaluated {new Date(evalResult.evaluated_at).toLocaleDateString()}</span>
                   </div>
@@ -514,7 +513,7 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
             </div>
           ) : (
             <div className="text-center py-8">
-              <CheckCircle className="w-12 h-12 text-text-muted mx-auto mb-3 opacity-30" />
+              <CheckCircle className="w-12 h-12 text-text-muted mx-auto mb-3" />
               <p className="text-text-muted">No custom evaluations yet</p>
             </div>
           )}
@@ -529,41 +528,41 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
         >
           <div className="grid grid-cols-2 gap-6">
             <div>
-              <h4 className="text-sm font-medium text-text-primary mb-3">Model Lineage</h4>
+              <h4 className="font-mono text-xs uppercase tracking-widest text-text-primary mb-3">Model Lineage</h4>
               <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
+                <div className="flex justify-between border-b border-border-subtle pb-1">
                   <span className="text-text-muted">Base Model</span>
-                  <span className="text-text-primary">{profile.base_model}</span>
+                  <span className="text-text-primary font-mono">{profile.base_model}</span>
                 </div>
                 {profile.parent_model && (
-                  <div className="flex justify-between">
+                  <div className="flex justify-between border-b border-border-subtle pb-1">
                     <span className="text-text-muted">Parent Model</span>
-                    <span className="text-text-primary">{profile.parent_model}</span>
+                    <span className="text-text-primary font-mono">{profile.parent_model}</span>
                   </div>
                 )}
                 {profile.teacher_model && (
-                  <div className="flex justify-between">
+                  <div className="flex justify-between border-b border-border-subtle pb-1">
                     <span className="text-text-muted">Teacher Model</span>
-                    <span className="text-text-primary">{profile.teacher_model}</span>
+                    <span className="text-text-primary font-mono">{profile.teacher_model}</span>
                   </div>
                 )}
               </div>
             </div>
 
             <div>
-              <h4 className="text-sm font-medium text-text-primary mb-3">Training Data</h4>
+              <h4 className="font-mono text-xs uppercase tracking-widest text-text-primary mb-3">Training Data</h4>
               <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
+                <div className="flex justify-between border-b border-border-subtle pb-1">
                   <span className="text-text-muted">Traces Used</span>
-                  <span className="text-text-primary">{profile.training_traces.length}</span>
+                  <span className="text-text-primary font-mono">{profile.training_traces.length}</span>
                 </div>
                 {profile.training_repos.length > 0 && (
                   <div>
                     <span className="text-text-muted block mb-1">From Repos</span>
                     <div className="flex flex-wrap gap-1">
                       {profile.training_repos.map(repo => (
-                        <span key={repo} className="px-2 py-0.5 rounded bg-background-tertiary text-text-muted text-xs">
-                          {repo}
+                        <span key={repo} className="tag">
+                          <span>{repo}</span>
                         </span>
                       ))}
                     </div>
@@ -582,18 +581,18 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
           onToggle={() => toggleSection('artifacts')}
         >
           <div className="space-y-4">
-            <div className="text-sm text-text-muted mb-2">
-              Model directory: <code className="bg-background-tertiary px-2 py-0.5 rounded">{profile.model_dir}</code>
+            <div className="font-mono text-xs text-text-muted mb-2">
+              Model directory: <code className="bg-background-secondary border-brutal border-border-subtle px-2 py-0.5 rounded-brutal">{profile.model_dir}</code>
             </div>
 
             {/* Checkpoints */}
             {profile.artifacts.checkpoints.length > 0 && (
               <div>
-                <h4 className="text-sm font-medium text-text-primary mb-2">Checkpoints</h4>
+                <h4 className="font-mono text-xs uppercase tracking-widest text-text-primary mb-2">Checkpoints</h4>
                 <div className="flex flex-wrap gap-2">
                   {profile.artifacts.checkpoints.map(cp => (
-                    <span key={cp.path} className="px-2 py-1 rounded bg-background-tertiary text-sm text-text-muted">
-                      Step {cp.step}
+                    <span key={cp.path} className="tag">
+                      <span>Step {cp.step}</span>
                     </span>
                   ))}
                 </div>
@@ -603,15 +602,15 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
             {/* Final & Merged */}
             <div className="grid grid-cols-2 gap-4">
               {profile.artifacts.final_adapter_path && (
-                <div className="p-3 bg-background-tertiary rounded-lg">
-                  <div className="text-xs text-text-muted mb-1">Final Adapter</div>
-                  <div className="text-sm text-text-primary truncate">{profile.artifacts.final_adapter_path}</div>
+                <div className="p-3 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
+                  <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Final Adapter</div>
+                  <div className="text-sm text-text-primary font-mono truncate">{profile.artifacts.final_adapter_path}</div>
                 </div>
               )}
               {profile.artifacts.merged_path && (
-                <div className="p-3 bg-background-tertiary rounded-lg">
-                  <div className="text-xs text-text-muted mb-1">Merged Model</div>
-                  <div className="text-sm text-text-primary truncate">{profile.artifacts.merged_path}</div>
+                <div className="p-3 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
+                  <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Merged Model</div>
+                  <div className="text-sm text-text-primary font-mono truncate">{profile.artifacts.merged_path}</div>
                 </div>
               )}
             </div>
@@ -619,13 +618,13 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
             {/* GGUF Exports */}
             {profile.artifacts.gguf_exports.length > 0 && (
               <div>
-                <h4 className="text-sm font-medium text-text-primary mb-2">GGUF Exports</h4>
+                <h4 className="font-mono text-xs uppercase tracking-widest text-text-primary mb-2">GGUF Exports</h4>
                 <div className="space-y-2">
                   {profile.artifacts.gguf_exports.map(gguf => (
-                    <div key={gguf.path} className="flex items-center justify-between p-3 bg-background-tertiary rounded-lg">
+                    <div key={gguf.path} className="flex items-center justify-between p-3 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
                       <div>
-                        <span className="text-sm text-text-primary">{gguf.quantization}</span>
-                        <span className="text-xs text-text-muted ml-2">
+                        <span className="font-mono text-sm text-text-primary">{gguf.quantization}</span>
+                        <span className="font-mono text-xs text-text-muted ml-2">
                           {(gguf.size_bytes / (1024 * 1024 * 1024)).toFixed(2)} GB
                         </span>
                       </div>
@@ -643,7 +642,8 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
             )}
 
             {/* Export Actions */}
-            <div className="flex items-center gap-2 pt-4 border-t border-border-subtle">
+            <div className="section-divider" />
+            <div className="flex items-center gap-2 pt-2">
               <button
                 onClick={() => handleExport('q4_k_m')}
                 disabled={isExporting}
@@ -689,17 +689,17 @@ interface CollapsibleSectionProps {
 
 function CollapsibleSection({ title, icon: Icon, expanded, onToggle, badge, children }: CollapsibleSectionProps) {
   return (
-    <div className="card-elevated">
+    <div className="card card-elevated overflow-hidden">
       <button
         onClick={onToggle}
-        className="w-full p-4 flex items-center justify-between hover:bg-background-tertiary transition-colors"
+        className="w-full p-4 flex items-center justify-between hover:bg-background-secondary transition-colors"
       >
         <div className="flex items-center gap-3">
-          <Icon className="w-5 h-5 text-primary" />
-          <span className="font-medium text-text-primary">{title}</span>
+          <Icon className="w-5 h-5 text-accent" />
+          <span className="font-brand text-lg text-text-primary">{title}</span>
           {badge !== undefined && (
-            <span className="px-2 py-0.5 rounded-full bg-primary/20 text-primary text-xs">
-              {badge}
+            <span className="tag">
+              <span>{badge}</span>
             </span>
           )}
         </div>
@@ -710,7 +710,7 @@ function CollapsibleSection({ title, icon: Icon, expanded, onToggle, badge, chil
         )}
       </button>
       {expanded && (
-        <div className="p-4 pt-0 border-t border-border-subtle">
+        <div className="p-4 pt-0 border-t border-border">
           {children}
         </div>
       )}

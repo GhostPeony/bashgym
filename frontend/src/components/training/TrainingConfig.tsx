@@ -76,16 +76,16 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-background-secondary rounded-2xl shadow-elevated w-full max-w-lg max-h-[90vh] overflow-hidden">
+    <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: 'rgba(27, 32, 64, 0.5)' }}>
+      <div className="card bg-background-card w-full max-w-lg max-h-[90vh] overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border-subtle">
-          <h2 className="text-lg font-semibold text-text-primary">Training Configuration</h2>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+          <h2 className="font-brand text-xl text-text-primary">Training Configuration</h2>
           <button
             onClick={onClose}
-            className="p-2 rounded-lg hover:bg-background-tertiary text-text-muted"
+            className="btn-icon w-8 h-8 flex items-center justify-center"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
@@ -93,7 +93,7 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
         <form onSubmit={handleSubmit} className="p-6 space-y-6 overflow-y-auto max-h-[calc(90vh-140px)]">
           {/* Data Source */}
           <div>
-            <label className="block text-sm font-medium text-text-primary mb-2">
+            <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-3">
               Data Source
             </label>
             <div className="grid grid-cols-3 gap-2 mb-3">
@@ -101,51 +101,51 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
                 type="button"
                 onClick={() => setDataSource('traces')}
                 className={clsx(
-                  'p-3 rounded-lg border text-center transition-all',
+                  'card p-3 text-center transition-press',
                   dataSource === 'traces'
-                    ? 'border-primary bg-primary/10 text-primary'
-                    : 'border-border-color hover:border-primary/50 text-text-secondary'
+                    ? 'border-accent bg-accent-light text-accent-dark'
+                    : 'text-text-secondary'
                 )}
               >
                 <Database className="w-5 h-5 mx-auto mb-1" />
-                <span className="block font-semibold text-sm">Gold Traces</span>
-                <span className="block text-xs mt-1 text-text-muted">Default</span>
+                <span className="block font-mono text-xs font-bold uppercase">Gold Traces</span>
+                <span className="block font-mono text-xs mt-1 text-text-muted">Default</span>
               </button>
               <button
                 type="button"
                 onClick={() => setDataSource('dataset_path')}
                 className={clsx(
-                  'p-3 rounded-lg border text-center transition-all',
+                  'card p-3 text-center transition-press',
                   dataSource === 'dataset_path'
-                    ? 'border-primary bg-primary/10 text-primary'
-                    : 'border-border-color hover:border-primary/50 text-text-secondary'
+                    ? 'border-accent bg-accent-light text-accent-dark'
+                    : 'text-text-secondary'
                 )}
               >
                 <FileText className="w-5 h-5 mx-auto mb-1" />
-                <span className="block font-semibold text-sm">Custom JSONL</span>
-                <span className="block text-xs mt-1 text-text-muted">User-provided</span>
+                <span className="block font-mono text-xs font-bold uppercase">Custom JSONL</span>
+                <span className="block font-mono text-xs mt-1 text-text-muted">User-provided</span>
               </button>
               <button
                 type="button"
                 onClick={() => setDataSource('security_dataset')}
                 className={clsx(
-                  'p-3 rounded-lg border text-center transition-all',
+                  'card p-3 text-center transition-press',
                   dataSource === 'security_dataset'
-                    ? 'border-primary bg-primary/10 text-primary'
-                    : 'border-border-color hover:border-primary/50 text-text-secondary'
+                    ? 'border-accent bg-accent-light text-accent-dark'
+                    : 'text-text-secondary'
                 )}
               >
                 <Shield className="w-5 h-5 mx-auto mb-1" />
-                <span className="block font-semibold text-sm">Security Dataset</span>
-                <span className="block text-xs mt-1 text-text-muted">Public datasets</span>
+                <span className="block font-mono text-xs font-bold uppercase">Security</span>
+                <span className="block font-mono text-xs mt-1 text-text-muted">Public datasets</span>
               </button>
             </div>
 
             {/* Security Dataset Config */}
             {dataSource === 'security_dataset' && (
-              <div className="border border-border-color rounded-lg p-3 bg-background-tertiary space-y-3">
+              <div className="card p-3 space-y-3">
                 <div>
-                  <label className="block text-xs text-text-muted mb-1">Dataset Type</label>
+                  <label className="block font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Dataset Type</label>
                   <select
                     value={config.securityDatasetType}
                     onChange={(e) => setConfig({ ...config, securityDatasetType: e.target.value })}
@@ -160,7 +160,7 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs text-text-muted mb-1">Input File Path</label>
+                  <label className="block font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Input File Path</label>
                   <input
                     type="text"
                     value={config.securityDatasetPath}
@@ -171,7 +171,7 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs text-text-muted mb-1">Mode</label>
+                    <label className="block font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Mode</label>
                     <select
                       value={config.securityConversionMode}
                       onChange={(e) => setConfig({ ...config, securityConversionMode: e.target.value as 'direct' | 'enriched' })}
@@ -182,7 +182,7 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs text-text-muted mb-1">Max Samples</label>
+                    <label className="block font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Max Samples</label>
                     <input
                       type="number"
                       value={config.securityMaxSamples ?? ''}
@@ -206,9 +206,9 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
             )}
 
             {/* Data source info */}
-            <div className="flex items-start gap-2 mt-3 p-2 rounded-lg bg-status-info/10 border border-status-info/20">
-              <Info className="w-4 h-4 text-status-info flex-shrink-0 mt-0.5" />
-              <p className="text-xs text-text-secondary">
+            <div className="card p-3 mt-3 flex items-start gap-2 border-l-4 border-l-accent">
+              <Info className="w-4 h-4 text-accent flex-shrink-0 mt-0.5" />
+              <p className="font-mono text-xs text-text-secondary">
                 {dataSource === 'traces' && 'Auto-generate training data from your collected gold traces.'}
                 {dataSource === 'dataset_path' && 'Provide a pre-formatted JSONL file for training.'}
                 {dataSource === 'security_dataset' && 'Ingest a public security dataset (EMBER, PhishTank, etc.) directly into training examples.'}
@@ -218,7 +218,7 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
 
           {/* Training Scope - only shown for trace-based training */}
           {dataSource === 'traces' && <div>
-            <label className="block text-sm font-medium text-text-primary mb-2">
+            <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-3">
               Training Data Scope
             </label>
             <div className="grid grid-cols-3 gap-2 mb-3">
@@ -226,50 +226,50 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
                 type="button"
                 onClick={() => setTrainingScope('all')}
                 className={clsx(
-                  'p-3 rounded-lg border text-center transition-all',
+                  'card p-3 text-center transition-press',
                   trainingScope === 'all'
-                    ? 'border-primary bg-primary/10 text-primary'
-                    : 'border-border-color hover:border-primary/50 text-text-secondary'
+                    ? 'border-accent bg-accent-light text-accent-dark'
+                    : 'text-text-secondary'
                 )}
               >
                 <Sparkles className="w-5 h-5 mx-auto mb-1" />
-                <span className="block font-semibold text-sm">Generalist</span>
-                <span className="block text-xs mt-1 text-text-muted">All repos</span>
+                <span className="block font-mono text-xs font-bold uppercase">Generalist</span>
+                <span className="block font-mono text-xs mt-1 text-text-muted">All repos</span>
               </button>
               <button
                 type="button"
                 onClick={() => setTrainingScope('selected')}
                 className={clsx(
-                  'p-3 rounded-lg border text-center transition-all',
+                  'card p-3 text-center transition-press',
                   trainingScope === 'selected'
-                    ? 'border-primary bg-primary/10 text-primary'
-                    : 'border-border-color hover:border-primary/50 text-text-secondary'
+                    ? 'border-accent bg-accent-light text-accent-dark'
+                    : 'text-text-secondary'
                 )}
               >
                 <Database className="w-5 h-5 mx-auto mb-1" />
-                <span className="block font-semibold text-sm">Mixed</span>
-                <span className="block text-xs mt-1 text-text-muted">Select repos</span>
+                <span className="block font-mono text-xs font-bold uppercase">Mixed</span>
+                <span className="block font-mono text-xs mt-1 text-text-muted">Select repos</span>
               </button>
               <button
                 type="button"
                 onClick={() => setTrainingScope('single')}
                 className={clsx(
-                  'p-3 rounded-lg border text-center transition-all',
+                  'card p-3 text-center transition-press',
                   trainingScope === 'single'
-                    ? 'border-primary bg-primary/10 text-primary'
-                    : 'border-border-color hover:border-primary/50 text-text-secondary'
+                    ? 'border-accent bg-accent-light text-accent-dark'
+                    : 'text-text-secondary'
                 )}
               >
                 <FolderGit2 className="w-5 h-5 mx-auto mb-1" />
-                <span className="block font-semibold text-sm">Specialist</span>
-                <span className="block text-xs mt-1 text-text-muted">Single repo</span>
+                <span className="block font-mono text-xs font-bold uppercase">Specialist</span>
+                <span className="block font-mono text-xs mt-1 text-text-muted">Single repo</span>
               </button>
             </div>
 
             {/* Repo Selection */}
             {trainingScope !== 'all' && (
-              <div className="border border-border-color rounded-lg p-3 bg-background-tertiary">
-                <p className="text-xs text-text-muted mb-2">
+              <div className="card p-3">
+                <p className="font-mono text-xs uppercase tracking-widest text-text-muted mb-2">
                   {trainingScope === 'single' ? 'Select one repository:' : 'Select repositories:'}
                 </p>
                 <div className="space-y-1 max-h-32 overflow-y-auto">
@@ -280,8 +280,8 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
                       <label
                         key={repo.name}
                         className={clsx(
-                          'flex items-center gap-2 p-2 rounded cursor-pointer hover:bg-background-secondary transition-colors',
-                          selectedRepos.includes(repo.name) && 'bg-primary/10'
+                          'flex items-center gap-2 p-2 cursor-pointer hover-press transition-press',
+                          selectedRepos.includes(repo.name) && 'bg-accent-light'
                         )}
                       >
                         <input
@@ -303,7 +303,7 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
                         />
                         <FolderGit2 className="w-4 h-4 text-text-muted" />
                         <span className="text-sm text-text-primary flex-1">{repo.name}</span>
-                        <span className="text-xs text-text-muted">{repo.trace_count} traces</span>
+                        <span className="font-mono text-xs text-text-muted">{repo.trace_count} traces</span>
                       </label>
                     ))
                   )}
@@ -312,9 +312,9 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
             )}
 
             {/* Info box */}
-            <div className="flex items-start gap-2 mt-3 p-2 rounded-lg bg-status-info/10 border border-status-info/20">
-              <Info className="w-4 h-4 text-status-info flex-shrink-0 mt-0.5" />
-              <p className="text-xs text-text-secondary">
+            <div className="card p-3 mt-3 flex items-start gap-2 border-l-4 border-l-accent">
+              <Info className="w-4 h-4 text-accent flex-shrink-0 mt-0.5" />
+              <p className="font-mono text-xs text-text-secondary">
                 {trainingScope === 'all' && 'Train on all collected traces for a versatile generalist agent.'}
                 {trainingScope === 'selected' && 'Train on selected repos for focused expertise across projects.'}
                 {trainingScope === 'single' && 'Train on a single repo for a highly specialized codebase expert.'}
@@ -324,7 +324,7 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
 
           {/* Training Backend */}
           <div>
-            <label className="block text-sm font-medium text-text-primary mb-2">
+            <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-3">
               Training Backend
             </label>
             <div className="grid grid-cols-2 gap-2">
@@ -335,15 +335,15 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
                   setConfig({ ...config, useNemoGym: false })
                 }}
                 className={clsx(
-                  'p-3 rounded-lg border text-center transition-all',
+                  'card p-3 text-center transition-press',
                   trainingBackend === 'local'
-                    ? 'border-primary bg-primary/10 text-primary'
-                    : 'border-border-color hover:border-primary/50 text-text-secondary'
+                    ? 'border-accent bg-accent-light text-accent-dark'
+                    : 'text-text-secondary'
                 )}
               >
                 <Monitor className="w-5 h-5 mx-auto mb-1" />
-                <span className="block font-semibold text-sm">Local</span>
-                <span className="block text-xs mt-1 text-text-muted">Your GPU (Unsloth)</span>
+                <span className="block font-mono text-xs font-bold uppercase">Local</span>
+                <span className="block font-mono text-xs mt-1 text-text-muted">Your GPU (Unsloth)</span>
               </button>
               <button
                 type="button"
@@ -352,22 +352,22 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
                   setConfig({ ...config, useNemoGym: true })
                 }}
                 className={clsx(
-                  'p-3 rounded-lg border text-center transition-all',
+                  'card p-3 text-center transition-press',
                   trainingBackend === 'nemo'
-                    ? 'border-primary bg-primary/10 text-primary'
-                    : 'border-border-color hover:border-primary/50 text-text-secondary'
+                    ? 'border-accent bg-accent-light text-accent-dark'
+                    : 'text-text-secondary'
                 )}
               >
                 <Cloud className="w-5 h-5 mx-auto mb-1" />
-                <span className="block font-semibold text-sm">NeMo Cloud</span>
-                <span className="block text-xs mt-1 text-text-muted">NVIDIA Microservices</span>
+                <span className="block font-mono text-xs font-bold uppercase">NeMo Cloud</span>
+                <span className="block font-mono text-xs mt-1 text-text-muted">NVIDIA Microservices</span>
               </button>
             </div>
 
             {/* Backend info */}
-            <div className="flex items-start gap-2 mt-3 p-2 rounded-lg bg-status-info/10 border border-status-info/20">
-              <Info className="w-4 h-4 text-status-info flex-shrink-0 mt-0.5" />
-              <p className="text-xs text-text-secondary">
+            <div className="card p-3 mt-3 flex items-start gap-2 border-l-4 border-l-accent">
+              <Info className="w-4 h-4 text-accent flex-shrink-0 mt-0.5" />
+              <p className="font-mono text-xs text-text-secondary">
                 {trainingBackend === 'local'
                   ? 'Train locally using your GPU with Unsloth for fast LoRA fine-tuning. Requires CUDA-capable GPU.'
                   : 'Train using NVIDIA NeMo Microservices for scalable cloud training. Requires NVIDIA_API_KEY.'}
@@ -377,7 +377,7 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
 
           {/* Strategy Selection */}
           <div>
-            <label className="block text-sm font-medium text-text-primary mb-2">
+            <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-3">
               Training Strategy
             </label>
             <div className="grid grid-cols-3 gap-2">
@@ -387,14 +387,14 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
                   type="button"
                   onClick={() => setConfig({ ...config, strategy: s.value })}
                   className={clsx(
-                    'p-3 rounded-lg border text-center transition-all',
+                    'card p-3 text-center transition-press',
                     config.strategy === s.value
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-border-color hover:border-primary/50 text-text-secondary'
+                      ? 'border-accent bg-accent-light text-accent-dark'
+                      : 'text-text-secondary'
                   )}
                 >
-                  <span className="block font-semibold">{s.label}</span>
-                  <span className="block text-xs mt-1 text-text-muted">{s.description}</span>
+                  <span className="block font-mono text-sm font-bold uppercase">{s.label}</span>
+                  <span className="block font-mono text-xs mt-1 text-text-muted">{s.description}</span>
                 </button>
               ))}
             </div>
@@ -402,7 +402,7 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
 
           {/* Base Model */}
           <div>
-            <label className="block text-sm font-medium text-text-primary mb-2">
+            <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-3">
               Base Model
             </label>
             <select
@@ -428,7 +428,7 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
           {/* Dataset Path - only for traces/custom JSONL modes */}
           {dataSource !== 'security_dataset' && (
             <div>
-              <label className="block text-sm font-medium text-text-primary mb-2">
+              <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-3">
                 Dataset Path
               </label>
               <input
@@ -442,65 +442,66 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
           )}
 
           {/* Hyperparameters Grid */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-text-primary mb-2">Epochs</label>
-              <input
-                type="number"
-                value={config.epochs}
-                onChange={(e) => setConfig({ ...config, epochs: parseInt(e.target.value) })}
-                className="input w-full"
-                min={1}
-                max={10}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-text-primary mb-2">
-                Batch Size
-              </label>
-              <input
-                type="number"
-                value={config.batchSize}
-                onChange={(e) => setConfig({ ...config, batchSize: parseInt(e.target.value) })}
-                className="input w-full"
-                min={1}
-                max={32}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-text-primary mb-2">
-                Learning Rate
-              </label>
-              <input
-                type="text"
-                value={config.learningRate}
-                onChange={(e) =>
-                  setConfig({ ...config, learningRate: parseFloat(e.target.value) })
-                }
-                className="input w-full"
-                placeholder="2e-5"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-text-primary mb-2">
-                Warmup Steps
-              </label>
-              <input
-                type="number"
-                value={config.warmupSteps}
-                onChange={(e) => setConfig({ ...config, warmupSteps: parseInt(e.target.value) })}
-                className="input w-full"
-                min={0}
-              />
+          <div>
+            <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-3">
+              Hyperparameters
+            </label>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block font-mono text-xs text-text-muted mb-2">Epochs</label>
+                <input
+                  type="number"
+                  value={config.epochs}
+                  onChange={(e) => setConfig({ ...config, epochs: parseInt(e.target.value) })}
+                  className="input w-full"
+                  min={1}
+                  max={10}
+                />
+              </div>
+              <div>
+                <label className="block font-mono text-xs text-text-muted mb-2">Batch Size</label>
+                <input
+                  type="number"
+                  value={config.batchSize}
+                  onChange={(e) => setConfig({ ...config, batchSize: parseInt(e.target.value) })}
+                  className="input w-full"
+                  min={1}
+                  max={32}
+                />
+              </div>
+              <div>
+                <label className="block font-mono text-xs text-text-muted mb-2">Learning Rate</label>
+                <input
+                  type="text"
+                  value={config.learningRate}
+                  onChange={(e) =>
+                    setConfig({ ...config, learningRate: parseFloat(e.target.value) })
+                  }
+                  className="input w-full"
+                  placeholder="2e-5"
+                />
+              </div>
+              <div>
+                <label className="block font-mono text-xs text-text-muted mb-2">Warmup Steps</label>
+                <input
+                  type="number"
+                  value={config.warmupSteps}
+                  onChange={(e) => setConfig({ ...config, warmupSteps: parseInt(e.target.value) })}
+                  className="input w-full"
+                  min={0}
+                />
+              </div>
             </div>
           </div>
 
           {/* LoRA Config */}
           <div>
-            <h3 className="text-sm font-medium text-text-primary mb-3">LoRA Configuration</h3>
+            <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-3">
+              LoRA Configuration
+            </label>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm text-text-secondary mb-2">LoRA Rank</label>
+                <label className="block font-mono text-xs text-text-muted mb-2">LoRA Rank</label>
                 <input
                   type="number"
                   value={config.loraRank}
@@ -511,7 +512,7 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
                 />
               </div>
               <div>
-                <label className="block text-sm text-text-secondary mb-2">LoRA Alpha</label>
+                <label className="block font-mono text-xs text-text-muted mb-2">LoRA Alpha</label>
                 <input
                   type="number"
                   value={config.loraAlpha}
@@ -537,7 +538,7 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
 
           {/* Max Sequence Length */}
           <div>
-            <label className="block text-sm font-medium text-text-primary mb-2">
+            <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-3">
               Max Sequence Length
             </label>
             <input
@@ -553,14 +554,14 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
 
           {/* Knowledge Distillation Config */}
           {config.strategy === 'kd' && (
-            <div className="border border-primary/20 rounded-lg p-4 bg-primary/5">
-              <h3 className="text-sm font-medium text-text-primary mb-3 flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-primary" />
+            <div className="card p-4 border-l-4 border-l-accent">
+              <h3 className="font-mono text-xs uppercase tracking-widest text-text-secondary mb-3 flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-accent" />
                 Knowledge Distillation Settings
               </h3>
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm text-text-secondary mb-2">Teacher Model</label>
+                  <label className="block font-mono text-xs text-text-muted mb-2">Teacher Model</label>
                   <select
                     value={config.teacherModel}
                     onChange={(e) => setConfig({ ...config, teacherModel: e.target.value })}
@@ -589,14 +590,14 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
                       <option value="gpt-4-turbo">GPT-4 Turbo</option>
                     </optgroup>
                   </select>
-                  <p className="text-xs text-text-muted mt-1">
+                  <p className="font-mono text-xs text-text-muted mt-1">
                     The larger model to distill knowledge from
                   </p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm text-text-secondary mb-2">Temperature</label>
+                    <label className="block font-mono text-xs text-text-muted mb-2">Temperature</label>
                     <input
                       type="number"
                       value={config.temperature}
@@ -606,12 +607,12 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
                       max={10}
                       step={0.5}
                     />
-                    <p className="text-xs text-text-muted mt-1">
+                    <p className="font-mono text-xs text-text-muted mt-1">
                       Softmax temperature (higher = softer distribution)
                     </p>
                   </div>
                   <div>
-                    <label className="block text-sm text-text-secondary mb-2">KD Alpha</label>
+                    <label className="block font-mono text-xs text-text-muted mb-2">KD Alpha</label>
                     <input
                       type="number"
                       value={config.kdAlpha}
@@ -621,15 +622,15 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
                       max={1}
                       step={0.1}
                     />
-                    <p className="text-xs text-text-muted mt-1">
+                    <p className="font-mono text-xs text-text-muted mt-1">
                       Weight for distillation loss (0 = task only, 1 = KD only)
                     </p>
                   </div>
                 </div>
 
-                <div className="flex items-start gap-2 p-2 rounded-lg bg-status-info/10 border border-status-info/20">
-                  <Info className="w-4 h-4 text-status-info flex-shrink-0 mt-0.5" />
-                  <p className="text-xs text-text-secondary">
+                <div className="card p-3 flex items-start gap-2 border-l-4 border-l-accent">
+                  <Info className="w-4 h-4 text-accent flex-shrink-0 mt-0.5" />
+                  <p className="font-mono text-xs text-text-secondary">
                     Knowledge distillation transfers capabilities from a large teacher model to your smaller student model.
                     The student learns to match the teacher's probability distributions, not just the correct answers.
                   </p>
@@ -640,7 +641,7 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
         </form>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border-subtle">
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border">
           <button type="button" onClick={onClose} className="btn-secondary">
             Cancel
           </button>

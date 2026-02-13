@@ -183,9 +183,9 @@ export const PreviewNode = memo(function PreviewNode({ data, selected }: Preview
   return (
     <div
       className={clsx(
-        'w-[300px] bg-background-secondary rounded-lg border-2 shadow-lg transition-all cursor-pointer',
-        'border-border-subtle hover:border-border',
-        selected && 'ring-2 ring-primary border-primary'
+        'w-[300px] card !rounded-brutal border-brutal cursor-pointer',
+        'border-border hover:border-border',
+        selected && 'border-accent shadow-brutal'
       )}
       onClick={handleFocus}
     >
@@ -193,30 +193,30 @@ export const PreviewNode = memo(function PreviewNode({ data, selected }: Preview
       <Handle
         type="target"
         position={Position.Left}
-        className="!bg-primary !w-2 !h-2"
+        className="!bg-accent !w-2 !h-2 !border-brutal !border-border"
       />
       <Handle
         type="source"
         position={Position.Right}
-        className="!bg-primary !w-2 !h-2"
+        className="!bg-accent !w-2 !h-2 !border-brutal !border-border"
       />
 
       {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-2 bg-background-tertiary/50 rounded-t-lg">
-        <div className="p-1.5 rounded-md bg-background-tertiary">
+      <div className="flex items-center gap-2 px-3 py-2 bg-background-secondary border-b border-brutal border-border rounded-t-brutal">
+        <div className="p-1.5 border-brutal border-border-subtle rounded-brutal bg-background-tertiary">
           {getLanguageIcon(language, filePath)}
         </div>
         <div className="flex-1 min-w-0">
-          <span className="text-sm font-medium text-text-primary truncate block" title={filePath}>
+          <span className="text-sm font-mono font-semibold text-text-primary truncate block" title={filePath}>
             {fileName}
           </span>
-          <span className="text-[10px] text-text-muted">{langName}</span>
+          <span className="text-[10px] text-text-muted font-mono">{langName}</span>
         </div>
         <div className="flex items-center gap-0.5">
           {onCopyPath && (
             <button
               onClick={handleCopyPath}
-              className="p-1 rounded hover:bg-background-tertiary text-text-muted hover:text-text-secondary"
+              className="p-1 hover:bg-background-tertiary text-text-muted hover:text-text-secondary transition-press"
               title="Copy path"
             >
               <Copy className="w-3.5 h-3.5" />
@@ -225,7 +225,7 @@ export const PreviewNode = memo(function PreviewNode({ data, selected }: Preview
           {onOpenExternal && (
             <button
               onClick={handleOpenExternal}
-              className="p-1 rounded hover:bg-background-tertiary text-text-muted hover:text-text-secondary"
+              className="p-1 hover:bg-background-tertiary text-text-muted hover:text-text-secondary transition-press"
               title="Open externally"
             >
               <ExternalLink className="w-3.5 h-3.5" />
@@ -233,14 +233,14 @@ export const PreviewNode = memo(function PreviewNode({ data, selected }: Preview
           )}
           <button
             onClick={handleFocus}
-            className="p-1 rounded hover:bg-background-tertiary text-text-muted hover:text-text-secondary"
+            className="p-1 hover:bg-background-tertiary text-text-muted hover:text-text-secondary transition-press"
             title="Focus panel"
           >
             <Maximize2 className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={handleClose}
-            className="p-1 rounded hover:bg-status-error/20 text-text-muted hover:text-status-error"
+            className="p-1 hover:bg-status-error/20 text-text-muted hover:text-status-error transition-press"
             title="Close"
           >
             <X className="w-3.5 h-3.5" />
@@ -249,7 +249,7 @@ export const PreviewNode = memo(function PreviewNode({ data, selected }: Preview
       </div>
 
       {/* File metadata */}
-      <div className="flex items-center gap-3 px-3 py-1.5 text-[10px] text-text-muted border-b border-border-subtle">
+      <div className="flex items-center gap-3 px-3 py-1.5 text-[10px] text-text-muted border-b border-brutal border-border font-mono">
         {fileSize !== undefined && (
           <div className="flex items-center gap-1">
             <HardDrive className="w-2.5 h-2.5" />
@@ -273,7 +273,7 @@ export const PreviewNode = memo(function PreviewNode({ data, selected }: Preview
       {/* Code preview */}
       <div className={clsx(
         'px-3 py-2 font-mono text-[10px] leading-relaxed',
-        'border-l-2',
+        'border-l-3',
         getSyntaxColor(language)
       )}>
         {previewLines && previewLines.length > 0 ? (
@@ -300,8 +300,8 @@ export const PreviewNode = memo(function PreviewNode({ data, selected }: Preview
       </div>
 
       {/* Path display */}
-      <div className="px-3 py-1.5 bg-background-tertiary/30 rounded-b-lg">
-        <div className="text-[9px] text-text-muted truncate" title={filePath}>
+      <div className="px-3 py-1.5 bg-background-secondary rounded-b-brutal border-t border-brutal border-border-subtle">
+        <div className="text-[9px] text-text-muted truncate font-mono" title={filePath}>
           {filePath}
         </div>
       </div>

@@ -46,13 +46,13 @@ export function NavigationBar() {
   const breadcrumb = getBreadcrumbText()
 
   return (
-    <header className="h-12 flex items-center justify-between px-4 border-b border-border-subtle bg-background-secondary/80 backdrop-blur-xl titlebar-drag">
+    <header className="h-12 flex items-center justify-between px-4 border-b border-border bg-background-card titlebar-drag">
       {/* Left Section */}
       <div className="flex items-center gap-3 titlebar-no-drag">
         {/* Menu Toggle */}
         <button
           onClick={toggleSidebar}
-          className="p-2 rounded-lg hover:bg-background-tertiary transition-colors"
+          className="btn-icon"
           title="Toggle menu"
         >
           <Menu className="w-5 h-5 text-text-secondary" />
@@ -61,10 +61,10 @@ export function NavigationBar() {
         {/* Home Button */}
         <button
           onClick={handleGoHome}
-          className={`p-2 rounded-lg transition-colors ${
+          className={`btn-icon ${
             overlayView === 'home'
-              ? 'bg-primary/10 text-primary'
-              : 'hover:bg-background-tertiary text-text-secondary'
+              ? 'bg-accent/10 text-accent'
+              : 'text-text-secondary'
           }`}
           title="Home"
         >
@@ -74,15 +74,18 @@ export function NavigationBar() {
         {/* Logo / Title - Clickable to go home */}
         <button
           onClick={handleGoHome}
-          className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+          className="flex items-center gap-2"
         >
-          <img src="/ghost-icon.png" alt="BashGym" className="w-6 h-6 rounded-lg object-cover" />
-          <span className="font-semibold" style={{ color: '#70A6C1' }}>/BashGym</span>
+          <img src="/ghost-icon.png" alt="BashGym" className="w-6 h-6 object-cover" />
+          <span className="font-brand font-semibold text-lg">
+            <span className="text-accent">/</span>
+            <span className="text-text-primary">BashGym</span>
+          </span>
         </button>
 
         {/* Breadcrumb for current view */}
         {breadcrumb && (
-          <div className="flex items-center">
+          <div className="flex items-center font-mono text-sm">
             <span className="text-text-muted mx-1">/</span>
             <span className="text-text-secondary">{breadcrumb}</span>
           </div>
@@ -95,7 +98,7 @@ export function NavigationBar() {
         {overlayView && overlayView !== 'home' && (
           <button
             onClick={handleCloseOverlay}
-            className="p-2 rounded-lg hover:bg-background-tertiary transition-colors text-text-secondary hover:text-text-primary"
+            className="btn-icon text-text-secondary"
             title="Return to workspace (Escape)"
           >
             <X className="w-5 h-5" />
@@ -105,7 +108,7 @@ export function NavigationBar() {
         {/* Theme Toggle */}
         <button
           onClick={toggleTheme}
-          className="p-2 rounded-lg hover:bg-background-tertiary transition-colors"
+          className="btn-icon"
           title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode (Ctrl+D)`}
         >
           {theme === 'dark' ? (
@@ -118,7 +121,7 @@ export function NavigationBar() {
         {/* Add Terminal */}
         <button
           onClick={handleAddTerminal}
-          className="p-2 rounded-lg hover:bg-background-tertiary transition-colors"
+          className="btn-icon"
           title="Add terminal (Ctrl+N)"
         >
           <Plus className="w-5 h-5 text-text-secondary" />
@@ -127,7 +130,7 @@ export function NavigationBar() {
         {/* Keyboard Shortcuts */}
         <button
           onClick={() => useUIStore.getState().setKeyboardShortcutsOpen(true)}
-          className="p-2 rounded-lg hover:bg-background-tertiary transition-colors"
+          className="btn-icon"
           title="Keyboard shortcuts (Ctrl+?)"
         >
           <Keyboard className="w-5 h-5 text-text-secondary" />
@@ -136,7 +139,7 @@ export function NavigationBar() {
         {/* Settings */}
         <button
           onClick={() => useUIStore.getState().setSettingsOpen(true)}
-          className="p-2 rounded-lg hover:bg-background-tertiary transition-colors"
+          className="btn-icon"
           title="Settings"
         >
           <Settings className="w-5 h-5 text-text-secondary" />

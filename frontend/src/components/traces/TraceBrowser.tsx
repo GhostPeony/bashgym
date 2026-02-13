@@ -270,14 +270,28 @@ export function TraceBrowser() {
     }
   }
 
-  // Get tier badge styling
+  // Get quality CSS class for triangular indicators
+  const getQualityClass = (status: TraceStatus): string => {
+    switch (status) {
+      case 'gold':
+      case 'silver':
+      case 'bronze':
+        return 'quality-gold'
+      case 'failed':
+        return 'quality-failed'
+      case 'pending':
+        return 'quality-pending'
+    }
+  }
+
+  // Get tier badge styling - solid backgrounds, no opacity patterns
   const getTierBadge = (status: TraceStatus) => {
-    const badges: Record<TraceStatus, { bg: string; text: string; label: string }> = {
-      gold: { bg: 'bg-yellow-500/10', text: 'text-yellow-500', label: 'Gold · SFT' },
-      silver: { bg: 'bg-slate-400/10', text: 'text-slate-400', label: 'Silver · DPO+' },
-      bronze: { bg: 'bg-amber-600/10', text: 'text-amber-600', label: 'Bronze · DPO-' },
-      failed: { bg: 'bg-red-500/10', text: 'text-red-500', label: 'Failed' },
-      pending: { bg: 'bg-orange-500/10', text: 'text-orange-500', label: 'Pending' }
+    const badges: Record<TraceStatus, { className: string; label: string }> = {
+      gold: { className: 'bg-accent-light text-yellow-600 border-border', label: 'Gold - SFT' },
+      silver: { className: 'bg-background-secondary text-slate-500 border-border', label: 'Silver - DPO+' },
+      bronze: { className: 'bg-background-secondary text-amber-700 border-border', label: 'Bronze - DPO-' },
+      failed: { className: 'bg-background-secondary text-status-error border-border', label: 'Failed' },
+      pending: { className: 'bg-background-secondary text-status-warning border-border', label: 'Pending' }
     }
     return badges[status]
   }
@@ -297,43 +311,48 @@ export function TraceBrowser() {
   return (
     <div className="h-full flex">
       {/* Left Panel - Trace List */}
-      <div className="w-96 border-r border-border-subtle flex flex-col">
-        {/* Search and Filters */}
-        <div className="p-4 border-b border-border-subtle">
-          <div className="flex items-center gap-2 px-3 py-2 bg-background-tertiary rounded-lg mb-3">
-            <Search className="w-4 h-4 text-text-muted" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search traces..."
-              className="flex-1 bg-transparent text-sm text-text-primary placeholder:text-text-muted focus:outline-none"
-            />
+      <div className="w-96 border-r border-brutal border-border flex flex-col bg-background-primary">
+        {/* Header */}
+        <div className="p-4 border-b border-brutal border-border">
+          <div className="flex items-center gap-3 mb-3">
+            <h1 className="font-brand text-2xl text-text-primary">Traces</h1>
+            <span className="tag"><span>Browser</span></span>
+          </div>
+
+          {/* Search Input */}
+          <div className="flex items-center gap-2 mb-3">
+            <div className="flex-1 flex items-center gap-2">
+              <Search className="w-4 h-4 text-text-muted flex-shrink-0" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search traces..."
+                className="input w-full"
+              />
+            </div>
           </div>
 
           {/* Filter Tabs - Tiered Quality Classification */}
           <div className="flex flex-wrap items-center gap-1 mb-3">
-            {(['all', 'gold', 'silver', 'bronze', 'failed', 'pending'] as const).map((status) => {
-              const badge = status !== 'all' ? getTierBadge(status) : null
-              return (
-                <button
-                  key={status}
-                  onClick={() => setStatusFilter(status)}
-                  className={clsx(
-                    'px-2.5 py-1.5 text-xs rounded-lg transition-colors capitalize flex items-center gap-1',
-                    statusFilter === status
-                      ? 'bg-primary/10 text-primary font-medium'
-                      : 'text-text-secondary hover:bg-background-tertiary'
-                  )}
-                >
-                  {status !== 'all' && getStatusIcon(status)}
-                  {status}
-                  <span className="opacity-60">
-                    ({getStatusCount(status)})
-                  </span>
-                </button>
-              )
-            })}
+            {(['all', 'gold', 'silver', 'bronze', 'failed', 'pending'] as const).map((status) => (
+              <button
+                key={status}
+                onClick={() => setStatusFilter(status)}
+                className={clsx(
+                  'px-2.5 py-1.5 text-xs font-mono font-semibold uppercase tracking-wide border-brutal border-border rounded-brutal transition-press capitalize flex items-center gap-1',
+                  statusFilter === status
+                    ? 'bg-accent-light text-accent-dark border-border shadow-brutal-sm'
+                    : 'bg-background-card text-text-secondary hover-press'
+                )}
+              >
+                {status !== 'all' && getStatusIcon(status)}
+                {status}
+                <span className="font-mono font-bold">
+                  ({getStatusCount(status)})
+                </span>
+              </button>
+            ))}
           </div>
 
           {/* Auto-Classify Button */}
@@ -341,14 +360,14 @@ export function TraceBrowser() {
             <button
               onClick={() => handleAutoClassify(true)}
               disabled={classifyLoading}
-              className="w-full flex items-center justify-center gap-2 px-3 py-2 mb-3 rounded-lg border border-primary/30 bg-primary/5 text-primary text-sm font-medium hover:bg-primary/10 transition-colors disabled:opacity-50"
+              className="btn-primary w-full flex items-center justify-center gap-2 mb-3"
             >
               {classifyLoading ? (
                 <RefreshCw className="w-4 h-4 animate-spin" />
               ) : (
                 <Wand2 className="w-4 h-4" />
               )}
-              Auto-Classify {pendingCount} Pending Traces
+              Auto-Classify {pendingCount} Pending
             </button>
           )}
 
@@ -357,26 +376,26 @@ export function TraceBrowser() {
             <button
               onClick={() => setRepoDropdownOpen(!repoDropdownOpen)}
               className={clsx(
-                'w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg border transition-colors text-sm',
+                'w-full flex items-center justify-between gap-2 px-3 py-2 border-brutal rounded-brutal transition-press text-sm',
                 repoFilter
-                  ? 'border-primary bg-primary/5 text-primary'
-                  : 'border-border-color bg-background-tertiary text-text-secondary hover:border-primary/50'
+                  ? 'border-border bg-accent-light text-accent-dark shadow-brutal-sm'
+                  : 'border-border bg-background-card text-text-secondary hover-press'
               )}
             >
               <div className="flex items-center gap-2">
                 <FolderGit2 className="w-4 h-4" />
-                <span>{repoFilter || 'All Repositories'}</span>
+                <span className="font-mono text-sm">{repoFilter || 'All Repositories'}</span>
               </div>
               <ChevronDown className={clsx('w-4 h-4 transition-transform', repoDropdownOpen && 'rotate-180')} />
             </button>
 
             {repoDropdownOpen && (
-              <div className="absolute top-full left-0 right-0 mt-1 bg-background-secondary border border-border-color rounded-lg shadow-lg z-10 max-h-48 overflow-y-auto">
+              <div className="absolute top-full left-0 right-0 mt-1 bg-background-card border-brutal border-border rounded-brutal shadow-brutal-sm z-10 max-h-48 overflow-y-auto">
                 <button
                   onClick={() => { setRepoFilter(null); setRepoDropdownOpen(false) }}
                   className={clsx(
-                    'w-full px-3 py-2 text-left text-sm hover:bg-background-tertiary transition-colors',
-                    !repoFilter && 'bg-primary/10 text-primary'
+                    'w-full px-3 py-2 text-left text-sm font-mono border-b border-border-subtle transition-theme',
+                    !repoFilter && 'bg-accent-light text-accent-dark'
                   )}
                 >
                   All Repositories
@@ -386,18 +405,18 @@ export function TraceBrowser() {
                     key={repo.name}
                     onClick={() => { setRepoFilter(repo.name); setRepoDropdownOpen(false) }}
                     className={clsx(
-                      'w-full px-3 py-2 text-left text-sm hover:bg-background-tertiary transition-colors flex items-center justify-between',
-                      repoFilter === repo.name && 'bg-primary/10 text-primary'
+                      'w-full px-3 py-2 text-left text-sm font-mono border-b border-border-subtle transition-theme flex items-center justify-between',
+                      repoFilter === repo.name && 'bg-accent-light text-accent-dark'
                     )}
                   >
                     <span>{repo.name}</span>
                     {repo.trace_count && (
-                      <span className="text-xs text-text-muted">{repo.trace_count} traces</span>
+                      <span className="font-mono font-bold text-xs text-text-muted">{repo.trace_count}</span>
                     )}
                   </button>
                 ))}
                 {availableRepos.length === 0 && (
-                  <div className="px-3 py-2 text-sm text-text-muted">No repositories found</div>
+                  <div className="px-3 py-2 text-sm text-text-muted font-mono">No repositories found</div>
                 )}
               </div>
             )}
@@ -409,38 +428,38 @@ export function TraceBrowser() {
           {isLoading ? (
             <div className="flex items-center justify-center h-32">
               <RefreshCw className="w-5 h-5 animate-spin text-text-muted" />
-              <span className="ml-2 text-sm text-text-muted">Loading traces...</span>
+              <span className="ml-2 text-sm font-mono text-text-muted">Loading traces...</span>
             </div>
           ) : error ? (
             <div className="p-4 text-center">
-              <p className="text-sm text-status-error mb-2">{error}</p>
+              <p className="text-sm text-status-error font-mono mb-2">{error}</p>
               <button onClick={fetchTraces} className="btn-secondary text-sm">
-                <RefreshCw className="w-4 h-4 mr-1" /> Retry
+                <RefreshCw className="w-4 h-4" /> Retry
               </button>
             </div>
           ) : displayTraces.length === 0 ? (
             <div className="p-4 text-center text-text-muted">
-              <Clock className="w-8 h-8 mx-auto mb-2 opacity-50" />
-              <p className="text-sm">No traces found</p>
-              <p className="text-xs mt-1">Start coding with Claude Code to capture traces</p>
+              <Clock className="w-8 h-8 mx-auto mb-2" />
+              <p className="text-sm font-mono">No traces found</p>
+              <p className="text-xs font-mono mt-1">Start coding with Claude Code to capture traces</p>
             </div>
           ) : displayTraces.map((trace) => (
             <button
               key={trace.id}
               onClick={() => selectTrace(trace.id)}
               className={clsx(
-                'w-full p-4 text-left border-b border-border-subtle transition-colors',
+                'w-full p-4 text-left border-b border-brutal border-border transition-press',
                 selectedTraceId === trace.id
-                  ? 'bg-primary/5'
-                  : 'hover:bg-background-tertiary'
+                  ? 'bg-accent-light'
+                  : 'bg-background-card hover-press'
               )}
             >
               <div className="flex items-start justify-between mb-2">
                 <div className="flex items-center gap-2">
                   {getStatusIcon(trace.status)}
-                  <span className="text-xs font-mono text-text-muted">{trace.id}</span>
+                  <span className="text-xs font-mono font-bold text-text-muted">{trace.id}</span>
                 </div>
-                <span className="text-xs text-text-muted">
+                <span className="text-xs font-mono text-text-muted">
                   {new Date(trace.createdAt).toLocaleTimeString()}
                 </span>
               </div>
@@ -451,37 +470,38 @@ export function TraceBrowser() {
                 {trace.repo && (
                   <div className="flex items-center gap-1">
                     <FolderGit2 className="w-3 h-3 text-text-muted" />
-                    <span className="text-xs text-text-muted">{trace.repo.name}</span>
+                    <span className="text-xs font-mono text-text-muted">{trace.repo.name}</span>
                   </div>
                 )}
                 {/* Tier badge */}
                 {(() => {
                   const badge = getTierBadge(trace.status)
                   return (
-                    <span className={clsx('text-xs px-1.5 py-0.5 rounded', badge.bg, badge.text)}>
-                      {badge.label}
+                    <span className="tag text-xs">
+                      <span>{badge.label}</span>
                     </span>
                   )
                 })()}
               </div>
               <div className="flex items-center gap-2">
-                <div className="flex-1 h-1.5 bg-background-tertiary rounded-full overflow-hidden">
+                {/* Progress bar - brutalist style with triangular end cap */}
+                <div className="progress-bar flex-1">
                   <div
-                    className="h-full rounded-full"
+                    className="progress-fill"
                     style={{
                       width: `${trace.quality.totalScore * 100}%`,
                       backgroundColor:
                         trace.quality.successRate >= 0.9
-                          ? '#FFD700'  // Gold
+                          ? '#FFD700'
                           : trace.quality.successRate >= 0.75
-                          ? '#C0C0C0'  // Silver
+                          ? '#C0C0C0'
                           : trace.quality.successRate >= 0.6
-                          ? '#CD7F32'  // Bronze
+                          ? '#CD7F32'
                           : colors.error
                     }}
                   />
                 </div>
-                <span className="text-xs font-medium text-text-muted">
+                <span className="text-xs font-mono font-bold text-text-muted">
                   {(trace.quality.successRate * 100).toFixed(0)}%
                 </span>
               </div>
@@ -492,16 +512,17 @@ export function TraceBrowser() {
 
       {/* Right Panel - Details */}
       {selectedTrace.id !== 'no-traces' && (
-      <div className="flex-1 p-6 overflow-y-auto">
+      <div className="flex-1 p-6 overflow-y-auto bg-background-primary">
         <div className="max-w-4xl">
           {/* Header */}
           <div className="flex items-start justify-between mb-6">
             <div>
               <div className="flex items-center gap-2 mb-2">
+                <span className={getQualityClass(selectedTrace.status)} />
                 {getStatusIcon(selectedTrace.status)}
-                <span className="text-sm font-mono text-text-muted">{selectedTrace.id}</span>
+                <span className="text-sm font-mono font-bold text-text-muted">{selectedTrace.id}</span>
               </div>
-              <h2 className="text-xl font-semibold text-text-primary">
+              <h2 className="font-brand text-2xl text-text-primary">
                 {selectedTrace.taskDescription}
               </h2>
             </div>
@@ -527,15 +548,18 @@ export function TraceBrowser() {
             </div>
           </div>
 
+          {/* Section Divider */}
+          <div className="section-divider mb-4" />
+
           {/* Detail Tabs */}
-          <div className="flex items-center gap-1 mb-4 border-b border-border-subtle">
+          <div className="flex items-center gap-1 mb-4 border-b border-brutal border-border">
             <button
               onClick={() => setDetailTab('overview')}
               className={clsx(
-                'px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px',
+                'px-4 py-2 text-sm font-mono font-semibold uppercase tracking-wide border-brutal rounded-brutal rounded-b-none -mb-px transition-press',
                 detailTab === 'overview'
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-text-secondary hover:text-text-primary'
+                  ? 'bg-accent-light text-accent-dark border-border border-b-transparent'
+                  : 'bg-background-secondary text-text-secondary border-transparent hover-press'
               )}
             >
               <BarChart3 className="w-4 h-4 inline mr-2" />
@@ -544,18 +568,16 @@ export function TraceBrowser() {
             <button
               onClick={() => setDetailTab('examples')}
               className={clsx(
-                'px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px',
+                'px-4 py-2 text-sm font-mono font-semibold uppercase tracking-wide border-brutal rounded-brutal rounded-b-none -mb-px transition-press',
                 detailTab === 'examples'
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-text-secondary hover:text-text-primary'
+                  ? 'bg-accent-light text-accent-dark border-border border-b-transparent'
+                  : 'bg-background-secondary text-text-secondary border-transparent hover-press'
               )}
             >
               <Layers className="w-4 h-4 inline mr-2" />
-              Training Examples
+              Examples
               {trainingExamples.length > 0 && (
-                <span className="ml-2 px-1.5 py-0.5 text-xs bg-primary/10 text-primary rounded">
-                  {trainingExamples.length}
-                </span>
+                <span className="ml-2 tag text-xs"><span>{trainingExamples.length}</span></span>
               )}
             </button>
           </div>
@@ -564,12 +586,12 @@ export function TraceBrowser() {
           {detailTab === 'overview' && (
             <>
               {/* Quality Score Breakdown */}
-              <div className="card-elevated p-4 mb-4">
+              <div className="card card-accent p-4 mb-4">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-medium text-text-primary">Quality Breakdown</h3>
+                  <h3 className="font-brand text-xl text-text-primary">Quality Breakdown</h3>
                   <div className="flex items-center gap-2">
                     <BarChart3 className="w-4 h-4 text-text-muted" />
-                    <span className="text-2xl font-bold text-primary">
+                    <span className="font-brand text-xl text-accent-dark">
                       {(selectedTrace.quality.totalScore * 100).toFixed(0)}%
                     </span>
                   </div>
@@ -589,13 +611,14 @@ export function TraceBrowser() {
                       />
                       <Tooltip
                         contentStyle={{
-                          backgroundColor: theme === 'dark' ? '#242424' : '#F5F5F7',
-                          border: `1px solid ${colors.grid}`,
-                          borderRadius: '8px'
+                          backgroundColor: 'var(--bg-card)',
+                          border: '2px solid var(--border-color)',
+                          borderRadius: 'var(--radius)',
+                          boxShadow: 'var(--shadow-sm)'
                         }}
                         formatter={(value: number) => [`${value.toFixed(0)}%`, 'Score']}
                       />
-                      <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={20}>
+                      <Bar dataKey="value" radius={[0, 2, 2, 0]} barSize={20}>
                         {qualityData.map((entry, index) => (
                           <Cell key={index} fill={entry.fill} />
                         ))}
@@ -606,8 +629,8 @@ export function TraceBrowser() {
               </div>
 
               {/* Trace Timeline */}
-              <div className="card-elevated p-4 mb-4">
-                <h3 className="text-lg font-medium text-text-primary mb-4">Traces Over Time</h3>
+              <div className="card p-4 mb-4">
+                <h3 className="font-brand text-xl text-text-primary mb-4">Traces Over Time</h3>
                 <div className="h-48">
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={timelineData}>
@@ -616,9 +639,10 @@ export function TraceBrowser() {
                       <YAxis stroke={colors.text} fontSize={11} />
                       <Tooltip
                         contentStyle={{
-                          backgroundColor: theme === 'dark' ? '#242424' : '#F5F5F7',
-                          border: `1px solid ${colors.grid}`,
-                          borderRadius: '8px'
+                          backgroundColor: 'var(--bg-card)',
+                          border: '2px solid var(--border-color)',
+                          borderRadius: 'var(--radius)',
+                          boxShadow: 'var(--shadow-sm)'
                         }}
                       />
                       <Area
@@ -652,9 +676,9 @@ export function TraceBrowser() {
               {/* Header */}
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-lg font-medium text-text-primary">Training Examples</h3>
-                  <p className="text-sm text-text-muted">
-                    Sessions are segmented into individual training examples for fine-tuning
+                  <h3 className="font-brand text-xl text-text-primary">Training Examples</h3>
+                  <p className="text-sm font-mono text-text-muted">
+                    Sessions segmented into individual training examples for fine-tuning
                   </p>
                 </div>
                 <button
@@ -673,8 +697,8 @@ export function TraceBrowser() {
 
               {/* Error state */}
               {examplesError && (
-                <div className="p-4 bg-status-error/10 border border-status-error/20 rounded-lg">
-                  <p className="text-sm text-status-error">{examplesError}</p>
+                <div className="card p-4 border-status-error">
+                  <p className="text-sm font-mono text-status-error">{examplesError}</p>
                 </div>
               )}
 
@@ -682,16 +706,16 @@ export function TraceBrowser() {
               {examplesLoading && (
                 <div className="flex items-center justify-center h-32">
                   <RefreshCw className="w-5 h-5 animate-spin text-text-muted" />
-                  <span className="ml-2 text-sm text-text-muted">Generating training examples...</span>
+                  <span className="ml-2 text-sm font-mono text-text-muted">Generating training examples...</span>
                 </div>
               )}
 
               {/* Empty state */}
               {!examplesLoading && !examplesError && trainingExamples.length === 0 && (
-                <div className="p-8 text-center border border-border-subtle rounded-lg">
-                  <FileCode className="w-8 h-8 mx-auto mb-2 text-text-muted opacity-50" />
-                  <p className="text-sm text-text-muted">No training examples generated yet</p>
-                  <p className="text-xs text-text-muted mt-1">Click "Regenerate" to create examples from this session</p>
+                <div className="card p-8 text-center">
+                  <FileCode className="w-8 h-8 mx-auto mb-2 text-text-muted" />
+                  <p className="text-sm font-mono text-text-muted">No training examples generated yet</p>
+                  <p className="text-xs font-mono text-text-muted mt-1">Click "Regenerate" to create examples from this session</p>
                 </div>
               )}
 
@@ -699,53 +723,61 @@ export function TraceBrowser() {
               {!examplesLoading && trainingExamples.length > 0 && (
                 <div className="space-y-3">
                   {trainingExamples.map((example, idx) => (
-                    <div key={example.example_id} className="card-elevated p-4">
+                    <div key={example.example_id} className="card p-4">
                       <div className="flex items-start justify-between mb-2">
                         <div className="flex items-center gap-2">
-                          <span className="text-xs font-mono text-text-muted bg-background-tertiary px-2 py-0.5 rounded">
-                            Example {idx + 1}
+                          <span className="tag text-xs">
+                            <span>Example {idx + 1}</span>
                           </span>
-                          <span className="text-xs text-text-muted">
+                          <span className="text-xs font-mono font-bold text-text-muted">
                             {example.step_count} steps
                           </span>
                         </div>
                         <div className="flex items-center gap-2">
                           <span className={clsx(
-                            'text-xs px-2 py-0.5 rounded',
-                            example.success_rate >= 0.8 ? 'bg-status-success/10 text-status-success' :
-                            example.success_rate >= 0.5 ? 'bg-status-warning/10 text-status-warning' :
-                            'bg-status-error/10 text-status-error'
+                            'text-xs font-mono font-bold px-2 py-0.5 border-brutal rounded-brutal',
+                            example.success_rate >= 0.8 ? 'bg-background-secondary text-status-success border-border' :
+                            example.success_rate >= 0.5 ? 'bg-background-secondary text-status-warning border-border' :
+                            'bg-background-secondary text-status-error border-border'
                           )}>
                             {(example.success_rate * 100).toFixed(0)}% success
                           </span>
-                          <span className="text-xs text-text-muted">
+                          <span className="text-xs font-mono font-bold text-text-muted">
                             {(example.confidence * 100).toFixed(0)}% confidence
                           </span>
                         </div>
                       </div>
 
                       <div className="mb-3">
-                        <span className="text-xs font-medium text-text-muted uppercase tracking-wide">Task Prompt</span>
+                        <span className="font-mono text-xs uppercase tracking-widest text-text-muted">Task Prompt</span>
                         <p className="text-sm text-text-primary mt-1 line-clamp-2">
                           {example.user_prompt}
                         </p>
                       </div>
 
                       <details className="group">
-                        <summary className="cursor-pointer text-xs text-primary hover:underline flex items-center gap-1">
+                        <summary className="cursor-pointer text-xs font-mono font-bold text-accent-dark flex items-center gap-1">
                           <ChevronRight className="w-3 h-3 group-open:rotate-90 transition-transform" />
                           View response ({example.assistant_response.length} chars)
                         </summary>
-                        <pre className="mt-2 p-3 bg-background-tertiary rounded text-xs text-text-secondary overflow-x-auto max-h-48">
-                          {example.assistant_response.slice(0, 1000)}
-                          {example.assistant_response.length > 1000 && '...'}
-                        </pre>
+                        <div className="terminal-chrome mt-2">
+                          <div className="terminal-header">
+                            <div className="terminal-dot terminal-dot-red" />
+                            <div className="terminal-dot terminal-dot-yellow" />
+                            <div className="terminal-dot terminal-dot-green" />
+                          </div>
+                          <pre className="p-3 text-xs font-mono text-text-secondary overflow-x-auto max-h-48">
+                            {example.assistant_response.slice(0, 1000)}
+                            {example.assistant_response.length > 1000 && '...'}
+                          </pre>
+                        </div>
                       </details>
                     </div>
                   ))}
 
                   {/* Export button */}
-                  <div className="pt-4 border-t border-border-subtle">
+                  <div className="section-divider" />
+                  <div className="pt-4">
                     <button
                       onClick={() => {
                         // Download examples as JSONL
@@ -765,9 +797,9 @@ export function TraceBrowser() {
                         a.click()
                         URL.revokeObjectURL(url)
                       }}
-                      className="btn-primary flex items-center gap-2"
+                      className="btn-cta"
                     >
-                      <Download className="w-4 h-4" />
+                      <Download className="w-4 h-4 mr-2 inline" />
                       Export as JSONL
                     </button>
                   </div>
@@ -777,35 +809,37 @@ export function TraceBrowser() {
           )}
 
           {/* Metadata (always show) */}
-          <div className="card-elevated p-4">
-            <h3 className="text-lg font-medium text-text-primary mb-4">Metadata</h3>
+          <div className="card p-4 mt-4">
+            <h3 className="font-brand text-xl text-text-primary mb-4">Metadata</h3>
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div>
-                <span className="text-text-muted">Task ID</span>
-                <p className="font-mono text-text-primary">{selectedTrace.taskId}</p>
+                <span className="font-mono text-xs uppercase tracking-widest text-text-muted">Task ID</span>
+                <p className="font-mono font-bold text-text-primary">{selectedTrace.taskId}</p>
               </div>
               <div>
-                <span className="text-text-muted">Created</span>
+                <span className="font-mono text-xs uppercase tracking-widest text-text-muted">Created</span>
                 <p className="text-text-primary">
                   {new Date(selectedTrace.createdAt).toLocaleString()}
                 </p>
               </div>
               {selectedTrace.promotedAt && (
                 <div>
-                  <span className="text-text-muted">Promoted</span>
+                  <span className="font-mono text-xs uppercase tracking-widest text-text-muted">Promoted</span>
                   <p className="text-text-primary">
                     {new Date(selectedTrace.promotedAt).toLocaleString()}
                   </p>
                 </div>
               )}
               <div>
-                <span className="text-text-muted">Status</span>
-                <p className="text-text-primary capitalize">{selectedTrace.status}</p>
+                <span className="font-mono text-xs uppercase tracking-widest text-text-muted">Status</span>
+                <p className={clsx('capitalize flex items-center gap-1', getQualityClass(selectedTrace.status))}>
+                  {selectedTrace.status}
+                </p>
               </div>
               {selectedTrace.repo && (
                 <>
                   <div>
-                    <span className="text-text-muted">Repository</span>
+                    <span className="font-mono text-xs uppercase tracking-widest text-text-muted">Repository</span>
                     <p className="text-text-primary flex items-center gap-1">
                       <FolderGit2 className="w-3 h-3" />
                       {selectedTrace.repo.name}
@@ -813,7 +847,7 @@ export function TraceBrowser() {
                   </div>
                   {selectedTrace.repo.git_branch && (
                     <div>
-                      <span className="text-text-muted">Branch</span>
+                      <span className="font-mono text-xs uppercase tracking-widest text-text-muted">Branch</span>
                       <p className="text-text-primary font-mono text-xs">{selectedTrace.repo.git_branch}</p>
                     </div>
                   )}
@@ -821,8 +855,8 @@ export function TraceBrowser() {
               )}
               {selectedTrace.reposCount > 1 && (
                 <div>
-                  <span className="text-text-muted">Repos Touched</span>
-                  <p className="text-text-primary">{selectedTrace.reposCount} repositories</p>
+                  <span className="font-mono text-xs uppercase tracking-widest text-text-muted">Repos Touched</span>
+                  <p className="font-brand text-xl text-text-primary">{selectedTrace.reposCount}</p>
                 </div>
               )}
             </div>
@@ -833,87 +867,87 @@ export function TraceBrowser() {
 
       {/* Auto-Classify Modal */}
       {showClassifyModal && classifyResult && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-background-secondary border border-border-color rounded-xl shadow-2xl max-w-md w-full mx-4">
-            <div className="flex items-center justify-between p-4 border-b border-border-subtle">
+        <div className="fixed inset-0 bg-background-primary flex items-center justify-center z-50" style={{ backgroundColor: 'rgba(27, 32, 64, 0.85)' }}>
+          <div className="card-elevated bg-background-card border-brutal border-border max-w-md w-full mx-4">
+            <div className="flex items-center justify-between p-4 border-b border-brutal border-border">
               <div className="flex items-center gap-2">
-                <Wand2 className="w-5 h-5 text-primary" />
-                <h3 className="text-lg font-semibold text-text-primary">Auto-Classification Preview</h3>
+                <Wand2 className="w-5 h-5 text-accent-dark" />
+                <h3 className="font-brand text-xl text-text-primary">Auto-Classification Preview</h3>
               </div>
               <button
                 onClick={() => setShowClassifyModal(false)}
-                className="p-1 rounded hover:bg-background-tertiary transition-colors"
+                className="btn-icon"
               >
-                <X className="w-5 h-5 text-text-muted" />
+                <X className="w-4 h-4 text-text-muted" />
               </button>
             </div>
 
             <div className="p-4 space-y-4">
-              <p className="text-sm text-text-secondary">
+              <p className="text-sm font-mono text-text-secondary">
                 Based on NVIDIA NeMo thresholds, traces will be classified into:
               </p>
 
               <div className="grid grid-cols-2 gap-3">
-                <div className="p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
+                <div className="card p-3">
                   <div className="flex items-center gap-2 mb-1">
                     <Trophy className="w-4 h-4 text-yellow-500" />
-                    <span className="text-sm font-medium text-yellow-500">Gold</span>
+                    <span className="font-mono text-xs uppercase tracking-widest text-yellow-600">Gold</span>
                   </div>
-                  <p className="text-2xl font-bold text-text-primary">{classifyResult.summary.gold}</p>
-                  <p className="text-xs text-text-muted">SFT Training</p>
+                  <p className="font-brand text-xl text-text-primary">{classifyResult.summary.gold}</p>
+                  <p className="font-mono text-xs uppercase tracking-widest text-text-muted">SFT Training</p>
                 </div>
 
-                <div className="p-3 rounded-lg bg-slate-400/10 border border-slate-400/20">
+                <div className="card p-3">
                   <div className="flex items-center gap-2 mb-1">
                     <Medal className="w-4 h-4 text-slate-400" />
-                    <span className="text-sm font-medium text-slate-400">Silver</span>
+                    <span className="font-mono text-xs uppercase tracking-widest text-slate-500">Silver</span>
                   </div>
-                  <p className="text-2xl font-bold text-text-primary">{classifyResult.summary.silver}</p>
-                  <p className="text-xs text-text-muted">DPO Chosen</p>
+                  <p className="font-brand text-xl text-text-primary">{classifyResult.summary.silver}</p>
+                  <p className="font-mono text-xs uppercase tracking-widest text-text-muted">DPO Chosen</p>
                 </div>
 
-                <div className="p-3 rounded-lg bg-amber-600/10 border border-amber-600/20">
+                <div className="card p-3">
                   <div className="flex items-center gap-2 mb-1">
                     <Award className="w-4 h-4 text-amber-600" />
-                    <span className="text-sm font-medium text-amber-600">Bronze</span>
+                    <span className="font-mono text-xs uppercase tracking-widest text-amber-700">Bronze</span>
                   </div>
-                  <p className="text-2xl font-bold text-text-primary">{classifyResult.summary.bronze}</p>
-                  <p className="text-xs text-text-muted">DPO Rejected</p>
+                  <p className="font-brand text-xl text-text-primary">{classifyResult.summary.bronze}</p>
+                  <p className="font-mono text-xs uppercase tracking-widest text-text-muted">DPO Rejected</p>
                 </div>
 
-                <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+                <div className="card p-3">
                   <div className="flex items-center gap-2 mb-1">
-                    <XCircle className="w-4 h-4 text-red-500" />
-                    <span className="text-sm font-medium text-red-500">Rejected</span>
+                    <XCircle className="w-4 h-4 text-status-error" />
+                    <span className="font-mono text-xs uppercase tracking-widest text-status-error">Rejected</span>
                   </div>
-                  <p className="text-2xl font-bold text-text-primary">{classifyResult.summary.rejected}</p>
-                  <p className="text-xs text-text-muted">Not Suitable</p>
+                  <p className="font-brand text-xl text-text-primary">{classifyResult.summary.rejected}</p>
+                  <p className="font-mono text-xs uppercase tracking-widest text-text-muted">Not Suitable</p>
                 </div>
               </div>
 
               {classifyResult.dpo_pairs_count > 0 && (
-                <div className="p-3 rounded-lg bg-primary/10 border border-primary/20">
-                  <p className="text-sm text-primary font-medium">
+                <div className="card card-accent p-3">
+                  <p className="text-sm font-mono font-bold text-accent-dark">
                     {classifyResult.dpo_pairs_count} DPO training pairs can be generated
                   </p>
-                  <p className="text-xs text-text-muted mt-1">
+                  <p className="text-xs font-mono text-text-muted mt-1">
                     Pairing Gold traces with Bronze traces for contrastive learning
                   </p>
                 </div>
               )}
             </div>
 
-            <div className="flex items-center justify-end gap-2 p-4 border-t border-border-subtle">
+            <div className="flex items-center justify-end gap-2 p-4 border-t border-brutal border-border">
               <button
                 onClick={() => setShowClassifyModal(false)}
-                className="px-4 py-2 text-sm text-text-secondary hover:text-text-primary transition-colors"
+                className="btn-ghost"
               >
                 Cancel
               </button>
               <button
                 onClick={() => handleAutoClassify(false)}
                 disabled={classifyLoading}
-                className="px-4 py-2 text-sm bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-2"
+                className="btn-primary flex items-center gap-2"
               >
                 {classifyLoading ? (
                   <RefreshCw className="w-4 h-4 animate-spin" />

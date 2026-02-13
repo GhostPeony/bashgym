@@ -656,11 +656,11 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
   const getStatusIcon = () => {
     switch (session?.status) {
       case 'running':
-        return <Loader2 className="w-3 h-3 animate-spin text-primary" />
+        return <Loader2 className="w-3 h-3 animate-spin text-accent" />
       case 'waiting_input':
         return <MessageSquare className="w-3 h-3 text-status-warning" />
       case 'tool_calling':
-        return <Wrench className="w-3 h-3 text-info animate-pulse" />
+        return <Wrench className="w-3 h-3 text-accent animate-pulse" />
       case 'idle':
       default:
         return <Coffee className="w-3 h-3 text-text-muted" />
@@ -684,10 +684,15 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
 
   return (
     <FileDropZone terminalId={id} className="h-full">
-      <div className="h-full flex flex-col bg-background-terminal">
-        {/* Terminal Header */}
-        <div className="flex items-center justify-between px-3 py-1.5 bg-background-secondary border-b border-border-subtle">
-          <div className="flex items-center gap-2">
+      <div className="terminal-chrome h-full flex flex-col">
+        {/* Terminal Header — macOS dots + title in JetBrains Mono */}
+        <div className="terminal-header">
+          <div className="flex items-center gap-1.5">
+            <span className="terminal-dot terminal-dot-red" />
+            <span className="terminal-dot terminal-dot-yellow" />
+            <span className="terminal-dot terminal-dot-green" />
+          </div>
+          <div className="flex items-center gap-2 ml-3 flex-1 min-w-0">
             {/* Status indicator */}
             <div title={getStatusTooltip()} className="flex-shrink-0">
               {getStatusIcon()}
@@ -707,12 +712,12 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
                   }
                   e.stopPropagation()
                 }}
-                className="text-sm font-medium bg-background-tertiary border border-border-subtle rounded px-1.5 py-0.5 w-32 focus:outline-none focus:ring-1 focus:ring-primary text-text-primary"
+                className="input !text-sm !py-0.5 !px-1.5 w-32 font-mono"
                 autoFocus
               />
             ) : (
               <span
-                className="text-sm font-medium text-text-primary truncate max-w-[200px] cursor-pointer hover:text-primary"
+                className="text-sm font-mono font-semibold text-text-primary truncate max-w-[200px] cursor-pointer hover:text-accent"
                 onDoubleClick={startTitleEdit}
                 title="Double-click to rename"
               >
@@ -720,142 +725,142 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
               </span>
             )}
             {session?.gitBranch && (
-              <span className="text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary">
-                {session.gitBranch}
+              <span className="tag !text-[10px] !py-0 !px-1.5">
+                <span>{session.gitBranch}</span>
               </span>
             )}
             {session?.currentTool && session?.status === 'tool_calling' && (
-              <span className="text-xs px-1.5 py-0.5 rounded bg-info/10 text-info">
-                {session.currentTool}
+              <span className="tag !text-[10px] !py-0 !px-1.5 !bg-status-info !border-status-info">
+                <span>{session.currentTool}</span>
               </span>
             )}
           </div>
-        <div className="flex items-center gap-1">
-          {/* More options dropdown */}
-          <div className="relative">
+          <div className="flex items-center gap-1">
+            {/* More options dropdown */}
+            <div className="relative">
+              <button
+                onClick={() => setShowMenu(!showMenu)}
+                className="p-1 hover:bg-background-tertiary text-text-muted hover:text-text-secondary transition-press"
+                title="More options"
+              >
+                <MoreHorizontal className="w-4 h-4" />
+              </button>
+              {showMenu && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
+                  <div className="absolute right-0 top-full mt-1 z-20 card !rounded-brutal py-1 min-w-[160px]">
+                    <button
+                      onClick={handleCopy}
+                      className="menu-item w-full !px-3 !py-1.5 !text-sm"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      Copy
+                      <span className="ml-auto text-xs text-text-muted font-mono">Ctrl+C</span>
+                    </button>
+                    <button
+                      onClick={handlePaste}
+                      className="menu-item w-full !px-3 !py-1.5 !text-sm"
+                    >
+                      <ClipboardPaste className="w-3.5 h-3.5" />
+                      Paste
+                      <span className="ml-auto text-xs text-text-muted font-mono">Ctrl+V</span>
+                    </button>
+                    <div className="section-divider my-1" />
+                    <button
+                      onClick={handleClear}
+                      className="menu-item w-full !px-3 !py-1.5 !text-sm"
+                    >
+                      Clear Terminal
+                    </button>
+                    <button
+                      onClick={handleReset}
+                      className="menu-item w-full !px-3 !py-1.5 !text-sm"
+                    >
+                      Reset Terminal
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
             <button
-              onClick={() => setShowMenu(!showMenu)}
-              className="p-1 rounded hover:bg-background-tertiary text-text-muted hover:text-text-secondary"
-              title="More options"
+              onClick={() => {
+                setActiveTerminal(id)
+                setViewMode('single')
+              }}
+              className="p-1 hover:bg-background-tertiary text-text-muted hover:text-text-secondary transition-press"
+              title="Fullscreen"
             >
-              <MoreHorizontal className="w-4 h-4" />
+              <Square className="w-3 h-3" />
             </button>
-            {showMenu && (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
-                <div className="absolute right-0 top-full mt-1 z-20 bg-background-secondary border border-border-subtle rounded-md shadow-lg py-1 min-w-[160px]">
-                  <button
-                    onClick={handleCopy}
-                    className="w-full px-3 py-1.5 text-left text-sm text-text-secondary hover:bg-background-tertiary hover:text-text-primary flex items-center gap-2"
-                  >
-                    <Copy className="w-3.5 h-3.5" />
-                    Copy
-                    <span className="ml-auto text-xs text-text-muted">Ctrl+C</span>
-                  </button>
-                  <button
-                    onClick={handlePaste}
-                    className="w-full px-3 py-1.5 text-left text-sm text-text-secondary hover:bg-background-tertiary hover:text-text-primary flex items-center gap-2"
-                  >
-                    <ClipboardPaste className="w-3.5 h-3.5" />
-                    Paste
-                    <span className="ml-auto text-xs text-text-muted">Ctrl+V</span>
-                  </button>
-                  <div className="my-1 border-t border-border-subtle" />
-                  <button
-                    onClick={handleClear}
-                    className="w-full px-3 py-1.5 text-left text-sm text-text-secondary hover:bg-background-tertiary hover:text-text-primary"
-                  >
-                    Clear Terminal
-                  </button>
-                  <button
-                    onClick={handleReset}
-                    className="w-full px-3 py-1.5 text-left text-sm text-text-secondary hover:bg-background-tertiary hover:text-text-primary"
-                  >
-                    Reset Terminal
-                  </button>
-                </div>
-              </>
-            )}
+            <button
+              onClick={handleClose}
+              className="p-1 hover:bg-status-error/20 text-text-muted hover:text-status-error transition-press"
+              title="Close"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
-          <button
-            onClick={() => {
-              setActiveTerminal(id)
-              setViewMode('single')
-            }}
-            className="p-1 rounded hover:bg-background-tertiary text-text-muted hover:text-text-secondary"
-            title="Fullscreen"
-          >
-            <Square className="w-3 h-3" />
-          </button>
-          <button
-            onClick={handleClose}
-            className="p-1 rounded hover:bg-status-error/20 text-text-muted hover:text-status-error"
-            title="Close"
-          >
-            <X className="w-4 h-4" />
-          </button>
         </div>
-      </div>
 
-      {/* Terminal Content */}
-      <div
-        ref={containerRef}
-        className={clsx(
-          'flex-1 overflow-hidden',
-          session?.attention === 'success' && 'terminal-attention-success',
-          session?.attention === 'error' && 'terminal-attention-error',
-          session?.attention === 'waiting' && 'terminal-attention-waiting'
+        {/* Terminal Content */}
+        <div
+          ref={containerRef}
+          className={clsx(
+            'flex-1 overflow-hidden',
+            session?.attention === 'success' && 'terminal-attention-success',
+            session?.attention === 'error' && 'terminal-attention-error',
+            session?.attention === 'waiting' && 'terminal-attention-waiting'
+          )}
+        />
+
+        {/* Right-click Context Menu */}
+        {contextMenu && (
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setContextMenu(null)} />
+            <div
+              className="fixed z-50 card !rounded-brutal py-1 min-w-[160px]"
+              style={{ left: contextMenu.x, top: contextMenu.y }}
+            >
+              <button
+                onClick={handleCopy}
+                className="menu-item w-full !px-3 !py-1.5 !text-sm"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                Copy
+                <span className="ml-auto text-xs text-text-muted font-mono">Ctrl+C</span>
+              </button>
+              <button
+                onClick={handlePaste}
+                className="menu-item w-full !px-3 !py-1.5 !text-sm"
+              >
+                <ClipboardPaste className="w-3.5 h-3.5" />
+                Paste
+                <span className="ml-auto text-xs text-text-muted font-mono">Ctrl+V</span>
+              </button>
+              <div className="section-divider my-1" />
+              <button
+                onClick={() => {
+                  if (terminalRef.current) {
+                    terminalRef.current.selectAll()
+                  }
+                  setContextMenu(null)
+                }}
+                className="menu-item w-full !px-3 !py-1.5 !text-sm"
+              >
+                Select All
+              </button>
+              <button
+                onClick={() => {
+                  handleClear()
+                  setContextMenu(null)
+                }}
+                className="menu-item w-full !px-3 !py-1.5 !text-sm"
+              >
+                Clear
+              </button>
+            </div>
+          </>
         )}
-      />
-
-      {/* Right-click Context Menu */}
-      {contextMenu && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setContextMenu(null)} />
-          <div
-            className="fixed z-50 bg-background-secondary border border-border-subtle rounded-md shadow-lg py-1 min-w-[160px]"
-            style={{ left: contextMenu.x, top: contextMenu.y }}
-          >
-            <button
-              onClick={handleCopy}
-              className="w-full px-3 py-1.5 text-left text-sm text-text-secondary hover:bg-background-tertiary hover:text-text-primary flex items-center gap-2"
-            >
-              <Copy className="w-3.5 h-3.5" />
-              Copy
-              <span className="ml-auto text-xs text-text-muted">Ctrl+C</span>
-            </button>
-            <button
-              onClick={handlePaste}
-              className="w-full px-3 py-1.5 text-left text-sm text-text-secondary hover:bg-background-tertiary hover:text-text-primary flex items-center gap-2"
-            >
-              <ClipboardPaste className="w-3.5 h-3.5" />
-              Paste
-              <span className="ml-auto text-xs text-text-muted">Ctrl+V</span>
-            </button>
-            <div className="my-1 border-t border-border-subtle" />
-            <button
-              onClick={() => {
-                if (terminalRef.current) {
-                  terminalRef.current.selectAll()
-                }
-                setContextMenu(null)
-              }}
-              className="w-full px-3 py-1.5 text-left text-sm text-text-secondary hover:bg-background-tertiary hover:text-text-primary"
-            >
-              Select All
-            </button>
-            <button
-              onClick={() => {
-                handleClear()
-                setContextMenu(null)
-              }}
-              className="w-full px-3 py-1.5 text-left text-sm text-text-secondary hover:bg-background-tertiary hover:text-text-primary"
-            >
-              Clear
-            </button>
-          </div>
-        </>
-      )}
       </div>
     </FileDropZone>
   )

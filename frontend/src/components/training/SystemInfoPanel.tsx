@@ -49,10 +49,10 @@ export function SystemInfoPanel({ onSystemInfo, onRecommendations, compact = fal
 
   if (loading) {
     return (
-      <div className={clsx('bg-background-tertiary rounded-lg', compact ? 'p-3' : 'p-4')}>
+      <div className={clsx('card', compact ? 'p-3' : 'p-4')}>
         <div className="flex items-center justify-center gap-2 text-text-muted">
           <RefreshCw className="w-4 h-4 animate-spin" />
-          <span className="text-sm">Detecting hardware...</span>
+          <span className="font-mono text-xs uppercase tracking-widest">Detecting hardware...</span>
         </div>
       </div>
     )
@@ -60,13 +60,13 @@ export function SystemInfoPanel({ onSystemInfo, onRecommendations, compact = fal
 
   if (error || !systemInfo) {
     return (
-      <div className={clsx('bg-background-tertiary rounded-lg', compact ? 'p-3' : 'p-4')}>
+      <div className={clsx('card', compact ? 'p-3' : 'p-4')}>
         <div className="flex items-center gap-2 text-status-error">
           <AlertCircle className="w-4 h-4 flex-shrink-0" />
-          <span className="text-sm flex-1">{error || 'Unknown error'}</span>
+          <span className="font-mono text-xs flex-1">{error || 'Unknown error'}</span>
           <button
             onClick={() => fetchSystemInfo(true)}
-            className="text-xs px-2 py-1 bg-background-secondary rounded hover:bg-background-tertiary"
+            className="btn-secondary text-xs px-2 py-1"
           >
             Retry
           </button>
@@ -79,25 +79,22 @@ export function SystemInfoPanel({ onSystemInfo, onRecommendations, compact = fal
   const hasNvidiaGpu = systemInfo.gpus.some(g => g.vendor === 'NVIDIA')
   const maxVram = Math.max(...systemInfo.gpus.map(g => g.vram), 0)
 
-  // GPU status indicator color
-  const gpuStatusColor = hasNvidiaGpu ? 'text-status-success' : systemInfo.cuda_available ? 'text-status-warning' : 'text-status-error'
-
   if (compact) {
     return (
-      <div className="bg-background-tertiary rounded-lg p-3">
+      <div className="card p-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className={clsx('w-2 h-2 rounded-full', hasNvidiaGpu ? 'bg-status-success' : systemInfo.cuda_available ? 'bg-status-warning' : 'bg-status-error')} />
+            <div className={clsx('status-dot', hasNvidiaGpu ? 'status-success' : systemInfo.cuda_available ? 'status-warning' : 'status-error')} />
             <div>
               <span className="text-sm font-medium text-text-primary">{primaryGpu.model}</span>
-              <span className="text-xs text-text-muted ml-2">
+              <span className="font-mono text-xs text-text-muted ml-2">
                 {primaryGpu.vram > 0 ? `${primaryGpu.vram} GB` : 'VRAM unknown'}
               </span>
             </div>
           </div>
           <button
             onClick={() => fetchSystemInfo(true)}
-            className="p-1 rounded hover:bg-background-secondary text-text-muted"
+            className="btn-icon w-7 h-7 flex items-center justify-center"
             title="Refresh"
           >
             <RefreshCw className="w-3.5 h-3.5" />
@@ -108,30 +105,30 @@ export function SystemInfoPanel({ onSystemInfo, onRecommendations, compact = fal
   }
 
   return (
-    <div className="bg-background-tertiary rounded-lg p-4 space-y-4">
+    <div className="space-y-4">
       {/* GPU Section */}
-      <div>
-        <div className="flex items-center gap-2 mb-2">
-          <Cpu className={clsx('w-4 h-4', gpuStatusColor)} />
-          <span className="text-xs font-semibold text-text-muted uppercase tracking-wide">GPU</span>
+      <div className="card p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <Cpu className={clsx('w-4 h-4', hasNvidiaGpu ? 'text-status-success' : systemInfo.cuda_available ? 'text-status-warning' : 'text-status-error')} />
+          <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">GPU</span>
         </div>
         <div className="flex items-baseline gap-2">
-          <span className="text-sm font-medium text-text-primary">{primaryGpu.model}</span>
-          <span className={clsx('text-xs font-medium', primaryGpu.vram >= 8 ? 'text-status-success' : primaryGpu.vram >= 4 ? 'text-status-warning' : 'text-status-error')}>
+          <span className="font-brand text-2xl text-text-primary">{primaryGpu.model}</span>
+          <span className={clsx('font-mono text-xs font-bold', primaryGpu.vram >= 8 ? 'text-status-success' : primaryGpu.vram >= 4 ? 'text-status-warning' : 'text-status-error')}>
             {primaryGpu.vram > 0 ? `${primaryGpu.vram} GB VRAM` : 'VRAM unknown'}
           </span>
         </div>
 
         {/* VRAM Usage Bar */}
         {primaryGpu.vram_used !== undefined && primaryGpu.vram > 0 && (
-          <div className="mt-2">
-            <div className="h-1.5 bg-background-secondary rounded-full overflow-hidden">
+          <div className="mt-3">
+            <div className="progress-bar">
               <div
-                className="h-full bg-primary rounded-full transition-all duration-300"
+                className="progress-fill"
                 style={{ width: `${Math.min((primaryGpu.vram_used / primaryGpu.vram) * 100, 100)}%` }}
               />
             </div>
-            <p className="text-xs text-text-muted mt-1">
+            <p className="font-mono text-xs text-text-muted mt-1">
               {primaryGpu.vram_used.toFixed(1)} / {primaryGpu.vram} GB used
             </p>
           </div>
@@ -139,52 +136,52 @@ export function SystemInfoPanel({ onSystemInfo, onRecommendations, compact = fal
 
         {/* Temperature/Utilization */}
         {(primaryGpu.temperature !== undefined || primaryGpu.utilization !== undefined) && (
-          <div className="flex gap-4 mt-2 text-xs text-text-muted">
+          <div className="flex gap-4 mt-2">
             {primaryGpu.temperature !== undefined && (
-              <span>{primaryGpu.temperature}°C</span>
+              <span className="font-mono text-xs text-text-muted">{primaryGpu.temperature}C</span>
             )}
             {primaryGpu.utilization !== undefined && (
-              <span>{primaryGpu.utilization}% util</span>
+              <span className="font-mono text-xs text-text-muted">{primaryGpu.utilization}% util</span>
             )}
           </div>
         )}
       </div>
 
       {/* RAM Section */}
-      <div>
-        <div className="flex items-center gap-2 mb-2">
+      <div className="card p-4">
+        <div className="flex items-center gap-2 mb-3">
           <HardDrive className="w-4 h-4 text-accent" />
-          <span className="text-xs font-semibold text-text-muted uppercase tracking-wide">RAM</span>
+          <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">RAM</span>
         </div>
-        <div className="flex items-baseline gap-1">
-          <span className="text-sm font-medium text-text-primary">
-            {systemInfo.available_ram.toFixed(1)} GB free
+        <div className="flex items-baseline gap-2">
+          <span className="font-brand text-2xl text-text-primary">
+            {systemInfo.available_ram.toFixed(1)} GB
           </span>
-          <span className="text-xs text-text-muted">
-            / {systemInfo.total_ram.toFixed(0)} GB
+          <span className="font-mono text-xs text-text-muted">
+            free / {systemInfo.total_ram.toFixed(0)} GB total
           </span>
         </div>
       </div>
 
       {/* Status Row */}
-      <div className="flex gap-4 pt-3 border-t border-border-subtle">
-        <div className="flex items-center gap-1.5">
+      <div className="flex gap-3">
+        <div className="card p-3 flex items-center gap-2 flex-1">
           {systemInfo.cuda_available ? (
-            <CheckCircle2 className="w-3.5 h-3.5 text-status-success" />
+            <CheckCircle2 className="w-4 h-4 text-status-success" />
           ) : (
-            <XCircle className="w-3.5 h-3.5 text-status-error" />
+            <XCircle className="w-4 h-4 text-status-error" />
           )}
-          <span className="text-xs text-text-secondary">
+          <span className="font-mono text-xs text-text-secondary">
             CUDA {systemInfo.cuda_version || (systemInfo.cuda_available ? '' : 'N/A')}
           </span>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="card p-3 flex items-center gap-2 flex-1">
           {systemInfo.python_available ? (
-            <CheckCircle2 className="w-3.5 h-3.5 text-status-success" />
+            <CheckCircle2 className="w-4 h-4 text-status-success" />
           ) : (
-            <XCircle className="w-3.5 h-3.5 text-status-error" />
+            <XCircle className="w-4 h-4 text-status-error" />
           )}
-          <span className="text-xs text-text-secondary">
+          <span className="font-mono text-xs text-text-secondary">
             Python {systemInfo.python_version || 'N/A'}
           </span>
         </div>
@@ -193,12 +190,12 @@ export function SystemInfoPanel({ onSystemInfo, onRecommendations, compact = fal
       {/* Recommendation */}
       {recommendations && (
         <div className={clsx(
-          'p-2 rounded text-xs',
+          'card p-3 font-mono text-xs border-l-4',
           recommendations.warning
-            ? 'bg-status-warning/10 text-status-warning'
+            ? 'border-l-status-warning text-status-warning'
             : maxVram >= 8
-              ? 'bg-status-success/10 text-status-success'
-              : 'bg-status-info/10 text-status-info'
+              ? 'border-l-status-success text-status-success'
+              : 'border-l-accent text-accent'
         )}>
           {recommendations.warning || (
             maxVram >= 8
@@ -213,7 +210,7 @@ export function SystemInfoPanel({ onSystemInfo, onRecommendations, compact = fal
       {/* Refresh Button */}
       <button
         onClick={() => fetchSystemInfo(true)}
-        className="w-full mt-2 py-1.5 px-3 text-xs text-text-muted border border-border-subtle rounded hover:bg-background-secondary transition-colors flex items-center justify-center gap-1.5"
+        className="btn-secondary w-full flex items-center justify-center gap-2 text-xs"
       >
         <RefreshCw className="w-3 h-3" />
         Refresh

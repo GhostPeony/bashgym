@@ -21,7 +21,6 @@ export function Modal({
   footer,
   size = 'md'
 }: ModalProps) {
-  // Handle escape key
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -54,32 +53,34 @@ export function Modal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {/* Backdrop */}
+      {/* Backdrop — warm navy tint */}
       <div
-        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+        className="absolute inset-0"
+        style={{ backgroundColor: 'rgba(27, 32, 64, 0.5)' }}
         onClick={onClose}
       />
 
-      {/* Modal */}
+      {/* Modal — brutalist card */}
       <div
         className={clsx(
-          'relative w-full mx-4 bg-background-secondary rounded-2xl shadow-elevated overflow-hidden',
+          'relative w-full mx-4 bg-background-card overflow-hidden',
+          'border-brutal border-border shadow-brutal rounded-brutal',
           sizes[size]
         )}
       >
         {/* Header */}
-        <div className="flex items-start justify-between px-6 py-4 border-b border-border-subtle">
+        <div className="flex items-start justify-between px-6 py-4 border-b border-border">
           <div>
-            <h2 className="text-lg font-semibold text-text-primary">{title}</h2>
+            <h2 className="text-lg font-brand font-normal text-text-primary">{title}</h2>
             {description && (
               <p className="text-sm text-text-secondary mt-1">{description}</p>
             )}
           </div>
           <button
             onClick={onClose}
-            className="p-2 rounded-lg hover:bg-background-tertiary text-text-muted transition-colors"
+            className="btn-icon w-8 h-8 text-text-muted hover:text-text-primary"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
@@ -88,7 +89,7 @@ export function Modal({
 
         {/* Footer */}
         {footer && (
-          <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border-subtle">
+          <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border">
             {footer}
           </div>
         )}

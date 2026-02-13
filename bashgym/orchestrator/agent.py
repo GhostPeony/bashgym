@@ -38,6 +38,7 @@ from bashgym.orchestrator.prompts import (
     WORKER_SYSTEM_PROMPT, RETRY_PROMPT_TEMPLATE,
     RETRY_ANALYSIS_SYSTEM, RETRY_ANALYSIS_TEMPLATE,
 )
+from bashgym.orchestrator.context_builder import WorkerContextBuilder
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +114,8 @@ class OrchestrationAgent:
             self.worktrees = None
 
         self.dag: Optional[TaskDAG] = None
+        self.context_builder: Optional[WorkerContextBuilder] = None
+        self._spec_title: str = ""
 
         # Budget tracking
         self._total_spent_usd: float = 0.0
@@ -152,9 +155,17 @@ class OrchestrationAgent:
             f"(provider={provider_name}, model={model_name})"
         )
         self.dag = await TaskDAG.from_spec(spec, self.llm_config)
+        self._spec_title = spec.title
 
         task_count = len(self.dag.nodes)
         conflicts = self.dag.detect_file_conflicts()
+
+        # Create context builder for worker awareness
+        self.context_builder = WorkerContextBuilder(
+            dag_nodes=self.dag.nodes,
+            spec_title=spec.title,
+            file_conflicts=conflicts,
+        )
 
         logger.info(
             f"Decomposed into {task_count} tasks, "
@@ -269,6 +280,23 @@ class OrchestrationAgent:
                     f"Task {result.task_id} completed. "
                     f"{len(newly_ready)} tasks unblocked."
                 )
+
+                # Append completion update to running workers' CLAUDE.md
+                if self.context_builder:
+                    update_text = self.context_builder.build_update(
+                        result.task_id, result
+                    )
+                    if update_text:
+                        for other in dag.nodes.values():
+                            if (
+                                other.status == TaskStatus.RUNNING
+                                and other.worktree_path
+                                and other.id != result.task_id
+                            ):
+                                self.context_builder.append_update(
+                                    other.worktree_path, update_text
+                                )
+
                 await self._broadcast_task_completed(result, len(newly_ready))
                 if self._on_task_completed:
                     task_node = dag.nodes[result.task_id]
@@ -351,6 +379,15 @@ class OrchestrationAgent:
                 task.status = TaskStatus.FAILED
                 return
 
+        # Write CLAUDE.md to worktree for dynamic context
+        if self.context_builder and task.worktree_path:
+            try:
+                self.context_builder.write_claude_md(task, task.worktree_path)
+            except Exception as e:
+                logger.warning(
+                    f"Failed to write CLAUDE.md for {task.id}: {e}"
+                )
+
         # Build worker config — cap per-worker budget to remaining job budget
         worker_budget = task.budget_usd
         if self._budget_limit_usd:
@@ -367,11 +404,17 @@ class OrchestrationAgent:
         else:
             self._tasks_routed_teacher += 1
 
+        # Generate context-aware system prompt or fall back to static prompt
+        if self.context_builder:
+            system_prompt = self.context_builder.build_system_prompt(task)
+        else:
+            system_prompt = WORKER_SYSTEM_PROMPT
+
         config = WorkerConfig(
             model=worker_model,
             max_turns=task.estimated_turns,
             max_budget_usd=worker_budget,
-            system_prompt_append=WORKER_SYSTEM_PROMPT,
+            system_prompt_append=system_prompt,
             worktree_path=task.worktree_path,
         )
 

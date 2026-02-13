@@ -26,11 +26,11 @@ export function StatusBar() {
   }
 
   return (
-    <footer className="h-10 flex items-center justify-between px-4 border-t border-border-subtle bg-background-secondary/80 backdrop-blur-xl">
+    <footer className="h-10 flex items-center justify-between px-4 border-t border-border bg-background-card">
       {/* Left Section - Status Info */}
-      <div className="flex items-center gap-4 text-sm">
+      <div className="flex items-center gap-4">
         {/* Terminal Count */}
-        <div className="flex items-center gap-2 text-text-secondary">
+        <div className="flex items-center gap-2 text-text-secondary font-mono text-xs">
           <Terminal className="w-4 h-4" />
           <span>
             {terminalCount} Terminal{terminalCount !== 1 ? 's' : ''}
@@ -43,12 +43,12 @@ export function StatusBar() {
             <span
               className={clsx(
                 'status-dot',
-                currentRun.status === 'running' && 'status-success animate-pulse',
+                currentRun.status === 'running' && 'status-success',
                 currentRun.status === 'paused' && 'status-warning',
                 currentRun.status === 'failed' && 'status-error'
               )}
             />
-            <span className="text-text-secondary">
+            <span className="text-text-secondary font-mono text-xs">
               Training: {currentRun.currentMetrics?.step || 0}/
               {currentRun.currentMetrics?.totalSteps || '?'}
             </span>
@@ -56,16 +56,20 @@ export function StatusBar() {
         )}
 
         {/* Connection Status */}
-        <div className="flex items-center gap-2 text-text-muted">
+        <div className="flex items-center gap-2">
           {isConnected ? (
             <>
               <Wifi className="w-4 h-4 text-status-success" />
-              <span className="text-status-success">Connected</span>
+              <span className="font-mono text-xs border-brutal border-border rounded-brutal px-1.5 py-0.5 text-status-success">
+                Connected
+              </span>
             </>
           ) : (
             <>
-              <WifiOff className="w-4 h-4" />
-              <span>Disconnected</span>
+              <WifiOff className="w-4 h-4 text-text-muted" />
+              <span className="font-mono text-xs border-brutal border-border rounded-brutal px-1.5 py-0.5 text-text-muted">
+                Disconnected
+              </span>
             </>
           )}
         </div>
@@ -75,14 +79,14 @@ export function StatusBar() {
       <div className="flex items-center gap-2 flex-1 max-w-xl mx-4">
         <div
           className={clsx(
-            'flex-1 flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all',
+            'flex-1 flex items-center gap-2 px-3 py-1.5 border-brutal border-border rounded-brutal transition-colors',
             isFocused
-              ? 'border-primary bg-background-primary'
-              : 'border-border-color bg-background-tertiary',
+              ? 'border-accent bg-background-primary'
+              : 'bg-background-secondary',
             !hasTerminals && 'opacity-50'
           )}
         >
-          <span className="text-text-muted font-mono text-sm">$</span>
+          <span className="text-accent font-mono text-sm">$</span>
           <input
             type="text"
             value={broadcastCommand}
@@ -103,10 +107,10 @@ export function StatusBar() {
           onClick={handleBroadcast}
           disabled={!hasTerminals || !broadcastCommand.trim()}
           className={clsx(
-            'px-3 py-1.5 rounded-lg flex items-center gap-2 text-sm font-medium transition-colors',
+            'px-3 py-1.5 rounded-brutal flex items-center gap-2 text-sm font-medium transition-colors',
             hasTerminals && broadcastCommand.trim()
-              ? 'bg-primary text-white hover:bg-primary/90'
-              : 'bg-background-tertiary text-text-muted cursor-not-allowed'
+              ? 'btn-primary'
+              : 'bg-background-secondary text-text-muted cursor-not-allowed'
           )}
         >
           <Send className="w-4 h-4" />
@@ -115,12 +119,12 @@ export function StatusBar() {
       </div>
 
       {/* Right Section - Hotkey Hints */}
-      <div className="flex items-center gap-3 text-xs text-text-muted">
-        <kbd className="px-1.5 py-0.5 rounded bg-background-tertiary border border-border-subtle">
+      <div className="flex items-center gap-3 font-mono text-xs text-text-muted">
+        <kbd className="px-1.5 py-0.5 border-brutal border-border bg-background-secondary rounded-brutal">
           Ctrl+N
         </kbd>
         <span>New</span>
-        <kbd className="px-1.5 py-0.5 rounded bg-background-tertiary border border-border-subtle">
+        <kbd className="px-1.5 py-0.5 border-brutal border-border bg-background-secondary rounded-brutal">
           Ctrl+D
         </kbd>
         <span>Theme</span>

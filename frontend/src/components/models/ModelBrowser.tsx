@@ -141,18 +141,18 @@ export function ModelBrowser({ onSelectModel, onTrainNew, onCompare, onViewTrend
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="p-6 border-b border-border-subtle">
+      <div className="p-6 border-b border-border">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h1 className="text-2xl font-semibold text-text-primary">Models</h1>
-            <p className="text-sm text-text-secondary mt-1">
+            <h1 className="font-brand text-3xl text-text-primary">Models</h1>
+            <p className="font-mono text-xs uppercase tracking-widest text-text-muted mt-1">
               {total} trained model{total !== 1 ? 's' : ''}
             </p>
           </div>
           <div className="flex items-center gap-2">
             {compareMode ? (
               <>
-                <span className="text-sm text-text-muted mr-2">
+                <span className="font-mono text-xs text-text-muted mr-2">
                   {selectedForCompare.length}/3 selected
                 </span>
                 <button
@@ -217,7 +217,7 @@ export function ModelBrowser({ onSelectModel, onTrainNew, onCompare, onViewTrend
           <select
             value={strategy}
             onChange={(e) => setStrategy(e.target.value)}
-            className="input"
+            className="input font-mono text-sm"
           >
             {STRATEGY_OPTIONS.map(opt => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -228,7 +228,7 @@ export function ModelBrowser({ onSelectModel, onTrainNew, onCompare, onViewTrend
           <select
             value={status}
             onChange={(e) => setStatus(e.target.value)}
-            className="input"
+            className="input font-mono text-sm"
           >
             {STATUS_OPTIONS.map(opt => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -239,10 +239,8 @@ export function ModelBrowser({ onSelectModel, onTrainNew, onCompare, onViewTrend
           <button
             onClick={() => setStarredOnly(!starredOnly)}
             className={clsx(
-              'flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors',
-              starredOnly
-                ? 'bg-yellow-500/20 text-yellow-500'
-                : 'bg-background-tertiary text-text-muted hover:text-text-primary'
+              'btn-ghost font-mono text-xs uppercase tracking-widest flex items-center gap-2',
+              starredOnly && 'text-status-warning'
             )}
           >
             <Star className={clsx('w-4 h-4', starredOnly && 'fill-current')} />
@@ -254,7 +252,7 @@ export function ModelBrowser({ onSelectModel, onTrainNew, onCompare, onViewTrend
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value)}
-              className="input"
+              className="input font-mono text-sm"
             >
               {SORT_OPTIONS.map(opt => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -262,14 +260,14 @@ export function ModelBrowser({ onSelectModel, onTrainNew, onCompare, onViewTrend
             </select>
             <button
               onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
-              className="p-2 rounded-lg bg-background-tertiary text-text-muted hover:text-text-primary"
+              className="btn-icon w-9 h-9 flex items-center justify-center"
             >
               <ChevronDown className={clsx('w-4 h-4 transition-transform', sortOrder === 'asc' && 'rotate-180')} />
             </button>
           </div>
 
           {/* View Mode Toggle */}
-          <div className="flex items-center bg-background-tertiary rounded-lg p-1">
+          <div className="flex items-center border-brutal border-border rounded-brutal overflow-hidden">
             {[
               { mode: 'grid' as ViewMode, icon: Grid3X3, label: 'Grid' },
               { mode: 'list' as ViewMode, icon: List, label: 'List' },
@@ -279,10 +277,10 @@ export function ModelBrowser({ onSelectModel, onTrainNew, onCompare, onViewTrend
                 key={mode}
                 onClick={() => setViewMode(mode)}
                 className={clsx(
-                  'p-2 rounded transition-colors',
+                  'p-2 transition-colors border-r border-border last:border-r-0',
                   viewMode === mode
-                    ? 'bg-primary text-white'
-                    : 'text-text-muted hover:text-text-primary'
+                    ? 'bg-accent text-white'
+                    : 'bg-background-card text-text-muted hover:text-text-primary'
                 )}
                 title={label}
               >
@@ -295,7 +293,7 @@ export function ModelBrowser({ onSelectModel, onTrainNew, onCompare, onViewTrend
           <button
             onClick={() => { fetchModels(); fetchLeaderboard() }}
             disabled={isLoading}
-            className="p-2 rounded-lg bg-background-tertiary text-text-muted hover:text-text-primary"
+            className="btn-icon"
           >
             <RefreshCw className={clsx('w-4 h-4', isLoading && 'animate-spin')} />
           </button>
@@ -306,14 +304,14 @@ export function ModelBrowser({ onSelectModel, onTrainNew, onCompare, onViewTrend
       <div className="flex-1 overflow-auto p-6">
         {isLoading && models.length === 0 ? (
           <div className="flex items-center justify-center h-64">
-            <Loader2 className="w-8 h-8 text-primary animate-spin" />
+            <Loader2 className="w-8 h-8 text-accent animate-spin" />
           </div>
         ) : models.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-center">
-            <div className="w-16 h-16 rounded-full bg-background-tertiary flex items-center justify-center mb-4">
+            <div className="w-16 h-16 border-brutal border-border rounded-brutal bg-background-secondary flex items-center justify-center mb-4">
               <Grid3X3 className="w-8 h-8 text-text-muted" />
             </div>
-            <h3 className="text-lg font-medium text-text-primary mb-2">No models found</h3>
+            <h3 className="font-brand text-xl text-text-primary mb-2">No models found</h3>
             <p className="text-text-muted mb-4">
               {search || strategy || status
                 ? 'Try adjusting your filters'
@@ -333,16 +331,16 @@ export function ModelBrowser({ onSelectModel, onTrainNew, onCompare, onViewTrend
                 key={model.model_id}
                 className={clsx(
                   'relative',
-                  compareMode && selectedForCompare.includes(model.model_id) && 'ring-2 ring-primary rounded-lg'
+                  compareMode && selectedForCompare.includes(model.model_id) && 'outline outline-3 outline-accent rounded-brutal'
                 )}
               >
                 {compareMode && (
                   <div
-                    className="absolute top-2 left-2 z-10 w-6 h-6 rounded-full border-2 border-primary bg-background-secondary flex items-center justify-center cursor-pointer"
+                    className="absolute top-2 left-2 z-10 w-6 h-6 border-brutal border-border bg-background-card flex items-center justify-center cursor-pointer rounded-brutal"
                     onClick={(e) => { e.stopPropagation(); handleCompare(model.model_id) }}
                   >
                     {selectedForCompare.includes(model.model_id) && (
-                      <div className="w-3 h-3 rounded-full bg-primary" />
+                      <div className="w-3 h-3 bg-accent" />
                     )}
                   </div>
                 )}
@@ -356,18 +354,18 @@ export function ModelBrowser({ onSelectModel, onTrainNew, onCompare, onViewTrend
             ))}
           </div>
         ) : viewMode === 'list' ? (
-          <div className="card-elevated">
+          <div className="card card-elevated overflow-hidden">
             <table className="w-full">
-              <thead className="bg-background-tertiary">
-                <tr>
+              <thead>
+                <tr className="bg-background-secondary border-b border-border">
                   {compareMode && <th className="w-12 px-4 py-3"></th>}
-                  <th className="px-4 py-3 text-left text-sm font-medium text-text-muted">Model</th>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-text-muted">Base</th>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-text-muted">Strategy</th>
-                  <th className="px-4 py-3 text-right text-sm font-medium text-text-muted">Custom Eval</th>
-                  <th className="px-4 py-3 text-right text-sm font-medium text-text-muted">Benchmark</th>
-                  <th className="px-4 py-3 text-right text-sm font-medium text-text-muted">Size</th>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-text-muted">Status</th>
+                  <th className="px-4 py-3 text-left font-mono text-xs uppercase tracking-widest text-text-muted">Model</th>
+                  <th className="px-4 py-3 text-left font-mono text-xs uppercase tracking-widest text-text-muted">Base</th>
+                  <th className="px-4 py-3 text-left font-mono text-xs uppercase tracking-widest text-text-muted">Strategy</th>
+                  <th className="px-4 py-3 text-right font-mono text-xs uppercase tracking-widest text-text-muted">Custom Eval</th>
+                  <th className="px-4 py-3 text-right font-mono text-xs uppercase tracking-widest text-text-muted">Benchmark</th>
+                  <th className="px-4 py-3 text-right font-mono text-xs uppercase tracking-widest text-text-muted">Size</th>
+                  <th className="px-4 py-3 text-left font-mono text-xs uppercase tracking-widest text-text-muted">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border-subtle">
@@ -375,49 +373,49 @@ export function ModelBrowser({ onSelectModel, onTrainNew, onCompare, onViewTrend
                   <tr
                     key={model.model_id}
                     onClick={() => !compareMode && handleSelectModel(model.model_id)}
-                    className="hover:bg-background-tertiary cursor-pointer"
+                    className="hover:bg-background-secondary cursor-pointer transition-colors"
                   >
                     {compareMode && (
                       <td className="px-4 py-3">
                         <div
-                          className="w-5 h-5 rounded-full border-2 border-primary flex items-center justify-center cursor-pointer"
+                          className="w-5 h-5 border-brutal border-border flex items-center justify-center cursor-pointer rounded-brutal"
                           onClick={(e) => { e.stopPropagation(); handleCompare(model.model_id) }}
                         >
                           {selectedForCompare.includes(model.model_id) && (
-                            <div className="w-2.5 h-2.5 rounded-full bg-primary" />
+                            <div className="w-2.5 h-2.5 bg-accent" />
                           )}
                         </div>
                       </td>
                     )}
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
-                        {model.starred && <Star className="w-4 h-4 text-yellow-500 fill-yellow-500" />}
-                        <span className="font-medium text-text-primary">{model.display_name}</span>
+                        {model.starred && <Star className="w-4 h-4 text-status-warning fill-current" />}
+                        <span className="font-brand text-lg text-text-primary">{model.display_name}</span>
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-text-secondary text-sm">
+                    <td className="px-4 py-3 font-mono text-xs text-text-secondary">
                       {model.base_model.split('/').pop()}
                     </td>
                     <td className="px-4 py-3">
-                      <span className="px-2 py-0.5 rounded bg-primary/20 text-primary text-xs">
-                        {model.training_strategy.toUpperCase()}
+                      <span className="tag">
+                        <span>{model.training_strategy.toUpperCase()}</span>
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right text-text-primary">
-                      {model.custom_eval_pass_rate !== null ? `${model.custom_eval_pass_rate.toFixed(1)}%` : '—'}
+                    <td className="px-4 py-3 text-right font-brand text-lg text-text-primary">
+                      {model.custom_eval_pass_rate !== null ? `${model.custom_eval_pass_rate.toFixed(1)}%` : '\u2014'}
                     </td>
-                    <td className="px-4 py-3 text-right text-text-primary">
-                      {model.benchmark_avg_score !== null ? `${model.benchmark_avg_score.toFixed(1)}%` : '—'}
+                    <td className="px-4 py-3 text-right font-brand text-lg text-text-primary">
+                      {model.benchmark_avg_score !== null ? `${model.benchmark_avg_score.toFixed(1)}%` : '\u2014'}
                     </td>
-                    <td className="px-4 py-3 text-right text-text-secondary text-sm">
+                    <td className="px-4 py-3 text-right font-mono text-xs text-text-secondary">
                       {model.model_size_display}
                     </td>
                     <td className="px-4 py-3">
                       <span className={clsx(
-                        'px-2 py-0.5 rounded text-xs',
-                        model.status === 'ready' ? 'bg-status-success/20 text-status-success' :
-                        model.status === 'needs_eval' ? 'bg-status-warning/20 text-status-warning' :
-                        'bg-text-muted/20 text-text-muted'
+                        'font-mono text-xs uppercase tracking-widest',
+                        model.status === 'ready' ? 'quality-gold text-status-success' :
+                        model.status === 'needs_eval' ? 'quality-pending text-status-warning' :
+                        'text-text-muted'
                       )}>
                         {model.status.replace('_', ' ')}
                       </span>
@@ -429,22 +427,22 @@ export function ModelBrowser({ onSelectModel, onTrainNew, onCompare, onViewTrend
           </div>
         ) : (
           /* Leaderboard View */
-          <div className="card-elevated">
-            <div className="p-4 border-b border-border-subtle">
+          <div className="card card-elevated overflow-hidden">
+            <div className="p-4 border-b border-border bg-background-secondary">
               <div className="flex items-center gap-2">
-                <Trophy className="w-5 h-5 text-yellow-500" />
-                <h3 className="font-medium text-text-primary">Leaderboard</h3>
-                <span className="text-sm text-text-muted">by Custom Eval Pass Rate</span>
+                <Trophy className="w-5 h-5 text-status-warning" />
+                <h3 className="font-brand text-xl text-text-primary">Leaderboard</h3>
+                <span className="font-mono text-xs uppercase tracking-widest text-text-muted">by Custom Eval Pass Rate</span>
               </div>
             </div>
             <table className="w-full">
-              <thead className="bg-background-tertiary">
-                <tr>
-                  <th className="w-16 px-4 py-3 text-center text-sm font-medium text-text-muted">Rank</th>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-text-muted">Model</th>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-text-muted">Base</th>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-text-muted">Strategy</th>
-                  <th className="px-4 py-3 text-right text-sm font-medium text-text-muted">Score</th>
+              <thead>
+                <tr className="bg-background-secondary border-b border-border">
+                  <th className="w-16 px-4 py-3 text-center font-mono text-xs uppercase tracking-widest text-text-muted">Rank</th>
+                  <th className="px-4 py-3 text-left font-mono text-xs uppercase tracking-widest text-text-muted">Model</th>
+                  <th className="px-4 py-3 text-left font-mono text-xs uppercase tracking-widest text-text-muted">Base</th>
+                  <th className="px-4 py-3 text-left font-mono text-xs uppercase tracking-widest text-text-muted">Strategy</th>
+                  <th className="px-4 py-3 text-right font-mono text-xs uppercase tracking-widest text-text-muted">Score</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border-subtle">
@@ -452,35 +450,35 @@ export function ModelBrowser({ onSelectModel, onTrainNew, onCompare, onViewTrend
                   <tr
                     key={entry.model_id}
                     onClick={() => handleSelectModel(entry.model_id)}
-                    className="hover:bg-background-tertiary cursor-pointer"
+                    className="hover:bg-background-secondary cursor-pointer transition-colors"
                   >
                     <td className="px-4 py-3 text-center">
                       {entry.rank <= 3 ? (
                         <span className={clsx(
-                          'inline-flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold',
-                          entry.rank === 1 ? 'bg-yellow-500/20 text-yellow-500' :
-                          entry.rank === 2 ? 'bg-gray-400/20 text-gray-400' :
-                          'bg-amber-700/20 text-amber-700'
+                          'inline-flex items-center justify-center w-8 h-8 border-brutal font-brand text-lg font-bold',
+                          entry.rank === 1 ? 'border-status-warning text-status-warning bg-background-card' :
+                          entry.rank === 2 ? 'border-text-muted text-text-muted bg-background-card' :
+                          'border-status-warning text-status-warning bg-background-card'
                         )}>
                           {entry.rank}
                         </span>
                       ) : (
-                        <span className="text-text-muted">{entry.rank}</span>
+                        <span className="font-mono text-text-muted">{entry.rank}</span>
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      <span className="font-medium text-text-primary">{entry.display_name}</span>
+                      <span className="font-brand text-lg text-text-primary">{entry.display_name}</span>
                     </td>
-                    <td className="px-4 py-3 text-text-secondary text-sm">
+                    <td className="px-4 py-3 font-mono text-xs text-text-secondary">
                       {entry.base_model.split('/').pop()}
                     </td>
                     <td className="px-4 py-3">
-                      <span className="px-2 py-0.5 rounded bg-primary/20 text-primary text-xs">
-                        {entry.strategy.toUpperCase()}
+                      <span className="tag">
+                        <span>{entry.strategy.toUpperCase()}</span>
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <span className="text-lg font-semibold text-text-primary">
+                      <span className="font-brand text-2xl text-text-primary">
                         {entry.value.toFixed(1)}%
                       </span>
                     </td>

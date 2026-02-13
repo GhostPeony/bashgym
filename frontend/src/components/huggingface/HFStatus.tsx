@@ -39,7 +39,7 @@ export function HFStatus({ compact = false, onClick }: HFStatusProps) {
         onClick && 'cursor-pointer hover:text-text-primary'
       )} onClick={onClick}>
         <Loader2 className="w-4 h-4 animate-spin" />
-        {!compact && <span className="text-sm">Loading...</span>}
+        {!compact && <span className="text-sm font-mono">Loading...</span>}
       </div>
     )
   }
@@ -51,7 +51,7 @@ export function HFStatus({ compact = false, onClick }: HFStatusProps) {
         onClick && 'cursor-pointer hover:text-text-primary'
       )} onClick={onClick}>
         <CloudOff className="w-4 h-4" />
-        {!compact && <span className="text-sm">HF Offline</span>}
+        {!compact && <span className="text-sm font-mono">HF Offline</span>}
       </div>
     )
   }
@@ -63,7 +63,7 @@ export function HFStatus({ compact = false, onClick }: HFStatusProps) {
         onClick && 'cursor-pointer hover:text-text-primary'
       )} onClick={onClick}>
         <CloudOff className="w-4 h-4" />
-        {!compact && <span className="text-sm">HF Not Configured</span>}
+        {!compact && <span className="text-sm font-mono">HF Not Configured</span>}
       </div>
     )
   }
@@ -71,19 +71,21 @@ export function HFStatus({ compact = false, onClick }: HFStatusProps) {
   return (
     <div className={clsx(
       'flex items-center gap-2',
-      onClick && 'cursor-pointer hover:opacity-80'
+      onClick && 'cursor-pointer hover-press'
     )} onClick={onClick}>
       <Cloud className={clsx(
         'w-4 h-4',
-        status.pro_enabled ? 'text-accent-primary' : 'text-status-success'
+        status.pro_enabled ? 'text-accent' : 'text-status-success'
       )} />
       {!compact && (
         <>
-          <span className="text-sm text-text-primary">{status.username || 'Connected'}</span>
+          <span className="text-sm text-text-primary font-mono">{status.username || 'Connected'}</span>
           {status.pro_enabled && (
-            <span className="flex items-center gap-1 px-1.5 py-0.5 text-xs font-medium bg-accent-primary/20 text-accent-primary rounded">
-              <Sparkles className="w-3 h-3" />
-              Pro
+            <span className="tag">
+              <span className="flex items-center gap-1">
+                <Sparkles className="w-3 h-3" />
+                Pro
+              </span>
             </span>
           )}
         </>

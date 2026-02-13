@@ -1,4 +1,4 @@
-import { CheckCircle2, Circle, ChevronRight, X, HelpCircle } from 'lucide-react'
+import { ChevronRight, X, HelpCircle } from 'lucide-react'
 import { useTutorialStore, TutorialStep } from '../../stores/tutorialStore'
 import { useUIStore } from '../../stores'
 import { clsx } from 'clsx'
@@ -28,26 +28,48 @@ function ChecklistItem({ step, isCompleted, isCurrent, onClick }: {
     <button
       onClick={onClick}
       className={clsx(
-        'w-full flex items-start gap-3 p-2 rounded-lg text-left transition-colors',
-        isCurrent && !isCompleted && 'bg-primary/10',
-        !isCurrent && 'hover:bg-background-tertiary'
+        'w-full flex items-start gap-3 p-2 text-left transition-press',
+        'border-b border-border-subtle last:border-b-0',
+        isCurrent && !isCompleted && 'bg-accent-light',
+        !isCurrent && 'hover:bg-background-secondary'
       )}
     >
       <div className="flex-shrink-0 mt-0.5">
         {isCompleted ? (
-          <CheckCircle2 className="w-5 h-5 text-status-success" />
+          /* Triangle checkmark pointing up — success */
+          <div
+            className="w-5 h-5 flex items-center justify-center"
+          >
+            <div
+              className="w-0 h-0"
+              style={{
+                borderLeft: '6px solid transparent',
+                borderRight: '6px solid transparent',
+                borderBottom: '10px solid var(--status-success)',
+              }}
+            />
+          </div>
         ) : isCurrent ? (
-          <div className="w-5 h-5 rounded-full border-2 border-primary flex items-center justify-center">
-            <div className="w-2 h-2 rounded-full bg-primary" />
+          /* Active — filled triangle pointing right */
+          <div className="w-5 h-5 flex items-center justify-center">
+            <div
+              className="w-0 h-0"
+              style={{
+                borderTop: '6px solid transparent',
+                borderBottom: '6px solid transparent',
+                borderLeft: '10px solid var(--accent)',
+              }}
+            />
           </div>
         ) : (
-          <Circle className="w-5 h-5 text-text-muted" />
+          /* Inactive — border-only square */
+          <div className="w-5 h-5 border-brutal border-border rounded-brutal" />
         )}
       </div>
       <div className="flex-1 min-w-0">
         <p className={clsx(
-          'text-sm font-medium',
-          isCompleted ? 'text-text-muted line-through' : isCurrent ? 'text-text-primary' : 'text-text-secondary'
+          'text-sm font-mono',
+          isCompleted ? 'text-text-muted line-through' : isCurrent ? 'text-text-primary font-semibold' : 'text-text-secondary'
         )}>
           {step.label}
         </p>
@@ -56,7 +78,7 @@ function ChecklistItem({ step, isCompleted, isCurrent, onClick }: {
         )}
       </div>
       {isCurrent && !isCompleted && (
-        <ChevronRight className="w-4 h-4 text-primary flex-shrink-0" />
+        <ChevronRight className="w-4 h-4 text-accent flex-shrink-0" />
       )}
     </button>
   )
@@ -81,7 +103,7 @@ export function TutorialChecklist() {
     return (
       <button
         onClick={toggleChecklist}
-        className="fixed bottom-20 right-4 z-50 w-12 h-12 rounded-full bg-primary text-white shadow-lg hover:bg-primary/90 transition-colors flex items-center justify-center"
+        className="fixed bottom-20 right-4 z-50 btn-icon w-12 h-12 bg-accent text-white"
         title="Show tutorial progress"
       >
         <HelpCircle className="w-6 h-6" />
@@ -115,24 +137,24 @@ export function TutorialChecklist() {
   const totalSteps = STEPS.length
 
   return (
-    <div className="fixed bottom-20 right-4 z-50 w-72 bg-background-secondary border border-border-subtle rounded-xl shadow-xl overflow-hidden">
+    <div className="fixed bottom-20 right-4 z-50 w-72 border-brutal border-border rounded-brutal shadow-brutal bg-background-card overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between p-3 border-b border-border-subtle bg-background-tertiary">
+      <div className="flex items-center justify-between p-3 border-b border-border bg-background-secondary">
         <div>
-          <h3 className="text-sm font-semibold text-text-primary">Getting Started</h3>
-          <p className="text-xs text-text-muted">{completedCount} of {totalSteps} complete</p>
+          <h3 className="font-brand text-sm text-text-primary">Getting Started</h3>
+          <p className="text-xs font-mono text-text-muted">{completedCount} of {totalSteps} complete</p>
         </div>
         <div className="flex items-center gap-1">
           <button
             onClick={toggleChecklist}
-            className="p-1.5 rounded-lg hover:bg-background-primary transition-colors text-text-muted hover:text-text-secondary"
+            className="btn-icon w-7 h-7 text-text-muted"
             title="Minimize"
           >
             <ChevronRight className="w-4 h-4" />
           </button>
           <button
             onClick={skipTutorial}
-            className="p-1.5 rounded-lg hover:bg-background-primary transition-colors text-text-muted hover:text-text-secondary"
+            className="btn-icon w-7 h-7 text-text-muted"
             title="Close tutorial"
           >
             <X className="w-4 h-4" />
@@ -141,15 +163,15 @@ export function TutorialChecklist() {
       </div>
 
       {/* Progress bar */}
-      <div className="h-1 bg-background-tertiary">
+      <div className="progress-bar" style={{ height: '8px', borderLeft: 'none', borderRight: 'none', borderRadius: 0 }}>
         <div
-          className="h-full bg-primary transition-all duration-300"
+          className="progress-fill"
           style={{ width: `${(completedCount / totalSteps) * 100}%` }}
         />
       </div>
 
       {/* Steps */}
-      <div className="p-2 max-h-80 overflow-y-auto">
+      <div className="max-h-80 overflow-y-auto">
         {STEPS.map((step) => (
           <ChecklistItem
             key={step.id}
@@ -162,8 +184,8 @@ export function TutorialChecklist() {
       </div>
 
       {/* Footer hint */}
-      <div className="p-3 border-t border-border-subtle bg-background-tertiary">
-        <p className="text-xs text-text-muted text-center">
+      <div className="p-3 border-t border-border bg-background-secondary">
+        <p className="text-xs text-text-muted text-center font-mono">
           Click any step to navigate there
         </p>
       </div>

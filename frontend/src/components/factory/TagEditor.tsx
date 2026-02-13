@@ -42,13 +42,13 @@ export function TagEditor({ tags, onChange }: TagEditorProps) {
 
   return (
     <div className="relative">
-      <div className="flex flex-wrap items-center gap-1.5 px-2 py-1.5 bg-background-tertiary rounded-lg border border-border-subtle focus-within:border-primary/50 transition-colors">
+      <div className="flex flex-wrap items-center gap-1.5 px-2 py-1.5 bg-background-secondary border-brutal border-border rounded-brutal focus-within:shadow-brutal-sm transition-shadow">
         {tags.map(tag => (
           <span
             key={tag}
-            className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-primary/15 text-primary"
+            className="tag inline-flex items-center gap-1"
           >
-            {tag}
+            <span>{tag}</span>
             <button
               onClick={() => removeTag(tag)}
               className="hover:text-status-error transition-colors"
@@ -68,12 +68,12 @@ export function TagEditor({ tags, onChange }: TagEditorProps) {
           onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
           onKeyDown={handleKeyDown}
           placeholder={tags.length === 0 ? 'Add tags...' : ''}
-          className="flex-1 min-w-[80px] bg-transparent text-xs text-text-primary outline-none placeholder:text-text-muted"
+          className="flex-1 min-w-[80px] bg-transparent text-xs font-mono text-text-primary outline-none placeholder:text-text-muted"
         />
       </div>
 
       {showSuggestions && input && suggestions.length > 0 && (
-        <div className="absolute z-10 mt-1 w-full bg-background-secondary border border-border-subtle rounded-lg shadow-elevated overflow-hidden">
+        <div className="absolute z-10 mt-1 w-full bg-background-secondary border-brutal border-border rounded-brutal shadow-brutal overflow-hidden">
           {suggestions.slice(0, 6).map(tag => (
             <button
               key={tag}
@@ -81,7 +81,7 @@ export function TagEditor({ tags, onChange }: TagEditorProps) {
                 e.preventDefault()
                 addTag(tag)
               }}
-              className="w-full px-3 py-1.5 text-xs text-left text-text-secondary hover:bg-background-tertiary hover:text-text-primary transition-colors"
+              className="w-full px-3 py-1.5 text-xs text-left font-mono text-text-secondary hover:bg-accent-light hover:text-accent-dark transition-colors"
             >
               {tag}
             </button>

@@ -8,11 +8,11 @@ interface FlywheelMiniProps {
 }
 
 const stages: { id: FlywheelStage; label: string; icon: string }[] = [
-  { id: 'act', label: 'Act', icon: '▶' },
-  { id: 'verify', label: 'Verify', icon: '✓' },
-  { id: 'synthesize', label: 'Synth', icon: '⚡' },
-  { id: 'train', label: 'Train', icon: '◉' },
-  { id: 'deploy', label: 'Deploy', icon: '↗' }
+  { id: 'act', label: 'Act', icon: '\u25B6' },
+  { id: 'verify', label: 'Verify', icon: '\u2713' },
+  { id: 'synthesize', label: 'Synth', icon: '\u26A1' },
+  { id: 'train', label: 'Train', icon: '\u25C9' },
+  { id: 'deploy', label: 'Deploy', icon: '\u2197' }
 ]
 
 function StageButton({ stage, isActive, isComplete }: {
@@ -23,26 +23,29 @@ function StageButton({ stage, isActive, isComplete }: {
   return (
     <div
       className={clsx(
-        'flex items-center gap-1.5 px-2 py-1.5 rounded text-xs transition-all',
-        isActive && 'bg-primary/10'
+        'flex items-center gap-1.5 px-2 py-1.5 text-xs transition-press border-brutal rounded-brutal',
+        isActive
+          ? 'bg-accent-light border-accent'
+          : 'bg-background-card border-border-subtle'
       )}
     >
       <span
         className={clsx(
-          'w-5 h-5 rounded flex items-center justify-center text-[10px] font-medium',
+          'w-5 h-5 flex items-center justify-center text-[10px] font-mono font-semibold border-brutal rounded-brutal',
           isActive
-            ? 'bg-primary text-white'
+            ? 'bg-accent text-white border-accent'
             : isComplete
-            ? 'bg-primary/30 text-primary'
-            : 'bg-background-tertiary text-text-muted'
+            ? 'bg-accent-light text-accent-dark border-border'
+            : 'bg-background-secondary text-text-muted border-border'
         )}
       >
         {stage.icon}
       </span>
       <span
         className={clsx(
+          'font-mono text-xs',
           isActive
-            ? 'text-primary font-medium'
+            ? 'text-accent-dark font-semibold'
             : isComplete
             ? 'text-text-secondary'
             : 'text-text-muted'
@@ -79,12 +82,12 @@ export function FlywheelMini({ currentStage = 'act', progress = 0 }: FlywheelMin
       <div className="flex justify-center">
         <StageButton {...getStageProps(4)} />
       </div>
-      {/* Progress indicator */}
+      {/* Progress indicator — brutalist progress bar */}
       {progress > 0 && (
         <div className="pt-1">
-          <div className="h-1 bg-background-tertiary rounded-full overflow-hidden">
+          <div className="progress-bar" style={{ height: '8px' }}>
             <div
-              className="h-full bg-primary transition-all duration-500"
+              className="progress-fill"
               style={{ width: `${progress}%` }}
             />
           </div>

@@ -184,12 +184,12 @@ export function SeedsPanel({ config, onConfigChange, onImportFromTraces, onNavig
   return (
     <div className="h-full flex">
       {/* Left Panel - Seed List */}
-      <div className="w-96 border-r border-border-subtle flex flex-col">
+      <div className="w-96 border-r-2 border-border flex flex-col">
         {/* Info bar */}
         <div className="px-4 pt-4 pb-2">
-          <div className="flex items-center justify-between text-xs text-text-muted">
+          <div className="flex items-center justify-between text-xs text-text-muted font-mono">
             <span>
-              <span className="font-medium text-text-primary">{config.seeds.length}</span> seeds
+              <span className="font-semibold text-text-primary">{config.seeds.length}</span> seeds
             </span>
             <span>Recommended: 20-100</span>
           </div>
@@ -197,14 +197,14 @@ export function SeedsPanel({ config, onConfigChange, onImportFromTraces, onNavig
 
         {/* Search */}
         <div className="px-4 pb-3">
-          <div className="flex items-center gap-2 px-3 py-2 bg-background-tertiary rounded-lg">
+          <div className="flex items-center gap-2 px-3 py-2 bg-background-secondary border-brutal border-border rounded-brutal">
             <Search className="w-4 h-4 text-text-muted flex-shrink-0" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search seeds..."
-              className="flex-1 bg-transparent text-sm text-text-primary outline-none placeholder:text-text-muted"
+              className="flex-1 bg-transparent text-sm font-mono text-text-primary outline-none placeholder:text-text-muted"
             />
           </div>
         </div>
@@ -216,15 +216,15 @@ export function SeedsPanel({ config, onConfigChange, onImportFromTraces, onNavig
               key={tab.id}
               onClick={() => setSourceFilter(tab.id)}
               className={clsx(
-                'px-2.5 py-1 text-xs rounded-md transition-colors',
+                'px-2.5 py-1 text-xs font-mono uppercase tracking-widest rounded-brutal transition-all border-brutal',
                 sourceFilter === tab.id
-                  ? 'bg-primary text-white'
-                  : 'text-text-secondary hover:text-text-primary hover:bg-background-tertiary'
+                  ? 'bg-accent-light text-accent-dark border-border shadow-brutal-sm'
+                  : 'text-text-secondary border-transparent hover:text-text-primary hover:border-border'
               )}
             >
               {tab.label}
               {sourceCounts[tab.id] > 0 && (
-                <span className="ml-1 opacity-70">{sourceCounts[tab.id]}</span>
+                <span className="ml-1 text-text-muted">{sourceCounts[tab.id]}</span>
               )}
             </button>
           ))}
@@ -237,9 +237,9 @@ export function SeedsPanel({ config, onConfigChange, onImportFromTraces, onNavig
               {tagFilter && (
                 <button
                   onClick={() => setTagFilter(null)}
-                  className="px-2 py-0.5 text-xs rounded-full bg-primary/15 text-primary flex-shrink-0"
+                  className="tag flex-shrink-0"
                 >
-                  Clear
+                  <span>Clear</span>
                 </button>
               )}
               {activeTags.map(tag => (
@@ -247,13 +247,13 @@ export function SeedsPanel({ config, onConfigChange, onImportFromTraces, onNavig
                   key={tag}
                   onClick={() => setTagFilter(tagFilter === tag ? null : tag)}
                   className={clsx(
-                    'px-2 py-0.5 text-xs rounded-full flex-shrink-0 transition-colors',
+                    'tag flex-shrink-0 transition-colors',
                     tagFilter === tag
-                      ? 'bg-primary text-white'
-                      : 'bg-background-tertiary text-text-secondary hover:text-text-primary'
+                      ? 'bg-accent text-white'
+                      : ''
                   )}
                 >
-                  {tag}
+                  <span>{tag}</span>
                 </button>
               ))}
             </div>
@@ -262,19 +262,19 @@ export function SeedsPanel({ config, onConfigChange, onImportFromTraces, onNavig
 
         {/* Bulk action bar */}
         {selectedSeedIds.size > 0 && (
-          <div className="px-4 py-2 border-y border-border-subtle bg-background-tertiary/50 flex items-center gap-2">
-            <span className="text-xs text-text-secondary">{selectedSeedIds.size} selected</span>
+          <div className="px-4 py-2 border-y-2 border-border bg-background-secondary flex items-center gap-2">
+            <span className="text-xs text-text-secondary font-mono">{selectedSeedIds.size} selected</span>
             <div className="flex-1" />
             <button
               onClick={bulkDuplicate}
-              className="p-1.5 text-text-muted hover:text-primary transition-colors rounded hover:bg-background-tertiary"
+              className="btn-icon w-7 h-7 flex items-center justify-center text-text-muted hover:text-accent"
               title="Duplicate selected"
             >
               <Copy className="w-3.5 h-3.5" />
             </button>
             <button
               onClick={bulkDelete}
-              className="p-1.5 text-text-muted hover:text-status-error transition-colors rounded hover:bg-background-tertiary"
+              className="btn-icon w-7 h-7 flex items-center justify-center text-text-muted hover:text-status-error"
               title="Delete selected"
             >
               <Trash2 className="w-3.5 h-3.5" />
@@ -289,8 +289,8 @@ export function SeedsPanel({ config, onConfigChange, onImportFromTraces, onNavig
               <Layers className="w-8 h-8 text-text-muted mx-auto mb-3" />
               {config.seeds.length === 0 ? (
                 <>
-                  <p className="text-sm font-medium text-text-primary mb-1">No seeds yet</p>
-                  <p className="text-xs text-text-muted mb-4">Import from traces or create manually</p>
+                  <p className="font-brand text-lg text-text-primary mb-1">No seeds yet</p>
+                  <p className="text-xs text-text-muted font-mono mb-4">Import from traces or create manually</p>
                   <button onClick={onImportFromTraces} className="btn-primary text-xs">
                     <FolderOpen className="w-3.5 h-3.5 mr-1" />
                     Import from Traces
@@ -298,8 +298,8 @@ export function SeedsPanel({ config, onConfigChange, onImportFromTraces, onNavig
                 </>
               ) : (
                 <>
-                  <p className="text-sm font-medium text-text-primary mb-1">No matching seeds</p>
-                  <p className="text-xs text-text-muted">Try adjusting your filters</p>
+                  <p className="font-brand text-lg text-text-primary mb-1">No matching seeds</p>
+                  <p className="text-xs text-text-muted font-mono">Try adjusting your filters</p>
                 </>
               )}
             </div>
@@ -314,8 +314,8 @@ export function SeedsPanel({ config, onConfigChange, onImportFromTraces, onNavig
                 <div
                   key={seed.id}
                   className={clsx(
-                    'group border-b border-border-subtle transition-colors cursor-pointer',
-                    isSelected ? 'bg-primary/5' : 'hover:bg-background-tertiary/50'
+                    'group border-b-2 border-border transition-all cursor-pointer',
+                    isSelected ? 'bg-accent-light' : 'hover:bg-background-secondary'
                   )}
                 >
                   <div className="flex items-start gap-2 p-3">
@@ -325,7 +325,7 @@ export function SeedsPanel({ config, onConfigChange, onImportFromTraces, onNavig
                       checked={isChecked}
                       onChange={() => toggleSelect(seed.id)}
                       onClick={(e) => e.stopPropagation()}
-                      className="mt-1 rounded flex-shrink-0"
+                      className="mt-1 rounded-brutal flex-shrink-0"
                     />
 
                     {/* Content */}
@@ -334,37 +334,37 @@ export function SeedsPanel({ config, onConfigChange, onImportFromTraces, onNavig
                       onClick={() => setSelectedSeedId(seed.id)}
                     >
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="text-xs font-medium text-text-primary">#{globalIdx + 1}</span>
+                        <span className="font-mono text-xs font-semibold text-text-primary">#{globalIdx + 1}</span>
                         <span className={clsx(
-                          'text-[10px] px-1.5 py-0.5 rounded-full',
-                          seed.source === 'gold_trace' ? 'bg-status-success/20 text-status-success' :
-                          seed.source === 'imported' ? 'bg-status-info/20 text-status-info' :
-                          'bg-background-tertiary text-text-muted'
+                          'tag text-[10px]',
+                          seed.source === 'gold_trace' ? 'text-status-success' :
+                          seed.source === 'imported' ? 'text-status-info' :
+                          'text-text-muted'
                         )}>
-                          {seed.source === 'gold_trace' ? 'Gold' : seed.source === 'imported' ? 'Import' : 'Manual'}
+                          <span>{seed.source === 'gold_trace' ? 'Gold' : seed.source === 'imported' ? 'Import' : 'Manual'}</span>
                         </span>
                         {(seed.tags || []).slice(0, 2).map(tag => (
-                          <span key={tag} className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary">
-                            {tag}
+                          <span key={tag} className="tag text-[10px]">
+                            <span>{tag}</span>
                           </span>
                         ))}
                         {(seed.tags || []).length > 2 && (
-                          <span className="text-[10px] text-text-muted">+{(seed.tags || []).length - 2}</span>
+                          <span className="text-[10px] text-text-muted font-mono">+{(seed.tags || []).length - 2}</span>
                         )}
                       </div>
-                      <p className="text-xs text-text-secondary truncate">
+                      <p className="text-xs text-text-secondary font-mono truncate">
                         {Object.values(seed.data).filter(Boolean).join(' \u00b7 ').slice(0, 100) || 'Empty seed'}
                       </p>
                       {/* Quality bar */}
                       {config.columns.length > 0 && (
                         <div className="mt-1.5 flex items-center gap-2">
-                          <div className="flex-1 h-1 bg-background-tertiary rounded-full overflow-hidden">
+                          <div className="progress-bar flex-1 !h-1">
                             <div
                               className={clsx(
-                                'h-full rounded-full',
-                                quality === 1 ? 'bg-status-success' :
-                                quality >= 0.5 ? 'bg-status-warning' :
-                                'bg-status-error'
+                                'progress-fill',
+                                quality === 1 ? '!bg-status-success' :
+                                quality >= 0.5 ? '!bg-status-warning' :
+                                '!bg-status-error'
                               )}
                               style={{ width: `${quality * 100}%` }}
                             />
@@ -399,7 +399,7 @@ export function SeedsPanel({ config, onConfigChange, onImportFromTraces, onNavig
         </div>
 
         {/* Bottom action bar */}
-        <div className="p-3 border-t border-border-subtle flex gap-2">
+        <div className="p-3 border-t-2 border-border flex gap-2">
           <button
             onClick={onImportFromTraces}
             className="btn-primary text-xs flex-1 flex items-center justify-center gap-1.5"
@@ -433,8 +433,8 @@ export function SeedsPanel({ config, onConfigChange, onImportFromTraces, onNavig
           <div className="h-full flex items-center justify-center">
             <div className="text-center">
               <Layers className="w-10 h-10 text-text-muted mx-auto mb-3" />
-              <p className="text-sm font-medium text-text-primary mb-1">Select a seed to edit</p>
-              <p className="text-xs text-text-muted">
+              <p className="font-brand text-lg text-text-primary mb-1">Select a seed to edit</p>
+              <p className="text-xs text-text-muted font-mono">
                 {config.seeds.length === 0
                   ? 'Import from traces or add a manual seed to get started'
                   : 'Choose a seed from the list on the left'}

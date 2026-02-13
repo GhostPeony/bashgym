@@ -202,7 +202,7 @@ export function SyntheticGenerator({ onStateChange }: SyntheticGeneratorProps) {
   if (isLoading) {
     return (
       <div className="h-full flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        <Loader2 className="w-8 h-8 animate-spin text-accent" />
       </div>
     )
   }
@@ -211,17 +211,17 @@ export function SyntheticGenerator({ onStateChange }: SyntheticGeneratorProps) {
     <div className="space-y-4">
         {/* Repository Filter - Dropdown at top */}
         <div className="flex items-center gap-4">
-          <label className="text-sm font-medium text-text-secondary whitespace-nowrap">Source:</label>
+          <label className="font-mono text-xs uppercase tracking-widest text-text-secondary whitespace-nowrap">Source:</label>
           <div className="relative flex-1">
             <button
               onClick={() => setRepoDropdownOpen(!repoDropdownOpen)}
-              className="w-full flex items-center justify-between px-3 py-2 bg-background-secondary border border-border rounded-lg text-sm text-text-primary hover:border-primary/50 transition-colors"
+              className="w-full flex items-center justify-between px-3 py-2 bg-background-secondary border-brutal border-border rounded-brutal text-sm text-text-primary hover:shadow-brutal-sm transition-shadow"
             >
-              <span>{getRepoLabel()}</span>
+              <span className="font-mono">{getRepoLabel()}</span>
               <ChevronDown className={clsx('w-4 h-4 text-text-muted transition-transform', repoDropdownOpen && 'rotate-180')} />
             </button>
             {repoDropdownOpen && (
-              <div className="absolute top-full left-0 right-0 mt-1 bg-background-secondary border border-border rounded-lg shadow-lg z-10 max-h-64 overflow-auto">
+              <div className="absolute top-full left-0 right-0 mt-1 bg-background-secondary border-brutal border-border rounded-brutal shadow-brutal z-10 max-h-64 overflow-auto">
                 <button
                   onClick={() => {
                     setRepoFilter('all')
@@ -229,13 +229,13 @@ export function SyntheticGenerator({ onStateChange }: SyntheticGeneratorProps) {
                     setRepoDropdownOpen(false)
                   }}
                   className={clsx(
-                    'w-full px-3 py-2 text-left text-sm hover:bg-background-tertiary transition-colors',
-                    repoFilter === 'all' ? 'text-primary font-medium' : 'text-text-primary'
+                    'w-full px-3 py-2 text-left text-sm font-mono hover:bg-accent-light transition-colors',
+                    repoFilter === 'all' ? 'text-accent-dark font-semibold' : 'text-text-primary'
                   )}
                 >
                   All repositories ({traceCount} traces)
                 </button>
-                <div className="border-t border-border" />
+                <div className="border-t-2 border-border" />
                 {repos.map(repo => (
                   <button
                     key={repo.name}
@@ -244,8 +244,8 @@ export function SyntheticGenerator({ onStateChange }: SyntheticGeneratorProps) {
                       toggleRepo(repo.name)
                     }}
                     className={clsx(
-                      'w-full px-3 py-2 text-left text-sm hover:bg-background-tertiary transition-colors flex items-center justify-between',
-                      selectedRepos.includes(repo.name) ? 'text-primary font-medium' : 'text-text-primary'
+                      'w-full px-3 py-2 text-left text-sm font-mono hover:bg-accent-light transition-colors flex items-center justify-between',
+                      selectedRepos.includes(repo.name) ? 'text-accent-dark font-semibold' : 'text-text-primary'
                     )}
                   >
                     <span>{repo.name}</span>
@@ -259,17 +259,17 @@ export function SyntheticGenerator({ onStateChange }: SyntheticGeneratorProps) {
 
         {/* Strategy Selection - Compact toggle with description */}
         <div className="flex items-center gap-4">
-          <label className="text-sm font-medium text-text-secondary whitespace-nowrap">Strategy:</label>
-          <div className="flex gap-1 p-1 bg-background-tertiary rounded-lg">
+          <label className="font-mono text-xs uppercase tracking-widest text-text-secondary whitespace-nowrap">Strategy:</label>
+          <div className="flex gap-1 p-1 border-brutal border-border rounded-brutal bg-background-secondary">
             {(Object.entries(STRATEGY_INFO) as [Strategy, typeof STRATEGY_INFO['trace_seeded']][]).map(([key, info]) => (
               <button
                 key={key}
                 onClick={() => setStrategy(key)}
                 className={clsx(
-                  'flex items-center gap-2 px-3 py-1.5 rounded text-sm transition-colors',
+                  'flex items-center gap-2 px-3 py-1.5 rounded-brutal text-sm font-mono transition-all',
                   strategy === key
-                    ? 'bg-background-secondary text-primary shadow-sm'
-                    : 'text-text-secondary hover:text-text-primary'
+                    ? 'bg-accent-light text-accent-dark border-brutal border-border shadow-brutal-sm'
+                    : 'text-text-secondary hover:text-text-primary border border-transparent'
                 )}
               >
                 <info.icon className="w-4 h-4" />
@@ -277,25 +277,25 @@ export function SyntheticGenerator({ onStateChange }: SyntheticGeneratorProps) {
               </button>
             ))}
           </div>
-          <span className="text-xs text-text-muted">
+          <span className="text-xs text-text-muted font-mono">
             {STRATEGY_INFO[strategy].description}
           </span>
         </div>
 
         {/* Target Size - Compact preset buttons + custom slider */}
         <div className="flex items-center gap-4">
-          <label className="text-sm font-medium text-text-secondary whitespace-nowrap">Target:</label>
+          <label className="font-mono text-xs uppercase tracking-widest text-text-secondary whitespace-nowrap">Target:</label>
           <div className="flex items-center gap-2 flex-1">
-            <div className="flex gap-1 p-1 bg-background-tertiary rounded-lg">
+            <div className="flex gap-1 p-1 border-brutal border-border rounded-brutal bg-background-secondary">
               {Object.entries(presets).map(([key, presetData]) => (
                 <button
                   key={key}
                   onClick={() => setPreset(key as Preset)}
                   className={clsx(
-                    'px-3 py-1.5 rounded text-sm transition-colors',
+                    'px-3 py-1.5 rounded-brutal text-sm font-mono transition-all',
                     key === preset
-                      ? 'bg-background-secondary text-primary shadow-sm'
-                      : 'text-text-secondary hover:text-text-primary'
+                      ? 'bg-accent-light text-accent-dark border-brutal border-border shadow-brutal-sm'
+                      : 'text-text-secondary hover:text-text-primary border border-transparent'
                   )}
                   title={presetData.label}
                 >
@@ -312,7 +312,7 @@ export function SyntheticGenerator({ onStateChange }: SyntheticGeneratorProps) {
                   step="50"
                   value={customTarget}
                   onChange={(e) => setCustomTarget(parseInt(e.target.value))}
-                  className="flex-1 h-1.5 bg-background-tertiary rounded-lg appearance-none cursor-pointer accent-primary"
+                  className="flex-1 h-1.5 bg-background-secondary rounded-brutal appearance-none cursor-pointer accent-accent"
                 />
                 <input
                   type="number"
@@ -320,11 +320,11 @@ export function SyntheticGenerator({ onStateChange }: SyntheticGeneratorProps) {
                   max="10000"
                   value={customTarget}
                   onChange={(e) => setCustomTarget(parseInt(e.target.value))}
-                  className="w-20 px-2 py-1 bg-background-secondary border border-border rounded text-sm text-center"
+                  className="input w-20 text-sm text-center font-mono"
                 />
               </div>
             ) : (
-              <span className="text-xs text-text-muted">
+              <span className="text-xs text-text-muted font-mono">
                 {presets[preset]?.label || ''}
               </span>
             )}
@@ -333,15 +333,15 @@ export function SyntheticGenerator({ onStateChange }: SyntheticGeneratorProps) {
 
         {/* Provider Selection - Compact toggle */}
         <div className="flex items-center gap-4">
-          <label className="text-sm font-medium text-text-secondary whitespace-nowrap">Provider:</label>
-          <div className="flex gap-1 p-1 bg-background-tertiary rounded-lg">
+          <label className="font-mono text-xs uppercase tracking-widest text-text-secondary whitespace-nowrap">Provider:</label>
+          <div className="flex gap-1 p-1 border-brutal border-border rounded-brutal bg-background-secondary">
             <button
               onClick={() => setProvider('nim')}
               className={clsx(
-                'flex items-center gap-2 px-3 py-1.5 rounded text-sm transition-colors',
+                'flex items-center gap-2 px-3 py-1.5 rounded-brutal text-sm font-mono transition-all',
                 provider === 'nim'
-                  ? 'bg-background-secondary text-primary shadow-sm'
-                  : 'text-text-secondary hover:text-text-primary'
+                  ? 'bg-accent-light text-accent-dark border-brutal border-border shadow-brutal-sm'
+                  : 'text-text-secondary hover:text-text-primary border border-transparent'
               )}
             >
               <Zap className="w-4 h-4" />
@@ -350,39 +350,39 @@ export function SyntheticGenerator({ onStateChange }: SyntheticGeneratorProps) {
             <button
               onClick={() => setProvider('anthropic')}
               className={clsx(
-                'flex items-center gap-2 px-3 py-1.5 rounded text-sm transition-colors',
+                'flex items-center gap-2 px-3 py-1.5 rounded-brutal text-sm font-mono transition-all',
                 provider === 'anthropic'
-                  ? 'bg-background-secondary text-primary shadow-sm'
-                  : 'text-text-secondary hover:text-text-primary'
+                  ? 'bg-accent-light text-accent-dark border-brutal border-border shadow-brutal-sm'
+                  : 'text-text-secondary hover:text-text-primary border border-transparent'
               )}
             >
               <Sparkles className="w-4 h-4" />
               Claude
             </button>
           </div>
-          <span className="text-xs text-text-muted">
+          <span className="text-xs text-text-muted font-mono">
             {provider === 'nim' ? 'Fast, cost-effective' : 'Higher quality'}
           </span>
         </div>
 
         {/* Summary Stats */}
-        <div className="flex items-center gap-6 pt-2 text-sm">
+        <div className="flex items-center gap-6 pt-2">
           <div className="flex items-center gap-2">
-            <span className="text-text-muted">Seeds:</span>
-            <span className="font-medium text-text-primary">{traceCount}</span>
+            <span className="font-mono text-xs uppercase tracking-widest text-text-muted">Seeds:</span>
+            <span className="font-mono text-sm font-semibold text-text-primary">{traceCount}</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-text-muted">Target:</span>
-            <span className="font-medium text-text-primary">{getTargetExamples().toLocaleString()}</span>
+            <span className="font-mono text-xs uppercase tracking-widest text-text-muted">Target:</span>
+            <span className="font-mono text-sm font-semibold text-text-primary">{getTargetExamples().toLocaleString()}</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-text-muted">Multiplier:</span>
-            <span className="font-medium text-primary">{getMultiplier()}x</span>
+            <span className="font-mono text-xs uppercase tracking-widest text-text-muted">Multiplier:</span>
+            <span className="font-mono text-sm font-semibold text-accent">{getMultiplier()}x</span>
           </div>
         </div>
 
       {/* Info text */}
-      <p className="text-xs text-text-muted pt-2">
+      <p className="text-xs text-text-muted font-mono pt-2">
         Generates NeMo-compatible JSONL saved to data/synthetic/. Recommended: 500-2000 examples for LoRA fine-tuning.
       </p>
     </div>

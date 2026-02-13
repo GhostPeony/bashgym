@@ -81,7 +81,7 @@ export function HFDashboard() {
   if (loading) {
     return (
       <div className="h-full flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-accent-primary" />
+        <Loader2 className="w-8 h-8 animate-spin text-accent" />
       </div>
     )
   }
@@ -92,36 +92,36 @@ export function HFDashboard() {
       <div className="h-full p-6">
         <div className="max-w-xl mx-auto mt-12">
           <div className="text-center mb-8">
-            <Cloud className="w-16 h-16 mx-auto text-text-secondary opacity-50 mb-4" />
-            <h1 className="text-2xl font-semibold text-text-primary">HuggingFace Integration</h1>
+            <Cloud className="w-16 h-16 mx-auto text-text-secondary mb-4" />
+            <h1 className="text-2xl font-brand text-text-primary">HuggingFace Integration</h1>
             <p className="text-text-secondary mt-2">
               Connect your HuggingFace account to access cloud training, ZeroGPU Spaces, and more.
             </p>
           </div>
 
-          <div className="bg-background-secondary rounded-lg border border-border p-6">
-            <h2 className="text-lg font-medium text-text-primary mb-4 flex items-center gap-2">
+          <div className="border-brutal shadow-brutal-sm rounded-brutal bg-background-card p-6">
+            <h2 className="text-lg font-brand text-text-primary mb-4 flex items-center gap-2">
               <Key className="w-5 h-5" />
               Configure Token
             </h2>
 
             {configSuccess && (
-              <div className="mb-4 p-3 bg-status-success/10 border border-status-success/30 rounded-lg flex items-center gap-2 text-status-success">
+              <div className="mb-4 p-3 bg-background-card border-2 border-status-success rounded-brutal flex items-center gap-2 text-status-success">
                 <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
-                <span className="text-sm">Token configured successfully!</span>
+                <span className="text-sm font-mono">Token configured successfully!</span>
               </div>
             )}
 
             {configError && (
-              <div className="mb-4 p-3 bg-status-error/10 border border-status-error/30 rounded-lg flex items-center gap-2 text-status-error">
+              <div className="mb-4 p-3 bg-background-card border-2 border-status-error rounded-brutal flex items-center gap-2 text-status-error">
                 <XCircle className="w-4 h-4 flex-shrink-0" />
-                <span className="text-sm">{configError}</span>
+                <span className="text-sm font-mono">{configError}</span>
               </div>
             )}
 
             <form onSubmit={handleConfigureToken} className="space-y-4">
               <div>
-                <label className="block text-sm text-text-secondary mb-2">
+                <label className="block text-sm font-mono text-text-secondary mb-2 uppercase tracking-widest">
                   HuggingFace API Token
                 </label>
                 <div className="relative">
@@ -130,7 +130,7 @@ export function HFDashboard() {
                     value={tokenInput}
                     onChange={(e) => setTokenInput(e.target.value)}
                     placeholder="hf_xxxxxxxxxxxxxxxxxxxx"
-                    className="w-full px-3 py-2 pr-10 bg-background-primary border border-border rounded-lg text-text-primary text-sm font-mono"
+                    className="input w-full pr-10 font-mono text-sm"
                   />
                   <button
                     type="button"
@@ -140,13 +140,13 @@ export function HFDashboard() {
                     {showToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
-                <p className="text-xs text-text-muted mt-1">
+                <p className="text-xs text-text-muted mt-1 font-mono">
                   Get your token from{' '}
                   <a
                     href="https://huggingface.co/settings/tokens"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-accent-primary hover:underline"
+                    className="text-accent hover:underline"
                   >
                     huggingface.co/settings/tokens
                   </a>
@@ -156,7 +156,7 @@ export function HFDashboard() {
               <button
                 type="submit"
                 disabled={configuring || !tokenInput.trim()}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-accent-primary text-white rounded-lg hover:bg-accent-primary/90 disabled:opacity-50 transition-colors"
+                className="btn-primary w-full flex items-center justify-center gap-2"
               >
                 {configuring ? (
                   <>
@@ -172,25 +172,25 @@ export function HFDashboard() {
               </button>
             </form>
 
-            <div className="mt-6 pt-6 border-t border-border">
-              <p className="text-xs text-text-muted">
-                Alternatively, set <code className="px-1 py-0.5 bg-background-tertiary rounded">HF_TOKEN</code> environment variable and restart the server.
+            <div className="mt-6 pt-6 border-t-2 border-border">
+              <p className="text-xs text-text-muted font-mono">
+                Alternatively, set <code className="px-1 py-0.5 bg-background-secondary border border-border-subtle rounded-brutal font-mono">HF_TOKEN</code> environment variable and restart the server.
               </p>
             </div>
 
-            <div className="mt-6 p-4 bg-accent-primary/10 rounded-lg border border-accent-primary/30">
+            <div className="mt-6 p-4 border-2 border-accent rounded-brutal bg-accent-light">
               <div className="flex items-center gap-2 mb-2">
-                <Sparkles className="w-4 h-4 text-accent-primary" />
-                <span className="text-sm font-medium text-text-primary">HuggingFace Pro</span>
+                <Sparkles className="w-4 h-4 text-accent" />
+                <span className="text-sm font-brand text-text-primary">HuggingFace Pro</span>
               </div>
-              <p className="text-xs text-text-secondary">
+              <p className="text-xs text-text-secondary font-mono">
                 Pro subscribers ($9/month) get access to cloud training on GPUs, ZeroGPU Spaces, 1TB storage, and $2/month inference credits.
               </p>
               <a
                 href="https://huggingface.co/subscribe/pro"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 mt-2 text-xs text-accent-primary hover:underline"
+                className="inline-flex items-center gap-1 mt-2 text-xs text-accent hover:underline font-mono"
               >
                 Learn more about Pro
                 <ExternalLink className="w-3 h-3" />
@@ -229,23 +229,25 @@ export function HFDashboard() {
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="flex-shrink-0 p-6 border-b border-border">
+      <div className="flex-shrink-0 p-6 border-b-2 border-border">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-3">
-              <Cloud className="w-8 h-8 text-accent-primary" />
+              <Cloud className="w-8 h-8 text-accent" />
               <div>
-                <h1 className="text-xl font-semibold text-text-primary">HuggingFace</h1>
+                <h1 className="text-xl font-brand text-text-primary">HuggingFace</h1>
                 <div className="flex items-center gap-2 mt-0.5">
-                  <span className="text-sm text-text-secondary">{status.username}</span>
+                  <span className="text-sm text-text-secondary font-mono">{status.username}</span>
                   {isPro && (
-                    <span className="flex items-center gap-1 px-1.5 py-0.5 text-xs font-medium bg-accent-primary/20 text-accent-primary rounded">
-                      <Sparkles className="w-3 h-3" />
-                      Pro
+                    <span className="tag">
+                      <span className="flex items-center gap-1">
+                        <Sparkles className="w-3 h-3" />
+                        Pro
+                      </span>
                     </span>
                   )}
                   {status.token_source && (
-                    <span className="text-xs text-text-muted">
+                    <span className="text-xs text-text-muted font-mono">
                       (token: {status.token_source === 'env' ? 'env var' : 'stored'})
                     </span>
                   )}
@@ -257,7 +259,7 @@ export function HFDashboard() {
             {status.token_source === 'stored' && (
               <button
                 onClick={handleRemoveToken}
-                className="px-3 py-1.5 text-sm text-status-error hover:bg-status-error/10 rounded-lg transition-colors"
+                className="btn-ghost text-sm text-status-error hover:bg-background-secondary"
                 title="Disconnect HuggingFace"
               >
                 Disconnect
@@ -267,7 +269,7 @@ export function HFDashboard() {
               href="https://huggingface.co/settings/profile"
               target="_blank"
               rel="noopener noreferrer"
-              className="p-2 rounded-lg hover:bg-background-tertiary transition-colors"
+              className="btn-icon"
               title="HuggingFace Settings"
             >
               <Settings className="w-5 h-5 text-text-secondary" />
@@ -277,9 +279,9 @@ export function HFDashboard() {
 
         {/* Pro Banner for non-Pro users */}
         {!isPro && (
-          <div className="mt-4 p-3 bg-accent-primary/10 rounded-lg border border-accent-primary/30 flex items-center justify-between">
+          <div className="mt-4 p-3 border-2 border-accent rounded-brutal bg-accent-light flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-accent-primary" />
+              <AlertCircle className="w-4 h-4 text-accent" />
               <span className="text-sm text-text-primary">
                 Upgrade to Pro for cloud training and ZeroGPU Spaces
               </span>
@@ -288,7 +290,7 @@ export function HFDashboard() {
               href="https://huggingface.co/subscribe/pro"
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-1 px-3 py-1.5 bg-accent-primary text-white text-sm rounded-lg hover:bg-accent-primary/90 transition-colors"
+              className="btn-primary flex items-center gap-1 px-3 py-1.5 text-sm"
             >
               <Sparkles className="w-4 h-4" />
               Upgrade
@@ -306,18 +308,18 @@ export function HFDashboard() {
                 onClick={() => !isDisabled && setActiveTab(tab.id)}
                 disabled={isDisabled}
                 className={clsx(
-                  'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors',
+                  'flex items-center gap-2 px-4 py-2 text-sm font-mono border-2 rounded-brutal transition-press',
                   activeTab === tab.id
-                    ? 'bg-accent-primary text-white'
+                    ? 'bg-accent text-white border-accent-dark shadow-brutal-sm'
                     : isDisabled
-                    ? 'text-text-secondary opacity-50 cursor-not-allowed'
-                    : 'text-text-secondary hover:text-text-primary hover:bg-background-tertiary'
+                    ? 'text-text-secondary border-border-subtle cursor-not-allowed bg-background-secondary'
+                    : 'text-text-secondary border-border hover:text-text-primary hover:bg-background-secondary hover-press'
                 )}
               >
                 <tab.icon className="w-4 h-4" />
                 {tab.label}
                 {tab.requiresPro && !isPro && (
-                  <Sparkles className="w-3 h-3 text-accent-primary" />
+                  <Sparkles className="w-3 h-3 text-accent" />
                 )}
               </button>
             )

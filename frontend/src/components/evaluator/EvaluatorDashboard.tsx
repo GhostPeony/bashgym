@@ -362,10 +362,13 @@ export function EvaluatorDashboard() {
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="p-6 border-b border-border-subtle">
+      <div className="p-6 border-b border-border">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-semibold text-text-primary">Model Evaluator</h1>
+            <div className="flex items-center gap-3">
+              <h1 className="font-brand text-2xl text-text-primary">Model Evaluator</h1>
+              <span className="tag"><span>EVALUATOR</span></span>
+            </div>
             <p className="text-sm text-text-secondary mt-1">
               Run comprehensive benchmarks on your trained models
             </p>
@@ -395,12 +398,14 @@ export function EvaluatorDashboard() {
           {/* Left: Benchmark Selection */}
           <div className="col-span-2 space-y-4">
             {/* Model Selection */}
-            <div className="card-elevated p-4">
+            <div className="card p-4">
               <div className="flex items-center gap-3 mb-4">
-                <BarChart3 className="w-5 h-5 text-primary" />
+                <div className="w-10 h-10 border-brutal border-border rounded-brutal flex items-center justify-center">
+                  <BarChart3 className="w-5 h-5 text-accent" />
+                </div>
                 <div>
-                  <h3 className="font-medium text-text-primary">Model to Evaluate</h3>
-                  <p className="text-sm text-text-muted">Select a trained model or checkpoint</p>
+                  <h3 className="font-brand text-lg text-text-primary">Model to Evaluate</h3>
+                  <p className="font-mono text-xs uppercase tracking-widest text-text-muted">Select a trained model or checkpoint</p>
                 </div>
               </div>
               {availableModels.length > 0 ? (
@@ -415,27 +420,29 @@ export function EvaluatorDashboard() {
                   ))}
                 </select>
               ) : (
-                <div className="p-4 bg-background-tertiary rounded-lg text-center">
+                <div className="p-4 border-brutal border-border rounded-brutal bg-background-secondary text-center">
                   <Brain className="w-8 h-8 text-text-muted mx-auto mb-2" />
-                  <p className="text-sm text-text-muted">Train a model first to run evaluations</p>
+                  <p className="font-mono text-xs uppercase tracking-widest text-text-muted">Train a model first to run evaluations</p>
                 </div>
               )}
             </div>
 
             {/* Benchmark Categories */}
-            <div className="card-elevated">
-              <div className="p-4 border-b border-border-subtle">
+            <div className="card">
+              <div className="p-4 border-b border-border">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <Target className="w-5 h-5 text-primary" />
+                    <div className="w-10 h-10 border-brutal border-border rounded-brutal flex items-center justify-center">
+                      <Target className="w-5 h-5 text-accent" />
+                    </div>
                     <div>
-                      <h3 className="font-medium text-text-primary">Benchmarks</h3>
-                      <p className="text-sm text-text-muted">{config.benchmarks.length} selected</p>
+                      <h3 className="font-brand text-lg text-text-primary">Benchmarks</h3>
+                      <p className="font-mono text-xs uppercase tracking-widest text-text-muted">{config.benchmarks.length} selected</p>
                     </div>
                   </div>
                   <button
                     onClick={() => setConfig(prev => ({ ...prev, benchmarks: [] }))}
-                    className="text-sm text-text-muted hover:text-text-primary"
+                    className="btn-ghost font-mono text-xs uppercase tracking-widest"
                   >
                     Clear all
                   </button>
@@ -452,15 +459,13 @@ export function EvaluatorDashboard() {
                     <div key={key}>
                       <button
                         onClick={() => setExpandedCategory(isExpanded ? null : key)}
-                        className="w-full flex items-center justify-between p-4 hover:bg-background-tertiary transition-colors"
+                        className="w-full flex items-center justify-between p-4 hover:bg-background-secondary transition-colors"
                       >
                         <div className="flex items-center gap-3">
-                          <Icon className="w-5 h-5 text-primary" />
-                          <span className="font-medium text-text-primary">{category.label}</span>
+                          <Icon className="w-5 h-5 text-accent" />
+                          <span className="font-brand text-lg text-text-primary">{category.label}</span>
                           {selectedCount > 0 && (
-                            <span className="px-2 py-0.5 text-xs rounded-full bg-primary/20 text-primary">
-                              {selectedCount}/{category.benchmarks.length}
-                            </span>
+                            <span className="tag"><span>{selectedCount}/{category.benchmarks.length}</span></span>
                           )}
                         </div>
                         {isExpanded ? (
@@ -474,7 +479,7 @@ export function EvaluatorDashboard() {
                         <div className="px-4 pb-4 space-y-2">
                           <button
                             onClick={() => selectAllInCategory(key)}
-                            className="text-xs text-primary hover:underline mb-2"
+                            className="font-mono text-xs uppercase tracking-widest text-accent-dark hover:underline mb-2"
                           >
                             {category.benchmarks.every(b => config.benchmarks.includes(b.id))
                               ? 'Deselect all'
@@ -487,13 +492,13 @@ export function EvaluatorDashboard() {
                             <label
                               key={benchmark.id}
                               className={clsx(
-                                'flex items-center gap-3 p-3 rounded-lg transition-colors group',
+                                'flex items-center gap-3 p-3 border-brutal rounded-brutal transition-colors group',
                                 isDisabled
-                                  ? 'opacity-50 cursor-not-allowed'
+                                  ? 'opacity-50 cursor-not-allowed border-border-subtle'
                                   : 'cursor-pointer',
                                 config.benchmarks.includes(benchmark.id)
-                                  ? 'bg-primary/10 border border-primary/30'
-                                  : 'bg-background-tertiary hover:bg-background-tertiary/80'
+                                  ? 'bg-accent-light border-border'
+                                  : 'bg-background-secondary border-border-subtle hover:border-border'
                               )}
                               title={benchInfo?.tooltip}
                             >
@@ -502,12 +507,12 @@ export function EvaluatorDashboard() {
                                 checked={config.benchmarks.includes(benchmark.id)}
                                 onChange={() => !isDisabled && toggleBenchmark(benchmark.id)}
                                 disabled={isDisabled}
-                                className="rounded"
+                                className="rounded-brutal"
                               />
                               <div className="flex-1">
                                 <div className="flex items-center gap-2">
-                                  <span className={clsx('font-medium', isDisabled ? 'text-text-muted' : 'text-text-primary')}>{benchmark.name}</span>
-                                  <span className={clsx('text-xs', getDifficultyColor(benchmark.difficulty))}>
+                                  <span className={clsx('font-mono text-sm font-semibold', isDisabled ? 'text-text-muted' : 'text-text-primary')}>{benchmark.name}</span>
+                                  <span className={clsx('font-mono text-xs uppercase', getDifficultyColor(benchmark.difficulty))}>
                                     {benchmark.difficulty}
                                   </span>
                                 </div>
@@ -524,11 +529,11 @@ export function EvaluatorDashboard() {
             </div>
 
             {/* Evaluation Settings */}
-            <div className="card-elevated p-4">
-              <h3 className="font-medium text-text-primary mb-4">Evaluation Settings</h3>
+            <div className="card p-4">
+              <h3 className="font-brand text-lg text-text-primary mb-4">Evaluation Settings</h3>
               <div className="grid grid-cols-3 gap-4">
                 <div>
-                  <label className="block text-sm text-text-secondary mb-1">Judge Model</label>
+                  <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Judge Model</label>
                   <select
                     value={config.judge_model}
                     onChange={(e) => setConfig(prev => ({ ...prev, judge_model: e.target.value }))}
@@ -553,7 +558,7 @@ export function EvaluatorDashboard() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm text-text-secondary mb-1">Samples per Benchmark</label>
+                  <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Samples per Benchmark</label>
                   <input
                     type="number"
                     min="10"
@@ -564,7 +569,7 @@ export function EvaluatorDashboard() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm text-text-secondary mb-1">Temperature</label>
+                  <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">Temperature</label>
                   <input
                     type="number"
                     min="0"
@@ -581,15 +586,15 @@ export function EvaluatorDashboard() {
 
           {/* Right: Job History & Results */}
           <div className="space-y-4">
-            <div className="card-elevated">
-              <div className="p-4 border-b border-border-subtle">
-                <h3 className="font-medium text-text-primary">Evaluation History</h3>
+            <div className="card">
+              <div className="p-4 border-b border-border">
+                <h3 className="font-brand text-lg text-text-primary">Evaluation History</h3>
               </div>
               <div className="divide-y divide-border-subtle max-h-96 overflow-auto">
                 {jobs.length === 0 ? (
                   <div className="p-8 text-center">
                     <BarChart3 className="w-10 h-10 text-text-muted mx-auto mb-2" />
-                    <p className="text-sm text-text-muted">No evaluations yet</p>
+                    <p className="font-mono text-xs uppercase tracking-widest text-text-muted">No evaluations yet</p>
                   </div>
                 ) : (
                   jobs.map(job => (
@@ -597,19 +602,19 @@ export function EvaluatorDashboard() {
                       key={job.id}
                       onClick={() => setSelectedJob(job)}
                       className={clsx(
-                        'w-full p-4 text-left hover:bg-background-tertiary transition-colors',
-                        selectedJob?.id === job.id && 'bg-primary/5'
+                        'w-full p-4 text-left hover:bg-background-secondary transition-colors',
+                        selectedJob?.id === job.id && 'bg-accent-light'
                       )}
                     >
                       <div className="flex items-center justify-between mb-1">
-                        <span className="font-medium text-text-primary text-sm">{job.model}</span>
-                        {job.status === 'running' && <Loader2 className="w-4 h-4 animate-spin text-primary" />}
+                        <span className="font-mono text-sm font-semibold text-text-primary">{job.model}</span>
+                        {job.status === 'running' && <Loader2 className="w-4 h-4 animate-spin text-accent" />}
                         {job.status === 'completed' && <CheckCircle className="w-4 h-4 text-status-success" />}
                         {job.status === 'failed' && <AlertCircle className="w-4 h-4 text-status-error" />}
                       </div>
-                      <div className="flex items-center gap-2 text-xs text-text-muted">
+                      <div className="flex items-center gap-2 font-mono text-xs text-text-muted">
                         <span>{job.benchmarks.length} benchmarks</span>
-                        <span>•</span>
+                        <span>|</span>
                         <span>{new Date(job.created_at).toLocaleString()}</span>
                       </div>
                     </button>
@@ -620,12 +625,12 @@ export function EvaluatorDashboard() {
 
             {/* Selected Job Results */}
             {selectedJob?.results && (
-              <div className="card-elevated p-4">
+              <div className="card p-4">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-medium text-text-primary">Results: {selectedJob.model}</h3>
+                  <h3 className="font-brand text-lg text-text-primary">Results: {selectedJob.model}</h3>
                   <button
                     onClick={() => setSelectedJob(null)}
-                    className="p-1 text-text-muted hover:text-text-primary"
+                    className="btn-icon flex items-center justify-center w-8 h-8"
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -635,11 +640,11 @@ export function EvaluatorDashboard() {
                     const benchInfo = BENCHMARK_INFO[benchmark]
                     const hasErrors = result.errors && (result.errors.wrong_answer > 0 || result.errors.syntax_error > 0 || result.errors.runtime_error > 0 || result.errors.timeout > 0)
                     return (
-                    <div key={benchmark} className="p-3 bg-background-tertiary rounded-lg overflow-visible">
+                    <div key={benchmark} className="p-3 border-brutal border-border-subtle rounded-brutal bg-background-secondary overflow-visible">
                       <div className="flex items-center justify-between mb-1">
-                        <span className="text-sm font-medium text-text-primary">{benchmark}</span>
+                        <span className="font-mono text-sm font-semibold text-text-primary">{benchmark}</span>
                         <span className={clsx(
-                          'text-sm font-bold',
+                          'font-brand text-xl font-bold',
                           result.score >= 0.8 ? 'text-status-success' :
                           result.score >= 0.6 ? 'text-status-warning' :
                           'text-status-error'
@@ -651,23 +656,25 @@ export function EvaluatorDashboard() {
                       {benchInfo && (
                         <p className="text-xs text-text-muted mb-2">{benchInfo.tooltip}</p>
                       )}
-                      <div className="h-2 bg-background-secondary rounded-full overflow-hidden">
+                      <div className="progress-bar">
                         <div
-                          className={clsx(
-                            'h-full rounded-full',
-                            result.score >= 0.8 ? 'bg-status-success' :
-                            result.score >= 0.6 ? 'bg-status-warning' :
-                            'bg-status-error'
-                          )}
-                          style={{ width: `${result.score * 100}%` }}
+                          className="progress-fill"
+                          style={{
+                            width: `${result.score * 100}%`,
+                            background: result.score >= 0.8
+                              ? 'var(--status-success)'
+                              : result.score >= 0.6
+                              ? 'var(--status-warning)'
+                              : 'var(--status-error)'
+                          }}
                         />
                       </div>
                       <div className="flex items-center justify-between mt-1">
-                        <p className="text-xs text-text-muted">
+                        <p className="font-mono text-xs text-text-muted">
                           {result.passed} / {result.total} passed
                         </p>
                         {result.duration_seconds && (
-                          <p className="text-xs text-text-muted flex items-center gap-1">
+                          <p className="font-mono text-xs text-text-muted flex items-center gap-1">
                             <Clock className="w-3 h-3" />
                             {result.duration_seconds.toFixed(1)}s
                           </p>
@@ -677,36 +684,36 @@ export function EvaluatorDashboard() {
                       {/* Error Analysis */}
                       {hasErrors && (
                         <div className="mt-2 pt-2 border-t border-border-subtle">
-                          <p className="text-xs text-text-secondary mb-1.5 font-medium">Error Breakdown:</p>
+                          <p className="font-mono text-xs uppercase tracking-widest text-text-secondary mb-1.5">Error Breakdown:</p>
                           <div className="grid grid-cols-2 gap-1.5 text-xs">
                             {result.errors!.wrong_answer > 0 && (
                               <div className="flex items-center gap-1.5 text-status-error">
                                 <XCircle className="w-3 h-3" />
-                                <span>Wrong answer: {result.errors!.wrong_answer}</span>
+                                <span className="font-mono">Wrong answer: {result.errors!.wrong_answer}</span>
                               </div>
                             )}
                             {result.errors!.syntax_error > 0 && (
                               <div className="flex items-center gap-1.5 text-status-warning">
                                 <AlertTriangle className="w-3 h-3" />
-                                <span>Syntax error: {result.errors!.syntax_error}</span>
+                                <span className="font-mono">Syntax error: {result.errors!.syntax_error}</span>
                               </div>
                             )}
                             {result.errors!.runtime_error > 0 && (
                               <div className="flex items-center gap-1.5 text-status-warning">
                                 <AlertCircle className="w-3 h-3" />
-                                <span>Runtime error: {result.errors!.runtime_error}</span>
+                                <span className="font-mono">Runtime error: {result.errors!.runtime_error}</span>
                               </div>
                             )}
                             {result.errors!.timeout > 0 && (
                               <div className="flex items-center gap-1.5 text-text-muted">
                                 <Timer className="w-3 h-3" />
-                                <span>Timeout: {result.errors!.timeout}</span>
+                                <span className="font-mono">Timeout: {result.errors!.timeout}</span>
                               </div>
                             )}
                             {result.errors!.other > 0 && (
                               <div className="flex items-center gap-1.5 text-text-muted">
                                 <AlertCircle className="w-3 h-3" />
-                                <span>Other: {result.errors!.other}</span>
+                                <span className="font-mono">Other: {result.errors!.other}</span>
                               </div>
                             )}
                           </div>
@@ -719,15 +726,15 @@ export function EvaluatorDashboard() {
             )}
 
             {/* Quick Stats */}
-            <div className="card-elevated p-4">
-              <h3 className="font-medium text-text-primary mb-3">Benchmark Coverage</h3>
+            <div className="card p-4">
+              <h3 className="font-brand text-lg text-text-primary mb-3">Benchmark Coverage</h3>
               <div className="grid grid-cols-2 gap-2 text-sm">
                 {Object.entries(BENCHMARK_CATEGORIES).map(([key, category]) => {
                   const count = category.benchmarks.filter(b => config.benchmarks.includes(b.id)).length
                   return (
-                    <div key={key} className="flex items-center justify-between p-2 bg-background-tertiary rounded">
-                      <span className="text-text-secondary">{category.label}</span>
-                      <span className="text-text-primary font-medium">{count}/{category.benchmarks.length}</span>
+                    <div key={key} className="flex items-center justify-between p-2 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
+                      <span className="text-text-secondary text-xs">{category.label}</span>
+                      <span className="font-brand text-lg text-text-primary">{count}/{category.benchmarks.length}</span>
                     </div>
                   )
                 })}

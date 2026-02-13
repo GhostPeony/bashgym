@@ -37,20 +37,20 @@ export type BrowserNodeType = NodeProps<BrowserNodeData>
 function getStatusColor(statusCode?: number): string {
   if (!statusCode) return 'text-text-muted'
   if (statusCode >= 200 && statusCode < 300) return 'text-status-success'
-  if (statusCode >= 300 && statusCode < 400) return 'text-info'
+  if (statusCode >= 300 && statusCode < 400) return 'text-accent'
   if (statusCode >= 400 && statusCode < 500) return 'text-status-warning'
   if (statusCode >= 500) return 'text-status-error'
   return 'text-text-muted'
 }
 
-// Get status badge color
+// Get status badge color — solid backgrounds, hard borders
 function getStatusBadgeColor(statusCode?: number): string {
-  if (!statusCode) return 'bg-background-tertiary text-text-muted'
-  if (statusCode >= 200 && statusCode < 300) return 'bg-status-success/20 text-status-success'
-  if (statusCode >= 300 && statusCode < 400) return 'bg-info/20 text-info'
-  if (statusCode >= 400 && statusCode < 500) return 'bg-status-warning/20 text-status-warning'
-  if (statusCode >= 500) return 'bg-status-error/20 text-status-error'
-  return 'bg-background-tertiary text-text-muted'
+  if (!statusCode) return 'bg-background-tertiary text-text-muted border-border-subtle'
+  if (statusCode >= 200 && statusCode < 300) return 'bg-status-success text-white border-status-success'
+  if (statusCode >= 300 && statusCode < 400) return 'bg-accent text-white border-accent'
+  if (statusCode >= 400 && statusCode < 500) return 'bg-status-warning text-white border-status-warning'
+  if (statusCode >= 500) return 'bg-status-error text-white border-status-error'
+  return 'bg-background-tertiary text-text-muted border-border-subtle'
 }
 
 // Get status text
@@ -142,9 +142,9 @@ export const BrowserNode = memo(function BrowserNode({ data, selected }: Browser
   return (
     <div
       className={clsx(
-        'w-[300px] bg-background-secondary rounded-lg border-2 shadow-lg transition-all cursor-pointer',
-        hasError ? 'border-status-error/50' : 'border-border-subtle hover:border-border',
-        selected && 'ring-2 ring-primary border-primary'
+        'w-[300px] card !rounded-brutal border-brutal cursor-pointer',
+        hasError ? 'border-status-error' : 'border-border hover:border-border',
+        selected && 'border-accent shadow-brutal'
       )}
       onClick={handleFocus}
     >
@@ -152,17 +152,17 @@ export const BrowserNode = memo(function BrowserNode({ data, selected }: Browser
       <Handle
         type="target"
         position={Position.Left}
-        className="!bg-primary !w-2 !h-2"
+        className="!bg-accent !w-2 !h-2 !border-brutal !border-border"
       />
       <Handle
         type="source"
         position={Position.Right}
-        className="!bg-primary !w-2 !h-2"
+        className="!bg-accent !w-2 !h-2 !border-brutal !border-border"
       />
 
       {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-2 bg-background-tertiary/50 rounded-t-lg">
-        <div className="p-1.5 rounded-md bg-background-tertiary">
+      <div className="flex items-center gap-2 px-3 py-2 bg-background-secondary border-b border-brutal border-border rounded-t-brutal">
+        <div className="p-1.5 border-brutal border-border-subtle rounded-brutal bg-background-tertiary">
           {favicon ? (
             <img src={favicon} alt="" className="w-4 h-4" onError={(e) => {
               (e.target as HTMLImageElement).style.display = 'none'
@@ -172,10 +172,10 @@ export const BrowserNode = memo(function BrowserNode({ data, selected }: Browser
           )}
         </div>
         <div className="flex-1 min-w-0">
-          <span className="text-sm font-medium text-text-primary truncate block" title={pageTitle || url}>
+          <span className="text-sm font-mono font-semibold text-text-primary truncate block" title={pageTitle || url}>
             {pageTitle || domain}
           </span>
-          <div className="flex items-center gap-1 text-[10px] text-text-muted">
+          <div className="flex items-center gap-1 text-[10px] text-text-muted font-mono">
             {secure ? (
               <Lock className="w-2.5 h-2.5 text-status-success" />
             ) : (
@@ -189,7 +189,7 @@ export const BrowserNode = memo(function BrowserNode({ data, selected }: Browser
             <button
               onClick={handleRefresh}
               className={clsx(
-                'p-1 rounded hover:bg-background-tertiary text-text-muted hover:text-text-secondary',
+                'p-1 hover:bg-background-tertiary text-text-muted hover:text-text-secondary transition-press',
                 isLoading && 'animate-spin'
               )}
               title="Refresh"
@@ -201,7 +201,7 @@ export const BrowserNode = memo(function BrowserNode({ data, selected }: Browser
           {onCopyUrl && (
             <button
               onClick={handleCopyUrl}
-              className="p-1 rounded hover:bg-background-tertiary text-text-muted hover:text-text-secondary"
+              className="p-1 hover:bg-background-tertiary text-text-muted hover:text-text-secondary transition-press"
               title="Copy URL"
             >
               <Copy className="w-3.5 h-3.5" />
@@ -210,7 +210,7 @@ export const BrowserNode = memo(function BrowserNode({ data, selected }: Browser
           {onOpenExternal && (
             <button
               onClick={handleOpenExternal}
-              className="p-1 rounded hover:bg-background-tertiary text-text-muted hover:text-text-secondary"
+              className="p-1 hover:bg-background-tertiary text-text-muted hover:text-text-secondary transition-press"
               title="Open in browser"
             >
               <ExternalLink className="w-3.5 h-3.5" />
@@ -218,14 +218,14 @@ export const BrowserNode = memo(function BrowserNode({ data, selected }: Browser
           )}
           <button
             onClick={handleFocus}
-            className="p-1 rounded hover:bg-background-tertiary text-text-muted hover:text-text-secondary"
+            className="p-1 hover:bg-background-tertiary text-text-muted hover:text-text-secondary transition-press"
             title="Focus panel"
           >
             <Maximize2 className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={handleClose}
-            className="p-1 rounded hover:bg-status-error/20 text-text-muted hover:text-status-error"
+            className="p-1 hover:bg-status-error/20 text-text-muted hover:text-status-error transition-press"
             title="Close"
           >
             <X className="w-3.5 h-3.5" />
@@ -234,10 +234,10 @@ export const BrowserNode = memo(function BrowserNode({ data, selected }: Browser
       </div>
 
       {/* Status bar */}
-      <div className="flex items-center gap-2 px-3 py-1.5 text-xs border-b border-border-subtle">
+      <div className="flex items-center gap-2 px-3 py-1.5 text-xs border-b border-brutal border-border font-mono">
         {isLoading ? (
           <>
-            <Loader2 className="w-3 h-3 animate-spin text-primary" />
+            <Loader2 className="w-3 h-3 animate-spin text-accent" />
             <span className="text-text-muted">Loading...</span>
           </>
         ) : hasError ? (
@@ -251,7 +251,8 @@ export const BrowserNode = memo(function BrowserNode({ data, selected }: Browser
           <>
             <CheckCircle2 className={clsx('w-3 h-3', getStatusColor(statusCode))} />
             <span className={clsx(
-              'px-1.5 py-0.5 rounded text-[10px] font-medium',
+              'px-1.5 py-0.5 text-[10px] font-mono font-semibold uppercase',
+              'border-brutal rounded-brutal',
               getStatusBadgeColor(statusCode)
             )}>
               {statusCode} {getStatusText(statusCode)}
@@ -263,7 +264,7 @@ export const BrowserNode = memo(function BrowserNode({ data, selected }: Browser
       </div>
 
       {/* Thumbnail preview area */}
-      <div className="h-[120px] bg-background-tertiary/30 flex items-center justify-center">
+      <div className="h-[120px] bg-background-tertiary flex items-center justify-center border-b border-brutal border-border-subtle">
         {thumbnailUrl ? (
           <img
             src={thumbnailUrl}
@@ -276,23 +277,23 @@ export const BrowserNode = memo(function BrowserNode({ data, selected }: Browser
         ) : isLoading ? (
           <div className="flex flex-col items-center gap-2 text-text-muted">
             <Loader2 className="w-6 h-6 animate-spin" />
-            <span className="text-[10px]">Loading preview...</span>
+            <span className="text-[10px] font-mono">Loading preview...</span>
           </div>
         ) : hasError ? (
-          <div className="flex flex-col items-center gap-2 text-status-error/60">
+          <div className="flex flex-col items-center gap-2 text-status-error">
             <AlertCircle className="w-6 h-6" />
-            <span className="text-[10px]">Failed to load</span>
+            <span className="text-[10px] font-mono">Failed to load</span>
           </div>
         ) : (
-          <div className="flex flex-col items-center gap-2 text-text-muted/50">
+          <div className="flex flex-col items-center gap-2 text-text-muted">
             <Globe className="w-8 h-8" />
-            <span className="text-[10px]">No preview</span>
+            <span className="text-[10px] font-mono">No preview</span>
           </div>
         )}
       </div>
 
       {/* URL display */}
-      <div className="px-3 py-1.5 bg-background-tertiary/30 rounded-b-lg">
+      <div className="px-3 py-1.5 bg-background-secondary rounded-b-brutal">
         <div className="text-[9px] text-text-muted truncate font-mono" title={url}>
           {truncateUrl(url, 50)}
         </div>

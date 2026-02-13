@@ -34,43 +34,51 @@ export function BrowserPane({ id, title, url: initialUrl, isActive }: BrowserPan
   }
 
   return (
-    <div className="h-full flex flex-col bg-background-secondary">
-      {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-1.5 bg-background-secondary border-b border-border-subtle">
-        <div className="flex items-center gap-1">
-          <button className="p-1 rounded hover:bg-background-tertiary text-text-muted hover:text-text-secondary">
-            <ArrowLeft className="w-4 h-4" />
+    <div className="terminal-chrome h-full flex flex-col">
+      {/* Header — terminal-header with macOS dots and nav buttons */}
+      <div className="terminal-header">
+        <div className="flex items-center gap-1.5">
+          <span className="terminal-dot terminal-dot-red" />
+          <span className="terminal-dot terminal-dot-yellow" />
+          <span className="terminal-dot terminal-dot-green" />
+        </div>
+
+        <div className="flex items-center gap-1 ml-3">
+          <button className="btn-icon !w-6 !h-6 !border-0 !shadow-none hover:bg-background-tertiary">
+            <ArrowLeft className="w-3.5 h-3.5 text-text-muted" />
           </button>
-          <button className="p-1 rounded hover:bg-background-tertiary text-text-muted hover:text-text-secondary">
-            <ArrowRight className="w-4 h-4" />
+          <button className="btn-icon !w-6 !h-6 !border-0 !shadow-none hover:bg-background-tertiary">
+            <ArrowRight className="w-3.5 h-3.5 text-text-muted" />
           </button>
           <button
             onClick={() => setUrl(url + '?refresh=' + Date.now())}
-            className="p-1 rounded hover:bg-background-tertiary text-text-muted hover:text-text-secondary"
+            className="btn-icon !w-6 !h-6 !border-0 !shadow-none hover:bg-background-tertiary"
           >
-            <RefreshCw className="w-4 h-4" />
+            <RefreshCw className="w-3.5 h-3.5 text-text-muted" />
           </button>
         </div>
 
-        {/* URL Bar */}
-        <div className="flex-1 flex items-center gap-2 px-3 py-1 bg-background-tertiary rounded-lg">
-          <Globe className="w-4 h-4 text-text-muted flex-shrink-0" />
-          <input
-            type="text"
-            value={inputUrl}
-            onChange={(e) => setInputUrl(e.target.value)}
-            onKeyDown={handleKeyDown}
-            className="flex-1 bg-transparent text-sm text-text-primary placeholder:text-text-muted focus:outline-none"
-            placeholder="Enter URL..."
-          />
+        {/* URL Bar — hard bordered input */}
+        <div className="flex-1 flex items-center gap-2 mx-2">
+          <div className="flex-1 flex items-center gap-2 px-3 py-1 border-brutal border-border rounded-brutal bg-background-terminal">
+            <Globe className="w-3.5 h-3.5 text-text-muted flex-shrink-0" />
+            <input
+              type="text"
+              value={inputUrl}
+              onChange={(e) => setInputUrl(e.target.value)}
+              onKeyDown={handleKeyDown}
+              className="flex-1 bg-transparent text-sm font-mono text-text-primary placeholder:text-text-muted focus:outline-none"
+              placeholder="Enter URL..."
+            />
+          </div>
         </div>
 
         <button
           onClick={handleClose}
-          className="p-1 rounded hover:bg-status-error/20 text-text-muted hover:text-status-error"
+          className="btn-icon !w-6 !h-6 !border-0 !shadow-none hover:bg-status-error/20"
           title="Close"
         >
-          <X className="w-4 h-4" />
+          <X className="w-3.5 h-3.5 text-text-muted hover:text-status-error" />
         </button>
       </div>
 

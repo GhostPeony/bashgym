@@ -85,9 +85,9 @@ export function NavigationBar() {
 
         {/* Breadcrumb for current view */}
         {breadcrumb && (
-          <div className="flex items-center font-mono text-sm">
+          <div className="flex items-center font-brand text-lg">
             <span className="text-text-muted mx-1">/</span>
-            <span className="text-text-secondary">{breadcrumb}</span>
+            <span className="text-text-secondary font-medium">{breadcrumb}</span>
           </div>
         )}
       </div>

@@ -43,7 +43,7 @@ export default {
       },
       fontFamily: {
         brand: [
-          'Cormorant Garamond',
+          'Playfair Display',
           'Georgia',
           'serif'
         ],

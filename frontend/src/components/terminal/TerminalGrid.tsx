@@ -182,6 +182,14 @@ export function TerminalGrid() {
     })
   }, [addPanel])
 
+  // Open browser panel
+  const openBrowser = useCallback(() => {
+    addPanel({
+      type: 'browser',
+      title: 'Browser'
+    })
+  }, [addPanel])
+
   // Render panel content
   const renderPanel = (panel: typeof panels[0], isActive: boolean, onPopupClose?: () => void) => {
     if (panel.type === 'terminal' && panel.terminalId) {
@@ -340,6 +348,15 @@ export function TerminalGrid() {
         title="Open File Browser"
       >
         <FolderTree className="w-4 h-4" />
+      </button>
+
+      {/* Add browser button */}
+      <button
+        onClick={openBrowser}
+        className="btn-icon !w-7 !h-7 text-text-muted hover:text-text-primary"
+        title="Open Browser"
+      >
+        <Globe className="w-4 h-4" />
       </button>
 
       {/* Spacer */}

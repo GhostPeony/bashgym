@@ -33,10 +33,10 @@
   /* Brutalist structure */
   --border-color: var(--text-primary);
   --border-subtle: #C8C4BF;
-  --border-weight: 2px;
+  --border-weight: 3px;
 
   --shadow-color: var(--text-primary);
-  --shadow: 4px 4px 0px var(--shadow-color);
+  --shadow: 5px 5px 0px var(--shadow-color);
   --shadow-sm: 3px 3px 0px var(--shadow-color);
   --radius: 2px;
 
@@ -493,20 +493,28 @@
 
   /* ── Terminal blocks ── */
   .terminal-chrome {
-    background: var(--bg-terminal);
+    background: var(--bg-card);
     border: var(--border-weight) solid var(--border-color);
     border-radius: var(--radius);
     box-shadow: var(--shadow);
     overflow: hidden;
   }
 
+  .dark .terminal-chrome {
+    background: var(--bg-terminal);
+  }
+
   .terminal-header {
-    background: #2A2A2A;
+    background: var(--bg-secondary);
     padding: 10px 14px;
     display: flex;
     align-items: center;
     gap: 8px;
     border-bottom: var(--border-weight) solid var(--border-color);
+  }
+
+  .dark .terminal-header {
+    background: #2A2A2A;
   }
 
   .terminal-dot {
@@ -576,7 +584,7 @@
 @layer utilities {
   /* Typography helpers */
   .font-brand {
-    font-family: 'Cormorant Garamond', Georgia, serif;
+    font-family: 'Playfair Display', Georgia, serif;
   }
 
   .font-body {

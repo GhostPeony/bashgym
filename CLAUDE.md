@@ -7,8 +7,19 @@ This document provides comprehensive guidance for AI agents working with this co
 ## Quick Reference
 
 ```bash
+# Start dev environment (backend + frontend)
+.\dev.ps1                      # Both services
+.\dev.ps1 -BackendOnly         # API only
+.\dev.ps1 -FrontendOnly        # Frontend only
+.\dev.ps1 -Electron            # Backend + Electron app
+
+# Or start manually in separate terminals:
+python run_backend.py           # API on port 8003 (hot reload)
+cd frontend && npm run dev      # Vite on port 5173
+
 # Install dependencies
 pip install -r requirements.txt
+cd frontend && npm install
 
 # Run tests
 pytest test_bashgym.py -v
@@ -479,20 +490,32 @@ VITE_WS_URL=ws://localhost:8002/ws
 
 ### Starting the Application
 
-**API Server** (port 8002):
-```bash
-uvicorn bashgym.api.routes:app --host 0.0.0.0 --port 8002
+**Unified dev script** (recommended):
+```powershell
+.\dev.ps1                      # Backend (port 8003) + Frontend (port 5173)
+.\dev.ps1 -BackendOnly         # API only
+.\dev.ps1 -FrontendOnly        # Frontend only
+.\dev.ps1 -Electron            # Backend + Electron app
 ```
 
-**Frontend** (from `frontend/` directory):
+**Manual startup** (separate terminals):
 ```bash
-npm run dev
+# Terminal 1 - Backend API (port 8003, hot reload)
+python run_backend.py
+
+# Terminal 2 - Frontend (port 5173)
+cd frontend && npm run dev
+```
+
+**Production-style backend** (no hot reload):
+```bash
+python start_api.py            # Port 8003, no reload
 ```
 
 **Kill bashgym processes** (Windows):
 ```powershell
-wmic process where "name='node.exe'" get processid,commandline | findstr "bashgym"
-taskkill /F /PID <pid>
+.\kill_api.ps1                 # Kill all uvicorn processes
+.\find_port.ps1                # Find what's on port 8003
 ```
 
 ### Known Issues

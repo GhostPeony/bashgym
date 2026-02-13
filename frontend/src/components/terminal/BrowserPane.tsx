@@ -60,7 +60,7 @@ export function BrowserPane({ id, title, url: initialUrl, isActive }: BrowserPan
 
         {/* URL Bar — hard bordered input */}
         <div className="flex-1 flex items-center gap-2 mx-2">
-          <div className="flex-1 flex items-center gap-2 px-3 py-1 border-brutal border-border rounded-brutal bg-background-terminal">
+          <div className="flex-1 flex items-center gap-2 px-3 py-1 border-brutal border-border rounded-brutal bg-background-secondary">
             <Globe className="w-3.5 h-3.5 text-text-muted flex-shrink-0" />
             <input
               type="text"

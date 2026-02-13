@@ -3,7 +3,7 @@
 Run the Bash Gym API backend with hot reload for development.
 
 Usage:
-    python run_backend.py          # Default port 8001
+    python run_backend.py          # Default port 8003
     python run_backend.py --port 8002
 """
 
@@ -12,7 +12,7 @@ import sys
 import os
 
 def main():
-    port = "8001"
+    port = "8003"
 
     # Check for --port argument
     if "--port" in sys.argv:

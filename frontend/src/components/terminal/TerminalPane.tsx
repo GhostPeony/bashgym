@@ -4,7 +4,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Square, X, MoreHorizontal, Copy, ClipboardPaste, Loader2, MessageSquare, Wrench, Coffee } from 'lucide-react'
-import { useTerminalStore, useThemeStore } from '../../stores'
+import { useTerminalStore, useThemeStore, useAccentStore } from '../../stores'
 import { FileDropZone } from './FileDropZone'
 import { clsx } from 'clsx'
 import '@xterm/xterm/css/xterm.css'
@@ -73,6 +73,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
     }
   }, [])
   const { theme } = useThemeStore()
+  const { accentHue } = useAccentStore()
 
   const session = sessions.get(id)
 
@@ -105,76 +106,99 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
     setEditTitle(title)
   }, [title])
 
-  // Theme colors
+  // HSL to hex conversion for xterm theme colors
+  const hslToHex = useCallback((h: number, s: number, l: number): string => {
+    s /= 100
+    l /= 100
+    const a = s * Math.min(l, 1 - l)
+    const f = (n: number) => {
+      const k = (n + h / 30) % 12
+      const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1)
+      return Math.round(255 * color).toString(16).padStart(2, '0')
+    }
+    return `#${f(0)}${f(8)}${f(4)}`
+  }, [])
+
+  // HSL to rgba hex string (xterm needs #RRGGBBAA for selection)
+  const hslToHexAlpha = useCallback((h: number, s: number, l: number, alpha: number): string => {
+    const hex = hslToHex(h, s, l)
+    const a = Math.round(alpha * 255).toString(16).padStart(2, '0')
+    return `${hex}${a}`
+  }, [hslToHex])
+
+  // Accent-influenced terminal theme colors
   const getThemeColors = useCallback(() => {
+    const h = accentHue
+
     if (theme === 'dark') {
+      // Dark: rich accent-tinted background — nighttime garden, not void
+      const bg = hslToHex(h, 35, 8)
+      const bgLight = hslToHex(h, 25, 15)
+      const accent = hslToHex(h, 50, 68)
+
       return {
-        background: '#0D0D0D',
-        foreground: '#FFFFFF',
-        cursor: '#76B900',
-        cursorAccent: '#0D0D0D',
-        selectionBackground: 'rgba(118, 185, 0, 0.3)',
-        black: '#1A1A1A',
+        background: bg,
+        foreground: '#E8E4E0',
+        cursor: accent,
+        cursorAccent: bg,
+        selectionBackground: hslToHexAlpha(h, 40, 55, 0.35),
+        black: bg,
         red: '#FF453A',
-        green: '#32D74B',
+        green: accent,
         yellow: '#FFD60A',
         blue: '#0A84FF',
-        magenta: '#BF5AF2',
-        cyan: '#64D2FF',
-        white: '#FFFFFF',
-        brightBlack: '#48484A',
+        magenta: hslToHex((h + 60) % 360, 45, 65),
+        cyan: hslToHex((h + 180) % 360, 40, 60),
+        white: '#E8E4E0',
+        brightBlack: bgLight,
         brightRed: '#FF6961',
-        brightGreen: '#76B900',
+        brightGreen: hslToHex(h, 50, 72),
         brightYellow: '#FFE066',
         brightBlue: '#409CFF',
-        brightMagenta: '#DA8FFF',
-        brightCyan: '#70D7FF',
+        brightMagenta: hslToHex((h + 60) % 360, 50, 75),
+        brightCyan: hslToHex((h + 180) % 360, 45, 70),
         brightWhite: '#FFFFFF'
       }
     }
+
+    // Light: colored accent wash — the terminal lives inside the gradient
+    const bg = hslToHex(h, 45, 85)
+    const fg = '#000000'
+    const fgMid = hslToHex(h, 20, 35)
+    const accent = hslToHex(h, 45, 38)
+    const accentVivid = hslToHex(h, 55, 32)
+
     return {
-      background: '#1E1E1E',
-      foreground: '#D4D4D4',
-      cursor: '#0066CC',
-      cursorAccent: '#1E1E1E',
-      selectionBackground: 'rgba(0, 102, 204, 0.3)',
-      black: '#000000',
-      red: '#CD3131',
-      green: '#0DBC79',
-      yellow: '#E5E510',
+      background: bg,
+      foreground: fg,
+      cursor: fg,
+      cursorAccent: bg,
+      selectionBackground: hslToHexAlpha(h, 25, 40, 0.15),
+      black: fg,
+      red: '#B84A4A',
+      green: accent,
+      yellow: '#C4923A',
       blue: '#2472C8',
-      magenta: '#BC3FBC',
-      cyan: '#11A8CD',
-      white: '#E5E5E5',
-      brightBlack: '#666666',
-      brightRed: '#F14C4C',
-      brightGreen: '#23D18B',
-      brightYellow: '#F5F543',
+      magenta: hslToHex((h + 60) % 360, 30, 45),
+      cyan: hslToHex((h + 180) % 360, 35, 40),
+      white: bg,
+      brightBlack: fgMid,
+      brightRed: '#CD3131',
+      brightGreen: accentVivid,
+      brightYellow: '#E5C07B',
       brightBlue: '#3B8EEA',
-      brightMagenta: '#D670D6',
-      brightCyan: '#29B8DB',
+      brightMagenta: hslToHex((h + 60) % 360, 40, 55),
+      brightCyan: hslToHex((h + 180) % 360, 40, 50),
       brightWhite: '#FFFFFF'
     }
-  }, [theme])
+  }, [theme, accentHue, hslToHex, hslToHexAlpha])
 
   // Initialize terminal (only runs once per terminal ID)
   useEffect(() => {
     if (!containerRef.current || terminalRef.current) return
 
-    // Get initial theme colors (updates handled separately)
-    const initialColors = theme === 'dark' ? {
-      background: '#0D0D0D',
-      foreground: '#FFFFFF',
-      cursor: '#76B900',
-      cursorAccent: '#0D0D0D',
-      selectionBackground: 'rgba(118, 185, 0, 0.3)',
-    } : {
-      background: '#1E1E1E',
-      foreground: '#D4D4D4',
-      cursor: '#0066CC',
-      cursorAccent: '#1E1E1E',
-      selectionBackground: 'rgba(0, 102, 204, 0.3)',
-    }
+    // Use accent-aware theme colors for initialization
+    const initialColors = getThemeColors()
 
     const terminal = new Terminal({
       cursorBlink: true,
@@ -438,13 +462,15 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]) // Only re-initialize when terminal ID changes, not on theme change
 
-  // Update theme when it changes
+  // Update theme when theme or accent hue changes
   useEffect(() => {
     if (terminalRef.current) {
       const colors = getThemeColors()
       terminalRef.current.options.theme = colors
+      // Force xterm to repaint (WebGL renderer caches colors)
+      terminalRef.current.refresh(0, terminalRef.current.rows - 1)
     }
-  }, [theme, getThemeColors])
+  }, [theme, accentHue, getThemeColors])
 
   // Focus terminal and refit when active
   useEffect(() => {

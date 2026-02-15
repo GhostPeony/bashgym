@@ -19,5 +19,5 @@ The base URL is set via environment variable — never hardcode it.
 ## Destructive Operations (require confirmation)
 - POST /api/training/{run_id}/stop
 - POST /api/traces/{trace_id}/demote
-- DELETE /api/orchestrator/{job_id}
+- DELETE /api/orchestrate/{job_id}
 - DELETE /api/models/{model_id}

@@ -11,7 +11,7 @@ Submit development specs for multi-agent decomposition and parallel execution.
 
 Decompose a development task into a parallel execution plan:
 ```
-scripts/api.sh POST /orchestrator/submit '{
+scripts/api.sh POST /orchestrate/submit '{
   "title": "Add user authentication",
   "description": "Implement JWT-based auth with login/register endpoints",
   "constraints": ["Use existing User model", "Add pytest tests"],
@@ -28,14 +28,14 @@ Returns: job_id and decomposed task plan. **Always summarize the plan for the us
 
 After reviewing the plan, approve to begin execution:
 ```
-scripts/api.sh POST /orchestrator/{job_id}/approve '{}'
+scripts/api.sh POST /orchestrate/{job_id}/approve '{}'
 ```
 
 ## Check Job Status
 
 Monitor worker progress and task states:
 ```
-scripts/api.sh GET /orchestrator/{job_id}/status
+scripts/api.sh GET /orchestrate/{job_id}/status
 ```
 
 Returns: task states (pending/running/completed/failed), worker assignments, budget usage.
@@ -44,38 +44,38 @@ Returns: task states (pending/running/completed/failed), worker assignments, bud
 
 Retry a specific failed task within a job:
 ```
-scripts/api.sh POST /orchestrator/{job_id}/task/{task_id}/retry '{}'
+scripts/api.sh POST /orchestrate/{job_id}/task/{task_id}/retry '{}'
 ```
 
 ## List All Jobs
 
 ```
-scripts/api.sh GET /orchestrator/jobs
+scripts/api.sh GET /orchestrate/jobs
 ```
 
 ## Delete a Job
 
 **Destructive — confirm with user first.**
 ```
-scripts/api.sh DELETE /orchestrator/{job_id}
+scripts/api.sh DELETE /orchestrate/{job_id}
 ```
 
 ## List Available Providers
 
 Check which LLM providers are configured for planning:
 ```
-scripts/api.sh GET /orchestrator/providers
+scripts/api.sh GET /orchestrate/providers
 ```
 
 ## Example Interactions
 
 User: "Build me an auth system with JWT"
-→ Ask for any constraints. Compose a spec. Call POST /orchestrator/submit.
+→ Ask for any constraints. Compose a spec. Call POST /orchestrate/submit.
    Summarize the decomposed plan. Ask user to approve before calling /approve.
 
 User: "What's the status of my last job?"
-→ Call GET /orchestrator/jobs to find the latest. Call GET /orchestrator/{job_id}/status.
+→ Call GET /orchestrate/jobs to find the latest. Call GET /orchestrate/{job_id}/status.
    Report task states and budget usage.
 
 User: "Task 3 failed, retry it"
-→ Call POST /orchestrator/{job_id}/task/{task_id}/retry. Report result.
+→ Call POST /orchestrate/{job_id}/task/{task_id}/retry. Report result.

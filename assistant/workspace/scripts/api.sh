@@ -1,5 +1,5 @@
 #!/bin/bash
-# BashGym API helper for picoclaw skills
+# BashGym API helper for peony skills
 # Usage: api.sh METHOD ENDPOINT [JSON_BODY]
 # Examples:
 #   api.sh GET /health

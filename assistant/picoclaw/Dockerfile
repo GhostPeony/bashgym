@@ -1,5 +1,5 @@
 # ============================================================
-# Stage 1: Build the picoclaw binary
+# Stage 1: Build the peony binary
 # ============================================================
 FROM golang:1.26.0-alpine AS builder
 
@@ -23,10 +23,10 @@ FROM alpine:3.23
 RUN apk add --no-cache ca-certificates tzdata curl
 
 # Copy binary
-COPY --from=builder /src/build/picoclaw /usr/local/bin/picoclaw
+COPY --from=builder /src/build/peony /usr/local/bin/peony
 
-# Create picoclaw home directory
-RUN /usr/local/bin/picoclaw onboard
+# Create peony home directory
+RUN /usr/local/bin/peony onboard
 
-ENTRYPOINT ["picoclaw"]
+ENTRYPOINT ["peony"]
 CMD ["gateway"]

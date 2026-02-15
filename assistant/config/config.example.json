@@ -1,7 +1,7 @@
 {
   "agents": {
     "defaults": {
-      "workspace": "/root/.picoclaw/workspace",
+      "workspace": "/root/.peony/workspace",
       "restrict_to_workspace": true,
       "model": "claude-sonnet-4-5-20250929",
       "max_tokens": 8192,

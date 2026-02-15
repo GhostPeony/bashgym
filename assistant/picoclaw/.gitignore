@@ -8,14 +8,14 @@ build/
 *.dylib
 *.test
 *.out
-/picoclaw
-/picoclaw-test
+/peony
+/peony-test
 cmd/picoclaw/workspace
 
-# Picoclaw specific
+# Peony specific
 
-# PicoClaw
-.picoclaw/
+# Peony
+.peony/
 config.json
 sessions/
 build/

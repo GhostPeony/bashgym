@@ -1,5 +1,5 @@
 # ============================================================
-# Stage 1: Build the picoclaw binary
+# Stage 1: Build the peony binary
 # ============================================================
 FROM golang:1.26.0-alpine AS builder
 
@@ -11,7 +11,7 @@ WORKDIR /src
 COPY picoclaw/go.mod picoclaw/go.sum ./
 RUN go mod download
 
-# Copy picoclaw source and build
+# Copy peony source and build
 COPY picoclaw/ .
 RUN make build
 
@@ -22,20 +22,20 @@ FROM alpine:3.21
 
 RUN apk add --no-cache ca-certificates tzdata curl bash dos2unix
 
-# Copy picoclaw binary
-COPY --from=builder /src/build/picoclaw /usr/local/bin/picoclaw
+# Copy peony binary
+COPY --from=builder /src/build/peony /usr/local/bin/peony
 
-# Initialize picoclaw home
-RUN /usr/local/bin/picoclaw onboard 2>/dev/null || true
+# Initialize peony home
+RUN /usr/local/bin/peony onboard 2>/dev/null || true
 
 # Copy our workspace (overridden by volume mount in dev)
-COPY workspace/ /root/.picoclaw/workspace/
+COPY workspace/ /root/.peony/workspace/
 
 # Fix Windows line endings in scripts
-RUN find /root/.picoclaw/workspace -name "*.sh" -exec dos2unix {} \;
+RUN find /root/.peony/workspace -name "*.sh" -exec dos2unix {} \;
 
 # Copy config template (overridden by volume mount in dev)
-COPY config/config.example.json /root/.picoclaw/config.json
+COPY config/config.example.json /root/.peony/config.json
 
-ENTRYPOINT ["picoclaw"]
+ENTRYPOINT ["peony"]
 CMD ["gateway"]

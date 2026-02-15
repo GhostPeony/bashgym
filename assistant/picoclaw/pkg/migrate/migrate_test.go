@@ -193,7 +193,7 @@ func TestConvertConfig(t *testing.T) {
 		if len(warnings) != 1 {
 			t.Fatalf("expected 1 warning, got %d", len(warnings))
 		}
-		if warnings[0] != "Provider 'deepseek' not supported in PicoClaw, skipping" {
+		if warnings[0] != "Provider 'deepseek' not supported in Peony, skipping" {
 			t.Errorf("unexpected warning: %s", warnings[0])
 		}
 	})
@@ -247,7 +247,7 @@ func TestConvertConfig(t *testing.T) {
 		if len(warnings) != 1 {
 			t.Fatalf("expected 1 warning, got %d", len(warnings))
 		}
-		if warnings[0] != "Channel 'email' not supported in PicoClaw, skipping" {
+		if warnings[0] != "Channel 'email' not supported in Peony, skipping" {
 			t.Errorf("unexpected warning: %s", warnings[0])
 		}
 	})
@@ -278,8 +278,8 @@ func TestConvertConfig(t *testing.T) {
 		if cfg.Agents.Defaults.Temperature != 0.5 {
 			t.Errorf("Temperature = %f, want %f", cfg.Agents.Defaults.Temperature, 0.5)
 		}
-		if cfg.Agents.Defaults.Workspace != "~/.picoclaw/workspace" {
-			t.Errorf("Workspace = %q, want %q", cfg.Agents.Defaults.Workspace, "~/.picoclaw/workspace")
+		if cfg.Agents.Defaults.Workspace != "~/.peony/workspace" {
+			t.Errorf("Workspace = %q, want %q", cfg.Agents.Defaults.Workspace, "~/.peony/workspace")
 		}
 	})
 
@@ -553,7 +553,7 @@ func TestRewriteWorkspacePath(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"default path", "~/.openclaw/workspace", "~/.picoclaw/workspace"},
+		{"default path", "~/.openclaw/workspace", "~/.peony/workspace"},
 		{"custom path", "/custom/path", "/custom/path"},
 		{"empty", "", ""},
 	}

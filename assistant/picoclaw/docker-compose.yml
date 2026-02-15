@@ -1,40 +1,40 @@
 services:
   # ─────────────────────────────────────────────
-  # PicoClaw Agent (one-shot query)
-  #   docker compose run --rm picoclaw-agent -m "Hello"
+  # Peony Agent (one-shot query)
+  #   docker compose run --rm peony-agent -m "Hello"
   # ─────────────────────────────────────────────
-  picoclaw-agent:
+  peony-agent:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: picoclaw-agent
+    container_name: peony-agent
     profiles:
       - agent
     volumes:
-      - ./config/config.json:/root/.picoclaw/config.json:ro
-      - picoclaw-workspace:/root/.picoclaw/workspace
-    entrypoint: ["picoclaw", "agent"]
+      - ./config/config.json:/root/.peony/config.json:ro
+      - peony-workspace:/root/.peony/workspace
+    entrypoint: ["peony", "agent"]
     stdin_open: true
     tty: true
 
   # ─────────────────────────────────────────────
-  # PicoClaw Gateway (Long-running Bot)
-  #   docker compose up picoclaw-gateway
+  # Peony Gateway (Long-running Bot)
+  #   docker compose up peony-gateway
   # ─────────────────────────────────────────────
-  picoclaw-gateway:
+  peony-gateway:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: picoclaw-gateway
+    container_name: peony-gateway
     restart: unless-stopped
     profiles:
       - gateway
     volumes:
       # Configuration file
-      - ./config/config.json:/root/.picoclaw/config.json:ro
+      - ./config/config.json:/root/.peony/config.json:ro
       # Persistent workspace (sessions, memory, logs)
-      - picoclaw-workspace:/root/.picoclaw/workspace
+      - peony-workspace:/root/.peony/workspace
     command: ["gateway"]
 
 volumes:
-  picoclaw-workspace:
+  peony-workspace:

@@ -125,7 +125,7 @@ func (si *SkillInstaller) ListAvailableSkills(ctx context.Context) ([]AvailableS
 }
 
 func (si *SkillInstaller) ListBuiltinSkills() []BuiltinSkill {
-	builtinSkillsDir := filepath.Join(filepath.Dir(si.workspace), "picoclaw", "skills")
+	builtinSkillsDir := filepath.Join(filepath.Dir(si.workspace), "peony", "skills")
 
 	entries, err := os.ReadDir(builtinSkillsDir)
 	if err != nil {

@@ -2,8 +2,8 @@
 # Usage:
 #   docker compose up                    # Start API + assistant gateway
 #   docker compose up bashgym-api        # API only
-#   docker compose up picoclaw-gateway   # Assistant only (needs API)
-#   docker compose run --rm picoclaw-agent -m "system status"  # One-shot query
+#   docker compose up peony-gateway   # Assistant only (needs API)
+#   docker compose run --rm peony-agent -m "system status"  # One-shot query
 
 services:
   # ─────────────────────────────────────
@@ -26,19 +26,19 @@ services:
       retries: 3
 
   # ─────────────────────────────────────
-  # PicoClaw Gateway (long-running bot)
+  # Peony Gateway (long-running bot)
   # ─────────────────────────────────────
-  picoclaw-gateway:
+  peony-gateway:
     build:
       context: ./assistant
       dockerfile: Dockerfile
-    container_name: picoclaw-gateway
+    container_name: peony-gateway
     depends_on:
       bashgym-api:
         condition: service_healthy
     volumes:
-      - ./assistant/workspace:/root/.picoclaw/workspace
-      - ./assistant/config/config.json:/root/.picoclaw/config.json:ro
+      - ./assistant/workspace:/root/.peony/workspace
+      - ./assistant/config/config.json:/root/.peony/config.json:ro
     env_file: ./assistant/.env
     environment:
       - BASHGYM_API_URL=http://bashgym-api:8003/api
@@ -46,25 +46,25 @@ services:
     command: ["gateway"]
 
   # ─────────────────────────────────────
-  # PicoClaw Agent (one-shot query)
-  #   docker compose run --rm picoclaw-agent -m "check system status"
+  # Peony Agent (one-shot query)
+  #   docker compose run --rm peony-agent -m "check system status"
   # ─────────────────────────────────────
-  picoclaw-agent:
+  peony-agent:
     build:
       context: ./assistant
       dockerfile: Dockerfile
-    container_name: picoclaw-agent
+    container_name: peony-agent
     profiles:
       - agent
     depends_on:
       bashgym-api:
         condition: service_healthy
     volumes:
-      - ./assistant/workspace:/root/.picoclaw/workspace
-      - ./assistant/config/config.json:/root/.picoclaw/config.json:ro
+      - ./assistant/workspace:/root/.peony/workspace
+      - ./assistant/config/config.json:/root/.peony/config.json:ro
     env_file: ./assistant/.env
     environment:
       - BASHGYM_API_URL=http://bashgym-api:8003/api
-    entrypoint: ["picoclaw", "agent"]
+    entrypoint: ["peony", "agent"]
     stdin_open: true
     tty: true

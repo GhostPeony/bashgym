@@ -1,0 +1,70 @@
+# GhostWork Development Stack
+# Usage:
+#   docker compose up                    # Start API + assistant gateway
+#   docker compose up bashgym-api        # API only
+#   docker compose up picoclaw-gateway   # Assistant only (needs API)
+#   docker compose run --rm picoclaw-agent -m "system status"  # One-shot query
+
+services:
+  # ─────────────────────────────────────
+  # BashGym API (FastAPI backend)
+  # ─────────────────────────────────────
+  bashgym-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: bashgym-api
+    ports:
+      - "8003:8003"
+    volumes:
+      - ./data:/app/data
+    env_file: .env
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ─────────────────────────────────────
+  # PicoClaw Gateway (long-running bot)
+  # ─────────────────────────────────────
+  picoclaw-gateway:
+    build:
+      context: ./assistant
+      dockerfile: Dockerfile
+    container_name: picoclaw-gateway
+    depends_on:
+      bashgym-api:
+        condition: service_healthy
+    volumes:
+      - ./assistant/workspace:/root/.picoclaw/workspace
+      - ./assistant/config/config.json:/root/.picoclaw/config.json:ro
+    env_file: ./assistant/.env
+    environment:
+      - BASHGYM_API_URL=http://bashgym-api:8003/api
+    restart: unless-stopped
+    command: ["gateway"]
+
+  # ─────────────────────────────────────
+  # PicoClaw Agent (one-shot query)
+  #   docker compose run --rm picoclaw-agent -m "check system status"
+  # ─────────────────────────────────────
+  picoclaw-agent:
+    build:
+      context: ./assistant
+      dockerfile: Dockerfile
+    container_name: picoclaw-agent
+    profiles:
+      - agent
+    depends_on:
+      bashgym-api:
+        condition: service_healthy
+    volumes:
+      - ./assistant/workspace:/root/.picoclaw/workspace
+      - ./assistant/config/config.json:/root/.picoclaw/config.json:ro
+    env_file: ./assistant/.env
+    environment:
+      - BASHGYM_API_URL=http://bashgym-api:8003/api
+    entrypoint: ["picoclaw", "agent"]
+    stdin_open: true
+    tty: true

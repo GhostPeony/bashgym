@@ -182,11 +182,11 @@ class TaskNode:
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        d = {
             "id": self.id,
             "title": self.title,
             "description": self.description,
-            "priority": self.priority.value,
+            "priority": self.priority.name,
             "status": self.status.value,
             "dependencies": self.dependencies,
             "files_touched": self.files_touched,
@@ -199,6 +199,9 @@ class TaskNode:
             "retry_count": self.retry_count,
             "created_at": self.created_at,
         }
+        if self.result is not None:
+            d["result"] = self.result.to_dict()
+        return d
 
 
 @dataclass

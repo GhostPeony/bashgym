@@ -15,6 +15,15 @@ interface HotkeyConfig {
 export function useHotkeys(hotkeys: HotkeyConfig[]) {
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {
+      // Let native clipboard/text shortcuts through when focused on an input
+      const target = event.target as HTMLElement
+      const isEditable = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable
+      if (isEditable && (event.ctrlKey || event.metaKey)) {
+        const key = event.key.toLowerCase()
+        // Allow: copy, paste, cut, select all, undo, redo
+        if (['c', 'v', 'x', 'a', 'z'].includes(key)) return
+      }
+
       for (const hotkey of hotkeys) {
         const ctrlMatch = hotkey.ctrl ? event.ctrlKey || event.metaKey : true
         const metaMatch = hotkey.meta ? event.metaKey : true
@@ -198,6 +207,28 @@ export function useGlobalHotkeys() {
         } else {
           openOverlay('evaluator')
         }
+      }
+    },
+    // Ctrl+Shift+O: Orchestrator dashboard
+    {
+      key: 'o',
+      ctrl: true,
+      shift: true,
+      handler: () => {
+        if (overlayView === 'orchestrator') {
+          closeOverlay()
+        } else {
+          openOverlay('orchestrator')
+        }
+      }
+    },
+    // Ctrl+Shift+A: Toggle Agent Chat
+    {
+      key: 'a',
+      ctrl: true,
+      shift: true,
+      handler: () => {
+        useUIStore.getState().toggleAgentChat()
       }
     },
 

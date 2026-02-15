@@ -149,7 +149,17 @@ async def submit_spec(request: SpecRequest, background_tasks: BackgroundTasks):
 async def _decompose_spec(job_id: str, spec, llm_config):
     """Background task: decompose spec into TaskDAG."""
     from bashgym.orchestrator.agent import OrchestrationAgent
+    from bashgym.api.websocket import WSMessage, MessageType, manager
     from pathlib import Path
+
+    # Broadcast decomposition started
+    try:
+        await manager.broadcast(WSMessage(
+            type=MessageType.ORCHESTRATION_DECOMPOSING,
+            payload={"job_id": job_id, "title": spec.title},
+        ))
+    except Exception:
+        pass  # WebSocket not critical for decomposition
 
     try:
         repo_path = Path(spec.repository) if spec.repository else None
@@ -166,6 +176,20 @@ async def _decompose_spec(job_id: str, spec, llm_config):
         _jobs[job_id]["agent"] = agent
         _jobs[job_id]["dag"] = dag
         _jobs[job_id]["status"] = "awaiting_approval"
+
+        # Broadcast decomposition complete
+        try:
+            await manager.broadcast(WSMessage(
+                type=MessageType.ORCHESTRATION_READY,
+                payload={
+                    "job_id": job_id,
+                    "title": spec.title,
+                    "task_count": len(dag.nodes),
+                    "stats": dag.stats,
+                },
+            ))
+        except Exception:
+            pass
 
     except Exception as e:
         logger.error(f"Decomposition failed for job {job_id}: {e}")

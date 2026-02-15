@@ -21,6 +21,8 @@ ACT (Arena) → VERIFY (Judge) → SYNTHESIZE (Factory) → TRAIN (Gym) → DEPL
 - [Quick Start](#quick-start)
 - [Architecture Overview](#architecture-overview)
 - [Project Structure](#project-structure)
+- [Peony Assistant](#peony-assistant)
+- [Orchestrator](#orchestrator)
 - [Frontend Dashboard](#frontend-dashboard)
 - [Benchmarking Suite](#benchmarking-suite)
 - [Data Creation & Synthesis](#data-creation--synthesis)
@@ -58,6 +60,8 @@ ACT (Arena) → VERIFY (Judge) → SYNTHESIZE (Factory) → TRAIN (Gym) → DEPL
 | **Multi-Cloud Deployment** | Export to HuggingFace, NVIDIA NIM, Ollama |
 | **Comprehensive Benchmarks** | HumanEval, MBPP, BigCodeBench, SWE-bench, and more |
 | **Safety Guardrails** | Injection detection, content moderation, dangerous command blocking |
+| **Multi-Agent Orchestrator** | Decompose specs into parallel tasks with DAG-based execution |
+| **Peony Chat Assistant** | Discord/Telegram bot with full system control via natural language |
 
 ---
 
@@ -114,11 +118,19 @@ cp .env.example .env
 # Install hooks for native mode (captures your Claude Code usage)
 cp bashgym/hooks/*.py ~/.claude/hooks/
 
-# Start the API server
-uvicorn bashgym.api.routes:app --host 0.0.0.0 --port 8002
+# Start everything (recommended)
+.\dev.ps1                      # Backend (port 8003) + Frontend (port 5173)
+.\dev.ps1 -Electron            # Backend + Electron app
 
-# Start the frontend (in another terminal)
-cd frontend && npm install && npm run dev
+# Or start manually in separate terminals:
+python run_backend.py           # API on port 8003 (hot reload)
+cd frontend && npm install && npm run dev  # Vite on port 5173
+
+# Optional: Start with Peony chat assistant (Docker)
+cp assistant/.env.example assistant/.env
+cp assistant/config/config.example.json assistant/config/config.json
+# Fill in channel tokens and API keys, then:
+docker compose up
 ```
 
 ---
@@ -152,8 +164,10 @@ cd frontend && npm install && npm run dev
 | **Gym** | `bashgym.gym` | Training & routing | Trainer, Environment, Router |
 | **Models** | `bashgym.models` | Registry & lifecycle | Profile, Registry, Evaluator |
 | **Observability** | `bashgym.observability` | Profiling & tracing | AgentProfiler |
+| **Orchestrator** | `bashgym.orchestrator` | Multi-agent coordination | Agent, TaskDAG, Dispatcher, Synthesizer |
 | **Integrations** | `bashgym.integrations` | External services | NeMo, HuggingFace, Bashbros |
 | **API** | `bashgym.api` | REST & WebSocket | Routes, Schemas, WebSocket |
+| **Assistant** | `assistant/` | Chat interface | Peony (Go), Skills, Identity |
 
 ---
 
@@ -239,8 +253,20 @@ bashgym/
 │   │   ├── detector.py                # Provider detection
 │   │   └── ollama.py                  # Ollama integration
 │   │
+│   ├── orchestrator/                  # Multi-agent orchestration
+│   │   ├── agent.py                   # Supervision & spec decomposition
+│   │   ├── task_dag.py                # Dependency graph & topological sort
+│   │   ├── dispatcher.py              # Worker pool management
+│   │   ├── context_builder.py         # Worker context assembly
+│   │   ├── synthesizer.py             # Result merging & trace ingestion
+│   │   ├── worktree.py                # Git worktree isolation
+│   │   ├── models.py                  # Data structures
+│   │   └── prompts.py                 # LLM planning prompts
+│   │
 │   └── api/                           # REST API
 │       ├── routes.py                  # Main endpoints
+│       ├── orchestrator_routes.py     # Orchestrator endpoints
+│       ├── agent_routes.py            # Agent chatbot endpoint
 │       ├── factory_routes.py          # Factory endpoints
 │       ├── models_routes.py           # Model registry endpoints
 │       ├── hf_routes.py               # HuggingFace endpoints
@@ -249,6 +275,31 @@ bashgym/
 │       ├── websocket.py               # Real-time updates
 │       ├── schemas.py                 # Pydantic models
 │       └── system_info.py             # System info utilities
+│
+├── assistant/                         # Peony chat assistant
+│   ├── picoclaw/                      # Go runtime (git subtree from sipeed/picoclaw, builds as "peony")
+│   │   ├── cmd/picoclaw/main.go       # CLI entry point (binary name: peony)
+│   │   ├── pkg/                       # Agent loop, channels, providers, tools
+│   │   ├── go.mod
+│   │   └── Makefile
+│   ├── workspace/                     # Assistant identity & skills
+│   │   ├── IDENTITY.md                # Who the assistant is
+│   │   ├── SOUL.md                    # Personality & values
+│   │   ├── AGENT.md                   # Behavioral instructions
+│   │   ├── USER.md                    # User preferences (evolves over time)
+│   │   ├── memory/                    # Persistent memory
+│   │   ├── scripts/api.sh             # BashGym API helper
+│   │   └── skills/                    # BashGym skill definitions
+│   │       ├── orchestrator/          # Submit specs, approve plans, monitor workers
+│   │       ├── training/              # Start/stop/monitor training runs
+│   │       ├── traces/                # Browse, promote, generate examples
+│   │       ├── models/                # Leaderboard, compare, deploy
+│   │       ├── system/                # Health, GPU, stats
+│   │       └── factory/               # Synthetic data, seeds
+│   ├── config/                        # Peony configuration
+│   │   └── config.example.json        # Provider & channel config template
+│   ├── Dockerfile                     # Multi-stage Go build
+│   └── .env.example                   # Channel tokens & API keys
 │
 ├── frontend/                          # Electron + React UI
 │   ├── src/
@@ -260,10 +311,12 @@ bashgym/
 │   └── electron/                      # Electron main process
 │
 ├── tests/                             # Test suite
-├── docker/                            # Docker configuration
+├── docker/                            # Docker configuration (sandbox)
 │   ├── Dockerfile.arena
 │   ├── Dockerfile.sandbox
 │   └── docker-compose.yml
+├── Dockerfile.api                     # BashGym API server image
+├── docker-compose.yml                 # Full stack: API + Peony assistant
 │
 ├── data/                              # Runtime data (gitignored)
 │   ├── gold_traces/                   # High-quality traces (≥90% success)
@@ -283,6 +336,156 @@ bashgym/
 
 ---
 
+## Peony Assistant
+
+Peony is a conversational AI assistant that provides full remote control over the entire BashGym ecosystem via Discord and Telegram. Built on a Go runtime forked from [picoclaw](https://github.com/sipeed/picoclaw), it runs as a Docker service alongside the BashGym API.
+
+```
+┌──────────────────┐         ┌──────────────────┐
+│  Discord/Telegram │         │   Electron UI    │
+│    (channels)     │         │   (existing)     │
+└────────┬─────────┘         └────────┬─────────┘
+         │                            │
+         ▼                            │
+┌──────────────────┐                  │
+│  peony-gateway   │                  │
+│   (Go binary)    │                  │
+│   Skills → HTTP  │                  │
+└────────┬─────────┘                  │
+         │ Docker internal network    │
+         ▼                            ▼
+┌──────────────────────────────────────┐
+│         bashgym-api (FastAPI)        │
+│         port 8003                    │
+└──────────────────────────────────────┘
+```
+
+### Skills
+
+Peony uses a skill-based architecture. Each skill wraps a set of BashGym API endpoints:
+
+| Skill | Triggers | Operations |
+|-------|----------|------------|
+| **system** | "system status", "GPU usage", "health check" | Health, hardware info, GPU, stats |
+| **orchestrator** | "submit spec", "approve plan", "retry task" | Spec submission, plan approval, worker monitoring |
+| **training** | "start training", "check progress", "stop run" | SFT/DPO/GRPO start/stop/pause/resume |
+| **traces** | "gold traces", "promote", "generate examples" | Browse, promote/demote, example generation, export |
+| **models** | "list models", "compare", "deploy to Ollama" | Leaderboard, comparison, evaluation, deployment |
+| **factory** | "generate data", "create seeds" | Synthetic generation, seed management |
+
+### Identity System
+
+Peony's personality is defined by workspace files that the LLM reads at conversation start:
+
+| File | Purpose |
+|------|---------|
+| `IDENTITY.md` | What the assistant is and its scope |
+| `SOUL.md` | Personality traits and values |
+| `AGENT.md` | Behavioral rules, API access patterns, destructive op safeguards |
+| `USER.md` | User preferences (evolves over time) |
+| `memory/` | Persistent memory across conversations |
+
+### Setup
+
+```bash
+# 1. Copy config templates
+cp assistant/.env.example assistant/.env
+cp assistant/config/config.example.json assistant/config/config.json
+
+# 2. Fill in your tokens
+#    - TELEGRAM_BOT_TOKEN (from @BotFather)
+#    - DISCORD_BOT_TOKEN (from Discord Developer Portal)
+#    - ANTHROPIC_API_KEY
+#    Edit assistant/.env and assistant/config/config.json
+
+# 3. Start the full stack
+docker compose up
+
+# 4. Or run a one-shot query
+docker compose run --rm peony-agent -m "system status"
+```
+
+### Channels
+
+| Channel | Auth | Setup |
+|---------|------|-------|
+| **Telegram** | Bot token + user ID whitelist | Create bot via @BotFather, add token to config |
+| **Discord** | Bot token + user ID whitelist | Create app in Developer Portal, enable MESSAGE_CONTENT intent |
+
+---
+
+## Orchestrator
+
+The orchestrator decomposes development specs into parallel tasks and dispatches them to isolated Claude Code workers.
+
+### How It Works
+
+```
+1. User submits a spec (title, description, constraints, acceptance criteria)
+2. LLM decomposes spec into a Task DAG (directed acyclic graph)
+3. User reviews and approves the plan
+4. Tasks execute in dependency order with parallel workers
+5. Each worker runs in an isolated git worktree
+6. Results merge back, traces feed the training pipeline
+```
+
+### Multi-Provider Planning
+
+The orchestrator can use different LLMs for spec decomposition:
+
+| Provider | Models | Notes |
+|----------|--------|-------|
+| **Anthropic** | Claude Opus 4.6, Sonnet 4.5 | Default, recommended |
+| **OpenAI** | GPT-4o, o1 | Alternative |
+| **Google** | Gemini 2.5 Pro | Alternative |
+| **Ollama** | qwen2.5-coder:32b, etc. | Local, free |
+
+Workers always use Claude Code CLI regardless of planning provider.
+
+### API
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/orchestrate/submit` | Submit a development spec |
+| `POST` | `/api/orchestrate/{job_id}/approve` | Approve plan and execute |
+| `GET` | `/api/orchestrate/{job_id}/status` | Worker progress and task states |
+| `POST` | `/api/orchestrate/{job_id}/task/{task_id}/retry` | Retry a failed task |
+| `GET` | `/api/orchestrate/jobs` | List all jobs |
+| `DELETE` | `/api/orchestrate/{job_id}` | Delete a job |
+| `GET` | `/api/orchestrate/providers` | List configured LLM providers |
+
+### Modules
+
+| Module | Purpose |
+|--------|---------|
+| `agent.py` | Supervision agent: decomposes specs, coordinates workers, handles retries |
+| `task_dag.py` | DAG construction, dependency resolution, topological sorting |
+| `dispatcher.py` | Worker pool management, task assignment, parallel execution |
+| `context_builder.py` | Assembles worker context from repo state, existing code, requirements |
+| `synthesizer.py` | Merges worktree results, verifies output, feeds traces to training |
+| `worktree.py` | Git worktree lifecycle (create, cleanup, merge) |
+
+### Example
+
+```bash
+# Via API
+curl -X POST http://localhost:8003/api/orchestrate/submit \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Add JWT authentication",
+    "description": "Implement login/register with JWT tokens",
+    "constraints": ["Use existing User model", "Add pytest tests"],
+    "acceptance_criteria": ["All tests pass", "Proper error handling"],
+    "max_workers": 3,
+    "budget_usd": 5.0
+  }'
+
+# Via Peony (Discord/Telegram)
+# "Build me an auth system with JWT, max 3 workers, $5 budget"
+```
+
+---
+
 ## Frontend Dashboard
 
 The Bash Gym frontend is an Electron + React application with real-time WebSocket updates.
@@ -291,10 +494,13 @@ The Bash Gym frontend is an Electron + React application with real-time WebSocke
 
 | Section | Components | Purpose |
 |---------|-----------|---------|
+| **Home** | HomeScreen | Central dashboard with flywheel visualization and system overview |
 | **Training** | TrainingDashboard, TrainingConfig, LossCurve, MetricsGrid, EpochProgress, TrainingLogs, SystemInfoPanel | Monitor training progress, view loss curves, track system resources |
 | **Models** | ModelBrowser, ModelCard, ModelProfile, ModelComparison, LineageTree, ModelTrends | Browse trained models, view lineage, compare performance |
 | **Factory** | FactoryDashboard, SyntheticGenerator | Generate synthetic data, manage datasets |
 | **Traces** | TraceBrowser | Explore gold/silver/bronze/failed traces, view quality metrics |
+| **Orchestrator** | OrchestratorDashboard, SpecForm, PlanReview, WorkerMonitor | Submit specs, review plans, monitor parallel workers |
+| **Agent** | AgentChat | Conversational interface to Peony assistant |
 | **Router** | RouterDashboard | Monitor teacher/student routing decisions and performance |
 | **Evaluator** | EvaluatorDashboard | Run benchmarks, view evaluation results |
 | **Guardrails** | GuardrailsDashboard | Monitor safety checks, PII redaction events |
@@ -313,7 +519,7 @@ npm install
 npm run dev
 ```
 
-The frontend connects to the API server at `http://localhost:8002` by default.
+The frontend connects to the API server at `http://localhost:8003` by default (configure in `frontend/.env.local`).
 
 ---
 
@@ -924,14 +1130,15 @@ The API server provides REST and WebSocket endpoints.
 ### Start API Server
 
 ```bash
-# Development
-uvicorn bashgym.api.routes:app --host 0.0.0.0 --port 8002 --reload
+# Development (hot reload)
+python run_backend.py
 
 # Production
-uvicorn bashgym.api.routes:app --host 0.0.0.0 --port 8002 --workers 4
+python start_api.py
+# Or: uvicorn bashgym.api.routes:app --host 0.0.0.0 --port 8003 --workers 4
 ```
 
-API documentation: `http://localhost:8002/docs`
+API documentation: `http://localhost:8003/docs`
 
 ### REST Endpoints
 
@@ -984,6 +1191,17 @@ API documentation: `http://localhost:8002/docs`
 | `GET` | `/api/factory/jobs/{job_id}` | Get generation progress |
 | `GET` | `/api/factory/examples` | List generated examples |
 
+#### Orchestrator
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/orchestrate/submit` | Submit a development spec |
+| `POST` | `/api/orchestrate/{job_id}/approve` | Approve plan and start execution |
+| `GET` | `/api/orchestrate/{job_id}/status` | Worker progress and task states |
+| `POST` | `/api/orchestrate/{job_id}/task/{task_id}/retry` | Retry a failed task |
+| `GET` | `/api/orchestrate/jobs` | List all jobs |
+| `DELETE` | `/api/orchestrate/{job_id}` | Delete a job |
+| `GET` | `/api/orchestrate/providers` | List configured LLM providers |
+
 #### Benchmarks
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -1015,13 +1233,14 @@ API documentation: `http://localhost:8002/docs`
 
 ### WebSocket Messages
 
-Connect to `ws://localhost:8002/ws` for real-time updates.
+Connect to `ws://localhost:8003/ws` for real-time updates.
 
 | Category | Message Types |
 |----------|--------------|
 | **Training** | `training:progress`, `training:complete`, `training:failed`, `training:log` |
 | **Tasks** | `task:status`, `task:complete` |
 | **Traces** | `trace:added`, `trace:promoted`, `trace:demoted` |
+| **Orchestrator** | `orchestrator:plan_ready`, `orchestrator:task_complete`, `orchestrator:job_complete`, `orchestrator:worker_log` |
 | **Router** | `router:stats`, `router:decision` |
 | **Verification** | `verification:result` |
 | **Guardrails** | `guardrail:blocked`, `guardrail:warn`, `guardrail:pii_redacted` |
@@ -1093,23 +1312,43 @@ Copy `.env.example` to `.env` and configure:
 
 ## Docker
 
-### Build Containers
+### Full Stack (API + Peony Assistant)
+
+The root `docker-compose.yml` runs the BashGym API alongside the Peony chat assistant:
+
+```bash
+# Configure secrets
+cp assistant/.env.example assistant/.env
+cp assistant/config/config.example.json assistant/config/config.json
+# Edit both files with your tokens and API keys
+
+# Build and start
+docker compose up --build -d
+
+# View logs
+docker compose logs -f
+
+# One-shot query via Peony
+docker compose run --rm peony-agent -m "system status"
+
+# Stop
+docker compose down
+```
+
+| Service | Image | Purpose |
+|---------|-------|---------|
+| `bashgym-api` | `Dockerfile.api` | FastAPI server on port 8003 with healthcheck |
+| `peony-gateway` | `assistant/Dockerfile` | Long-running Discord/Telegram bot |
+| `peony-agent` | `assistant/Dockerfile` | One-shot CLI queries |
+
+### Sandbox Mode (Arena)
+
+The `docker/docker-compose.yml` provides isolated containers for autonomous batch execution:
 
 ```bash
 cd docker
-docker-compose build
-```
-
-### Run Services
-
-```bash
-docker-compose up -d
-
-# View logs
-docker-compose logs -f
-
-# Stop
-docker-compose down
+docker compose build
+docker compose up -d
 ```
 
 ---

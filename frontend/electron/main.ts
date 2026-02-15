@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, Menu } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
@@ -23,6 +23,37 @@ const terminals: Map<string, ChildProcessWithoutNullStreams> = new Map()
 
 // Determine if we're in development
 const isDev = !app.isPackaged
+
+function setupMenu() {
+  const template: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' },
+      ]
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { role: 'togglefullscreen' },
+      ]
+    }
+  ]
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -76,6 +107,7 @@ if (gotTheLock) {
 
   // App lifecycle
   app.whenReady().then(() => {
+    setupMenu()
     createWindow()
 
     app.on('activate', () => {
@@ -219,6 +251,7 @@ ipcMain.handle('api:fetch', async (_, url: string, options?: RequestInit) => {
       ...options,
       headers: {
         'Content-Type': 'application/json',
+        'X-API-Key': process.env.BASHGYM_API_KEY || '',
         ...(options?.headers || {})
       }
     }

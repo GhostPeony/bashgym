@@ -111,7 +111,7 @@
   },
   "tools": {
     "web": {
-      "search": {
+      "brave": {
         "api_key": "YOUR_BRAVE_API_KEY",
         "max_results": 5
       }

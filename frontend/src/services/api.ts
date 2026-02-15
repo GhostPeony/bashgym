@@ -170,6 +170,7 @@ async function request<T>(
       ...options,
       headers: {
         'Content-Type': 'application/json',
+        'X-API-Key': localStorage.getItem('bashgym_api_key') || '',
         ...options?.headers
       }
     })
@@ -1848,4 +1849,54 @@ export const achievementsApi = {
 
   refresh: () =>
     request<RefreshAchievementsResponse>('/achievements/refresh', { method: 'POST' })
+}
+
+// Agent Chat API
+export const agentApi = {
+  chat: (message: string, history?: Array<{ role: string; content: string }>) =>
+    request<{ response: string; context_used: string[] }>('/agent/chat', {
+      method: 'POST',
+      body: JSON.stringify({ message, history })
+    }),
+}
+
+// Orchestrator API
+export const orchestratorApi = {
+  submitSpec: (spec: {
+    title: string
+    description: string
+    constraints?: string[]
+    acceptance_criteria?: string[]
+    repository?: string
+    base_branch?: string
+    max_budget_usd?: number
+    max_workers?: number
+    llm_config?: {
+      provider?: string
+      model?: string
+      temperature?: number
+    }
+  }) => request('/orchestrate/submit', { method: 'POST', body: JSON.stringify(spec) }),
+
+  approveJob: (jobId: string, baseBranch?: string) =>
+    request(`/orchestrate/${jobId}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ base_branch: baseBranch || 'main' })
+    }),
+
+  getStatus: (jobId: string) =>
+    request(`/orchestrate/${jobId}/status`),
+
+  retryTask: (jobId: string, taskId: string, modifiedPrompt?: string) =>
+    request(`/orchestrate/${jobId}/task/${taskId}/retry`, {
+      method: 'POST',
+      body: JSON.stringify({ modified_prompt: modifiedPrompt })
+    }),
+
+  cancelJob: (jobId: string) =>
+    request(`/orchestrate/${jobId}`, { method: 'DELETE' }),
+
+  listProviders: () => request('/orchestrate/providers'),
+
+  listJobs: () => request('/orchestrate/jobs'),
 }

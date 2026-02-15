@@ -20,7 +20,7 @@ RUN make build
 # ============================================================
 FROM alpine:3.21
 
-RUN apk add --no-cache ca-certificates tzdata curl bash dos2unix
+RUN apk add --no-cache ca-certificates tzdata curl bash dos2unix jq
 
 # Copy peony binary
 COPY --from=builder /src/build/peony /usr/local/bin/peony
@@ -36,6 +36,12 @@ RUN find /root/.peony/workspace -name "*.sh" -exec dos2unix {} \;
 
 # Copy config template (overridden by volume mount in dev)
 COPY config/config.example.json /root/.peony/config.json
+
+# Create non-root user and transfer ownership
+RUN adduser -D -h /home/peony peony && \
+    mv /root/.peony /home/peony/.peony && \
+    chown -R peony:peony /home/peony/.peony
+USER peony
 
 ENTRYPOINT ["peony"]
 CMD ["gateway"]

@@ -13,6 +13,7 @@ METHOD="${1:?Usage: api.sh METHOD ENDPOINT [BODY]}"
 ENDPOINT="${2:?Usage: api.sh METHOD ENDPOINT [BODY]}"
 BODY="${3:-}"
 API_URL="${BASHGYM_API_URL:?BASHGYM_API_URL not set}"
+API_KEY="${BASHGYM_API_KEY:-}"
 
 CURL_ARGS=(
   -s
@@ -20,6 +21,7 @@ CURL_ARGS=(
   -X "$METHOD"
   "${API_URL}${ENDPOINT}"
   -H "Content-Type: application/json"
+  -H "X-API-Key: $API_KEY"
 )
 
 if [ -n "$BODY" ]; then
@@ -35,4 +37,4 @@ if [ "$HTTP_CODE" -ge 400 ]; then
   exit 1
 fi
 
-echo "$BODY_OUT"
+echo "$BODY_OUT" | jq . 2>/dev/null || echo "$BODY_OUT"

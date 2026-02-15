@@ -1,22 +1,13 @@
 import { useState, useEffect } from 'react'
-import { Terminal, Sparkles, BarChart3, ArrowRight } from 'lucide-react'
+import { Terminal, Sparkles, BarChart3, GitBranch, Trophy, MessageSquare, Database, ArrowRight } from 'lucide-react'
 import { useUIStore } from '../../stores'
-import { useTutorialStore } from '../../stores/tutorialStore'
-import { systemApi, tracesApi, modelsApi } from '../../services/api'
-import { AchievementSummary } from './AchievementSummary'
+import { useAchievementStore } from '../../stores/achievementStore'
+import { systemApi, tracesApi } from '../../services/api'
 import { clsx } from 'clsx'
 
-interface SpaceCardProps {
-  icon: React.ReactNode
-  title: string
-  description: string
-  stats?: string
-  onClick: () => void
-  primary?: boolean
-  accentColor: string
-}
-
-function SpaceCard({ icon, title, description, stats, onClick, primary, accentColor }: SpaceCardProps) {
+function SpaceCard({ icon, title, desc, stat, onClick, primary }: {
+  icon: React.ReactNode; title: string; desc: string; stat?: string; onClick: () => void; primary?: boolean
+}) {
   return (
     <button
       onClick={onClick}
@@ -25,46 +16,49 @@ function SpaceCard({ icon, title, description, stats, onClick, primary, accentCo
         primary && 'card-elevated'
       )}
     >
-      <div
-        className="w-12 h-12 border-brutal border-border rounded-brutal bg-accent-light flex items-center justify-center mb-4"
-      >
+      <div className="w-10 h-10 border-brutal border-border rounded-brutal bg-accent-light flex items-center justify-center mb-3">
         {icon}
       </div>
       <h3 className="font-brand text-lg text-text-primary mb-1">{title}</h3>
-      <p className="text-sm text-text-secondary mb-4 flex-1">{description}</p>
-      {stats && (
-        <p className="font-mono text-xs uppercase tracking-widest text-text-muted">{stats}</p>
+      <p className="text-sm text-text-secondary mb-3 flex-1 leading-relaxed">{desc}</p>
+      {stat && (
+        <p className="font-mono text-[10px] uppercase tracking-widest text-text-muted">{stat}</p>
       )}
-      {/* CSS triangle arrow — always visible */}
-      <div className="absolute bottom-6 right-6">
-        <div
-          className="w-0 h-0"
-          style={{
-            borderTop: '6px solid transparent',
-            borderBottom: '6px solid transparent',
-            borderLeft: '8px solid var(--text-muted)',
-          }}
-        />
+      <div className="absolute bottom-5 right-5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <ArrowRight className="w-4 h-4 text-accent" />
       </div>
     </button>
   )
 }
 
+const AGENT_CAPABILITIES = [
+  {
+    label: 'Plan training runs',
+    detail: 'Recommends strategy, model, and hyperparameters based on your traces and GPU',
+  },
+  {
+    label: 'Schedule data generation',
+    detail: 'Knows your trace inventory and suggests what to synthesize next',
+  },
+  {
+    label: 'Check bandwidth',
+    detail: 'Reads live VRAM, RAM, and GPU utilization to advise on capacity',
+  },
+  {
+    label: 'Orchestrate work',
+    detail: 'Write specs, review task graphs, manage multi-agent jobs',
+  },
+]
+
 export function HomeScreen() {
-  const { openOverlay, closeOverlay } = useUIStore()
-  const { hasSeenIntro, startTutorial, skipTutorial } = useTutorialStore()
-  const [stats, setStats] = useState({
-    sessions: 0,
-    traces: 0,
-    examples: 0,
-    models: 0,
-    trainingInProgress: false
-  })
+  const { openOverlay, closeOverlay, toggleAgentChat } = useUIStore()
+  const { earnedCount, totalCount, totalPoints, fetchRecent } = useAchievementStore()
+  const [stats, setStats] = useState({ traces: 0, examples: 0, models: 0 })
 
   useEffect(() => {
+    fetchRecent()
     const fetchStats = async () => {
       try {
-        // Get system stats
         const statsResult = await systemApi.stats()
         if (statsResult.ok && statsResult.data) {
           setStats(prev => ({
@@ -73,141 +67,133 @@ export function HomeScreen() {
             models: statsResult.data.models_count || 0
           }))
         }
-
-        // Get trace count for examples estimate
         const tracesResult = await tracesApi.listRepos()
         if (tracesResult.ok && tracesResult.data) {
-          const totalTraces = tracesResult.data.reduce((sum, r) => sum + (r.trace_count || 0), 0)
-          setStats(prev => ({
-            ...prev,
-            traces: totalTraces,
-            examples: totalTraces * 3 // rough estimate
-          }))
+          const total = tracesResult.data.reduce((sum: number, r: any) => sum + (r.trace_count || 0), 0)
+          setStats(prev => ({ ...prev, traces: total, examples: total * 3 }))
         }
-      } catch (e) {
-        // Silently fail
-      }
+      } catch { /* silent */ }
     }
-
     fetchStats()
-  }, [])
-
-  const handleEnterWorkspace = () => {
-    closeOverlay() // This will show the terminal grid
-  }
+  }, [fetchRecent])
 
   return (
-    <div className="h-full overflow-auto bg-background-primary">
-      <div className="max-w-5xl mx-auto px-6 py-12">
-        {/* Header */}
-        <div className="text-center mb-12">
-          <div className="mx-auto mb-6 h-32 w-36 overflow-hidden border-brutal border-border rounded-brutal shadow-brutal">
-            <img
-              src="/bb.png"
-              alt="Bash Gym"
-              className="h-full w-auto object-cover object-right"
-            />
-          </div>
-          <h1 className="font-brand text-3xl text-text-primary mb-3">
-            Turn your coding sessions into smarter AI assistants
-          </h1>
-          <p className="text-text-secondary max-w-2xl mx-auto">
-            Bash Gym captures your work with Claude Code, transforms it into training data,
-            and fine-tunes models that learn your coding style.
-          </p>
+    <div className="h-full flex flex-col bg-background-primary overflow-hidden">
+      {/* Floating stat buttons — top right */}
+      <div className="flex items-center justify-end px-8 pt-4 shrink-0">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => openOverlay('traces')}
+            className="card flex items-center gap-2 px-3 py-1.5 hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all"
+          >
+            <Database className="w-3.5 h-3.5 text-accent" />
+            <span className="font-mono text-xs text-text-primary">{stats.traces}</span>
+            <span className="font-mono text-[10px] uppercase tracking-widest text-text-muted">Traces</span>
+          </button>
+          <button
+            onClick={() => openOverlay('achievements')}
+            className="card flex items-center gap-2 px-3 py-1.5 hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all"
+          >
+            <Trophy className="w-3.5 h-3.5 text-status-warning" />
+            <span className="font-mono text-xs text-text-primary">{earnedCount}/{totalCount}</span>
+            <span className="tag text-[9px] py-0 px-1"><span>{totalPoints} pts</span></span>
+          </button>
         </div>
+      </div>
 
-        {/* First-time user prompt */}
-        {!hasSeenIntro && (
-          <div className="card mb-10 p-6">
-            <div className="flex items-center justify-between flex-wrap gap-4">
-              <div>
-                <div className="mb-2">
-                  <span className="tag"><span>New Here</span></span>
+      {/* Centered content block */}
+      <div className="flex-1 flex flex-col items-center justify-center px-8 pb-6">
+        <div className="w-full max-w-[1080px]">
+
+          {/* Brand header — centered */}
+          <div className="flex items-center gap-5 mb-8">
+            <div className="h-16 w-18 overflow-hidden border-brutal border-border rounded-brutal shadow-brutal shrink-0">
+              <img src="/bb.png" alt="Bash Gym" className="h-full w-auto object-cover object-right" />
+            </div>
+            <div>
+              <h1 className="font-brand text-2xl text-text-primary leading-tight">Bash Gym</h1>
+              <p className="text-sm text-text-secondary mt-1">Self-improving agentic development</p>
+            </div>
+          </div>
+
+          {/* Agent + Space cards row */}
+          <div className="flex gap-6 items-stretch">
+
+            {/* Left: Agent panel */}
+            <button
+              onClick={toggleAgentChat}
+              className="card card-elevated w-[320px] shrink-0 flex flex-col p-6 text-left group"
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 border-brutal border-border rounded-brutal bg-accent-light flex items-center justify-center">
+                  <MessageSquare className="w-5 h-5 text-accent-dark" />
                 </div>
-                <h2 className="font-brand text-lg text-text-primary mb-1">
-                  First time here?
-                </h2>
-                <p className="text-sm text-text-secondary">
-                  Let us show you around and help you set up your first training run.
-                </p>
+                <div>
+                  <h2 className="font-brand text-lg text-text-primary leading-tight">Gym Agent</h2>
+                  <p className="font-mono text-[10px] uppercase tracking-widest text-text-muted">System-Aware</p>
+                </div>
               </div>
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={skipTutorial}
-                  className="btn btn-ghost"
-                >
-                  Skip
-                </button>
-                <button
-                  onClick={startTutorial}
-                  className="btn btn-primary"
-                >
-                  Let's Go
-                </button>
+
+              <p className="text-sm text-text-secondary mb-5 leading-relaxed">
+                Your assistant for the entire pipeline — planning, data, training, and orchestration.
+              </p>
+
+              <div className="space-y-3 flex-1">
+                {AGENT_CAPABILITIES.map((cap) => (
+                  <div key={cap.label} className="flex items-start gap-2.5">
+                    <div className="w-1 h-1 rounded-full bg-accent mt-[7px] shrink-0" />
+                    <p className="text-xs text-text-secondary leading-relaxed">
+                      <span className="text-text-primary font-medium">{cap.label}</span>
+                      <span className="text-text-muted"> — </span>
+                      {cap.detail}
+                    </p>
+                  </div>
+                ))}
               </div>
+
+              <div className="mt-5 pt-4 border-t border-border flex items-center justify-between">
+                <span className="font-mono text-[10px] uppercase tracking-widest text-text-muted">
+                  Open Chat
+                </span>
+                <ArrowRight className="w-4 h-4 text-accent opacity-60 group-hover:opacity-100 group-hover:translate-x-1 transition-all" />
+              </div>
+            </button>
+
+            {/* Right: 2x2 space cards */}
+            <div className="flex-1 grid grid-cols-2 gap-5">
+              <SpaceCard
+                icon={<Terminal className="w-5 h-5 text-accent-dark" />}
+                title="Workspace"
+                desc="Code with AI assistance. Sessions are automatically captured as training data."
+                stat="Terminal grid"
+                onClick={closeOverlay}
+                primary
+              />
+              <SpaceCard
+                icon={<Sparkles className="w-5 h-5 text-accent-dark" />}
+                title="Data Factory"
+                desc="Transform captured traces into high-quality training examples for fine-tuning."
+                stat={stats.traces > 0 ? `${stats.traces} traces / ${stats.examples} examples` : 'No traces yet'}
+                onClick={() => openOverlay('factory')}
+              />
+              <SpaceCard
+                icon={<BarChart3 className="w-5 h-5 text-accent-dark" />}
+                title="Training"
+                desc="Fine-tune models on your data using SFT, DPO, or GRPO strategies."
+                stat={stats.models > 0 ? `${stats.models} models trained` : 'Ready to train'}
+                onClick={() => openOverlay('training')}
+              />
+              <SpaceCard
+                icon={<GitBranch className="w-5 h-5 text-accent-dark" />}
+                title="Orchestrator"
+                desc="Decompose specs into parallel tasks. Multi-agent execution with git worktrees."
+                stat="Multi-agent pipeline"
+                onClick={() => openOverlay('orchestrator')}
+              />
             </div>
+
           </div>
-        )}
-
-        {/* Section label */}
-        <div className="mb-4">
-          <span className="tag"><span>Spaces</span></span>
         </div>
-        <h2 className="font-brand text-2xl text-text-primary mb-6">Choose Your Workspace</h2>
-
-        {/* Space Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-          <SpaceCard
-            icon={<Terminal className="w-6 h-6 text-accent-dark" />}
-            title="Workspace"
-            description="Code with AI assistance. Your sessions are automatically captured for training."
-            stats={stats.sessions > 0 ? `${stats.sessions} active sessions` : 'Start coding'}
-            onClick={handleEnterWorkspace}
-            primary
-            accentColor=""
-          />
-          <SpaceCard
-            icon={<Sparkles className="w-6 h-6 text-accent-dark" />}
-            title="Data Factory"
-            description="Transform captured traces into high-quality training examples."
-            stats={stats.traces > 0 ? `${stats.traces} traces / ${stats.examples} examples` : 'No traces yet'}
-            onClick={() => openOverlay('factory')}
-            accentColor=""
-          />
-          <SpaceCard
-            icon={<BarChart3 className="w-6 h-6 text-accent-dark" />}
-            title="Training"
-            description="Fine-tune models on your data using SFT, DPO, or GRPO strategies."
-            stats={stats.models > 0 ? `${stats.models} models trained` : 'Ready to train'}
-            onClick={() => openOverlay('training')}
-            accentColor=""
-          />
-        </div>
-
-        {/* Quick Stats Bar */}
-        {(stats.traces > 0 || stats.models > 0) && (
-          <div className="card flex items-center justify-center gap-8 p-4 mb-8">
-            <div className="text-center">
-              <p className="font-brand text-3xl text-text-primary">{stats.traces}</p>
-              <p className="font-mono text-xs uppercase tracking-widest text-text-muted">Traces Captured</p>
-            </div>
-            <div className="w-px h-8 bg-border" />
-            <div className="text-center">
-              <p className="font-brand text-3xl text-text-primary">{stats.examples}</p>
-              <p className="font-mono text-xs uppercase tracking-widest text-text-muted">Training Examples</p>
-            </div>
-            <div className="w-px h-8 bg-border" />
-            <div className="text-center">
-              <p className="font-brand text-3xl text-text-primary">{stats.models}</p>
-              <p className="font-mono text-xs uppercase tracking-widest text-text-muted">Models Trained</p>
-            </div>
-          </div>
-        )}
-
-        {/* Achievement Summary */}
-        <AchievementSummary />
-
       </div>
     </div>
   )

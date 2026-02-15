@@ -49,7 +49,9 @@ const shortcutGroups: ShortcutGroup[] = [
       { keys: ['Ctrl', 'Shift', 'T'], description: 'Open Training dashboard' },
       { keys: ['Ctrl', 'Shift', 'R'], description: 'Open Router dashboard' },
       { keys: ['Ctrl', 'Shift', 'F'], description: 'Open Factory dashboard' },
-      { keys: ['Ctrl', 'Shift', 'E'], description: 'Open Evaluator dashboard' }
+      { keys: ['Ctrl', 'Shift', 'E'], description: 'Open Evaluator dashboard' },
+      { keys: ['Ctrl', 'Shift', 'O'], description: 'Open Orchestrator dashboard' },
+      { keys: ['Ctrl', 'Shift', 'A'], description: 'Toggle Agent Chat' }
     ]
   },
   {

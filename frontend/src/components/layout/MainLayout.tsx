@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { MessageSquare } from 'lucide-react'
 import { NavigationBar } from './NavigationBar'
 import { Sidebar } from './Sidebar'
 import { StatusBar } from './StatusBar'
@@ -14,6 +15,8 @@ import { ModelBrowser, ModelProfilePage, ModelComparison, ModelTrends } from '..
 import { HFDashboard } from '../huggingface'
 import { IntegrationDashboard } from '../integration/IntegrationDashboard'
 import { AchievementsView } from '../achievements/AchievementsView'
+import { OrchestratorDashboard } from '../orchestrator/OrchestratorDashboard'
+import { AgentChat } from '../agent/AgentChat'
 import { HomeScreen, TutorialChecklist, TutorialTooltip } from '../home'
 import { KeyboardShortcutsModal } from '../common/KeyboardShortcutsModal'
 import { useUIStore } from '../../stores'
@@ -21,7 +24,7 @@ import { useUIStore } from '../../stores'
 type ModelSubView = 'browser' | 'profile' | 'comparison' | 'trends'
 
 export function MainLayout() {
-  const { isSidebarOpen, overlayView, openOverlay } = useUIStore()
+  const { isSidebarOpen, overlayView, openOverlay, isAgentChatOpen, toggleAgentChat } = useUIStore()
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null)
   const [modelSubView, setModelSubView] = useState<ModelSubView>('browser')
   const [compareModelIds, setCompareModelIds] = useState<string[]>([])
@@ -167,6 +170,12 @@ export function MainLayout() {
               <AchievementsView />
             </div>
           )}
+
+          {overlayView === 'orchestrator' && (
+            <div className="flex-1 overflow-auto">
+              <OrchestratorDashboard />
+            </div>
+          )}
         </main>
       </div>
 
@@ -179,6 +188,20 @@ export function MainLayout() {
 
       {/* Global Modals */}
       <KeyboardShortcutsModal />
+
+      {/* Agent Chat Panel */}
+      <AgentChat />
+
+      {/* Floating Agent Button — visible when chat is closed and not on home */}
+      {!isAgentChatOpen && overlayView !== 'home' && (
+        <button
+          onClick={toggleAgentChat}
+          className="fixed bottom-20 right-6 z-40 w-12 h-12 border-brutal border-border rounded-brutal bg-accent text-white shadow-brutal flex items-center justify-center hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all"
+          title="Open Gym Agent"
+        >
+          <MessageSquare className="w-5 h-5" />
+        </button>
+      )}
     </div>
   )
 }

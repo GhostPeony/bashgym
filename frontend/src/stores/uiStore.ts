@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export type ViewMode = 'home' | 'workspace' | 'training' | 'router' | 'traces' | 'factory' | 'evaluator' | 'guardrails' | 'profiler' | 'models' | 'huggingface' | 'integration' | 'achievements'
+export type ViewMode = 'home' | 'workspace' | 'training' | 'router' | 'traces' | 'factory' | 'evaluator' | 'guardrails' | 'profiler' | 'models' | 'huggingface' | 'integration' | 'achievements' | 'orchestrator'
 
 interface UIState {
   // Navigation
@@ -10,6 +10,7 @@ interface UIState {
   isCommandPaletteOpen: boolean
   isOnboardingOpen: boolean
   isKeyboardShortcutsOpen: boolean
+  isAgentChatOpen: boolean
 
   // Overlays - terminals persist behind these
   overlayView: ViewMode | null
@@ -24,6 +25,8 @@ interface UIState {
   setCommandPaletteOpen: (open: boolean) => void
   setOnboardingOpen: (open: boolean) => void
   setKeyboardShortcutsOpen: (open: boolean) => void
+  setAgentChatOpen: (open: boolean) => void
+  toggleAgentChat: () => void
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -33,6 +36,7 @@ export const useUIStore = create<UIState>((set) => ({
   isCommandPaletteOpen: false,
   isOnboardingOpen: false,
   isKeyboardShortcutsOpen: false,
+  isAgentChatOpen: false,
   overlayView: 'home',
 
   setView: (view) => set({ currentView: view, overlayView: null }),
@@ -51,5 +55,9 @@ export const useUIStore = create<UIState>((set) => ({
 
   setOnboardingOpen: (open) => set({ isOnboardingOpen: open }),
 
-  setKeyboardShortcutsOpen: (open) => set({ isKeyboardShortcutsOpen: open })
+  setKeyboardShortcutsOpen: (open) => set({ isKeyboardShortcutsOpen: open }),
+
+  setAgentChatOpen: (open) => set({ isAgentChatOpen: open }),
+
+  toggleAgentChat: () => set((state) => ({ isAgentChatOpen: !state.isAgentChatOpen })),
 }))

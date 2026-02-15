@@ -57,6 +57,7 @@ from bashgym.api.integration_routes import router as integration_router
 from bashgym.api.achievements_routes import router as achievements_router
 from bashgym.api.security_routes import router as security_router
 from bashgym.api.orchestrator_routes import router as orchestrator_router
+from bashgym.api.agent_routes import router as agent_router
 from bashgym.factory.quality_calculator import calculate_quality_breakdown
 
 
@@ -74,11 +75,15 @@ def create_app() -> FastAPI:
     # CORS middleware for frontend
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # Configure for production
+        allow_origins=["http://localhost:5173", "http://localhost:8003"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # API key authentication middleware
+    from bashgym.api.auth import APIKeyMiddleware
+    app.add_middleware(APIKeyMiddleware)
 
     # Initialize state
     app.state.trainer = None
@@ -3169,6 +3174,9 @@ def create_app() -> FastAPI:
 
     # Include Orchestrator routes (multi-agent orchestration)
     app.include_router(orchestrator_router)
+
+    # Include Agent chat routes (system-aware assistant)
+    app.include_router(agent_router)
 
     return app
 

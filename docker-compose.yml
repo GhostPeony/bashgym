@@ -15,7 +15,7 @@ services:
       dockerfile: Dockerfile.api
     container_name: bashgym-api
     ports:
-      - "8003:8003"
+      - "127.0.0.1:8003:8003"
     volumes:
       - ./data:/app/data
     env_file: .env
@@ -37,11 +37,12 @@ services:
       bashgym-api:
         condition: service_healthy
     volumes:
-      - ./assistant/workspace:/root/.peony/workspace
-      - ./assistant/config/config.json:/root/.peony/config.json:ro
+      - ./assistant/workspace:/home/peony/.peony/workspace
+      - ./assistant/config/config.json:/home/peony/.peony/config.json:ro
     env_file: ./assistant/.env
     environment:
       - BASHGYM_API_URL=http://bashgym-api:8003/api
+      - BASHGYM_API_KEY
     restart: unless-stopped
     command: ["gateway"]
 
@@ -60,11 +61,12 @@ services:
       bashgym-api:
         condition: service_healthy
     volumes:
-      - ./assistant/workspace:/root/.peony/workspace
-      - ./assistant/config/config.json:/root/.peony/config.json:ro
+      - ./assistant/workspace:/home/peony/.peony/workspace
+      - ./assistant/config/config.json:/home/peony/.peony/config.json:ro
     env_file: ./assistant/.env
     environment:
       - BASHGYM_API_URL=http://bashgym-api:8003/api
+      - BASHGYM_API_KEY
     entrypoint: ["peony", "agent"]
     stdin_open: true
     tty: true

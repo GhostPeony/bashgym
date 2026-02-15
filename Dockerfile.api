@@ -18,6 +18,11 @@ COPY . .
 
 RUN mkdir -p data/gold_traces data/failed_traces data/models
 
+# Run as non-root user
+RUN useradd -r -m bashgym && \
+    chown -R bashgym:bashgym /app
+USER bashgym
+
 EXPOSE 8003
 
 CMD ["python", "-m", "uvicorn", "bashgym.api.routes:app", "--host", "0.0.0.0", "--port", "8003"]

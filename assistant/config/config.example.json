@@ -29,7 +29,7 @@
   },
   "tools": {
     "web": {
-      "search": {
+      "brave": {
         "api_key": "",
         "max_results": 5
       }

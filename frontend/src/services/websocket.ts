@@ -22,6 +22,7 @@
  */
 
 import { useTrainingStore, useRouterStore, useTracesStore } from '../stores'
+import { useOrchestratorStore } from '../stores/orchestratorStore'
 
 type MessageHandler = (data: any) => void
 
@@ -69,6 +70,17 @@ export const MessageTypes = {
   HF_JOB_FAILED: 'hf:job:failed',
   HF_SPACE_READY: 'hf:space:ready',
   HF_SPACE_ERROR: 'hf:space:error',
+  // Orchestration events
+  ORCHESTRATION_DECOMPOSING: 'orchestration:decomposing',
+  ORCHESTRATION_READY: 'orchestration:ready',
+  ORCHESTRATION_TASK_STARTED: 'orchestration:task:started',
+  ORCHESTRATION_TASK_COMPLETED: 'orchestration:task:completed',
+  ORCHESTRATION_TASK_FAILED: 'orchestration:task:failed',
+  ORCHESTRATION_BUDGET_UPDATE: 'orchestration:budget:update',
+  ORCHESTRATION_COMPLETE: 'orchestration:complete',
+  ORCHESTRATION_CANCELLED: 'orchestration:cancelled',
+  ORCHESTRATION_TASK_RETRYING: 'orchestration:task:retrying',
+  ORCHESTRATION_MERGE_RESULT: 'orchestration:merge:result',
 } as const
 
 class WebSocketService {
@@ -220,6 +232,47 @@ class WebSocketService {
       // Verification events
       case MessageTypes.VERIFICATION_RESULT:
         // Verification results handled by custom subscribers
+        break
+
+      // Orchestration events
+      case MessageTypes.ORCHESTRATION_DECOMPOSING:
+        useOrchestratorStore.getState().handleDecomposing(payload)
+        break
+
+      case MessageTypes.ORCHESTRATION_READY:
+        useOrchestratorStore.getState().handleReady(payload)
+        break
+
+      case MessageTypes.ORCHESTRATION_TASK_STARTED:
+        useOrchestratorStore.getState().handleTaskStarted(payload)
+        break
+
+      case MessageTypes.ORCHESTRATION_TASK_COMPLETED:
+        useOrchestratorStore.getState().handleTaskCompleted(payload)
+        break
+
+      case MessageTypes.ORCHESTRATION_TASK_FAILED:
+        useOrchestratorStore.getState().handleTaskFailed(payload)
+        break
+
+      case MessageTypes.ORCHESTRATION_BUDGET_UPDATE:
+        useOrchestratorStore.getState().handleBudgetUpdate(payload)
+        break
+
+      case MessageTypes.ORCHESTRATION_COMPLETE:
+        useOrchestratorStore.getState().handleComplete(payload)
+        break
+
+      case MessageTypes.ORCHESTRATION_CANCELLED:
+        useOrchestratorStore.getState().handleCancelled(payload)
+        break
+
+      case MessageTypes.ORCHESTRATION_TASK_RETRYING:
+        useOrchestratorStore.getState().handleTaskRetrying(payload)
+        break
+
+      case MessageTypes.ORCHESTRATION_MERGE_RESULT:
+        useOrchestratorStore.getState().handleMergeResult(payload)
         break
 
       // Connection events

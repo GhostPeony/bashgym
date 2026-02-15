@@ -38,3 +38,7 @@ node_modules/
 # Misc
 nul
 =2.14.0
+
+# Assistant secrets
+assistant/config/config.json
+assistant/.env

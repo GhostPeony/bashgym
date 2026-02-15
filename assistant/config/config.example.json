@@ -1,0 +1,42 @@
+{
+  "agents": {
+    "defaults": {
+      "workspace": "/root/.picoclaw/workspace",
+      "restrict_to_workspace": true,
+      "model": "claude-sonnet-4-5-20250929",
+      "max_tokens": 8192,
+      "temperature": 0.3,
+      "max_tool_iterations": 25
+    }
+  },
+  "channels": {
+    "telegram": {
+      "enabled": false,
+      "token": "YOUR_TELEGRAM_BOT_TOKEN",
+      "allow_from": ["YOUR_TELEGRAM_USER_ID"]
+    },
+    "discord": {
+      "enabled": false,
+      "token": "YOUR_DISCORD_BOT_TOKEN",
+      "allow_from": ["YOUR_DISCORD_USER_ID"]
+    }
+  },
+  "providers": {
+    "anthropic": {
+      "api_key": "",
+      "api_base": ""
+    }
+  },
+  "tools": {
+    "web": {
+      "search": {
+        "api_key": "",
+        "max_results": 5
+      }
+    }
+  },
+  "heartbeat": {
+    "enabled": true,
+    "interval": 60
+  }
+}

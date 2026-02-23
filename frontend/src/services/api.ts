@@ -381,6 +381,19 @@ export const tracesApi = {
     }>(`/traces/auto-classify${queryString ? `?${queryString}` : ''}`, { method: 'POST' })
   },
 
+  // Trigger import of new Claude Code sessions from ~/.claude/projects/
+  triggerImport: () =>
+    request<{ imported: number; total: number; skipped: number; errors: number; new_trace_ids: string[] }>(
+      '/traces/import',
+      { method: 'POST' }
+    ),
+
+  // Get count of traces created since a given ISO timestamp
+  importSince: (since: string) =>
+    request<{ count: number; traces: string[] }>(
+      `/traces/import-since?since=${encodeURIComponent(since)}`
+    ),
+
   // Generate training examples from a trace session
   generateExamples: (traceId: string, options?: { min_success_rate?: number }) =>
     request<{
@@ -1350,6 +1363,7 @@ export interface HFJob {
   created_at: string
   logs_url?: string
   error_message?: string
+  metrics?: Record<string, number>
 }
 
 export interface HFJobSubmitRequest {
@@ -1359,6 +1373,18 @@ export interface HFJobSubmitRequest {
   base_model?: string
   num_epochs?: number
   learning_rate?: number
+  strategy?: 'sft' | 'dpo' | 'distillation'
+  batch_size?: number
+  lora_r?: number
+  lora_alpha?: number
+  max_seq_length?: number
+}
+
+export interface HFHardwareTier {
+  id: string
+  gpu: string | null
+  vram_gb: number
+  cost_per_hour: number
 }
 
 export interface HFSpace {
@@ -1434,6 +1460,9 @@ export const hfApi = {
   // Jobs
   listJobs: () =>
     request<HFJob[]>('/hf/jobs'),
+
+  getHardware: () =>
+    request<HFHardwareTier[]>('/hf/jobs/hardware'),
 
   submitJob: (req: HFJobSubmitRequest) =>
     request<HFJob>('/hf/jobs', {
@@ -1851,13 +1880,63 @@ export const achievementsApi = {
     request<RefreshAchievementsResponse>('/achievements/refresh', { method: 'POST' })
 }
 
-// Agent Chat API
+// Agent Chat API — Session types
+export interface AgentSessionMeta {
+  session_id: string
+  name: string
+  created_at: string
+  updated_at: string
+  message_count: number
+}
+
+export interface AgentSessionMessage {
+  id: string
+  role: string
+  content: string
+  timestamp: number
+  context_used: string[]
+}
+
+export interface PendingAction {
+  type: string  // "shell_command"
+  command: string
+  reason: string
+  token: string
+}
+
+export interface AgentChatResponse {
+  response: string
+  context_used: string[]
+  pending_action?: PendingAction | null
+}
+
 export const agentApi = {
   chat: (message: string, history?: Array<{ role: string; content: string }>) =>
-    request<{ response: string; context_used: string[] }>('/agent/chat', {
+    request<AgentChatResponse>('/agent/chat', {
       method: 'POST',
       body: JSON.stringify({ message, history })
     }),
+
+  confirmAction: (token: string, approved: boolean, sessionId?: string) =>
+    request<AgentChatResponse>('/agent/confirm-action', {
+      method: 'POST',
+      body: JSON.stringify({ token, approved, session_id: sessionId ?? null })
+    }),
+
+  listSessions: () =>
+    request<AgentSessionMeta[]>('/agent/sessions'),
+
+  loadSession: (sessionId: string) =>
+    request<AgentSessionMessage[]>(`/agent/sessions/${sessionId}`),
+
+  saveSession: (sessionId: string, name: string, messages: AgentSessionMessage[]) =>
+    request('/agent/sessions', {
+      method: 'POST',
+      body: JSON.stringify({ session_id: sessionId, name, messages })
+    }),
+
+  deleteSession: (sessionId: string) =>
+    request(`/agent/sessions/${sessionId}`, { method: 'DELETE' }),
 }
 
 // Orchestrator API
@@ -1878,11 +1957,8 @@ export const orchestratorApi = {
     }
   }) => request('/orchestrate/submit', { method: 'POST', body: JSON.stringify(spec) }),
 
-  approveJob: (jobId: string, baseBranch?: string) =>
-    request(`/orchestrate/${jobId}/approve`, {
-      method: 'POST',
-      body: JSON.stringify({ base_branch: baseBranch || 'main' })
-    }),
+  approveJob: (jobId: string) =>
+    request(`/orchestrate/${jobId}/approve`, { method: 'POST', body: '{}' }),
 
   getStatus: (jobId: string) =>
     request(`/orchestrate/${jobId}/status`),

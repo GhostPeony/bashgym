@@ -19,7 +19,8 @@ import {
   Cloud,
   Link2,
   Trophy,
-  Network
+  Network,
+  Rocket
 } from 'lucide-react'
 import { useUIStore, useTrainingStore } from '../../stores'
 import { hooksApi, systemApi } from '../../services/api'
@@ -42,7 +43,7 @@ function MenuItem({ icon, label, onClick, active, badge, primary }: MenuItemProp
         'w-full flex items-center gap-3 px-3 py-2.5 rounded-brutal transition-colors text-left',
         active
           ? 'menu-item-active rounded-brutal'
-          : 'text-text-secondary hover:text-text-primary hover:bg-background-secondary',
+          : 'text-text-secondary hover:text-accent hover:bg-accent/[0.06]',
         primary && 'font-medium'
       )}
     >
@@ -74,7 +75,7 @@ type SecondaryViewId = 'traces' | 'models' | 'evaluator' | 'router' | 'guardrail
 
 interface CollapsibleSectionProps {
   title: string
-  items: Array<{ id: SecondaryViewId; icon: React.ReactNode; label: string }>
+  items: Array<{ id: SecondaryViewId; icon: React.ReactNode; label: string; disabled?: boolean; disabledTitle?: string }>
   defaultExpanded?: boolean
 }
 
@@ -98,7 +99,7 @@ function CollapsibleSection({ title, items, defaultExpanded = false }: Collapsib
         onClick={() => setIsExpanded(!isExpanded)}
         className={clsx(
           'w-full flex items-center gap-2 px-3 py-2 font-mono text-xs uppercase tracking-widest transition-colors',
-          hasActiveItem ? 'text-accent-dark' : 'text-text-muted hover:text-text-secondary'
+          hasActiveItem ? 'text-accent-dark' : 'text-text-muted hover:text-accent/70'
         )}
       >
         <ChevronRight className={clsx('w-3 h-3 transition-transform', isExpanded && 'rotate-90')} />
@@ -106,15 +107,27 @@ function CollapsibleSection({ title, items, defaultExpanded = false }: Collapsib
       </button>
       {isExpanded && (
         <div className="space-y-1 mt-1">
-          {items.map((item) => (
-            <MenuItem
-              key={item.id}
-              icon={item.icon}
-              label={item.label}
-              onClick={() => handleClick(item.id)}
-              active={overlayView === item.id}
-            />
-          ))}
+          {items.map((item) =>
+            item.disabled ? (
+              <div
+                key={item.id}
+                title={item.disabledTitle ?? 'Temporarily unavailable'}
+                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-brutal text-left opacity-40 cursor-not-allowed select-none"
+              >
+                <span className="flex-shrink-0">{item.icon}</span>
+                <span className="flex-1 text-sm text-text-muted">{item.label}</span>
+                <span className="font-mono text-[9px] uppercase tracking-widest text-text-muted border border-border px-1 py-0.5 rounded-brutal">off</span>
+              </div>
+            ) : (
+              <MenuItem
+                key={item.id}
+                icon={item.icon}
+                label={item.label}
+                onClick={() => handleClick(item.id)}
+                active={overlayView === item.id}
+              />
+            )
+          )}
         </div>
       )}
     </div>
@@ -145,7 +158,7 @@ function SecondarySections() {
   ]
 
   return (
-    <div className="mb-4 pt-2 border-t border-border">
+    <div className="mb-4 pt-2 border-t border-accent/15">
       <CollapsibleSection title="Library" items={libraryItems} defaultExpanded />
       <CollapsibleSection title="Tools" items={toolsItems} defaultExpanded />
       <CollapsibleSection title="Progress" items={progressItems} defaultExpanded />
@@ -196,16 +209,7 @@ export function Sidebar() {
   if (!isSidebarOpen) return null
 
   return (
-    <>
-      {/* Backdrop */}
-      <div
-        className="fixed inset-0 z-40"
-        style={{ backgroundColor: 'rgba(27, 32, 64, 0.3)' }}
-        onClick={() => setSidebarOpen(false)}
-      />
-
-      {/* Sidebar */}
-      <aside className="fixed left-0 top-12 bottom-8 w-64 bg-background-card border-r border-border z-50 overflow-y-auto">
+      <aside className="w-64 min-w-[16rem] bg-background-card border-r border-border overflow-y-auto flex-shrink-0">
         <div className="p-4">
           {/* Header - Clickable to go home */}
           <button
@@ -315,8 +319,16 @@ export function Sidebar() {
             </div>
           </MenuSection>
 
-          {/* Settings */}
-          <div className="pt-2 border-t border-border">
+          {/* Settings & Getting Started */}
+          <div className="pt-2 border-t border-accent/15">
+            <MenuItem
+              icon={<Rocket className="w-4 h-4" />}
+              label="Getting Started"
+              onClick={() => {
+                useUIStore.getState().setOnboardingOpen(true)
+                setSidebarOpen(false)
+              }}
+            />
             <MenuItem
               icon={<Settings className="w-4 h-4" />}
               label="Settings"
@@ -328,6 +340,5 @@ export function Sidebar() {
           </div>
         </div>
       </aside>
-    </>
   )
 }

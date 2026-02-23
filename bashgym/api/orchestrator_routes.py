@@ -41,11 +41,6 @@ class SpecRequest(BaseModel):
     llm_config: Optional[LLMConfigRequest] = None
 
 
-class ApproveRequest(BaseModel):
-    """Request to approve a decomposed plan."""
-    base_branch: str = "main"
-
-
 class RetryRequest(BaseModel):
     """Request to retry a failed task."""
     modified_prompt: Optional[str] = None
@@ -145,7 +140,6 @@ async def submit_spec(request: SpecRequest, background_tasks: BackgroundTasks):
         "model": llm_config.model,
     }
 
-
 async def _decompose_spec(job_id: str, spec, llm_config):
     """Background task: decompose spec into TaskDAG."""
     from bashgym.orchestrator.agent import OrchestrationAgent
@@ -198,11 +192,11 @@ async def _decompose_spec(job_id: str, spec, llm_config):
 
 
 @router.post("/{job_id}/approve")
-async def approve_plan(job_id: str, request: ApproveRequest, background_tasks: BackgroundTasks):
-    """Approve the decomposed plan and start execution.
+async def approve_plan(job_id: str, background_tasks: BackgroundTasks):
+    """Approve the decomposed plan. Returns task list for frontend terminal dispatch.
 
-    Workers are spawned as Claude Code CLI subprocesses in isolated
-    git worktrees.
+    The frontend writes 'claude "[prompt]"' to idle terminals directly.
+    No background subprocess execution is started.
     """
     if job_id not in _jobs:
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
@@ -214,14 +208,24 @@ async def approve_plan(job_id: str, request: ApproveRequest, background_tasks: B
             detail=f"Job status is '{job['status']}', expected 'awaiting_approval'"
         )
 
-    job["status"] = "executing"
-    background_tasks.add_task(_execute_dag, job_id, request.base_branch)
+    job["status"] = "dispatched"
 
-    dag = job["dag"]
+    dag = job.get("dag")
+    tasks = []
+    if dag:
+        for task_id, task in dag.nodes.items():
+            tasks.append({
+                "id": task_id,
+                "title": task.title,
+                "worker_prompt": getattr(task, 'worker_prompt', task.description),
+                "priority": task.priority.value if hasattr(task.priority, 'value') else str(task.priority),
+                "dependencies": list(getattr(task, 'dependencies', [])),
+            })
+
     return {
-        "status": "executing",
-        "task_count": len(dag.nodes),
-        "stats": dag.stats,
+        "status": "dispatched",
+        "task_count": len(tasks),
+        "tasks": tasks,
     }
 
 
@@ -244,7 +248,6 @@ async def _execute_dag(job_id: str, base_branch: str):
         logger.error(f"Execution failed for job {job_id}: {e}")
         job["status"] = "failed"
         job["error"] = str(e)
-
 
 @router.get("/{job_id}/status")
 async def get_status(job_id: str):

@@ -6,12 +6,13 @@ export interface TaskNode {
   title: string
   description: string
   priority: 'CRITICAL' | 'HIGH' | 'NORMAL' | 'LOW'
-  status: 'pending' | 'assigned' | 'running' | 'completed' | 'failed' | 'blocked' | 'cancelled' | 'retrying'
+  status: 'pending' | 'assigned' | 'running' | 'completed' | 'failed' | 'blocked' | 'cancelled' | 'retrying' | 'dispatched'
   dependencies: string[]
   files_touched: string[]
   estimated_turns: number
   budget_usd: number
   retry_count: number
+  worker_prompt?: string
   worker_id?: string
   cost_usd?: number
   duration_seconds?: number
@@ -20,7 +21,7 @@ export interface TaskNode {
 
 export interface OrchestratorJob {
   jobId: string
-  status: 'decomposing' | 'awaiting_approval' | 'executing' | 'completed' | 'failed' | 'cancelled'
+  status: 'decomposing' | 'awaiting_approval' | 'executing' | 'dispatched' | 'completed' | 'failed' | 'cancelled'
   title: string
   tasks: Record<string, TaskNode>
   stats: { pending: number; in_progress: number; completed: number; failed: number }
@@ -37,10 +38,7 @@ export interface SpecInput {
   description: string
   constraints?: string[]
   acceptance_criteria?: string[]
-  repository?: string
-  base_branch?: string
   max_budget_usd?: number
-  max_workers?: number
   llm_config?: {
     provider?: string
     model?: string
@@ -53,16 +51,23 @@ interface OrchestratorState {
   jobs: Array<{ jobId: string; status: string; title: string; taskCount?: number }>
   providers: Array<{ provider: string; default_model: string; env_key: string; base_url?: string }>
   activeTab: 'submit' | 'active' | 'history'
+  taskAssignments: Record<string, string>   // taskId → terminalId
+  taskQueue: string[]                        // taskIds waiting for an idle terminal
+  editedPrompts: Record<string, string>      // taskId → user-edited prompt
 
   // Actions
   setActiveTab: (tab: 'submit' | 'active' | 'history') => void
   submitSpec: (spec: SpecInput) => Promise<string | null>
-  approveJob: (jobId: string, baseBranch?: string) => Promise<void>
+  approveJob: (jobId: string) => Promise<void>
   cancelJob: (jobId: string) => Promise<void>
   retryTask: (jobId: string, taskId: string, prompt?: string) => Promise<void>
   fetchStatus: (jobId: string) => Promise<void>
   fetchJobs: () => Promise<void>
   fetchProviders: () => Promise<void>
+  setEditedPrompt: (taskId: string, prompt: string) => void
+  resetEditedPrompt: (taskId: string) => void
+  dispatchToTerminals: () => void
+  dispatchNextQueued: (terminalId: string) => void
 
   // WS handlers
   handleTaskStarted: (payload: any) => void
@@ -77,11 +82,18 @@ interface OrchestratorState {
   handleMergeResult: (payload: any) => void
 }
 
+function escapePrompt(prompt: string): string {
+  return prompt.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+}
+
 export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
   currentJob: null,
   jobs: [],
   providers: [],
   activeTab: 'submit',
+  taskAssignments: {},
+  taskQueue: [],
+  editedPrompts: {},
 
   setActiveTab: (tab) => set({ activeTab: tab }),
 
@@ -108,20 +120,25 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
           mergeFailures: 0,
         },
         activeTab: 'active',
+        taskAssignments: {},
+        taskQueue: [],
+        editedPrompts: {},
       })
       return jobId
     }
     return null
   },
 
-  approveJob: async (jobId, baseBranch) => {
-    const result = await orchestratorApi.approveJob(jobId, baseBranch)
+  approveJob: async (jobId) => {
+    const result = await orchestratorApi.approveJob(jobId)
     if (result.ok) {
       set((state) => ({
         currentJob: state.currentJob
-          ? { ...state.currentJob, status: 'executing' }
+          ? { ...state.currentJob, status: 'dispatched' }
           : null,
       }))
+      // Dispatch tasks to idle terminals
+      get().dispatchToTerminals()
     }
   },
 
@@ -138,6 +155,74 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
 
   retryTask: async (jobId, taskId, prompt) => {
     await orchestratorApi.retryTask(jobId, taskId, prompt)
+  },
+
+  setEditedPrompt: (taskId, prompt) =>
+    set((state) => ({
+      editedPrompts: { ...state.editedPrompts, [taskId]: prompt },
+    })),
+
+  resetEditedPrompt: (taskId) =>
+    set((state) => {
+      const next = { ...state.editedPrompts }
+      delete next[taskId]
+      return { editedPrompts: next }
+    }),
+
+  dispatchToTerminals: () => {
+    const { currentJob, editedPrompts } = get()
+    if (!currentJob) return
+
+    // Lazy-import terminalStore to avoid circular dependency
+    const { useTerminalStore } = require('./terminalStore') as typeof import('./terminalStore')
+    const { sessions, panels } = useTerminalStore.getState()
+
+    const idleTerminalIds = Array.from(sessions.entries())
+      .filter(([, s]) => s.status === 'idle')
+      .map(([id]) => id)
+
+    const tasks = Object.values(currentJob.tasks)
+      .filter((t) => t.status === 'pending')
+      .sort((a, b) => {
+        const order = ['CRITICAL', 'HIGH', 'NORMAL', 'LOW']
+        return order.indexOf(a.priority) - order.indexOf(b.priority)
+      })
+
+    const assignments: Record<string, string> = { ...get().taskAssignments }
+    const queue: string[] = []
+
+    tasks.forEach((task, i) => {
+      const terminalId = idleTerminalIds[i]
+      if (terminalId) {
+        const prompt = editedPrompts[task.id] ?? task.worker_prompt ?? task.description
+        window.bashgym?.terminal.write(terminalId, `claude "${escapePrompt(prompt)}"\r`)
+        assignments[task.id] = terminalId
+      } else {
+        queue.push(task.id)
+      }
+    })
+
+    set({ taskAssignments: assignments, taskQueue: queue })
+  },
+
+  dispatchNextQueued: (terminalId: string) => {
+    const { taskQueue, currentJob, editedPrompts } = get()
+    if (taskQueue.length === 0 || !currentJob) return
+
+    const [nextTaskId, ...remaining] = taskQueue
+    const task = currentJob.tasks[nextTaskId]
+    if (!task) {
+      set({ taskQueue: remaining })
+      return
+    }
+
+    const prompt = editedPrompts[nextTaskId] ?? task.worker_prompt ?? task.description
+    window.bashgym?.terminal.write(terminalId, `claude "${escapePrompt(prompt)}"\r`)
+
+    set((state) => ({
+      taskQueue: remaining,
+      taskAssignments: { ...state.taskAssignments, [nextTaskId]: terminalId },
+    }))
   },
 
   fetchStatus: async (jobId) => {
@@ -158,6 +243,7 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
             estimated_turns: t.estimated_turns || 20,
             budget_usd: t.budget_usd || 2.0,
             retry_count: t.retry_count || 0,
+            worker_prompt: t.worker_prompt,
             worker_id: t.worker_id,
             cost_usd: t.result?.cost_usd,
             duration_seconds: t.result?.duration_seconds,
@@ -165,7 +251,6 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
           }
         }
       }
-      // Map backend stats (uses "running") to frontend expectations (uses "in_progress")
       const rawStats = data.dag?.stats || data.stats || {}
       const stats = {
         pending: rawStats.pending || 0,
@@ -176,7 +261,7 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
       set({
         currentJob: {
           jobId,
-          status: data.status || 'executing',
+          status: data.status || 'dispatched',
           title: data.title || get().currentJob?.title || '',
           tasks,
           stats,
@@ -228,7 +313,6 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
 
   handleReady: (payload) => {
     const { job_id } = payload
-    // Fetch full status to get the DAG
     get().fetchStatus(job_id).then(() => {
       set((state) => ({
         currentJob: state.currentJob?.jobId === job_id
@@ -293,11 +377,7 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
       const taskId = payload.task_id
       const tasks = { ...state.currentJob.tasks }
       if (tasks[taskId]) {
-        tasks[taskId] = {
-          ...tasks[taskId],
-          status: 'failed',
-          error: payload.error,
-        }
+        tasks[taskId] = { ...tasks[taskId], status: 'failed', error: payload.error }
       }
       return {
         currentJob: {

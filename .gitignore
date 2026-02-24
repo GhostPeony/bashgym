@@ -17,6 +17,9 @@ env/
 .env
 frontend.env.local
 
+# Internal config
+cleancontrol.json
+
 # Internal docs (not for public repo)
 docs/PRODUCT.md
 docs/plans/

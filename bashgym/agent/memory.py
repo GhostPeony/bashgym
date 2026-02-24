@@ -7,6 +7,7 @@ Four layers:
   - Prompt builder: assembles all layers into a system prompt section
 """
 
+import copy
 import json
 import uuid
 from datetime import datetime, timezone
@@ -55,11 +56,13 @@ class PeonyMemory:
     def load_profile(self) -> Dict[str, Any]:
         """Load the user profile from disk, or return defaults."""
         if self._profile_path.exists():
-            data = json.loads(self._profile_path.read_text(encoding="utf-8"))
-            # Merge with defaults so new fields are always present
-            merged = {**_PROFILE_DEFAULTS, **data}
-            return merged
-        return dict(_PROFILE_DEFAULTS)
+            try:
+                data = json.loads(self._profile_path.read_text(encoding="utf-8"))
+                defaults = copy.deepcopy(_PROFILE_DEFAULTS)
+                return {**defaults, **data}
+            except (json.JSONDecodeError, OSError):
+                pass
+        return copy.deepcopy(_PROFILE_DEFAULTS)
 
     def update_profile(self, field: str, value: Any) -> None:
         """Update a single profile field and persist to disk.
@@ -85,14 +88,17 @@ class PeonyMemory:
     def _load_all_facts(self) -> List[Dict[str, Any]]:
         """Load the raw facts list from disk."""
         if self._facts_path.exists():
-            data = json.loads(self._facts_path.read_text(encoding="utf-8"))
-            return data.get("facts", [])
+            try:
+                data = json.loads(self._facts_path.read_text(encoding="utf-8"))
+                return data.get("facts", [])
+            except (json.JSONDecodeError, OSError):
+                pass
         return []
 
     def _save_all_facts(self, facts: List[Dict[str, Any]]) -> None:
         """Persist the full facts list to disk, enforcing the cap."""
         # Sort by created_at descending, keep most recent MAX_FACTS
-        facts.sort(key=lambda f: f.get("created_at", ""), reverse=True)
+        facts = sorted(facts, key=lambda f: f.get("created_at", ""), reverse=True)
         facts = facts[:MAX_FACTS]
         self._facts_path.write_text(
             json.dumps({"facts": facts}, indent=2, default=str),

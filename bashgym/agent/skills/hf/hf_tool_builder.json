@@ -1,0 +1,31 @@
+{
+  "name": "hf_tool_builder",
+  "description": "Build reusable scripts for HuggingFace API automation and data pipelines",
+  "trigger_keywords": ["tool", "script", "automate", "build", "api", "pipeline", "reusable"],
+  "tools": [
+    {
+      "name": "hf_create_tool_script",
+      "description": "Generate a reusable CLI script for HuggingFace API operations and data pipelines.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "Natural language description of what the script should do."
+          },
+          "output_format": {
+            "type": "string",
+            "enum": ["shell", "python"],
+            "description": "Script language. Shell preferred for simple tasks, Python for complex logic."
+          },
+          "name": {
+            "type": "string",
+            "description": "Script name (used for filename and help text)."
+          }
+        },
+        "required": ["description"]
+      }
+    }
+  ],
+  "knowledge": "You are operating the HuggingFace Tool Builder skill. This skill creates reusable automation scripts for HuggingFace Hub operations and data pipelines.\n\n## Core Principles\n\n### Every Script Must Support --help\nAll generated scripts must accept a `--help` flag that prints usage information, required arguments, optional flags, and examples. This is non-negotiable. Users should be able to understand a script without reading its source.\n\n### Authentication via Environment Variable\nScripts must use `HF_TOKEN` as an environment variable for authentication. Never hardcode tokens. Never accept tokens as command-line arguments (they appear in process listings). The standard pattern:\n```bash\n: \"${HF_TOKEN:?Error: HF_TOKEN environment variable is required}\"\n```\nOr in Python:\n```python\nimport os\ntoken = os.environ.get(\"HF_TOKEN\")\nif not token:\n    raise ValueError(\"HF_TOKEN environment variable is required\")\n```\n\n### Shell vs Python\n\n**Shell scripts** are preferred for:\n- Simple API calls (curl to HF endpoints)\n- File upload/download operations\n- Piping data between tools\n- Quick one-off automation\n- Composable pipeline steps\n\n**Python scripts** are preferred for:\n- Complex data transformation logic\n- JSON parsing and restructuring\n- Multi-step workflows with error handling\n- Operations requiring the `huggingface_hub` library\n- Tasks involving ML model operations\n\nWhen in doubt, start with shell. Escalate to Python when the logic exceeds what shell handles cleanly.\n\n### Non-Destructive by Default\nScripts must be tested before delivery. Destructive operations (delete repos, overwrite data) must require explicit confirmation flags (`--force`, `--confirm`). Default behavior should be read-only or dry-run. For example, a script that deletes old model checkpoints should default to listing what would be deleted, with `--execute` to actually delete.\n\n### Composable via Piping\nFavor composable solutions. Scripts should read from stdin when no file argument is given, and output structured data (JSON, TSV) to stdout. This enables piping:\n```bash\n./list-models.sh --task text-generation | ./filter-by-size.sh --max-params 7B | ./download-all.sh\n```\n\n## HuggingFace API Endpoints\n\nThe HF REST API provides these key endpoints for script automation:\n\n- `/api/models` \u2014 List and search models. Supports filters: `search`, `author`, `task`, `sort`, `limit`, `direction`.\n- `/api/datasets` \u2014 List and search datasets. Same filter pattern as models.\n- `/api/spaces` \u2014 List and search Spaces.\n- `/api/collections` \u2014 List and search collections.\n- `/api/daily_papers` \u2014 Retrieve daily paper listings.\n- `/api/models/{repo_id}` \u2014 Get detailed model metadata.\n- `/api/datasets/{repo_id}` \u2014 Get detailed dataset metadata.\n\nAll endpoints return JSON. Base URL: `https://huggingface.co`. Authenticated requests use `Authorization: Bearer $HF_TOKEN` header.\n\nThe `hf` CLI tool is also available for common operations and can be called from scripts. It handles authentication, pagination, and error handling automatically.\n\n## IMPORTANT: Do Not Read OpenAPI Spec Directly\n\nThe HuggingFace OpenAPI specification is extremely large and should NOT be fetched or parsed in scripts. Instead, use the specific endpoint patterns documented above, or use the `huggingface_hub` Python library which provides typed interfaces.\n\n## Script Structure Best Practices\n\nShell scripts should follow this structure:\n1. Shebang line (`#!/usr/bin/env bash`)\n2. `set -euo pipefail` for safety\n3. Help text function\n4. Argument parsing\n5. Input validation\n6. Main logic\n7. Output formatting\n\nPython scripts should follow:\n1. Shebang line (`#!/usr/bin/env python3`)\n2. Docstring with usage\n3. Imports\n4. `argparse` argument parsing with help text\n5. Main function\n6. `if __name__ == \"__main__\":` guard\n\n## Error Handling\n\nScripts must handle common failure modes:\n- Missing HF_TOKEN: Clear error message explaining how to set it.\n- Network failures: Retry logic for transient errors (HTTP 429, 500, 503).\n- Invalid repo IDs: Validate format before making API calls.\n- Rate limiting: Respect HF API rate limits, add delays in batch operations.\n- Partial failures in batch operations: Log failures, continue processing, report summary at end.\n\n## Common Pitfalls\n\n- Not quoting variables in shell scripts \u2014 breaks on repo names with special characters.\n- Using `curl` without `-f` flag \u2014 masks HTTP errors.\n- Not handling pagination \u2014 API endpoints return max 100 results per page by default.\n- Writing JSON with `echo` instead of `jq` \u2014 produces invalid JSON on special characters.\n- Forgetting to make scripts executable (`chmod +x`).\n- Not testing with dry-run before destructive operations."
+}

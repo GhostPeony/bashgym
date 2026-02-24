@@ -1,0 +1,57 @@
+{
+  "name": "hf_evaluation",
+  "description": "Add evaluation results to model cards, run benchmarks with lighteval/vLLM",
+  "trigger_keywords": ["evaluate", "eval", "benchmark", "metric", "score", "model-card", "leaderboard"],
+  "tools": [
+    {
+      "name": "hf_add_eval_results",
+      "description": "Extract evaluation tables from a model README and add structured results to the model-index YAML metadata.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "repo_id": {
+            "type": "string",
+            "description": "Model repository identifier (e.g. 'username/my-model')"
+          },
+          "table_number": {
+            "type": "integer",
+            "description": "Index of the markdown table to extract (0-based). Use inspect-tables first to identify."
+          },
+          "apply": {
+            "type": "boolean",
+            "description": "If true, write the results to the model card. If false, preview only."
+          },
+          "create_pr": {
+            "type": "boolean",
+            "description": "If true, create a pull request instead of committing directly."
+          }
+        },
+        "required": ["repo_id"]
+      }
+    },
+    {
+      "name": "hf_run_evaluation",
+      "description": "Run model evaluation using lighteval with vLLM or accelerate backend.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "model_id": {
+            "type": "string",
+            "description": "Model to evaluate (HuggingFace repo ID or local path)."
+          },
+          "tasks": {
+            "type": "string",
+            "description": "Comma-separated list of evaluation tasks (e.g. 'mmlu,hellaswag,arc_challenge')."
+          },
+          "backend": {
+            "type": "string",
+            "enum": ["vllm", "accelerate"],
+            "description": "Inference backend. vLLM is faster, accelerate is more compatible."
+          }
+        },
+        "required": ["model_id", "tasks"]
+      }
+    }
+  ],
+  "knowledge": "You are operating the HuggingFace Evaluation skill. This skill adds structured evaluation results to model cards and runs benchmarks using lighteval.\n\n## CRITICAL RULE: Check for Existing PRs First\n\nBefore creating any pull request on a model repo, ALWAYS check for existing open PRs first using `get-prs`. This prevents duplicate PRs and conflicting changes. If an open PR already modifies the model card or evaluation metadata, update that PR instead of creating a new one.\n\n## Adding Evaluation Results to Model Cards\n\nThe primary workflow for adding eval results to model cards:\n\n1. **Inspect tables first**: Run `inspect-tables` on the repo to see all markdown tables in the README and their indices. This tells you which table_number to target.\n2. **Preview before applying**: Always run without `--apply` first to see the generated YAML. Verify the metric names, dataset names, and scores are correct.\n3. **Apply or create PR**: Use `--apply` to commit directly, or `--create-pr` to open a pull request for review. PRs are preferred for models you do not own.\n\nThe tool extracts markdown tables from the README and converts them into structured `model-index` YAML metadata in the model card front matter. This metadata powers the HuggingFace leaderboard and model comparison features.\n\n### YAML Model-Index Format\n\nThe generated YAML follows this structure:\n```yaml\nmodel-index:\n- name: ModelName\n  results:\n  - task:\n      type: text-generation\n    dataset:\n      type: benchmark_name\n      name: Benchmark Name\n    metrics:\n    - type: accuracy\n      value: 85.2\n```\n\nIMPORTANT: Never include markdown formatting in YAML model names. Raw text only \u2014 no bold, italic, or links. The YAML parser will break.\n\n## Running Evaluations with lighteval\n\nlighteval is the recommended evaluation framework. It supports two backends:\n\n- **vLLM**: Faster inference through continuous batching. Preferred for GPU evaluation. Requires vLLM installation and compatible model architecture.\n- **accelerate**: Broader model compatibility. Works with any HuggingFace model. Slower but more reliable fallback.\n\nCommon evaluation tasks:\n- `mmlu` \u2014 Massive Multitask Language Understanding (general knowledge)\n- `hellaswag` \u2014 Commonsense reasoning\n- `arc_challenge` \u2014 Science reasoning\n- `truthfulqa` \u2014 Factual accuracy\n- `gsm8k` \u2014 Math reasoning\n- `winogrande` \u2014 Coreference resolution\n\nFor custom tasks, provide a task definition file. Tasks can be combined with commas.\n\n## Alternative Evaluation Methods\n\n- **inspect-ai**: Alternative evaluation framework with different task suites.\n- **Artificial Analysis API**: Import benchmark results from Artificial Analysis for commercial models. Useful when you cannot run evals locally.\n- **Custom scripts**: For domain-specific evaluation, write custom evaluation scripts and record results manually.\n\n## Evaluation Commands Reference\n\nCore commands available:\n- `inspect-tables` \u2014 List markdown tables in a model card with indices\n- `extract-table` \u2014 Extract a specific table as structured data\n- `preview-yaml` \u2014 Generate model-index YAML without applying\n- `apply-results` \u2014 Write model-index YAML to the model card\n- `get-prs` \u2014 List open PRs on a repo (always check before creating)\n- `run-eval` \u2014 Execute evaluation with lighteval\n- `import-results` \u2014 Import results from external sources\n\n## Common Pitfalls\n\n- Table extraction can fail if the markdown table is malformed. Verify with inspect-tables first.\n- Model-index YAML must not duplicate existing entries. The tool merges by default, but conflicts are possible.\n- vLLM backend requires the model to fit in GPU memory. For large models, use accelerate with device_map='auto'.\n- Some tasks require specific prompt templates. Check lighteval docs for task-specific configurations.\n- Leaderboard visibility requires the model-index to follow exact schema. Preview and validate before committing.\n- When evaluating quantized models (GGUF, GPTQ), ensure the backend supports the quantization format."
+}

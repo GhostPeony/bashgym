@@ -1,0 +1,66 @@
+{
+  "name": "hf_model_trainer",
+  "description": "Fine-tune language models with TRL \u2014 SFT, DPO, GRPO, reward modeling on HF cloud",
+  "trigger_keywords": ["train", "fine-tune", "finetune", "sft", "dpo", "grpo", "lora", "qlora", "trl", "reward"],
+  "tools": [
+    {
+      "name": "hf_estimate_training",
+      "description": "Estimate training cost, duration, and hardware requirements for a fine-tuning job.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "model_id": {
+            "type": "string",
+            "description": "Base model to fine-tune (e.g. 'Qwen/Qwen2.5-Coder-7B-Instruct')."
+          },
+          "dataset_id": {
+            "type": "string",
+            "description": "Training dataset on HuggingFace Hub."
+          },
+          "strategy": {
+            "type": "string",
+            "enum": ["sft", "dpo", "grpo"],
+            "description": "Training strategy."
+          }
+        },
+        "required": ["model_id", "dataset_id"]
+      }
+    },
+    {
+      "name": "hf_start_cloud_training",
+      "description": "Submit a TRL fine-tuning job to HuggingFace cloud infrastructure.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "model_id": {
+            "type": "string",
+            "description": "Base model to fine-tune (HuggingFace repo ID)."
+          },
+          "dataset_id": {
+            "type": "string",
+            "description": "Training dataset on HuggingFace Hub."
+          },
+          "strategy": {
+            "type": "string",
+            "enum": ["sft", "dpo", "grpo"],
+            "description": "Training strategy: SFT (supervised), DPO (preference), or GRPO (group relative policy optimization)."
+          },
+          "flavor": {
+            "type": "string",
+            "description": "GPU flavor for training (e.g. 't4-small', 'a10g-large', 'a100-large')."
+          },
+          "push_to_hub": {
+            "type": "boolean",
+            "description": "Whether to push the trained model to HuggingFace Hub. MUST be true for cloud training."
+          },
+          "hub_model_id": {
+            "type": "string",
+            "description": "Target repo for the trained model (e.g. 'username/my-finetuned-model')."
+          }
+        },
+        "required": ["model_id", "dataset_id", "strategy"]
+      }
+    }
+  ],
+  "knowledge": "You are operating the HuggingFace Model Trainer skill. This skill manages fine-tuning of language models using TRL (Transformer Reinforcement Learning) on HuggingFace cloud infrastructure.\n\n## CRITICAL: Persist Training Results\n\nCloud training environments are EPHEMERAL. If you do not set `push_to_hub=True` AND specify a `hub_model_id`, ALL TRAINING IS LOST when the job ends. There is no recovery. This is the number one cause of wasted compute. Every training job MUST include:\n```python\npush_to_hub=True\nhub_model_id=\"username/my-finetuned-model\"\n```\n\n## CRITICAL: Include Trackio Monitoring\n\nAlways integrate Trackio for real-time training monitoring. Without it, you have no visibility into training progress on ephemeral instances. Add `report_to=\"trackio\"` in the training arguments. See the hf_trackio skill for setup details.\n\n## Training Strategies\n\n### SFT (Supervised Fine-Tuning)\nThe standard approach. Train on prompt-response pairs. Dataset format: `messages` column with role/content conversation turns, OR `text` column with pre-formatted text.\n\n### DPO (Direct Preference Optimization)\nTrain on preference pairs. Dataset MUST have three columns:\n- `prompt` \u2014 The input prompt\n- `chosen` \u2014 The preferred response\n- `rejected` \u2014 The dispreferred response\n\nDPO requires a reference model (the base model before training). TRL handles this automatically.\n\n### GRPO (Group Relative Policy Optimization)\nRL-based training using group rewards. Dataset needs only a `prompt` column \u2014 the model generates responses and a reward function scores them. Best for math, coding, and reasoning tasks where correctness is verifiable.\n\n## TRL Configuration Gotchas\n\n**max_length vs max_seq_length**: TRL uses `max_length`, NOT `max_seq_length`. The default is 1024 tokens. For longer conversations or code, increase this explicitly. Using the wrong parameter name silently falls back to default.\n\n**Default timeout**: Cloud jobs default to 30 minutes. Training almost always takes longer. Set timeout to at least 2 hours for small models, 6-12 hours for larger ones.\n\n## Dataset Validation\n\nALWAYS validate the dataset before submitting a GPU training job. Check:\n1. Column names match the strategy requirements (messages for SFT, prompt/chosen/rejected for DPO, prompt for GRPO).\n2. Data types are correct (strings, not None/null values).\n3. Sample a few rows to verify content quality.\n4. Check dataset size \u2014 too small (<100 examples) leads to overfitting, too large (>1M) may need data selection.\n\nValidation is free; GPU time is not. A 5-minute validation check can save hours of wasted compute.\n\n## Hardware Selection Guide\n\n| Model Size | Quick Demo | Production Training |\n|-----------|------------|--------------------|\n| <1B | t4-small | t4-small/t4-medium |\n| 1-3B | t4-small | a10g-small |\n| 3-7B | a10g-small | a10g-large/a100-large |\n| 7-13B | a100-large | a100-large/h100x1 |\n| 13-30B | h100x1 | h100x4 |\n| 30-70B | h100x4 | h100x8 |\n\nFor quick demos and testing, use the smallest viable flavor with a small data subset. For production training, size up and use full datasets.\n\n## LoRA and QLoRA\n\nFull fine-tuning is expensive and often unnecessary. LoRA (Low-Rank Adaptation) trains a small adapter on top of the frozen base model, reducing memory by 60-80%. QLoRA adds 4-bit quantization of the base model, further reducing memory requirements.\n\nRecommendations:\n- Models >3B: Always use LoRA or QLoRA.\n- Models <1B: Full fine-tuning is feasible on t4-small.\n- QLoRA enables 7B fine-tuning on a single T4 (16GB VRAM).\n\n## Multi-GPU Training\n\nFor models requiring multiple GPUs, TRL with accelerate handles distributed training automatically. No special configuration needed \u2014 select a multi-GPU flavor (h100x4, h100x8) and accelerate detects the topology. Ensure your batch size is divisible by the number of GPUs for even distribution.\n\n## Save Strategy\n\nFor production training, set `save_strategy=\"steps\"` with `save_steps=500` (or appropriate interval). This creates intermediate checkpoints on the Hub, protecting against crashes and allowing training resumption. Without a save strategy, only the final model is saved \u2014 and if the job crashes, nothing is saved.\n\n## Post-Training: GGUF Conversion\n\nFor local deployment (llama.cpp, ollama), convert the trained model to GGUF format. Common quantizations: Q4_K_M (good quality/size balance), Q5_K_M (higher quality), Q8_0 (near-lossless). Conversion can run on CPU \u2014 no GPU needed.\n\n## Common Pitfalls\n\n- Forgetting `push_to_hub=True` \u2014 all training lost.\n- Using `max_seq_length` instead of `max_length` \u2014 silently truncates to 1024.\n- Default 30min timeout \u2014 kills most training jobs.\n- Wrong column names for DPO (needs prompt/chosen/rejected, not instruction/preferred/dispreferred).\n- No Trackio integration \u2014 blind to training progress.\n- Not validating dataset before GPU submission \u2014 expensive errors."
+}

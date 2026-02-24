@@ -9,6 +9,14 @@ export default defineConfig({
     electron({
       main: {
         entry: 'electron/main.ts',
+        // Don't auto-manage Electron lifecycle — the dev script launches Electron
+        // separately via `wait-on && electron .`. Without this override, the plugin
+        // calls `taskkill` on a stale PID from a previous session, which throws and
+        // crashes Vite. It also wires Electron exit → Vite exit which kills the
+        // dev server whenever the window closes.
+        onstart() {
+          // no-op: Electron is started by the dev script, not the plugin
+        },
         vite: {
           build: {
             outDir: 'dist-electron',
@@ -36,6 +44,10 @@ export default defineConfig({
       '@stores': path.resolve(__dirname, './src/stores'),
       '@services': path.resolve(__dirname, './src/services')
     }
+  },
+  server: {
+    port: 5174,
+    strictPort: true,
   },
   build: {
     rollupOptions: {

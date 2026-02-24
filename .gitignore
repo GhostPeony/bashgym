@@ -19,6 +19,9 @@ frontend.env.local
 
 # Internal docs (not for public repo)
 docs/PRODUCT.md
+docs/plans/
+docs/research/
+docs/bashgym-screenshot.png
 
 # IDE
 .vscode/

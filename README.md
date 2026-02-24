@@ -44,8 +44,7 @@ The flywheel is self-reinforcing: more usage generates more traces, which produc
 | **Multi-Cloud Deployment** | Export to HuggingFace, NVIDIA NIM, Ollama |
 | **Comprehensive Benchmarks** | HumanEval, MBPP, BigCodeBench, SWE-bench, and more |
 | **Safety Guardrails** | Injection detection, content moderation, dangerous command blocking |
-| **Multi-Agent Orchestrator** | Decompose specs into parallel tasks with DAG-based execution |
-| **Peony Chat Assistant** | Discord/Telegram bot with full system control via natural language |
+| **Peony Agent Chat** | In-app assistant with tool-use: import traces, search HuggingFace, trigger training, run shell commands |
 
 ---
 
@@ -137,9 +136,7 @@ Key terms used throughout Bash Gym:
 | **Judge** | The verification layer. Scores traces, runs tests, checks safety, evaluates quality. |
 | **Factory** | The data synthesis layer. Transforms raw traces into training-ready datasets with privacy guarantees. |
 | **Gym** | The training layer. Fine-tunes models using various strategies (SFT, DPO, GRPO, etc.). |
-| **Task DAG** | Directed Acyclic Graph. The orchestrator decomposes a spec into tasks with dependencies — tasks execute in parallel where possible. |
-| **Worktree** | A git worktree — an isolated copy of the repository. Each orchestrator worker gets its own worktree to avoid conflicts. |
-| **Peony** | The conversational AI assistant that provides remote control over Bash Gym via Discord and Telegram. |
+| **Peony** | The AI assistant built into Bash Gym. Available in-app via the Agent panel with tool-use, and remotely via Discord/Telegram. |
 | **PII** | Personally Identifiable Information. Emails, phone numbers, API keys, etc. Automatically detected and scrubbed from training data. |
 | **Unsloth** | A training acceleration library. Makes fine-tuning 2-5x faster and uses 50-80% less memory. |
 
@@ -237,99 +234,41 @@ For autonomous batch runs: agents run in isolated Docker containers, network-iso
 
 ## Peony Assistant
 
-Peony is a conversational AI assistant that provides full remote control over the entire BashGym ecosystem via Discord and Telegram. Built on a Go runtime forked from [picoclaw](https://github.com/sipeed/picoclaw), it runs as a Docker service alongside the BashGym API.
+Peony is the AI assistant built into Bash Gym. She lives in the **Agent** panel and has live access to system context — active training runs, recent traces, GPU status, connected HuggingFace account — and can take real actions on your behalf.
 
-```
-┌──────────────────┐         ┌──────────────────┐
-│  Discord/Telegram │         │   Electron UI    │
-│    (channels)     │         │   (existing)     │
-└────────┬─────────┘         └────────┬─────────┘
-         │                            │
-         ▼                            │
-┌──────────────────┐                  │
-│  peony-gateway   │                  │
-│   (Go binary)    │                  │
-│   Skills → HTTP  │                  │
-└────────┬─────────┘                  │
-         │ Docker internal network    │
-         ▼                            ▼
-┌──────────────────────────────────────┐
-│         bashgym-api (FastAPI)        │
-│         port 8003                    │
-└──────────────────────────────────────┘
-```
+### In-App Tool Use
 
-### Skills
+| Tool | What it does |
+|------|-------------|
+| `import_traces` | Pulls new Claude Code sessions from `~/.claude/projects/` into the pipeline |
+| `classify_pending_traces` | Auto-classifies pending traces into gold/silver/bronze/failed tiers |
+| `start_training` | Kicks off an SFT, DPO, or GRPO training run |
+| `get_training_status` | Reports active jobs, current loss, and ETA |
+| `hf_search_models` | Searches HuggingFace Hub by task, sorted by downloads or likes |
+| `hf_test_inference` | Runs a prompt against any HF Inference API model |
+| `hf_evaluate_model` | Scores a model using accuracy, F1, BLEU, or ROUGE against local validation data |
+| `run_shell_command` | Runs a shell command — always shows a confirmation dialog first |
 
-| Skill | Triggers | Operations |
-|-------|----------|------------|
-| **system** | "system status", "GPU usage", "health check" | Health, hardware info, GPU, stats |
-| **orchestrator** | "submit spec", "approve plan", "retry task" | Spec submission, plan approval, worker monitoring |
-| **training** | "start training", "check progress", "stop run" | SFT/DPO/GRPO start/stop/pause/resume |
-| **traces** | "gold traces", "promote", "generate examples" | Browse, promote/demote, example generation, export |
-| **models** | "list models", "compare", "deploy to Ollama" | Leaderboard, comparison, evaluation, deployment |
-| **factory** | "generate data", "create seeds" | Synthetic generation, seed management |
+Shell commands always pause for your approval before running. The command, reason, and output are shown inline in the chat.
 
-### Setup
+### Remote Access (Docker)
+
+Peony is also available as a Discord/Telegram bot via the Docker stack, built on a Go runtime.
 
 ```bash
-# 1. Copy config templates
+# Copy config templates and fill in your tokens
 cp assistant/.env.example assistant/.env
 cp assistant/config/config.example.json assistant/config/config.json
+# TELEGRAM_BOT_TOKEN, DISCORD_BOT_TOKEN, ANTHROPIC_API_KEY
 
-# 2. Fill in your tokens (TELEGRAM_BOT_TOKEN, DISCORD_BOT_TOKEN, ANTHROPIC_API_KEY)
-# 3. Start the full stack
+# Start the full stack
 docker compose up
 
-# 4. Or run a one-shot query
+# Or run a one-shot query
 docker compose run --rm peony-agent -m "system status"
 ```
 
----
-
-## Orchestrator
-
-The orchestrator decomposes development specs into parallel tasks and dispatches them to isolated Claude Code workers.
-
-### How It Works
-
-```
-1. User submits a spec (title, description, constraints, acceptance criteria)
-2. LLM decomposes spec into a Task DAG (directed acyclic graph)
-3. User reviews and approves the plan
-4. Tasks execute in dependency order with parallel workers
-5. Each worker runs in an isolated git worktree
-6. Results merge back, traces feed the training pipeline
-```
-
-### Multi-Provider Planning
-
-| Provider | Models | Notes |
-|----------|--------|-------|
-| **Anthropic** | Claude Opus 4.6, Sonnet 4.5 | Default, recommended |
-| **OpenAI** | GPT-4o, o1 | Alternative |
-| **Google** | Gemini 2.5 Pro | Alternative |
-| **Ollama** | qwen2.5-coder:32b, etc. | Local, free |
-
-Workers always use Claude Code CLI regardless of planning provider.
-
-### Example
-
-```bash
-curl -X POST http://localhost:8003/api/orchestrate/submit \
-  -H "Content-Type: application/json" \
-  -d '{
-    "title": "Add JWT authentication",
-    "description": "Implement login/register with JWT tokens",
-    "constraints": ["Use existing User model", "Add pytest tests"],
-    "acceptance_criteria": ["All tests pass", "Proper error handling"],
-    "max_workers": 3,
-    "budget_usd": 5.0
-  }'
-
-# Or via Peony (Discord/Telegram):
-# "Build me an auth system with JWT, max 3 workers, $5 budget"
-```
+Add your Discord/Telegram user ID to the whitelist in `assistant/config/config.json`.
 
 ---
 
@@ -379,8 +318,7 @@ The Bash Gym frontend is an Electron + React application with real-time WebSocke
 | **Models** | Browse trained models, view lineage, compare performance |
 | **Factory** | Generate synthetic data, manage datasets |
 | **Traces** | Explore gold/silver/bronze/failed traces, view quality metrics |
-| **Orchestrator** | Submit specs, review plans, monitor parallel workers |
-| **Agent** | Conversational interface to Peony assistant |
+| **Agent** | Peony — conversational assistant with live system context and tool-use |
 | **Router** | Monitor teacher/student routing decisions and performance |
 | **Evaluator** | Run benchmarks, view evaluation results |
 | **Guardrails** | Monitor safety checks, PII redaction events |
@@ -396,6 +334,8 @@ Full HuggingFace ecosystem integration for cloud training via Unsloth Jobs, data
 |---------|-------------|
 | **Cloud Training (Unsloth Jobs)** | Submit training jobs via `hf jobs uv run` with PEP 723 inline deps |
 | **SFT / DPO / Distillation** | All three training strategies supported in cloud mode |
+| **Model Hub Search** | Search HuggingFace Hub by task, sorted by downloads or likes |
+| **Model Evaluation** | Score any HF model against local validation data using accuracy, F1, BLEU, or ROUGE |
 | **Dataset Management** | Upload and manage training datasets on HF Hub |
 | **Inference API** | Use HuggingFace Inference Providers for generation and embeddings |
 | **Spaces Deployment** | Deploy interactive Gradio demos |

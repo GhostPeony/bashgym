@@ -80,6 +80,10 @@ python start_api.py
 | `POST` | `/api/traces/{trace_id}/promote` | Promote to gold |
 | `POST` | `/api/traces/{trace_id}/demote` | Demote to failed |
 | `POST` | `/api/traces/{trace_id}/generate-examples` | Generate training examples |
+| `POST` | `/api/traces/import` | Import new sessions from `~/.claude/projects/` |
+| `GET` | `/api/traces/import-since` | Count traces imported since a given ISO timestamp (`?since=`) |
+| `POST` | `/api/traces/auto-classify` | Auto-classify pending traces into quality tiers |
+| `POST` | `/api/traces/sync` | Sync traces from `~/.bashgym/` into the project data directory |
 
 ### Factory
 
@@ -95,18 +99,6 @@ python start_api.py
 | `POST` | `/api/factory/designer/from-hf` | Load from HuggingFace |
 | `POST` | `/api/factory/designer/push-to-hub` | Push to HuggingFace Hub |
 
-### Orchestrator
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/orchestrate/submit` | Submit a development spec |
-| `POST` | `/api/orchestrate/{job_id}/approve` | Approve plan and start execution |
-| `GET` | `/api/orchestrate/{job_id}/status` | Worker progress and task states |
-| `POST` | `/api/orchestrate/{job_id}/task/{task_id}/retry` | Retry a failed task |
-| `GET` | `/api/orchestrate/jobs` | List all jobs |
-| `DELETE` | `/api/orchestrate/{job_id}` | Delete a job |
-| `GET` | `/api/orchestrate/providers` | List configured LLM providers |
-
 ### Benchmarks
 
 | Method | Endpoint | Description |
@@ -119,10 +111,11 @@ python start_api.py
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/agent/chat` | Send chat message to Peony |
+| `POST` | `/api/agent/chat` | Send chat message to Peony (returns response + optional `pending_action`) |
+| `POST` | `/api/agent/confirm-action` | Approve or deny a pending shell command |
 | `GET` | `/api/agent/sessions` | List chat sessions |
 | `GET` | `/api/agent/sessions/{session_id}` | Get session details |
-| `POST` | `/api/agent/sessions` | Create new session |
+| `POST` | `/api/agent/sessions` | Save session |
 | `DELETE` | `/api/agent/sessions/{session_id}` | Delete session |
 
 ### HuggingFace
@@ -138,6 +131,8 @@ python start_api.py
 | `GET` | `/api/hf/jobs/{job_id}` | Get job status |
 | `GET` | `/api/hf/jobs/{job_id}/logs` | Stream job logs |
 | `DELETE` | `/api/hf/jobs/{job_id}` | Cancel job |
+| `GET` | `/api/hf/models/search` | Search HuggingFace Hub (`?task=&sort=downloads&limit=10`) |
+| `POST` | `/api/hf/evaluate` | Evaluate a model with accuracy, F1, BLEU, or ROUGE metrics |
 | `POST` | `/api/hf/inference/generate` | Use HF inference API |
 | `POST` | `/api/hf/inference/embed` | Generate embeddings |
 | `GET` | `/api/hf/spaces` | List Spaces |
@@ -208,7 +203,6 @@ Connect to `ws://localhost:8003/ws` for real-time updates.
 | **Training** | `training:progress`, `training:complete`, `training:failed`, `training:log` |
 | **Tasks** | `task:status`, `task:complete` |
 | **Traces** | `trace:added`, `trace:promoted`, `trace:demoted` |
-| **Orchestrator** | `orchestrator:plan_ready`, `orchestrator:task_complete`, `orchestrator:job_complete`, `orchestrator:worker_log` |
 | **Router** | `router:stats`, `router:decision` |
 | **Verification** | `verification:result` |
 | **Guardrails** | `guardrail:blocked`, `guardrail:warn`, `guardrail:pii_redacted` |

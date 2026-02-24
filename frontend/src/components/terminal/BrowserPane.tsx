@@ -56,7 +56,13 @@ const PICKER_SCRIPT = `(function() {
   document.addEventListener('click', onClick, true);
 })();`
 
-async function copyDataUrlToClipboard(dataUrl: string) {
+async function copyDataUrlToClipboard(dataUrl: string): Promise<void> {
+  // Electron's native clipboard is reliable; navigator.clipboard.write() is not in Electron
+  if (window.bashgym?.clipboard?.writeImage) {
+    const result = await window.bashgym.clipboard.writeImage(dataUrl)
+    if (result.success) return
+  }
+  // Web fallback (dev server / browser context)
   const blob = await fetch(dataUrl).then(r => r.blob())
   await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
 }
@@ -172,8 +178,11 @@ export function BrowserPane({ id, title, url: initialUrl, isActive }: BrowserPan
       const dataUrl = await captureScreenshot()
       if (!dataUrl) throw new Error('No screenshot')
       setPanelThumbnail(id, dataUrl)
-      await copyDataUrlToClipboard(dataUrl)
-      await routeToConnectedTerminals(dataUrl)
+      // Run clipboard copy and terminal routing independently — one failure shouldn't block the other
+      await Promise.allSettled([
+        copyDataUrlToClipboard(dataUrl),
+        routeToConnectedTerminals(dataUrl)
+      ])
       setActionStatus('done')
       setTimeout(() => setActionStatus('idle'), 2000)
     } catch {
@@ -199,8 +208,10 @@ export function BrowserPane({ id, title, url: initialUrl, isActive }: BrowserPan
 
           const dataUrl = await captureScreenshot(bounds)
           if (dataUrl) {
-            await copyDataUrlToClipboard(dataUrl)
-            await routeToConnectedTerminals(dataUrl)
+            await Promise.allSettled([
+              copyDataUrlToClipboard(dataUrl),
+              routeToConnectedTerminals(dataUrl)
+            ])
           }
         } catch { /* ignore poll errors */ }
       }, 200)

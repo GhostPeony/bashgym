@@ -90,6 +90,11 @@ export interface BrowserAPI {
   }>
 }
 
+export interface ClipboardAPI {
+  writeImage: (dataUrl: string) => Promise<{ success: boolean; error?: string }>
+  writeText: (text: string) => Promise<{ success: boolean; error?: string }>
+}
+
 export interface BashGymAPI {
   terminal: TerminalAPI
   theme: ThemeAPI
@@ -98,6 +103,7 @@ export interface BashGymAPI {
   files: FilesAPI
   window: WindowAPI
   browser: BrowserAPI
+  clipboard: ClipboardAPI
 }
 
 // Expose protected methods to renderer
@@ -142,6 +148,10 @@ contextBridge.exposeInMainWorld('bashgym', {
   browser: {
     screenshot: (webContentsId: number, rect?: { x: number; y: number; width: number; height: number; vpW: number; vpH: number }) =>
       ipcRenderer.invoke('browser:screenshot', webContentsId, rect)
+  },
+  clipboard: {
+    writeImage: (dataUrl: string) => ipcRenderer.invoke('clipboard:writeImage', dataUrl),
+    writeText: (text: string) => ipcRenderer.invoke('clipboard:writeText', text)
   },
   window: {
     minimize: () => ipcRenderer.invoke('window:minimize'),

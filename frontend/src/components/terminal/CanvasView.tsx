@@ -79,7 +79,11 @@ function buildNodeData(
       onFocus,
       onClose,
       onCopyPath: (path: string) => {
-        navigator.clipboard.writeText(path)
+        if (window.bashgym?.clipboard?.writeText) {
+          window.bashgym.clipboard.writeText(path)
+        } else {
+          navigator.clipboard.writeText(path)
+        }
       }
     } as PreviewNodeData
   } else if (panel.type === 'browser') {
@@ -91,7 +95,11 @@ function buildNodeData(
       onFocus,
       onClose,
       onCopyUrl: (url: string) => {
-        navigator.clipboard.writeText(url)
+        if (window.bashgym?.clipboard?.writeText) {
+          window.bashgym.clipboard.writeText(url)
+        } else {
+          navigator.clipboard.writeText(url)
+        }
       },
       onOpenExternal: (url: string) => {
         window.open(url, '_blank')

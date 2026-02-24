@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, Menu, webContents } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, Menu, webContents, clipboard, nativeImage } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
@@ -451,6 +451,26 @@ ipcMain.handle('files:stat', async (_, filePath: string) => {
         created: stats.birthtimeMs
       }
     }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  }
+})
+
+// Clipboard handlers — native Electron clipboard is reliable; navigator.clipboard.write() is not
+ipcMain.handle('clipboard:writeImage', (_, dataUrl: string) => {
+  try {
+    const img = nativeImage.createFromDataURL(dataUrl)
+    clipboard.writeImage(img)
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  }
+})
+
+ipcMain.handle('clipboard:writeText', (_, text: string) => {
+  try {
+    clipboard.writeText(text)
+    return { success: true }
   } catch (error) {
     return { success: false, error: String(error) }
   }

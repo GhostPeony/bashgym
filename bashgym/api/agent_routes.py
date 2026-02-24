@@ -763,3 +763,80 @@ async def delete_session(session_id: str):
     _write_sessions_index(index)
 
     return {"status": "ok", "session_id": session_id}
+
+
+# ---------------------------------------------------------------------------
+# Session summarization
+# ---------------------------------------------------------------------------
+
+@router.post("/summarize-session/{session_id}")
+async def summarize_session(session_id: str):
+    """Generate and save an episode summary for a completed session."""
+    import httpx
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY not configured")
+
+    # Load session messages
+    log_path = _get_peony_logs_dir() / f"{session_id}.jsonl"
+    if not log_path.exists():
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    messages_text = []
+    for line in log_path.read_text(encoding="utf-8").strip().splitlines():
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if record.get("type") == "message":
+            messages_text.append(f"{record['role']}: {record['content']}")
+
+    if not messages_text:
+        raise HTTPException(status_code=400, detail="Session has no messages")
+
+    transcript = "\n".join(messages_text[-20:])  # Last 20 messages max
+
+    # Generate summary via Claude Haiku (fast, cheap)
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": "claude-haiku-4-5-20251001",
+                    "max_tokens": 200,
+                    "messages": [{
+                        "role": "user",
+                        "content": (
+                            "Summarize this conversation in 2-3 sentences. "
+                            "Focus on what the user wanted, what was accomplished, "
+                            "and any decisions made.\n\n" + transcript
+                        ),
+                    }],
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except httpx.HTTPStatusError as e:
+            raise HTTPException(
+                status_code=502,
+                detail=f"LLM API error: {e.response.status_code}",
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    summary_text = ""
+    for block in data.get("content", []):
+        if block.get("type") == "text":
+            summary_text += block["text"]
+
+    if not summary_text:
+        raise HTTPException(status_code=500, detail="Failed to generate summary")
+
+    episode = _memory.save_episode(session_id, summary_text)
+    return {"status": "ok", "episode": episode}

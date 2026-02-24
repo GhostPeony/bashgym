@@ -55,6 +55,7 @@ class MessageType(str, Enum):
     HF_JOB_LOG = "hf:job:log"
     HF_JOB_COMPLETED = "hf:job:completed"
     HF_JOB_FAILED = "hf:job:failed"
+    HF_JOB_METRICS = "hf:job:metrics"
     HF_SPACE_READY = "hf:space:ready"
     HF_SPACE_ERROR = "hf:space:error"
 
@@ -509,6 +510,20 @@ async def broadcast_hf_job_failed(job_id: str, error: str, logs: str = None) -> 
             "job_id": job_id,
             "error": error,
             "logs": logs,
+        }
+    )
+    await manager.broadcast(message)
+
+
+async def broadcast_hf_job_metrics(
+    job_id: str, metrics: Dict[str, Any]
+) -> None:
+    """Broadcast real-time training metrics from a HuggingFace cloud job."""
+    message = WSMessage(
+        type=MessageType.HF_JOB_METRICS,
+        payload={
+            "job_id": job_id,
+            "metrics": metrics,
         }
     )
     await manager.broadcast(message)

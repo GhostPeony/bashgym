@@ -41,7 +41,7 @@ export function SettingsPanel({ config, onConfigChange }: SettingsPanelProps) {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-6 max-w-6xl mx-auto">
       {/* 2x2 Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Privacy Card - top-left */}
@@ -428,10 +428,7 @@ function CLICommandCard({ config }: { config: FactoryConfig }) {
       </div>
       <div className="terminal-chrome">
         <div className="terminal-header">
-          <div className="terminal-dot terminal-dot-red" />
-          <div className="terminal-dot terminal-dot-yellow" />
-          <div className="terminal-dot terminal-dot-green" />
-          <span className="font-mono text-xs text-text-muted ml-2">command</span>
+          <span className="font-mono text-xs text-text-muted">command</span>
         </div>
         <pre className="text-xs text-text-primary font-mono p-3 overflow-x-auto">
           <span className="terminal-prompt">$</span> {command}

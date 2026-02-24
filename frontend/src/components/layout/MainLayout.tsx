@@ -192,12 +192,12 @@ export function MainLayout() {
       {/* Agent Chat Panel */}
       <AgentChat />
 
-      {/* Floating Agent Button — visible when chat is closed and not on home */}
-      {!isAgentChatOpen && overlayView !== 'home' && (
+      {/* Floating Agent Button — visible on all pages when chat is closed */}
+      {!isAgentChatOpen && (
         <button
           onClick={toggleAgentChat}
-          className="fixed bottom-20 right-6 z-40 w-12 h-12 border-brutal border-border rounded-brutal bg-accent text-white shadow-brutal flex items-center justify-center hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all"
-          title="Open Gym Agent"
+          className="fixed bottom-6 right-6 z-40 w-12 h-12 border-brutal border-border rounded-full bg-accent text-white shadow-brutal flex items-center justify-center hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all"
+          title="Open Peony Agent"
         >
           <MessageSquare className="w-5 h-5" />
         </button>

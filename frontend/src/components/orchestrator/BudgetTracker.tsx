@@ -18,14 +18,14 @@ export function BudgetTracker() {
     .sort((a, b) => (b.cost_usd || 0) - (a.cost_usd || 0))
 
   return (
-    <div className="border-brutal border-border rounded-brutal bg-background-card p-4 shadow-brutal">
+    <div className="card p-4">
       <div className="flex items-center justify-between mb-4">
         <h3 className="font-mono text-xs uppercase tracking-widest text-text-muted">Budget</h3>
         {isWarning && !isExceeded && (
           <AlertTriangle className="w-4 h-4 text-status-warning" />
         )}
         {isExceeded && (
-          <span className="tag text-[10px] bg-status-error/20 text-status-error border-status-error">EXCEEDED</span>
+          <span className="tag text-[10px] bg-status-error/20 text-status-error border-status-error"><span>EXCEEDED</span></span>
         )}
       </div>
 

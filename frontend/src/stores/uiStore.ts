@@ -31,7 +31,7 @@ interface UIState {
 
 export const useUIStore = create<UIState>((set) => ({
   currentView: 'home',
-  isSidebarOpen: false,
+  isSidebarOpen: true,
   isSettingsOpen: false,
   isCommandPaletteOpen: false,
   isOnboardingOpen: false,

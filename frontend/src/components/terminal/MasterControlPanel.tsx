@@ -101,12 +101,7 @@ export const MasterControlPanel = memo(function MasterControlPanel({
     <div className="absolute top-3 right-3 z-10 w-[240px] card overflow-hidden">
       {/* Header */}
       <div className="terminal-header !py-2 !px-3">
-        <div className="flex items-center gap-1.5">
-          <span className="terminal-dot terminal-dot-red" />
-          <span className="terminal-dot terminal-dot-yellow" />
-          <span className="terminal-dot terminal-dot-green" />
-        </div>
-        <span className="text-[10px] font-mono font-semibold text-text-primary uppercase tracking-wider ml-2 flex-1">
+        <span className="text-[10px] font-mono font-semibold text-text-primary uppercase tracking-wider flex-1">
           Master Control
         </span>
         <button

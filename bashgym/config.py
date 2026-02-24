@@ -468,6 +468,11 @@ class Settings:
     # HuggingFace integration
     huggingface: HuggingFaceSettings = field(default_factory=HuggingFaceSettings)
 
+    # Feature flags
+    orchestration_enabled: bool = field(
+        default_factory=lambda: get_env_bool("ORCHESTRATION_ENABLED", False)
+    )
+
     def validate(self) -> List[str]:
         """Validate all settings."""
         errors = []

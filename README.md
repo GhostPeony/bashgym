@@ -2,7 +2,7 @@
 
 **A Self-Improving Agentic Development Gym**
 
-![bashgym](docs/bashgym-screenshot.png)
+<img width="1563" height="908" alt="Bash Gym home screen" src="https://github.com/user-attachments/assets/472d7ada-d57b-4e79-8604-c27e4fc99348" />
 
 Bash Gym trains smaller language models (SLMs) from agent execution traces. It implements a continuous improvement flywheel where your daily Claude Code usage automatically generates training data for your own personalized coding assistant.
 
@@ -14,37 +14,21 @@ ACT (Arena) → VERIFY (Judge) → SYNTHESIZE (Factory) → TRAIN (Gym) → DEPL
 
 ---
 
-## Table of Contents
+## Why Bash Gym
 
-- [Key Features](#key-features)
-- [Execution Modes](#execution-modes)
-- [Quick Start](#quick-start)
-- [Architecture Overview](#architecture-overview)
-- [Project Structure](#project-structure)
-- [Peony Assistant](#peony-assistant)
-- [Orchestrator](#orchestrator)
-- [Frontend Dashboard](#frontend-dashboard)
-- [Benchmarking Suite](#benchmarking-suite)
-- [Data Creation & Synthesis](#data-creation--synthesis)
-- [Evaluation & LLM-as-Judge](#evaluation--llm-as-judge)
-- [Safety & Guardrails](#safety--guardrails)
-- [Observability & Profiling](#observability--profiling)
-- [Training System](#training-system)
-- [Model Registry](#model-registry)
-- [Model Routing](#model-routing)
-- [HuggingFace Integration](#huggingface-integration)
-- [API Reference](#api-reference)
-- [Python API](#python-api)
-- [Configuration](#configuration)
-- [Docker](#docker)
-- [Testing](#testing)
-- [Security](#security)
-- [Data Flow](#data-flow)
+AI-assisted coding is expensive, latency-bound, and generic. Bash Gym solves all three:
+
+| Problem | How Bash Gym Solves It |
+|---------|----------------------|
+| **API costs at scale** ($50-200/mo per developer) | Route simple tasks to a local 1.5-7B model. 40-70% cost reduction at steady state. |
+| **Latency on simple tasks** (2-8s round-trip) | Local inference for routed tasks (~50ms). 10-50x faster on routine completions. |
+| **Generic behavior** (doesn't know your codebase) | Fine-tuned on *your* coding patterns, conventions, and repositories. |
+| **No learning from corrections** | Every correction and successful interaction becomes training data automatically. |
+| **Vendor lock-in** | You own all traces, models, and training data. Export to HuggingFace, Ollama, or GGUF. |
+
+The flywheel is self-reinforcing: more usage generates more traces, which produce better training data, which improve the student model, which handles more tasks, which generates even more high-quality traces.
 
 ---
-
-<img width="1563" height="908" alt="dashbros home" src="https://github.com/user-attachments/assets/472d7ada-d57b-4e79-8604-c27e4fc99348" />
-
 
 ## Key Features
 
@@ -65,79 +49,41 @@ ACT (Arena) → VERIFY (Judge) → SYNTHESIZE (Factory) → TRAIN (Gym) → DEPL
 
 ---
 
-## Execution Modes
-
-Bash Gym supports two execution modes. **Native mode is the default** for daily use.
-
-| Mode | Where Claude Runs | Use Case |
-|------|-------------------|----------|
-| **Native** | On your PC directly | Real projects, daily tasks, desktop control |
-| **Sandbox** | Docker containers | Autonomous batch runs for training data |
-
-### Native Mode (Default - Your Daily Use)
-
-Claude Code runs directly on your system, working on your real projects and files. The hooks silently capture successful executions to build your personalized training dataset.
-
-```
-Your PC
-├── Your Projects/              # Claude works here directly
-├── Desktop tasks/              # Bash commands, file operations
-└── bashgym/data/               # Traces collected automatically
-    ├── gold_traces/            # Successful executions → training data
-    └── failed_traces/          # For DPO training (learn from mistakes)
-```
-
-**No Docker required.** Just use Claude Code normally - Bash Gym learns from your workflow.
-
-### Sandbox Mode (Optional - Bulk Training)
-
-For autonomous batch runs where you want to generate lots of training data safely:
-- Runs agents in isolated Docker containers
-- Network-isolated, resource-limited
-- Use when running many autonomous tasks without supervision
-
----
-
 ## Quick Start
 
 ```bash
-# Clone and setup
-git clone https://github.com/your-org/bashgym.git
+# Clone and install
+git clone https://github.com/GhostPeony/bashgym.git
 cd bashgym
-
-# Install dependencies
 pip install -r requirements.txt
+cd frontend && npm install && cd ..
 
-# For training capabilities
-pip install -r requirements-training.txt
-
-# Configure environment
+# Configure
 cp .env.example .env
-# Edit .env with your API keys
+# Edit .env — add ANTHROPIC_API_KEY (the only required key)
 
-# Install hooks for native mode (captures your Claude Code usage)
+# Install trace capture hooks
 cp bashgym/hooks/*.py ~/.claude/hooks/
 
-# Start everything (recommended)
-.\dev.ps1                      # Backend (port 8003) + Frontend (port 5173)
-.\dev.ps1 -Electron            # Backend + Electron app
+# Start (pick your platform)
 
-# Or start manually in separate terminals:
-python run_backend.py           # API on port 8003 (hot reload)
-cd frontend && npm install && npm run dev  # Vite on port 5173
+# Windows (PowerShell)
+.\dev.ps1
 
-# Optional: Start with Peony chat assistant (Docker)
-cp assistant/.env.example assistant/.env
-cp assistant/config/config.example.json assistant/config/config.json
-# Fill in channel tokens and API keys, then:
+# macOS / Linux
+./dev.sh
+
+# Any platform (Docker)
 docker compose up
 ```
 
+The backend starts on port 8003, the frontend on port 5173. Open `http://localhost:5173` or use `.\dev.ps1 -Electron` / `./dev.sh --electron` for the desktop app.
+
+For training capabilities, also install: `pip install -r requirements-training.txt`
+
 ---
 
-## Architecture Overview
-
-### The Ouroboros Flywheel
+## How It Works
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -154,6 +100,71 @@ docker compose up
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
+| Stage | Module | What Happens |
+|-------|--------|--------------|
+| **ACT** | Arena | You use Claude Code normally. Hooks capture every tool call, file edit, and bash command as structured traces. |
+| **VERIFY** | Judge | Traces are scored on 6 quality metrics. Tests validate solutions. Guardrails check safety. |
+| **SYNTHESIZE** | Factory | Gold traces are segmented into training examples. PII is scrubbed. Synthetic augmentation fills gaps. |
+| **TRAIN** | Gym | SFT, DPO, GRPO, RLVR, or distillation fine-tunes a small model (1.5-7B) using Unsloth acceleration. |
+| **DEPLOY** | Router | Confidence-based routing progressively shifts traffic from teacher (Claude) to student (your model). |
+
+---
+
+## Glossary
+
+Key terms used throughout Bash Gym:
+
+| Term | Definition |
+|------|-----------|
+| **Trace** | A complete record of a Claude Code coding session — every tool call, file edit, bash command, and response. Stored as JSON. |
+| **Gold Trace** | A high-quality trace (>=90% success rate, >=0.75 quality score) used as positive training data. |
+| **Failed Trace** | A low-quality trace (<60% success) used as negative examples in DPO training — the model learns what *not* to do. |
+| **Training Example** | A single task-response pair extracted from a trace. One trace may contain multiple examples. Format: NeMo JSONL. |
+| **Session** | A complete coding interaction (one trace). Contains many tool calls. A session is segmented into training examples. |
+| **SFT** | Supervised Fine-Tuning. Trains the model to reproduce successful traces. The simplest and most common strategy. |
+| **DPO** | Direct Preference Optimization. Trains using pairs of good and bad responses, teaching the model to prefer correct behavior. |
+| **GRPO** | Group Relative Policy Optimization. RL-based training where the model generates solutions and learns from reward signals. |
+| **RLVR** | Reinforcement Learning with Verifiable Rewards. Like GRPO but the reward comes from running tests — solutions must actually pass. |
+| **Distillation** | Knowledge transfer from a large teacher model (Claude) to a smaller student model. |
+| **LoRA** | Low-Rank Adaptation. Fine-tunes only ~1% of model parameters, producing a small adapter (~50MB) instead of rewriting the full model. |
+| **QLoRA** | Quantized LoRA. Same as LoRA but loads the base model in 4-bit precision, dramatically reducing VRAM usage. |
+| **GGUF** | A model file format optimized for local inference. Used by Ollama and llama.cpp. Supports various quantization levels (q4, q8, etc.). |
+| **Teacher Model** | The large, expensive cloud model (Claude) that produces high-quality outputs. |
+| **Student Model** | The small, local model (1.5-7B parameters) that you fine-tune to replicate the teacher's behavior. |
+| **Router** | The system that decides whether to send a task to the teacher or student model, based on confidence, complexity, or other strategies. |
+| **Flywheel** | The self-reinforcing loop: Act -> Verify -> Synthesize -> Train -> Deploy -> Act. Each cycle improves the student. |
+| **Arena** | The execution layer. Where Claude Code runs tasks (either natively on your PC or in Docker sandboxes). |
+| **Judge** | The verification layer. Scores traces, runs tests, checks safety, evaluates quality. |
+| **Factory** | The data synthesis layer. Transforms raw traces into training-ready datasets with privacy guarantees. |
+| **Gym** | The training layer. Fine-tunes models using various strategies (SFT, DPO, GRPO, etc.). |
+| **Task DAG** | Directed Acyclic Graph. The orchestrator decomposes a spec into tasks with dependencies — tasks execute in parallel where possible. |
+| **Worktree** | A git worktree — an isolated copy of the repository. Each orchestrator worker gets its own worktree to avoid conflicts. |
+| **Peony** | The conversational AI assistant that provides remote control over Bash Gym via Discord and Telegram. |
+| **PII** | Personally Identifiable Information. Emails, phone numbers, API keys, etc. Automatically detected and scrubbed from training data. |
+| **Unsloth** | A training acceleration library. Makes fine-tuning 2-5x faster and uses 50-80% less memory. |
+
+---
+
+## Getting Started Tutorial
+
+For the complete 10-step walkthrough from install to first trained model, see **[docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)**.
+
+The short version:
+
+1. Install and configure (add `ANTHROPIC_API_KEY` to `.env`)
+2. Install trace capture hooks (`cp bashgym/hooks/*.py ~/.claude/hooks/`)
+3. Use Claude Code normally for a week — traces accumulate automatically
+4. Review and curate traces in the Traces dashboard
+5. Generate training examples from gold traces
+6. Train your first model (SFT on Qwen 1.5B — takes 30-90 min with a GPU)
+7. Deploy to Ollama and enable progressive routing
+
+No local GPU? Use [HuggingFace Cloud Training](#huggingface-integration) instead.
+
+---
+
+## Architecture
+
 ### Layer Architecture
 
 | Layer | Module | Purpose | Key Components |
@@ -169,170 +180,58 @@ docker compose up
 | **API** | `bashgym.api` | REST & WebSocket | Routes, Schemas, WebSocket |
 | **Assistant** | `assistant/` | Chat interface | Peony (Go), Skills, Identity |
 
----
-
-## Project Structure
+### Project Structure
 
 ```
 bashgym/
 ├── bashgym/                           # Main Python package
-│   ├── __init__.py
-│   ├── config.py                      # Configuration management
-│   ├── secrets.py                     # Secret handling
-│   ├── main.py                        # CLI entry point
-│   │
-│   ├── arena/                         # Execution layer
-│   │   ├── runner.py                  # Claude Code CLI wrapper
-│   │   └── sandbox.py                 # Docker sandbox manager
-│   │
-│   ├── judge/                         # Verification layer
-│   │   ├── verifier.py                # Test execution engine
-│   │   ├── evaluator.py               # NeMo Evaluator (LLM-as-Judge)
-│   │   ├── guardrails.py              # NeMo Guardrails (safety checks)
-│   │   ├── benchmarks.py              # Standard code benchmarks
-│   │   ├── benchmark_loader.py        # Benchmark dataset loading
-│   │   └── verify.sh                  # Default verification script
-│   │
-│   ├── factory/                       # Data synthesis layer
-│   │   ├── data_factory.py            # Main trace-to-example pipeline
-│   │   ├── trace_processor.py         # Quality scoring & normalization
-│   │   ├── quality_calculator.py      # 6-metric quality breakdown
-│   │   ├── example_generator.py       # Session segmentation
-│   │   ├── safe_synthesizer.py        # Privacy-preserving PII handling
-│   │   ├── synthetic_generator.py     # Task generation from patterns
-│   │   ├── pattern_extractor.py       # Extract reusable task patterns
-│   │   ├── schema_builder.py          # Fluent API for synthetic data
-│   │   └── prompt_optimizer.py        # MIPROv2-style prompt optimization
-│   │
-│   ├── gym/                           # Training layer
-│   │   ├── trainer.py                 # SFT/DPO/GRPO with Unsloth
-│   │   ├── environment.py             # Gymnasium RL environment
-│   │   └── router.py                  # Teacher/Student model routing
-│   │
-│   ├── models/                        # Model registry
-│   │   ├── profile.py                 # Rich model metadata
-│   │   ├── registry.py                # Model tracking & comparison
-│   │   └── evaluator.py               # Custom evaluation sets
-│   │
-│   ├── hooks/                         # Claude Code instrumentation
-│   │   ├── post_tool_use.py           # Tool capture hook
-│   │   ├── pre_tool_use.py            # Pre-execution hook
-│   │   ├── stop.py                    # Session finalization
-│   │   └── notification.py            # User notifications
-│   │
-│   ├── observability/                 # Performance tracking
-│   │   └── profiler.py                # Agent profiler (Phoenix, Langfuse, OTEL)
-│   │
-│   ├── core/                          # Core utilities
-│   │   └── instrumentation.py         # Unified guardrails + profiler
-│   │
-│   ├── inference/                     # Model inference
-│   │   └── model_loader.py            # Load trained models
-│   │
-│   ├── trace_capture/                 # Trace import system
-│   │   ├── core.py                    # Base trace import logic
-│   │   ├── detector.py                # Auto-detect trace sources
-│   │   ├── adapters/                  # Agent adapters
-│   │   │   ├── claude_code.py         # Claude Code adapter
-│   │   │   └── opencode.py            # OpenCode adapter
-│   │   ├── importers/                 # Source importers
-│   │   │   └── claude_history.py      # Import from ~/.claude/projects/
-│   │   └── setup.py                   # Hook installation
-│   │
-│   ├── integrations/                  # External integrations
-│   │   ├── nemo_client.py             # NVIDIA NeMo SDK wrapper
-│   │   ├── bashbros.py                # Bashbros integration
-│   │   └── huggingface/               # HuggingFace integration
-│   │       ├── client.py              # Main client
-│   │       ├── datasets.py            # Dataset management
-│   │       ├── inference.py           # Inference API
-│   │       ├── jobs.py                # Cloud training jobs
-│   │       └── spaces.py              # Spaces deployment
-│   │
-│   ├── providers/                     # Model providers
-│   │   ├── detector.py                # Provider detection
-│   │   └── ollama.py                  # Ollama integration
-│   │
-│   ├── orchestrator/                  # Multi-agent orchestration
-│   │   ├── agent.py                   # Supervision & spec decomposition
-│   │   ├── task_dag.py                # Dependency graph & topological sort
-│   │   ├── dispatcher.py              # Worker pool management
-│   │   ├── context_builder.py         # Worker context assembly
-│   │   ├── synthesizer.py             # Result merging & trace ingestion
-│   │   ├── worktree.py                # Git worktree isolation
-│   │   ├── models.py                  # Data structures
-│   │   └── prompts.py                 # LLM planning prompts
-│   │
-│   └── api/                           # REST API
-│       ├── routes.py                  # Main endpoints
-│       ├── orchestrator_routes.py     # Orchestrator endpoints
-│       ├── agent_routes.py            # Agent chatbot endpoint
-│       ├── factory_routes.py          # Factory endpoints
-│       ├── models_routes.py           # Model registry endpoints
-│       ├── hf_routes.py               # HuggingFace endpoints
-│       ├── integration_routes.py      # Bashbros integration
-│       ├── observability_routes.py    # Profiler endpoints
-│       ├── websocket.py               # Real-time updates
-│       ├── schemas.py                 # Pydantic models
-│       └── system_info.py             # System info utilities
+│   ├── arena/                         # Execution layer (runner, sandbox)
+│   ├── judge/                         # Verification layer (verifier, evaluator, guardrails, benchmarks)
+│   ├── factory/                       # Data synthesis (data_factory, trace_processor, safe_synthesizer, schema_builder)
+│   ├── gym/                           # Training layer (trainer, environment, router)
+│   ├── models/                        # Model registry (profile, registry, evaluator)
+│   ├── hooks/                         # Claude Code instrumentation (post_tool_use, pre_tool_use, stop)
+│   ├── observability/                 # Performance tracking (profiler)
+│   ├── orchestrator/                  # Multi-agent orchestration (agent, task_dag, dispatcher, worktree)
+│   ├── integrations/                  # External integrations (NeMo, HuggingFace, Bashbros)
+│   ├── trace_capture/                 # Trace import system (adapters, importers)
+│   ├── providers/                     # Model providers (Ollama)
+│   └── api/                           # REST API + WebSocket
 │
-├── assistant/                         # Peony chat assistant
-│   ├── picoclaw/                      # Go runtime (git subtree from sipeed/picoclaw, builds as "peony")
-│   │   ├── cmd/picoclaw/main.go       # CLI entry point (binary name: peony)
-│   │   ├── pkg/                       # Agent loop, channels, providers, tools
-│   │   ├── go.mod
-│   │   └── Makefile
-│   ├── workspace/                     # Assistant identity & skills
-│   │   ├── IDENTITY.md                # Who the assistant is
-│   │   ├── SOUL.md                    # Personality & values
-│   │   ├── AGENT.md                   # Behavioral instructions
-│   │   ├── USER.md                    # User preferences (evolves over time)
-│   │   ├── memory/                    # Persistent memory
-│   │   ├── scripts/api.sh             # BashGym API helper
-│   │   └── skills/                    # BashGym skill definitions
-│   │       ├── orchestrator/          # Submit specs, approve plans, monitor workers
-│   │       ├── training/              # Start/stop/monitor training runs
-│   │       ├── traces/                # Browse, promote, generate examples
-│   │       ├── models/                # Leaderboard, compare, deploy
-│   │       ├── system/                # Health, GPU, stats
-│   │       └── factory/               # Synthetic data, seeds
-│   ├── config/                        # Peony configuration
-│   │   └── config.example.json        # Provider & channel config template
-│   ├── Dockerfile                     # Multi-stage Go build
-│   └── .env.example                   # Channel tokens & API keys
+├── assistant/                         # Peony chat assistant (Go + Docker)
+│   ├── picoclaw/                      # Go runtime (builds as "peony")
+│   └── workspace/                     # Identity, skills, memory
 │
-├── frontend/                          # Electron + React UI
-│   ├── src/
-│   │   ├── App.tsx
-│   │   ├── components/                # 52+ React components
-│   │   ├── services/                  # API clients
-│   │   ├── stores/                    # State management
-│   │   └── hooks/                     # React hooks
+├── frontend/                          # Electron + React UI (72+ components)
+│   ├── src/components/                # React components
+│   ├── src/stores/                    # Zustand state management
 │   └── electron/                      # Electron main process
 │
 ├── tests/                             # Test suite
+├── docs/                              # Documentation
 ├── docker/                            # Docker configuration (sandbox)
-│   ├── Dockerfile.arena
-│   ├── Dockerfile.sandbox
-│   └── docker-compose.yml
-├── Dockerfile.api                     # BashGym API server image
 ├── docker-compose.yml                 # Full stack: API + Peony assistant
-│
-├── data/                              # Runtime data (gitignored)
-│   ├── gold_traces/                   # High-quality traces (≥90% success)
-│   ├── silver_traces/                 # Good traces (≥75% success)
-│   ├── bronze_traces/                 # Acceptable traces (≥60% success)
-│   ├── failed_traces/                 # Failed attempts (<60% success)
-│   ├── traces/                        # Pending classification
-│   ├── training_batches/              # SFT/DPO datasets
-│   ├── models/                        # Trained models
-│   └── profiler_traces/               # Performance traces
-│
-├── requirements.txt                   # Core dependencies
-├── requirements-training.txt          # ML dependencies
-├── pyproject.toml
 └── .env.example                       # Environment template
 ```
+
+---
+
+## Execution Modes
+
+Bash Gym supports two execution modes. **Native mode is the default** for daily use.
+
+| Mode | Where Claude Runs | Use Case |
+|------|-------------------|----------|
+| **Native** | On your PC directly | Real projects, daily tasks, desktop control |
+| **Sandbox** | Docker containers | Autonomous batch runs for training data |
+
+### Native Mode (Default)
+
+Claude Code runs directly on your system. The hooks silently capture successful executions to build your personalized training dataset. **No Docker required.**
+
+### Sandbox Mode (Optional)
+
+For autonomous batch runs: agents run in isolated Docker containers, network-isolated and resource-limited.
 
 ---
 
@@ -362,8 +261,6 @@ Peony is a conversational AI assistant that provides full remote control over th
 
 ### Skills
 
-Peony uses a skill-based architecture. Each skill wraps a set of BashGym API endpoints:
-
 | Skill | Triggers | Operations |
 |-------|----------|------------|
 | **system** | "system status", "GPU usage", "health check" | Health, hardware info, GPU, stats |
@@ -373,18 +270,6 @@ Peony uses a skill-based architecture. Each skill wraps a set of BashGym API end
 | **models** | "list models", "compare", "deploy to Ollama" | Leaderboard, comparison, evaluation, deployment |
 | **factory** | "generate data", "create seeds" | Synthetic generation, seed management |
 
-### Identity System
-
-Peony's personality is defined by workspace files that the LLM reads at conversation start:
-
-| File | Purpose |
-|------|---------|
-| `IDENTITY.md` | What the assistant is and its scope |
-| `SOUL.md` | Personality traits and values |
-| `AGENT.md` | Behavioral rules, API access patterns, destructive op safeguards |
-| `USER.md` | User preferences (evolves over time) |
-| `memory/` | Persistent memory across conversations |
-
 ### Setup
 
 ```bash
@@ -392,25 +277,13 @@ Peony's personality is defined by workspace files that the LLM reads at conversa
 cp assistant/.env.example assistant/.env
 cp assistant/config/config.example.json assistant/config/config.json
 
-# 2. Fill in your tokens
-#    - TELEGRAM_BOT_TOKEN (from @BotFather)
-#    - DISCORD_BOT_TOKEN (from Discord Developer Portal)
-#    - ANTHROPIC_API_KEY
-#    Edit assistant/.env and assistant/config/config.json
-
+# 2. Fill in your tokens (TELEGRAM_BOT_TOKEN, DISCORD_BOT_TOKEN, ANTHROPIC_API_KEY)
 # 3. Start the full stack
 docker compose up
 
 # 4. Or run a one-shot query
 docker compose run --rm peony-agent -m "system status"
 ```
-
-### Channels
-
-| Channel | Auth | Setup |
-|---------|------|-------|
-| **Telegram** | Bot token + user ID whitelist | Create bot via @BotFather, add token to config |
-| **Discord** | Bot token + user ID whitelist | Create app in Developer Portal, enable MESSAGE_CONTENT intent |
 
 ---
 
@@ -431,8 +304,6 @@ The orchestrator decomposes development specs into parallel tasks and dispatches
 
 ### Multi-Provider Planning
 
-The orchestrator can use different LLMs for spec decomposition:
-
 | Provider | Models | Notes |
 |----------|--------|-------|
 | **Anthropic** | Claude Opus 4.6, Sonnet 4.5 | Default, recommended |
@@ -442,33 +313,9 @@ The orchestrator can use different LLMs for spec decomposition:
 
 Workers always use Claude Code CLI regardless of planning provider.
 
-### API
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/orchestrate/submit` | Submit a development spec |
-| `POST` | `/api/orchestrate/{job_id}/approve` | Approve plan and execute |
-| `GET` | `/api/orchestrate/{job_id}/status` | Worker progress and task states |
-| `POST` | `/api/orchestrate/{job_id}/task/{task_id}/retry` | Retry a failed task |
-| `GET` | `/api/orchestrate/jobs` | List all jobs |
-| `DELETE` | `/api/orchestrate/{job_id}` | Delete a job |
-| `GET` | `/api/orchestrate/providers` | List configured LLM providers |
-
-### Modules
-
-| Module | Purpose |
-|--------|---------|
-| `agent.py` | Supervision agent: decomposes specs, coordinates workers, handles retries |
-| `task_dag.py` | DAG construction, dependency resolution, topological sorting |
-| `dispatcher.py` | Worker pool management, task assignment, parallel execution |
-| `context_builder.py` | Assembles worker context from repo state, existing code, requirements |
-| `synthesizer.py` | Merges worktree results, verifies output, feeds traces to training |
-| `worktree.py` | Git worktree lifecycle (create, cleanup, merge) |
-
 ### Example
 
 ```bash
-# Via API
 curl -X POST http://localhost:8003/api/orchestrate/submit \
   -H "Content-Type: application/json" \
   -d '{
@@ -480,798 +327,8 @@ curl -X POST http://localhost:8003/api/orchestrate/submit \
     "budget_usd": 5.0
   }'
 
-# Via Peony (Discord/Telegram)
+# Or via Peony (Discord/Telegram):
 # "Build me an auth system with JWT, max 3 workers, $5 budget"
-```
-
----
-
-## Frontend Dashboard
-
-The Bash Gym frontend is an Electron + React application with real-time WebSocket updates.
-
-### Dashboard Sections
-
-| Section | Components | Purpose |
-|---------|-----------|---------|
-| **Home** | HomeScreen | Central dashboard with flywheel visualization and system overview |
-| **Training** | TrainingDashboard, TrainingConfig, LossCurve, MetricsGrid, EpochProgress, TrainingLogs, SystemInfoPanel | Monitor training progress, view loss curves, track system resources |
-| **Models** | ModelBrowser, ModelCard, ModelProfile, ModelComparison, LineageTree, ModelTrends | Browse trained models, view lineage, compare performance |
-| **Factory** | FactoryDashboard, SyntheticGenerator | Generate synthetic data, manage datasets |
-| **Traces** | TraceBrowser | Explore gold/silver/bronze/failed traces, view quality metrics |
-| **Orchestrator** | OrchestratorDashboard, SpecForm, PlanReview, WorkerMonitor | Submit specs, review plans, monitor parallel workers |
-| **Agent** | AgentChat | Conversational interface to Peony assistant |
-| **Router** | RouterDashboard | Monitor teacher/student routing decisions and performance |
-| **Evaluator** | EvaluatorDashboard | Run benchmarks, view evaluation results |
-| **Guardrails** | GuardrailsDashboard | Monitor safety checks, PII redaction events |
-| **Profiler** | ProfilerDashboard | View performance traces, analyze latency |
-| **HuggingFace** | HFDashboard, CloudTraining, DatasetBrowser, SpaceManager | Cloud training, Spaces deployment, dataset management |
-| **Integration** | IntegrationDashboard | Bashbros linking, trace sync, model export |
-| **Terminal** | TerminalGrid, TerminalPane, TerminalNode, MasterControlPanel, CanvasView | Multi-view execution environment with file drop |
-| **Files** | FileBrowser, FileTreeItem | File exploration and preview |
-| **Flywheel** | FlywheelVisualization, FlywheelMini | Visual pipeline representation |
-
-### Starting the Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-The frontend connects to the API server at `http://localhost:8003` by default (configure in `frontend/.env.local`).
-
----
-
-## Benchmarking Suite
-
-Bash Gym includes a comprehensive benchmarking system for evaluating model performance.
-
-### Supported Benchmarks
-
-| Benchmark | Description | Samples | Metric |
-|-----------|-------------|---------|--------|
-| **HumanEval** | Python function synthesis | 164 | pass@k |
-| **MBPP** | Python programming problems | 974 | pass@k |
-| **BigCodeBench** | Comprehensive code evaluation | Multi-language | pass@k |
-| **BFCL** | Function calling accuracy | Various | AST accuracy |
-| **SWE-bench** | Real-world software engineering | GitHub issues | Resolution rate |
-| **GSM8K** | Math reasoning | 8.5K | Accuracy |
-| **ARC** | Scientific reasoning | 7.7K | Accuracy |
-| **HellaSwag** | Commonsense reasoning | 10K | Accuracy |
-| **Toxigen** | Toxicity detection | Various | Safety score |
-| **BBQ** | Bias detection | Various | Bias score |
-
-### Running Benchmarks
-
-```python
-from bashgym.judge.benchmarks import BenchmarkRunner, BenchmarkConfig, BenchmarkType
-
-config = BenchmarkConfig(
-    benchmark_type=BenchmarkType.HUMANEVAL,
-    num_samples=100,
-    pass_k=[1, 5, 10],
-    timeout_per_sample=30,
-    model_name="my-finetuned-model"
-)
-
-runner = BenchmarkRunner(config)
-
-# Define your model's generation function
-async def my_generate(prompt: str) -> str:
-    return generated_code
-
-# Run the benchmark
-result = await runner.run_benchmark(my_generate)
-
-print(f"Pass@1: {result.pass_at_k[1]:.2%}")
-print(f"Pass@5: {result.pass_at_k[5]:.2%}")
-print(f"Pass@10: {result.pass_at_k[10]:.2%}")
-```
-
-### Comparing Multiple Models
-
-```python
-models = {
-    "baseline": baseline_generate_fn,
-    "finetuned-v1": finetuned_v1_generate_fn,
-    "finetuned-v2": finetuned_v2_generate_fn,
-}
-
-results = await runner.compare_models(models, BenchmarkType.HUMANEVAL)
-
-for model_name, result in results.items():
-    print(f"{model_name}: pass@1={result.pass_at_k[1]:.2%}")
-```
-
----
-
-<img width="1567" height="906" alt="bashgym data" src="https://github.com/user-attachments/assets/79c83388-68b7-4be4-a81d-e7900c5ae987" />
-
-
-## Data Creation & Synthesis
-
-The Factory layer provides comprehensive tools for creating high-quality training data.
-
-### Quality Metrics (6 Components)
-
-| Metric | Weight | Description |
-|--------|--------|-------------|
-| **Success Rate** | 30% | Percentage of successful steps |
-| **Verification Score** | 25% | Test passing rate |
-| **Complexity Score** | 15% | Tool diversity + pattern complexity |
-| **Length Score** | 10% | Bell curve around ideal length |
-| **Tool Diversity** | 10% | Unique tools used |
-| **Efficiency Score** | 10% | Output quality ratio |
-
-### Trace Classification
-
-| Status | Criteria | Location |
-|--------|----------|----------|
-| **Gold** | ≥90% success, ≥0.75 quality | `data/gold_traces/` |
-| **Silver** | ≥75% success, ≥0.55 quality | `data/silver_traces/` |
-| **Bronze** | ≥60% success, ≥0.40 quality | `data/bronze_traces/` |
-| **Failed** | <60% success | `data/failed_traces/` |
-
-### Data Factory
-
-```python
-from bashgym.factory import DataFactory, DataFactoryConfig
-from pathlib import Path
-
-config = DataFactoryConfig(
-    quality_threshold=0.7,
-    max_turns_per_example=20,
-    redact_sensitive_data=True,
-    add_thinking_tags=True
-)
-
-factory = DataFactory(config)
-
-# Process traces into training examples
-examples, dpo_examples = await factory.process_trace_directory(
-    gold_dir=Path("data/gold_traces"),
-    failed_dir=Path("data/failed_traces")
-)
-
-# Save training batches
-factory.save_training_batch(examples, "sft")
-factory.save_dpo_batch(dpo_examples, "dpo")
-```
-
-### Schema Builder (Synthetic Data Generation)
-
-Create rich synthetic datasets using a fluent API:
-
-```python
-from bashgym.factory.schema_builder import SchemaBuilder, DataDesignerClient
-
-schema = (
-    SchemaBuilder("coding_tasks")
-    .uuid("task_id", description="Unique task identifier")
-    .category("language", ["python", "javascript", "rust", "go"])
-    .category("difficulty", ["easy", "medium", "hard"], weights=[0.4, 0.4, 0.2])
-    .llm(
-        "task_description",
-        prompt="Generate a {{ difficulty }} {{ language }} coding task.",
-        depends_on=["language", "difficulty"]
-    )
-    .code(
-        "reference_solution",
-        task_description="task_description",
-        language="{{ language }}",
-        depends_on=["task_description", "language"]
-    )
-    .with_rows(1000)
-    .build()
-)
-
-client = DataDesignerClient()
-records = await client.generate(schema, output_path=Path("data/synthetic/tasks.jsonl"))
-```
-
-### Safe Synthesizer (Privacy-Preserving)
-
-```python
-from bashgym.factory.safe_synthesizer import (
-    SafeSynthesizer, SafeSynthesizerConfig, ReplacementStrategy
-)
-
-config = SafeSynthesizerConfig(
-    epsilon=8.0,  # Differential privacy budget
-    pii_types=["email", "phone", "ssn", "api_key", "credit_card"],
-    default_strategy=ReplacementStrategy.SYNTHETIC,
-    use_llm_classification=True
-)
-
-synthesizer = SafeSynthesizer(config)
-
-# Process dataset with privacy guarantees
-processed_data, privacy_report = await synthesizer.process_dataset(
-    data=my_dataset,
-    text_fields=["message", "notes"]
-)
-
-print(f"Records with PII: {privacy_report.records_with_pii}")
-print(f"Disclosure Risk: {privacy_report.disclosure_risk}")
-```
-
-### PII Types Detected
-
-| Category | Types |
-|----------|-------|
-| **Personal** | `person`, `email`, `phone`, `ssn`, `passport`, `driver_license` |
-| **Financial** | `credit_card`, `bank_account`, `iban` |
-| **Location** | `address`, `zip_code`, `city`, `country`, `ip_address` |
-| **Medical** | `mrn`, `health_plan`, `medical_condition` |
-| **Digital** | `username`, `password`, `api_key`, `auth_token`, `url` |
-
-### Prompt Optimizer (MIPROv2)
-
-```python
-from bashgym.factory.prompt_optimizer import (
-    PromptOptimizer, PromptOptConfig, OptimizationIntensity
-)
-
-config = PromptOptConfig(
-    intensity=OptimizationIntensity.MEDIUM,
-    max_bootstrapped_demos=4,
-    num_candidates=10
-)
-
-optimizer = PromptOptimizer(config)
-
-result = await optimizer.optimize_prompt(
-    original_prompt="You are a code reviewer. Review the code.",
-    eval_examples=[{"input": "def f():", "expected_output": "Missing docstring"}],
-    eval_fn=eval_fn,
-    optimization_goals="Provide detailed, actionable code review feedback"
-)
-
-print(f"Improvement: {result.improvement:.2%}")
-print(f"Optimized Prompt: {result.optimized_prompt}")
-```
-
----
-
-## Evaluation & LLM-as-Judge
-
-The Judge layer includes NeMo Evaluator integration for comprehensive model evaluation.
-
-### LLM-as-Judge Scoring
-
-```python
-from bashgym.judge.evaluator import EvaluatorClient, EvaluatorConfig
-
-evaluator = EvaluatorClient(EvaluatorConfig())
-
-# Score a response on multiple metrics
-scores = await evaluator.judge_response(
-    prompt="Write a function to check if a number is prime",
-    response="def is_prime(n): ...",
-    metrics=["correctness", "code_quality", "helpfulness"]
-)
-
-for score in scores:
-    print(f"{score.metric}: {score.score:.2f} - {score.reasoning}")
-```
-
-### Available Metrics
-
-| Metric | Description |
-|--------|-------------|
-| `helpfulness` | How helpful for completing the task |
-| `correctness` | Technical correctness |
-| `coherence` | Logical flow and clarity |
-| `complexity` | Appropriate complexity level |
-| `verbosity` | Conciseness vs verbosity |
-| `safety` | Absence of harmful content |
-| `code_quality` | Code cleanliness and best practices |
-| `task_completion` | How completely the task was accomplished |
-
-### Agentic Trace Evaluation
-
-```python
-metrics = await evaluator.evaluate_agentic_trace(
-    trace=[
-        {"action": {"type": "bash", "content": "ls -la"}, "observation": {"success": True}},
-        {"action": {"type": "edit", "content": "..."}, "observation": {"success": True}},
-    ],
-    task_description="Fix the bug in utils.py"
-)
-
-print(f"Tool Call Accuracy: {metrics['tool_call_accuracy']:.2%}")
-print(f"Goal Accuracy: {metrics['goal_accuracy']:.2%}")
-print(f"Efficiency: {metrics['efficiency']:.2%}")
-```
-
----
-
-## Safety & Guardrails
-
-The Judge layer includes NeMo Guardrails integration for comprehensive safety checks.
-
-### NemoGuard Features
-
-```python
-from bashgym.judge.guardrails import NemoGuard, GuardrailsConfig
-
-config = GuardrailsConfig(
-    injection_detection=True,
-    content_moderation=True,
-    code_safety=True,
-    pii_filtering=True,
-    blocked_topics=["politics", "religion"]
-)
-
-guard = NemoGuard(config)
-
-# Check input for safety
-input_result = await guard.check_input("User input here...")
-if not input_result.passed:
-    print(f"Blocked: {input_result.blocked_reason}")
-
-# Check command safety
-cmd_result = await guard.check_command("rm -rf /tmp/test")
-print(f"Command Safe: {cmd_result.passed}")
-```
-
-### Guardrail Types
-
-| Type | Description |
-|------|-------------|
-| **Injection Detection** | Detects prompt injection attempts |
-| **Content Moderation** | Filters violence, hate speech, illegal content |
-| **Topic Control** | Enforces allowed/blocked topics |
-| **Code Safety** | Blocks dangerous commands and patterns |
-| **PII Filter** | Detects and redacts personal information |
-
-### Blocked Command Patterns
-
-```python
-# Default blocked commands
-blocked_commands = [
-    "rm -rf /", "rm -rf /*",       # System destruction
-    ":(){:|:&};:",                  # Fork bomb
-    "dd if=/dev/zero",             # Disk wipe
-    "mkfs.",                        # Filesystem format
-    "> /dev/sda",                  # Direct disk write
-    "chmod -R 777 /",              # Dangerous permissions
-    "sudo rm -rf",                 # Privileged destruction
-]
-
-# Blocked patterns (regex)
-blocked_patterns = [
-    r"curl.*\|.*sh",              # Remote code execution
-    r"wget.*\|.*bash",            # Remote code execution
-]
-```
-
----
-
-## Observability & Profiling
-
-The observability layer provides comprehensive profiling and tracing for agent workflows.
-
-### Agent Profiler
-
-```python
-from bashgym.observability.profiler import (
-    AgentProfiler, ProfilerConfig, ObservabilityBackend, SpanKind
-)
-
-config = ProfilerConfig(
-    backend=ObservabilityBackend.LOCAL,  # or PHOENIX, LANGFUSE, OPENTELEMETRY
-    profile_tokens=True,
-    profile_latency=True,
-    trace_sampling_rate=1.0
-)
-
-profiler = AgentProfiler(config)
-
-# Start a trace
-trace_id = profiler.start_trace("Debug Python script", metadata={"user": "dev"})
-
-# Record operations with spans
-with profiler.span("analyze_error", SpanKind.LLM_CALL) as span:
-    span.set_tokens(input_tokens=500, output_tokens=200)
-
-# Record tool calls
-profiler.record_tool_call(
-    tool_name="read_file",
-    tool_input="script.py",
-    tool_output="def main(): ...",
-    success=True,
-    latency_ms=50
-)
-
-# End trace and get summary
-trace = profiler.end_trace()
-summary = profiler.get_trace_summary(trace_id)
-
-print(f"Duration: {summary['duration_ms']:.0f}ms")
-print(f"LLM Calls: {summary['llm_calls']['count']}")
-print(f"Total Tokens: {summary['llm_calls']['total_tokens']}")
-```
-
-### Supported Backends
-
-| Backend | Description |
-|---------|-------------|
-| `LOCAL` | Save traces to local JSON files |
-| `PHOENIX` | Export to Arize Phoenix |
-| `LANGFUSE` | Export to Langfuse |
-| `OPENTELEMETRY` | Export via OpenTelemetry |
-
----
-
-## Training System
-
-The Gym layer provides comprehensive model training capabilities.
-
-### Training Strategies
-
-| Strategy | Description | Use Case |
-|----------|-------------|----------|
-| **SFT** | Supervised Fine-Tuning | Learning from gold traces |
-| **DPO** | Direct Preference Optimization | Learning from pass/fail pairs |
-| **GRPO** | Group Relative Policy Optimization | RL with verifiable rewards |
-| **RLVR** | RL with Verifiable Rewards | Verification-guided training |
-| **Distillation** | Knowledge transfer | Teacher-to-student distillation |
-
-### Running Training
-
-```python
-from bashgym.gym import Trainer, TrainerConfig, TrainingStrategy
-
-config = TrainerConfig(
-    base_model="Qwen/Qwen2.5-Coder-1.5B-Instruct",
-    strategy=TrainingStrategy.SFT,
-    num_epochs=3,
-    batch_size=4,
-    learning_rate=2e-5,
-    use_lora=True,
-    lora_r=16,
-    lora_alpha=32,
-    auto_export_gguf=True,
-    gguf_quantization="q4_k_m"
-)
-
-trainer = Trainer(config)
-
-# SFT Training
-run = trainer.train_sft(
-    dataset_path="data/training_batches/sft_batch.jsonl",
-    callback=lambda m: print(f"Epoch {m['epoch']}: Loss={m['loss']:.4f}")
-)
-
-# DPO Training
-run = trainer.train_dpo(
-    dataset_path="data/training_batches/dpo_batch.jsonl"
-)
-
-print(f"Output: {run.output_path}")
-print(f"GGUF: {run.gguf_path}")
-```
-
-### Output Formats
-
-| Format | File | Description |
-|--------|------|-------------|
-| LoRA Adapters | `adapter_model.safetensors` | Lightweight (~50MB) |
-| Merged Model | `merged/` | Full weights (16-bit) |
-| GGUF | `model-q4_k_m.gguf` | Quantized for inference |
-
-### RL Environment
-
-Gymnasium-compatible environment for RL training:
-
-```python
-from bashgym.gym import BashGymEnv, GymEnvConfig, Action, ActionType
-
-config = GymEnvConfig(
-    max_steps=50,
-    use_sandbox=False,
-    reward_on_verification=1.0,
-    step_penalty=-0.01
-)
-
-env = BashGymEnv(config)
-obs = env.reset(task="Implement quicksort")
-
-while not env.done:
-    action = Action(ActionType.BASH, "python -c 'print(1)'")
-    obs, reward, done, info = env.step(action)
-```
-
----
-
-## Model Registry
-
-The Models layer provides full lifecycle tracking for trained models.
-
-### Model Profile
-
-```python
-from bashgym.models.profile import ModelProfile
-from bashgym.models.registry import ModelRegistry
-
-registry = ModelRegistry()
-
-# Register a new model
-profile = ModelProfile(
-    name="my-coder-v1",
-    base_model="Qwen/Qwen2.5-Coder-1.5B-Instruct",
-    strategy="sft",
-    tags=["python", "debugging"],
-    training_traces=["trace_001", "trace_002"]
-)
-
-model_id = registry.register(profile)
-```
-
-### Model Profile Captures
-
-| Category | Fields |
-|----------|--------|
-| **Identity** | name, tags, description |
-| **Lineage** | base_model, strategy, training_traces, source_repos |
-| **Training** | config, loss_curves, metrics, duration |
-| **Artifacts** | checkpoints, LoRA adapters, merged models, GGUF exports |
-| **Evaluations** | benchmarks, custom_eval_results, history |
-| **Operational** | size, latency, deployment_status |
-
-### Model Comparison
-
-```python
-# Compare multiple models
-comparison = registry.compare_models(
-    model_ids=["model_001", "model_002", "model_003"],
-    metrics=["humaneval_pass1", "mbpp_pass1", "latency_ms"]
-)
-
-for model_id, metrics in comparison.items():
-    print(f"{model_id}: HumanEval={metrics['humaneval_pass1']:.2%}")
-```
-
----
-
-## Model Routing
-
-Routes requests between Teacher (Claude) and Student (fine-tuned) models.
-
-```python
-from bashgym.gym import ModelRouter, RouterConfig, RoutingStrategy
-
-router = ModelRouter(RouterConfig(
-    strategy=RoutingStrategy.PROGRESSIVE,
-    student_sample_rate=0.2,
-    max_student_rate=0.9,
-    confidence_threshold=0.7
-))
-
-# Route a request
-decision = router.route("Refactor authentication module")
-print(f"Model: {decision.selected_model}")
-print(f"Complexity: {decision.task_complexity:.2f}")
-
-# Generate with automatic routing
-response = await router.generate(
-    prompt="Fix the bug in utils.py",
-    system_prompt="You are a helpful coding assistant."
-)
-
-# Update routing based on performance
-router.update_student_performance(success_rate=0.85)
-```
-
-### Routing Strategies
-
-| Strategy | Description |
-|----------|-------------|
-| `TEACHER_ONLY` | Always use teacher model |
-| `STUDENT_ONLY` | Always use student model |
-| `CONFIDENCE_BASED` | Route based on student confidence |
-| `TASK_COMPLEXITY` | Simple tasks to student, complex to teacher |
-| `PROGRESSIVE` | Gradually increase student usage |
-| `RANDOM_SAMPLE` | Random sampling for A/B testing |
-
----
-
-## HuggingFace Integration
-
-Full HuggingFace ecosystem integration for cloud training, datasets, and deployment.
-
-### Features
-
-| Feature | Description |
-|---------|-------------|
-| **Cloud Training** | Submit training jobs to HuggingFace Spaces |
-| **Dataset Management** | Upload and manage training datasets |
-| **Inference API** | Use HuggingFace endpoints for inference |
-| **Spaces Deployment** | Deploy interactive demos |
-| **Pro Detection** | Unlock premium features with Pro subscription |
-
-### Cloud Training
-
-```python
-from bashgym.integrations.huggingface import HFClient
-
-client = HFClient()
-
-# Submit a training job
-job = await client.submit_training_job(
-    dataset_repo="username/my-traces",
-    base_model="Qwen/Qwen2.5-Coder-1.5B-Instruct",
-    hardware="a10g-small"
-)
-
-# Monitor progress
-status = await client.get_job_status(job.job_id)
-print(f"Status: {status.state}")
-```
-
-### Dataset Upload
-
-```python
-# Upload training data
-await client.upload_dataset(
-    repo_id="username/bash-gym-traces",
-    data_path=Path("data/training_batches/sft_batch.jsonl")
-)
-```
-
----
-
-## API Reference
-
-The API server provides REST and WebSocket endpoints.
-
-### Start API Server
-
-```bash
-# Development (hot reload)
-python run_backend.py
-
-# Production
-python start_api.py
-# Or: uvicorn bashgym.api.routes:app --host 0.0.0.0 --port 8003 --workers 4
-```
-
-API documentation: `http://localhost:8003/docs`
-
-### REST Endpoints
-
-#### System
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/health` | Health check |
-| `GET` | `/api/stats` | System statistics |
-| `GET` | `/api/system/info` | Hardware & GPU info |
-
-#### Tasks
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/tasks` | Submit new task |
-| `GET` | `/api/tasks/{task_id}` | Get task status |
-| `GET` | `/api/tasks` | List all tasks |
-| `POST` | `/api/tasks/{task_id}/cancel` | Cancel task |
-
-#### Training
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/training/start` | Start training run |
-| `GET` | `/api/training/{run_id}` | Get training status |
-| `GET` | `/api/training` | List training runs |
-| `POST` | `/api/training/{run_id}/pause` | Pause training |
-| `POST` | `/api/training/{run_id}/cancel` | Cancel training |
-| `GET` | `/api/training/{run_id}/logs` | Stream training logs |
-
-#### Models
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/models` | List trained models |
-| `GET` | `/api/models/{model_id}` | Get model profile |
-| `POST` | `/api/models/{model_id}/export` | Export model |
-| `POST` | `/api/models/{model_id}/evaluate` | Run evaluation |
-| `GET` | `/api/models/compare` | Compare models |
-
-#### Traces
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/traces` | List traces |
-| `GET` | `/api/traces/{trace_id}` | Get trace details |
-| `POST` | `/api/traces/{trace_id}/promote` | Promote to gold |
-| `POST` | `/api/traces/{trace_id}/demote` | Demote to failed |
-
-#### Factory
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/factory/synthetic/generate` | Start synthetic generation |
-| `GET` | `/api/factory/jobs/{job_id}` | Get generation progress |
-| `GET` | `/api/factory/examples` | List generated examples |
-
-#### Orchestrator
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/orchestrate/submit` | Submit a development spec |
-| `POST` | `/api/orchestrate/{job_id}/approve` | Approve plan and start execution |
-| `GET` | `/api/orchestrate/{job_id}/status` | Worker progress and task states |
-| `POST` | `/api/orchestrate/{job_id}/task/{task_id}/retry` | Retry a failed task |
-| `GET` | `/api/orchestrate/jobs` | List all jobs |
-| `DELETE` | `/api/orchestrate/{job_id}` | Delete a job |
-| `GET` | `/api/orchestrate/providers` | List configured LLM providers |
-
-#### Benchmarks
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/benchmarks` | List available benchmarks |
-| `POST` | `/api/benchmarks/run` | Run benchmark |
-| `GET` | `/api/benchmarks/{run_id}` | Get results |
-
-#### HuggingFace
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/hf/status` | Check HF integration |
-| `POST` | `/api/hf/cloud-training/submit` | Submit cloud job |
-| `POST` | `/api/hf/spaces/create` | Deploy to Spaces |
-| `GET` | `/api/hf/datasets` | List datasets |
-
-#### Integration
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/integration/status` | Bashbros status |
-| `GET` | `/api/integration/settings` | Get settings |
-| `POST` | `/api/integration/settings` | Update settings |
-| `POST` | `/api/integration/link` | Link bashbros |
-
-#### Observability
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/observability/traces` | List profiler traces |
-| `GET` | `/api/observability/guardrail-events` | Get guardrail events |
-
-### WebSocket Messages
-
-Connect to `ws://localhost:8003/ws` for real-time updates.
-
-| Category | Message Types |
-|----------|--------------|
-| **Training** | `training:progress`, `training:complete`, `training:failed`, `training:log` |
-| **Tasks** | `task:status`, `task:complete` |
-| **Traces** | `trace:added`, `trace:promoted`, `trace:demoted` |
-| **Orchestrator** | `orchestrator:plan_ready`, `orchestrator:task_complete`, `orchestrator:job_complete`, `orchestrator:worker_log` |
-| **Router** | `router:stats`, `router:decision` |
-| **Verification** | `verification:result` |
-| **Guardrails** | `guardrail:blocked`, `guardrail:warn`, `guardrail:pii_redacted` |
-| **HuggingFace** | `hf:job:started`, `hf:job:complete`, `hf:space:deployed` |
-| **Integration** | `integration:trace:synced`, `integration:model:exported` |
-
----
-
-## Python API
-
-### Basic Usage
-
-```python
-from bashgym import BashGym, Trainer, BashGymEnv
-from bashgym.config import get_settings
-
-# Initialize
-settings = get_settings()
-gym = BashGym()
-
-# Run a task
-result = await gym.run_task(
-    task_prompt="Implement a binary search function",
-    repository_url="https://github.com/example/repo.git"
-)
-
-# Train on accumulated traces
-if result["verification_passed"]:
-    trainer = Trainer()
-    run = trainer.train_sft("data/training_batches/sft_batch.jsonl")
-    print(f"Training complete: {run.output_path}")
 ```
 
 ---
@@ -1310,11 +367,72 @@ Copy `.env.example` to `.env` and configure:
 
 ---
 
+## Frontend Dashboard
+
+The Bash Gym frontend is an Electron + React application with real-time WebSocket updates.
+
+| Section | Purpose |
+|---------|---------|
+| **Home** | Central dashboard with flywheel visualization and system overview |
+| **Workspace** | Multi-terminal grid with canvas view, file browser, and live status detection |
+| **Training** | Monitor training progress, view loss curves, track system resources |
+| **Models** | Browse trained models, view lineage, compare performance |
+| **Factory** | Generate synthetic data, manage datasets |
+| **Traces** | Explore gold/silver/bronze/failed traces, view quality metrics |
+| **Orchestrator** | Submit specs, review plans, monitor parallel workers |
+| **Agent** | Conversational interface to Peony assistant |
+| **Router** | Monitor teacher/student routing decisions and performance |
+| **Evaluator** | Run benchmarks, view evaluation results |
+| **Guardrails** | Monitor safety checks, PII redaction events |
+| **HuggingFace** | Cloud training, Spaces deployment, dataset management |
+
+---
+
+## HuggingFace Integration
+
+Full HuggingFace ecosystem integration for cloud training via Unsloth Jobs, datasets, and deployment.
+
+| Feature | Description |
+|---------|-------------|
+| **Cloud Training (Unsloth Jobs)** | Submit training jobs via `hf jobs uv run` with PEP 723 inline deps |
+| **SFT / DPO / Distillation** | All three training strategies supported in cloud mode |
+| **Dataset Management** | Upload and manage training datasets on HF Hub |
+| **Inference API** | Use HuggingFace Inference Providers for generation and embeddings |
+| **Spaces Deployment** | Deploy interactive Gradio demos |
+
+### Hardware Tiers
+
+| Tier | GPU | VRAM | Cost/hr | Best For |
+|------|-----|------|---------|----------|
+| `t4-small` | T4 | 16GB | $0.60 | Small models (<3B) |
+| `a10g-small` | A10G | 24GB | $1.05 | Medium models (3-7B) |
+| `a10g-large` | A10G | 24GB | $1.80 | Longer training runs |
+| `a100-large` | A100 | 80GB | $4.50 | Large models (7B+) |
+| `h100` | H100 | 80GB | $10.00 | Maximum performance |
+
+All GPU tiers require a HuggingFace Pro subscription.
+
+---
+
+## API Reference
+
+The API server provides 90+ REST endpoints and WebSocket real-time updates.
+
+```bash
+# Development (hot reload)
+python run_backend.py
+
+# Interactive API docs
+open http://localhost:8003/docs
+```
+
+For the full endpoint reference, see **[docs/API.md](docs/API.md)**.
+
+---
+
 ## Docker
 
 ### Full Stack (API + Peony Assistant)
-
-The root `docker-compose.yml` runs the BashGym API alongside the Peony chat assistant:
 
 ```bash
 # Configure secrets
@@ -1330,9 +448,6 @@ docker compose logs -f
 
 # One-shot query via Peony
 docker compose run --rm peony-agent -m "system status"
-
-# Stop
-docker compose down
 ```
 
 | Service | Image | Purpose |
@@ -1343,12 +458,8 @@ docker compose down
 
 ### Sandbox Mode (Arena)
 
-The `docker/docker-compose.yml` provides isolated containers for autonomous batch execution:
-
 ```bash
-cd docker
-docker compose build
-docker compose up -d
+cd docker && docker compose build && docker compose up -d
 ```
 
 ---
@@ -1377,51 +488,118 @@ pytest tests/test_data_factory.py -v
 | **Resource Limits** | Memory and CPU constraints on sandboxes |
 | **Command Blocking** | Blocks rm -rf, fork bombs, disk operations |
 | **API Key Protection** | Sensitive values hidden in logs and responses |
-| **PII Detection** | Automatic detection and redaction |
+| **PII Detection** | Automatic detection and redaction across 20+ types |
 | **Injection Detection** | Prompt injection attack prevention |
 | **Content Moderation** | Filtering of harmful content |
 
 ---
 
-## Data Flow
+## FAQ & Troubleshooting
 
+### General
+
+**Q: Do I need a GPU to use Bash Gym?**
+A: No. Trace capture, curation, and the dashboard work without a GPU. Training requires a CUDA-capable GPU (8GB+ VRAM for 1.5B models, 16GB+ for 7B). Alternatively, use **HuggingFace Cloud Training** (Unsloth Jobs) to train on remote GPUs — supports T4, A10G, A100, and H100 hardware tiers starting at $0.60/hr with a HuggingFace Pro subscription.
+
+**Q: How many traces do I need before training?**
+A: You can start with as few as 20-30 gold traces for a basic SFT run. 100+ traces produce noticeably better results. The more diverse your traces (different repos, task types), the more generalizable the student model.
+
+**Q: Does Bash Gym send my code to any external service?**
+A: Only to the LLM providers you configure (Anthropic, OpenAI, etc.) — the same calls Claude Code already makes. Traces, training data, and models are stored locally. HuggingFace uploads only happen when you explicitly push.
+
+**Q: What's the difference between a trace and a training example?**
+A: A **trace** is a complete coding session (potentially many tool calls over 30+ minutes). A **training example** is a single task-response pair extracted from that trace. One trace typically produces 1-5 training examples. See the [Glossary](#glossary) for more terms.
+
+**Q: Can I use base models other than Qwen?**
+A: Yes. Set `BASE_MODEL` in your `.env` to any HuggingFace model ID. Qwen2.5-Coder and Llama 3.2 are tested. Any causal LM compatible with HuggingFace Transformers should work with LoRA/QLoRA training.
+
+### Installation & Startup
+
+**Q: Port 8003 is already in use.**
+A: Kill existing processes:
+```bash
+# Windows
+.\kill_api.ps1
+
+# macOS/Linux
+lsof -i :8003 | grep LISTEN
+kill -9 <PID>
 ```
-1. YOUR DAILY CLAUDE CODE USAGE (Native Mode)
-   └─▶ You use Claude Code normally on your projects
-   └─▶ Hooks silently capture tool usage (post_tool_use.py)
 
-2. SESSION END
-   └─▶ stop.py processes the trace
-   └─▶ Checks for verification markers
-
-3. AUTOMATIC DATA COLLECTION
-   └─▶ Gold traces (≥90% success) → gold_traces/
-   └─▶ Silver traces (≥75% success) → silver_traces/
-   └─▶ Bronze traces (≥60% success) → bronze_traces/
-   └─▶ Failed traces (<60%) → failed_traces/ (for DPO)
-
-4. DATA SYNTHESIS
-   └─▶ TraceProcessor normalizes and scores traces
-   └─▶ DataFactory creates training examples
-   └─▶ SafeSynthesizer ensures privacy compliance
-
-5. PERIODIC TRAINING
-   └─▶ Run training on accumulated traces
-   └─▶ Unsloth fine-tunes your personal SLM
-   └─▶ Auto-exports to GGUF
-
-6. EVALUATION
-   └─▶ BenchmarkRunner evaluates on HumanEval, MBPP, etc.
-   └─▶ EvaluatorClient runs LLM-as-Judge scoring
-   └─▶ NemoGuard validates safety
-
-7. DEPLOYMENT
-   └─▶ New model registered with ModelRegistry
-   └─▶ Progressive handoff from Teacher to Student
+**Q: The frontend can't connect to the API.**
+A: Check that the backend is running (`python run_backend.py`). The frontend expects the API at `http://localhost:8003`. If using a different port, update `frontend/.env.local`:
 ```
+VITE_API_URL=http://localhost:YOUR_PORT/api
+VITE_WS_URL=ws://localhost:YOUR_PORT/ws
+```
+
+**Q: Hooks show "Not installed" in the sidebar.**
+A: Copy hooks to the correct directory:
+```bash
+cp bashgym/hooks/*.py ~/.claude/hooks/
+```
+Or use **Settings > Trace Capture** to install hooks from the UI.
+
+**Q: `npm install` fails in the frontend directory.**
+A: The frontend uses `node-pty` which requires native compilation. Ensure you have:
+- Node.js 18+ (LTS recommended)
+- Python 3.10+ (for node-gyp)
+- On Windows: Visual Studio Build Tools with "Desktop development with C++"
+
+### Training
+
+**Q: Training fails with "CUDA out of memory".**
+A: Reduce memory usage:
+1. Use QLoRA (4-bit quantization) — enabled by default
+2. Reduce batch size to 1-2
+3. Reduce sequence length (default 2048, try 1024)
+4. Use the smaller 1.5B model instead of 7B
+5. Close other GPU-consuming applications
+
+**Q: Training seems stuck or very slow.**
+A: Check GPU utilization with `nvidia-smi -l 1`. If GPU utilization is 0%, the training process may have crashed silently. Check training logs in the Training dashboard or at `~/.bashgym/models/{run_id}/`.
+
+**Q: Where are my trained models saved?**
+A: Models are saved to `~/.bashgym/models/{run_id}/`:
+- `checkpoint-*/` — intermediate checkpoints
+- `final/` — final LoRA adapter
+- `merged/` — full merged weights (if merge was requested)
+- `model-q4_k_m.gguf` — quantized GGUF (if auto-export enabled)
+
+### Frontend & Electron
+
+**Q: The Electron app refreshes and kills my terminals.**
+A: Ctrl+R is blocked by default. Use **Settings > Reload App** instead.
+
+**Q: Terminal shows no activity / Claude commands aren't detected.**
+A: Restart the Electron app (Settings > Reload App). Terminal status detection parses live output — if the app was updated while running, the detection patterns may be stale.
+
+### Peony Assistant
+
+**Q: How do I set up the Discord bot?**
+A:
+1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
+2. Create a new application and add a Bot
+3. Enable **MESSAGE_CONTENT** intent under Bot settings
+4. Copy the bot token to `assistant/.env` (`DISCORD_BOT_TOKEN=...`)
+5. Add your Discord user ID to the whitelist in `assistant/config/config.json`
+6. Run `docker compose up`
+
+**Q: How do I set up the Telegram bot?**
+A:
+1. Message [@BotFather](https://t.me/BotFather) on Telegram
+2. Create a new bot and copy the token to `assistant/.env` (`TELEGRAM_BOT_TOKEN=...`)
+3. Add your Telegram user ID to the whitelist in `assistant/config/config.json`
+4. Run `docker compose up`
+
+---
+
+## Contributing
+
+See **[CONTRIBUTING.md](CONTRIBUTING.md)** for development setup, code style, and PR process.
 
 ---
 
 ## License
 
-MIT License - see LICENSE file for details.
+MIT License — see [LICENSE](LICENSE) for details.

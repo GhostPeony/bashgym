@@ -17,6 +17,9 @@ env/
 .env
 frontend.env.local
 
+# Internal docs (not for public repo)
+docs/PRODUCT.md
+
 # IDE
 .vscode/
 .idea/

@@ -31,7 +31,7 @@ export function StatusBar() {
       <div className="flex items-center gap-4">
         {/* Terminal Count */}
         <div className="flex items-center gap-2 text-text-secondary font-mono text-xs">
-          <Terminal className="w-4 h-4" />
+          <Terminal className="w-4 h-4 text-accent" />
           <span>
             {terminalCount} Terminal{terminalCount !== 1 ? 's' : ''}
           </span>
@@ -120,11 +120,11 @@ export function StatusBar() {
 
       {/* Right Section - Hotkey Hints */}
       <div className="flex items-center gap-3 font-mono text-xs text-text-muted">
-        <kbd className="px-1.5 py-0.5 border-brutal border-border bg-background-secondary rounded-brutal">
+        <kbd className="px-1.5 py-0.5 border-brutal border-accent/20 bg-accent/[0.06] rounded-brutal text-accent/70">
           Ctrl+N
         </kbd>
         <span>New</span>
-        <kbd className="px-1.5 py-0.5 border-brutal border-border bg-background-secondary rounded-brutal">
+        <kbd className="px-1.5 py-0.5 border-brutal border-accent/20 bg-accent/[0.06] rounded-brutal text-accent/70">
           Ctrl+D
         </kbd>
         <span>Theme</span>

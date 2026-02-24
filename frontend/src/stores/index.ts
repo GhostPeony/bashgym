@@ -8,6 +8,7 @@ export type {
   ViewMode as TerminalViewMode,
   AgentStatus,
   CanvasNode,
+  CanvasEdge,
   ToolHistoryItem,
   SessionMetrics
 } from './terminalStore'
@@ -33,7 +34,9 @@ export type { ViewMode } from './uiStore'
 export { useTutorialStore } from './tutorialStore'
 export type { TutorialStep } from './tutorialStore'
 export { useAchievementStore } from './achievementStore'
-export { useAccentStore, ACCENT_PRESETS } from './accentStore'
-export type { AccentPreset } from './accentStore'
+export { useAccentStore, ACCENT_PRESETS, TERMINAL_FG_PRESETS } from './accentStore'
+export type { AccentPreset, TerminalFgPreset } from './accentStore'
 export { useOrchestratorStore } from './orchestratorStore'
 export type { TaskNode, OrchestratorJob, SpecInput } from './orchestratorStore'
+export { useAgentStore } from './agentStore'
+export type { ChatMessage as AgentChatMessage } from './agentStore'

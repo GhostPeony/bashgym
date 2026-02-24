@@ -94,10 +94,7 @@ export function SeedEditor({ seed, seedIndex, columns, onUpdate, onDelete, onNav
                   {isCode && value.length > 0 && (
                     <div className="terminal-chrome mt-2">
                       <div className="terminal-header">
-                        <div className="terminal-dot terminal-dot-red" />
-                        <div className="terminal-dot terminal-dot-yellow" />
-                        <div className="terminal-dot terminal-dot-green" />
-                        <span className="font-mono text-xs text-text-muted ml-2">preview</span>
+                        <span className="font-mono text-xs text-text-muted">preview</span>
                       </div>
                       <pre className="text-xs font-mono text-text-primary whitespace-pre-wrap p-3">
                         {highlightCode(value)}

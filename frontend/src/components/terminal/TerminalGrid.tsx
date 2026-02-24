@@ -279,12 +279,19 @@ export function TerminalGrid() {
               'flex items-center gap-1.5 px-2 py-1.5 cursor-pointer group min-w-0 font-mono text-xs',
               'border-brutal rounded-brutal transition-press',
               isActive
-                ? 'bg-background-card text-text-primary border-border shadow-brutal-sm'
-                : 'text-text-secondary border-transparent hover:text-text-primary hover:bg-background-tertiary hover:border-border-subtle',
+                ? 'bg-background-card text-text-primary border-border shadow-brutal-sm border-b-accent'
+                : 'text-text-secondary border-transparent hover:text-accent hover:bg-background-tertiary hover:border-border-subtle',
               isDragging && 'scale-95',
               isDragOver && 'border-accent shadow-brutal-sm'
             )}
-            onClick={() => !isEditing && setActivePanel(panel.id)}
+            onClick={() => {
+              if (isEditing) return
+              setActivePanel(panel.id)
+              // In canvas mode with popup open, switch the popup to show this panel
+              if (viewMode === 'canvas' && canvasPopupPanelId) {
+                setCanvasPopupPanelId(panel.id)
+              }
+            }}
           >
             <GripVertical className="w-3 h-3 text-text-muted hidden group-hover:block cursor-grab active:cursor-grabbing flex-shrink-0" />
             {getPanelIcon(panel.type)}
@@ -335,7 +342,7 @@ export function TerminalGrid() {
       {/* Add new terminal button */}
       <button
         onClick={() => createTerminal()}
-        className="btn-icon !w-7 !h-7 text-text-muted hover:text-text-primary"
+        className="btn-icon !w-7 !h-7 text-text-muted hover:text-accent"
         title="New Terminal"
       >
         <Plus className="w-4 h-4" />
@@ -344,7 +351,7 @@ export function TerminalGrid() {
       {/* Add file browser button */}
       <button
         onClick={openFileBrowser}
-        className="btn-icon !w-7 !h-7 text-text-muted hover:text-text-primary"
+        className="btn-icon !w-7 !h-7 text-text-muted hover:text-accent"
         title="Open File Browser"
       >
         <FolderTree className="w-4 h-4" />
@@ -353,7 +360,7 @@ export function TerminalGrid() {
       {/* Add browser button */}
       <button
         onClick={openBrowser}
-        className="btn-icon !w-7 !h-7 text-text-muted hover:text-text-primary"
+        className="btn-icon !w-7 !h-7 text-text-muted hover:text-accent"
         title="Open Browser"
       >
         <Globe className="w-4 h-4" />
@@ -369,7 +376,7 @@ export function TerminalGrid() {
           className={clsx(
             'p-1.5 rounded-brutal transition-press',
             viewMode === 'grid'
-              ? 'bg-background-card text-text-primary shadow-brutal-sm border-brutal border-border'
+              ? 'bg-background-card text-accent shadow-brutal-sm border-brutal border-border'
               : 'text-text-muted hover:text-text-secondary border border-transparent'
           )}
           title="Grid view"
@@ -381,7 +388,7 @@ export function TerminalGrid() {
           className={clsx(
             'p-1.5 rounded-brutal transition-press',
             viewMode === 'single'
-              ? 'bg-background-card text-text-primary shadow-brutal-sm border-brutal border-border'
+              ? 'bg-background-card text-accent shadow-brutal-sm border-brutal border-border'
               : 'text-text-muted hover:text-text-secondary border border-transparent'
           )}
           title="Single view"
@@ -393,7 +400,7 @@ export function TerminalGrid() {
           className={clsx(
             'p-1.5 rounded-brutal transition-press',
             viewMode === 'canvas'
-              ? 'bg-background-card text-text-primary shadow-brutal-sm border-brutal border-border'
+              ? 'bg-background-card text-accent shadow-brutal-sm border-brutal border-border'
               : 'text-text-muted hover:text-text-secondary border border-transparent'
           )}
           title="Canvas view"
@@ -451,7 +458,7 @@ export function TerminalGrid() {
         {/* Canvas view background - rendered first so terminals appear on top when in popup */}
         {viewMode === 'canvas' && (
           <div className="absolute inset-0 z-10">
-            <CanvasViewWrapper onFocusPanel={handleFocusPanel} />
+            <CanvasViewWrapper onFocusPanel={handleFocusPanel} onClosePopup={closeCanvasPopup} />
           </div>
         )}
 

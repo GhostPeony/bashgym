@@ -71,10 +71,7 @@ function HowItWorks({ isCollapsed, onToggle }: { isCollapsed: boolean; onToggle:
 
           <div className="terminal-chrome">
             <div className="terminal-header">
-              <div className="terminal-dot terminal-dot-red" />
-              <div className="terminal-dot terminal-dot-yellow" />
-              <div className="terminal-dot terminal-dot-green" />
-              <span className="font-mono text-xs text-text-muted ml-2">pipeline</span>
+              <span className="font-mono text-xs text-text-muted">pipeline</span>
             </div>
             <div className="flex items-center justify-between text-xs p-3 font-mono text-text-secondary">
               <span className="terminal-prompt font-semibold">Gold Traces</span>
@@ -905,7 +902,7 @@ export function FactoryDashboard() {
 
         {/* Jobs Tab - Unified view of both Factory and Synthetic jobs */}
         {activeTab === 'jobs' && (
-          <div className="p-6 space-y-4">
+          <div className="p-6 space-y-4 max-w-6xl mx-auto">
             {jobs.length === 0 && syntheticJobs.length === 0 ? (
               <div className="card p-12 text-center">
                 <div className="w-16 h-16 border-brutal border-border rounded-brutal bg-background-secondary flex items-center justify-center mx-auto mb-4">

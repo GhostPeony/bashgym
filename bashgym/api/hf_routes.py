@@ -48,6 +48,11 @@ class JobSubmitRequest(BaseModel):
     base_model: str = Field(default="Qwen/Qwen2.5-Coder-1.5B-Instruct", description="Base model")
     num_epochs: int = Field(default=3, ge=1, le=100)
     learning_rate: float = Field(default=2e-5, gt=0)
+    strategy: str = Field(default="sft", description="Training strategy: sft, dpo, distillation")
+    batch_size: int = Field(default=1, ge=1, le=64)
+    lora_r: int = Field(default=16, ge=4, le=256)
+    lora_alpha: int = Field(default=32, ge=4, le=512)
+    max_seq_length: int = Field(default=2048, ge=256, le=8192)
 
 
 class JobResponse(BaseModel):
@@ -251,6 +256,9 @@ async def submit_job(request: JobSubmitRequest, background_tasks: BackgroundTask
     """Submit a new training job to HuggingFace."""
     from bashgym.integrations.huggingface import get_hf_client, HFProRequiredError
     from bashgym.integrations.huggingface.jobs import create_job_runner, HFJobConfig
+    from bashgym.integrations.huggingface.script_adapter import (
+        CloudScriptConfig, generate_cloud_script,
+    )
 
     client = get_hf_client()
 
@@ -261,47 +269,24 @@ async def submit_job(request: JobSubmitRequest, background_tasks: BackgroundTask
 
     runner = create_job_runner(client)
 
-    # Generate a basic training script
-    script_content = f'''"""
-Auto-generated training script for HuggingFace Jobs.
-"""
-import os
-from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments
-from datasets import load_dataset
-from trl import SFTTrainer
-
-# Load model and tokenizer
-model_id = "{request.base_model}"
-model = AutoModelForCausalLM.from_pretrained(model_id, device_map="auto")
-tokenizer = AutoTokenizer.from_pretrained(model_id)
-
-# Load dataset
-dataset = load_dataset("{request.dataset_repo}")
-
-# Training arguments
-training_args = TrainingArguments(
-    output_dir="./output",
-    num_train_epochs={request.num_epochs},
-    learning_rate={request.learning_rate},
-    per_device_train_batch_size=4,
-    gradient_accumulation_steps=4,
-    save_strategy="epoch",
-    logging_steps=10,
-    push_to_hub=True,
-    hub_model_id="{request.output_repo}",
-)
-
-# Train
-trainer = SFTTrainer(
-    model=model,
-    tokenizer=tokenizer,
-    train_dataset=dataset["train"],
-    args=training_args,
-)
-
-trainer.train()
-trainer.push_to_hub()
-'''
+    # Generate cloud-ready Unsloth script via script adapter
+    try:
+        cloud_config = CloudScriptConfig(
+            strategy=request.strategy,
+            dataset_repo=request.dataset_repo,
+            output_repo=request.output_repo,
+            base_model=request.base_model,
+            hardware=request.hardware,
+            num_epochs=request.num_epochs,
+            learning_rate=request.learning_rate,
+            batch_size=request.batch_size,
+            lora_r=request.lora_r,
+            lora_alpha=request.lora_alpha,
+            max_seq_length=request.max_seq_length,
+        )
+        script_content = generate_cloud_script(cloud_config)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     import tempfile
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
@@ -408,6 +393,24 @@ async def cancel_job(job_id: str):
             raise HTTPException(status_code=400, detail="Job cannot be cancelled (may already be completed)")
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
+
+
+@router.get("/jobs/hardware")
+async def get_hardware_tiers():
+    """Get available hardware tiers with pricing."""
+    from bashgym.integrations.huggingface.jobs import HARDWARE_SPECS
+
+    tiers = []
+    for tier_id, specs in HARDWARE_SPECS.items():
+        if not specs.get("pro_required", True):
+            continue  # Only return GPU tiers
+        tiers.append({
+            "id": tier_id,
+            "gpu": specs.get("gpu"),
+            "vram_gb": specs.get("vram_gb", 0),
+            "cost_per_hour": specs.get("cost_per_hour", 0),
+        })
+    return tiers
 
 
 # =============================================================================
@@ -648,6 +651,79 @@ async def upload_dataset(request: DatasetUploadRequest):
         raise HTTPException(status_code=400, detail=str(e))
     except HFError as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/models/search")
+async def search_models(
+    task: Optional[str] = None,
+    sort: str = "downloads",
+    limit: int = 10,
+    framework: Optional[str] = None,
+):
+    """Search HuggingFace Hub for models.
+
+    Query params:
+        task: Pipeline task filter (e.g. 'text-generation')
+        sort: Sort order — 'downloads', 'likes', or 'lastModified'
+        limit: Max number of results (default 10)
+        framework: Framework filter (e.g. 'pytorch')
+    """
+    from bashgym.integrations.huggingface.model_hub import get_model_hub
+
+    if sort not in ("downloads", "likes", "lastModified"):
+        raise HTTPException(status_code=400, detail="sort must be 'downloads', 'likes', or 'lastModified'")
+
+    hub = get_model_hub()
+    try:
+        models = await hub.search_models(task=task, sort=sort, limit=limit, framework=framework)
+    except Exception as e:
+        logger.error(f"Model search failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Model search failed: {e}")
+
+    return [
+        {
+            "id": m.id,
+            "downloads": m.downloads,
+            "likes": m.likes,
+            "pipeline_tag": m.pipeline_tag,
+            "lastModified": m.last_modified,
+            "author": m.author,
+            "tags": m.tags[:10],  # Limit tag list size
+        }
+        for m in models
+    ]
+
+
+class EvaluateRequest(BaseModel):
+    """Request to evaluate a model with a HF metric."""
+    model_id: str = Field(description="HuggingFace model ID")
+    metric: str = Field(default="accuracy", description="Metric to use: accuracy, f1, bleu, rouge")
+    validation_data_path: Optional[str] = Field(default=None, description="Path to validation JSONL file")
+
+
+@router.post("/evaluate")
+async def evaluate_model(request: EvaluateRequest):
+    """Evaluate a model using HuggingFace evaluate library on local validation data."""
+    from bashgym.integrations.huggingface.evaluate import get_evaluator, SUPPORTED_METRICS
+
+    if request.metric not in SUPPORTED_METRICS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported metric '{request.metric}'. Choose from: {', '.join(SUPPORTED_METRICS)}"
+        )
+
+    evaluator = get_evaluator()
+    try:
+        result = await evaluator.evaluate_with_metric(
+            model_id=request.model_id,
+            metric_name=request.metric,
+            validation_data_path=request.validation_data_path,
+        )
+    except Exception as e:
+        logger.error(f"Evaluation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Evaluation failed: {e}")
+
+    return result
 
 
 @router.delete("/datasets/{repo_name}")

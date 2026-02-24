@@ -1,13 +1,17 @@
 import { useEffect } from 'react'
 import { MainLayout } from './components/layout/MainLayout'
 import { SettingsModal } from './components/common'
-import { useThemeStore, useAccentStore } from './stores'
+import { OnboardingModal } from './components/onboarding/OnboardingModal'
+import { useThemeStore, useAccentStore, useUIStore } from './stores'
+import { useTutorialStore } from './stores/tutorialStore'
 import { useGlobalHotkeys } from './hooks'
 import { wsService } from './services'
 
 function App() {
   const { theme } = useThemeStore()
   const { accentHue } = useAccentStore()
+  const { setOnboardingOpen } = useUIStore()
+  const { hasSeenIntro } = useTutorialStore()
 
   // Apply theme on mount
   useEffect(() => {
@@ -35,6 +39,13 @@ function App() {
     }
   }, [])
 
+  // Show onboarding on first visit
+  useEffect(() => {
+    if (!hasSeenIntro) {
+      setOnboardingOpen(true)
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Global keyboard shortcuts
   useGlobalHotkeys()
 
@@ -42,6 +53,7 @@ function App() {
     <>
       <MainLayout />
       <SettingsModal />
+      <OnboardingModal />
     </>
   )
 }

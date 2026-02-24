@@ -1,4 +1,4 @@
-import { memo, useCallback } from 'react'
+import { memo, useCallback, useState, useEffect } from 'react'
 import { Handle, Position, NodeProps } from '@xyflow/react'
 import {
   FileText,
@@ -12,7 +12,8 @@ import {
   ExternalLink,
   Clock,
   HardDrive,
-  Hash
+  Hash,
+  Loader2
 } from 'lucide-react'
 import { clsx } from 'clsx'
 
@@ -157,6 +158,52 @@ export const PreviewNode = memo(function PreviewNode({ data, selected }: Preview
     onOpenExternal
   } = data
 
+  // Self-load file preview when filePath changes
+  const [loadedPreview, setLoadedPreview] = useState<{
+    previewLines?: string[]
+    fileSize?: number
+    lineCount?: number
+    lastModified?: number
+    loading?: boolean
+  } | null>(null)
+
+  useEffect(() => {
+    if (!filePath) return
+    let cancelled = false
+    setLoadedPreview({ loading: true })
+
+    const load = async () => {
+      try {
+        const [fileResult, statResult] = await Promise.all([
+          window.bashgym?.files.readFile(filePath),
+          window.bashgym?.files.stat(filePath)
+        ])
+        if (cancelled) return
+        const lines = fileResult?.success && fileResult.content
+          ? fileResult.content.split('\n')
+          : undefined
+        setLoadedPreview({
+          previewLines: lines?.slice(0, 20),
+          lineCount: lines?.length,
+          fileSize: statResult?.success ? statResult.stats?.size : undefined,
+          lastModified: statResult?.success ? statResult.stats?.modified : undefined
+        })
+      } catch {
+        if (!cancelled) setLoadedPreview(null)
+      }
+    }
+
+    load()
+    return () => { cancelled = true }
+  }, [filePath])
+
+  // Use loaded data with fallback to props
+  const displayLines = loadedPreview?.previewLines ?? previewLines
+  const displayFileSize = loadedPreview?.fileSize ?? fileSize
+  const displayLineCount = loadedPreview?.lineCount ?? lineCount
+  const displayLastModified = loadedPreview?.lastModified ?? lastModified
+  const isLoadingPreview = loadedPreview?.loading ?? false
+
   const handleFocus = useCallback(() => {
     onFocus?.(panelId)
   }, [panelId, onFocus])
@@ -178,7 +225,7 @@ export const PreviewNode = memo(function PreviewNode({ data, selected }: Preview
 
   const fileName = getFileName(filePath)
   const langName = getLanguageName(language, filePath)
-  const relativeTime = formatRelativeTime(lastModified)
+  const relativeTime = formatRelativeTime(displayLastModified)
 
   return (
     <div
@@ -250,16 +297,16 @@ export const PreviewNode = memo(function PreviewNode({ data, selected }: Preview
 
       {/* File metadata */}
       <div className="flex items-center gap-3 px-3 py-1.5 text-[10px] text-text-muted border-b border-brutal border-border font-mono">
-        {fileSize !== undefined && (
+        {displayFileSize !== undefined && (
           <div className="flex items-center gap-1">
             <HardDrive className="w-2.5 h-2.5" />
-            <span>{formatFileSize(fileSize)}</span>
+            <span>{formatFileSize(displayFileSize)}</span>
           </div>
         )}
-        {lineCount !== undefined && (
+        {displayLineCount !== undefined && (
           <div className="flex items-center gap-1">
             <Hash className="w-2.5 h-2.5" />
-            <span>{lineCount} lines</span>
+            <span>{displayLineCount} lines</span>
           </div>
         )}
         {relativeTime && (
@@ -276,9 +323,14 @@ export const PreviewNode = memo(function PreviewNode({ data, selected }: Preview
         'border-l-3',
         getSyntaxColor(language)
       )}>
-        {previewLines && previewLines.length > 0 ? (
+        {isLoadingPreview ? (
+          <div className="flex items-center justify-center gap-2 text-text-muted py-2">
+            <Loader2 className="w-3 h-3 animate-spin" />
+            <span>Loading preview...</span>
+          </div>
+        ) : displayLines && displayLines.length > 0 ? (
           <div className="space-y-0.5 max-h-[120px] overflow-hidden">
-            {previewLines.slice(0, 8).map((line, idx) => (
+            {displayLines.slice(0, 8).map((line, idx) => (
               <div key={idx} className="flex">
                 <span className="text-text-muted w-6 text-right mr-2 select-none flex-shrink-0">
                   {idx + 1}
@@ -286,9 +338,9 @@ export const PreviewNode = memo(function PreviewNode({ data, selected }: Preview
                 <span className="text-text-secondary truncate">{line || ' '}</span>
               </div>
             ))}
-            {previewLines.length > 8 && (
+            {displayLines.length > 8 && (
               <div className="text-text-muted text-center pt-1">
-                +{previewLines.length - 8} more lines
+                +{displayLines.length - 8} more lines
               </div>
             )}
           </div>

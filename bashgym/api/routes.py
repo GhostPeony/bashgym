@@ -1813,6 +1813,85 @@ def create_app() -> FastAPI:
 
         return {"synced": synced, "project_dir": str(project_dir)}
 
+    @app.post("/api/traces/import", tags=["Traces"])
+    async def import_traces_from_claude():
+        """Import new Claude Code sessions from ~/.claude/projects/ into the trace pipeline.
+
+        Scans all project directories in ~/.claude/projects/, imports sessions that
+        haven't been imported yet, and copies them to ~/.bashgym/traces/.
+
+        Returns:
+            Dict with count of imported sessions, total found, and new trace IDs.
+        """
+        try:
+            from bashgym.trace_capture.importers.claude_history import ClaudeSessionImporter, import_recent
+            results = import_recent(days=60, verbose=False)
+        except Exception as e:
+            logger.error(f"Trace import failed: {e}")
+            raise HTTPException(status_code=500, detail=f"Import failed: {e}")
+
+        imported = [r for r in results if not r.skipped and not r.error]
+        new_trace_ids = [r.session_id for r in imported]
+
+        return {
+            "imported": len(imported),
+            "total": len(results),
+            "skipped": len([r for r in results if r.skipped]),
+            "errors": len([r for r in results if r.error]),
+            "new_trace_ids": new_trace_ids,
+        }
+
+    @app.get("/api/traces/import-since", tags=["Traces"])
+    async def get_traces_since(since: str):
+        """Get traces created after a given ISO timestamp.
+
+        Args:
+            since: ISO 8601 timestamp (e.g. 2024-01-01T00:00:00Z)
+
+        Returns:
+            Dict with count of traces created after the timestamp.
+        """
+        from bashgym.config import get_bashgym_dir, get_settings
+
+        try:
+            since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid timestamp format: {since}")
+
+        settings = get_settings()
+        data_dir = Path(settings.data.data_dir)
+        bashgym_dir = get_bashgym_dir()
+
+        new_traces = []
+        dirs_to_check = [
+            bashgym_dir / "traces",
+            bashgym_dir / "gold_traces",
+            bashgym_dir / "silver_traces",
+            bashgym_dir / "bronze_traces",
+            bashgym_dir / "failed_traces",
+            data_dir / "traces",
+            data_dir / "gold_traces",
+            data_dir / "silver_traces",
+            data_dir / "bronze_traces",
+            data_dir / "failed_traces",
+        ]
+
+        seen_ids = set()
+        for trace_dir in dirs_to_check:
+            if not trace_dir.exists():
+                continue
+            for f in trace_dir.glob("*.json"):
+                try:
+                    import datetime as _dt
+                    mtime = _dt.datetime.fromtimestamp(f.stat().st_mtime, tz=_dt.timezone.utc)
+                    if mtime > since_dt and f.stem not in seen_ids:
+                        seen_ids.add(f.stem)
+                        new_traces.append(f.stem)
+                except Exception:
+                    continue
+
+        return {"count": len(new_traces), "traces": new_traces}
+
     @app.post("/api/traces/auto-classify", tags=["Traces"])
     async def auto_classify_traces(
         # Tiered thresholds based on NVIDIA NeMo recommendations

@@ -10,11 +10,11 @@ export function WorkerMonitor() {
   const runningTasks = Object.values(currentJob.tasks).filter(t => t.status === 'running')
 
   return (
-    <div className="border-brutal border-border rounded-brutal bg-background-card p-4 shadow-brutal">
+    <div className="card p-4">
       <div className="flex items-center justify-between mb-4">
         <h3 className="font-mono text-xs uppercase tracking-widest text-text-muted">Workers</h3>
         <span className="tag text-[10px]">
-          {runningTasks.length} active
+          <span>{runningTasks.length} active</span>
         </span>
       </div>
 

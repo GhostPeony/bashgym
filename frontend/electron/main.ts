@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, Menu } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, Menu, webContents } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
@@ -41,8 +41,7 @@ function setupMenu() {
     {
       label: 'View',
       submenu: [
-        { role: 'reload' },
-        { role: 'forceReload' },
+        // Reload deliberately omitted — Ctrl+R kills terminals and wipes state
         { role: 'toggleDevTools' },
         { type: 'separator' },
         { role: 'resetZoom' },
@@ -56,20 +55,23 @@ function setupMenu() {
 }
 
 function createWindow() {
+  const isWin = process.platform === 'win32'
+
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
     minWidth: 800,
     minHeight: 600,
     title: 'Bash Gym',
-    titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 16, y: 16 },
+    titleBarStyle: isWin ? 'hidden' : 'hiddenInset',
+    ...(isWin ? {} : { trafficLightPosition: { x: 16, y: 16 } }),
     backgroundColor: '#0D0D0D',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
-      sandbox: false // Required for node-pty
+      sandbox: false, // Required for node-pty
+      webviewTag: true // Required for browser panel screenshots
     }
   })
 
@@ -80,6 +82,33 @@ function createWindow() {
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
   }
+
+  // Inject electron-window class for platform-specific styling (e.g. window border on Windows)
+  mainWindow.webContents.on('did-finish-load', () => {
+    mainWindow?.webContents.executeJavaScript(
+      `document.documentElement.classList.add('electron-window')`
+    )
+  })
+
+  // Block Ctrl+R / Ctrl+Shift+R / F5 from refreshing the app — kills terminals and wipes state
+  mainWindow.webContents.on('before-input-event', (_event, input) => {
+    if (input.type !== 'keyDown') return
+
+    const isRefresh =
+      (input.key === 'r' && input.control && !input.alt) ||
+      (input.key === 'R' && input.control && input.shift && !input.alt) ||
+      (input.key === 'F5' && !input.control && !input.alt)
+
+    if (isRefresh) {
+      // Forward Ctrl+R to renderer so browser panes can handle it
+      mainWindow?.webContents.send('app-keydown', {
+        key: input.key,
+        ctrlKey: input.control,
+        shiftKey: input.shift
+      })
+      _event.preventDefault()
+    }
+  })
 
   // Open external links in browser
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -129,6 +158,9 @@ if (gotTheLock) {
 // Get fresh environment with updated PATH (especially important on Windows)
 function getFreshEnv(): Record<string, string> {
   const env = { ...process.env } as Record<string, string>
+
+  // Remove Claude Code's nesting guard so terminals can launch claude freely
+  delete env.CLAUDECODE
 
   if (process.platform === 'win32') {
     // On Windows, add common tool paths that might have been installed after app launch
@@ -231,6 +263,27 @@ ipcMain.handle('system:info', () => {
     electronVersion: process.versions.electron,
     cwd: process.cwd()
   }
+})
+
+// Window controls (for frameless window on Windows)
+ipcMain.handle('window:minimize', () => {
+  mainWindow?.minimize()
+})
+
+ipcMain.handle('window:maximize', () => {
+  if (mainWindow?.isMaximized()) {
+    mainWindow.unmaximize()
+  } else {
+    mainWindow?.maximize()
+  }
+})
+
+ipcMain.handle('window:close', () => {
+  mainWindow?.close()
+})
+
+ipcMain.handle('window:isMaximized', () => {
+  return mainWindow?.isMaximized() ?? false
 })
 
 // Theme persistence
@@ -345,6 +398,43 @@ ipcMain.handle('files:exists', async (_, filePath: string) => {
     return true
   } catch {
     return false
+  }
+})
+
+// Browser screenshot via webContentsId — reliable alternative to webview.capturePage() in renderer
+ipcMain.handle('browser:screenshot', async (_, webContentsId: number, rect?: { x: number; y: number; width: number; height: number; vpW: number; vpH: number }) => {
+  try {
+    const wc = webContents.fromId(webContentsId)
+    if (!wc) return { success: false, error: 'WebContents not found' }
+    const fullImage = await wc.capturePage()
+    if (rect) {
+      // Scale CSS pixel bounds to device pixels using viewport size
+      const { width: imgW, height: imgH } = fullImage.getSize()
+      const scaleX = imgW / rect.vpW
+      const scaleY = imgH / rect.vpH
+      const cropped = fullImage.crop({
+        x: Math.round(rect.x * scaleX),
+        y: Math.round(rect.y * scaleY),
+        width: Math.max(1, Math.round(rect.width * scaleX)),
+        height: Math.max(1, Math.round(rect.height * scaleY))
+      })
+      return { success: true, dataUrl: cropped.toDataURL() }
+    }
+    return { success: true, dataUrl: fullImage.toDataURL() }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  }
+})
+
+ipcMain.handle('files:writeTempFile', async (_, dataUrl: string, ext: string) => {
+  try {
+    const filename = `bashgym_screenshot_${Date.now()}.${ext}`
+    const filePath = path.join(os.tmpdir(), filename)
+    const base64Data = dataUrl.replace(/^data:[^;]+;base64,/, '')
+    await fs.promises.writeFile(filePath, Buffer.from(base64Data, 'base64'))
+    return { success: true, path: filePath }
+  } catch (error) {
+    return { success: false, error: String(error) }
   }
 })
 

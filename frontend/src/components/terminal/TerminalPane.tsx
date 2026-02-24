@@ -73,7 +73,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
     }
   }, [])
   const { theme } = useThemeStore()
-  const { accentHue } = useAccentStore()
+  const { accentHue, terminalFgHue } = useAccentStore()
 
   const session = sessions.get(id)
 
@@ -129,6 +129,8 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
   // Accent-influenced terminal theme colors
   const getThemeColors = useCallback(() => {
     const h = accentHue
+    // Guard against undefined from old persisted store data
+    const fgH = typeof terminalFgHue === 'number' ? terminalFgHue : -1
 
     if (theme === 'dark') {
       // Dark: rich accent-tinted background — nighttime garden, not void
@@ -136,24 +138,27 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
       const bgLight = hslToHex(h, 25, 15)
       const accent = hslToHex(h, 50, 68)
 
+      // Terminal foreground: default white or user-picked hue
+      const fg = fgH < 0 ? '#F0EDE8' : hslToHex(fgH, 30, 82)
+
       return {
         background: bg,
-        foreground: '#E8E4E0',
+        foreground: fg,
         cursor: accent,
         cursorAccent: bg,
         selectionBackground: hslToHexAlpha(h, 40, 55, 0.35),
         black: bg,
         red: '#FF453A',
         green: accent,
-        yellow: '#FFD60A',
+        yellow: fg,
         blue: '#0A84FF',
         magenta: hslToHex((h + 60) % 360, 45, 65),
         cyan: hslToHex((h + 180) % 360, 40, 60),
-        white: '#E8E4E0',
+        white: fg,
         brightBlack: bgLight,
         brightRed: '#FF6961',
         brightGreen: hslToHex(h, 50, 72),
-        brightYellow: '#FFE066',
+        brightYellow: fg,
         brightBlue: '#409CFF',
         brightMagenta: hslToHex((h + 60) % 360, 50, 75),
         brightCyan: hslToHex((h + 180) % 360, 45, 70),
@@ -163,8 +168,10 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
 
     // Light: colored accent wash — the terminal lives inside the gradient
     const bg = hslToHex(h, 45, 85)
-    const fg = '#000000'
-    const fgMid = hslToHex(h, 20, 35)
+
+    // Terminal foreground: default black or user-picked hue
+    const fg = fgH < 0 ? '#000000' : hslToHex(fgH, 45, 25)
+    const fgMid = fgH < 0 ? hslToHex(h, 20, 35) : hslToHex(fgH, 30, 45)
     const accent = hslToHex(h, 45, 38)
     const accentVivid = hslToHex(h, 55, 32)
 
@@ -177,7 +184,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
       black: fg,
       red: '#B84A4A',
       green: accent,
-      yellow: '#C4923A',
+      yellow: fg,
       blue: '#2472C8',
       magenta: hslToHex((h + 60) % 360, 30, 45),
       cyan: hslToHex((h + 180) % 360, 35, 40),
@@ -185,13 +192,13 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
       brightBlack: fgMid,
       brightRed: '#CD3131',
       brightGreen: accentVivid,
-      brightYellow: '#E5C07B',
+      brightYellow: fg,
       brightBlue: '#3B8EEA',
       brightMagenta: hslToHex((h + 60) % 360, 40, 55),
       brightCyan: hslToHex((h + 180) % 360, 40, 50),
       brightWhite: '#FFFFFF'
     }
-  }, [theme, accentHue, hslToHex, hslToHexAlpha])
+  }, [theme, accentHue, terminalFgHue, hslToHex, hslToHexAlpha])
 
   // Initialize terminal (only runs once per terminal ID)
   useEffect(() => {
@@ -328,11 +335,10 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
 
     // Check if Electron terminal API is available (browser mode has no PTY)
     if (!window.bashgym?.terminal) {
-      const yellow = '\x1b[33m'
       const dim = '\x1b[2m'
       const reset = '\x1b[0m'
       terminal.writeln('')
-      terminal.writeln(`${yellow}  Terminal requires the Bash Gym desktop app.${reset}`)
+      terminal.writeln('  Terminal requires the Bash Gym desktop app.')
       terminal.writeln('')
       terminal.writeln(`${dim}  The browser preview does not support terminal sessions.${reset}`)
       terminal.writeln(`${dim}  Please launch the Electron app to use terminals.${reset}`)
@@ -386,7 +392,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
 
     // Listen for exit
     const removeExitListener = window.bashgym?.terminal.onExit(id, (exitCode) => {
-      terminal.writeln(`\r\n\x1b[33mProcess exited with code ${exitCode}\x1b[0m`)
+      terminal.writeln(`\r\n\x1b[2mProcess exited with code ${exitCode}\x1b[0m`)
     })
 
     // Handle resize with debouncing
@@ -462,7 +468,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]) // Only re-initialize when terminal ID changes, not on theme change
 
-  // Update theme when theme or accent hue changes
+  // Update theme when theme, accent hue, or terminal fg hue changes
   useEffect(() => {
     if (terminalRef.current) {
       const colors = getThemeColors()
@@ -470,7 +476,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
       // Force xterm to repaint (WebGL renderer caches colors)
       terminalRef.current.refresh(0, terminalRef.current.rows - 1)
     }
-  }, [theme, accentHue, getThemeColors])
+  }, [theme, accentHue, terminalFgHue, getThemeColors])
 
   // Focus terminal and refit when active
   useEffect(() => {
@@ -535,13 +541,27 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
       outputBufferRef.current = ''
       const clean = stripAnsi(raw)
 
+      // Capture last few meaningful lines for canvas preview
+      let outputUpdate: Partial<{ lastOutput: string[] }> = {}
+      const lines = clean.split('\n')
+        .map(l => l.trim())
+        .filter(l => l.length > 0 && !/^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/.test(l))
+      if (lines.length > 0) {
+        const current = useTerminalStore.getState().sessions.get(id)
+        const prev = current?.lastOutput || []
+        outputUpdate = { lastOutput: [...prev, ...lines].slice(-6) }
+      }
+
       // --- Pattern matching in priority order ---
+      // Single updateSession call per flush to avoid double state updates
 
       // 1. Spinner + tool name → tool_calling
       const toolMatch = clean.match(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s*(Read|Edit|Write|Bash|Glob|Grep|Task|WebFetch|WebSearch|NotebookEdit)/i)
       if (toolMatch) {
         updateSession(id, {
+          ...outputUpdate,
           status: 'tool_calling',
+          attention: 'none',
           currentTool: toolMatch[1],
           lastActivity: Date.now()
         })
@@ -552,7 +572,9 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
       // 2. Spinner + Thinking/Planning → running
       if (/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s*(Thinking|Planning)/i.test(clean)) {
         updateSession(id, {
+          ...outputUpdate,
           status: 'running',
+          attention: 'none',
           lastActivity: Date.now()
         })
         resetIdleTimer()
@@ -562,7 +584,9 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
       // 3. Spinner without recognized label → running
       if (/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/.test(clean)) {
         updateSession(id, {
+          ...outputUpdate,
           status: 'running',
+          attention: 'none',
           lastActivity: Date.now()
         })
         resetIdleTimer()
@@ -572,7 +596,9 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
       // 4. Tool completion markers (checkmark/cross) → still running (processing result)
       if (/[✓✗✔✘]/.test(clean)) {
         updateSession(id, {
+          ...outputUpdate,
           status: 'running',
+          attention: 'none',
           currentTool: undefined,
           lastActivity: Date.now()
         })
@@ -585,7 +611,9 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
       //    - Box drawing chars from Claude's UI (╭, ╰)
       if (/^\s*>\s*$/m.test(clean) || /[╭╰]/.test(clean)) {
         updateSession(id, {
+          ...outputUpdate,
           status: 'waiting_input',
+          attention: 'waiting',
           currentTool: undefined,
           lastActivity: Date.now()
         })
@@ -594,15 +622,33 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
         return
       }
 
-      // 6. Shell prompt → idle (back to shell)
-      if (/PS\s+[A-Z]:\\[^>]*>\s*$/m.test(clean) || /[$#%]\s*$/m.test(clean)) {
+      // 6. Shell prompt → idle (back to shell), extract cwd from PS prompt
+      const psPromptMatch = clean.match(/PS\s+([A-Z]:\\[^>]*?)>\s*$/m)
+      if (psPromptMatch || /[$#%]\s*$/m.test(clean)) {
         updateSession(id, {
+          ...outputUpdate,
           status: 'idle',
+          attention: 'none',
           currentTool: undefined,
-          lastActivity: Date.now()
+          lastActivity: Date.now(),
+          ...(psPromptMatch?.[1] && { cwd: psPromptMatch[1].trim() })
         })
         if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
         return
+      }
+
+      // No specific pattern matched — if there's non-trivial content and we're idle,
+      // assume something is running (catches Claude output patterns we didn't anticipate)
+      const currentSession = useTerminalStore.getState().sessions.get(id)
+      if (clean.trim().length > 0 && currentSession?.status === 'idle') {
+        updateSession(id, {
+          ...outputUpdate,
+          status: 'running',
+          attention: 'none',
+          lastActivity: Date.now()
+        })
+      } else if (outputUpdate.lastOutput) {
+        updateSession(id, outputUpdate)
       }
 
       // Any other output = activity, reset idle timer
@@ -619,6 +665,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
       if (current && (current.status === 'running' || current.status === 'tool_calling')) {
         updateSession(id, {
           status: 'waiting_input',
+          attention: 'waiting',
           currentTool: undefined,
           lastActivity: Date.now()
         })
@@ -711,14 +758,9 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
   return (
     <FileDropZone terminalId={id} className="h-full">
       <div className="terminal-chrome h-full flex flex-col">
-        {/* Terminal Header — macOS dots + title in JetBrains Mono */}
+        {/* Terminal Header */}
         <div className="terminal-header">
-          <div className="flex items-center gap-1.5">
-            <span className="terminal-dot terminal-dot-red" />
-            <span className="terminal-dot terminal-dot-yellow" />
-            <span className="terminal-dot terminal-dot-green" />
-          </div>
-          <div className="flex items-center gap-2 ml-3 flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-1 min-w-0">
             {/* Status indicator */}
             <div title={getStatusTooltip()} className="flex-shrink-0">
               {getStatusIcon()}
@@ -835,7 +877,10 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
             'flex-1 overflow-hidden',
             session?.attention === 'success' && 'terminal-attention-success',
             session?.attention === 'error' && 'terminal-attention-error',
-            session?.attention === 'waiting' && 'terminal-attention-waiting'
+            session?.attention === 'waiting' && 'terminal-attention-waiting',
+            session?.status === 'running' && 'terminal-status-running',
+            session?.status === 'tool_calling' && 'terminal-status-tool-calling',
+            session?.status === 'waiting_input' && 'terminal-status-waiting-input'
           )}
         />
 

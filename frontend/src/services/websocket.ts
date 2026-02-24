@@ -68,6 +68,7 @@ export const MessageTypes = {
   HF_JOB_LOG: 'hf:job:log',
   HF_JOB_COMPLETED: 'hf:job:completed',
   HF_JOB_FAILED: 'hf:job:failed',
+  HF_JOB_METRICS: 'hf:job:metrics',
   HF_SPACE_READY: 'hf:space:ready',
   HF_SPACE_ERROR: 'hf:space:error',
   // Orchestration events

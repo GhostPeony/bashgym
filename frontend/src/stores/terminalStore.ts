@@ -41,6 +41,8 @@ export interface TerminalSession {
   errorMessage?: string
   isExpanded?: boolean
   isPaused?: boolean
+  /** Last few lines of terminal output for canvas preview */
+  lastOutput?: string[]
 }
 
 // Canvas node for React Flow view
@@ -56,6 +58,13 @@ export interface CanvasNode {
   }
 }
 
+// Canvas edge — a connection between two panels on the canvas
+export interface CanvasEdge {
+  id: string
+  source: string  // panelId of source node
+  target: string  // panelId of target node
+}
+
 export interface Panel {
   id: string
   type: PanelType
@@ -66,6 +75,8 @@ export interface Panel {
   filePath?: string
   // For browser panels
   url?: string
+  // In-memory screenshot (lives only for panel lifetime, never persisted)
+  thumbnail?: string
 }
 
 interface TerminalState {
@@ -84,6 +95,9 @@ interface TerminalState {
 
   // Canvas nodes for React Flow view
   canvasNodes: Map<string, CanvasNode>
+
+  // Canvas edges — connections between panels (browser→terminal routing)
+  canvasEdges: CanvasEdge[]
 
   // Drag state for tab reordering
   draggedPanelId: string | null
@@ -109,12 +123,15 @@ interface TerminalState {
 
   // Canvas actions
   updateCanvasNode: (panelId: string, position: { x: number; y: number }) => void
+  setCanvasEdges: (edges: CanvasEdge[]) => void
 
   // Drag actions
   setDraggedPanel: (id: string | null) => void
 
   setBroadcastCommand: (command: string) => void
   executeBroadcast: () => void
+  setPanelUrl: (id: string, url: string) => void
+  setPanelThumbnail: (id: string, thumbnail: string) => void
 }
 
 let panelCounter = 0
@@ -179,7 +196,7 @@ const saveCanvasPositions = (nodes: Map<string, CanvasNode>) => {
 const loadViewMode = (): ViewMode => {
   try {
     const stored = localStorage.getItem(VIEW_MODE_KEY)
-    if (stored && ['grid', 'single'].includes(stored)) {
+    if (stored && ['grid', 'single', 'canvas'].includes(stored)) {
       return stored as ViewMode
     }
   } catch {
@@ -204,6 +221,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   activePanelId: null,
   viewMode: loadViewMode(),
   canvasNodes: loadCanvasPositions(),
+  canvasEdges: [],
   draggedPanelId: null,
   broadcastCommand: '',
 
@@ -286,14 +304,17 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       const session = newSessions.get(id)
       if (!session) return state
 
-      // Check if status or currentTool actually changed (significant updates)
+      // Check which fields actually changed (significant updates that canvas should reflect)
       const statusChanged = updates.status !== undefined && updates.status !== session.status
       const toolChanged = updates.currentTool !== undefined && updates.currentTool !== session.currentTool
+      const outputChanged = false // lastOutput no longer displayed in canvas nodes
+      const attentionChanged = updates.attention !== undefined && updates.attention !== session.attention
+      const taskSummaryChanged = updates.taskSummary !== undefined && updates.taskSummary !== session.taskSummary
 
       newSessions.set(id, { ...session, ...updates })
 
-      // Only increment version for significant changes (status/tool) to avoid excessive re-renders
-      if (statusChanged || toolChanged) {
+      // Increment version for any significant change to force canvas re-renders
+      if (statusChanged || toolChanged || outputChanged || attentionChanged || taskSummaryChanged) {
         return { sessions: newSessions, sessionsVersion: state.sessionsVersion + 1 }
       }
       return { sessions: newSessions }
@@ -317,14 +338,20 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       const panel = state.panels.find((p) => p.id === id)
       const newPanels = state.panels.filter((p) => p.id !== id)
 
+      // Clean up persisted canvas position for this panel
+      const newCanvasNodes = new Map(state.canvasNodes)
+      newCanvasNodes.delete(id)
+      saveCanvasPositions(newCanvasNodes)
+
       // If it's a terminal panel, close the terminal too
       if (panel?.type === 'terminal' && panel.terminalId) {
         get().closeTerminal(panel.terminalId)
-        return { panels: newPanels }
+        return { panels: newPanels, canvasNodes: newCanvasNodes }
       }
 
       return {
         panels: newPanels,
+        canvasNodes: newCanvasNodes,
         activePanelId: state.activePanelId === id
           ? (newPanels.length > 0 ? newPanels[newPanels.length - 1].id : null)
           : state.activePanelId
@@ -428,6 +455,10 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     })
   },
 
+  setCanvasEdges: (edges: CanvasEdge[]) => {
+    set({ canvasEdges: edges })
+  },
+
   setDraggedPanel: (id: string | null) => {
     set({ draggedPanelId: id })
   },
@@ -446,5 +477,17 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     })
 
     set({ broadcastCommand: '' })
+  },
+
+  setPanelUrl: (id: string, url: string) => {
+    set((state) => ({
+      panels: state.panels.map(p => p.id === id ? { ...p, url } : p)
+    }))
+  },
+
+  setPanelThumbnail: (id: string, thumbnail: string) => {
+    set((state) => ({
+      panels: state.panels.map(p => p.id === id ? { ...p, thumbnail } : p)
+    }))
   }
 }))

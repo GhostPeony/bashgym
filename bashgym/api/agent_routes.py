@@ -1,8 +1,13 @@
 # bashgym/api/agent_routes.py
-"""API routes for the system-aware Gym Agent chatbot."""
+"""API routes for Peony — the botanical assistant for Bash Gym."""
 
+import json
 import logging
 import os
+import secrets
+import subprocess
+from datetime import datetime, timezone, timedelta
+from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException
@@ -12,6 +17,121 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
 
+# ---------------------------------------------------------------------------
+# In-memory pending actions (shell confirmation gate)
+# ---------------------------------------------------------------------------
+
+PENDING_ACTIONS: dict[str, dict] = {}  # token → {cmd, reason, messages, tool_use_id, expires_at}
+
+# ---------------------------------------------------------------------------
+# Peony tool definitions
+# ---------------------------------------------------------------------------
+
+PEONY_TOOLS = [
+    # Core gym operations
+    {
+        "name": "import_traces",
+        "description": "Import new Claude Code sessions from ~/.claude/projects/ into the trace pipeline.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "get_trace_status",
+        "description": "Get current trace counts by quality tier and recent activity.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "classify_pending_traces",
+        "description": "Auto-classify pending traces into gold/silver/bronze/failed tiers.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "dry_run": {"type": "boolean", "description": "If true, preview only without applying changes"}
+            },
+        },
+    },
+    {
+        "name": "start_training",
+        "description": "Start a model fine-tuning run.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "strategy": {"type": "string", "enum": ["sft", "dpo", "grpo"]},
+                "model": {"type": "string", "description": "Base model ID to fine-tune"},
+            },
+        },
+    },
+    {
+        "name": "get_training_status",
+        "description": "Check active and recent training jobs.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    # HuggingFace operations
+    {
+        "name": "hf_search_models",
+        "description": "Search HuggingFace Hub for models by task, sort order, and limit.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task": {"type": "string", "description": "Pipeline task filter (e.g. 'text-generation')"},
+                "sort": {"type": "string", "enum": ["downloads", "likes", "lastModified"]},
+                "limit": {"type": "integer", "description": "Number of results to return (default 10)"},
+            },
+        },
+    },
+    {
+        "name": "hf_get_job_status",
+        "description": "Check status of a HuggingFace cloud training job.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "job_id": {"type": "string"},
+            },
+            "required": ["job_id"],
+        },
+    },
+    {
+        "name": "hf_test_inference",
+        "description": "Test a model on HuggingFace Inference API with a prompt.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "model_id": {"type": "string"},
+                "prompt": {"type": "string"},
+            },
+            "required": ["model_id", "prompt"],
+        },
+    },
+    {
+        "name": "hf_evaluate_model",
+        "description": "Evaluate a model using HuggingFace evaluate library on local validation data.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "model_id": {"type": "string"},
+                "metric": {"type": "string", "enum": ["accuracy", "f1", "bleu", "rouge"]},
+            },
+            "required": ["model_id"],
+        },
+    },
+    # Shell escape hatch
+    {
+        "name": "run_shell_command",
+        "description": "Run a shell command. ONLY use when no structured tool covers the need. Always provide a reason.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "command": {"type": "string"},
+                "reason": {"type": "string", "description": "Why this command is necessary"},
+            },
+            "required": ["command", "reason"],
+        },
+    },
+]
+
+
+# ---------------------------------------------------------------------------
+# Chat models
+# ---------------------------------------------------------------------------
 
 class ChatMessage(BaseModel):
     role: str  # "user" | "assistant" | "system"
@@ -23,18 +143,91 @@ class ChatRequest(BaseModel):
     history: Optional[List[ChatMessage]] = None
 
 
+class PendingAction(BaseModel):
+    type: str  # "shell_command"
+    command: str
+    reason: str
+    token: str
+
+
 class ChatResponse(BaseModel):
     response: str
     context_used: List[str] = []
+    pending_action: Optional[PendingAction] = None
 
+
+class ConfirmActionRequest(BaseModel):
+    token: str
+    approved: bool
+    session_id: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Session models
+# ---------------------------------------------------------------------------
+
+class SessionMeta(BaseModel):
+    session_id: str
+    name: str
+    created_at: str
+    updated_at: str
+    message_count: int = 0
+
+
+class SessionMessage(BaseModel):
+    id: str
+    role: str
+    content: str
+    timestamp: float
+    context_used: list[str] = []
+
+
+class SaveSessionRequest(BaseModel):
+    session_id: str
+    name: str
+    messages: list[SessionMessage]
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _get_peony_logs_dir() -> Path:
+    from bashgym.config import get_bashgym_dir
+    d = get_bashgym_dir() / "peony_logs"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _get_sessions_index_path() -> Path:
+    return _get_peony_logs_dir() / "_sessions_index.json"
+
+
+def _read_sessions_index() -> list[dict]:
+    path = _get_sessions_index_path()
+    if not path.exists():
+        return []
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+
+def _write_sessions_index(index: list[dict]) -> None:
+    path = _get_sessions_index_path()
+    path.write_text(json.dumps(index, indent=2), encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# System context gathering
+# ---------------------------------------------------------------------------
 
 async def _gather_system_context() -> str:
-    """Gather current system state to give the agent full awareness."""
+    """Gather current system state to give Peony full awareness."""
     sections = []
 
     # 1. System stats (traces, models, training)
     try:
-        from pathlib import Path
         from bashgym.config import get_settings, get_bashgym_dir
         settings = get_settings()
         data_dir = Path(settings.data.data_dir)
@@ -83,14 +276,21 @@ async def _gather_system_context() -> str:
 
     # 3. Trace repos
     try:
-        from bashgym.trace_capture.importers.claude_history import ClaudeHistoryImporter
-        importer = ClaudeHistoryImporter()
-        repos = importer.list_repos()
-        if repos:
-            repo_lines = [f"  - {r['name']}: {r.get('trace_count', '?')} traces" for r in repos[:10]]
-            sections.append(
-                f"**Trace Repositories ({len(repos)} total):**\n" + '\n'.join(repo_lines)
-            )
+        from bashgym.trace_capture.importers.claude_history import ClaudeSessionImporter
+        importer = ClaudeSessionImporter()
+        projects_dir = importer.find_projects_dir()
+        if projects_dir and projects_dir.exists():
+            repos = [
+                {"name": d.name, "trace_count": len(list(d.glob("*.jsonl")))}
+                for d in projects_dir.iterdir()
+                if d.is_dir()
+            ]
+            repos.sort(key=lambda r: r["trace_count"], reverse=True)
+            if repos:
+                repo_lines = [f"  - {r['name']}: {r.get('trace_count', '?')} sessions" for r in repos[:10]]
+                sections.append(
+                    f"**Trace Repositories ({len(repos)} total):**\n" + '\n'.join(repo_lines)
+                )
     except Exception as e:
         logger.debug(f"Could not gather trace repos: {e}")
 
@@ -125,34 +325,136 @@ async def _gather_system_context() -> str:
 
 def _build_system_prompt(context: str) -> str:
     return (
-        "You are the Gym Agent — a system-aware assistant for Bash Gym, a self-improving "
+        "You are Peony — the botanical assistant for Bash Gym, a self-improving "
         "agentic development gym that captures coding sessions, transforms them into training "
         "data, and fine-tunes models.\n\n"
-        "You have access to the user's current system state. Use it to give specific, "
-        "actionable advice. Be concise and direct.\n\n"
-        "You can help with:\n"
-        "- Planning training runs (choosing strategy, model, hyperparameters)\n"
-        "- Scheduling data generation (when to run, how much to generate)\n"
-        "- Assessing system bandwidth (GPU memory, available VRAM, concurrent capacity)\n"
-        "- Analyzing trace quality and recommending next steps\n"
-        "- Suggesting orchestration specs for multi-agent work\n"
-        "- Troubleshooting training or data pipeline issues\n\n"
-        "When giving recommendations, reference the actual numbers from the system context. "
-        "Be specific about model names, trace counts, and resource constraints.\n\n"
+        "You have access to tools that let you take real actions in the system. Use them "
+        "when the user asks you to do something actionable (import traces, search models, "
+        "start training, etc.). For questions and analysis, respond directly.\n\n"
+        "When you use a tool, briefly tell the user what you're doing before/after. "
+        "Summarize tool results in natural language — don't dump raw JSON.\n\n"
+        "For run_shell_command: only use this as a last resort when no structured tool covers "
+        "the need. Always provide a clear reason.\n\n"
+        "You have access to the user's current system state snapshot (below). Use it to give "
+        "specific, actionable advice. Be concise and direct.\n\n"
         f"--- CURRENT SYSTEM STATE ---\n{context}\n--- END SYSTEM STATE ---"
     )
 
 
+# ---------------------------------------------------------------------------
+# Tool executor
+# ---------------------------------------------------------------------------
+
+async def _execute_tool(name: str, tool_input: dict) -> str:
+    """Execute a Peony tool and return a string result for the tool_result block."""
+    import httpx
+
+    base_url = "http://localhost:8003"
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            if name == "import_traces":
+                resp = await client.post(f"{base_url}/api/traces/import")
+                resp.raise_for_status()
+                data = resp.json()
+                return json.dumps(data)
+
+            elif name == "get_trace_status":
+                resp = await client.get(f"{base_url}/api/stats")
+                resp.raise_for_status()
+                data = resp.json()
+                return json.dumps(data)
+
+            elif name == "classify_pending_traces":
+                dry_run = tool_input.get("dry_run", True)
+                resp = await client.post(
+                    f"{base_url}/api/traces/auto-classify",
+                    params={"dry_run": str(dry_run).lower(), "auto_promote": str(not dry_run).lower()},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                return json.dumps(data)
+
+            elif name == "start_training":
+                payload = {
+                    "strategy": tool_input.get("strategy", "sft"),
+                }
+                if tool_input.get("model"):
+                    payload["base_model"] = tool_input["model"]
+                resp = await client.post(f"{base_url}/api/training/start", json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+                return json.dumps(data)
+
+            elif name == "get_training_status":
+                resp = await client.get(f"{base_url}/api/training")
+                resp.raise_for_status()
+                data = resp.json()
+                return json.dumps(data)
+
+            elif name == "hf_search_models":
+                params = {}
+                if tool_input.get("task"):
+                    params["task"] = tool_input["task"]
+                if tool_input.get("sort"):
+                    params["sort"] = tool_input["sort"]
+                if tool_input.get("limit"):
+                    params["limit"] = tool_input["limit"]
+                resp = await client.get(f"{base_url}/api/hf/models/search", params=params)
+                resp.raise_for_status()
+                data = resp.json()
+                return json.dumps(data)
+
+            elif name == "hf_get_job_status":
+                job_id = tool_input["job_id"]
+                resp = await client.get(f"{base_url}/api/hf/jobs/{job_id}")
+                resp.raise_for_status()
+                data = resp.json()
+                return json.dumps(data)
+
+            elif name == "hf_test_inference":
+                payload = {
+                    "model": tool_input["model_id"],
+                    "prompt": tool_input["prompt"],
+                }
+                resp = await client.post(f"{base_url}/api/hf/inference/generate", json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+                return json.dumps(data)
+
+            elif name == "hf_evaluate_model":
+                payload = {
+                    "model_id": tool_input["model_id"],
+                    "metric": tool_input.get("metric", "accuracy"),
+                }
+                resp = await client.post(f"{base_url}/api/hf/evaluate", json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+                return json.dumps(data)
+
+            else:
+                return json.dumps({"error": f"Unknown tool: {name}"})
+
+        except httpx.HTTPStatusError as e:
+            return json.dumps({"error": f"HTTP {e.response.status_code}: {e.response.text[:200]}"})
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+
+# ---------------------------------------------------------------------------
+# Chat endpoint
+# ---------------------------------------------------------------------------
+
 @router.post("/chat")
 async def chat(request: ChatRequest):
-    """Send a message to the system-aware Gym Agent."""
+    """Send a message to Peony, the botanical assistant."""
     import httpx
 
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:
         raise HTTPException(
             status_code=503,
-            detail="ANTHROPIC_API_KEY not configured. The Gym Agent requires an API key."
+            detail="ANTHROPIC_API_KEY not configured. Peony requires an API key."
         )
 
     # Gather live system context
@@ -169,7 +471,196 @@ async def chat(request: ChatRequest):
     else:
         messages.append({"role": "user", "content": request.message})
 
-    # Call Claude API
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        try:
+            # First Claude call with tools
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers=headers,
+                json={
+                    "model": "claude-sonnet-4-5-20250929",
+                    "max_tokens": 1024,
+                    "system": system_prompt,
+                    "tools": PEONY_TOOLS,
+                    "messages": messages,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Anthropic API error: {e.response.status_code} - {e.response.text[:200]}")
+            raise HTTPException(status_code=502, detail=f"LLM API error: {e.response.status_code}")
+        except httpx.TimeoutException:
+            raise HTTPException(status_code=504, detail="LLM request timed out")
+        except Exception as e:
+            logger.error(f"Peony chat error: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    stop_reason = data.get("stop_reason")
+
+    # --- Tool use path ---
+    if stop_reason == "tool_use":
+        tool_use_blocks = [b for b in data.get("content", []) if b.get("type") == "tool_use"]
+        tool_results = []
+        pending_shell: Optional[dict] = None
+
+        for block in tool_use_blocks:
+            tool_name = block["name"]
+            tool_id = block["id"]
+            tool_input = block.get("input", {})
+
+            if tool_name == "run_shell_command":
+                # Gate: require user confirmation
+                token = secrets.token_urlsafe(16)
+                expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+                PENDING_ACTIONS[token] = {
+                    "command": tool_input["command"],
+                    "reason": tool_input.get("reason", ""),
+                    "messages": messages + [{"role": "assistant", "content": data["content"]}],
+                    "tool_use_id": tool_id,
+                    "expires_at": expires_at,
+                    "system_prompt": system_prompt,
+                    "context_used": context_used,
+                    "headers": headers,
+                }
+                pending_shell = {
+                    "type": "shell_command",
+                    "command": tool_input["command"],
+                    "reason": tool_input.get("reason", ""),
+                    "token": token,
+                }
+                # Return immediately for shell commands — user must confirm
+                # Emit a brief text response so the UI shows something
+                return ChatResponse(
+                    response="",
+                    context_used=context_used,
+                    pending_action=PendingAction(**pending_shell),
+                )
+            else:
+                # Execute structured tools immediately
+                result_str = await _execute_tool(tool_name, tool_input)
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": tool_id,
+                    "content": result_str,
+                })
+
+        if not tool_results:
+            # Only shell command was requested; already returned above
+            return ChatResponse(response="", context_used=context_used)
+
+        # Second Claude call with tool results
+        follow_up_messages = messages + [
+            {"role": "assistant", "content": data["content"]},
+            {"role": "user", "content": tool_results},
+        ]
+
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client2:
+                resp2 = await client2.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers=headers,
+                    json={
+                        "model": "claude-sonnet-4-5-20250929",
+                        "max_tokens": 1024,
+                        "system": system_prompt,
+                        "tools": PEONY_TOOLS,
+                        "messages": follow_up_messages,
+                    },
+                )
+                resp2.raise_for_status()
+                data2 = resp2.json()
+        except Exception as e:
+            logger.error(f"Peony second call error: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+        response_text = ""
+        for block in data2.get("content", []):
+            if block.get("type") == "text":
+                response_text += block["text"]
+
+        return ChatResponse(
+            response=response_text or "Done.",
+            context_used=context_used,
+        )
+
+    # --- Normal end_turn path ---
+    response_text = ""
+    for block in data.get("content", []):
+        if block.get("type") == "text":
+            response_text += block["text"]
+
+    if not response_text:
+        response_text = "I couldn't generate a response. Please try again."
+
+    return ChatResponse(response=response_text, context_used=context_used)
+
+
+# ---------------------------------------------------------------------------
+# Confirm action endpoint
+# ---------------------------------------------------------------------------
+
+@router.post("/confirm-action")
+async def confirm_action(request: ConfirmActionRequest):
+    """Approve or deny a pending shell command and resume the Claude conversation."""
+    import httpx
+
+    token = request.token
+    action = PENDING_ACTIONS.pop(token, None)
+    if not action:
+        raise HTTPException(status_code=404, detail="Pending action not found or expired")
+
+    # Check expiry
+    if datetime.now(timezone.utc) > action["expires_at"]:
+        raise HTTPException(status_code=410, detail="Pending action expired")
+
+    tool_use_id = action["tool_use_id"]
+    messages = action["messages"]
+    system_prompt = action["system_prompt"]
+    context_used = action["context_used"]
+    headers = action["headers"]
+
+    if request.approved:
+        # Run the command
+        try:
+            proc = subprocess.run(
+                action["command"],
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            output = proc.stdout or ""
+            if proc.stderr:
+                output += f"\n[stderr]: {proc.stderr}"
+            tool_result_content = output.strip() or "(no output)"
+        except subprocess.TimeoutExpired:
+            tool_result_content = "[Error]: Command timed out after 30 seconds"
+        except Exception as e:
+            tool_result_content = f"[Error]: {e}"
+    else:
+        tool_result_content = "User declined to run this command."
+
+    # Resume Claude conversation with tool result
+    follow_up_messages = messages + [
+        {
+            "role": "user",
+            "content": [{
+                "type": "tool_result",
+                "tool_use_id": tool_use_id,
+                "content": tool_result_content,
+            }],
+        }
+    ]
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
@@ -183,28 +674,120 @@ async def chat(request: ChatRequest):
                     "model": "claude-sonnet-4-5-20250929",
                     "max_tokens": 1024,
                     "system": system_prompt,
-                    "messages": messages,
+                    "tools": PEONY_TOOLS,
+                    "messages": follow_up_messages,
                 },
             )
             resp.raise_for_status()
             data = resp.json()
-
-        # Extract text from response
-        response_text = ""
-        for block in data.get("content", []):
-            if block.get("type") == "text":
-                response_text += block["text"]
-
-        if not response_text:
-            response_text = "I couldn't generate a response. Please try again."
-
-        return ChatResponse(response=response_text, context_used=context_used)
-
     except httpx.HTTPStatusError as e:
-        logger.error(f"Anthropic API error: {e.response.status_code} - {e.response.text[:200]}")
         raise HTTPException(status_code=502, detail=f"LLM API error: {e.response.status_code}")
-    except httpx.TimeoutException:
-        raise HTTPException(status_code=504, detail="LLM request timed out")
     except Exception as e:
-        logger.error(f"Agent chat error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+    response_text = ""
+    for block in data.get("content", []):
+        if block.get("type") == "text":
+            response_text += block["text"]
+
+    return ChatResponse(
+        response=response_text or "Done.",
+        context_used=context_used,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Session CRUD endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/sessions")
+async def list_sessions():
+    """List all Peony chat sessions."""
+    return _read_sessions_index()
+
+
+@router.get("/sessions/{session_id}")
+async def load_session(session_id: str):
+    """Load messages for a specific session from its JSONL log."""
+    log_path = _get_peony_logs_dir() / f"{session_id}.jsonl"
+    if not log_path.exists():
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    messages = []
+    try:
+        for line in log_path.read_text(encoding="utf-8").strip().splitlines():
+            record = json.loads(line)
+            if record.get("type") == "message":
+                messages.append(SessionMessage(
+                    id=record["id"],
+                    role=record["role"],
+                    content=record["content"],
+                    timestamp=record["timestamp"],
+                    context_used=record.get("context_used", []),
+                ))
+    except Exception as e:
+        logger.error(f"Error reading session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to read session")
+
+    return messages
+
+
+@router.post("/sessions")
+async def save_session(req: SaveSessionRequest):
+    """Save a session — writes JSONL file and updates the index."""
+    logs_dir = _get_peony_logs_dir()
+    log_path = logs_dir / f"{req.session_id}.jsonl"
+
+    # Write JSONL
+    now = datetime.now(timezone.utc).isoformat()
+
+    lines = []
+    # Meta line
+    lines.append(json.dumps({
+        "type": "meta",
+        "session_id": req.session_id,
+        "name": req.name,
+        "created_at": now,
+        "updated_at": now,
+    }))
+    # Message lines
+    for msg in req.messages:
+        lines.append(json.dumps({
+            "type": "message",
+            "id": msg.id,
+            "role": msg.role,
+            "content": msg.content,
+            "timestamp": msg.timestamp,
+            "context_used": msg.context_used,
+        }))
+
+    log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    # Update index
+    index = _read_sessions_index()
+    # Remove existing entry for this session
+    index = [s for s in index if s.get("session_id") != req.session_id]
+    index.append({
+        "session_id": req.session_id,
+        "name": req.name,
+        "created_at": now,
+        "updated_at": now,
+        "message_count": len(req.messages),
+    })
+    _write_sessions_index(index)
+
+    return {"status": "ok", "session_id": req.session_id}
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_session(session_id: str):
+    """Delete a session log and remove it from the index."""
+    log_path = _get_peony_logs_dir() / f"{session_id}.jsonl"
+    if log_path.exists():
+        log_path.unlink()
+
+    index = _read_sessions_index()
+    index = [s for s in index if s.get("session_id") != session_id]
+    _write_sessions_index(index)
+
+    return {"status": "ok", "session_id": session_id}

@@ -30,6 +30,9 @@ Usage:
 """
 
 import logging
+import subprocess
+import tempfile
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -59,16 +62,16 @@ class JobStatus(Enum):
     CANCELLED = "cancelled"
 
 
-# Hardware tier pricing and specs (as of 2025)
+# Hardware tier pricing and specs (as of 2026)
 HARDWARE_SPECS = {
-    "cpu-basic": {"gpu": None, "memory_gb": 2, "pro_required": False},
-    "cpu-upgrade": {"gpu": None, "memory_gb": 8, "pro_required": False},
-    "t4-small": {"gpu": "T4", "memory_gb": 16, "pro_required": True},
-    "t4-medium": {"gpu": "T4", "memory_gb": 32, "pro_required": True},
-    "a10g-small": {"gpu": "A10G", "memory_gb": 24, "pro_required": True},
-    "a10g-large": {"gpu": "A10G", "memory_gb": 48, "pro_required": True},
-    "a100-large": {"gpu": "A100", "memory_gb": 80, "pro_required": True},
-    "h100": {"gpu": "H100", "memory_gb": 80, "pro_required": True},
+    "cpu-basic": {"gpu": None, "vram_gb": 0, "memory_gb": 2, "cost_per_hour": 0.0, "pro_required": False},
+    "cpu-upgrade": {"gpu": None, "vram_gb": 0, "memory_gb": 8, "cost_per_hour": 0.0, "pro_required": False},
+    "t4-small": {"gpu": "T4", "vram_gb": 16, "memory_gb": 16, "cost_per_hour": 0.60, "pro_required": True},
+    "t4-medium": {"gpu": "T4", "vram_gb": 16, "memory_gb": 32, "cost_per_hour": 0.90, "pro_required": True},
+    "a10g-small": {"gpu": "A10G", "vram_gb": 24, "memory_gb": 24, "cost_per_hour": 1.05, "pro_required": True},
+    "a10g-large": {"gpu": "A10G", "vram_gb": 24, "memory_gb": 48, "cost_per_hour": 1.80, "pro_required": True},
+    "a100-large": {"gpu": "A100", "vram_gb": 80, "memory_gb": 80, "cost_per_hour": 4.50, "pro_required": True},
+    "h100": {"gpu": "H100", "vram_gb": 80, "memory_gb": 80, "cost_per_hour": 10.00, "pro_required": True},
 }
 
 
@@ -352,71 +355,69 @@ class HFJobRunner:
         # Store job locally for tracking
         self._jobs[job_id] = job_info
 
-        # In a real implementation, this would call the HF API:
-        # - Create a Space with the training script
-        # - Configure hardware and secrets
-        # - Start the job
-        #
-        # For now, we simulate the API call behavior
-        if HF_HUB_AVAILABLE and self._client.api is not None:
-            try:
-                # Attempt to use the actual HF API if available
-                # Note: The exact API may vary based on HF SDK version
-                self._submit_via_api(job_info, script_path, repo_id, config, script_args)
-            except (AttributeError, NotImplementedError, TypeError) as e:
-                # API method not available or incompatible, use simulation
-                logger.debug(f"HF Jobs API not available or incompatible, using simulation: {e}")
-                self._simulate_job_submission(job_info)
-        else:
-            # Simulate for testing
+        # Submit via `hf jobs` CLI
+        try:
+            self._submit_via_cli(job_info, script_path, config)
+        except FileNotFoundError:
+            logger.warning("hf CLI not found, falling back to simulation")
             self._simulate_job_submission(job_info)
+        except subprocess.SubprocessError as e:
+            logger.error(f"CLI submission failed: {e}")
+            raise HFJobFailedError(
+                f"Failed to submit job via CLI: {e}",
+                job_id=job_info.job_id,
+            )
 
         return job_info
 
-    def _submit_via_api(
+    def _submit_via_cli(
         self,
         job_info: HFJobInfo,
         script_path: Path,
-        repo_id: str,
         config: HFJobConfig,
-        script_args: Optional[List[str]],
     ) -> None:
-        """Submit job via HuggingFace API."""
-        # This is a placeholder for actual API integration
-        # The HuggingFace Jobs/Spaces API structure may vary
-        #
-        # Typical flow:
-        # 1. Create or update a Space repository
-        # 2. Upload the training script
-        # 3. Set hardware configuration
-        # 4. Add secrets to the Space
-        # 5. Restart/run the Space
+        """Submit job via `hf jobs uv run` CLI."""
+        cmd = [
+            "hf", "jobs", "uv", "run",
+            str(script_path),
+            "--flavor", config.hardware,
+            "--secret", "HF_TOKEN",
+        ]
 
-        api = self._client.api
+        logger.info(f"Running CLI command: {' '.join(cmd)}")
 
-        # Check if the API has jobs support
-        if hasattr(api, "run_job"):
-            # Hypothetical jobs API
-            result = api.run_job(
-                repo_id=repo_id,
-                command=["python", str(script_path)] + (script_args or []),
-                hardware=config.hardware,
-                timeout=config.timeout_minutes * 60,
-                environment=config.environment,
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        if result.returncode != 0:
+            error_msg = result.stderr.strip() or result.stdout.strip() or "Unknown error"
+            raise subprocess.SubprocessError(
+                f"hf jobs command failed (exit {result.returncode}): {error_msg}"
             )
-            job_info.job_id = result.get("job_id", job_info.job_id)
-            job_info.status = JobStatus(result.get("status", "pending"))
-        elif hasattr(api, "create_space"):
-            # Use Spaces as a training environment
-            # This creates an ephemeral Space for the training run
-            logger.info("Using Spaces API for job submission")
-            # Note: Full implementation would upload script, configure, and run
-            raise NotImplementedError("Spaces-based job submission not yet implemented")
-        else:
-            raise NotImplementedError("HuggingFace Jobs API not available")
+
+        # Parse job ID from CLI output
+        output = result.stdout.strip()
+        logger.info(f"CLI output: {output}")
+
+        # Try to extract job ID from output (format varies)
+        job_id_match = re.search(r'(?:job[_\s-]?(?:id)?[:\s]+)(\S+)', output, re.IGNORECASE)
+        if job_id_match:
+            job_info.job_id = job_id_match.group(1)
+
+        # Try to extract URL from output
+        url_match = re.search(r'(https://huggingface\.co/\S+)', output)
+        if url_match:
+            job_info.logs_url = url_match.group(1)
+
+        job_info.status = JobStatus.PENDING
+        logger.info(f"Job submitted successfully: {job_info.job_id}")
 
     def _simulate_job_submission(self, job_info: HFJobInfo) -> None:
-        """Simulate job submission for testing."""
+        """Simulate job submission for testing (when CLI is unavailable)."""
         logger.info(f"Simulating job submission for {job_info.job_id}")
         job_info.status = JobStatus.PENDING
 
@@ -459,29 +460,85 @@ class HFJobRunner:
         raise KeyError(f"Job not found: {job_id}")
 
     def _refresh_job_status(self, job_info: HFJobInfo) -> None:
-        """Refresh job status from API."""
-        # Placeholder for actual API call
-        api = self._client.api
-        if hasattr(api, "get_job"):
-            result = api.get_job(job_info.job_id)
-            job_info.status = JobStatus(result.get("status", job_info.status.value))
-            job_info.error_message = result.get("error")
-            job_info.metrics = result.get("metrics", {})
+        """Refresh job status via `hf jobs status` CLI."""
+        try:
+            result = subprocess.run(
+                ["hf", "jobs", "status", job_info.job_id],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode == 0:
+                output = result.stdout.strip().lower()
+                if "completed" in output or "success" in output:
+                    job_info.status = JobStatus.COMPLETED
+                    job_info.completed_at = datetime.now(timezone.utc)
+                elif "failed" in output or "error" in output:
+                    job_info.status = JobStatus.FAILED
+                    job_info.completed_at = datetime.now(timezone.utc)
+                    job_info.error_message = result.stdout.strip()
+                elif "running" in output:
+                    job_info.status = JobStatus.RUNNING
+                    if job_info.started_at is None:
+                        job_info.started_at = datetime.now(timezone.utc)
+                # Parse metrics from logs if available
+                self._poll_job_metrics(job_info)
+        except (FileNotFoundError, subprocess.SubprocessError, subprocess.TimeoutExpired) as e:
+            logger.debug(f"Could not refresh job status via CLI: {e}")
 
-            if result.get("started_at"):
-                job_info.started_at = datetime.fromisoformat(result["started_at"])
-            if result.get("completed_at"):
-                job_info.completed_at = datetime.fromisoformat(result["completed_at"])
+    def _poll_job_metrics(self, job_info: HFJobInfo) -> None:
+        """Poll job logs via CLI and parse training metrics."""
+        try:
+            result = subprocess.run(
+                ["hf", "jobs", "logs", job_info.job_id],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode == 0:
+                # Parse training metrics from log output
+                for line in result.stdout.strip().split('\n'):
+                    # Match common training log patterns like: loss=0.1234, epoch=1
+                    loss_match = re.search(r"['\"]?loss['\"]?\s*[:=]\s*([\d.]+)", line)
+                    epoch_match = re.search(r"['\"]?epoch['\"]?\s*[:=]\s*([\d.]+)", line)
+                    if loss_match:
+                        job_info.metrics["loss"] = float(loss_match.group(1))
+                    if epoch_match:
+                        job_info.metrics["epoch"] = float(epoch_match.group(1))
+        except (FileNotFoundError, subprocess.SubprocessError, subprocess.TimeoutExpired):
+            pass  # Metrics are best-effort
 
     def _fetch_job_from_api(self, job_id: str) -> HFJobInfo:
-        """Fetch job info from API."""
+        """Fetch job info from API or CLI."""
+        # Try CLI first
+        try:
+            result = subprocess.run(
+                ["hf", "jobs", "status", job_id],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode == 0:
+                job_info = HFJobInfo(
+                    job_id=job_id,
+                    status=JobStatus.PENDING,
+                    hardware="unknown",
+                    created_at=datetime.now(timezone.utc),
+                )
+                self._refresh_job_status(job_info)
+                self._jobs[job_id] = job_info
+                return job_info
+        except (FileNotFoundError, subprocess.SubprocessError, subprocess.TimeoutExpired):
+            pass
+
+        # Fall back to API
         api = self._client.api
         if hasattr(api, "get_job"):
             result = api.get_job(job_id)
             job_info = HFJobInfo.from_dict(result)
             self._jobs[job_id] = job_info
             return job_info
-        raise NotImplementedError("HuggingFace Jobs API not available")
+        raise KeyError(f"Job not found: {job_id}")
 
     def get_job_logs(
         self,

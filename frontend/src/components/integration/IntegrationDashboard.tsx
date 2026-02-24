@@ -317,11 +317,6 @@ export function IntegrationDashboard() {
                 <h3 className="font-brand text-text-primary">Integration Directory</h3>
               </div>
               <div className="terminal-chrome">
-                <div className="terminal-header">
-                  <div className="terminal-dot-red" />
-                  <div className="terminal-dot-yellow" />
-                  <div className="terminal-dot-green" />
-                </div>
                 <code className="block text-sm font-mono text-text-secondary px-3 py-2">
                   ~/.bashgym/integration/
                 </code>

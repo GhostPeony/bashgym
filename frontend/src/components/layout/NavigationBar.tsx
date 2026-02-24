@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import {
   Menu,
   Plus,
@@ -6,14 +7,39 @@ import {
   Moon,
   X,
   Keyboard,
-  Home
+  Home,
+  Minus,
+  Square,
+  Copy
 } from 'lucide-react'
 import { useThemeStore, useUIStore, useTerminalStore } from '../../stores'
+
+// Detect if running in Electron
+const isElectron = typeof window !== 'undefined' && !!(window as any).bashgym?.window
 
 export function NavigationBar() {
   const { theme, toggleTheme } = useThemeStore()
   const { toggleSidebar, overlayView, openOverlay, closeOverlay } = useUIStore()
   const { createTerminal } = useTerminalStore()
+  const [isMaximized, setIsMaximized] = useState(false)
+
+  // Track maximized state
+  useEffect(() => {
+    if (!isElectron) return
+    const windowApi = (window as any).bashgym.window
+
+    const checkMaximized = async () => {
+      const maximized = await windowApi.isMaximized()
+      setIsMaximized(maximized)
+    }
+
+    checkMaximized()
+
+    // Re-check on resize (covers maximize/unmaximize/restore events)
+    const handleResize = () => checkMaximized()
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
 
   const handleAddTerminal = () => {
     createTerminal()
@@ -52,10 +78,10 @@ export function NavigationBar() {
         {/* Menu Toggle */}
         <button
           onClick={toggleSidebar}
-          className="btn-icon"
+          className="btn-icon group"
           title="Toggle menu"
         >
-          <Menu className="w-5 h-5 text-text-secondary" />
+          <Menu className="w-5 h-5 text-text-secondary group-hover:text-accent" />
         </button>
 
         {/* Home Button */}
@@ -108,42 +134,77 @@ export function NavigationBar() {
         {/* Theme Toggle */}
         <button
           onClick={toggleTheme}
-          className="btn-icon"
+          className="btn-icon text-text-secondary hover:text-accent"
           title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode (Ctrl+D)`}
         >
           {theme === 'dark' ? (
-            <Sun className="w-5 h-5 text-text-secondary" />
+            <Sun className="w-5 h-5" />
           ) : (
-            <Moon className="w-5 h-5 text-text-secondary" />
+            <Moon className="w-5 h-5" />
           )}
         </button>
 
         {/* Add Terminal */}
         <button
           onClick={handleAddTerminal}
-          className="btn-icon"
+          className="btn-icon text-text-secondary hover:text-accent"
           title="Add terminal (Ctrl+N)"
         >
-          <Plus className="w-5 h-5 text-text-secondary" />
+          <Plus className="w-5 h-5" />
         </button>
 
         {/* Keyboard Shortcuts */}
         <button
           onClick={() => useUIStore.getState().setKeyboardShortcutsOpen(true)}
-          className="btn-icon"
+          className="btn-icon text-text-secondary hover:text-accent"
           title="Keyboard shortcuts (Ctrl+?)"
         >
-          <Keyboard className="w-5 h-5 text-text-secondary" />
+          <Keyboard className="w-5 h-5" />
         </button>
 
         {/* Settings */}
         <button
           onClick={() => useUIStore.getState().setSettingsOpen(true)}
-          className="btn-icon"
+          className="btn-icon text-text-secondary hover:text-accent"
           title="Settings"
         >
-          <Settings className="w-5 h-5 text-text-secondary" />
+          <Settings className="w-5 h-5" />
         </button>
+
+        {/* Window Controls — Electron only */}
+        {isElectron && (
+          <>
+            <div className="w-px h-5 bg-border mx-1" />
+            <button
+              onClick={() => (window as any).bashgym.window.minimize()}
+              className="btn-icon text-text-secondary hover:text-accent"
+              title="Minimize"
+            >
+              <Minus className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => {
+                (window as any).bashgym.window.maximize()
+                // State will update via resize listener
+              }}
+              className="btn-icon text-text-secondary hover:text-accent"
+              title={isMaximized ? 'Restore' : 'Maximize'}
+            >
+              {isMaximized ? (
+                <Copy className="w-3.5 h-3.5" />
+              ) : (
+                <Square className="w-3.5 h-3.5" />
+              )}
+            </button>
+            <button
+              onClick={() => (window as any).bashgym.window.close()}
+              className="btn-icon text-text-secondary hover:text-red-500 hover:bg-red-500/10"
+              title="Close"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </>
+        )}
       </div>
     </header>
   )

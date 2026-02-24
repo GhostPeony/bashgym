@@ -1,16 +1,16 @@
 import { useState, useEffect } from 'react'
 import { Modal } from './Modal'
 import { Button } from './Button'
-import { useUIStore, useAccentStore, ACCENT_PRESETS } from '../../stores'
+import { useUIStore, useAccentStore, ACCENT_PRESETS, TERMINAL_FG_PRESETS } from '../../stores'
 import { HooksSection, ModelsSection } from '../settings'
-import { Settings, Cpu, Terminal, Info, Keyboard, Moon, Sun, Monitor, Dices, RotateCcw } from 'lucide-react'
+import { Settings, Cpu, Terminal, Info, Keyboard, Moon, Sun, Monitor, Dices, RotateCcw, RefreshCw } from 'lucide-react'
 
 type SettingsTab = 'general' | 'models' | 'capture' | 'terminal' | 'api'
 type Theme = 'light' | 'dark' | 'system'
 
 export function SettingsModal() {
   const { isSettingsOpen, setSettingsOpen } = useUIStore()
-  const { accentHue, setAccentHue, randomizeHue, resetHue } = useAccentStore()
+  const { accentHue, setAccentHue, randomizeHue, resetHue, terminalFgHue, setTerminalFgHue, resetTerminalFgHue } = useAccentStore()
   const [activeTab, setActiveTab] = useState<SettingsTab>('general')
   const [theme, setTheme] = useState<Theme>('dark')
 
@@ -200,6 +200,77 @@ export function SettingsModal() {
                     <span className="text-xs font-mono text-text-muted">{accentHue}deg</span>
                   </div>
                 </div>
+
+                {/* Terminal Text Color Slider */}
+                <div className="space-y-3 mt-6">
+                  <label className="text-xs font-mono uppercase tracking-widest text-text-secondary">Terminal Text Color</label>
+
+                  {/* Slider Row */}
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min="0"
+                      max="360"
+                      value={terminalFgHue < 0 ? 0 : terminalFgHue}
+                      onChange={(e) => setTerminalFgHue(Number(e.target.value))}
+                      className="hue-slider flex-1"
+                      disabled={terminalFgHue < 0}
+                      style={{ opacity: terminalFgHue < 0 ? 0.4 : 1 }}
+                    />
+
+                    <button
+                      onClick={resetTerminalFgHue}
+                      className="btn-icon w-8 h-8 flex-shrink-0"
+                      title="Reset to default"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {/* Preset Chips */}
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {TERMINAL_FG_PRESETS.map(preset => (
+                      <button
+                        key={preset.name}
+                        onClick={() => setTerminalFgHue(preset.hue)}
+                        className={`flex items-center gap-2 px-3 py-1.5 text-xs font-mono font-semibold border-brutal rounded-brutal transition-press ${
+                          terminalFgHue === preset.hue
+                            ? 'border-border shadow-brutal-sm'
+                            : 'border-border-subtle hover:border-border'
+                        }`}
+                      >
+                        <span
+                          className="w-3 h-3 rounded-full border border-border"
+                          style={{
+                            backgroundColor: preset.hue < 0
+                              ? (theme === 'dark' ? '#E8E4E0' : '#000000')
+                              : (theme === 'dark' ? `hsl(${preset.hue}, 30%, 82%)` : `hsl(${preset.hue}, 45%, 25%)`)
+                          }}
+                        />
+                        {preset.name}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Live Preview */}
+                  <div className="flex items-center gap-3 mt-3">
+                    <span className="text-xs font-mono text-text-muted uppercase tracking-widest">Preview:</span>
+                    <div
+                      className="px-4 py-2 border-brutal border-border rounded-brutal font-mono text-sm"
+                      style={{
+                        backgroundColor: theme === 'dark' ? '#1a1a2e' : `hsl(${accentHue}, 45%, 85%)`,
+                        color: terminalFgHue < 0
+                          ? (theme === 'dark' ? '#E8E4E0' : '#000000')
+                          : (theme === 'dark' ? `hsl(${terminalFgHue}, 30%, 82%)` : `hsl(${terminalFgHue}, 45%, 25%)`)
+                      }}
+                    >
+                      $ echo "hello world"
+                    </div>
+                    <span className="text-xs font-mono text-text-muted">
+                      {terminalFgHue < 0 ? 'default' : `${terminalFgHue}deg`}
+                    </span>
+                  </div>
+                </div>
               </div>
 
               {/* Keyboard Shortcuts */}
@@ -234,7 +305,21 @@ export function SettingsModal() {
                   <p className="text-sm font-brand text-text-primary">BashGym</p>
                   <p className="text-xs text-text-muted">A Self-Improving Agentic Development Gym</p>
                 </div>
-                <span className="text-xs font-mono text-text-muted">v1.0.0</span>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => {
+                      if (window.confirm('Reload the app? This will close all terminal sessions.')) {
+                        window.location.reload()
+                      }
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono font-semibold border-brutal border-border-subtle rounded-brutal text-text-secondary hover:border-border hover:text-text-primary transition-press"
+                    title="Reload app (closes all terminals)"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    Reload App
+                  </button>
+                  <span className="text-xs font-mono text-text-muted">v1.0.0</span>
+                </div>
               </div>
             </div>
           )}

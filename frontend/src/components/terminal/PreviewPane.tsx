@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { FileText, X, RefreshCw } from 'lucide-react'
 import { useTerminalStore } from '../../stores'
 
@@ -19,27 +19,37 @@ export function PreviewPane({ id, title, filePath, isActive }: PreviewPaneProps)
     removePanel(id)
   }
 
-  const loadFile = async () => {
+  const loadFile = useCallback(async () => {
     if (!filePath) return
     setLoading(true)
-    // In real implementation, this would read the file
-    // For now, show placeholder
-    setTimeout(() => {
-      setContent(`// File: ${filePath}\n\n// Content would appear here`)
+    try {
+      const result = await window.bashgym?.files.readFile(filePath)
+      if (result?.success && result.content !== undefined) {
+        setContent(result.content)
+      } else {
+        setContent(`// Could not load file${result?.error ? ':\n// ' + result.error : ''}`)
+      }
+    } catch {
+      setContent(`// Failed to load file`)
+    } finally {
       setLoading(false)
-    }, 500)
-  }
+    }
+  }, [filePath])
+
+  // Auto-load when filePath changes
+  useEffect(() => {
+    if (filePath) {
+      loadFile()
+    } else {
+      setContent(null)
+    }
+  }, [filePath, loadFile])
 
   return (
     <div className="terminal-chrome h-full flex flex-col">
-      {/* Header — terminal-header with macOS dots */}
+      {/* Header — terminal-header */}
       <div className="terminal-header">
-        <div className="flex items-center gap-1.5">
-          <span className="terminal-dot terminal-dot-red" />
-          <span className="terminal-dot terminal-dot-yellow" />
-          <span className="terminal-dot terminal-dot-green" />
-        </div>
-        <div className="flex-1 flex items-center gap-2 ml-2">
+        <div className="flex-1 flex items-center gap-2">
           <FileText className="w-4 h-4 text-text-muted" />
           <span className="text-sm font-mono text-text-primary truncate max-w-[200px]">
             {filePath || title}

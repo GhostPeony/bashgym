@@ -753,10 +753,7 @@ export function GuardrailsDashboard() {
             </div>
             <div className="terminal-chrome">
               <div className="terminal-header">
-                <div className="terminal-dot terminal-dot-red" />
-                <div className="terminal-dot terminal-dot-yellow" />
-                <div className="terminal-dot terminal-dot-green" />
-                <span className="font-mono text-xs text-text-muted ml-2">colang.config</span>
+                <span className="font-mono text-xs text-text-muted">colang.config</span>
               </div>
               <textarea
                 className="w-full font-mono text-sm bg-background-terminal text-green-400 p-4 border-none outline-none resize-y"

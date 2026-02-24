@@ -11,7 +11,8 @@ import {
   CheckCircle2,
   RefreshCw,
   Lock,
-  Unlock
+  Unlock,
+  Link2
 } from 'lucide-react'
 import { clsx } from 'clsx'
 
@@ -24,6 +25,7 @@ export interface BrowserNodeData {
   statusCode?: number
   errorMessage?: string
   thumbnailUrl?: string
+  hasConnections?: boolean
   onFocus?: (panelId: string) => void
   onClose?: (panelId: string) => void
   onCopyUrl?: (url: string) => void
@@ -94,6 +96,21 @@ function truncateUrl(url: string, maxLength: number = 40): string {
   return url.slice(0, maxLength - 3) + '...'
 }
 
+// Parse URL into parts for visual display
+function parseUrlParts(url: string): { protocol: string; host: string; path: string; port: string } | null {
+  try {
+    const parsed = new URL(url)
+    return {
+      protocol: parsed.protocol.replace(':', '').toUpperCase(),
+      host: parsed.hostname,
+      path: parsed.pathname !== '/' ? parsed.pathname + parsed.search : '',
+      port: parsed.port
+    }
+  } catch {
+    return null
+  }
+}
+
 export const BrowserNode = memo(function BrowserNode({ data, selected }: BrowserNodeType) {
   const {
     panelId,
@@ -104,6 +121,7 @@ export const BrowserNode = memo(function BrowserNode({ data, selected }: Browser
     statusCode,
     errorMessage,
     thumbnailUrl,
+    hasConnections,
     onFocus,
     onClose,
     onCopyUrl,
@@ -138,6 +156,7 @@ export const BrowserNode = memo(function BrowserNode({ data, selected }: Browser
   const domain = getDomain(url)
   const secure = isSecure(url)
   const hasError = !!errorMessage || (statusCode && statusCode >= 400)
+  const urlParts = parseUrlParts(url)
 
   return (
     <div
@@ -185,6 +204,15 @@ export const BrowserNode = memo(function BrowserNode({ data, selected }: Browser
           </div>
         </div>
         <div className="flex items-center gap-0.5">
+          {hasConnections && (
+            <div
+              className="flex items-center gap-0.5 px-1 py-0.5 border-brutal border-accent/60 bg-accent/10 rounded-brutal text-accent"
+              title="Connected to terminal — screenshots route automatically"
+            >
+              <Link2 className="w-2.5 h-2.5" />
+              <span className="text-[8px] font-mono font-bold uppercase tracking-wide">Linked</span>
+            </div>
+          )}
           {onRefresh && (
             <button
               onClick={handleRefresh}
@@ -263,8 +291,8 @@ export const BrowserNode = memo(function BrowserNode({ data, selected }: Browser
         )}
       </div>
 
-      {/* Thumbnail preview area */}
-      <div className="h-[120px] bg-background-tertiary flex items-center justify-center border-b border-brutal border-border-subtle">
+      {/* Thumbnail / URL preview area */}
+      <div className="h-[120px] bg-background-tertiary border-b border-brutal border-border-subtle overflow-hidden">
         {thumbnailUrl ? (
           <img
             src={thumbnailUrl}
@@ -275,17 +303,41 @@ export const BrowserNode = memo(function BrowserNode({ data, selected }: Browser
             }}
           />
         ) : isLoading ? (
-          <div className="flex flex-col items-center gap-2 text-text-muted">
+          <div className="h-full flex flex-col items-center justify-center gap-2 text-text-muted">
             <Loader2 className="w-6 h-6 animate-spin" />
-            <span className="text-[10px] font-mono">Loading preview...</span>
+            <span className="text-[10px] font-mono">Loading...</span>
           </div>
         ) : hasError ? (
-          <div className="flex flex-col items-center gap-2 text-status-error">
+          <div className="h-full flex flex-col items-center justify-center gap-2 text-status-error">
             <AlertCircle className="w-6 h-6" />
             <span className="text-[10px] font-mono">Failed to load</span>
           </div>
+        ) : urlParts ? (
+          <div className="h-full flex flex-col justify-center px-4 gap-2">
+            <div className="flex items-center gap-2">
+              <span className={clsx(
+                'text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 border-brutal rounded-brutal flex-shrink-0',
+                secure
+                  ? 'text-status-success border-status-success bg-status-success/10'
+                  : 'text-status-warning border-status-warning bg-status-warning/10'
+              )}>
+                {urlParts.protocol}
+              </span>
+              {urlParts.port && (
+                <span className="text-[9px] font-mono text-text-muted">:{urlParts.port}</span>
+              )}
+            </div>
+            <div className="font-mono font-semibold text-sm text-text-primary truncate" title={urlParts.host}>
+              {urlParts.host}
+            </div>
+            {urlParts.path && (
+              <div className="font-mono text-[10px] text-text-secondary truncate" title={urlParts.path}>
+                {urlParts.path}
+              </div>
+            )}
+          </div>
         ) : (
-          <div className="flex flex-col items-center gap-2 text-text-muted">
+          <div className="h-full flex flex-col items-center justify-center gap-2 text-text-muted">
             <Globe className="w-8 h-8" />
             <span className="text-[10px] font-mono">No preview</span>
           </div>

@@ -60,10 +60,7 @@ export function TrainingLogs({ maxHeight = 300, defaultExpanded = true }: Traini
       {/* Terminal Header */}
       <div className="terminal-header">
         <div className="flex items-center gap-2 flex-1 cursor-pointer" onClick={() => setExpanded(!expanded)}>
-          <div className="terminal-dot terminal-dot-red" />
-          <div className="terminal-dot terminal-dot-yellow" />
-          <div className="terminal-dot terminal-dot-green" />
-          <span className="font-mono text-xs uppercase tracking-widest text-text-muted ml-2">Training Logs</span>
+          <span className="font-mono text-xs uppercase tracking-widest text-text-muted">Training Logs</span>
           <span className="tag ml-2"><span>{logs.length}</span></span>
         </div>
         <div className="flex items-center gap-1">

@@ -20,7 +20,8 @@ import {
   ChevronRight,
   Coins,
   Pause,
-  Play
+  Play,
+  Link2
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import type { AttentionState, AgentStatus, PanelType, ToolHistoryItem, SessionMetrics } from '../../stores/terminalStore'
@@ -46,6 +47,8 @@ export interface TerminalNodeData {
   errorMessage?: string
   isExpanded?: boolean
   isPaused?: boolean
+  lastOutput?: string[]
+  hasConnections?: boolean
   onFocus?: (panelId: string) => void
   onClose?: (panelId: string) => void
   onTogglePause?: (panelId: string) => void
@@ -156,6 +159,7 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: Termi
     errorMessage,
     isExpanded: dataExpanded,
     isPaused,
+    hasConnections,
     onFocus,
     onClose,
     onTogglePause
@@ -194,7 +198,10 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: Termi
         'card !rounded-brutal border-brutal cursor-pointer',
         getAttentionStyle(attention),
         selected && 'border-accent shadow-brutal',
-        isPaused && 'opacity-75'
+        isPaused && 'opacity-75',
+        !isPaused && status === 'running' && 'terminal-status-running',
+        !isPaused && status === 'tool_calling' && 'terminal-status-tool-calling',
+        !isPaused && status === 'waiting_input' && 'terminal-status-waiting-input'
       )}
       style={{ width: nodeWidth }}
       onClick={handleFocus}
@@ -246,6 +253,14 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: Termi
           </div>
         )}
         <div className="flex items-center gap-0.5">
+          {hasConnections && (
+            <div
+              className="flex items-center gap-0.5 px-1 py-0.5 border-brutal border-accent/60 bg-accent/10 rounded-brutal text-accent"
+              title="Receiving screenshots from connected browser"
+            >
+              <Link2 className="w-2.5 h-2.5" />
+            </div>
+          )}
           {onTogglePause && (
             <button
               onClick={handleTogglePause}

@@ -61,6 +61,11 @@ from .jobs import (
     create_job_runner,
 )
 
+from .script_adapter import (
+    CloudScriptConfig,
+    generate_cloud_script,
+)
+
 from .inference import (
     HFInferenceClient,
     HFInferenceConfig,
@@ -109,6 +114,9 @@ __all__ = [
     "JobStatus",
     "HARDWARE_SPECS",
     "create_job_runner",
+    # Script Adapter
+    "CloudScriptConfig",
+    "generate_cloud_script",
     # Inference
     "HFInferenceClient",
     "HFInferenceConfig",

@@ -25,7 +25,28 @@
       "Bash(wc:*)",
       "WebFetch(domain:vercel.com)",
       "WebFetch(domain:developer.nvidia.com)",
-      "Bash(cmd /c \"cd C:\\\\Users\\\\Cade\\\\projects\\\\ghostwork\\\\tests && ren test_bashgym.py test_bashgym.py\")"
+      "Bash(cmd /c \"cd C:\\\\Users\\\\Cade\\\\projects\\\\ghostwork\\\\tests && ren test_bashgym.py test_bashgym.py\")",
+      "Bash(findstr:*)",
+      "Bash(dir \"C:\\\\Users\\\\Cade\\\\projects\"\" /b | findstr /i \"lang \")",
+      "Bash(cmd /c \"mkdir tests\\\\orchestrator 2>nul\")",
+      "Bash(cmd /c \"echo. > tests\\\\orchestrator\\\\__init__.py\")",
+      "Bash(git log:*)",
+      "Bash(npx vite build)",
+      "Bash(ls:*)",
+      "Bash(gh repo view:*)",
+      "Bash(gh api:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(chmod:*)",
+      "Bash(bash -n \"C:/Users/Cade/projects/ghostwork/assistant/workspace/scripts/api.sh\")",
+      "Bash(docker compose up:*)",
+      "Bash(docker compose run --rm --entrypoint sh picoclaw-agent -c \"curl -s http://bashgym-api:8003/api/health\")",
+      "Bash(docker run:*)",
+      "Bash(docker compose build:*)",
+      "Bash(netstat:*)",
+      "Bash(node -e:*)",
+      "Bash(tasklist:*)",
+      "Bash(python --version 2>&1 || py --version 2>&1)"
     ]
   }
 }

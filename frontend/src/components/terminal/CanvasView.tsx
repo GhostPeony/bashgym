@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useEffect, useState, useRef } from 'react'
+import { useCallback, useEffect, useState, useRef } from 'react'
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -18,6 +18,7 @@ import {
 import '@xyflow/react/dist/style.css'
 
 import { useTerminalStore, useCanvasControlStore } from '../../stores'
+import type { Panel, TerminalSession, CanvasEdge } from '../../stores'
 import { TerminalNode, type TerminalNodeData } from './TerminalNode'
 import { PreviewNode, type PreviewNodeData } from './PreviewNode'
 import { BrowserNode, type BrowserNodeData } from './BrowserNode'
@@ -57,9 +58,72 @@ const nodeTypes = {
 
 export interface CanvasViewProps {
   onFocusPanel: (panelId: string) => void
+  onClosePopup?: () => void
 }
 
-function CanvasViewInner({ onFocusPanel }: CanvasViewProps) {
+// Build node data for a panel — single source of truth, avoids duplication between init and effect
+function buildNodeData(
+  panel: Panel,
+  sessions: Map<string, TerminalSession>,
+  onFocus: (id: string) => void,
+  onClose: (id: string) => void,
+  canvasEdges: CanvasEdge[] = []
+): TerminalNodeData | PreviewNodeData | BrowserNodeData {
+  const session = panel.terminalId ? sessions.get(panel.terminalId) : undefined
+  const hasConnections = canvasEdges.some(e => e.source === panel.id || e.target === panel.id)
+
+  if (panel.type === 'preview') {
+    return {
+      panelId: panel.id,
+      filePath: panel.filePath || '',
+      onFocus,
+      onClose,
+      onCopyPath: (path: string) => {
+        navigator.clipboard.writeText(path)
+      }
+    } as PreviewNodeData
+  } else if (panel.type === 'browser') {
+    return {
+      panelId: panel.id,
+      url: panel.url || 'http://localhost:3000',
+      thumbnailUrl: panel.thumbnail,
+      hasConnections,
+      onFocus,
+      onClose,
+      onCopyUrl: (url: string) => {
+        navigator.clipboard.writeText(url)
+      },
+      onOpenExternal: (url: string) => {
+        window.open(url, '_blank')
+      }
+    } as BrowserNodeData
+  } else {
+    return {
+      panelId: panel.id,
+      title: panel.title,
+      type: panel.type,
+      status: session?.status,
+      attention: session?.attention,
+      gitBranch: session?.gitBranch,
+      model: session?.model,
+      currentTool: session?.currentTool,
+      cwd: session?.cwd,
+      lastActivity: session?.lastActivity,
+      taskSummary: session?.taskSummary,
+      toolHistory: session?.toolHistory,
+      metrics: session?.metrics,
+      recentFiles: session?.recentFiles,
+      errorMessage: session?.errorMessage,
+      isExpanded: session?.isExpanded,
+      isPaused: session?.isPaused,
+      hasConnections,
+      onFocus,
+      onClose
+    } as TerminalNodeData
+  }
+}
+
+function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
   const {
     panels,
     sessions,
@@ -67,9 +131,9 @@ function CanvasViewInner({ onFocusPanel }: CanvasViewProps) {
     activePanelId,
     canvasNodes,
     updateCanvasNode,
-    removePanel,
     setActivePanel,
-    createTerminal
+    createTerminal,
+    setCanvasEdges
   } = useTerminalStore()
 
   const {
@@ -81,194 +145,80 @@ function CanvasViewInner({ onFocusPanel }: CanvasViewProps) {
   const { fitView, zoomIn, zoomOut, getZoom } = useReactFlow()
   const [currentZoom, setCurrentZoom] = useState(1)
 
-  // Convert panels to React Flow nodes
-  const initialNodes = useMemo(() => {
-    return panels.map((panel, index) => {
-      const existingNode = canvasNodes.get(panel.id)
-      const session = panel.terminalId ? sessions.get(panel.terminalId) : undefined
+  // Stable callbacks — consistent references across renders so TerminalNode memo stays effective
+  const handleFocusPanel = useCallback((id: string) => {
+    setActivePanel(id)
+    onFocusPanel(id)
+  }, [setActivePanel, onFocusPanel])
 
-      // Default position: grid layout
-      const defaultPosition = {
-        x: 50 + (index % 3) * 380,
-        y: 50 + Math.floor(index / 3) * 280
-      }
+  const handleClosePanel = useCallback((_id: string) => {
+    // Close the popup overlay — don't destroy the panel itself
+    onClosePopup?.()
+  }, [onClosePopup])
 
-      // Determine node type based on panel type
-      const nodeType = panel.type === 'preview' ? 'preview' :
-                       panel.type === 'browser' ? 'browser' : 'terminal'
+  // Track canvasNodes via ref so the update effect can read current saved positions for new
+  // panels without re-running every time a drag updates canvasNodes
+  const canvasNodesRef = useRef(canvasNodes)
+  canvasNodesRef.current = canvasNodes
 
-      // Build data based on node type
-      let nodeData: TerminalNodeData | PreviewNodeData | BrowserNodeData
-
-      if (panel.type === 'preview') {
-        nodeData = {
-          panelId: panel.id,
-          filePath: panel.filePath || '',
-          onFocus: (id: string) => {
-            setActivePanel(id)
-            onFocusPanel(id)
-          },
-          onClose: (id: string) => {
-            removePanel(id)
-          },
-          onCopyPath: (path: string) => {
-            navigator.clipboard.writeText(path)
-          }
-        } as PreviewNodeData
-      } else if (panel.type === 'browser') {
-        nodeData = {
-          panelId: panel.id,
-          url: panel.url || '',
-          onFocus: (id: string) => {
-            setActivePanel(id)
-            onFocusPanel(id)
-          },
-          onClose: (id: string) => {
-            removePanel(id)
-          },
-          onCopyUrl: (url: string) => {
-            navigator.clipboard.writeText(url)
-          },
-          onOpenExternal: (url: string) => {
-            window.open(url, '_blank')
-          }
-        } as BrowserNodeData
-      } else {
-        nodeData = {
-          panelId: panel.id,
-          title: panel.title,
-          type: panel.type,
-          status: session?.status,
-          attention: session?.attention,
-          gitBranch: session?.gitBranch,
-          model: session?.model,
-          currentTool: session?.currentTool,
-          cwd: session?.cwd,
-          lastActivity: session?.lastActivity,
-          taskSummary: session?.taskSummary,
-          toolHistory: session?.toolHistory,
-          metrics: session?.metrics,
-          recentFiles: session?.recentFiles,
-          errorMessage: session?.errorMessage,
-          isExpanded: session?.isExpanded,
-          isPaused: session?.isPaused,
-          onFocus: (id: string) => {
-            setActivePanel(id)
-            onFocusPanel(id)
-          },
-          onClose: (id: string) => {
-            removePanel(id)
-          }
-        } as TerminalNodeData
-      }
-
-      return {
-        id: panel.id,
-        type: nodeType,
-        position: existingNode?.position || defaultPosition,
-        selected: panel.id === activePanelId,
-        data: nodeData
-      }
-    })
-  }, [panels, sessions, sessionsVersion, activePanelId, canvasNodes, setActivePanel, onFocusPanel, removePanel])
-
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
+  const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
 
-  // Update nodes when panels/sessions change
+  // Sync React Flow edges to Zustand store for cross-component routing (e.g. BrowserPane screenshot routing)
   useEffect(() => {
-    setNodes((prevNodes) => {
-      // Create map of existing positions
-      const positionMap = new Map(prevNodes.map(n => [n.id, n.position]))
+    setCanvasEdges(edges.map(e => ({ id: e.id, source: e.source, target: e.target })))
+  }, [edges, setCanvasEdges])
 
-      return panels.map((panel, index) => {
-        const existingNode = canvasNodes.get(panel.id)
-        const savedPosition = positionMap.get(panel.id)
-        const session = panel.terminalId ? sessions.get(panel.terminalId) : undefined
+  // Use stable refs for callbacks so the Zustand subscription never needs to be recreated
+  const handleFocusPanelRef = useRef(handleFocusPanel)
+  const handleClosePanelRef = useRef(handleClosePanel)
+  handleFocusPanelRef.current = handleFocusPanel
+  handleClosePanelRef.current = handleClosePanel
 
-        // Default position: grid layout
-        const defaultPosition = {
-          x: 50 + (index % 3) * 380,
-          y: 50 + Math.floor(index / 3) * 280
-        }
+  // Direct Zustand subscription — bypasses React's dep comparison and batching.
+  // Fires immediately whenever any display-relevant store state changes.
+  useEffect(() => {
+    const rebuildNodes = (state: ReturnType<typeof useTerminalStore.getState>) => {
+      setNodes((prevNodes) => {
+        const positionMap = new Map(prevNodes.map(n => [n.id, n.position]))
 
-        const nodeType = panel.type === 'preview' ? 'preview' :
-                         panel.type === 'browser' ? 'browser' : 'terminal'
-
-        let nodeData: TerminalNodeData | PreviewNodeData | BrowserNodeData
-
-        if (panel.type === 'preview') {
-          nodeData = {
-            panelId: panel.id,
-            filePath: panel.filePath || '',
-            onFocus: (id: string) => {
-              setActivePanel(id)
-              onFocusPanel(id)
-            },
-            onClose: (id: string) => {
-              removePanel(id)
-            },
-            onCopyPath: (path: string) => {
-              navigator.clipboard.writeText(path)
-            }
-          } as PreviewNodeData
-        } else if (panel.type === 'browser') {
-          nodeData = {
-            panelId: panel.id,
-            url: panel.url || '',
-            onFocus: (id: string) => {
-              setActivePanel(id)
-              onFocusPanel(id)
-            },
-            onClose: (id: string) => {
-              removePanel(id)
-            },
-            onCopyUrl: (url: string) => {
-              navigator.clipboard.writeText(url)
-            },
-            onOpenExternal: (url: string) => {
-              window.open(url, '_blank')
-            }
-          } as BrowserNodeData
-        } else {
-          nodeData = {
-            panelId: panel.id,
-            title: panel.title,
-            type: panel.type,
-            status: session?.status,
-            attention: session?.attention,
-            gitBranch: session?.gitBranch,
-            model: session?.model,
-            currentTool: session?.currentTool,
-            cwd: session?.cwd,
-            lastActivity: session?.lastActivity,
-            taskSummary: session?.taskSummary,
-            toolHistory: session?.toolHistory,
-            metrics: session?.metrics,
-            recentFiles: session?.recentFiles,
-            errorMessage: session?.errorMessage,
-            isExpanded: session?.isExpanded,
-            isPaused: session?.isPaused,
-            onFocus: (id: string) => {
-              setActivePanel(id)
-              onFocusPanel(id)
-            },
-            onClose: (id: string) => {
-              removePanel(id)
-            }
-          } as TerminalNodeData
-        }
-
-        return {
-          id: panel.id,
-          type: nodeType,
-          position: savedPosition || existingNode?.position || defaultPosition,
-          selected: panel.id === activePanelId,
-          data: nodeData
-        }
+        return state.panels.map((panel, index) => {
+          const savedPosition = positionMap.get(panel.id)
+          const persistedPosition = canvasNodesRef.current.get(panel.id)?.position
+          const defaultPosition = {
+            x: 50 + (index % 3) * 380,
+            y: 50 + Math.floor(index / 3) * 280
+          }
+          const nodeType = panel.type === 'preview' ? 'preview' :
+                           panel.type === 'browser' ? 'browser' : 'terminal'
+          return {
+            id: panel.id,
+            type: nodeType,
+            position: savedPosition || persistedPosition || defaultPosition,
+            selected: panel.id === state.activePanelId,
+            data: buildNodeData(panel, state.sessions, handleFocusPanelRef.current, handleClosePanelRef.current, state.canvasEdges)
+          }
+        })
       })
+    }
+
+    // Run immediately on mount with current state
+    rebuildNodes(useTerminalStore.getState())
+
+    // Subscribe to all subsequent changes
+    const unsubscribe = useTerminalStore.subscribe((state, prev) => {
+      if (
+        state.sessions === prev.sessions &&
+        state.panels === prev.panels &&
+        state.sessionsVersion === prev.sessionsVersion &&
+        state.activePanelId === prev.activePanelId &&
+        state.canvasEdges === prev.canvasEdges
+      ) return
+      rebuildNodes(state)
     })
-  }, [panels, sessions, sessionsVersion, activePanelId, canvasNodes, setActivePanel, onFocusPanel, removePanel, setNodes])
+
+    return unsubscribe
+  }, [setNodes]) // setNodes is stable; callbacks accessed via ref
 
   // Handle node position changes
   const handleNodesChange = useCallback((changes: any) => {
@@ -411,16 +361,16 @@ function CanvasViewInner({ onFocusPanel }: CanvasViewProps) {
   )
 }
 
-export function CanvasView({ onFocusPanel }: CanvasViewProps) {
+export function CanvasView({ onFocusPanel, onClosePopup }: CanvasViewProps) {
   return (
     <ReactFlowProvider>
-      <CanvasViewInner onFocusPanel={onFocusPanel} />
+      <CanvasViewInner onFocusPanel={onFocusPanel} onClosePopup={onClosePopup} />
     </ReactFlowProvider>
   )
 }
 
 // Wrapper component with error boundary
-export function CanvasViewWrapper({ onFocusPanel }: CanvasViewProps) {
+export function CanvasViewWrapper({ onFocusPanel, onClosePopup }: CanvasViewProps) {
   const [hasError, setHasError] = useState(false)
 
   if (hasError) {
@@ -442,5 +392,5 @@ export function CanvasViewWrapper({ onFocusPanel }: CanvasViewProps) {
     )
   }
 
-  return <CanvasView onFocusPanel={onFocusPanel} />
+  return <CanvasView onFocusPanel={onFocusPanel} onClosePopup={onClosePopup} />
 }

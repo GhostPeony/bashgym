@@ -67,6 +67,27 @@ export interface FilesAPI {
     }
     error?: string
   }>
+  writeTempFile: (dataUrl: string, ext: string) => Promise<{
+    success: boolean
+    path?: string
+    error?: string
+  }>
+}
+
+export interface WindowAPI {
+  minimize: () => Promise<void>
+  maximize: () => Promise<void>
+  close: () => Promise<void>
+  isMaximized: () => Promise<boolean>
+  onAppKeydown: (callback: (data: { key: string; ctrlKey: boolean; shiftKey: boolean }) => void) => () => void
+}
+
+export interface BrowserAPI {
+  screenshot: (webContentsId: number, rect?: { x: number; y: number; width: number; height: number; vpW: number; vpH: number }) => Promise<{
+    success: boolean
+    dataUrl?: string
+    error?: string
+  }>
 }
 
 export interface BashGymAPI {
@@ -75,6 +96,8 @@ export interface BashGymAPI {
   system: SystemAPI
   api: ApiProxy
   files: FilesAPI
+  window: WindowAPI
+  browser: BrowserAPI
 }
 
 // Expose protected methods to renderer
@@ -113,7 +136,23 @@ contextBridge.exposeInMainWorld('bashgym', {
     getParentDirectory: (path: string) => ipcRenderer.invoke('files:getParentDirectory', path),
     readFile: (path: string) => ipcRenderer.invoke('files:readFile', path),
     exists: (path: string) => ipcRenderer.invoke('files:exists', path),
-    stat: (path: string) => ipcRenderer.invoke('files:stat', path)
+    stat: (path: string) => ipcRenderer.invoke('files:stat', path),
+    writeTempFile: (dataUrl: string, ext: string) => ipcRenderer.invoke('files:writeTempFile', dataUrl, ext)
+  },
+  browser: {
+    screenshot: (webContentsId: number, rect?: { x: number; y: number; width: number; height: number; vpW: number; vpH: number }) =>
+      ipcRenderer.invoke('browser:screenshot', webContentsId, rect)
+  },
+  window: {
+    minimize: () => ipcRenderer.invoke('window:minimize'),
+    maximize: () => ipcRenderer.invoke('window:maximize'),
+    close: () => ipcRenderer.invoke('window:close'),
+    isMaximized: () => ipcRenderer.invoke('window:isMaximized'),
+    onAppKeydown: (callback: (data: { key: string; ctrlKey: boolean; shiftKey: boolean }) => void) => {
+      const listener = (_: any, data: { key: string; ctrlKey: boolean; shiftKey: boolean }) => callback(data)
+      ipcRenderer.on('app-keydown', listener)
+      return () => ipcRenderer.removeListener('app-keydown', listener)
+    }
   }
 } satisfies BashGymAPI)
 

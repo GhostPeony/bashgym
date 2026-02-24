@@ -39,6 +39,8 @@ import type { Trace, TraceStatus, TraceQualityTier } from '../../stores'
 import { tracesApi, RepoInfo } from '../../services/api'
 import { clsx } from 'clsx'
 
+const TRACES_VISIT_KEY = 'bashgym-last-traces-visit'
+
 // Empty state placeholder when no traces exist
 const emptyTracePlaceholder: Trace = {
   id: 'no-traces',
@@ -88,6 +90,9 @@ export function TraceBrowser() {
   const [examplesError, setExamplesError] = useState<string | null>(null)
   const [timelineData, setTimelineData] = useState<{ time: string; gold: number; failed: number; pending: number }[]>([])
   const [statsLoading, setStatsLoading] = useState(false)
+
+  // Import notification banner state
+  const [importedSinceLastVisit, setImportedSinceLastVisit] = useState(0)
 
   // Auto-classify state
   const [classifyLoading, setClassifyLoading] = useState(false)
@@ -158,7 +163,7 @@ export function TraceBrowser() {
     }
   }, [])
 
-  // Load traces, repos, and stats on mount
+  // Load traces, repos, and stats on mount; check for new imports since last visit
   useEffect(() => {
     fetchTraces()
     fetchStats()
@@ -169,6 +174,18 @@ export function TraceBrowser() {
         setAvailableRepos(result.data)
       }
     })
+
+    // Check for traces imported since last visit
+    const lastVisit = localStorage.getItem(TRACES_VISIT_KEY)
+    if (lastVisit) {
+      tracesApi.importSince(lastVisit).then((result) => {
+        if (result.ok && result.data && result.data.count > 0) {
+          setImportedSinceLastVisit(result.data.count)
+        }
+      }).catch(() => {})
+    }
+    // Update last-visit timestamp
+    localStorage.setItem(TRACES_VISIT_KEY, new Date().toISOString())
   }, [fetchTraces, fetchStats, setAvailableRepos])
 
   // Generate training examples for selected trace
@@ -309,7 +326,31 @@ export function TraceBrowser() {
   }
 
   return (
-    <div className="h-full flex">
+    <div className="h-full flex flex-col">
+      {/* Import notification banner */}
+      {importedSinceLastVisit > 0 && (
+        <div className="border-b-2 border-border bg-accent-light px-4 py-2.5 flex items-center justify-between shrink-0">
+          <span className="font-mono text-sm text-accent-dark font-semibold">
+            {importedSinceLastVisit} new trace{importedSinceLastVisit !== 1 ? 's' : ''} imported since your last visit
+          </span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => { setStatusFilter('pending'); setImportedSinceLastVisit(0) }}
+              className="font-mono text-xs uppercase tracking-wide border-brutal border-accent-dark/30 bg-white/50 text-accent-dark px-3 py-1 rounded-brutal hover:bg-white/80 transition-colors"
+            >
+              Review
+            </button>
+            <button
+              onClick={() => setImportedSinceLastVisit(0)}
+              className="font-mono text-xs uppercase tracking-wide text-accent-dark/60 hover:text-accent-dark transition-colors px-2"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="flex-1 flex min-h-0">
       {/* Left Panel - Trace List */}
       <div className="w-96 border-r border-brutal border-border flex flex-col bg-background-primary">
         {/* Header */}
@@ -761,11 +802,6 @@ export function TraceBrowser() {
                           View response ({example.assistant_response.length} chars)
                         </summary>
                         <div className="terminal-chrome mt-2">
-                          <div className="terminal-header">
-                            <div className="terminal-dot terminal-dot-red" />
-                            <div className="terminal-dot terminal-dot-yellow" />
-                            <div className="terminal-dot terminal-dot-green" />
-                          </div>
                           <pre className="p-3 text-xs font-mono text-text-secondary overflow-x-auto max-h-48">
                             {example.assistant_response.slice(0, 1000)}
                             {example.assistant_response.length > 1000 && '...'}
@@ -864,6 +900,8 @@ export function TraceBrowser() {
         </div>
       </div>
       )}
+
+      </div>{/* end flex-1 flex */}
 
       {/* Auto-Classify Modal */}
       {showClassifyModal && classifyResult && (

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Modal } from '../common/Modal'
 import { Button } from '../common/Button'
 import { useUIStore } from '../../stores'
+import { useTutorialStore } from '../../stores/tutorialStore'
 import { hooksApi, systemApi, tracesApi } from '../../services/api'
 import { clsx } from 'clsx'
 import {
@@ -33,6 +34,7 @@ interface Step {
 
 export function OnboardingModal() {
   const { isOnboardingOpen, setOnboardingOpen, openOverlay } = useUIStore()
+  const { startTutorial, skipTutorial } = useTutorialStore()
   const [currentStep, setCurrentStep] = useState(0)
   const [hooksInstalled, setHooksInstalled] = useState(false)
   const [traceCount, setTraceCount] = useState(0)
@@ -357,7 +359,10 @@ export function OnboardingModal() {
           <div className="flex items-center gap-2">
             <Button
               variant="ghost"
-              onClick={() => setOnboardingOpen(false)}
+              onClick={() => {
+                skipTutorial()
+                setOnboardingOpen(false)
+              }}
             >
               Skip for now
             </Button>
@@ -367,6 +372,7 @@ export function OnboardingModal() {
                 if (currentStep < steps.length - 1) {
                   setCurrentStep(currentStep + 1)
                 } else {
+                  startTutorial()
                   setOnboardingOpen(false)
                 }
               }}

@@ -15,7 +15,7 @@ This document provides comprehensive guidance for AI agents working with this co
 
 # Or start manually in separate terminals:
 python run_backend.py           # API on port 8003 (hot reload)
-cd frontend && npm run dev      # Vite on port 5174
+cd frontend && npm run dev      # Vite on port 5173
 
 # Install dependencies
 pip install -r requirements.txt

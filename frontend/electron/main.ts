@@ -77,7 +77,7 @@ function createWindow() {
 
   // Load the app
   if (isDev) {
-    mainWindow.loadURL('http://localhost:5174')
+    mainWindow.loadURL('http://localhost:5173')
     // Don't auto-open DevTools - use Ctrl+Shift+I if needed
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))

@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Launches the FastAPI backend (port 8003, hot reload) and Vite frontend
-    dev server (port 5174) in parallel. Press Ctrl+C to stop both.
+    dev server (port 5173) in parallel. Press Ctrl+C to stop both.
 
 .PARAMETER BackendOnly
     Only start the backend API server.
@@ -70,7 +70,7 @@ try {
                 & npm run electron:dev 2>&1
             } -ArgumentList $frontendDir
         } else {
-            Write-Host "  [Frontend] http://localhost:5174" -ForegroundColor Green
+            Write-Host "  [Frontend] http://localhost:5173" -ForegroundColor Green
             $frontendJob = Start-Job -Name "frontend" -ScriptBlock {
                 param($dir)
                 Set-Location $dir

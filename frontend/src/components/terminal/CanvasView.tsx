@@ -22,6 +22,12 @@ import type { Panel, TerminalSession, CanvasEdge } from '../../stores'
 import { TerminalNode, type TerminalNodeData } from './TerminalNode'
 import { PreviewNode, type PreviewNodeData } from './PreviewNode'
 import { BrowserNode, type BrowserNodeData } from './BrowserNode'
+import { IntegrationNode } from './nodes/IntegrationNode'
+import type { IntegrationNodeData } from './nodes/types'
+// Import adapters to trigger registration side effects
+import './nodes/adapters/context'
+import './nodes/adapters/neon'
+import './nodes/adapters/vercel'
 import { MasterControlPanel } from './MasterControlPanel'
 import { AlertCircle } from 'lucide-react'
 
@@ -53,7 +59,10 @@ const saveViewport = (viewport: Viewport) => {
 const nodeTypes = {
   terminal: TerminalNode,
   preview: PreviewNode,
-  browser: BrowserNode
+  browser: BrowserNode,
+  context: IntegrationNode,
+  neon: IntegrationNode,
+  vercel: IntegrationNode,
 }
 
 export interface CanvasViewProps {
@@ -68,11 +77,21 @@ function buildNodeData(
   onFocus: (id: string) => void,
   onClose: (id: string) => void,
   canvasEdges: CanvasEdge[] = []
-): TerminalNodeData | PreviewNodeData | BrowserNodeData {
+): TerminalNodeData | PreviewNodeData | BrowserNodeData | IntegrationNodeData {
   const session = panel.terminalId ? sessions.get(panel.terminalId) : undefined
   const hasConnections = canvasEdges.some(e => e.source === panel.id || e.target === panel.id)
 
-  if (panel.type === 'preview') {
+  if (panel.type === 'context' || panel.type === 'neon' || panel.type === 'vercel') {
+    return {
+      panelId: panel.id,
+      title: panel.title,
+      adapterType: panel.type,
+      adapterConfig: { ...panel.adapterConfig, _panelId: panel.id },
+      hasConnections,
+      onFocus,
+      onClose,
+    } as IntegrationNodeData
+  } else if (panel.type === 'preview') {
     return {
       panelId: panel.id,
       filePath: panel.filePath || '',
@@ -197,8 +216,10 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
             x: 50 + (index % 3) * 380,
             y: 50 + Math.floor(index / 3) * 280
           }
+          const integrationTypes = ['context', 'neon', 'vercel'] as const
           const nodeType = panel.type === 'preview' ? 'preview' :
-                           panel.type === 'browser' ? 'browser' : 'terminal'
+                           panel.type === 'browser' ? 'browser' :
+                           integrationTypes.includes(panel.type as any) ? panel.type : 'terminal'
           return {
             id: panel.id,
             type: nodeType,
@@ -301,6 +322,11 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
     createTerminal()
   }, [createTerminal])
 
+  const addIntegrationPanel = useCallback((type: 'context' | 'neon' | 'vercel', title: string) => {
+    const { addPanel } = useTerminalStore.getState()
+    addPanel({ type, title, adapterConfig: {} })
+  }, [])
+
   return (
     <div className="h-full w-full relative">
       <ReactFlow
@@ -364,6 +390,9 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
         onFitView={handleFitView}
         onAutoArrange={handleAutoArrange}
         onNewSession={handleNewSession}
+        onAddContext={() => addIntegrationPanel('context', 'Context')}
+        onAddNeon={() => addIntegrationPanel('neon', 'Neon DB')}
+        onAddVercel={() => addIntegrationPanel('vercel', 'Vercel')}
       />
     </div>
   )

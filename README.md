@@ -53,6 +53,30 @@ The dashboard **Settings > Agents** tab provides one-click installation for all 
 
 ---
 
+## Terminal Canvas
+
+The workspace is an infinite canvas where terminals, browsers, and integration nodes live side by side and connect with edges to share context.
+
+<img width="1563" height="908" alt="Terminal canvas with connected nodes" src="https://github.com/user-attachments/assets/472d7ada-d57b-4e79-8604-c27e4fc99348" />
+
+**Terminals** are real PTY sessions (xterm.js + WebGL rendering, 10k line scrollback). Agent status is detected live from output — idle, running, tool calling, waiting for input — with CWD extraction from shell prompts. Drag files from the built-in file browser or your OS directly into a terminal to insert the path.
+
+**Browsers** render live pages in a Chromium webview. Take full-page or element-level screenshots (crosshair picker to select a specific element) and route them to connected terminals — feed page screenshots directly to Claude as context.
+
+**Integration nodes** plug external services into the canvas:
+
+| Node | What It Does |
+|------|--------------|
+| **Context** | Freeform notes, file contents, URLs, or snippets. Reload files and fetch URLs on demand. |
+| **Neon** | Connect to a Postgres database. Introspect schema, run queries, send results to terminals as markdown. |
+| **Vercel** | Monitor deployments, pull build logs, generate code with v0, push previews to browser nodes. |
+
+**Edges are context channels.** Connect any two nodes and content flows between them — schema from Neon, build logs from Vercel, screenshots from browsers, notes from context nodes — all prefilled into linked terminal inputs for review before sending.
+
+**Shift+drag** to box-select nodes and auto-connect them in a full mesh. Three view modes: grid (all panels visible), single (one at a time), or canvas (click to open floating popups). Viewport, node positions, and all settings persist across sessions.
+
+---
+
 ## Setup
 
 ### Prerequisites
@@ -145,17 +169,7 @@ Once you have 20–30 gold traces, you're ready to train. See **[docs/GETTING_ST
 
 ### Workspace
 
-Multi-terminal canvas built on React Flow. Terminals, browsers, and integration nodes connect via edges to share context.
-
-| Node Type | What It Does |
-|-----------|--------------|
-| **Terminal** | Claude Code session with live status, metrics, tool history |
-| **Browser** | Live web preview — screenshots route to linked terminals |
-| **Context** | Persistent notes, file references, URLs, snippets — sends content to linked terminals |
-| **Neon** | Database schema introspection, query execution — sends schema/results to terminals |
-| **Vercel** | Deploy status, build logs, v0 AI generation — sends code/logs to terminals |
-
-**Shift+drag** to box-select multiple nodes and auto-connect them. Connected nodes share context through edge routing.
+See [Terminal Canvas](#terminal-canvas) above for the full breakdown — real PTY terminals, live browsers with element-level screenshots, Neon/Vercel/Context integration nodes, edge-based context routing.
 
 ### Data Factory
 

@@ -22,10 +22,12 @@ from .base import (
     get_claude_dir,
     get_collected_dir,
 )
+from .subagent import SubagentCollector
 
 __all__ = [
     "BaseCollector",
     "CollectorRecord",
+    "SubagentCollector",
     "SubagentRecord",
     "EditRecord",
     "PlanRecord",

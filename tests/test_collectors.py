@@ -1,5 +1,5 @@
 """
-Tests for the collector base classes and record types.
+Tests for the collector base classes, record types, and concrete collectors.
 
 Tests cover:
   - CollectorRecord creation, serialization, and file persistence
@@ -8,6 +8,7 @@ Tests cover:
   - BaseCollector abstract interface enforcement
   - get_claude_dir() and get_collected_dir() helper functions
   - Deduplication state loading/saving via scan_state.json
+  - SubagentCollector: scanning, parsing, collecting subagent JSONL files
 """
 
 import json
@@ -481,3 +482,176 @@ class TestHelperFunctions:
         home = Path.home()
         result = get_claude_dir()
         assert result == home / ".claude"
+
+
+# ---------------------------------------------------------------------------
+# 7. SubagentCollector
+# ---------------------------------------------------------------------------
+
+from bashgym.trace_capture.collectors.subagent import SubagentCollector
+
+
+class TestSubagentCollector:
+    """Tests for SubagentCollector: scanning, parsing, and collecting subagent JSONL files."""
+
+    @pytest.fixture
+    def mock_claude_dir(self, tmp_path):
+        """Create mock .claude with subagent files."""
+        projects = tmp_path / "projects"
+        project = projects / "C--Users-Cade-projects-myapp"
+        session_dir = project / "abc12345-1234-5678-abcd-1234567890ab"
+        subagents = session_dir / "subagents"
+        subagents.mkdir(parents=True)
+
+        subagent_file = subagents / "agent-a11b22c33d44e55f6.jsonl"
+        lines = [
+            json.dumps({"parentUuid": None, "isSidechain": True, "userType": "external",
+                "cwd": "C:\\Users\\Cade\\projects\\myapp",
+                "sessionId": "abc12345-1234-5678-abcd-1234567890ab",
+                "version": "2.1.51", "gitBranch": "main",
+                "agentId": "a11b22c33d44e55f6",
+                "slug": "iridescent-wiggling-adleman", "type": "user",
+                "message": {"role": "user", "content": "Find all API endpoints"}}),
+            json.dumps({"type": "assistant", "message": {
+                "role": "assistant", "model": "claude-sonnet-4-5-20250929",
+                "content": [
+                    {"type": "text", "text": "I'll search for API endpoints."},
+                    {"type": "tool_use", "id": "toolu_01", "name": "Grep",
+                     "input": {"pattern": "@app\\.(get|post)", "path": "src/"}},
+                ],
+                "usage": {"input_tokens": 500, "output_tokens": 100}}}),
+        ]
+        subagent_file.write_text("\n".join(lines), encoding="utf-8")
+
+        # Also a session JSONL (can be empty)
+        (project / "abc12345-1234-5678-abcd-1234567890ab.jsonl").write_text("", encoding="utf-8")
+        return tmp_path
+
+    def test_scan_finds_subagent_files(self, mock_claude_dir, tmp_path):
+        """scan() discovers subagent files and reports correct counts."""
+        collector = SubagentCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        result = collector.scan()
+        assert result.source_type == "subagents"
+        assert result.total_found == 1
+        assert result.new_available == 1
+
+    def test_collect_parses_subagent_jsonl(self, mock_claude_dir, tmp_path):
+        """collect() parses subagent JSONL and returns SubagentRecord with correct fields."""
+        collector = SubagentCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        records = collector.collect("abc12345-1234-5678-abcd-1234567890ab")
+        assert len(records) >= 1
+        rec = records[0]
+        assert rec.agent_id == "a11b22c33d44e55f6"
+        assert rec.slug == "iridescent-wiggling-adleman"
+        assert rec.parent_session_id == "abc12345-1234-5678-abcd-1234567890ab"
+        assert rec.total_tool_calls >= 1
+        assert "Grep" in rec.tools_used
+        assert "claude-sonnet-4-5-20250929" in rec.models_used
+        assert rec.total_input_tokens == 500
+        assert rec.total_output_tokens == 100
+        assert rec.user_prompt == "Find all API endpoints"
+        assert rec.source_type == "subagents"
+        assert len(rec.steps) >= 1
+        assert rec.steps[0]["tool_name"] == "Grep"
+
+    def test_collect_all_returns_batch_result(self, mock_claude_dir, tmp_path):
+        """collect_all() returns a CollectorBatchResult with correct totals."""
+        collector = SubagentCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        result = collector.collect_all()
+        assert result.source_type == "subagents"
+        assert result.collected == 1
+        assert len(result.records) == 1
+
+    def test_collect_skips_already_collected(self, mock_claude_dir, tmp_path):
+        """collect_all() skips subagents that were already collected."""
+        collector = SubagentCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        # Collect once
+        first = collector.collect_all()
+        assert first.collected == 1
+
+        # Collect again — should skip
+        second = collector.collect_all()
+        assert second.collected == 0
+        assert second.skipped == 1
+
+    def test_scan_respects_project_filter(self, mock_claude_dir, tmp_path):
+        """scan() filters subagent files by project directory name."""
+        collector = SubagentCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        # Filter matches the project slug
+        result = collector.scan(project_filter="myapp")
+        assert result.total_found == 1
+
+        # Filter does NOT match
+        result = collector.scan(project_filter="nonexistent")
+        assert result.total_found == 0
+
+    def test_scan_respects_since_filter(self, mock_claude_dir, tmp_path):
+        """scan() filters subagent files by modification time."""
+        collector = SubagentCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        # Far-future date — nothing should match
+        result = collector.scan(since="2099-01-01T00:00:00Z")
+        assert result.total_found == 0
+
+        # Far-past date — everything should match
+        result = collector.scan(since="2000-01-01T00:00:00Z")
+        assert result.total_found == 1
+
+    def test_collect_handles_empty_subagent_file(self, tmp_path):
+        """collect() handles an empty subagent JSONL gracefully."""
+        projects = tmp_path / "projects"
+        project = projects / "C--Users-Cade-projects-emptyapp"
+        session_dir = project / "empty-session-id"
+        subagents = session_dir / "subagents"
+        subagents.mkdir(parents=True)
+        (subagents / "agent-empty123.jsonl").write_text("", encoding="utf-8")
+
+        collector = SubagentCollector(
+            claude_dir=tmp_path,
+            collected_dir=tmp_path / "collected",
+        )
+        records = collector.collect("empty-session-id")
+        assert records == []
+
+    def test_collect_handles_malformed_json_lines(self, tmp_path):
+        """collect() skips malformed JSON lines without crashing."""
+        projects = tmp_path / "projects"
+        project = projects / "C--Users-Cade-projects-badapp"
+        session_dir = project / "bad-session-id"
+        subagents = session_dir / "subagents"
+        subagents.mkdir(parents=True)
+
+        lines = [
+            "not valid json at all",
+            json.dumps({"type": "user", "sessionId": "bad-session-id",
+                "agentId": "badagent1", "slug": "test-slug",
+                "message": {"role": "user", "content": "Hello"}}),
+            "{incomplete json",
+        ]
+        (subagents / "agent-badagent1.jsonl").write_text("\n".join(lines), encoding="utf-8")
+
+        collector = SubagentCollector(
+            claude_dir=tmp_path,
+            collected_dir=tmp_path / "collected",
+        )
+        records = collector.collect("bad-session-id")
+        assert len(records) == 1
+        assert records[0].agent_id == "badagent1"
+        assert records[0].user_prompt == "Hello"

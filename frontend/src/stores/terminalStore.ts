@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 
-export type PanelType = 'terminal' | 'preview' | 'browser' | 'files'
+export type PanelType = 'terminal' | 'preview' | 'browser' | 'files' | 'context' | 'neon' | 'vercel'
 export type AttentionState = 'none' | 'waiting' | 'success' | 'error'
 export type ViewMode = 'grid' | 'single' | 'canvas'
 export type AgentStatus = 'running' | 'idle' | 'waiting_input' | 'tool_calling'
@@ -77,6 +77,7 @@ export interface Panel {
   url?: string
   // In-memory screenshot (lives only for panel lifetime, never persisted)
   thumbnail?: string
+  adapterConfig?: Record<string, unknown>  // Integration node config
 }
 
 interface TerminalState {

@@ -45,7 +45,7 @@ CORE_TOOLS: List[Dict] = [
     },
     {
         "name": "scan_claude_data",
-        "description": "Scan ~/.claude and show what data is available but not yet imported. Shows counts and sizes per source type.",
+        "description": "Scan ~/.claude and show what data is available but not yet imported. Shows counts per source type.",
         "input_schema": {
             "type": "object",
             "properties": {},
@@ -54,7 +54,7 @@ CORE_TOOLS: List[Dict] = [
     },
     {
         "name": "get_collection_status",
-        "description": "Show current collection stats: sessions, subagents, edits, plans collected, storage usage, last import time.",
+        "description": "Show current collection stats per source type: total found, already collected, and available to collect.",
         "input_schema": {
             "type": "object",
             "properties": {},

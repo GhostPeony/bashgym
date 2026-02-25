@@ -1421,3 +1421,80 @@ class TestPeonyToolIntegration:
         for source in ALL_SOURCES:
             assert source in enum_values
         assert "all" in enum_values
+
+    def test_execute_scan_claude_data_calls_scanner(self):
+        """_execute_tool('scan_claude_data') calls scanner.scan_all() and returns JSON."""
+        import asyncio
+        from unittest.mock import patch, MagicMock
+        from bashgym.trace_capture.collectors.base import CollectorScanResult
+
+        mock_scanner = MagicMock()
+        mock_scanner.scan_all.return_value = {
+            "plans": CollectorScanResult(
+                source_type="plans", total_found=5,
+                already_collected=2, new_available=3,
+            ),
+        }
+
+        with patch(
+            "bashgym.trace_capture.collectors.scanner.ClaudeDataScanner",
+            return_value=mock_scanner,
+        ):
+            from bashgym.api.agent_routes import _execute_tool
+            result = asyncio.run(_execute_tool("scan_claude_data", {}))
+
+        data = json.loads(result)
+        assert data["plans"]["total_found"] == 5
+        assert data["plans"]["new_available"] == 3
+        mock_scanner.scan_all.assert_called_once()
+
+    def test_execute_get_collection_status_calls_scanner(self):
+        """_execute_tool('get_collection_status') calls scanner.status() and returns JSON."""
+        import asyncio
+        from unittest.mock import patch, MagicMock
+
+        mock_scanner = MagicMock()
+        mock_scanner.status.return_value = {
+            "plans": {"total": 10, "collected": 7, "available": 3},
+        }
+
+        with patch(
+            "bashgym.trace_capture.collectors.scanner.ClaudeDataScanner",
+            return_value=mock_scanner,
+        ):
+            from bashgym.api.agent_routes import _execute_tool
+            result = asyncio.run(_execute_tool("get_collection_status", {}))
+
+        data = json.loads(result)
+        assert data["plans"]["total"] == 10
+        assert data["plans"]["collected"] == 7
+        mock_scanner.status.assert_called_once()
+
+    def test_execute_import_traces_dry_run_calls_scan_all(self):
+        """_execute_tool('import_traces', {dry_run: True}) calls scanner.scan_all()."""
+        import asyncio
+        from unittest.mock import patch, MagicMock
+        from bashgym.trace_capture.collectors.base import CollectorScanResult
+
+        mock_scanner = MagicMock()
+        mock_scanner.scan_all.return_value = {
+            "plans": CollectorScanResult(
+                source_type="plans", total_found=3,
+                already_collected=1, new_available=2,
+            ),
+        }
+
+        with patch(
+            "bashgym.trace_capture.collectors.scanner.ClaudeDataScanner",
+            return_value=mock_scanner,
+        ):
+            from bashgym.api.agent_routes import _execute_tool
+            result = asyncio.run(_execute_tool("import_traces", {
+                    "sources": ["plans"],
+                    "dry_run": True,
+                }))
+
+        data = json.loads(result)
+        assert "plans" in data
+        assert data["plans"]["new_available"] == 2
+        mock_scanner.scan_all.assert_called_once()

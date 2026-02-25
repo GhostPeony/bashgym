@@ -882,14 +882,40 @@ export interface GuardrailStats {
   block_rate: number
 }
 
+export interface ToolStat {
+  tool: string
+  calls: number
+  avg_duration_ms: number
+  success_rate: number
+  total_tokens: number
+}
+
 export interface TraceSummary {
   trace_id: string
   name: string
   duration_ms: number
   total_spans: number
+  status?: 'success' | 'error' | 'in_progress'
   llm_calls: Record<string, any>
   tool_calls: Record<string, any>
   bottlenecks?: Array<Record<string, any>>
+}
+
+export interface TraceSpan {
+  span_id: string
+  name: string
+  kind: string
+  duration_ms: number
+  status: string
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
+  latency_ms: number
+  attributes: Record<string, any>
+}
+
+export interface TraceDetail extends TraceSummary {
+  spans: TraceSpan[]
 }
 
 export interface ObservabilityMetrics {
@@ -924,7 +950,10 @@ export const observabilityApi = {
     ),
 
   getTrace: (traceId: string) =>
-    request<TraceSummary>(`/observability/traces/${traceId}`),
+    request<TraceDetail>(`/observability/traces/${traceId}`),
+
+  getToolStats: () =>
+    request<ToolStat[]>('/observability/tool-stats'),
 
   // Guardrail events
   listGuardrailEvents: (options?: {
@@ -2017,4 +2046,40 @@ export const pipelineApi = {
       `/pipeline/trigger/${stage}`,
       { method: 'POST' }
     ),
+}
+
+// Settings API types
+export interface EnvKeyStatus {
+  env_key: string
+  display_name: string
+  masked_value: string
+  is_configured: boolean
+  source: string
+}
+
+export interface EnvKeysResponse {
+  keys: EnvKeyStatus[]
+}
+
+export interface EnvTestResponse {
+  valid: boolean
+  error?: string
+  provider?: string
+}
+
+export const settingsApi = {
+  getEnvKeys: () =>
+    request<EnvKeysResponse>('/settings/env'),
+
+  updateEnvKeys: (values: Record<string, string>) =>
+    request<{ success: boolean; updated: string[] }>('/settings/env', {
+      method: 'PUT',
+      body: JSON.stringify({ values }),
+    }),
+
+  testEnvKey: (key: string, value?: string) =>
+    request<EnvTestResponse>('/settings/env/test', {
+      method: 'POST',
+      body: JSON.stringify({ key, value }),
+    }),
 }

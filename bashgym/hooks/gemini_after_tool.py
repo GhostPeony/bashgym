@@ -218,7 +218,7 @@ def process_tool_event(event: Dict[str, Any]) -> None:
         "success": exit_code == 0 if exit_code is not None else None,
         "cwd": cwd,
         "repo": repo_info,
-        "source_tool": "gemini_cli",
+        "source_tool": os.environ.get("BASHGYM_SOURCE_TOOL", "gemini_cli"),
         "metadata": {
             "gemini_session_id": os.environ.get("GEMINI_SESSION_ID"),
             "gemini_project_dir": os.environ.get("GEMINI_PROJECT_DIR"),

@@ -99,7 +99,7 @@ function ProviderCard({
   const [inputValue, setInputValue] = useState('')
   const [showValue, setShowValue] = useState(false)
 
-  const isConfigured = status?.is_configured ?? false
+  const isConfigured = status?.is_set ?? false
 
   const handleSave = async () => {
     if (!inputValue.trim()) return
@@ -345,7 +345,7 @@ export function ApiKeysSection() {
       if (result.ok && result.data) {
         setTestResults((prev) => ({
           ...prev,
-          [envKey]: { valid: result.data!.valid, error: result.data!.error },
+          [envKey]: { valid: result.data!.valid, error: result.data!.message || undefined },
         }))
       } else {
         setTestResults((prev) => ({
@@ -404,7 +404,7 @@ export function ApiKeysSection() {
       {/* Provider Cards */}
       <div className="space-y-2">
         {PROVIDERS.map((provider) => {
-          const status = keys.find((k) => k.env_key === provider.envKey)
+          const status = keys.find((k) => k.key === provider.envKey)
           return (
             <ProviderCard
               key={provider.envKey}

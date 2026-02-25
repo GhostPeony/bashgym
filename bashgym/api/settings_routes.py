@@ -151,7 +151,7 @@ def _read_env_file() -> Dict[str, str]:
             continue
         key, _, val = stripped.partition("=")
         key = key.strip()
-        val = val.strip()
+        val = val.strip().strip('"').strip("'")
         result[key] = val
     return result
 

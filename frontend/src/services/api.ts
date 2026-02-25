@@ -2050,10 +2050,10 @@ export const pipelineApi = {
 
 // Settings API types
 export interface EnvKeyStatus {
-  env_key: string
+  key: string
   display_name: string
   masked_value: string
-  is_configured: boolean
+  is_set: boolean
   source: string
 }
 
@@ -2062,9 +2062,10 @@ export interface EnvKeysResponse {
 }
 
 export interface EnvTestResponse {
+  key: string
   valid: boolean
-  error?: string
-  provider?: string
+  message: string
+  status_code?: number
 }
 
 export const settingsApi = {

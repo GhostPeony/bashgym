@@ -52,9 +52,13 @@ def _build_hooks_config() -> dict:
     """
     source_dir = _get_source_hooks_dir()
 
-    # Use the same hook scripts as Gemini CLI (they handle stdin/stdout JSON)
+    # Reuse Gemini hook scripts (they handle stdin/stdout JSON protocol)
+    # Set BASHGYM_SOURCE_TOOL env var to attribute traces correctly
     after_tool_path = source_dir / "gemini_after_tool.py"
     session_end_path = source_dir / "gemini_session_end.py"
+
+    # Prefix command with env var to override source_tool attribution
+    env_prefix = "BASHGYM_SOURCE_TOOL=copilot_cli"
 
     config = {
         "name": "bashgym",
@@ -62,11 +66,11 @@ def _build_hooks_config() -> dict:
         "description": "Bash Gym trace capture hooks for Copilot CLI",
         "hooks": {
             "after_tool": {
-                "command": f"python {after_tool_path}",
+                "command": f"{env_prefix} python {after_tool_path}",
                 "timeout": 5000
             },
             "session_end": {
-                "command": f"python {session_end_path}",
+                "command": f"{env_prefix} python {session_end_path}",
                 "timeout": 5000
             }
         }

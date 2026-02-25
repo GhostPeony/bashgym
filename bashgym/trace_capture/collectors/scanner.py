@@ -17,7 +17,7 @@ Usage::
 """
 
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from .base import (
     CollectorBatchResult,
@@ -197,6 +197,19 @@ class ClaudeDataScanner:
             since=since,
             project_filter=project_filter,
         )
+
+    def build_index(self) -> Dict[str, Any]:
+        """Build or rebuild the cross-reference index.
+
+        Walks ``collected_dir`` and groups all records by ``session_id``.
+
+        Returns
+        -------
+        dict
+            The cross-reference index.
+        """
+        from .index import build_cross_reference_index
+        return build_cross_reference_index(self.collected_dir)
 
     def status(self) -> Dict[str, dict]:
         """Get collection status for all sources.

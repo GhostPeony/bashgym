@@ -30,6 +30,7 @@ from .prompt import PromptCollector
 from .environment import EnvironmentCollector
 from .debug import DebugCollector
 from .scanner import ClaudeDataScanner, ALL_SOURCES
+from .index import build_cross_reference_index
 
 __all__ = [
     "BaseCollector",
@@ -54,4 +55,5 @@ __all__ = [
     "get_collected_dir",
     "ClaudeDataScanner",
     "ALL_SOURCES",
+    "build_cross_reference_index",
 ]

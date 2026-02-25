@@ -2062,3 +2062,235 @@ class TestDebugCollector:
         """DebugCollector should be importable from the collectors package."""
         from bashgym.trace_capture.collectors import DebugCollector
         assert DebugCollector is not None
+
+
+# ---------------------------------------------------------------------------
+# 15. Cross-Reference Index
+# ---------------------------------------------------------------------------
+
+class TestCrossReferenceIndex:
+    """Tests for cross-reference index building."""
+
+    def test_build_index_links_records_by_session(self, tmp_path):
+        """build_cross_reference_index groups records by session_id."""
+        from bashgym.trace_capture.collectors.index import build_cross_reference_index
+
+        # Create mock collected directory with JSON records
+        collected = tmp_path / "collected"
+
+        # Subagent record
+        sub_dir = collected / "subagents"
+        sub_dir.mkdir(parents=True)
+        (sub_dir / "agent-abc.json").write_text(json.dumps({
+            "session_id": "session-001",
+            "timestamp": "2026-02-25T10:00:00Z",
+            "source_type": "subagents",
+            "agent_id": "abc",
+        }), encoding="utf-8")
+
+        # Plan record (no session_id -- should go under "_no_session")
+        plan_dir = collected / "plans"
+        plan_dir.mkdir(parents=True)
+        (plan_dir / "my-plan.json").write_text(json.dumps({
+            "session_id": "",
+            "timestamp": "2026-02-25T09:00:00Z",
+            "source_type": "plans",
+            "plan_name": "my-plan",
+        }), encoding="utf-8")
+
+        # Edit record for same session
+        edit_dir = collected / "edits"
+        edit_dir.mkdir(parents=True)
+        (edit_dir / "session-001_file.json").write_text(json.dumps({
+            "session_id": "session-001",
+            "timestamp": "2026-02-25T10:05:00Z",
+            "source_type": "edits",
+        }), encoding="utf-8")
+
+        index = build_cross_reference_index(collected)
+
+        assert isinstance(index, dict)
+        assert "session-001" in index
+        assert "subagents" in index["session-001"]
+        assert "edits" in index["session-001"]
+        assert len(index["session-001"]["subagents"]) == 1
+        assert len(index["session-001"]["edits"]) == 1
+
+    def test_build_index_returns_empty_for_no_records(self, tmp_path):
+        """build_cross_reference_index returns empty dict when no records exist."""
+        from bashgym.trace_capture.collectors.index import build_cross_reference_index
+        collected = tmp_path / "collected"
+        collected.mkdir()
+        index = build_cross_reference_index(collected)
+        assert index == {}
+
+    def test_build_index_skips_empty_session_ids(self, tmp_path):
+        """Records with empty session_id are grouped under _no_session key."""
+        from bashgym.trace_capture.collectors.index import build_cross_reference_index
+        collected = tmp_path / "collected"
+        plans = collected / "plans"
+        plans.mkdir(parents=True)
+        (plans / "some-plan.json").write_text(json.dumps({
+            "session_id": "",
+            "source_type": "plans",
+            "timestamp": "2026-02-25T09:00:00Z",
+        }), encoding="utf-8")
+
+        index = build_cross_reference_index(collected)
+        # Empty session_id records should be under "_no_session" key
+        assert "_no_session" in index
+
+    def test_build_index_includes_timestamps(self, tmp_path):
+        """Index entries include the earliest timestamp for each session."""
+        from bashgym.trace_capture.collectors.index import build_cross_reference_index
+        collected = tmp_path / "collected"
+        sub_dir = collected / "subagents"
+        sub_dir.mkdir(parents=True)
+        (sub_dir / "agent-a.json").write_text(json.dumps({
+            "session_id": "session-002",
+            "timestamp": "2026-02-25T12:00:00Z",
+            "source_type": "subagents",
+        }), encoding="utf-8")
+
+        index = build_cross_reference_index(collected)
+        assert "session-002" in index
+        assert "timestamp" in index["session-002"]
+
+    def test_build_index_writes_to_file(self, tmp_path):
+        """build_cross_reference_index writes index.json to collected dir."""
+        from bashgym.trace_capture.collectors.index import build_cross_reference_index
+        collected = tmp_path / "collected"
+        collected.mkdir()
+
+        build_cross_reference_index(collected)
+
+        index_path = collected / "index.json"
+        assert index_path.exists()
+        data = json.loads(index_path.read_text(encoding="utf-8"))
+        assert isinstance(data, dict)
+
+    def test_build_index_is_idempotent(self, tmp_path):
+        """Calling build_cross_reference_index twice produces the same result."""
+        from bashgym.trace_capture.collectors.index import build_cross_reference_index
+        collected = tmp_path / "collected"
+        sub_dir = collected / "subagents"
+        sub_dir.mkdir(parents=True)
+        (sub_dir / "agent-x.json").write_text(json.dumps({
+            "session_id": "session-003",
+            "timestamp": "2026-02-25T14:00:00Z",
+            "source_type": "subagents",
+        }), encoding="utf-8")
+
+        index1 = build_cross_reference_index(collected)
+        index2 = build_cross_reference_index(collected)
+        assert index1 == index2
+
+    def test_build_index_skips_invalid_json(self, tmp_path):
+        """build_cross_reference_index skips files that are not valid JSON."""
+        from bashgym.trace_capture.collectors.index import build_cross_reference_index
+        collected = tmp_path / "collected"
+        sub_dir = collected / "subagents"
+        sub_dir.mkdir(parents=True)
+        (sub_dir / "bad-file.json").write_text("not valid json {{{", encoding="utf-8")
+        (sub_dir / "good-file.json").write_text(json.dumps({
+            "session_id": "session-004",
+            "timestamp": "2026-02-25T15:00:00Z",
+            "source_type": "subagents",
+        }), encoding="utf-8")
+
+        index = build_cross_reference_index(collected)
+        assert "session-004" in index
+        assert len(index) == 1
+
+    def test_build_index_handles_missing_directory(self, tmp_path):
+        """build_cross_reference_index handles a non-existent collected dir gracefully."""
+        from bashgym.trace_capture.collectors.index import build_cross_reference_index
+        collected = tmp_path / "nonexistent"
+        index = build_cross_reference_index(collected)
+        assert index == {}
+        # Should still create index.json
+        assert (collected / "index.json").exists()
+
+    def test_build_index_uses_earliest_timestamp(self, tmp_path):
+        """When multiple records exist for a session, use the earliest timestamp."""
+        from bashgym.trace_capture.collectors.index import build_cross_reference_index
+        collected = tmp_path / "collected"
+
+        sub_dir = collected / "subagents"
+        sub_dir.mkdir(parents=True)
+        (sub_dir / "agent-late.json").write_text(json.dumps({
+            "session_id": "session-005",
+            "timestamp": "2026-02-25T18:00:00Z",
+            "source_type": "subagents",
+        }), encoding="utf-8")
+
+        edit_dir = collected / "edits"
+        edit_dir.mkdir(parents=True)
+        (edit_dir / "session-005_edit.json").write_text(json.dumps({
+            "session_id": "session-005",
+            "timestamp": "2026-02-25T08:00:00Z",
+            "source_type": "edits",
+        }), encoding="utf-8")
+
+        index = build_cross_reference_index(collected)
+        assert index["session-005"]["timestamp"] == "2026-02-25T08:00:00Z"
+
+    def test_build_index_file_paths_are_relative(self, tmp_path):
+        """File paths in the index are relative to collected_dir."""
+        from bashgym.trace_capture.collectors.index import build_cross_reference_index
+        collected = tmp_path / "collected"
+        sub_dir = collected / "subagents"
+        sub_dir.mkdir(parents=True)
+        (sub_dir / "agent-z.json").write_text(json.dumps({
+            "session_id": "session-006",
+            "timestamp": "2026-02-25T10:00:00Z",
+            "source_type": "subagents",
+        }), encoding="utf-8")
+
+        index = build_cross_reference_index(collected)
+        paths = index["session-006"]["subagents"]
+        for p in paths:
+            # Must be relative (no absolute path prefix)
+            assert not Path(p).is_absolute()
+            # Must start with the source type subdirectory
+            assert p.startswith("subagents/") or p.startswith("subagents\\")
+
+    def test_build_index_ignores_index_json_itself(self, tmp_path):
+        """build_cross_reference_index ignores the index.json file in collected root."""
+        from bashgym.trace_capture.collectors.index import build_cross_reference_index
+        collected = tmp_path / "collected"
+        collected.mkdir(parents=True)
+        # Write a stale index.json at root
+        (collected / "index.json").write_text("{}", encoding="utf-8")
+        # Write a real record
+        sub_dir = collected / "subagents"
+        sub_dir.mkdir()
+        (sub_dir / "agent-q.json").write_text(json.dumps({
+            "session_id": "session-007",
+            "timestamp": "2026-02-25T10:00:00Z",
+            "source_type": "subagents",
+        }), encoding="utf-8")
+
+        index = build_cross_reference_index(collected)
+        assert "session-007" in index
+        # The root index.json should NOT appear in any index entry
+        for entry in index.values():
+            for key, val in entry.items():
+                if isinstance(val, list):
+                    for p in val:
+                        assert "index.json" not in p
+
+    def test_scanner_build_index_method(self, tmp_path):
+        """ClaudeDataScanner has a build_index() method."""
+        from bashgym.trace_capture.collectors.scanner import ClaudeDataScanner
+        scanner = ClaudeDataScanner()
+        scanner.collected_dir = tmp_path / "collected"
+        scanner.collected_dir.mkdir(parents=True)
+
+        index = scanner.build_index()
+        assert isinstance(index, dict)
+
+    def test_build_cross_reference_index_importable_from_package(self):
+        """build_cross_reference_index is importable from collectors package."""
+        from bashgym.trace_capture.collectors import build_cross_reference_index
+        assert callable(build_cross_reference_index)

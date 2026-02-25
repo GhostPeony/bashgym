@@ -28,6 +28,7 @@ from .plan import PlanCollector
 from .todo import TodoCollector
 from .prompt import PromptCollector
 from .environment import EnvironmentCollector
+from .scanner import ClaudeDataScanner, ALL_SOURCES
 
 __all__ = [
     "BaseCollector",
@@ -49,4 +50,6 @@ __all__ = [
     "CollectorBatchResult",
     "get_claude_dir",
     "get_collected_dir",
+    "ClaudeDataScanner",
+    "ALL_SOURCES",
 ]

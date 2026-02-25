@@ -1244,3 +1244,129 @@ class TestEnvironmentCollector:
         aliases = snap.shell_snapshot.get("aliases", {})
         assert "ll" in aliases
         assert aliases["ll"] == "ls -la"
+
+
+# ---------------------------------------------------------------------------
+# 10. ClaudeDataScanner orchestrator
+# ---------------------------------------------------------------------------
+
+
+class TestClaudeDataScanner:
+    """Tests for the ClaudeDataScanner orchestrator."""
+
+    @pytest.fixture
+    def mock_claude_dir(self, tmp_path):
+        """Create mock .claude with data for multiple collectors."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+
+        # Plans
+        plans_dir = claude_dir / "plans"
+        plans_dir.mkdir()
+        (plans_dir / "test-plan.md").write_text(
+            "# Plan\nContent here.\n", encoding="utf-8"
+        )
+
+        # History (prompts)
+        (claude_dir / "history.jsonl").write_text(
+            json.dumps({
+                "display": "test prompt",
+                "pastedContents": {},
+                "timestamp": 1700000000000,
+                "project": "test",
+            }),
+            encoding="utf-8",
+        )
+
+        # File history (edits)
+        fh = claude_dir / "file-history" / "session-001"
+        fh.mkdir(parents=True)
+        (fh / "abc123@v1").write_text("old", encoding="utf-8")
+        (fh / "abc123@v2").write_text("new", encoding="utf-8")
+
+        return claude_dir
+
+    def _make_scanner(self, mock_claude_dir, tmp_path):
+        """Create a ClaudeDataScanner pointed at mock directories."""
+        from bashgym.trace_capture.collectors.scanner import ClaudeDataScanner
+
+        scanner = ClaudeDataScanner()
+        scanner.claude_dir = mock_claude_dir
+        scanner.collected_dir = tmp_path / "collected"
+        return scanner
+
+    def test_scan_all_returns_all_sources(self, mock_claude_dir, tmp_path):
+        """scan_all() returns a dict keyed by every source type, each a CollectorScanResult."""
+        scanner = self._make_scanner(mock_claude_dir, tmp_path)
+        results = scanner.scan_all()
+        from bashgym.trace_capture.collectors.scanner import ALL_SOURCES
+
+        assert set(results.keys()) == set(ALL_SOURCES)
+        for key, result in results.items():
+            assert isinstance(result, CollectorScanResult)
+            assert result.source_type == key
+
+    def test_collect_all_runs_all_collectors(self, mock_claude_dir, tmp_path):
+        """collect_all() collects from all sources; total collected >= 2 (plans + prompts)."""
+        scanner = self._make_scanner(mock_claude_dir, tmp_path)
+        results = scanner.collect_all()
+        from bashgym.trace_capture.collectors.scanner import ALL_SOURCES
+
+        assert set(results.keys()) == set(ALL_SOURCES)
+        total_collected = sum(r.collected for r in results.values())
+        # At minimum plans (1) + prompts (1) + edits (1) = 3
+        assert total_collected >= 2
+
+    def test_collect_specific_sources(self, mock_claude_dir, tmp_path):
+        """collect_all(sources=['plans']) only collects plans."""
+        scanner = self._make_scanner(mock_claude_dir, tmp_path)
+        results = scanner.collect_all(sources=["plans"])
+        assert list(results.keys()) == ["plans"]
+        assert results["plans"].collected == 1
+
+    def test_collect_source_single(self, mock_claude_dir, tmp_path):
+        """collect_source('plans') returns a CollectorBatchResult with collected == 1."""
+        scanner = self._make_scanner(mock_claude_dir, tmp_path)
+        result = scanner.collect_source("plans")
+        assert isinstance(result, CollectorBatchResult)
+        assert result.collected == 1
+        assert result.source_type == "plans"
+
+    def test_status_returns_all_sources(self, mock_claude_dir, tmp_path):
+        """status() returns dict with all source types, each with total/collected/available."""
+        scanner = self._make_scanner(mock_claude_dir, tmp_path)
+        status = scanner.status()
+        from bashgym.trace_capture.collectors.scanner import ALL_SOURCES
+
+        assert set(status.keys()) == set(ALL_SOURCES)
+        for source, info in status.items():
+            assert "total" in info
+            assert "collected" in info
+            assert "available" in info
+
+    def test_invalid_source_ignored(self, mock_claude_dir, tmp_path):
+        """collect_all(sources=['invalid']) returns an empty dict."""
+        scanner = self._make_scanner(mock_claude_dir, tmp_path)
+        results = scanner.collect_all(sources=["invalid"])
+        assert results == {}
+
+    def test_scan_all_with_specific_sources(self, mock_claude_dir, tmp_path):
+        """scan_all(sources=['plans', 'prompts']) only scans those two."""
+        scanner = self._make_scanner(mock_claude_dir, tmp_path)
+        results = scanner.scan_all(sources=["plans", "prompts"])
+        assert set(results.keys()) == {"plans", "prompts"}
+
+    def test_collect_source_raises_on_unknown(self, mock_claude_dir, tmp_path):
+        """collect_source() raises KeyError for unknown source types."""
+        scanner = self._make_scanner(mock_claude_dir, tmp_path)
+        with pytest.raises(KeyError):
+            scanner.collect_source("nonexistent")
+
+    def test_status_reflects_collection(self, mock_claude_dir, tmp_path):
+        """After collecting plans, status shows them as collected."""
+        scanner = self._make_scanner(mock_claude_dir, tmp_path)
+        # Collect plans first
+        scanner.collect_source("plans")
+        status = scanner.status()
+        assert status["plans"]["collected"] == 1
+        assert status["plans"]["available"] == 0

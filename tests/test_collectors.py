@@ -819,7 +819,180 @@ class TestPlanCollector:
 
 
 # ---------------------------------------------------------------------------
-# 10. PromptCollector
+# 10. TodoCollector
+# ---------------------------------------------------------------------------
+
+try:
+    from bashgym.trace_capture.collectors.todo import TodoCollector
+    _has_todo_collector = True
+except ImportError:
+    _has_todo_collector = False
+
+
+@pytest.mark.skipif(not _has_todo_collector, reason="TodoCollector not yet implemented")
+class TestTodoCollector:
+    """Tests for TodoCollector: scanning, parsing, and collecting todo JSON files."""
+
+    @pytest.fixture
+    def mock_claude_dir(self, tmp_path):
+        """Create mock .claude with todos/ directory."""
+        todos = tmp_path / "todos"
+        todos.mkdir()
+        # Non-empty todo file: 2 tasks (1 completed, 1 pending)
+        (todos / "abc12345-1234-5678-abcd-1234567890ab-agent-abc12345-1234-5678-abcd-1234567890ab.json").write_text(
+            json.dumps([
+                {"subject": "Fix auth", "status": "completed"},
+                {"subject": "Add tests", "status": "pending"},
+            ]),
+            encoding="utf-8",
+        )
+        # Empty todo file: should be skipped
+        (todos / "def67890-1234-5678-abcd-1234567890ab-agent-def67890-1234-5678-abcd-1234567890ab.json").write_text(
+            "[]",
+            encoding="utf-8",
+        )
+        return tmp_path
+
+    def test_source_type(self, mock_claude_dir, tmp_path):
+        """source_type returns 'todos'."""
+        collector = TodoCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        assert collector.source_type == "todos"
+
+    def test_collect_all_skips_empty_todos(self, mock_claude_dir, tmp_path):
+        """collect_all() skips files with empty arrays and collects non-empty ones."""
+        collector = TodoCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        result = collector.collect_all()
+        assert result.source_type == "todos"
+        assert result.collected == 1
+        assert len(result.records) == 1
+
+        rec = result.records[0]
+        assert rec.total_tasks == 2
+        assert rec.completed_tasks == 1
+        assert rec.pending_tasks == 1
+        assert rec.agent_id == "abc12345-1234-5678-abcd-1234567890ab"
+        assert rec.session_id == "abc12345-1234-5678-abcd-1234567890ab"
+
+    def test_scan_finds_todo_files(self, mock_claude_dir, tmp_path):
+        """scan() discovers non-empty todo files and reports correct counts."""
+        collector = TodoCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        result = collector.scan()
+        assert result.source_type == "todos"
+        # Only non-empty files are counted
+        assert result.total_found >= 1
+        assert result.new_available >= 1
+
+    def test_collect_all_deduplicates(self, mock_claude_dir, tmp_path):
+        """collect_all() skips todos that were already collected."""
+        collector = TodoCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        # First collection
+        first = collector.collect_all()
+        assert first.collected == 1
+
+        # Second collection -- should skip
+        second = collector.collect_all()
+        assert second.collected == 0
+        assert second.skipped >= 1
+
+    def test_collect_returns_records_for_session(self, mock_claude_dir, tmp_path):
+        """collect() returns todo records matching the given session_id."""
+        collector = TodoCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        records = collector.collect("abc12345-1234-5678-abcd-1234567890ab")
+        assert len(records) == 1
+        assert records[0].total_tasks == 2
+
+    def test_collect_returns_empty_for_unknown_session(self, mock_claude_dir, tmp_path):
+        """collect() returns empty list for non-existent session_id."""
+        collector = TodoCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        records = collector.collect("nonexistent-session-id")
+        assert records == []
+
+    def test_parse_filename_extracts_ids(self, mock_claude_dir, tmp_path):
+        """_parse_filename() extracts session_id and agent_id from the filename."""
+        collector = TodoCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        session_id, agent_id = collector._parse_filename(
+            "abc12345-1234-5678-abcd-1234567890ab-agent-def67890-1234-5678-abcd-1234567890ab.json"
+        )
+        assert session_id == "abc12345-1234-5678-abcd-1234567890ab"
+        assert agent_id == "def67890-1234-5678-abcd-1234567890ab"
+
+    def test_parse_filename_returns_none_for_invalid(self, mock_claude_dir, tmp_path):
+        """_parse_filename() returns (None, None) for filenames that don't match the pattern."""
+        collector = TodoCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        session_id, agent_id = collector._parse_filename("not-a-valid-filename.json")
+        assert session_id is None
+        assert agent_id is None
+
+    def test_collect_all_records_contain_tasks(self, mock_claude_dir, tmp_path):
+        """Collected records contain the original task data."""
+        collector = TodoCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        result = collector.collect_all()
+        rec = result.records[0]
+        assert len(rec.tasks) == 2
+        subjects = {t["subject"] for t in rec.tasks}
+        assert "Fix auth" in subjects
+        assert "Add tests" in subjects
+
+    def test_scan_respects_since_filter(self, mock_claude_dir, tmp_path):
+        """scan() filters todo files by modification time."""
+        collector = TodoCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        # Far-future date -- nothing should match
+        result = collector.scan(since="2099-01-01T00:00:00Z")
+        assert result.total_found == 0
+
+        # Far-past date -- everything non-empty should match
+        result = collector.scan(since="2000-01-01T00:00:00Z")
+        assert result.total_found >= 1
+
+    def test_handles_malformed_json(self, tmp_path):
+        """collect_all() handles malformed JSON files gracefully."""
+        todos = tmp_path / "todos"
+        todos.mkdir()
+        (todos / "abc12345-1234-5678-abcd-1234567890ab-agent-abc12345-1234-5678-abcd-1234567890ab.json").write_text(
+            "{not valid json",
+            encoding="utf-8",
+        )
+
+        collector = TodoCollector(
+            claude_dir=tmp_path,
+            collected_dir=tmp_path / "collected",
+        )
+        result = collector.collect_all()
+        assert result.collected == 0
+
+
+# ---------------------------------------------------------------------------
+# 11. PromptCollector
 # ---------------------------------------------------------------------------
 
 try:
@@ -968,7 +1141,7 @@ class TestPromptCollector:
 
 
 # ---------------------------------------------------------------------------
-# 11. EnvironmentCollector
+# 12. EnvironmentCollector
 # ---------------------------------------------------------------------------
 
 try:

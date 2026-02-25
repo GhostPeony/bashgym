@@ -25,6 +25,9 @@ from .base import (
 from .subagent import SubagentCollector
 from .edit import EditCollector
 from .plan import PlanCollector
+from .todo import TodoCollector
+from .prompt import PromptCollector
+from .environment import EnvironmentCollector
 
 __all__ = [
     "BaseCollector",
@@ -32,6 +35,8 @@ __all__ = [
     "SubagentCollector",
     "EditCollector",
     "PlanCollector",
+    "PromptCollector",
+    "EnvironmentCollector",
     "SubagentRecord",
     "EditRecord",
     "PlanRecord",

@@ -88,6 +88,12 @@ class APISettings:
     anthropic_api_key: str = field(default_factory=lambda: get_env("ANTHROPIC_API_KEY"))
     anthropic_model: str = field(default_factory=lambda: get_env("ANTHROPIC_MODEL", "claude-sonnet-4-20250514"))
 
+    # OpenAI
+    openai_api_key: str = field(default_factory=lambda: get_env("OPENAI_API_KEY"))
+
+    # Google (Gemini)
+    google_api_key: str = field(default_factory=lambda: get_env("GOOGLE_API_KEY"))
+
     # NVIDIA
     nvidia_api_key: str = field(default_factory=lambda: get_env("NVIDIA_API_KEY"))
     nemo_endpoint: str = field(default_factory=lambda: get_env("NEMO_ENDPOINT", "http://localhost:8000"))

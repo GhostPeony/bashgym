@@ -59,6 +59,7 @@ from bashgym.api.security_routes import router as security_router
 from bashgym.api.orchestrator_routes import router as orchestrator_router
 from bashgym.api.agent_routes import router as agent_router
 from bashgym.api.pipeline_routes import router as pipeline_router, start_pipeline_watcher, stop_pipeline_watcher
+from bashgym.api.settings_routes import router as settings_router
 from bashgym.factory.quality_calculator import calculate_quality_breakdown
 
 
@@ -3264,6 +3265,9 @@ def create_app() -> FastAPI:
 
     # Include Pipeline routes (auto-import pipeline)
     app.include_router(pipeline_router)
+
+    # Include Settings routes (env/API key management)
+    app.include_router(settings_router)
 
     return app
 

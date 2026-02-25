@@ -1370,3 +1370,54 @@ class TestClaudeDataScanner:
         status = scanner.status()
         assert status["plans"]["collected"] == 1
         assert status["plans"]["available"] == 0
+
+
+# ---------------------------------------------------------------------------
+# 11. Peony Tool Integration
+# ---------------------------------------------------------------------------
+
+
+class TestPeonyToolIntegration:
+    """Tests for Peony tool definitions and execution wiring."""
+
+    def test_import_traces_tool_definition_has_sources_param(self):
+        """import_traces tool must define sources, days, project_filter, dry_run params."""
+        from bashgym.agent.tools import ToolRegistry
+        registry = ToolRegistry()
+        tools = registry.build_tools()
+        import_tool = [t for t in tools if t["name"] == "import_traces"][0]
+        props = import_tool["input_schema"]["properties"]
+        assert "sources" in props
+        assert "days" in props
+        assert "project_filter" in props
+        assert "dry_run" in props
+
+    def test_scan_claude_data_tool_exists(self):
+        """scan_claude_data tool must be present in the tool registry."""
+        from bashgym.agent.tools import ToolRegistry
+        registry = ToolRegistry()
+        tools = registry.build_tools()
+        names = [t["name"] for t in tools]
+        assert "scan_claude_data" in names
+
+    def test_get_collection_status_tool_exists(self):
+        """get_collection_status tool must be present in the tool registry."""
+        from bashgym.agent.tools import ToolRegistry
+        registry = ToolRegistry()
+        tools = registry.build_tools()
+        names = [t["name"] for t in tools]
+        assert "get_collection_status" in names
+
+    def test_import_traces_sources_enum_matches_all_sources(self):
+        """The sources enum should contain 'all' plus all source types from ALL_SOURCES."""
+        from bashgym.agent.tools import ToolRegistry
+        from bashgym.trace_capture.collectors.scanner import ALL_SOURCES
+        registry = ToolRegistry()
+        tools = registry.build_tools()
+        import_tool = [t for t in tools if t["name"] == "import_traces"][0]
+        sources_prop = import_tool["input_schema"]["properties"]["sources"]
+        # The items enum should contain "all" plus all source types
+        enum_values = sources_prop["items"]["enum"]
+        for source in ALL_SOURCES:
+            assert source in enum_values
+        assert "all" in enum_values

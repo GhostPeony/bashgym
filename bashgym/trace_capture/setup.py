@@ -14,6 +14,12 @@ from .adapters import (
     uninstall_claude_code_hooks,
     install_opencode_plugin,
     uninstall_opencode_plugin,
+    install_gemini_cli_hooks,
+    uninstall_gemini_cli_hooks,
+    install_codex_hooks,
+    uninstall_codex_hooks,
+    install_copilot_cli_hooks,
+    uninstall_copilot_cli_hooks,
 )
 from .importers import import_today, import_recent, import_session
 
@@ -83,6 +89,45 @@ def setup_trace_capture(
                 results["success"] = False
                 results["errors"].append(f"OpenCode: {message}")
 
+        elif tool == "gemini_cli":
+            success, message = install_gemini_cli_hooks()
+            results["tools"]["gemini_cli"] = {
+                "success": success,
+                "message": message
+            }
+            if verbose:
+                status = "✓" if success else "✗"
+                print(f"  {status} Gemini CLI: {message}")
+            if not success:
+                results["success"] = False
+                results["errors"].append(f"Gemini CLI: {message}")
+
+        elif tool == "codex":
+            success, message = install_codex_hooks()
+            results["tools"]["codex"] = {
+                "success": success,
+                "message": message
+            }
+            if verbose:
+                status = "✓" if success else "✗"
+                print(f"  {status} Codex: {message}")
+            if not success:
+                results["success"] = False
+                results["errors"].append(f"Codex: {message}")
+
+        elif tool == "copilot_cli":
+            success, message = install_copilot_cli_hooks()
+            results["tools"]["copilot_cli"] = {
+                "success": success,
+                "message": message
+            }
+            if verbose:
+                status = "✓" if success else "✗"
+                print(f"  {status} Copilot CLI: {message}")
+            if not success:
+                results["success"] = False
+                results["errors"].append(f"Copilot CLI: {message}")
+
         elif tool in ["aider", "continue", "cursor"]:
             results["tools"][tool] = {
                 "success": False,
@@ -125,7 +170,7 @@ def uninstall_trace_capture(
     }
 
     if all_tools:
-        target_tools = ["claude_code", "opencode"]
+        target_tools = ["claude_code", "opencode", "gemini_cli", "codex", "copilot_cli"]
     elif tools:
         target_tools = tools
     else:
@@ -156,6 +201,36 @@ def uninstall_trace_capture(
             if verbose:
                 status = "✓" if success else "✗"
                 print(f"  {status} OpenCode: {message}")
+
+        elif tool == "gemini_cli":
+            success, message = uninstall_gemini_cli_hooks()
+            results["tools"]["gemini_cli"] = {
+                "success": success,
+                "message": message
+            }
+            if verbose:
+                status = "✓" if success else "✗"
+                print(f"  {status} Gemini CLI: {message}")
+
+        elif tool == "codex":
+            success, message = uninstall_codex_hooks()
+            results["tools"]["codex"] = {
+                "success": success,
+                "message": message
+            }
+            if verbose:
+                status = "✓" if success else "✗"
+                print(f"  {status} Codex: {message}")
+
+        elif tool == "copilot_cli":
+            success, message = uninstall_copilot_cli_hooks()
+            results["tools"]["copilot_cli"] = {
+                "success": success,
+                "message": message
+            }
+            if verbose:
+                status = "✓" if success else "✗"
+                print(f"  {status} Copilot CLI: {message}")
 
     return results
 
@@ -262,7 +337,7 @@ Examples:
     parser.add_argument(
         "--tools", "-t",
         nargs="+",
-        choices=["claude_code", "claude", "opencode", "aider"],
+        choices=["claude_code", "claude", "opencode", "gemini_cli", "gemini", "codex", "copilot_cli", "copilot", "aider"],
         help="Specific tools to set up"
     )
     parser.add_argument(
@@ -331,6 +406,10 @@ Examples:
         for t in args.tools:
             if t == "claude":
                 tools.append("claude_code")
+            elif t == "gemini":
+                tools.append("gemini_cli")
+            elif t == "copilot":
+                tools.append("copilot_cli")
             else:
                 tools.append(t)
 

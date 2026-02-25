@@ -58,6 +58,7 @@ from bashgym.api.achievements_routes import router as achievements_router
 from bashgym.api.security_routes import router as security_router
 from bashgym.api.orchestrator_routes import router as orchestrator_router
 from bashgym.api.agent_routes import router as agent_router
+from bashgym.api.pipeline_routes import router as pipeline_router, start_pipeline_watcher, stop_pipeline_watcher
 from bashgym.factory.quality_calculator import calculate_quality_breakdown
 
 
@@ -161,11 +162,15 @@ def create_app() -> FastAPI:
         except ImportError as e:
             print(f"Warning: Some components not available: {e}")
 
+        # Start pipeline watcher
+        start_pipeline_watcher()
+
     @app.on_event("shutdown")
     async def shutdown():
         """Cleanup on shutdown."""
         if app.state.router:
             await app.state.router.close()
+        stop_pipeline_watcher()
 
     # =========================================================================
     # WebSocket Endpoint
@@ -3256,6 +3261,9 @@ def create_app() -> FastAPI:
 
     # Include Agent chat routes (system-aware assistant)
     app.include_router(agent_router)
+
+    # Include Pipeline routes (auto-import pipeline)
+    app.include_router(pipeline_router)
 
     return app
 

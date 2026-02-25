@@ -1498,3 +1498,169 @@ class TestPeonyToolIntegration:
         assert "plans" in data
         assert data["plans"]["new_available"] == 2
         mock_scanner.scan_all.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# CLI subcommand tests (scan, status, --source)
+# ---------------------------------------------------------------------------
+
+class TestCLICommands:
+    """Tests for bashgym-setup CLI subcommands (scan, status, --source)."""
+
+    def test_scan_subcommand_parses(self, monkeypatch):
+        """The 'scan' subcommand is recognized by argparse and calls scanner.scan_all()."""
+        from bashgym.trace_capture.setup import main
+        from unittest.mock import MagicMock
+
+        monkeypatch.setattr("sys.argv", ["bashgym-setup", "--quiet", "scan"])
+
+        mock_scanner = MagicMock()
+        mock_scanner.scan_all.return_value = {}
+
+        with patch(
+            "bashgym.trace_capture.collectors.scanner.ClaudeDataScanner",
+            return_value=mock_scanner,
+        ):
+            result = main()
+
+        assert result == 0
+        mock_scanner.scan_all.assert_called_once()
+
+    def test_status_subcommand_parses(self, monkeypatch):
+        """The 'status' subcommand is recognized by argparse and calls scanner.status()."""
+        from bashgym.trace_capture.setup import main
+        from unittest.mock import MagicMock
+
+        monkeypatch.setattr("sys.argv", ["bashgym-setup", "--quiet", "status"])
+
+        mock_scanner = MagicMock()
+        mock_scanner.status.return_value = {}
+
+        with patch(
+            "bashgym.trace_capture.collectors.scanner.ClaudeDataScanner",
+            return_value=mock_scanner,
+        ):
+            result = main()
+
+        assert result == 0
+        mock_scanner.status.assert_called_once()
+
+    def test_import_recent_source_argument_exists(self, monkeypatch):
+        """import-recent accepts --source argument and routes to scanner.collect_all()."""
+        from bashgym.trace_capture.setup import main
+        from unittest.mock import MagicMock
+
+        monkeypatch.setattr(
+            "sys.argv",
+            ["bashgym-setup", "--quiet", "import-recent", "--source", "plans", "--days", "7"],
+        )
+
+        mock_scanner = MagicMock()
+        mock_scanner.collect_all.return_value = {}
+
+        with patch(
+            "bashgym.trace_capture.collectors.scanner.ClaudeDataScanner",
+            return_value=mock_scanner,
+        ):
+            result = main()
+
+        assert result == 0
+        mock_scanner.collect_all.assert_called_once()
+
+    def test_import_recent_default_source_is_sessions(self, monkeypatch):
+        """import-recent without --source defaults to sessions (original behavior)."""
+        from bashgym.trace_capture.setup import main
+        from unittest.mock import MagicMock
+
+        monkeypatch.setattr(
+            "sys.argv",
+            ["bashgym-setup", "--quiet", "import-recent", "--days", "7"],
+        )
+
+        # Patch import_recent to avoid real filesystem access
+        mock_import_recent = MagicMock(return_value=[])
+
+        with patch(
+            "bashgym.trace_capture.setup.import_recent",
+            mock_import_recent,
+        ):
+            result = main()
+
+        assert result == 0
+        mock_import_recent.assert_called_once()
+        call_kwargs = mock_import_recent.call_args
+        assert call_kwargs[1]["days"] == 7
+
+    def test_import_recent_source_all_routes_to_scanner(self, monkeypatch):
+        """import-recent --source all passes sources=None to scanner.collect_all()."""
+        from bashgym.trace_capture.setup import main
+        from unittest.mock import MagicMock
+
+        monkeypatch.setattr(
+            "sys.argv",
+            ["bashgym-setup", "--quiet", "import-recent", "--source", "all", "--days", "3"],
+        )
+
+        mock_scanner = MagicMock()
+        mock_scanner.collect_all.return_value = {}
+
+        with patch(
+            "bashgym.trace_capture.collectors.scanner.ClaudeDataScanner",
+            return_value=mock_scanner,
+        ):
+            result = main()
+
+        assert result == 0
+        mock_scanner.collect_all.assert_called_once()
+        call_kwargs = mock_scanner.collect_all.call_args
+        # source='all' should pass sources=None to collect everything
+        assert call_kwargs[1]["sources"] is None
+
+    def test_scan_verbose_prints_table(self, monkeypatch, capsys):
+        """The 'scan' subcommand prints a table when verbose (no --quiet)."""
+        from bashgym.trace_capture.setup import main
+        from unittest.mock import MagicMock
+
+        monkeypatch.setattr("sys.argv", ["bashgym-setup", "scan"])
+
+        mock_scanner = MagicMock()
+        mock_scanner.scan_all.return_value = {
+            "plans": CollectorScanResult(
+                source_type="plans", total_found=10,
+                already_collected=3, new_available=7,
+            ),
+        }
+
+        with patch(
+            "bashgym.trace_capture.collectors.scanner.ClaudeDataScanner",
+            return_value=mock_scanner,
+        ):
+            result = main()
+
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "Data Scan Results" in captured.out
+        assert "plans" in captured.out
+
+    def test_status_verbose_prints_table(self, monkeypatch, capsys):
+        """The 'status' subcommand prints a table when verbose (no --quiet)."""
+        from bashgym.trace_capture.setup import main
+        from unittest.mock import MagicMock
+
+        monkeypatch.setattr("sys.argv", ["bashgym-setup", "status"])
+
+        mock_scanner = MagicMock()
+        mock_scanner.status.return_value = {
+            "plans": {"total": 10, "collected": 3, "available": 7},
+        }
+
+        with patch(
+            "bashgym.trace_capture.collectors.scanner.ClaudeDataScanner",
+            return_value=mock_scanner,
+        ):
+            result = main()
+
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "Collection Status" in captured.out
+        assert "plans" in captured.out

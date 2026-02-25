@@ -288,10 +288,16 @@ Examples:
   bashgym-setup --status           # Check current status
   bashgym-setup --uninstall        # Remove all hooks
 
+  # Scan and inspect available data
+  bashgym-setup scan                      # Show all available data sources
+  bashgym-setup status                    # Show collection stats per source
+
   # Import Claude Code session history
   bashgym-setup import-today              # Import today's sessions
-  bashgym-setup import-recent             # Import last 60 days
+  bashgym-setup import-recent             # Import last 60 days (sessions)
   bashgym-setup import-recent --days 30   # Import last 30 days
+  bashgym-setup import-recent -S plans    # Import plans from last 60 days
+  bashgym-setup import-recent -S all      # Import all source types
   bashgym-setup import-session <path>     # Import specific session file
 
   # Import from other tools
@@ -304,6 +310,18 @@ Examples:
 
     # Create subparsers for import commands
     subparsers = parser.add_subparsers(dest="command", help="Import commands")
+
+    # scan subcommand
+    scan_parser = subparsers.add_parser(
+        "scan",
+        help="Scan ~/.claude and show what data is available but not yet collected"
+    )
+
+    # status subcommand
+    status_parser = subparsers.add_parser(
+        "status",
+        help="Show collection stats per source type"
+    )
 
     # import-today subcommand
     import_today_parser = subparsers.add_parser(
@@ -329,6 +347,12 @@ Examples:
     import_recent_parser.add_argument(
         "--project", "-p",
         help="Only import sessions from projects matching this substring"
+    )
+    import_recent_parser.add_argument(
+        "--source", "-S",
+        choices=["all", "sessions", "subagents", "edits", "plans", "prompts", "todos", "environments"],
+        default="sessions",
+        help="Data source to import (default: sessions). Use 'all' for everything."
     )
 
     # import-session subcommand
@@ -444,6 +468,36 @@ Examples:
     args = parser.parse_args()
     verbose = not args.quiet
 
+    # Handle scan and status subcommands
+    if args.command == "scan":
+        from bashgym.trace_capture.collectors.scanner import ClaudeDataScanner
+        scanner = ClaudeDataScanner()
+        results = scanner.scan_all()
+        if verbose:
+            print("[BashGym] Data Scan Results")
+            print("=" * 60)
+            print(f"{'Source':<15} {'Total':<10} {'Collected':<12} {'Available':<10}")
+            print("-" * 60)
+            for source, result in results.items():
+                print(f"{source:<15} {result.total_found:<10} {result.already_collected:<12} {result.new_available:<10}")
+            total = sum(r.new_available for r in results.values())
+            print("-" * 60)
+            print(f"{'TOTAL':<15} {'':<10} {'':<12} {total:<10}")
+        return 0
+
+    if args.command == "status":
+        from bashgym.trace_capture.collectors.scanner import ClaudeDataScanner
+        scanner = ClaudeDataScanner()
+        status = scanner.status()
+        if verbose:
+            print("[BashGym] Collection Status")
+            print("=" * 60)
+            print(f"{'Source':<15} {'Total':<10} {'Collected':<12} {'Available':<10}")
+            print("-" * 60)
+            for source, info in status.items():
+                print(f"{source:<15} {info['total']:<10} {info['collected']:<12} {info['available']:<10}")
+        return 0
+
     # Handle import subcommands
     if args.command == "import-today":
         results = import_today(
@@ -457,15 +511,35 @@ Examples:
         return 0
 
     if args.command == "import-recent":
-        results = import_recent(
-            days=args.days,
-            project_filter=args.project,
-            verbose=verbose
-        )
-        imported = sum(1 for r in results if not r.skipped and not r.error)
-        total_steps = sum(r.steps_imported for r in results)
-        if verbose:
-            print(f"\n[BashGym] Imported {imported} session(s), {total_steps} total steps")
+        source = getattr(args, "source", "sessions")
+        if source == "sessions":
+            # Original behavior -- import session transcripts
+            results = import_recent(
+                days=args.days,
+                project_filter=args.project,
+                verbose=verbose
+            )
+            imported = sum(1 for r in results if not r.skipped and not r.error)
+            total_steps = sum(r.steps_imported for r in results)
+            if verbose:
+                print(f"\n[BashGym] Imported {imported} session(s), {total_steps} total steps")
+        else:
+            # New behavior -- use ClaudeDataScanner for collector sources
+            from bashgym.trace_capture.collectors.scanner import ClaudeDataScanner
+            from datetime import datetime, timezone, timedelta
+            scanner = ClaudeDataScanner()
+            since = (datetime.now(timezone.utc) - timedelta(days=args.days)).isoformat()
+            sources = None if source == "all" else [source]
+            results = scanner.collect_all(
+                sources=sources,
+                since=since,
+                project_filter=getattr(args, "project", None),
+            )
+            if verbose:
+                for src, batch in results.items():
+                    print(f"  {src}: collected={batch.collected}, skipped={batch.skipped}, errors={len(batch.errors)}")
+                total = sum(r.collected for r in results.values())
+                print(f"\n[BashGym] Collected {total} record(s) from {len(results)} source(s)")
         return 0
 
     if args.command == "import-session":

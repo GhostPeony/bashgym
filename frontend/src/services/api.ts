@@ -1976,3 +1976,45 @@ export const orchestratorApi = {
 
   listJobs: () => request('/orchestrate/jobs'),
 }
+
+// Pipeline API
+export interface PipelineConfig {
+  watch_enabled: boolean
+  watch_debounce_seconds: number
+  classify_enabled: boolean
+  classify_gold_min_success_rate: number
+  classify_gold_min_steps: number
+  classify_fail_max_success_rate: number
+  generate_enabled: boolean
+  generate_gold_threshold: number
+  train_enabled: boolean
+  train_examples_threshold: number
+}
+
+export interface PipelineStatus {
+  watcher_running: boolean
+  config: PipelineConfig
+  gold_count: number
+  pending_count: number
+  failed_count: number
+}
+
+export const pipelineApi = {
+  getConfig: () =>
+    request<PipelineConfig>('/pipeline/config'),
+
+  updateConfig: (updates: Partial<PipelineConfig>) =>
+    request<PipelineConfig>('/pipeline/config', {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    }),
+
+  getStatus: () =>
+    request<PipelineStatus>('/pipeline/status'),
+
+  triggerStage: (stage: 'import' | 'classify') =>
+    request<{ imported?: number; classified?: number; total?: number }>(
+      `/pipeline/trigger/${stage}`,
+      { method: 'POST' }
+    ),
+}

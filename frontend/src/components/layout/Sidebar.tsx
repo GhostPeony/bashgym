@@ -20,7 +20,8 @@ import {
   Link2,
   Trophy,
   Network,
-  Rocket
+  Rocket,
+  Workflow
 } from 'lucide-react'
 import { useUIStore, useTrainingStore } from '../../stores'
 import { hooksApi, systemApi } from '../../services/api'
@@ -71,7 +72,7 @@ function MenuSection({ title, children }: { title?: string; children: React.Reac
   )
 }
 
-type SecondaryViewId = 'traces' | 'models' | 'evaluator' | 'router' | 'guardrails' | 'profiler' | 'huggingface' | 'integration' | 'achievements' | 'orchestrator'
+type SecondaryViewId = 'traces' | 'models' | 'evaluator' | 'router' | 'guardrails' | 'profiler' | 'huggingface' | 'integration' | 'achievements' | 'orchestrator' | 'pipeline'
 
 interface CollapsibleSectionProps {
   title: string
@@ -145,7 +146,8 @@ function SecondarySections() {
     { id: 'router', icon: <GitBranch className="w-4 h-4" />, label: 'Router' },
     { id: 'guardrails', icon: <Shield className="w-4 h-4" />, label: 'Guardrails' },
     { id: 'profiler', icon: <Activity className="w-4 h-4" />, label: 'Profiler' },
-    { id: 'orchestrator', icon: <Network className="w-4 h-4" />, label: 'Orchestrator' }
+    { id: 'orchestrator', icon: <Network className="w-4 h-4" />, label: 'Orchestrator' },
+    { id: 'pipeline', icon: <Workflow className="w-4 h-4" />, label: 'Pipeline' }
   ]
 
   const connectionsItems: CollapsibleSectionProps['items'] = [

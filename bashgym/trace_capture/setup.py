@@ -21,7 +21,14 @@ from .adapters import (
     install_copilot_cli_hooks,
     uninstall_copilot_cli_hooks,
 )
-from .importers import import_today, import_recent, import_session
+from .importers import (
+    import_today,
+    import_recent,
+    import_session,
+    import_gemini_sessions,
+    import_copilot_sessions,
+    import_opencode_sessions,
+)
 
 
 def setup_trace_capture(
@@ -286,6 +293,12 @@ Examples:
   bashgym-setup import-recent             # Import last 60 days
   bashgym-setup import-recent --days 30   # Import last 30 days
   bashgym-setup import-session <path>     # Import specific session file
+
+  # Import from other tools
+  bashgym-setup import-gemini             # Import Gemini CLI sessions
+  bashgym-setup import-copilot            # Import Copilot CLI sessions
+  bashgym-setup import-opencode           # Import OpenCode sessions
+  bashgym-setup import-all                # Import from all detected tools
         """
     )
 
@@ -331,6 +344,78 @@ Examples:
         "--force", "-f",
         action="store_true",
         help="Import even if already imported"
+    )
+
+    # import-gemini subcommand
+    import_gemini_parser = subparsers.add_parser(
+        "import-gemini",
+        help="Import Gemini CLI session history"
+    )
+    import_gemini_parser.add_argument(
+        "--days", "-d",
+        type=int,
+        default=60,
+        help="Number of days to look back (default: 60)"
+    )
+    import_gemini_parser.add_argument(
+        "--limit", "-l",
+        type=int,
+        default=100,
+        help="Maximum number of sessions to import (default: 100)"
+    )
+
+    # import-copilot subcommand
+    import_copilot_parser = subparsers.add_parser(
+        "import-copilot",
+        help="Import Copilot CLI session history"
+    )
+    import_copilot_parser.add_argument(
+        "--days", "-d",
+        type=int,
+        default=60,
+        help="Number of days to look back (default: 60)"
+    )
+    import_copilot_parser.add_argument(
+        "--limit", "-l",
+        type=int,
+        default=100,
+        help="Maximum number of sessions to import (default: 100)"
+    )
+
+    # import-opencode subcommand
+    import_opencode_parser = subparsers.add_parser(
+        "import-opencode",
+        help="Import OpenCode session history"
+    )
+    import_opencode_parser.add_argument(
+        "--days", "-d",
+        type=int,
+        default=60,
+        help="Number of days to look back (default: 60)"
+    )
+    import_opencode_parser.add_argument(
+        "--limit", "-l",
+        type=int,
+        default=100,
+        help="Maximum number of sessions to import (default: 100)"
+    )
+
+    # import-all subcommand
+    import_all_parser = subparsers.add_parser(
+        "import-all",
+        help="Import session history from all detected tools"
+    )
+    import_all_parser.add_argument(
+        "--days", "-d",
+        type=int,
+        default=60,
+        help="Number of days to look back (default: 60)"
+    )
+    import_all_parser.add_argument(
+        "--limit", "-l",
+        type=int,
+        default=100,
+        help="Maximum sessions to import per tool (default: 100)"
     )
 
     # Main command arguments
@@ -390,6 +475,107 @@ Examples:
             verbose=verbose
         )
         return 0 if not result.error else 1
+
+    if args.command == "import-gemini":
+        results = import_gemini_sessions(
+            days=args.days,
+            limit=args.limit,
+            verbose=verbose,
+        )
+        imported = sum(1 for r in results if not r.get("skipped") and not r.get("error"))
+        total_steps = sum(r.get("steps_imported", 0) for r in results)
+        if verbose:
+            print(f"\n[BashGym] Gemini: Imported {imported} session(s), {total_steps} total steps")
+        return 0
+
+    if args.command == "import-copilot":
+        results = import_copilot_sessions(
+            days=args.days,
+            limit=args.limit,
+            verbose=verbose,
+        )
+        imported = sum(1 for r in results if not r.get("skipped") and not r.get("error"))
+        total_steps = sum(r.get("steps_imported", 0) for r in results)
+        if verbose:
+            print(f"\n[BashGym] Copilot: Imported {imported} session(s), {total_steps} total steps")
+        return 0
+
+    if args.command == "import-opencode":
+        results = import_opencode_sessions(
+            days=args.days,
+            limit=args.limit,
+            verbose=verbose,
+        )
+        imported = sum(1 for r in results if not r.get("skipped") and not r.get("error"))
+        total_steps = sum(r.get("steps_imported", 0) for r in results)
+        if verbose:
+            print(f"\n[BashGym] OpenCode: Imported {imported} session(s), {total_steps} total steps")
+        return 0
+
+    if args.command == "import-all":
+        if verbose:
+            print("[BashGym] Importing from all detected tools...")
+            print()
+
+        grand_total_imported = 0
+        grand_total_steps = 0
+
+        # Claude Code
+        if verbose:
+            print("--- Claude Code ---")
+        claude_results = import_recent(
+            days=args.days,
+            verbose=verbose,
+        )
+        claude_imported = sum(1 for r in claude_results if not r.skipped and not r.error)
+        claude_steps = sum(r.steps_imported for r in claude_results)
+        grand_total_imported += claude_imported
+        grand_total_steps += claude_steps
+
+        # Gemini CLI
+        if verbose:
+            print("\n--- Gemini CLI ---")
+        gemini_results = import_gemini_sessions(
+            days=args.days,
+            limit=args.limit,
+            verbose=verbose,
+        )
+        gemini_imported = sum(1 for r in gemini_results if not r.get("skipped") and not r.get("error"))
+        gemini_steps = sum(r.get("steps_imported", 0) for r in gemini_results)
+        grand_total_imported += gemini_imported
+        grand_total_steps += gemini_steps
+
+        # Copilot CLI
+        if verbose:
+            print("\n--- Copilot CLI ---")
+        copilot_results = import_copilot_sessions(
+            days=args.days,
+            limit=args.limit,
+            verbose=verbose,
+        )
+        copilot_imported = sum(1 for r in copilot_results if not r.get("skipped") and not r.get("error"))
+        copilot_steps = sum(r.get("steps_imported", 0) for r in copilot_results)
+        grand_total_imported += copilot_imported
+        grand_total_steps += copilot_steps
+
+        # OpenCode
+        if verbose:
+            print("\n--- OpenCode ---")
+        opencode_results = import_opencode_sessions(
+            days=args.days,
+            limit=args.limit,
+            verbose=verbose,
+        )
+        opencode_imported = sum(1 for r in opencode_results if not r.get("skipped") and not r.get("error"))
+        opencode_steps = sum(r.get("steps_imported", 0) for r in opencode_results)
+        grand_total_imported += opencode_imported
+        grand_total_steps += opencode_steps
+
+        if verbose:
+            print(f"\n[BashGym] Total: Imported {grand_total_imported} session(s), {grand_total_steps} total steps")
+            print(f"  Claude: {claude_imported}, Gemini: {gemini_imported}, "
+                  f"Copilot: {copilot_imported}, OpenCode: {opencode_imported}")
+        return 0
 
     if args.status:
         check_setup_status(verbose=verbose)

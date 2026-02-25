@@ -480,6 +480,15 @@ ipcMain.handle('clipboard:writeText', (_, text: string) => {
 })
 
 // Credential storage handlers — encrypt/decrypt via Electron safeStorage (OS-level encryption)
+
+function safeCredentialPath(key: string): string {
+  const sanitized = key.replace(/[^a-zA-Z0-9_-]/g, '')
+  if (!sanitized) throw new Error('Invalid credential key')
+  const resolved = path.join(credentialsDir, sanitized)
+  if (!resolved.startsWith(credentialsDir)) throw new Error('Invalid credential path')
+  return resolved
+}
+
 ipcMain.handle('credentials:store', async (_, key: string, value: string) => {
   try {
     if (!safeStorage.isEncryptionAvailable()) {
@@ -487,7 +496,7 @@ ipcMain.handle('credentials:store', async (_, key: string, value: string) => {
     }
     await fs.promises.mkdir(credentialsDir, { recursive: true })
     const encrypted = safeStorage.encryptString(value)
-    await fs.promises.writeFile(path.join(credentialsDir, key), encrypted)
+    await fs.promises.writeFile(safeCredentialPath(key), encrypted)
     return { success: true }
   } catch (error) {
     return { success: false, error: String(error) }
@@ -499,7 +508,7 @@ ipcMain.handle('credentials:read', async (_, key: string) => {
     if (!safeStorage.isEncryptionAvailable()) {
       return { success: false, error: 'Encryption is not available on this system' }
     }
-    const encrypted = await fs.promises.readFile(path.join(credentialsDir, key))
+    const encrypted = await fs.promises.readFile(safeCredentialPath(key))
     const value = safeStorage.decryptString(encrypted)
     return { success: true, value }
   } catch (error) {
@@ -509,7 +518,7 @@ ipcMain.handle('credentials:read', async (_, key: string) => {
 
 ipcMain.handle('credentials:delete', async (_, key: string) => {
   try {
-    await fs.promises.unlink(path.join(credentialsDir, key))
+    await fs.promises.unlink(safeCredentialPath(key))
     return { success: true }
   } catch (error) {
     return { success: false, error: String(error) }

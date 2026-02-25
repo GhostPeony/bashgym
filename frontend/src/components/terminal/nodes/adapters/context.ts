@@ -134,12 +134,6 @@ function createContextAdapter(
         placeholder: 'Paste or type content...'
       })
 
-      fields.push({
-        key: 'autoSend',
-        label: 'Auto-Send',
-        type: 'toggle'
-      })
-
       return fields
     }
   }

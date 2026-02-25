@@ -32,7 +32,7 @@ function createVercelAdapter(
   config: Record<string, unknown>,
   onChange: (key: string, value: unknown) => void
 ): NodeAdapter {
-  const projectName = (config.projectName as string) || ''
+  const projectId = (config.projectId as string) || ''
   const deployStatus = (config.deployStatus as string) || ''
   const deployUrl = (config.deployUrl as string) || ''
   const deployId = (config.deployId as string) || ''
@@ -55,13 +55,13 @@ function createVercelAdapter(
       } else if (v0Files.length > 0) {
         content = formatV0Files(v0Files)
       } else {
-        content = projectName
-          ? `Project: ${projectName}\nStatus: ${deployStatus || 'unknown'}\nURL: ${deployUrl || 'n/a'}`
+        content = projectId
+          ? `Project: ${projectId}\nStatus: ${deployStatus || 'unknown'}\nURL: ${deployUrl || 'n/a'}`
           : '(not configured)'
       }
 
-      const summary = projectName
-        ? `${projectName}: ${deployStatus || 'no deploy'}`
+      const summary = projectId
+        ? `${projectId}: ${deployStatus || 'no deploy'}`
         : 'Vercel: not configured'
 
       const tokenEstimate = Math.ceil(content.length / 4)
@@ -78,27 +78,32 @@ function createVercelAdapter(
         label: 'Refresh',
         icon: RefreshCw,
         async handler() {
-          const tokenResult = await window.bashgym?.credentials.read('vercel-token')
-          if (!tokenResult?.value) return
-
-          const response = await fetch(
-            `https://api.vercel.com/v13/deployments?projectId=${encodeURIComponent(projectName)}&limit=1`,
-            {
-              headers: { Authorization: `Bearer ${tokenResult.value}` }
-            }
-          )
-
-          const text = await response.text()
           try {
-            const data = JSON.parse(text)
-            const latest = data?.deployments?.[0]
-            if (latest) {
-              onChange('deployStatus', latest.state ?? latest.readyState ?? 'unknown')
-              onChange('deployUrl', latest.url ? `https://${latest.url}` : '')
-              onChange('deployId', latest.uid ?? latest.id ?? '')
+            const tokenResult = await window.bashgym?.credentials.read('vercel-token')
+            if (!tokenResult?.value) return
+
+            const response = await fetch(
+              `https://api.vercel.com/v13/deployments?projectId=${encodeURIComponent(projectId)}&limit=1`,
+              {
+                headers: { Authorization: `Bearer ${tokenResult.value}` }
+              }
+            )
+
+            const text = await response.text()
+            try {
+              const data = JSON.parse(text)
+              const latest = data?.deployments?.[0]
+              if (latest) {
+                onChange('deployStatus', latest.state ?? latest.readyState ?? 'unknown')
+                onChange('deployUrl', latest.url ? `https://${latest.url}` : '')
+                onChange('deployId', latest.uid ?? latest.id ?? '')
+              }
+            } catch {
+              // Non-JSON response -- leave config unchanged
             }
-          } catch {
-            // Non-JSON response -- leave config unchanged
+          } catch (error) {
+            onChange('deployStatus', 'ERROR')
+            onChange('errorMessage', String(error))
           }
         }
       })
@@ -109,33 +114,37 @@ function createVercelAdapter(
         label: 'Get Logs',
         icon: FileCode,
         async handler() {
-          if (!deployId) return
-          const tokenResult = await window.bashgym?.credentials.read('vercel-token')
-          if (!tokenResult?.value) return
-
-          const response = await fetch(
-            `https://api.vercel.com/v12/deployments/${encodeURIComponent(deployId)}/events`,
-            {
-              headers: { Authorization: `Bearer ${tokenResult.value}` }
-            }
-          )
-
-          const text = await response.text()
           try {
-            const events = JSON.parse(text) as Array<{
-              type?: string
-              text?: string
-              payload?: { text?: string }
-            }>
-            const logLines = events
-              .filter(e => e.type === 'stdout' || e.type === 'stderr')
-              .slice(-50)
-              .map(e => e.text ?? e.payload?.text ?? '')
-              .join('\n')
+            if (!deployId) return
+            const tokenResult = await window.bashgym?.credentials.read('vercel-token')
+            if (!tokenResult?.value) return
 
-            onChange('buildLogs', logLines)
-          } catch {
-            // Non-JSON response -- leave config unchanged
+            const response = await fetch(
+              `https://api.vercel.com/v12/deployments/${encodeURIComponent(deployId)}/events`,
+              {
+                headers: { Authorization: `Bearer ${tokenResult.value}` }
+              }
+            )
+
+            const text = await response.text()
+            try {
+              const events = JSON.parse(text) as Array<{
+                type?: string
+                text?: string
+                payload?: { text?: string }
+              }>
+              const logLines = events
+                .filter(e => e.type === 'stdout' || e.type === 'stderr')
+                .slice(-50)
+                .map(e => e.text ?? e.payload?.text ?? '')
+                .join('\n')
+
+              onChange('buildLogs', logLines)
+            } catch {
+              // Non-JSON response -- leave config unchanged
+            }
+          } catch (error) {
+            onChange('buildLogs', `Error fetching logs: ${String(error)}`)
           }
         }
       })
@@ -158,32 +167,36 @@ function createVercelAdapter(
         label: 'Generate',
         icon: Rocket,
         async handler() {
-          const apiKeyResult = await window.bashgym?.credentials.read('v0-api-key')
-          if (!apiKeyResult?.value || !v0Prompt) return
+          try {
+            const apiKeyResult = await window.bashgym?.credentials.read('v0-api-key')
+            if (!apiKeyResult?.value || !v0Prompt) return
 
-          const { createClient } = await import('v0-sdk')
-          const client = createClient({ apiKey: apiKeyResult.value })
+            const { createClient } = await import('v0-sdk')
+            const client = createClient({ apiKey: apiKeyResult.value })
 
-          const chat = await client.chats.create({ message: v0Prompt })
+            const chat = await client.chats.create({ message: v0Prompt })
 
-          // chats.create can return a stream or a ChatDetail; we only handle
-          // the synchronous ChatDetail shape here.
-          if (chat && typeof chat === 'object' && 'id' in chat) {
-            const detail = chat as {
-              id: string
-              latestVersion?: {
-                demoUrl?: string
-                files?: Array<{ name: string; content: string }>
+            // chats.create can return a stream or a ChatDetail; we only handle
+            // the synchronous ChatDetail shape here.
+            if (chat && typeof chat === 'object' && 'id' in chat) {
+              const detail = chat as {
+                id: string
+                latestVersion?: {
+                  demoUrl?: string
+                  files?: Array<{ name: string; content: string }>
+                }
               }
-            }
-            const files: V0File[] = (detail.latestVersion?.files ?? []).map(f => ({
-              name: f.name,
-              content: f.content
-            }))
+              const files: V0File[] = (detail.latestVersion?.files ?? []).map(f => ({
+                name: f.name,
+                content: f.content
+              }))
 
-            onChange('v0Files', files)
-            onChange('v0PreviewUrl', detail.latestVersion?.demoUrl ?? '')
-            onChange('v0ChatId', detail.id)
+              onChange('v0Files', files)
+              onChange('v0PreviewUrl', detail.latestVersion?.demoUrl ?? '')
+              onChange('v0ChatId', detail.id)
+            }
+          } catch (error) {
+            onChange('errorMessage', `v0 generation failed: ${String(error)}`)
           }
         }
       })
@@ -234,10 +247,10 @@ function createVercelAdapter(
     getConfigFields(): ConfigField[] {
       return [
         {
-          key: 'projectName',
-          label: 'Project',
+          key: 'projectId',
+          label: 'Project ID',
           type: 'text',
-          placeholder: 'prj_xxx or project name'
+          placeholder: 'prj_xxx'
         },
         {
           key: 'v0Prompt',

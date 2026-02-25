@@ -44,59 +44,64 @@ function createNeonAdapter(
         label: connected ? 'Refresh' : 'Connect',
         icon: RefreshCw,
         async handler() {
-          const apiKeyResult = await window.bashgym?.credentials.read('neon-api-key')
-          const connStringResult = await window.bashgym?.credentials.read('neon-connection-string')
+          try {
+            const apiKeyResult = await window.bashgym?.credentials.read('neon-api-key')
+            const connStringResult = await window.bashgym?.credentials.read('neon-connection-string')
 
-          if (!apiKeyResult?.value || !connStringResult?.value) {
-            onChange('connected', false)
-            return
-          }
-
-          const connectionString = connStringResult.value
-
-          const { neon } = await import('@neondatabase/serverless')
-          const sql = neon(connectionString)
-
-          // Query tables
-          const tablesResult = await sql`
-            SELECT table_name
-            FROM information_schema.tables
-            WHERE table_schema = 'public'
-            ORDER BY table_name
-          `
-
-          // Query columns
-          const columnsResult = await sql`
-            SELECT table_name, column_name, data_type
-            FROM information_schema.columns
-            WHERE table_schema = 'public'
-            ORDER BY table_name, ordinal_position
-          `
-
-          // Build compact schema: tableName: col1(type) col2(type) ...
-          const tableMap = new Map<string, string[]>()
-          for (const row of tablesResult) {
-            tableMap.set(row.table_name as string, [])
-          }
-          for (const row of columnsResult) {
-            const tableName = row.table_name as string
-            const colName = row.column_name as string
-            const dataType = row.data_type as string
-            const cols = tableMap.get(tableName)
-            if (cols) {
-              cols.push(`${colName}(${dataType})`)
+            if (!apiKeyResult?.value || !connStringResult?.value) {
+              onChange('connected', false)
+              return
             }
-          }
 
-          const lines: string[] = [`## DB: ${projectName} (neon, branch: ${branchName})`]
-          for (const [table, cols] of tableMap) {
-            lines.push(`${table}: ${cols.join(' ')}`)
-          }
-          const schemaText = lines.join('\n')
+            const connectionString = connStringResult.value
 
-          onChange('connected', true)
-          onChange('schema', schemaText)
-          onChange('tableCount', tableMap.size)
+            const { neon } = await import('@neondatabase/serverless')
+            const sql = neon(connectionString)
+
+            // Query tables
+            const tablesResult = await sql`
+              SELECT table_name
+              FROM information_schema.tables
+              WHERE table_schema = 'public'
+              ORDER BY table_name
+            `
+
+            // Query columns
+            const columnsResult = await sql`
+              SELECT table_name, column_name, data_type
+              FROM information_schema.columns
+              WHERE table_schema = 'public'
+              ORDER BY table_name, ordinal_position
+            `
+
+            // Build compact schema: tableName: col1(type) col2(type) ...
+            const tableMap = new Map<string, string[]>()
+            for (const row of tablesResult) {
+              tableMap.set(row.table_name as string, [])
+            }
+            for (const row of columnsResult) {
+              const tableName = row.table_name as string
+              const colName = row.column_name as string
+              const dataType = row.data_type as string
+              const cols = tableMap.get(tableName)
+              if (cols) {
+                cols.push(`${colName}(${dataType})`)
+              }
+            }
+
+            const lines: string[] = [`## DB: ${projectName} (neon, branch: ${branchName})`]
+            for (const [table, cols] of tableMap) {
+              lines.push(`${table}: ${cols.join(' ')}`)
+            }
+            const schemaText = lines.join('\n')
+
+            onChange('connected', true)
+            onChange('schema', schemaText)
+            onChange('tableCount', tableMap.size)
+          } catch (error) {
+            onChange('connected', false)
+            onChange('errorMessage', String(error))
+          }
         }
       })
 
@@ -118,36 +123,40 @@ function createNeonAdapter(
         label: 'Run Query',
         icon: Play,
         async handler() {
-          const connStringResult = await window.bashgym?.credentials.read('neon-connection-string')
-          if (!connStringResult?.value || !query) return
+          try {
+            const connStringResult = await window.bashgym?.credentials.read('neon-connection-string')
+            if (!connStringResult?.value || !query) return
 
-          const { neon } = await import('@neondatabase/serverless')
-          const sql = neon(connStringResult.value, { fullResults: true })
+            const { neon } = await import('@neondatabase/serverless')
+            const sql = neon(connStringResult.value, { fullResults: true })
 
-          const result = await sql(query)
+            const result = await sql(query)
 
-          // Format as markdown table
-          const fields = result.fields ?? []
-          const rows = result.rows ?? []
+            // Format as markdown table
+            const fields = result.fields ?? []
+            const rows = result.rows ?? []
 
-          if (fields.length === 0) {
-            onChange('queryResult', '(no results)')
-            return
+            if (fields.length === 0) {
+              onChange('queryResult', '(no results)')
+              return
+            }
+
+            const headers = fields.map((f: { name: string }) => f.name)
+            const separator = headers.map(() => '---')
+            const dataRows = rows.map((row: Record<string, unknown>) =>
+              headers.map(h => String(row[h] ?? ''))
+            )
+
+            const mdLines = [
+              `| ${headers.join(' | ')} |`,
+              `| ${separator.join(' | ')} |`,
+              ...dataRows.map((r: string[]) => `| ${r.join(' | ')} |`)
+            ]
+
+            onChange('queryResult', mdLines.join('\n'))
+          } catch (error) {
+            onChange('queryResult', `Error: ${String(error)}`)
           }
-
-          const headers = fields.map((f: { name: string }) => f.name)
-          const separator = headers.map(() => '---')
-          const dataRows = rows.map((row: Record<string, unknown>) =>
-            headers.map(h => String(row[h] ?? ''))
-          )
-
-          const mdLines = [
-            `| ${headers.join(' | ')} |`,
-            `| ${separator.join(' | ')} |`,
-            ...dataRows.map((r: string[]) => `| ${r.join(' | ')} |`)
-          ]
-
-          onChange('queryResult', mdLines.join('\n'))
         }
       })
 

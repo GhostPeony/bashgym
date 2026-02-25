@@ -133,6 +133,7 @@ interface TerminalState {
   executeBroadcast: () => void
   setPanelUrl: (id: string, url: string) => void
   setPanelThumbnail: (id: string, thumbnail: string) => void
+  updatePanelConfig: (panelId: string, adapterConfig: Record<string, unknown>) => void
 }
 
 let panelCounter = 0
@@ -489,6 +490,14 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   setPanelThumbnail: (id: string, thumbnail: string) => {
     set((state) => ({
       panels: state.panels.map(p => p.id === id ? { ...p, thumbnail } : p)
+    }))
+  },
+
+  updatePanelConfig: (panelId: string, adapterConfig: Record<string, unknown>) => {
+    set((state) => ({
+      panels: state.panels.map(p =>
+        p.id === panelId ? { ...p, adapterConfig } : p
+      )
     }))
   }
 }))

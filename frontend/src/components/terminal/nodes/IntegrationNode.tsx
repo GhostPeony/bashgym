@@ -1,6 +1,7 @@
-import { memo, useCallback, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import {
+  Check,
   ChevronDown,
   ChevronRight,
   Link2,
@@ -11,6 +12,7 @@ import {
 import { clsx } from 'clsx'
 import type { ConfigField, IntegrationNodeData, NodeAdapter } from './types'
 import { routeToLinkedTerminals } from '../../../utils/edgeRouting'
+import { useTerminalStore } from '../../../stores/terminalStore'
 
 // ---------------------------------------------------------------------------
 // Adapter registry
@@ -101,6 +103,93 @@ function ConfigFieldInput({
 }
 
 // ---------------------------------------------------------------------------
+// Credential field definitions per adapter type
+// ---------------------------------------------------------------------------
+
+interface CredentialFieldDef {
+  key: string
+  label: string
+}
+
+const CREDENTIAL_FIELDS: Record<string, CredentialFieldDef[]> = {
+  neon: [
+    { key: 'neon-api-key', label: 'API Key' },
+    { key: 'neon-connection-string', label: 'Connection String' }
+  ],
+  vercel: [
+    { key: 'vercel-token', label: 'Vercel Token' },
+    { key: 'v0-api-key', label: 'v0 API Key' }
+  ]
+}
+
+// ---------------------------------------------------------------------------
+// CredentialField - a single credential input row
+// ---------------------------------------------------------------------------
+
+function CredentialField({
+  field,
+  isSaved,
+  onSave
+}: {
+  field: CredentialFieldDef
+  isSaved: boolean
+  onSave: (key: string, value: string) => Promise<void>
+}) {
+  const [value, setValue] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const handleSave = useCallback(async () => {
+    if (!value.trim() || saving) return
+    setSaving(true)
+    try {
+      await onSave(field.key, value)
+      setValue('')
+    } finally {
+      setSaving(false)
+    }
+  }, [field.key, value, saving, onSave])
+
+  return (
+    <div>
+      <label className="block text-[9px] font-mono uppercase tracking-wider text-secondary mb-1">
+        {field.label}
+        {isSaved && (
+          <span className="inline-flex items-center gap-0.5 ml-2 text-status-success">
+            <Check className="w-2.5 h-2.5" />
+            Saved
+          </span>
+        )}
+      </label>
+      <div className="flex items-center gap-1">
+        <input
+          type="password"
+          className="flex-1 text-xs font-mono bg-background border-brutal border-border px-2 py-1.5 focus:border-accent focus:outline-none"
+          placeholder={isSaved ? '••••••••' : `Enter ${field.label.toLowerCase()}…`}
+          value={value}
+          onChange={e => setValue(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Enter') void handleSave()
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => void handleSave()}
+          disabled={!value.trim() || saving}
+          className={clsx(
+            'px-2 py-1.5 text-[10px] font-mono uppercase tracking-wider border-brutal transition-press',
+            value.trim()
+              ? 'border-accent text-accent hover:bg-accent hover:text-white'
+              : 'border-border text-text-muted cursor-not-allowed'
+          )}
+        >
+          {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Save'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // IntegrationNode
 // ---------------------------------------------------------------------------
 
@@ -126,6 +215,45 @@ export const IntegrationNode = memo(function IntegrationNode({
     () => ({ ...adapterConfig })
   )
   const [sending, setSending] = useState(false)
+
+  // Credential management state
+  const [credentialStatus, setCredentialStatus] = useState<Record<string, boolean>>({})
+  const credentialFields = CREDENTIAL_FIELDS[adapterType] ?? []
+
+  // Check credential status on mount / adapter type change
+  useEffect(() => {
+    const fields = CREDENTIAL_FIELDS[adapterType]
+    if (!fields || !window.bashgym?.credentials) return
+
+    Promise.all(
+      fields.map(f =>
+        window.bashgym.credentials.read(f.key).then(
+          result => [f.key, Boolean(result?.value)] as const
+        ).catch(() => [f.key, false] as const)
+      )
+    ).then(entries => {
+      setCredentialStatus(Object.fromEntries(entries))
+    })
+  }, [adapterType])
+
+  // Save a credential and update status
+  const handleCredentialSave = useCallback(async (key: string, value: string) => {
+    await window.bashgym?.credentials.store(key, value)
+    setCredentialStatus(prev => ({ ...prev, [key]: true }))
+  }, [])
+
+  // Persist config changes to store (debounced)
+  const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (persistTimer.current) clearTimeout(persistTimer.current)
+    persistTimer.current = setTimeout(() => {
+      const { _panelId, ...persistConfig } = config as Record<string, unknown> & { _panelId?: unknown }
+      useTerminalStore.getState().updatePanelConfig(panelId, persistConfig)
+    }, 300)
+    return () => {
+      if (persistTimer.current) clearTimeout(persistTimer.current)
+    }
+  }, [config, panelId])
 
   // Config change handler fed into the adapter factory
   const handleConfigChange = useCallback(
@@ -306,8 +434,25 @@ export const IntegrationNode = memo(function IntegrationNode({
       )}
 
       {/* Expanded config panel */}
-      {expanded && configFields.length > 0 && (
+      {expanded && (credentialFields.length > 0 || configFields.length > 0) && (
         <div className="px-3 py-2 space-y-2 border-t border-border bg-background">
+          {/* Credential fields (shown above adapter config) */}
+          {credentialFields.length > 0 && (
+            <>
+              {credentialFields.map(field => (
+                <CredentialField
+                  key={field.key}
+                  field={field}
+                  isSaved={credentialStatus[field.key] ?? false}
+                  onSave={handleCredentialSave}
+                />
+              ))}
+              {configFields.length > 0 && (
+                <div className="border-t border-border my-1" />
+              )}
+            </>
+          )}
+          {/* Adapter config fields */}
           {configFields.map(field => (
             <div key={field.key}>
               <label className="block text-[9px] font-mono uppercase tracking-wider text-secondary mb-1">

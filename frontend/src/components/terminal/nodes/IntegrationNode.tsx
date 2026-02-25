@@ -4,6 +4,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  ExternalLink,
   Link2,
   Loader2,
   Send,
@@ -43,7 +44,7 @@ function ConfigFieldInput({
   onChange: (key: string, value: unknown) => void
 }) {
   const inputClasses =
-    'w-full text-xs font-mono bg-background border-brutal border-border px-2 py-1.5 focus:border-accent focus:outline-none'
+    'w-full text-xs font-mono bg-background-card border-brutal border-border rounded-brutal px-2 py-1.5 focus:border-accent focus:outline-none'
 
   switch (field.type) {
     case 'text':
@@ -87,7 +88,7 @@ function ConfigFieldInput({
         <button
           type="button"
           className={clsx(
-            'px-3 py-1 text-[10px] font-mono uppercase tracking-wider border-brutal transition-press',
+            'px-3 py-1 text-[10px] font-mono uppercase tracking-wider border-brutal rounded-brutal transition-press',
             value
               ? 'bg-accent text-white border-accent'
               : 'bg-background text-text-secondary border-border'
@@ -151,7 +152,7 @@ function CredentialField({
 
   return (
     <div>
-      <label className="block text-[9px] font-mono uppercase tracking-wider text-secondary mb-1">
+      <label className="block text-[9px] font-mono uppercase tracking-wider text-text-secondary mb-1">
         {field.label}
         {isSaved && (
           <span className="inline-flex items-center gap-0.5 ml-2 text-status-success">
@@ -163,7 +164,7 @@ function CredentialField({
       <div className="flex items-center gap-1">
         <input
           type="password"
-          className="flex-1 text-xs font-mono bg-background border-brutal border-border px-2 py-1.5 focus:border-accent focus:outline-none"
+          className="flex-1 text-xs font-mono bg-background-card border-brutal border-border rounded-brutal px-2 py-1.5 focus:border-accent focus:outline-none"
           placeholder={isSaved ? '••••••••' : `Enter ${field.label.toLowerCase()}…`}
           value={value}
           onChange={e => setValue(e.target.value)}
@@ -176,7 +177,7 @@ function CredentialField({
           onClick={() => void handleSave()}
           disabled={!value.trim() || saving}
           className={clsx(
-            'px-2 py-1.5 text-[10px] font-mono uppercase tracking-wider border-brutal transition-press',
+            'px-2 py-1.5 text-[10px] font-mono uppercase tracking-wider border-brutal rounded-brutal transition-press',
             value.trim()
               ? 'border-accent text-accent hover:bg-accent hover:text-white'
               : 'border-border text-text-muted cursor-not-allowed'
@@ -322,8 +323,8 @@ export const IntegrationNode = memo(function IntegrationNode({
   return (
     <div
       className={clsx(
-        'w-[300px] bg-surface border-brutal border-border shadow-brutal-sm cursor-pointer',
-        selected && 'border-accent shadow-brutal'
+        'w-[300px] card !rounded-brutal border-brutal cursor-pointer',
+        selected ? 'border-accent shadow-brutal' : 'border-border hover:border-border'
       )}
       onClick={handleFocus}
     >
@@ -340,13 +341,19 @@ export const IntegrationNode = memo(function IntegrationNode({
       />
 
       {/* Header bar */}
-      <div className="flex items-center gap-2 px-3 py-2 bg-background border-b border-border">
-        {AdapterIcon && (
-          <AdapterIcon className="w-4 h-4 text-accent flex-shrink-0" />
-        )}
-        <span className="text-xs font-mono font-bold uppercase tracking-wider text-primary flex-1 truncate">
-          {title}
-        </span>
+      <div className="flex items-center gap-2 px-3 py-2 bg-background-secondary border-b border-brutal border-border rounded-t-brutal">
+        <div className="p-1.5 border-brutal border-border-subtle rounded-brutal bg-background-tertiary">
+          {AdapterIcon ? (
+            <AdapterIcon className="w-4 h-4 text-accent" />
+          ) : (
+            <div className="w-4 h-4" />
+          )}
+        </div>
+        <div className="flex-1 min-w-0">
+          <span className="text-sm font-mono font-semibold text-text-primary truncate block">
+            {title}
+          </span>
+        </div>
 
         <div className="flex items-center gap-0.5">
           {hasConnections && (
@@ -383,26 +390,70 @@ export const IntegrationNode = memo(function IntegrationNode({
         </div>
       </div>
 
-      {/* Summary line */}
+      {/* Summary line with adapter status indicators */}
       {context && (
-        <div className="flex items-center justify-between px-3 py-1.5 text-[10px] font-mono text-text-muted border-b border-border">
+        <div className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-mono text-text-muted border-b border-brutal border-border">
+          {/* Neon: connection status dot + table count */}
+          {adapterType === 'neon' && (
+            <div
+              className={clsx(
+                'w-1.5 h-1.5 rounded-full flex-shrink-0',
+                config.connected ? 'bg-status-success' : 'bg-background-tertiary'
+              )}
+              title={config.connected ? 'Connected' : 'Disconnected'}
+            />
+          )}
+          {/* Vercel: deploy status dot */}
+          {adapterType === 'vercel' && (
+            <div
+              className={clsx(
+                'w-1.5 h-1.5 rounded-full flex-shrink-0',
+                config.deployStatus === 'READY' ? 'bg-status-success' :
+                config.deployStatus === 'BUILDING' ? 'bg-status-warning animate-pulse' :
+                config.deployStatus === 'ERROR' ? 'bg-status-error' :
+                'bg-background-tertiary'
+              )}
+              title={typeof config.deployStatus === 'string' ? config.deployStatus : 'Unknown'}
+            />
+          )}
           <span className="truncate flex-1">{context.summary}</span>
-          <span className="flex-shrink-0 ml-2">~{context.tokenEstimate}t</span>
+          {/* Neon: table count badge */}
+          {adapterType === 'neon' && config.tableCount && (
+            <span className="text-[9px] font-mono text-text-secondary flex-shrink-0">
+              {String(config.tableCount)} tables
+            </span>
+          )}
+          {/* Vercel: deploy URL link */}
+          {adapterType === 'vercel' && typeof config.deployUrl === 'string' && config.deployUrl && (
+            <a
+              href={config.deployUrl as string}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={e => e.stopPropagation()}
+              className="flex items-center gap-0.5 text-[9px] text-accent hover:text-accent-dark flex-shrink-0"
+              title={config.deployUrl as string}
+            >
+              <ExternalLink className="w-2.5 h-2.5" />
+            </a>
+          )}
+          <span className="flex-shrink-0 ml-auto">~{context.tokenEstimate}t</span>
         </div>
       )}
 
       {/* Action buttons */}
       {(hasConnections || actions.length > 0) && (
-        <div className="flex flex-wrap items-center gap-1.5 px-3 py-2">
+        <div className="flex flex-wrap items-center gap-1.5 px-3 py-2 border-b border-brutal border-border">
           {hasConnections && (
             <button
               type="button"
               onClick={handleSendContext}
               disabled={sending}
               className={clsx(
-                'flex items-center gap-1 px-2 py-1 text-[10px] font-mono uppercase tracking-wider border-brutal border-accent text-accent transition-press',
-                'hover:bg-accent hover:text-white',
-                sending && 'opacity-50 cursor-not-allowed'
+                'flex items-center gap-1 px-2 py-1 text-[10px] font-mono uppercase tracking-wider',
+                'border-brutal rounded-brutal transition-press',
+                sending
+                  ? 'border-border text-text-muted cursor-not-allowed opacity-50'
+                  : 'border-accent text-accent hover:bg-accent hover:text-white'
               )}
             >
               {sending ? (
@@ -423,7 +474,7 @@ export const IntegrationNode = memo(function IntegrationNode({
                   e.stopPropagation()
                   void action.handler()
                 }}
-                className="flex items-center gap-1 px-2 py-1 text-[10px] font-mono uppercase tracking-wider border-brutal border-border text-text-secondary hover:border-accent hover:text-accent transition-press"
+                className="flex items-center gap-1 px-2 py-1 text-[10px] font-mono uppercase tracking-wider border-brutal rounded-brutal border-border text-text-secondary hover:border-accent hover:text-accent transition-press"
               >
                 <ActionIcon className="w-3 h-3" />
                 {action.label}
@@ -435,7 +486,7 @@ export const IntegrationNode = memo(function IntegrationNode({
 
       {/* Expanded config panel */}
       {expanded && (credentialFields.length > 0 || configFields.length > 0) && (
-        <div className="px-3 py-2 space-y-2 border-t border-border bg-background">
+        <div className="px-3 py-2 space-y-2 bg-background-secondary">
           {/* Credential fields (shown above adapter config) */}
           {credentialFields.length > 0 && (
             <>
@@ -448,14 +499,14 @@ export const IntegrationNode = memo(function IntegrationNode({
                 />
               ))}
               {configFields.length > 0 && (
-                <div className="border-t border-border my-1" />
+                <div className="border-t border-brutal border-border-subtle my-1" />
               )}
             </>
           )}
           {/* Adapter config fields */}
           {configFields.map(field => (
             <div key={field.key}>
-              <label className="block text-[9px] font-mono uppercase tracking-wider text-secondary mb-1">
+              <label className="block text-[9px] font-mono uppercase tracking-wider text-text-secondary mb-1">
                 {field.label}
               </label>
               <ConfigFieldInput
@@ -470,7 +521,7 @@ export const IntegrationNode = memo(function IntegrationNode({
 
       {/* Fallback when adapter not yet registered */}
       {!adapter && (
-        <div className="px-3 py-4 text-center">
+        <div className="px-3 py-4 text-center rounded-b-brutal">
           <span className="text-[10px] font-mono text-text-muted uppercase tracking-wider">
             Adapter &quot;{adapterType}&quot; not registered
           </span>

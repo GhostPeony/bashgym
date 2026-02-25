@@ -1,0 +1,113 @@
+{
+  "name": "hf_cli",
+  "description": "Execute HuggingFace Hub operations \u2014 download, upload, repo management, cache, browse",
+  "trigger_keywords": ["hub", "download", "upload", "repo", "cache", "login", "hf", "model", "space"],
+  "tools": [
+    {
+      "name": "hf_download_model",
+      "description": "Download a model, dataset, or space from HuggingFace Hub to local storage.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "repo_id": {
+            "type": "string",
+            "description": "HuggingFace repository identifier (e.g. 'meta-llama/Llama-3.2-3B-Instruct')"
+          },
+          "local_dir": {
+            "type": "string",
+            "description": "Local directory to download into. Defaults to HF cache."
+          },
+          "repo_type": {
+            "type": "string",
+            "enum": ["model", "dataset", "space"],
+            "description": "Type of repository to download."
+          },
+          "revision": {
+            "type": "string",
+            "description": "Git revision (branch, tag, or commit hash) to download."
+          }
+        },
+        "required": ["repo_id"]
+      }
+    },
+    {
+      "name": "hf_upload_to_hub",
+      "description": "Upload files or directories to a HuggingFace repository.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "repo_id": {
+            "type": "string",
+            "description": "Target repository identifier (e.g. 'username/my-model')"
+          },
+          "path": {
+            "type": "string",
+            "description": "Local file or directory path to upload."
+          },
+          "repo_type": {
+            "type": "string",
+            "enum": ["model", "dataset", "space"],
+            "description": "Type of repository."
+          },
+          "commit_message": {
+            "type": "string",
+            "description": "Commit message for the upload."
+          }
+        },
+        "required": ["repo_id", "path"]
+      }
+    },
+    {
+      "name": "hf_manage_repo",
+      "description": "Create, delete, or list HuggingFace repositories.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["create", "delete", "list"],
+            "description": "Repository management action to perform."
+          },
+          "repo_id": {
+            "type": "string",
+            "description": "Repository identifier. Required for create/delete."
+          },
+          "repo_type": {
+            "type": "string",
+            "enum": ["model", "dataset", "space"],
+            "description": "Type of repository."
+          },
+          "private": {
+            "type": "boolean",
+            "description": "Whether the repository should be private (create only)."
+          }
+        },
+        "required": ["action"]
+      }
+    },
+    {
+      "name": "hf_search_models",
+      "description": "Search the HuggingFace Hub for models by task, name, or other criteria.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "description": "Filter by ML task (e.g. 'text-generation', 'image-classification')."
+          },
+          "sort": {
+            "type": "string",
+            "enum": ["downloads", "likes", "lastModified"],
+            "description": "Sort order for search results."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum number of results to return."
+          }
+        },
+        "required": []
+      }
+    }
+  ],
+  "knowledge": "You are operating the HuggingFace CLI skill. This skill wraps the `hf` command-line tool and the `huggingface_hub` Python library for all Hub interactions.\n\n## Authentication\n\nBefore any Hub operation, ensure the user is authenticated. Run `hf auth login` to authenticate interactively, or set the HF_TOKEN environment variable. Use `hf auth whoami` to verify the current identity. Tokens need write scope for upload/create operations and read scope for gated models. If a download fails with 401/403, prompt the user to check token permissions or request access to gated repos.\n\n## Downloading\n\nUse `hf download <repo_id>` for models, datasets, or spaces. Add `--repo-type dataset` or `--repo-type space` for non-model repos. Use `--local-dir <path>` to download outside the default cache. For selective downloads, use `--include` and `--exclude` glob patterns (e.g. `--include '*.safetensors'`). The `--revision` flag targets specific branches, tags, or commits. Large models benefit from `--resume-download` if interrupted. For GGUF files or quantized models, specify the exact filename pattern.\n\n## Uploading\n\nUse `hf upload <repo_id> <local_path>` to push files. The tool infers whether you are uploading a file or directory. Include a `--commit-message` for traceability. For large files, HF automatically uses LFS. Upload entire directories for model checkpoints. Use `--repo-type` to target datasets or spaces. When uploading model weights, ensure the repo has a proper model card (README.md with YAML front matter).\n\n## Repository Management\n\nCreate repos with `hf repo create <repo_id>` — add `--private` for private repos, `--type dataset` or `--type space` for non-model repos. Delete with `hf repo delete <repo_id>`. List your repos with `hf repo list`. For Spaces, set the SDK with `--space-sdk gradio` or `--space-sdk streamlit`. Manage branches with `hf repo branch create/delete <branch>`. Tags: `hf repo tag create/delete <tag>`. Update repo settings (visibility, description) with `hf repo settings`.\n\n## Cache Management\n\nThe HF cache stores downloaded models and datasets. Use `hf cache ls` to see cached repos and their sizes. Remove specific repos with `hf cache rm <repo_id>`. Run `hf cache prune` to remove incomplete or orphaned downloads. The cache directory defaults to `~/.cache/huggingface/hub` on Linux/Mac and `%USERPROFILE%\\.cache\\huggingface\\hub` on Windows.\n\n## GPU Flavors for Jobs\n\nWhen submitting jobs (see hf_jobs skill), available GPU flavors range from `cpu-basic` (2 vCPU, 16GB RAM) through `t4-small`, `t4-medium`, `a10g-small`, `a10g-large`, `a100-large`, up to `h100x8` for large-scale training. Match the flavor to the model size: <3B params fits on t4-small, 7B needs a10g-small minimum, 70B+ needs a100 or h100 multi-GPU.\n\n## Browsing and Search\n\nUse `hf_search_models` to find models on the Hub. Filter by task (`text-generation`, `image-classification`, `token-classification`, etc.) and sort by `downloads`, `likes`, or `lastModified`. Combine filters for targeted discovery. The search API returns model metadata including pipeline tags, library compatibility, and download counts. For datasets and spaces, use the corresponding API endpoints or the `huggingface_hub` Python library's `list_datasets()` and `list_spaces()` functions.\n\n## Common Workflows\n\n1. **Download and use a model**: Search for models, download with `hf download`, load locally.\n2. **Publish a model**: Create repo, upload weights, add model card, set visibility.\n3. **Fork and modify**: Download existing model/dataset, make changes, upload to your own repo.\n4. **Manage storage**: Check cache size, prune old downloads, remove unused repos.\n\n## Common Pitfalls\n\n- Always verify repo_id format: `username/repo-name` or `organization/repo-name`. Bare names without a slash refer to the authenticated user's namespace.\n- Gated models (Llama, Mistral, etc.) require accepting terms on the model page before download.\n- Upload failures on large files usually indicate LFS issues — ensure git-lfs is installed.\n- Use `--token` flag to override HF_TOKEN for one-off operations with different credentials.\n- When searching, combine task filters with sort to find the most relevant models quickly.\n- Symlinks in the cache directory are normal — HF uses them for deduplication. Do not manually reorganize the cache.\n- The `hf` CLI respects `HF_HOME` environment variable for custom cache locations."
+}

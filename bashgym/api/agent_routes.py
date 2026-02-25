@@ -13,120 +13,27 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from bashgym.agent.memory import PeonyMemory
+from bashgym.agent.skills.registry import SkillRegistry
+from bashgym.agent.tools import ToolRegistry
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
 
 # ---------------------------------------------------------------------------
+# Module-level singletons
+# ---------------------------------------------------------------------------
+
+_skill_registry = SkillRegistry()
+_tool_registry = ToolRegistry()
+_memory = PeonyMemory()
+
+# ---------------------------------------------------------------------------
 # In-memory pending actions (shell confirmation gate)
 # ---------------------------------------------------------------------------
 
-PENDING_ACTIONS: dict[str, dict] = {}  # token → {cmd, reason, messages, tool_use_id, expires_at}
-
-# ---------------------------------------------------------------------------
-# Peony tool definitions
-# ---------------------------------------------------------------------------
-
-PEONY_TOOLS = [
-    # Core gym operations
-    {
-        "name": "import_traces",
-        "description": "Import new Claude Code sessions from ~/.claude/projects/ into the trace pipeline.",
-        "input_schema": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "get_trace_status",
-        "description": "Get current trace counts by quality tier and recent activity.",
-        "input_schema": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "classify_pending_traces",
-        "description": "Auto-classify pending traces into gold/silver/bronze/failed tiers.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "dry_run": {"type": "boolean", "description": "If true, preview only without applying changes"}
-            },
-        },
-    },
-    {
-        "name": "start_training",
-        "description": "Start a model fine-tuning run.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "strategy": {"type": "string", "enum": ["sft", "dpo", "grpo"]},
-                "model": {"type": "string", "description": "Base model ID to fine-tune"},
-            },
-        },
-    },
-    {
-        "name": "get_training_status",
-        "description": "Check active and recent training jobs.",
-        "input_schema": {"type": "object", "properties": {}},
-    },
-    # HuggingFace operations
-    {
-        "name": "hf_search_models",
-        "description": "Search HuggingFace Hub for models by task, sort order, and limit.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "task": {"type": "string", "description": "Pipeline task filter (e.g. 'text-generation')"},
-                "sort": {"type": "string", "enum": ["downloads", "likes", "lastModified"]},
-                "limit": {"type": "integer", "description": "Number of results to return (default 10)"},
-            },
-        },
-    },
-    {
-        "name": "hf_get_job_status",
-        "description": "Check status of a HuggingFace cloud training job.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "job_id": {"type": "string"},
-            },
-            "required": ["job_id"],
-        },
-    },
-    {
-        "name": "hf_test_inference",
-        "description": "Test a model on HuggingFace Inference API with a prompt.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "model_id": {"type": "string"},
-                "prompt": {"type": "string"},
-            },
-            "required": ["model_id", "prompt"],
-        },
-    },
-    {
-        "name": "hf_evaluate_model",
-        "description": "Evaluate a model using HuggingFace evaluate library on local validation data.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "model_id": {"type": "string"},
-                "metric": {"type": "string", "enum": ["accuracy", "f1", "bleu", "rouge"]},
-            },
-            "required": ["model_id"],
-        },
-    },
-    # Shell escape hatch
-    {
-        "name": "run_shell_command",
-        "description": "Run a shell command. ONLY use when no structured tool covers the need. Always provide a reason.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "command": {"type": "string"},
-                "reason": {"type": "string", "description": "Why this command is necessary"},
-            },
-            "required": ["command", "reason"],
-        },
-    },
-]
+PENDING_ACTIONS: dict[str, dict] = {}  # token → {cmd, reason, messages, tool_use_id, expires_at, tools}
 
 
 # ---------------------------------------------------------------------------
@@ -323,22 +230,38 @@ async def _gather_system_context() -> str:
     return '\n\n'.join(sections) if sections else 'System context unavailable.'
 
 
-def _build_system_prompt(context: str) -> str:
-    return (
+def _build_system_prompt(context: str, memory_prompt: str = "", skill_knowledge: str = "") -> str:
+    sections = [
+        # 1. Core identity
         "You are Peony — the botanical assistant for Bash Gym, a self-improving "
         "agentic development gym that captures coding sessions, transforms them into training "
-        "data, and fine-tunes models.\n\n"
+        "data, and fine-tunes models.",
+
+        # 2. Tool usage instructions
         "You have access to tools that let you take real actions in the system. Use them "
         "when the user asks you to do something actionable (import traces, search models, "
         "start training, etc.). For questions and analysis, respond directly.\n\n"
         "When you use a tool, briefly tell the user what you're doing before/after. "
         "Summarize tool results in natural language — don't dump raw JSON.\n\n"
         "For run_shell_command: only use this as a last resort when no structured tool covers "
-        "the need. Always provide a clear reason.\n\n"
-        "You have access to the user's current system state snapshot (below). Use it to give "
-        "specific, actionable advice. Be concise and direct.\n\n"
-        f"--- CURRENT SYSTEM STATE ---\n{context}\n--- END SYSTEM STATE ---"
-    )
+        "the need. Always provide a clear reason.",
+
+        # 3. Capabilities summary (always present)
+        _tool_registry.capabilities_summary(),
+    ]
+
+    # 4. Memory prompt (if non-empty)
+    if memory_prompt:
+        sections.append(memory_prompt)
+
+    # 5. Current system state
+    sections.append(f"--- CURRENT SYSTEM STATE ---\n{context}\n--- END SYSTEM STATE ---")
+
+    # 6. Skill knowledge (if non-empty)
+    if skill_knowledge:
+        sections.append(f"--- RELEVANT SKILL KNOWLEDGE ---\n{skill_knowledge}\n--- END SKILL KNOWLEDGE ---")
+
+    return "\n\n".join(sections)
 
 
 # ---------------------------------------------------------------------------
@@ -347,6 +270,40 @@ def _build_system_prompt(context: str) -> str:
 
 async def _execute_tool(name: str, tool_input: dict) -> str:
     """Execute a Peony tool and return a string result for the tool_result block."""
+
+    # ----- Memory tools (local, no HTTP needed) -----
+    if name == "remember_fact":
+        fact = _memory.remember_fact(tool_input["category"], tool_input["content"])
+        return json.dumps({"status": "remembered", "fact": fact})
+
+    if name == "recall_facts":
+        facts = _memory.recall_facts(
+            category=tool_input.get("category"),
+            keyword=tool_input.get("keyword"),
+        )
+        return json.dumps({"facts": facts, "count": len(facts)})
+
+    if name == "forget_fact":
+        try:
+            _memory.forget_fact(tool_input["fact_id"])
+            return json.dumps({"status": "forgotten"})
+        except ValueError as e:
+            return json.dumps({"error": str(e)})
+
+    if name == "update_user_profile":
+        try:
+            _memory.update_profile(tool_input["field"], tool_input["value"])
+            profile = _memory.load_profile()
+            return json.dumps({"status": "updated", "profile": profile})
+        except ValueError as e:
+            return json.dumps({"error": str(e)})
+
+    # ----- Awareness tools (local, no HTTP needed) -----
+    if name == "list_my_capabilities":
+        result = _tool_registry.list_capabilities(category=tool_input.get("category"))
+        return result
+
+    # ----- HTTP-based tools -----
     import httpx
 
     base_url = "http://localhost:8003"
@@ -457,10 +414,23 @@ async def chat(request: ChatRequest):
             detail="ANTHROPIC_API_KEY not configured. Peony requires an API key."
         )
 
+    # Load memory
+    memory_prompt = _memory.build_memory_prompt()
+
+    # Match skills to user message
+    matched_skills = _skill_registry.match(request.message)
+    skill_tools = _skill_registry.get_tools(matched_skills)
+    skill_knowledge = _skill_registry.get_knowledge(matched_skills)
+
+    # Build dynamic tool list
+    tools = _tool_registry.build_tools(skill_tools=skill_tools)
+
     # Gather live system context
     context = await _gather_system_context()
-    system_prompt = _build_system_prompt(context)
     context_used = [s.split(':**')[0].replace('**', '') for s in context.split('\n\n') if ':**' in s]
+
+    # Build system prompt with all sections
+    system_prompt = _build_system_prompt(context, memory_prompt, skill_knowledge)
 
     # Build message list
     messages = []
@@ -487,7 +457,7 @@ async def chat(request: ChatRequest):
                     "model": "claude-sonnet-4-5-20250929",
                     "max_tokens": 1024,
                     "system": system_prompt,
-                    "tools": PEONY_TOOLS,
+                    "tools": tools,
                     "messages": messages,
                 },
             )
@@ -529,6 +499,7 @@ async def chat(request: ChatRequest):
                     "system_prompt": system_prompt,
                     "context_used": context_used,
                     "headers": headers,
+                    "tools": tools,
                 }
                 pending_shell = {
                     "type": "shell_command",
@@ -571,7 +542,7 @@ async def chat(request: ChatRequest):
                         "model": "claude-sonnet-4-5-20250929",
                         "max_tokens": 1024,
                         "system": system_prompt,
-                        "tools": PEONY_TOOLS,
+                        "tools": tools,
                         "messages": follow_up_messages,
                     },
                 )
@@ -626,6 +597,7 @@ async def confirm_action(request: ConfirmActionRequest):
     system_prompt = action["system_prompt"]
     context_used = action["context_used"]
     headers = action["headers"]
+    action_tools = action.get("tools", _tool_registry.build_tools())
 
     if request.approved:
         # Run the command
@@ -674,7 +646,7 @@ async def confirm_action(request: ConfirmActionRequest):
                     "model": "claude-sonnet-4-5-20250929",
                     "max_tokens": 1024,
                     "system": system_prompt,
-                    "tools": PEONY_TOOLS,
+                    "tools": action_tools,
                     "messages": follow_up_messages,
                 },
             )
@@ -791,3 +763,80 @@ async def delete_session(session_id: str):
     _write_sessions_index(index)
 
     return {"status": "ok", "session_id": session_id}
+
+
+# ---------------------------------------------------------------------------
+# Session summarization
+# ---------------------------------------------------------------------------
+
+@router.post("/summarize-session/{session_id}")
+async def summarize_session(session_id: str):
+    """Generate and save an episode summary for a completed session."""
+    import httpx
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY not configured")
+
+    # Load session messages
+    log_path = _get_peony_logs_dir() / f"{session_id}.jsonl"
+    if not log_path.exists():
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    messages_text = []
+    for line in log_path.read_text(encoding="utf-8").strip().splitlines():
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if record.get("type") == "message":
+            messages_text.append(f"{record['role']}: {record['content']}")
+
+    if not messages_text:
+        raise HTTPException(status_code=400, detail="Session has no messages")
+
+    transcript = "\n".join(messages_text[-20:])  # Last 20 messages max
+
+    # Generate summary via Claude Haiku (fast, cheap)
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": "claude-haiku-4-5-20251001",
+                    "max_tokens": 200,
+                    "messages": [{
+                        "role": "user",
+                        "content": (
+                            "Summarize this conversation in 2-3 sentences. "
+                            "Focus on what the user wanted, what was accomplished, "
+                            "and any decisions made.\n\n" + transcript
+                        ),
+                    }],
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except httpx.HTTPStatusError as e:
+            raise HTTPException(
+                status_code=502,
+                detail=f"LLM API error: {e.response.status_code}",
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    summary_text = ""
+    for block in data.get("content", []):
+        if block.get("type") == "text":
+            summary_text += block["text"]
+
+    if not summary_text:
+        raise HTTPException(status_code=500, detail="Failed to generate summary")
+
+    episode = _memory.save_episode(session_id, summary_text)
+    return {"status": "ok", "episode": episode}

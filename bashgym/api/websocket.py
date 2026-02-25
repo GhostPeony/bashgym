@@ -80,6 +80,12 @@ class MessageType(str, Enum):
     INTEGRATION_UNLINKED = "integration:unlinked"
     INTEGRATION_TRAINING_TRIGGERED = "integration:training:triggered"
 
+    # Pipeline events (auto-import pipeline)
+    PIPELINE_IMPORT = "pipeline:import"
+    PIPELINE_CLASSIFIED = "pipeline:classified"
+    PIPELINE_THRESHOLD_REACHED = "pipeline:threshold_reached"
+    PIPELINE_STAGE_STARTED = "pipeline:stage_started"
+
 
 @dataclass
 class WSMessage:
@@ -756,6 +762,17 @@ async def broadcast_orchestration_complete(
             "merge_successes": merge_successes,
             "merge_failures": merge_failures,
         }
+    )
+    await manager.broadcast(message)
+
+
+async def broadcast_pipeline_event(
+    event_type: MessageType, payload: Dict[str, Any]
+) -> None:
+    """Broadcast a pipeline event to all connected clients."""
+    message = WSMessage(
+        type=event_type,
+        payload=payload,
     )
     await manager.broadcast(message)
 

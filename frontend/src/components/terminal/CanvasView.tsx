@@ -13,7 +13,8 @@ import {
   Node,
   BackgroundVariant,
   Panel as FlowPanel,
-  Viewport
+  Viewport,
+  SelectionMode
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
@@ -22,6 +23,12 @@ import type { Panel, TerminalSession, CanvasEdge } from '../../stores'
 import { TerminalNode, type TerminalNodeData } from './TerminalNode'
 import { PreviewNode, type PreviewNodeData } from './PreviewNode'
 import { BrowserNode, type BrowserNodeData } from './BrowserNode'
+import { IntegrationNode } from './nodes/IntegrationNode'
+import type { IntegrationNodeData } from './nodes/types'
+// Import adapters to trigger registration side effects
+import './nodes/adapters/context'
+import './nodes/adapters/neon'
+import './nodes/adapters/vercel'
 import { MasterControlPanel } from './MasterControlPanel'
 import { AlertCircle } from 'lucide-react'
 
@@ -53,7 +60,10 @@ const saveViewport = (viewport: Viewport) => {
 const nodeTypes = {
   terminal: TerminalNode,
   preview: PreviewNode,
-  browser: BrowserNode
+  browser: BrowserNode,
+  context: IntegrationNode,
+  neon: IntegrationNode,
+  vercel: IntegrationNode,
 }
 
 export interface CanvasViewProps {
@@ -68,11 +78,21 @@ function buildNodeData(
   onFocus: (id: string) => void,
   onClose: (id: string) => void,
   canvasEdges: CanvasEdge[] = []
-): TerminalNodeData | PreviewNodeData | BrowserNodeData {
+): TerminalNodeData | PreviewNodeData | BrowserNodeData | IntegrationNodeData {
   const session = panel.terminalId ? sessions.get(panel.terminalId) : undefined
   const hasConnections = canvasEdges.some(e => e.source === panel.id || e.target === panel.id)
 
-  if (panel.type === 'preview') {
+  if (panel.type === 'context' || panel.type === 'neon' || panel.type === 'vercel') {
+    return {
+      panelId: panel.id,
+      title: panel.title,
+      adapterType: panel.type,
+      adapterConfig: { ...panel.adapterConfig, _panelId: panel.id },
+      hasConnections,
+      onFocus,
+      onClose,
+    } as IntegrationNodeData
+  } else if (panel.type === 'preview') {
     return {
       panelId: panel.id,
       filePath: panel.filePath || '',
@@ -150,7 +170,7 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
     showMiniMap
   } = useCanvasControlStore()
 
-  const { fitView, zoomIn, zoomOut, getZoom } = useReactFlow()
+  const { fitView, zoomIn, zoomOut, getZoom, getNodes } = useReactFlow()
   const [currentZoom, setCurrentZoom] = useState(1)
 
   // Stable callbacks — consistent references across renders so TerminalNode memo stays effective
@@ -159,9 +179,10 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
     onFocusPanel(id)
   }, [setActivePanel, onFocusPanel])
 
-  const handleClosePanel = useCallback((_id: string) => {
-    // Close the popup overlay — don't destroy the panel itself
+  const handleClosePanel = useCallback((id: string) => {
+    // Close the popup overlay if open, then remove the panel from the canvas
     onClosePopup?.()
+    useTerminalStore.getState().removePanel(id)
   }, [onClosePopup])
 
   // Track canvasNodes via ref so the update effect can read current saved positions for new
@@ -197,8 +218,10 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
             x: 50 + (index % 3) * 380,
             y: 50 + Math.floor(index / 3) * 280
           }
+          const integrationTypes = ['context', 'neon', 'vercel'] as const
           const nodeType = panel.type === 'preview' ? 'preview' :
-                           panel.type === 'browser' ? 'browser' : 'terminal'
+                           panel.type === 'browser' ? 'browser' :
+                           integrationTypes.includes(panel.type as any) ? panel.type : 'terminal'
           return {
             id: panel.id,
             type: nodeType,
@@ -248,6 +271,35 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
       style: { stroke: 'var(--accent)', strokeWidth: 2 }
     }, eds))
   }, [setEdges])
+
+  // Auto-connect all nodes when shift+drag box-selects 2+ nodes
+  const onSelectionEnd = useCallback(() => {
+    const selectedNodes = getNodes().filter(n => n.selected)
+    if (selectedNodes.length < 2) return
+
+    setEdges((eds) => {
+      let updated = eds
+      // Create edges between every pair of selected nodes (skip if already connected)
+      for (let i = 0; i < selectedNodes.length; i++) {
+        for (let j = i + 1; j < selectedNodes.length; j++) {
+          const a = selectedNodes[i].id
+          const b = selectedNodes[j].id
+          const exists = updated.some(
+            e => (e.source === a && e.target === b) || (e.source === b && e.target === a)
+          )
+          if (!exists) {
+            updated = addEdge({
+              source: a,
+              target: b,
+              animated: true,
+              style: { stroke: 'var(--accent)', strokeWidth: 2 }
+            }, updated)
+          }
+        }
+      }
+      return updated
+    })
+  }, [getNodes, setEdges])
 
   // Handle node selection
   const onNodeClick = useCallback((_: any, node: Node) => {
@@ -301,6 +353,11 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
     createTerminal()
   }, [createTerminal])
 
+  const addIntegrationPanel = useCallback((type: 'context' | 'neon' | 'vercel', title: string) => {
+    const { addPanel } = useTerminalStore.getState()
+    addPanel({ type, title, adapterConfig: {} })
+  }, [])
+
   return (
     <div className="h-full w-full relative">
       <ReactFlow
@@ -310,12 +367,14 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onNodeClick={onNodeClick}
+        onSelectionEnd={onSelectionEnd}
         onMoveEnd={onMoveEnd}
         nodeTypes={nodeTypes}
         fitView={shouldFitView}
         fitViewOptions={{
           padding: 0.2
         }}
+        selectionMode={SelectionMode.Partial}
         snapToGrid={snapToGrid}
         snapGrid={[20, 20]}
         minZoom={0.1}
@@ -352,7 +411,7 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
           />
         )}
         <FlowPanel position="bottom-center" className="text-xs font-mono text-text-muted bg-background-card border-brutal border-border shadow-brutal-sm px-2 py-1 rounded-brutal">
-          Drag nodes to reposition
+          Drag to reposition &middot; Shift+drag to select &amp; connect
         </FlowPanel>
       </ReactFlow>
 
@@ -364,6 +423,9 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
         onFitView={handleFitView}
         onAutoArrange={handleAutoArrange}
         onNewSession={handleNewSession}
+        onAddContext={() => addIntegrationPanel('context', 'Context')}
+        onAddNeon={() => addIntegrationPanel('neon', 'Neon DB')}
+        onAddVercel={() => addIntegrationPanel('vercel', 'Vercel')}
       />
     </div>
   )

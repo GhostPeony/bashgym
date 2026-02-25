@@ -1,0 +1,76 @@
+{
+  "name": "hf_datasets",
+  "description": "Create and manage datasets \u2014 templates, SQL queries via DuckDB, batch operations",
+  "trigger_keywords": ["dataset", "data", "sql", "query", "parquet", "csv", "rows", "tabular", "chat"],
+  "tools": [
+    {
+      "name": "hf_create_dataset",
+      "description": "Initialize a new dataset repository with a structured template.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "repo_id": {
+            "type": "string",
+            "description": "Dataset repository identifier (e.g. 'username/my-dataset')"
+          },
+          "template": {
+            "type": "string",
+            "enum": ["chat", "classification", "qa", "completion", "tabular"],
+            "description": "Dataset template defining the column schema."
+          },
+          "private": {
+            "type": "boolean",
+            "description": "Whether the dataset should be private."
+          }
+        },
+        "required": ["repo_id"]
+      }
+    },
+    {
+      "name": "hf_query_dataset",
+      "description": "Query a HuggingFace dataset using SQL via DuckDB.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "dataset_id": {
+            "type": "string",
+            "description": "Dataset identifier to query (e.g. 'username/my-dataset')"
+          },
+          "sql": {
+            "type": "string",
+            "description": "SQL query to execute against the dataset. Use 'data' as the table name."
+          },
+          "push_to": {
+            "type": "string",
+            "description": "Optional repo_id to push query results as a new dataset."
+          }
+        },
+        "required": ["dataset_id", "sql"]
+      }
+    },
+    {
+      "name": "hf_upload_dataset",
+      "description": "Upload data rows to an existing HuggingFace dataset.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "repo_id": {
+            "type": "string",
+            "description": "Target dataset repository identifier."
+          },
+          "rows_json": {
+            "type": "string",
+            "description": "JSON string containing an array of row objects matching the dataset schema."
+          },
+          "template": {
+            "type": "string",
+            "enum": ["chat", "classification", "qa", "completion", "tabular"],
+            "description": "Template to validate row structure against."
+          }
+        },
+        "required": ["repo_id", "rows_json"]
+      }
+    }
+  ],
+  "knowledge": "You are operating the HuggingFace Datasets skill. This skill manages dataset creation, querying, and batch operations on the HuggingFace Hub.\n\n## Authentication\n\nAll write operations require HF_TOKEN with write access. Read operations on public datasets do not require auth. Set HF_TOKEN as an environment variable or pass via `--token`.\n\n## Dataset Templates\n\nFive templates are available, each defining a column schema:\n\n- **chat**: Messages in conversation format with role/content pairs. Schema: `messages` (list of {role, content} objects). Used for instruction tuning, chatbot training.\n- **classification**: Text with labels. Schema: `text` (string), `label` (string/int). Used for sentiment analysis, topic classification.\n- **qa**: Question-answer pairs with optional context. Schema: `question` (string), `answer` (string), `context` (string, optional). Used for reading comprehension, knowledge QA.\n- **completion**: Prompt-completion pairs. Schema: `prompt` (string), `completion` (string). Used for text generation fine-tuning.\n- **tabular**: Generic key-value rows. Schema: flexible columns defined at creation. Used for structured data, CSV imports.\n\nWhen creating a dataset, always specify the template to get proper column validation and viewer support on the Hub.\n\n## SQL Queries via DuckDB\n\nDatasets stored as Parquet on the Hub can be queried directly using SQL through DuckDB. The query engine uses `hf://` paths to access remote Parquet files without downloading the full dataset.\n\nAvailable SQL commands:\n\n- **query**: Execute arbitrary SQL. Reference the dataset as `data` table: `SELECT * FROM data WHERE label = 'positive' LIMIT 10`\n- **describe**: Show column names, types, and null counts: `DESCRIBE data`\n- **sample**: Random sample of rows: `SELECT * FROM data USING SAMPLE 100`\n- **count**: Row count: `SELECT COUNT(*) FROM data`\n- **unique**: Distinct values in a column: `SELECT DISTINCT label FROM data`\n- **histogram**: Value distribution: `SELECT label, COUNT(*) as cnt FROM data GROUP BY label ORDER BY cnt DESC`\n- **transform**: Create derived columns: `SELECT *, LENGTH(text) as text_length FROM data`\n- **export**: Push query results to a new dataset using the `push_to` parameter.\n\nSQL queries run server-side and are efficient even for large datasets. Use LIMIT clauses to preview before running expensive queries. Complex joins across multiple datasets are supported using multiple `hf://` paths.\n\n## Data Management Commands\n\nCore operations beyond SQL:\n\n- **init**: Create a new dataset repo with template and initial schema.\n- **config**: View or update dataset card metadata (license, language, task tags).\n- **quick_setup**: One-command creation with template, initial rows, and card.\n- **add_rows**: Append rows to an existing dataset. Validates against the template schema. Pass rows as JSON array.\n- **stats**: Show dataset statistics — row counts, column types, storage size, download counts.\n\n## Common Workflows\n\n1. **Create and populate**: `init` with template, then `add_rows` in batches. Each batch creates a new Parquet shard.\n2. **Explore existing data**: Use `describe` first to understand schema, then `sample` to preview, then targeted `query`.\n3. **Data cleaning**: Query with filters and transforms, export cleaned version with `push_to`.\n4. **Dataset splitting**: Use SQL to create train/validation/test splits: `SELECT * FROM data WHERE random() < 0.8` for train.\n\n## Common Pitfalls\n\n- Row data must match the template schema exactly. Extra or missing columns cause validation errors.\n- Large batch uploads (>10k rows) should be chunked to avoid timeouts.\n- DuckDB SQL syntax differs slightly from standard SQL — use `USING SAMPLE` not `TABLESAMPLE`, string concatenation uses `||`.\n- Always use `data` as the table alias in SQL queries — the actual Parquet path is resolved automatically.\n- Private datasets require the token even for read queries.\n- When pushing query results with `push_to`, ensure the target repo exists or will be auto-created."
+}

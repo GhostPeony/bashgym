@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.0.2",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-web-links": "^0.11.0",
     "@xterm/addon-webgl": "^0.18.0",
@@ -26,6 +27,7 @@
     "react-markdown": "^10.1.0",
     "recharts": "^2.15.0",
     "remark-gfm": "^4.0.1",
+    "v0-sdk": "^0.16.2",
     "zustand": "^5.0.0"
   },
   "devDependencies": {

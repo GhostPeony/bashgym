@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Globe, X, RefreshCw, ArrowLeft, ArrowRight, Camera, Crosshair } from 'lucide-react'
 import { useTerminalStore } from '../../stores'
+import { routeBinaryToLinkedTerminals } from '../../utils/edgeRouting'
 
 interface WebviewElement extends HTMLElement {
   src: string
@@ -104,21 +105,7 @@ export function BrowserPane({ id, title, url: initialUrl, isActive }: BrowserPan
 
   // Route a screenshot to all terminals connected to this browser node via canvas edges
   const routeToConnectedTerminals = useCallback(async (dataUrl: string) => {
-    const result = await window.bashgym?.files.writeTempFile(dataUrl, 'png')
-    if (!result?.success || !result.path) return
-
-    const { canvasEdges, panels } = useTerminalStore.getState()
-    const filePath = result.path
-
-    const connectedEdges = canvasEdges.filter(e => e.source === id || e.target === id)
-    for (const edge of connectedEdges) {
-      const targetPanelId = edge.source === id ? edge.target : edge.source
-      const targetPanel = panels.find(p => p.id === targetPanelId && p.type === 'terminal')
-      if (targetPanel?.terminalId) {
-        // Prefill the terminal's input without submitting (no \r) so the user can review before sending
-        window.bashgym?.terminal.write(targetPanel.terminalId, filePath)
-      }
-    }
+    await routeBinaryToLinkedTerminals(id, dataUrl, 'png')
   }, [id])
 
   useEffect(() => {

@@ -15,7 +15,10 @@ import {
   ChevronDown,
   Settings2,
   Keyboard,
-  X
+  X,
+  StickyNote,
+  Database,
+  Triangle
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useCanvasControlStore, useTerminalStore } from '../../stores'
@@ -26,6 +29,9 @@ export interface MasterControlPanelProps {
   onFitView?: () => void
   onAutoArrange?: () => void
   onNewSession?: () => void
+  onAddContext?: () => void
+  onAddNeon?: () => void
+  onAddVercel?: () => void
   currentZoom?: number
 }
 
@@ -35,6 +41,9 @@ export const MasterControlPanel = memo(function MasterControlPanel({
   onFitView,
   onAutoArrange,
   onNewSession,
+  onAddContext,
+  onAddNeon,
+  onAddVercel,
   currentZoom = 1
 }: MasterControlPanelProps) {
   const {
@@ -282,6 +291,37 @@ export const MasterControlPanel = memo(function MasterControlPanel({
             </button>
           )}
         </div>
+        {(onAddContext || onAddNeon || onAddVercel) && (
+          <div className="flex items-center gap-2 mt-2">
+            {onAddContext && (
+              <button
+                onClick={onAddContext}
+                className="btn-secondary !py-1.5 !px-3 !text-xs flex-1"
+              >
+                <StickyNote className="w-3 h-3" />
+                Context
+              </button>
+            )}
+            {onAddNeon && (
+              <button
+                onClick={onAddNeon}
+                className="btn-secondary !py-1.5 !px-3 !text-xs flex-1"
+              >
+                <Database className="w-3 h-3" />
+                Neon
+              </button>
+            )}
+            {onAddVercel && (
+              <button
+                onClick={onAddVercel}
+                className="btn-secondary !py-1.5 !px-3 !text-xs flex-1"
+              >
+                <Triangle className="w-3 h-3" />
+                Vercel
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Keyboard shortcuts hint */}

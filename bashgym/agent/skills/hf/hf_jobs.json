@@ -1,0 +1,71 @@
+{
+  "name": "hf_jobs",
+  "description": "Run workloads on HuggingFace cloud infrastructure \u2014 UV scripts, Docker jobs, scheduling",
+  "trigger_keywords": ["job", "cloud", "compute", "batch", "docker", "uv", "schedule"],
+  "tools": [
+    {
+      "name": "hf_submit_job",
+      "description": "Submit a UV script or Docker job to HuggingFace cloud infrastructure.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "script": {
+            "type": "string",
+            "description": "Inline Python script content (for UV jobs) or Docker image reference (for Docker jobs)."
+          },
+          "flavor": {
+            "type": "string",
+            "description": "Hardware flavor (e.g. 'cpu-basic', 't4-small', 'a10g-large', 'a100-large', 'h100x8')."
+          },
+          "timeout": {
+            "type": "string",
+            "description": "Job timeout duration (e.g. '2h', '30m'). Default is 30 minutes."
+          },
+          "secrets": {
+            "type": "object",
+            "description": "Environment variable secrets to inject (e.g. {\"HF_TOKEN\": \"$HF_TOKEN\"})."
+          }
+        },
+        "required": ["script"]
+      }
+    },
+    {
+      "name": "hf_list_jobs",
+      "description": "List recent HuggingFace cloud jobs with their status.",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "hf_cancel_job",
+      "description": "Cancel a running HuggingFace cloud job.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "description": "The job ID to cancel."
+          }
+        },
+        "required": ["job_id"]
+      }
+    },
+    {
+      "name": "hf_get_job_logs",
+      "description": "Retrieve logs from a HuggingFace cloud job.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "description": "The job ID to get logs for."
+          }
+        },
+        "required": ["job_id"]
+      }
+    }
+  ],
+  "knowledge": "You are operating the HuggingFace Jobs skill. This skill submits and manages compute workloads on HuggingFace's cloud infrastructure.\n\n## CRITICAL: Ephemeral Environment\n\nThe single most important rule: HuggingFace job environments are EPHEMERAL. All files, model weights, datasets, and outputs are deleted when the job ends. You MUST persist any valuable results to the HuggingFace Hub before the job terminates. This means:\n\n- Always push trained models with `push_to_hub=True` and a `hub_model_id`.\n- Upload generated datasets or artifacts to a Hub repo before the script exits.\n- Save logs and metrics to the Hub or an external tracking service.\n- If the job crashes or times out, everything is lost. Build in checkpointing.\n\n## Authentication in Jobs\n\nJobs run in isolated containers without access to your local credentials. Always pass authentication via the secrets parameter:\n```json\n{\"HF_TOKEN\": \"$HF_TOKEN\"}\n```\nThis injects your token as an environment variable inside the container. Without this, any Hub operation (download gated models, upload results) will fail with 401.\n\n## Job Types\n\n### UV Scripts (Recommended for most tasks)\nInline Python scripts that run in a managed UV environment. Dependencies are auto-installed from `# /// script` metadata blocks or pip install commands. Best for:\n- Data processing and transformation\n- Model inference and evaluation\n- Quick experiments and prototyping\n\nExample UV script header for dependencies:\n```python\n# /// script\n# dependencies = [\"transformers\", \"torch\", \"datasets\"]\n# ///\n```\n\n### Docker Jobs (Custom environments)\nFor workloads requiring specific system packages, custom CUDA versions, or complex environments. Specify a Docker image reference instead of inline script. Best for:\n- Custom training frameworks\n- Multi-step pipelines\n- Reproducible environments\n\n## Timeout Management\n\nThe default timeout is 30 minutes. This is almost always insufficient for:\n- Model training (use 2h-12h depending on model size)\n- Large dataset processing (use 1h-4h)\n- Multi-model evaluation (use 1h-2h)\n\nAlways explicitly set the timeout parameter. Overestimate rather than underestimate \u2014 you are only charged for actual compute time, not the timeout window.\n\n## GPU Flavors\n\nAvailable hardware configurations, from cheapest to most powerful:\n\n| Flavor | GPU | VRAM | Use Case |\n|--------|-----|------|----------|\n| cpu-basic | None | 16GB RAM | Data processing, no ML |\n| cpu-upgrade | None | 32GB RAM | Large data processing |\n| t4-small | 1x T4 | 16GB | Small models (<3B), inference |\n| t4-medium | 1x T4 | 32GB RAM | Small models with more CPU RAM |\n| a10g-small | 1x A10G | 24GB | Medium models (3-7B), fine-tuning |\n| a10g-large | 1x A10G | 48GB RAM | Medium models with more CPU RAM |\n| a100-large | 1x A100 | 80GB | Large models (7-30B), fast training |\n| h100x1 | 1x H100 | 80GB | Large models, fastest single GPU |\n| h100x4 | 4x H100 | 320GB | Very large models (30-70B) |\n| h100x8 | 8x H100 | 640GB | Largest models (70B+), distributed |\n\nMatch flavor to workload: inference is cheaper than training. A 7B model can infer on t4-small but needs a10g-small for fine-tuning.\n\n## Scheduled Jobs\n\nJobs support cron-style scheduling for recurring workloads:\n- Daily dataset updates\n- Periodic model evaluation\n- Automated data pipelines\n\nCron expressions follow standard format: `minute hour day month weekday`. Example: `0 6 * * *` runs daily at 6 AM UTC.\n\n## Monitoring and Debugging\n\nUse `hf_list_jobs` to check job status (pending, running, completed, failed). Use `hf_get_job_logs` to stream stdout/stderr from running or completed jobs. If a job fails:\n1. Check logs for error messages.\n2. Verify secrets are passed correctly (especially HF_TOKEN).\n3. Check if the flavor has sufficient memory for your workload.\n4. Ensure timeout is adequate.\n\n## Common Pitfalls\n\n- Forgetting to pass HF_TOKEN in secrets \u2014 most common failure cause.\n- Default 30min timeout killing training jobs \u2014 always set explicit timeout.\n- Not persisting results before job ends \u2014 everything is lost.\n- Selecting too small a GPU flavor \u2014 OOM errors are not recoverable.\n- UV script dependency resolution failures \u2014 pin specific versions in the script metadata."
+}

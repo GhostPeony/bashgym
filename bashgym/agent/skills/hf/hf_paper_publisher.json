@@ -1,0 +1,63 @@
+{
+  "name": "hf_paper_publisher",
+  "description": "Publish research papers on HuggingFace Hub \u2014 arXiv indexing, authorship, article generation",
+  "trigger_keywords": ["paper", "publish", "arxiv", "research", "citation", "authorship"],
+  "tools": [
+    {
+      "name": "hf_publish_paper",
+      "description": "Create a research article on HuggingFace from a template.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Paper title."
+          },
+          "template": {
+            "type": "string",
+            "enum": ["standard", "modern", "arxiv", "ml-report"],
+            "description": "Article template to use."
+          },
+          "authors": {
+            "type": "string",
+            "description": "Comma-separated list of author names or HuggingFace usernames."
+          },
+          "abstract": {
+            "type": "string",
+            "description": "Paper abstract text."
+          }
+        },
+        "required": ["title"]
+      }
+    },
+    {
+      "name": "hf_index_arxiv_paper",
+      "description": "Index an arXiv paper on HuggingFace for discovery and linking.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "arxiv_id": {
+            "type": "string",
+            "description": "arXiv paper identifier (e.g. '2301.12345')."
+          }
+        },
+        "required": ["arxiv_id"]
+      }
+    },
+    {
+      "name": "hf_search_papers",
+      "description": "Search for papers on HuggingFace Hub.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search query for finding papers."
+          }
+        },
+        "required": ["query"]
+      }
+    }
+  ],
+  "knowledge": "You are operating the HuggingFace Paper Publisher skill. This skill manages the creation, indexing, and management of research papers on the HuggingFace Hub.\n\n## Authentication\n\nAll publishing operations require HF_TOKEN with write permissions. Reading and searching public papers does not require authentication.\n\n## Full Publishing Workflow\n\nThe typical end-to-end workflow for publishing a paper on HuggingFace:\n\n1. **Create the article**: Use `create` with a template to generate the article structure on HuggingFace. This creates a new paper page with formatted content.\n2. **Submit to arXiv**: If the paper is going to arXiv, prepare and submit the LaTeX/PDF through arXiv's standard submission process.\n3. **Index on HuggingFace**: Once the arXiv paper is live, use `index` with the arXiv ID to create a HuggingFace paper page linked to the arXiv version. This enables discovery through HF search.\n4. **Link to model/dataset**: Associate the paper with related model and dataset repos on HuggingFace using the `link` command. This creates bidirectional references.\n5. **Claim authorship**: Authors with HuggingFace accounts should use `claim` to associate their profiles with the paper, enabling it to appear on their profile.\n\n## Article Templates\n\nFour templates are available for creating articles directly on HuggingFace:\n\n- **standard**: Clean, minimal layout suitable for most papers. Good default choice.\n- **modern**: Contemporary design with larger typography and visual emphasis. Good for blog-style technical articles.\n- **arxiv**: Formatted to match arXiv paper styling. Best for papers that will also be on arXiv.\n- **ml-report**: Structured for ML experiment reports with sections for methodology, results, and ablations.\n\nChoose the template based on the paper's purpose and audience. All templates support markdown content with LaTeX math rendering.\n\n## Available Commands\n\nCore paper management commands:\n\n- **index**: Index an arXiv paper on HuggingFace by its arXiv ID. Creates a paper page with metadata, abstract, and links.\n- **link**: Link a paper to model or dataset repos. Creates bidirectional references for discoverability.\n- **claim**: Claim authorship of a paper with your HuggingFace account.\n- **check-authorship**: Verify authorship claims on a paper.\n- **toggle-visibility**: Show or hide a paper on your profile.\n- **list-my-papers**: List all papers associated with your account.\n- **create**: Create a new article from a template.\n- **convert**: Convert between formats (e.g., LaTeX to markdown, markdown to PDF).\n- **search**: Search papers on HuggingFace by title, author, or topic.\n- **info**: Get detailed metadata about a specific paper.\n- **citation**: Generate citation strings in various formats (BibTeX, APA, MLA, etc.).\n- **validate**: Check paper metadata for completeness and correctness.\n\n## Authorship and Profiles\n\nPapers on HuggingFace have an authorship system:\n- Authors can claim papers to display them on their HuggingFace profile.\n- Authorship must be verified (the author's name must appear in the paper metadata).\n- Use `check-authorship` to verify claims before attempting to claim.\n- Authors can toggle paper visibility on their profile without removing the claim.\n\n## Linking Papers to Repos\n\nA key feature of HuggingFace papers is bidirectional linking to models and datasets:\n- Link a paper to its corresponding model repo to show \"Paper\" on the model card.\n- Link to the training dataset for full reproducibility context.\n- Links are visible on both the paper page and the linked repo.\n\n## Citation Generation\n\nGenerate properly formatted citations in multiple styles:\n- BibTeX (standard for academic papers)\n- APA (common in social sciences)\n- MLA (common in humanities)\n- Chicago, IEEE, and others\n\nUse the `citation` command with the paper ID and desired format.\n\n## Common Pitfalls\n\n- arXiv indexing requires the paper to be publicly available on arXiv first. You cannot index a submission that is still under review.\n- Authorship claims require your name to match the paper metadata. Name variations (first initial vs full name) may need manual resolution.\n- Templates are for HuggingFace-native articles. For arXiv papers, use `index` instead of `create`.\n- Paper search works best with specific technical terms rather than broad queries.\n- LaTeX math in articles uses `$...$` for inline and `$$...$$` for display, not `\\(...\\)` notation.\n- Large PDFs or papers with many figures may take time to process during indexing."
+}

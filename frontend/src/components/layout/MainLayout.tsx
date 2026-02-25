@@ -16,6 +16,7 @@ import { HFDashboard } from '../huggingface'
 import { IntegrationDashboard } from '../integration/IntegrationDashboard'
 import { AchievementsView } from '../achievements/AchievementsView'
 import { OrchestratorDashboard } from '../orchestrator/OrchestratorDashboard'
+import { PipelineDashboard } from '../pipeline/PipelineDashboard'
 import { AgentChat } from '../agent/AgentChat'
 import { HomeScreen, TutorialChecklist, TutorialTooltip } from '../home'
 import { KeyboardShortcutsModal } from '../common/KeyboardShortcutsModal'
@@ -174,6 +175,12 @@ export function MainLayout() {
           {overlayView === 'orchestrator' && (
             <div className="flex-1 overflow-auto">
               <OrchestratorDashboard />
+            </div>
+          )}
+
+          {overlayView === 'pipeline' && (
+            <div className="flex-1 overflow-auto">
+              <PipelineDashboard />
             </div>
           )}
         </main>

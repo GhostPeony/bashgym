@@ -1,0 +1,58 @@
+{
+  "name": "hf_trackio",
+  "description": "Track and visualize ML training experiments \u2014 metric logging, dashboards, HF Space sync",
+  "trigger_keywords": ["track", "experiment", "log", "visualize", "metrics", "dashboard", "monitoring"],
+  "tools": [
+    {
+      "name": "hf_start_tracking",
+      "description": "Initialize experiment tracking for a project, optionally syncing to a HuggingFace Space.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project name for grouping related experiments."
+          },
+          "space_id": {
+            "type": "string",
+            "description": "HuggingFace Space ID for persistent dashboard (e.g. 'username/my-tracking-space'). Required for remote/ephemeral training."
+          }
+        },
+        "required": ["project"]
+      }
+    },
+    {
+      "name": "hf_log_metrics",
+      "description": "Log metrics for the current training experiment.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "metrics": {
+            "type": "object",
+            "description": "Key-value pairs of metric names and values (e.g. {\"loss\": 0.42, \"accuracy\": 0.89})."
+          },
+          "step": {
+            "type": "integer",
+            "description": "Training step or epoch number for this metric entry."
+          }
+        },
+        "required": ["metrics"]
+      }
+    },
+    {
+      "name": "hf_list_experiments",
+      "description": "List tracked experiments and their runs.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Filter by project name. If omitted, lists all projects."
+          }
+        },
+        "required": []
+      }
+    }
+  ],
+  "knowledge": "You are operating the HuggingFace Trackio skill. This skill provides experiment tracking and visualization for ML training runs, with native HuggingFace Hub integration.\n\n## Two Interfaces\n\nTrackio has two complementary interfaces designed for different use cases:\n\n### Python API (for logging during training)\nUsed inside training scripts to log metrics in real time:\n\n```python\nimport trackio\n\n# Initialize tracking\ntrackio.init(project=\"my-project\", space_id=\"username/my-tracking\")\n\n# Log metrics at each step\nfor step in range(num_steps):\n    loss = train_step()\n    trackio.log({\"loss\": loss, \"learning_rate\": lr}, step=step)\n\n# Finalize the run\ntrackio.finish()\n```\n\nKey functions:\n- `trackio.init(project, space_id=None)` \u2014 Start a new tracking run. Always call first.\n- `trackio.log(metrics_dict, step=None)` \u2014 Log a dictionary of metric values. Step is auto-incremented if omitted.\n- `trackio.finish()` \u2014 Finalize the run. Always call at the end, even in error handlers.\n\n### CLI (for retrieving and inspecting results)\nUsed to browse experiments, compare runs, and manage tracking data:\n\n```bash\n# List all projects\ntrackio list\n\n# List runs in a project\ntrackio list --project my-project\n\n# Get details of a specific run\ntrackio get <run_id>\n\n# Show metrics chart in terminal\ntrackio show <run_id> --metric loss\n\n# Sync local tracking data to HF Space\ntrackio sync --space-id username/my-tracking\n```\n\nKey CLI commands:\n- `trackio list` \u2014 List projects and runs. Add `--json` for machine-readable output.\n- `trackio get <run_id>` \u2014 Get full run metadata and final metrics. Add `--json` for structured output.\n- `trackio show <run_id>` \u2014 Display metric curves. Use `--metric <name>` to filter.\n- `trackio sync` \u2014 Push local tracking data to a HuggingFace Space for persistent access.\n\n## CRITICAL: Remote Training Requires space_id\n\nWhen training on ephemeral cloud infrastructure (HuggingFace jobs, cloud VMs, Colab), you MUST pass `space_id` when initializing tracking. Without it, metrics are stored locally on the ephemeral instance and are permanently lost when the instance terminates.\n\nThe space_id points to a HuggingFace Space that serves as a persistent dashboard. Metrics are streamed to this Space in real time, so you can monitor training progress from anywhere, even if the training instance crashes.\n\n```python\n# WRONG for cloud training - metrics lost when instance dies\ntrackio.init(project=\"my-training\")\n\n# CORRECT for cloud training - metrics persist to HF Space\ntrackio.init(project=\"my-training\", space_id=\"username/training-dashboard\")\n```\n\nFor local training with persistent storage, space_id is optional but recommended for sharing results.\n\n## TRL Integration\n\nTrackio integrates natively with TRL (Transformer Reinforcement Learning) via the `report_to` training argument:\n\n```python\nfrom trl import SFTConfig\n\nconfig = SFTConfig(\n    output_dir=\"./output\",\n    report_to=\"trackio\",\n    # ... other training args\n)\n```\n\nWith this configuration, TRL automatically logs training loss, evaluation metrics, learning rate, and other training statistics to Trackio. No manual `trackio.log()` calls needed.\n\nThis is the recommended approach for all TRL-based training (SFT, DPO, GRPO). Always combine with `space_id` initialization for cloud training.\n\n## Machine-Readable Output\n\nAll CLI commands support `--json` flag for programmatic consumption:\n\n```bash\n# Get structured run data\ntrackio get <run_id> --json | jq '.metrics.loss[-1]'\n\n# List all runs as JSON array\ntrackio list --project my-project --json | jq '.[].run_id'\n```\n\nUse `--json` when parsing Trackio output in scripts or pipelines. The default human-readable output includes formatting that breaks automated parsing.\n\n## Dashboard and Visualization\n\nThe HuggingFace Space dashboard provides:\n- Real-time metric curves during training\n- Run comparison (overlay multiple runs on the same chart)\n- Hyperparameter tracking\n- System metrics (GPU utilization, memory)\n- Shareable URLs for collaboration\n\nThe dashboard updates automatically as new metrics arrive. No manual refresh needed.\n\n## Common Pitfalls\n\n- Forgetting `space_id` for cloud training \u2014 metrics permanently lost when instance terminates.\n- Not calling `trackio.finish()` \u2014 run stays in 'running' state, metrics may not be fully flushed.\n- Logging too frequently (every batch) on large datasets \u2014 creates excessive data. Log every N steps.\n- Using human-readable CLI output in scripts \u2014 always use `--json` for programmatic access.\n- Not initializing before logging \u2014 `trackio.log()` without `trackio.init()` silently drops metrics.\n- Forgetting `report_to=\"trackio\"` in TRL config \u2014 training runs without any tracking."
+}

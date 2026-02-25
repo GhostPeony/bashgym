@@ -95,6 +95,12 @@ export interface ClipboardAPI {
   writeText: (text: string) => Promise<{ success: boolean; error?: string }>
 }
 
+export interface CredentialsAPI {
+  store: (key: string, value: string) => Promise<{ success: boolean; error?: string }>
+  read: (key: string) => Promise<{ success: boolean; value?: string; error?: string }>
+  delete: (key: string) => Promise<{ success: boolean; error?: string }>
+}
+
 export interface BashGymAPI {
   terminal: TerminalAPI
   theme: ThemeAPI
@@ -104,6 +110,7 @@ export interface BashGymAPI {
   window: WindowAPI
   browser: BrowserAPI
   clipboard: ClipboardAPI
+  credentials: CredentialsAPI
 }
 
 // Expose protected methods to renderer
@@ -152,6 +159,11 @@ contextBridge.exposeInMainWorld('bashgym', {
   clipboard: {
     writeImage: (dataUrl: string) => ipcRenderer.invoke('clipboard:writeImage', dataUrl),
     writeText: (text: string) => ipcRenderer.invoke('clipboard:writeText', text)
+  },
+  credentials: {
+    store: (key: string, value: string) => ipcRenderer.invoke('credentials:store', key, value),
+    read: (key: string) => ipcRenderer.invoke('credentials:read', key),
+    delete: (key: string) => ipcRenderer.invoke('credentials:delete', key),
   },
   window: {
     minimize: () => ipcRenderer.invoke('window:minimize'),

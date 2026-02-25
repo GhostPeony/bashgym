@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, Menu, webContents, clipboard, nativeImage } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, Menu, webContents, clipboard, nativeImage, safeStorage } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
@@ -23,6 +23,9 @@ const terminals: Map<string, ChildProcessWithoutNullStreams> = new Map()
 
 // Determine if we're in development
 const isDev = !app.isPackaged
+
+// Credentials directory for secure storage
+const credentialsDir = path.join(app.getPath('userData'), 'credentials')
 
 function setupMenu() {
   const template: Electron.MenuItemConstructorOptions[] = [
@@ -78,7 +81,7 @@ function createWindow() {
   // Load the app
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173')
-    // Don't auto-open DevTools - use Ctrl+Shift+I if needed
+    mainWindow.webContents.openDevTools() // TEMP: debug black screen
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
   }
@@ -470,6 +473,43 @@ ipcMain.handle('clipboard:writeImage', (_, dataUrl: string) => {
 ipcMain.handle('clipboard:writeText', (_, text: string) => {
   try {
     clipboard.writeText(text)
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  }
+})
+
+// Credential storage handlers — encrypt/decrypt via Electron safeStorage (OS-level encryption)
+ipcMain.handle('credentials:store', async (_, key: string, value: string) => {
+  try {
+    if (!safeStorage.isEncryptionAvailable()) {
+      return { success: false, error: 'Encryption is not available on this system' }
+    }
+    await fs.promises.mkdir(credentialsDir, { recursive: true })
+    const encrypted = safeStorage.encryptString(value)
+    await fs.promises.writeFile(path.join(credentialsDir, key), encrypted)
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  }
+})
+
+ipcMain.handle('credentials:read', async (_, key: string) => {
+  try {
+    if (!safeStorage.isEncryptionAvailable()) {
+      return { success: false, error: 'Encryption is not available on this system' }
+    }
+    const encrypted = await fs.promises.readFile(path.join(credentialsDir, key))
+    const value = safeStorage.decryptString(encrypted)
+    return { success: true, value }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  }
+})
+
+ipcMain.handle('credentials:delete', async (_, key: string) => {
+  try {
+    await fs.promises.unlink(path.join(credentialsDir, key))
     return { success: true }
   } catch (error) {
     return { success: false, error: String(error) }

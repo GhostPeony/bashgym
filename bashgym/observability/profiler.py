@@ -578,6 +578,42 @@ class AgentProfiler:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(json.dumps(trace.to_dict(), indent=2))
 
+    def get_tool_stats(self) -> List[Dict[str, Any]]:
+        """Get per-tool performance breakdown across all traces."""
+        tool_data: Dict[str, Dict[str, Any]] = {}
+
+        for trace in self.traces.values():
+            for span in trace.spans:
+                if span.kind != SpanKind.TOOL_CALL:
+                    continue
+                tool_name = span.attributes.get("tool_name", span.name)
+                if tool_name not in tool_data:
+                    tool_data[tool_name] = {
+                        "tool": tool_name,
+                        "calls": 0,
+                        "total_duration_ms": 0.0,
+                        "successes": 0,
+                        "total_tokens": 0,
+                    }
+                entry = tool_data[tool_name]
+                entry["calls"] += 1
+                entry["total_duration_ms"] += span.latency_ms
+                entry["total_tokens"] += span.total_tokens
+                if span.status == "success":
+                    entry["successes"] += 1
+
+        result = []
+        for entry in tool_data.values():
+            calls = entry["calls"]
+            result.append({
+                "tool": entry["tool"],
+                "calls": calls,
+                "avg_duration_ms": round(entry["total_duration_ms"] / max(calls, 1), 1),
+                "success_rate": round(entry["successes"] / max(calls, 1) * 100, 1),
+                "total_tokens": entry["total_tokens"],
+            })
+        return sorted(result, key=lambda x: x["calls"], reverse=True)
+
     def get_all_traces(self) -> List[Trace]:
         """Get all traces in memory."""
         return list(self.traces.values())

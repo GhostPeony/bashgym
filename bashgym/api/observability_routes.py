@@ -21,6 +21,10 @@ class TraceSpanResponse(BaseModel):
     kind: str
     duration_ms: float
     status: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    latency_ms: float = 0.0
     attributes: Dict[str, Any] = {}
 
 
@@ -30,15 +34,30 @@ class TraceSummaryResponse(BaseModel):
     name: str
     duration_ms: float
     total_spans: int
+    status: str = "success"
     llm_calls: Dict[str, Any] = {}
     tool_calls: Dict[str, Any] = {}
     bottlenecks: List[Dict[str, Any]] = []
+
+
+class TraceDetailResponse(TraceSummaryResponse):
+    """Response model for full trace detail with spans."""
+    spans: List[TraceSpanResponse] = []
 
 
 class TraceListResponse(BaseModel):
     """Response model for trace list."""
     traces: List[TraceSummaryResponse]
     total: int
+
+
+class ToolStatResponse(BaseModel):
+    """Response model for per-tool performance stats."""
+    tool: str
+    calls: int
+    avg_duration_ms: float
+    success_rate: float
+    total_tokens: int
 
 
 class GuardrailEventResponse(BaseModel):
@@ -124,30 +143,43 @@ async def list_traces(
 
     summaries = []
     for trace in traces:
+        # Get full summary with bottlenecks
+        trace_summary = inst._profiler.get_trace_summary(trace.trace_id)
+        bottlenecks = trace_summary.get("bottlenecks", [])
+        # Add trace_id to each bottleneck for navigation
+        for b in bottlenecks:
+            b["trace_id"] = trace.trace_id
+
+        # Derive status from span errors
+        has_errors = any(s.status == "error" for s in trace.spans)
+        status = "error" if has_errors else ("in_progress" if trace.end_time is None else "success")
+
         summary = TraceSummaryResponse(
             trace_id=trace.trace_id,
             name=trace.name,
             duration_ms=trace.duration_ms,
             total_spans=len(trace.spans),
-            llm_calls={
+            status=status,
+            llm_calls=trace_summary.get("llm_calls", {
                 "count": trace.total_llm_calls,
                 "total_tokens": trace.total_tokens
-            },
-            tool_calls={
+            }),
+            tool_calls=trace_summary.get("tool_calls", {
                 "count": trace.total_tool_calls
-            }
+            }),
+            bottlenecks=bottlenecks,
         )
         summaries.append(summary)
 
     return TraceListResponse(traces=summaries, total=total)
 
 
-@router.get("/traces/{trace_id}", response_model=TraceSummaryResponse)
+@router.get("/traces/{trace_id}", response_model=TraceDetailResponse)
 async def get_trace(trace_id: str):
     """
-    Get details for a specific trace.
+    Get details for a specific trace with all spans.
 
-    Returns full trace information with all spans.
+    Returns full trace information including span-level data.
     """
     inst = get_instrumentation()
     if not inst or not inst.profiler_enabled:
@@ -158,16 +190,54 @@ async def get_trace(trace_id: str):
 
     trace = inst._profiler.traces[trace_id]
     summary = inst._profiler.get_trace_summary(trace_id)
+    bottlenecks = summary.get("bottlenecks", [])
+    for b in bottlenecks:
+        b["trace_id"] = trace_id
 
-    return TraceSummaryResponse(
+    has_errors = any(s.status == "error" for s in trace.spans)
+    status = "error" if has_errors else ("in_progress" if trace.end_time is None else "success")
+
+    spans = [
+        TraceSpanResponse(
+            span_id=s.span_id,
+            name=s.name,
+            kind=s.kind.value,
+            duration_ms=s.duration_ms,
+            status=s.status,
+            input_tokens=s.input_tokens,
+            output_tokens=s.output_tokens,
+            total_tokens=s.total_tokens,
+            latency_ms=s.latency_ms,
+            attributes=s.attributes,
+        )
+        for s in trace.spans
+    ]
+
+    return TraceDetailResponse(
         trace_id=trace.trace_id,
         name=trace.name,
         duration_ms=trace.duration_ms,
         total_spans=len(trace.spans),
+        status=status,
         llm_calls=summary.get("llm_calls", {}),
         tool_calls=summary.get("tool_calls", {}),
-        bottlenecks=summary.get("bottlenecks", [])
+        bottlenecks=bottlenecks,
+        spans=spans,
     )
+
+
+@router.get("/tool-stats", response_model=List[ToolStatResponse])
+async def get_tool_stats():
+    """
+    Get per-tool performance breakdown.
+
+    Returns stats grouped by tool name: calls, avg duration, success rate, tokens.
+    """
+    inst = get_instrumentation()
+    if not inst or not inst.profiler_enabled:
+        return []
+
+    return inst._profiler.get_tool_stats()
 
 
 @router.get("/guardrails/events", response_model=GuardrailEventsResponse)

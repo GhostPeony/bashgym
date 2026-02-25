@@ -1011,6 +1011,22 @@ html.electron-window {
   animation: float 6s ease-in-out infinite;
 }
 
+/* Slide-in from right — trace detail panel */
+@keyframes slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.25s ease-out both;
+}
+
 /* Scroll reveal */
 .reveal {
   opacity: 0;

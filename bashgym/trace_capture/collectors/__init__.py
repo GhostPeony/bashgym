@@ -23,11 +23,15 @@ from .base import (
     get_collected_dir,
 )
 from .subagent import SubagentCollector
+from .edit import EditCollector
+from .plan import PlanCollector
 
 __all__ = [
     "BaseCollector",
     "CollectorRecord",
     "SubagentCollector",
+    "EditCollector",
+    "PlanCollector",
     "SubagentRecord",
     "EditRecord",
     "PlanRecord",

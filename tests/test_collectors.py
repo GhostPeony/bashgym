@@ -655,3 +655,419 @@ class TestSubagentCollector:
         assert len(records) == 1
         assert records[0].agent_id == "badagent1"
         assert records[0].user_prompt == "Hello"
+
+
+# ---------------------------------------------------------------------------
+# 8. EditCollector
+# ---------------------------------------------------------------------------
+
+from bashgym.trace_capture.collectors.edit import EditCollector
+
+
+class TestEditCollector:
+    """Tests for EditCollector: scanning, parsing, and collecting file-history snapshots."""
+
+    @pytest.fixture
+    def mock_claude_dir(self, tmp_path):
+        """Create mock .claude with file-history directories."""
+        fh = tmp_path / "file-history" / "abc12345-1234-5678-abcd-1234567890ab"
+        fh.mkdir(parents=True)
+        (fh / "a1b2c3d4e5f6g7h8@v1").write_text("def hello():\n    pass\n", encoding="utf-8")
+        (fh / "a1b2c3d4e5f6g7h8@v2").write_text("def hello():\n    print('hello')\n", encoding="utf-8")
+        (fh / "f0f0f0f0f0f0f0f0@v1").write_text("# old\n", encoding="utf-8")
+        (fh / "f0f0f0f0f0f0f0f0@v2").write_text("# middle\n", encoding="utf-8")
+        (fh / "f0f0f0f0f0f0f0f0@v3").write_text("# final\n", encoding="utf-8")
+        return tmp_path
+
+    def test_scan_finds_edit_sessions(self, mock_claude_dir, tmp_path):
+        """scan() discovers edit sessions and reports correct counts."""
+        collector = EditCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        result = collector.scan()
+        assert result.source_type == "edits"
+        assert result.total_found >= 1
+        assert result.new_available >= 1
+
+    def test_collect_groups_versions(self, mock_claude_dir, tmp_path):
+        """collect() groups versions by content hash and returns correct records."""
+        collector = EditCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        records = collector.collect("abc12345-1234-5678-abcd-1234567890ab")
+        assert len(records) == 2  # two content hashes
+
+        # Find the record with 3 versions (f0f0f0f0f0f0f0f0)
+        three_ver = [r for r in records if r.total_versions == 3]
+        assert len(three_ver) == 1
+        rec = three_ver[0]
+        assert rec.content_hash == "f0f0f0f0f0f0f0f0"
+        assert rec.versions[0]["content"] == "# old\n"
+        assert rec.versions[-1]["content"] == "# final\n"
+
+    def test_collect_produces_diff(self, mock_claude_dir, tmp_path):
+        """collect() produces a unified diff between first and last version."""
+        collector = EditCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        records = collector.collect("abc12345-1234-5678-abcd-1234567890ab")
+
+        # Find the 2-version hash (a1b2c3d4e5f6g7h8)
+        two_ver = [r for r in records if r.total_versions == 2]
+        assert len(two_ver) == 1
+        rec = two_ver[0]
+        assert "pass" in rec.diff
+        assert "hello" in rec.diff
+
+    def test_collect_all_deduplicates(self, mock_claude_dir, tmp_path):
+        """collect_all() skips sessions that were already collected."""
+        collector = EditCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        # First collection
+        first = collector.collect_all()
+        assert first.source_type == "edits"
+        assert first.collected >= 1
+
+        # Second collection — should skip
+        second = collector.collect_all()
+        assert second.collected == 0
+        assert second.skipped >= 1
+
+
+# ---------------------------------------------------------------------------
+# 9. PlanCollector
+# ---------------------------------------------------------------------------
+
+from bashgym.trace_capture.collectors.plan import PlanCollector
+
+
+class TestPlanCollector:
+    """Tests for PlanCollector: scanning, parsing, and collecting plan markdown files."""
+
+    @pytest.fixture
+    def mock_claude_dir(self, tmp_path):
+        """Create mock .claude with plans/ directory."""
+        plans = tmp_path / "plans"
+        plans.mkdir()
+        (plans / "clever-jumping-fox.md").write_text(
+            "# Auth System Plan\n\n## Problem\nNeed auth.\n\n## Approach\nUse JWT.\n",
+            encoding="utf-8",
+        )
+        (plans / "wiggly-napping-pixel.md").write_text(
+            "# Dashboard Redesign\n\nShort plan.\n",
+            encoding="utf-8",
+        )
+        return tmp_path
+
+    def test_scan_finds_plan_files(self, mock_claude_dir, tmp_path):
+        """scan() discovers plan markdown files and reports correct counts."""
+        collector = PlanCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        result = collector.scan()
+        assert result.source_type == "plans"
+        assert result.total_found == 2
+
+    def test_collect_all_parses_markdown(self, mock_claude_dir, tmp_path):
+        """collect_all() parses plan markdown files and returns correct records."""
+        collector = PlanCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        result = collector.collect_all()
+        assert result.collected == 2
+        assert len(result.records) == 2
+
+        names = {r.plan_name for r in result.records}
+        assert "clever-jumping-fox" in names
+        assert "wiggly-napping-pixel" in names
+
+        for rec in result.records:
+            assert rec.word_count > 0
+            assert rec.content != ""
+            assert rec.source_type == "plans"
+
+    def test_collect_by_session_id_returns_empty(self, mock_claude_dir, tmp_path):
+        """collect() returns empty list since plans are not session-scoped."""
+        collector = PlanCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        records = collector.collect("any-id")
+        assert records == []
+
+    def test_collect_all_deduplicates(self, mock_claude_dir, tmp_path):
+        """collect_all() skips plans that were already collected."""
+        collector = PlanCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        # First collection
+        first = collector.collect_all()
+        assert first.collected == 2
+
+        # Second collection — should skip all
+        second = collector.collect_all()
+        assert second.collected == 0
+        assert second.skipped == 2
+
+
+# ---------------------------------------------------------------------------
+# 10. PromptCollector
+# ---------------------------------------------------------------------------
+
+try:
+    from bashgym.trace_capture.collectors.prompt import PromptCollector
+    _has_prompt_collector = True
+except ImportError:
+    _has_prompt_collector = False
+
+
+@pytest.mark.skipif(not _has_prompt_collector, reason="PromptCollector not yet implemented")
+class TestPromptCollector:
+    """Tests for PromptCollector: scanning, parsing, and collecting user prompts from history.jsonl."""
+
+    @pytest.fixture
+    def mock_claude_dir(self, tmp_path):
+        """Create mock .claude with history.jsonl and paste-cache/."""
+        history = tmp_path / "history.jsonl"
+        lines = [
+            json.dumps({"display": "Fix the auth bug", "pastedContents": {}, "timestamp": 1759817571796, "project": "C:\\Users\\Cade\\projects\\myapp"}),
+            json.dumps({"display": "Add dark mode", "pastedContents": {"abc123": True}, "timestamp": 1759817600000, "project": "C:\\Users\\Cade\\projects\\myapp"}),
+        ]
+        history.write_text("\n".join(lines), encoding="utf-8")
+
+        paste = tmp_path / "paste-cache"
+        paste.mkdir()
+        (paste / "abc123.txt").write_text("const theme = 'dark';", encoding="utf-8")
+        return tmp_path
+
+    def test_scan_counts_history_lines(self, mock_claude_dir, tmp_path):
+        """scan() counts all lines in history.jsonl and reports correct totals."""
+        collector = PromptCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        result = collector.scan()
+        assert result.source_type == "prompts"
+        assert result.total_found == 2
+
+    def test_collect_all_reads_history(self, mock_claude_dir, tmp_path):
+        """collect_all() reads history.jsonl and creates PromptRecords."""
+        collector = PromptCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        result = collector.collect_all()
+        assert result.source_type == "prompts"
+        assert result.collected == 2
+        assert len(result.records) == 2
+
+        # Find the auth prompt and verify project extraction
+        auth_records = [r for r in result.records if "auth" in r.prompt_text]
+        assert len(auth_records) == 1
+        assert auth_records[0].project.endswith("myapp")
+
+    def test_collect_links_paste_cache(self, mock_claude_dir, tmp_path):
+        """collect_all() reads paste-cache files and links pasted content."""
+        collector = PromptCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        result = collector.collect_all()
+
+        # Find the dark mode prompt
+        dark_records = [r for r in result.records if "dark mode" in r.prompt_text]
+        assert len(dark_records) == 1
+        assert "theme" in dark_records[0].pasted_content
+
+    def test_collect_all_deduplicates(self, mock_claude_dir, tmp_path):
+        """collect_all() skips prompts that were already collected."""
+        collector = PromptCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        # First collection
+        first = collector.collect_all()
+        assert first.collected == 2
+
+        # Second collection — should skip all
+        second = collector.collect_all()
+        assert second.collected == 0
+        assert second.skipped == 2
+
+    def test_collect_returns_empty_list(self, mock_claude_dir, tmp_path):
+        """collect() returns empty list since prompts are not session-scoped."""
+        collector = PromptCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        records = collector.collect("any-session-id")
+        assert records == []
+
+    def test_scan_respects_project_filter(self, mock_claude_dir, tmp_path):
+        """scan() filters prompts by project name."""
+        collector = PromptCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        # Filter matches the project
+        result = collector.scan(project_filter="myapp")
+        assert result.total_found == 2
+
+        # Filter does NOT match
+        result = collector.scan(project_filter="nonexistent")
+        assert result.total_found == 0
+
+    def test_scan_respects_since_filter(self, mock_claude_dir, tmp_path):
+        """scan() filters prompts by timestamp."""
+        collector = PromptCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        # Far-future date — nothing should match
+        result = collector.scan(since="2099-01-01T00:00:00Z")
+        assert result.total_found == 0
+
+        # Far-past date — everything should match
+        result = collector.scan(since="2000-01-01T00:00:00Z")
+        assert result.total_found == 2
+
+    def test_collect_all_truncates_long_content(self, tmp_path):
+        """collect_all() truncates prompt_text to 5000 chars and pasted_content to 10000 chars."""
+        history = tmp_path / "history.jsonl"
+        long_prompt = "x" * 6000
+        long_paste_id = "longpaste1"
+        line = json.dumps({
+            "display": long_prompt,
+            "pastedContents": {long_paste_id: True},
+            "timestamp": 1759817571796,
+            "project": "C:\\Users\\Cade\\projects\\bigapp",
+        })
+        history.write_text(line, encoding="utf-8")
+
+        paste = tmp_path / "paste-cache"
+        paste.mkdir()
+        (paste / f"{long_paste_id}.txt").write_text("y" * 12000, encoding="utf-8")
+
+        collector = PromptCollector(
+            claude_dir=tmp_path,
+            collected_dir=tmp_path / "collected",
+        )
+        result = collector.collect_all()
+        assert result.collected == 1
+        rec = result.records[0]
+        assert len(rec.prompt_text) <= 5000
+        assert len(rec.pasted_content) <= 10000
+
+
+# ---------------------------------------------------------------------------
+# 11. EnvironmentCollector
+# ---------------------------------------------------------------------------
+
+try:
+    from bashgym.trace_capture.collectors.environment import EnvironmentCollector
+    _has_environment_collector = True
+except ImportError:
+    _has_environment_collector = False
+
+
+@pytest.mark.skipif(not _has_environment_collector, reason="EnvironmentCollector not yet implemented")
+class TestEnvironmentCollector:
+    """Tests for EnvironmentCollector: scanning, parsing, and collecting session environments and shell snapshots."""
+
+    @pytest.fixture
+    def mock_claude_dir(self, tmp_path):
+        """Create mock .claude with session-env dirs and shell snapshots."""
+        env = tmp_path / "session-env" / "abc12345-session-id"
+        env.mkdir(parents=True)
+        snaps = tmp_path / "shell-snapshots"
+        snaps.mkdir()
+        (snaps / "snapshot-bash-1760000000000-abc123.sh").write_text(
+            "# Snapshot file\nexport PATH=/usr/bin:/usr/local/bin\nalias ll='ls -la'\n",
+            encoding="utf-8",
+        )
+        return tmp_path
+
+    def test_scan_finds_environments(self, mock_claude_dir, tmp_path):
+        """scan() discovers session-env dirs and shell snapshots."""
+        collector = EnvironmentCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        result = collector.scan()
+        assert result.source_type == "environments"
+        assert result.total_found >= 1
+
+    def test_collect_all_captures_shell_snapshot(self, mock_claude_dir, tmp_path):
+        """collect_all() parses shell snapshot and returns records with PATH info."""
+        collector = EnvironmentCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        result = collector.collect_all()
+        assert result.source_type == "environments"
+        assert result.collected >= 1
+
+        # Find a record that has shell_snapshot data
+        snapshot_records = [r for r in result.records if r.shell_snapshot]
+        assert len(snapshot_records) >= 1
+        snap = snapshot_records[0]
+        assert "PATH" in str(snap.shell_snapshot)
+
+    def test_collect_all_deduplicates(self, mock_claude_dir, tmp_path):
+        """collect_all() skips already-collected items on second call."""
+        collector = EnvironmentCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        # First collection
+        first = collector.collect_all()
+        assert first.collected >= 1
+
+        # Second collection — should skip
+        second = collector.collect_all()
+        assert second.collected == 0
+        assert second.skipped >= 1
+
+    def test_collect_for_session_returns_env_record(self, mock_claude_dir, tmp_path):
+        """collect() returns an EnvironmentRecord for a known session."""
+        collector = EnvironmentCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        records = collector.collect("abc12345-session-id")
+        assert len(records) == 1
+        rec = records[0]
+        assert rec.session_id == "abc12345-session-id"
+        assert rec.source_type == "environments"
+        assert rec.platform != ""
+
+    def test_collect_for_unknown_session_returns_empty(self, mock_claude_dir, tmp_path):
+        """collect() returns empty list for a session that doesn't exist."""
+        collector = EnvironmentCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        records = collector.collect("nonexistent-session-id")
+        assert records == []
+
+    def test_parse_shell_snapshot_extracts_aliases(self, mock_claude_dir, tmp_path):
+        """Shell snapshot parsing extracts alias definitions."""
+        collector = EnvironmentCollector(
+            claude_dir=mock_claude_dir,
+            collected_dir=tmp_path / "collected",
+        )
+        result = collector.collect_all()
+        snapshot_records = [r for r in result.records if r.shell_snapshot]
+        assert len(snapshot_records) >= 1
+        snap = snapshot_records[0]
+        aliases = snap.shell_snapshot.get("aliases", {})
+        assert "ll" in aliases
+        assert aliases["ll"] == "ls -la"

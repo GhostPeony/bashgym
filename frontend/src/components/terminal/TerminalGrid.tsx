@@ -47,9 +47,12 @@ export function TerminalGrid() {
   // State for canvas popup - must be before any early returns
   const [canvasPopupPanelId, setCanvasPopupPanelId] = useState<string | null>(null)
 
-  // Handle focus panel from canvas view - show popup
+  // Handle focus panel from canvas view - show popup (skip for integration nodes which configure inline)
   const handleFocusPanel = useCallback((panelId: string) => {
     setActivePanel(panelId)
+    const panel = useTerminalStore.getState().panels.find(p => p.id === panelId)
+    const integrationTypes = ['context', 'neon', 'vercel']
+    if (panel && integrationTypes.includes(panel.type)) return
     setCanvasPopupPanelId(panelId)
   }, [setActivePanel])
 

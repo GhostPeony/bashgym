@@ -46,7 +46,14 @@
       "Bash(netstat:*)",
       "Bash(node -e:*)",
       "Bash(tasklist:*)",
-      "Bash(python --version 2>&1 || py --version 2>&1)"
+      "Bash(python --version 2>&1 || py --version 2>&1)",
+      "WebFetch(domain:docs.langchain.com)",
+      "WebFetch(domain:blog.langchain.com)",
+      "WebFetch(domain:supabase.com)",
+      "WebFetch(domain:neon.com)",
+      "WebFetch(domain:api-docs.neon.tech)",
+      "WebFetch(domain:v0.dev)",
+      "WebFetch(domain:v0.app)"
     ]
   }
 }

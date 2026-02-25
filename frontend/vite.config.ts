@@ -28,6 +28,11 @@ export default defineConfig({
       },
       preload: {
         input: 'electron/preload.ts',
+        // Same as main — prevent reload() from falling back to startup() when
+        // process.electronApp is null (i.e. we're managing Electron externally).
+        onstart() {
+          // no-op
+        },
         vite: {
           build: {
             outDir: 'dist-electron'

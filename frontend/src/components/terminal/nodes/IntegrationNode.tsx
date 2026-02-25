@@ -210,8 +210,9 @@ export const IntegrationNode = memo(function IntegrationNode({
     onClose
   } = data
 
-  // Local UI state
-  const [expanded, setExpanded] = useState(false)
+  // Local UI state — auto-expand when node is freshly created (no meaningful config yet)
+  const hasExistingConfig = Object.keys(adapterConfig).some(k => k !== '_panelId' && adapterConfig[k] !== undefined && adapterConfig[k] !== '')
+  const [expanded, setExpanded] = useState(!hasExistingConfig)
   const [config, setConfig] = useState<Record<string, unknown>>(
     () => ({ ...adapterConfig })
   )
@@ -355,7 +356,7 @@ export const IntegrationNode = memo(function IntegrationNode({
           </span>
         </div>
 
-        <div className="flex items-center gap-0.5">
+        <div className="flex items-center gap-0.5 nodrag">
           {hasConnections && (
             <div
               className="flex items-center gap-0.5 px-1 py-0.5 border-brutal border-accent/60 bg-accent/10 rounded-brutal text-accent"
@@ -442,7 +443,7 @@ export const IntegrationNode = memo(function IntegrationNode({
 
       {/* Action buttons */}
       {(hasConnections || actions.length > 0) && (
-        <div className="flex flex-wrap items-center gap-1.5 px-3 py-2 border-b border-brutal border-border">
+        <div className="flex flex-wrap items-center gap-1.5 px-3 py-2 border-b border-brutal border-border nodrag">
           {hasConnections && (
             <button
               type="button"
@@ -486,7 +487,7 @@ export const IntegrationNode = memo(function IntegrationNode({
 
       {/* Expanded config panel */}
       {expanded && (credentialFields.length > 0 || configFields.length > 0) && (
-        <div className="px-3 py-2 space-y-2 bg-background-secondary">
+        <div className="px-3 py-2 space-y-2 bg-background-secondary nodrag nowheel">
           {/* Credential fields (shown above adapter config) */}
           {credentialFields.length > 0 && (
             <>
@@ -517,6 +518,19 @@ export const IntegrationNode = memo(function IntegrationNode({
             </div>
           ))}
         </div>
+      )}
+
+      {/* Setup prompt when collapsed with no config */}
+      {adapter && !expanded && !hasExistingConfig && (
+        <button
+          type="button"
+          onClick={handleToggleExpand}
+          className="w-full px-3 py-3 text-center bg-background-secondary hover:bg-background-tertiary transition-press cursor-pointer border-t border-brutal border-border"
+        >
+          <span className="text-[10px] font-mono text-accent uppercase tracking-wider">
+            Click to configure
+          </span>
+        </button>
       )}
 
       {/* Fallback when adapter not yet registered */}

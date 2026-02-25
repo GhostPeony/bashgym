@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any, Set, Tuple
 from dataclasses import dataclass, asdict, field
 
-from ..core import TraceStep, TraceSession, TraceCapture
+from ..core import TraceStep, TraceSession, TraceCapture, estimate_cost_usd
 
 # Import instrumentation (optional - graceful degradation if not available)
 try:
@@ -63,7 +63,8 @@ class ClaudeSessionImporter:
     ~/.claude/projects/<project-slug>/<session-id>.jsonl
     """
 
-    RELEVANT_TOOLS = {"Bash", "Edit", "Write", "Read", "Grep", "Glob"}
+    # Tools to exclude from trace steps (empty = capture everything)
+    EXCLUDED_TOOLS: Set[str] = set()
 
     def __init__(self):
         self.trace_capture = TraceCapture()
@@ -159,20 +160,86 @@ class ClaudeSessionImporter:
         session_files.sort(key=lambda x: x[1], reverse=True)
         return session_files
 
-    def parse_session_file(self, session_file: Path) -> Tuple[List[TraceStep], Optional[str]]:
+    @staticmethod
+    def _extract_text_from_content(content) -> Optional[str]:
+        """Extract text from message content (string or list of blocks)."""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            texts = []
+            for item in content:
+                if isinstance(item, str):
+                    texts.append(item)
+                elif isinstance(item, dict) and item.get("type") == "text":
+                    texts.append(item.get("text", ""))
+            return "\n".join(texts) if texts else None
+        return None
+
+    @staticmethod
+    def _apply_tool_result(steps: list, tool_use_id: str, result_content, is_error: bool) -> None:
+        """Match a tool_result to its corresponding step and update output/success."""
+        for step in steps:
+            if step.metadata.get("tool_use_id") == tool_use_id:
+                if isinstance(result_content, str):
+                    step.output = result_content[:10000]
+                elif isinstance(result_content, list):
+                    text_parts = []
+                    for block in result_content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            text_parts.append(block.get("text", ""))
+                        elif isinstance(block, str):
+                            text_parts.append(block)
+                    step.output = "\n".join(text_parts)[:10000]
+                step.success = not is_error
+                step.exit_code = 1 if is_error else 0
+                break
+
+    def parse_session_file(
+        self,
+        session_file: Path,
+        thinking_max_chars: int = 2000,
+        text_max_chars: int = 2000,
+    ) -> Tuple[List[TraceStep], Dict[str, Any]]:
         """
-        Parse a Claude Code session JSONL file and extract tool execution steps.
+        Parse a Claude Code session JSONL file and extract all available data.
+
+        Captures tool executions, model/token usage, thinking blocks, all user
+        messages, subagent metadata, git branch, and session-level aggregates.
 
         Args:
             session_file: Path to the .jsonl session file
+            thinking_max_chars: Max chars to keep from each thinking block
+            text_max_chars: Max chars to keep from each assistant text block
 
         Returns:
-            Tuple of (List of TraceStep objects, user's initial prompt or None)
+            Tuple of (steps, session_metadata_dict)
         """
-        steps = []
+        steps: List[TraceStep] = []
         session_id = session_file.stem
-        cwd = None
-        user_initial_prompt = None
+        cwd: Optional[str] = None
+
+        # Session-level accumulators
+        models_used: Set[str] = set()
+        tools_used: Set[str] = set()
+        meta: Dict[str, Any] = {
+            "user_initial_prompt": None,
+            "all_user_prompts": [],
+            "plan_contents": [],
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+            "total_cache_creation_tokens": 0,
+            "total_cache_read_tokens": 0,
+            "conversation_turns": 0,
+            "thinking_block_count": 0,
+            "total_tool_calls": 0,
+            "subagent_count": 0,
+            "subagent_total_tokens": 0,
+            "subagent_total_duration_ms": 0,
+            "git_branch": None,
+            "claude_version": None,
+            "session_slug": None,
+            "session_id_original": None,
+        }
 
         try:
             with open(session_file, 'r', encoding='utf-8') as f:
@@ -186,45 +253,74 @@ class ClaudeSessionImporter:
                     except json.JSONDecodeError:
                         continue
 
-                    # Track working directory
+                    # --- Session-level fields (first occurrence wins) ---
                     if "cwd" in event:
                         cwd = event["cwd"]
+                    if meta["git_branch"] is None and "gitBranch" in event:
+                        meta["git_branch"] = event["gitBranch"]
+                    if meta["claude_version"] is None and "version" in event:
+                        meta["claude_version"] = event["version"]
+                    if meta["session_slug"] is None and "slug" in event:
+                        meta["session_slug"] = event["slug"]
+                    if meta["session_id_original"] is None and "sessionId" in event:
+                        meta["session_id_original"] = event["sessionId"]
 
-                    # Extract user's initial prompt (first user message)
-                    if user_initial_prompt is None and event.get("type") == "user":
-                        message = event.get("message", {})
-                        content = message.get("content", [])
-                        # Content can be a string or a list of content blocks
-                        if isinstance(content, str):
-                            user_initial_prompt = content[:500]  # Limit length
-                        elif isinstance(content, list):
-                            for item in content:
-                                if isinstance(item, dict) and item.get("type") == "text":
-                                    user_initial_prompt = item.get("text", "")[:500]
-                                    break
-                                elif isinstance(item, str):
-                                    user_initial_prompt = item[:500]
-                                    break
+                    event_type = event.get("type")
 
-                    # Extract tool use from assistant messages
-                    if event.get("type") == "assistant":
-                        message = event.get("message", {})
-                        content = message.get("content", [])
+                    # ===================================================
+                    # ASSISTANT messages: model, usage, thinking, text, tool_use
+                    # ===================================================
+                    if event_type == "assistant":
+                        msg = event.get("message", {})
+                        model = msg.get("model", "")
+                        usage = msg.get("usage", {})
                         timestamp = event.get("timestamp", datetime.now(timezone.utc).isoformat())
 
+                        # Accumulate model & token usage
+                        if model:
+                            models_used.add(model)
+                        meta["total_input_tokens"] += usage.get("input_tokens", 0)
+                        meta["total_output_tokens"] += usage.get("output_tokens", 0)
+                        meta["total_cache_creation_tokens"] += usage.get("cache_creation_input_tokens", 0)
+                        meta["total_cache_read_tokens"] += usage.get("cache_read_input_tokens", 0)
+
+                        # Walk content blocks: thinking/text precede tool_use
+                        content = msg.get("content", [])
+                        if not isinstance(content, list):
+                            continue
+
+                        pending_thinking: List[str] = []
+                        pending_text: List[str] = []
+
                         for item in content:
-                            if item.get("type") == "tool_use":
+                            block_type = item.get("type") if isinstance(item, dict) else None
+
+                            if block_type == "thinking":
+                                meta["thinking_block_count"] += 1
+                                thinking_str = item.get("thinking", "")
+                                if thinking_str:
+                                    pending_thinking.append(thinking_str[:thinking_max_chars])
+
+                            elif block_type == "text":
+                                text_str = item.get("text", "")
+                                if text_str:
+                                    pending_text.append(text_str[:text_max_chars])
+
+                            elif block_type == "tool_use":
                                 tool_name = item.get("name", "")
                                 tool_input = item.get("input", {})
                                 tool_id = item.get("id", "")
 
-                                if tool_name in self.RELEVANT_TOOLS:
+                                meta["total_tool_calls"] += 1
+                                tools_used.add(tool_name)
+
+                                if tool_name not in self.EXCLUDED_TOOLS:
                                     step = TraceStep(
                                         step_id=f"{session_id}_{tool_id}",
                                         timestamp=timestamp,
                                         tool_name=tool_name,
                                         command=json.dumps(tool_input),
-                                        output="",  # Output comes in tool_result
+                                        output="",
                                         exit_code=None,
                                         success=None,
                                         cwd=cwd or "",
@@ -233,68 +329,94 @@ class ClaudeSessionImporter:
                                         metadata={
                                             "tool_use_id": tool_id,
                                             "session_id": session_id,
-                                            "imported_from": str(session_file)
+                                            "imported_from": str(session_file),
+                                            "model": model,
+                                            "input_tokens": usage.get("input_tokens", 0),
+                                            "output_tokens": usage.get("output_tokens", 0),
+                                            "thinking_content": "\n".join(pending_thinking) if pending_thinking else None,
+                                            "assistant_text": "\n".join(pending_text) if pending_text else None,
+                                            "stop_reason": msg.get("stop_reason"),
                                         }
                                     )
                                     steps.append(step)
 
-                    # Extract tool results from user events (this is where Claude stores them)
-                    elif event.get("type") == "user":
+                                # Reset pending blocks after associating with this tool_use
+                                pending_thinking = []
+                                pending_text = []
+
+                    # ===================================================
+                    # USER messages: prompts, tool_result, toolUseResult, planContent
+                    # ===================================================
+                    elif event_type == "user":
                         message = event.get("message", {})
                         content = message.get("content", [])
 
+                        # Extract user prompt text
+                        user_text = self._extract_text_from_content(content)
+                        if user_text:
+                            meta["all_user_prompts"].append({
+                                "text": user_text[:2000],
+                                "timestamp": event.get("timestamp"),
+                            })
+                            if meta["user_initial_prompt"] is None:
+                                meta["user_initial_prompt"] = user_text[:500]
+                            meta["conversation_turns"] += 1
+
+                        # Extract planContent
+                        plan = event.get("planContent")
+                        if plan:
+                            meta["plan_contents"].append(str(plan)[:2000])
+
+                        # Extract subagent metadata from toolUseResult
+                        tur = event.get("toolUseResult")
+                        if isinstance(tur, dict) and "totalTokens" in tur:
+                            meta["subagent_count"] += 1
+                            meta["subagent_total_tokens"] += tur.get("totalTokens", 0)
+                            meta["subagent_total_duration_ms"] += tur.get("totalDurationMs", 0)
+
+                        # Match tool_result blocks back to steps
                         for item in content if isinstance(content, list) else []:
-                            if item.get("type") == "tool_result":
-                                tool_use_id = item.get("tool_use_id", "")
-                                result_content = item.get("content", "")
-                                is_error = item.get("is_error", False)
+                            if isinstance(item, dict) and item.get("type") == "tool_result":
+                                self._apply_tool_result(
+                                    steps,
+                                    item.get("tool_use_id", ""),
+                                    item.get("content", ""),
+                                    item.get("is_error", False),
+                                )
 
-                                # Find matching step and update it
-                                for step in steps:
-                                    if step.metadata.get("tool_use_id") == tool_use_id:
-                                        # Truncate large outputs
-                                        if isinstance(result_content, str):
-                                            step.output = result_content[:10000]
-                                        elif isinstance(result_content, list):
-                                            # Content can be a list of blocks
-                                            text_parts = []
-                                            for block in result_content:
-                                                if isinstance(block, dict) and block.get("type") == "text":
-                                                    text_parts.append(block.get("text", ""))
-                                                elif isinstance(block, str):
-                                                    text_parts.append(block)
-                                            step.output = "\n".join(text_parts)[:10000]
-                                        # Default to success if is_error not present
-                                        step.success = not is_error
-                                        step.exit_code = 1 if is_error else 0
-                                        break
-
-                    # Also check progress events for agent_progress (sub-agent results)
-                    elif event.get("type") == "progress":
+                    # ===================================================
+                    # PROGRESS events: agent_progress tool results
+                    # ===================================================
+                    elif event_type == "progress":
                         data = event.get("data", {})
                         if data.get("type") == "agent_progress":
-                            msg = data.get("message", {})
-                            msg_content = msg.get("message", {}).get("content", [])
-
+                            msg_content = data.get("message", {}).get("message", {}).get("content", [])
                             for item in msg_content if isinstance(msg_content, list) else []:
-                                if item.get("type") == "tool_result":
-                                    tool_use_id = item.get("tool_use_id", "")
-                                    result_content = item.get("content", "")
-                                    is_error = item.get("is_error", False)
-
-                                    for step in steps:
-                                        if step.metadata.get("tool_use_id") == tool_use_id:
-                                            if isinstance(result_content, str):
-                                                step.output = result_content[:10000]
-                                            step.success = not is_error
-                                            step.exit_code = 1 if is_error else 0
-                                            break
+                                if isinstance(item, dict) and item.get("type") == "tool_result":
+                                    self._apply_tool_result(
+                                        steps,
+                                        item.get("tool_use_id", ""),
+                                        item.get("content", ""),
+                                        item.get("is_error", False),
+                                    )
 
         except IOError as e:
             print(f"Error reading session file {session_file}: {e}")
-            return [], None
+            return [], {"user_initial_prompt": None}
 
-        return steps, user_initial_prompt
+        # Finalize session metadata
+        meta["models_used"] = sorted(models_used)
+        meta["tools_used"] = sorted(tools_used)
+        meta["model"] = meta["models_used"][0] if meta["models_used"] else ""
+        meta["api_equivalent_cost_usd"] = estimate_cost_usd(
+            meta["model"],
+            meta["total_input_tokens"],
+            meta["total_output_tokens"],
+            meta["total_cache_creation_tokens"],
+            meta["total_cache_read_tokens"],
+        )
+
+        return steps, meta
 
     def import_session(
         self,
@@ -324,7 +446,7 @@ class ClaudeSessionImporter:
             )
 
         # Parse the session
-        steps, user_initial_prompt = self.parse_session_file(session_file)
+        steps, session_meta = self.parse_session_file(session_file)
 
         if not steps:
             return ImportResult(
@@ -335,14 +457,16 @@ class ClaudeSessionImporter:
                 skip_reason="No relevant tool executions found"
             )
 
-        # Create a trace session with user's initial prompt
+        # Extract user prompt, spread remaining metadata into session
+        user_initial_prompt = session_meta.pop("user_initial_prompt", None) or "Imported session"
         session = TraceSession.from_steps(
             steps,
             source_tool="claude_code",
             verification_passed=None,  # Unknown until actually verified
             imported=True,
             import_source=str(session_file),
-            user_initial_prompt=user_initial_prompt or "Imported session"
+            user_initial_prompt=user_initial_prompt,
+            **session_meta
         )
 
         # Save to traces directory
@@ -422,7 +546,7 @@ class ClaudeSessionImporter:
                 )
 
             # Parse the session
-            steps, user_initial_prompt = self.parse_session_file(session_file)
+            steps, session_meta = self.parse_session_file(session_file)
 
             if not steps:
                 return ImportResult(
@@ -433,6 +557,8 @@ class ClaudeSessionImporter:
                     skip_reason="No relevant tool executions found"
                 )
 
+            # Extract user prompt for injection/PII checks
+            user_initial_prompt = session_meta.pop("user_initial_prompt", None)
             sanitized_prompt = user_initial_prompt
 
             # Apply instrumentation if available
@@ -445,7 +571,6 @@ class ClaudeSessionImporter:
                     )
                     if not is_safe:
                         injection_blocked = True
-                        # Still import but flag it
                         sanitized_prompt = "[INJECTION_DETECTED] " + user_initial_prompt
 
                     # Filter PII from user prompt
@@ -455,6 +580,16 @@ class ClaudeSessionImporter:
                         location="import.user_prompt"
                     )
                     if sanitized_prompt != original_prompt:
+                        pii_redactions += 1
+
+                # Filter PII from all_user_prompts entries
+                for prompt_entry in session_meta.get("all_user_prompts", []):
+                    original_text = prompt_entry["text"]
+                    prompt_entry["text"] = await inst.filter_pii(
+                        original_text,
+                        location="import.user_prompt"
+                    )
+                    if prompt_entry["text"] != original_text:
                         pii_redactions += 1
 
                 # Filter PII from tool outputs
@@ -478,14 +613,15 @@ class ClaudeSessionImporter:
                         if step.command != original_command:
                             pii_redactions += 1
 
-            # Create a trace session with sanitized prompt
+            # Create trace session with all enriched metadata
             session = TraceSession.from_steps(
                 steps,
                 source_tool="claude_code",
                 verification_passed=None,  # Unknown until actually verified
                 imported=True,
                 import_source=str(session_file),
-                user_initial_prompt=sanitized_prompt or "Imported session"
+                user_initial_prompt=sanitized_prompt or "Imported session",
+                **session_meta
             )
 
             # Add instrumentation metadata

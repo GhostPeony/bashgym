@@ -199,11 +199,73 @@ class TraceSession:
                 "successful_steps": successful_steps,
                 "failed_steps": failed_steps,
                 "success_rate": successful_steps / total_steps if total_steps > 0 else 0,
-                "repos_count": len(repos)
+                "repos_count": len(repos),
+                "tool_breakdown": _count_tools(steps)
             },
             trace=[asdict(s) for s in steps],
             final_bash_script="\n".join(bash_commands)
         )
+
+
+def _count_tools(steps: list) -> Dict[str, int]:
+    """Count tool usage across steps."""
+    counts: Dict[str, int] = {}
+    for s in steps:
+        name = s.tool_name
+        counts[name] = counts.get(name, 0) + 1
+    return counts
+
+
+# ---------------------------------------------------------------------------
+# Cost estimation for Claude models
+# ---------------------------------------------------------------------------
+
+# Pricing per million tokens: (input, output, cache_creation, cache_read)
+CLAUDE_PRICING: Dict[str, Dict[str, float]] = {
+    # Claude 4.6
+    "claude-opus-4-6": {"input": 15.0, "output": 75.0, "cache_creation": 18.75, "cache_read": 1.875},
+    "claude-sonnet-4-6": {"input": 3.0, "output": 15.0, "cache_creation": 3.75, "cache_read": 0.30},
+    # Claude 4.5
+    "claude-opus-4-5": {"input": 15.0, "output": 75.0, "cache_creation": 18.75, "cache_read": 1.875},
+    "claude-sonnet-4-5": {"input": 3.0, "output": 15.0, "cache_creation": 3.75, "cache_read": 0.30},
+    "claude-haiku-4-5": {"input": 0.80, "output": 4.0, "cache_creation": 1.0, "cache_read": 0.08},
+    # Claude 4
+    "claude-opus-4": {"input": 15.0, "output": 75.0, "cache_creation": 18.75, "cache_read": 1.875},
+    "claude-sonnet-4": {"input": 3.0, "output": 15.0, "cache_creation": 3.75, "cache_read": 0.30},
+}
+
+
+def estimate_cost_usd(
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    cache_creation_tokens: int = 0,
+    cache_read_tokens: int = 0,
+) -> float:
+    """
+    Estimate USD cost from model name and token counts.
+
+    Uses prefix matching to handle model date suffixes
+    (e.g. "claude-sonnet-4-5-20250929" matches "claude-sonnet-4-5").
+    Returns 0.0 for unknown models.
+    """
+    pricing = CLAUDE_PRICING.get(model)
+    if pricing is None:
+        # Try prefix match (longest prefix wins)
+        for key in sorted(CLAUDE_PRICING, key=len, reverse=True):
+            if model.startswith(key):
+                pricing = CLAUDE_PRICING[key]
+                break
+    if pricing is None:
+        return 0.0
+
+    cost = (
+        input_tokens * pricing["input"] / 1_000_000
+        + output_tokens * pricing["output"] / 1_000_000
+        + cache_creation_tokens * pricing["cache_creation"] / 1_000_000
+        + cache_read_tokens * pricing["cache_read"] / 1_000_000
+    )
+    return round(cost, 6)
 
 
 class TraceCapture:

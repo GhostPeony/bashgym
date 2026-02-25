@@ -25,13 +25,13 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 # =============================================================================
 
 # Allowlist of env var names that can be read/written through this API
-ALLOWED_ENV_KEYS = [
+ALLOWED_ENV_KEYS = {
     "ANTHROPIC_API_KEY",
     "OPENAI_API_KEY",
     "GOOGLE_API_KEY",
     "NVIDIA_API_KEY",
     "HF_TOKEN",
-]
+}
 
 # Display metadata per provider key
 PROVIDER_META: Dict[str, Dict[str, str]] = {
@@ -247,7 +247,10 @@ async def update_env_keys(request: EnvUpdateRequest):
             )
 
     # Write to .env file (preserves comments/ordering)
-    _write_env_values(request.values)
+    try:
+        _write_env_values(request.values)
+    except (IOError, OSError) as e:
+        raise HTTPException(status_code=500, detail=f"Failed to write .env file: {e}")
 
     # Also update os.environ for the running process
     for key, val in request.values.items():

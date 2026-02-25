@@ -9,6 +9,7 @@ Tests cover:
   - get_claude_dir() and get_collected_dir() helper functions
   - Deduplication state loading/saving via scan_state.json
   - SubagentCollector: scanning, parsing, collecting subagent JSONL files
+  - DebugCollector: scanning, parsing, collecting debug log files
 """
 
 import json
@@ -1664,3 +1665,400 @@ class TestCLICommands:
         captured = capsys.readouterr()
         assert "Collection Status" in captured.out
         assert "plans" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# 14. DebugCollector
+# ---------------------------------------------------------------------------
+
+# A minimal but realistic mock debug log file.  Mirrors the real format found
+# at ~/.claude/debug/<session-id>.txt: each line starts with an ISO timestamp,
+# a log level tag in brackets, and the log message.
+
+MOCK_DEBUG_LOG = """\
+2026-02-20T16:17:40.218Z [DEBUG] [init] configureGlobalMTLS starting
+2026-02-20T16:17:40.218Z [DEBUG] [init] configureGlobalMTLS complete
+2026-02-20T16:17:40.260Z [DEBUG] Applying permission update: Adding 1 allow rule(s)
+2026-02-20T16:17:42.516Z [DEBUG] [SystemPrompt] path=simple proactive=false
+2026-02-20T16:17:42.922Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.49.b45; cc_entrypoint=cli; cch=e76c9;
+2026-02-20T16:17:42.923Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-20T16:17:42.923Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-20T16:17:42.924Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-20T16:17:43.091Z [DEBUG] autocompact: tokens=2123 threshold=167000 effectiveWindow=180000
+2026-02-20T16:17:43.337Z [DEBUG] Tool search disabled for model 'claude-sonnet-4-5-20250929': model does not support tool_reference blocks.
+2026-02-20T16:17:44.694Z [DEBUG] Stream started - received first chunk
+2026-02-20T16:17:46.500Z [DEBUG] [useDeferredValue] Messages deferred by 2
+2026-02-20T16:17:50.000Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.49.107; cc_entrypoint=cli; cch=00000;
+2026-02-20T16:17:50.001Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-20T16:17:50.002Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-20T16:17:50.003Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-20T16:17:50.100Z [DEBUG] autocompact: tokens=45674 threshold=167000 effectiveWindow=180000
+2026-02-20T16:17:50.200Z [DEBUG] Tool search disabled for model 'claude-sonnet-4-5-20250929': model does not support tool_reference blocks.
+2026-02-20T16:17:51.500Z [DEBUG] Stream started - received first chunk
+2026-02-20T16:17:55.000Z [ERROR] Error: LSP server plugin:rust-analyzer crashed with exit code 1
+2026-02-20T16:17:55.500Z [ERROR] RangeError: stdout maxBuffer length exceeded
+"""
+
+MOCK_DEBUG_LOG_WITH_HAIKU = """\
+2026-02-20T18:00:00.000Z [DEBUG] [init] configureGlobalMTLS starting
+2026-02-20T18:00:01.000Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks.
+2026-02-20T18:00:01.500Z [DEBUG] [SystemPrompt] path=simple proactive=false
+2026-02-20T18:00:02.000Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.50.6b4; cc_entrypoint=cli; cch=00000;
+2026-02-20T18:00:02.001Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-20T18:00:02.002Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-20T18:00:02.100Z [DEBUG] autocompact: tokens=4926 threshold=167000 effectiveWindow=180000
+2026-02-20T18:00:03.000Z [DEBUG] Stream started - received first chunk
+"""
+
+
+class TestDebugCollector:
+    """Tests for the DebugCollector that parses ~/.claude/debug/<session>.txt."""
+
+    def _make_debug_dir(self, tmp_path, logs: dict):
+        """Create a fake ~/.claude/debug/ directory with the given log files.
+
+        Parameters
+        ----------
+        tmp_path : Path
+            pytest temp directory.
+        logs : dict
+            Mapping of session_id -> log content string.
+
+        Returns
+        -------
+        tuple of (claude_dir, collected_dir)
+        """
+        claude_dir = tmp_path / ".claude"
+        debug_dir = claude_dir / "debug"
+        debug_dir.mkdir(parents=True)
+        for session_id, content in logs.items():
+            (debug_dir / f"{session_id}.txt").write_text(content, encoding="utf-8")
+        collected_dir = tmp_path / "collected"
+        collected_dir.mkdir(parents=True)
+        return claude_dir, collected_dir
+
+    def test_source_type_is_debug(self, tmp_path):
+        """DebugCollector.source_type returns 'debug'."""
+        from bashgym.trace_capture.collectors.debug import DebugCollector
+
+        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {})
+        collector = DebugCollector(claude_dir, collected_dir)
+        assert collector.source_type == "debug"
+
+    def test_scan_finds_debug_files(self, tmp_path):
+        """scan() correctly counts debug log files."""
+        from bashgym.trace_capture.collectors.debug import DebugCollector
+
+        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {
+            "aaa-bbb-ccc": MOCK_DEBUG_LOG,
+            "ddd-eee-fff": MOCK_DEBUG_LOG_WITH_HAIKU,
+        })
+        collector = DebugCollector(claude_dir, collected_dir)
+        result = collector.scan()
+
+        assert result.source_type == "debug"
+        assert result.total_found == 2
+        assert result.new_available == 2
+        assert result.already_collected == 0
+        assert result.estimated_size_bytes > 0
+
+    def test_scan_respects_since_filter(self, tmp_path):
+        """scan(since=...) only returns files modified after the given date."""
+        from bashgym.trace_capture.collectors.debug import DebugCollector
+        import time
+
+        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {
+            "old-session": MOCK_DEBUG_LOG,
+        })
+        # Set the file modification time to the distant past
+        old_file = claude_dir / "debug" / "old-session.txt"
+        old_time = 1700000000  # 2023-11-14
+        os.utime(old_file, (old_time, old_time))
+
+        collector = DebugCollector(claude_dir, collected_dir)
+        result = collector.scan(since="2025-01-01T00:00:00Z")
+
+        assert result.total_found == 0
+
+    def test_scan_deduplicates_already_collected(self, tmp_path):
+        """scan() subtracts already-collected sessions from new_available."""
+        from bashgym.trace_capture.collectors.debug import DebugCollector
+
+        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {
+            "sess-001": MOCK_DEBUG_LOG,
+            "sess-002": MOCK_DEBUG_LOG_WITH_HAIKU,
+        })
+        collector = DebugCollector(claude_dir, collected_dir)
+
+        # Simulate sess-001 already collected
+        collector._save_collected_id("sess-001")
+
+        result = collector.scan()
+        assert result.total_found == 2
+        assert result.already_collected == 1
+        assert result.new_available == 1
+
+    def test_scan_returns_zero_when_no_debug_dir(self, tmp_path):
+        """scan() returns zeros when the debug directory doesn't exist."""
+        from bashgym.trace_capture.collectors.debug import DebugCollector
+
+        claude_dir = tmp_path / ".claude"  # no debug/ subdirectory
+        claude_dir.mkdir(parents=True)
+        collected_dir = tmp_path / "collected"
+        collected_dir.mkdir(parents=True)
+
+        collector = DebugCollector(claude_dir, collected_dir)
+        result = collector.scan()
+        assert result.total_found == 0
+        assert result.new_available == 0
+
+    def test_collect_single_session(self, tmp_path):
+        """collect() parses a single debug log and returns a DebugRecord."""
+        from bashgym.trace_capture.collectors.debug import DebugCollector
+
+        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {
+            "sess-abc": MOCK_DEBUG_LOG,
+        })
+        collector = DebugCollector(claude_dir, collected_dir)
+        records = collector.collect("sess-abc")
+
+        assert len(records) == 1
+        record = records[0]
+        assert record.session_id == "sess-abc"
+        assert record.source_type == "debug"
+
+    def test_collect_extracts_api_call_count(self, tmp_path):
+        """collect() counts API calls from '[API:request]' lines."""
+        from bashgym.trace_capture.collectors.debug import DebugCollector
+
+        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {
+            "sess-abc": MOCK_DEBUG_LOG,
+        })
+        collector = DebugCollector(claude_dir, collected_dir)
+        records = collector.collect("sess-abc")
+        record = records[0]
+
+        # MOCK_DEBUG_LOG has 2 "[API:request]" lines
+        assert record.api_call_count == 2
+
+    def test_collect_extracts_models_used(self, tmp_path):
+        """collect() extracts unique model names from debug logs."""
+        from bashgym.trace_capture.collectors.debug import DebugCollector
+
+        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {
+            "sess-abc": MOCK_DEBUG_LOG,
+        })
+        collector = DebugCollector(claude_dir, collected_dir)
+        records = collector.collect("sess-abc")
+        record = records[0]
+
+        assert "claude-sonnet-4-5-20250929" in record.metadata.get("models_used", [])
+
+    def test_collect_extracts_token_counts(self, tmp_path):
+        """collect() sums token counts from autocompact lines."""
+        from bashgym.trace_capture.collectors.debug import DebugCollector
+
+        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {
+            "sess-abc": MOCK_DEBUG_LOG,
+        })
+        collector = DebugCollector(claude_dir, collected_dir)
+        records = collector.collect("sess-abc")
+        record = records[0]
+
+        # Should extract max tokens seen (45674 from second autocompact line)
+        assert record.metadata.get("max_tokens_seen", 0) == 45674
+        # Should track all token snapshots
+        assert len(record.metadata.get("token_snapshots", [])) == 2
+
+    def test_collect_detects_system_prompt(self, tmp_path):
+        """collect() detects [SystemPrompt] entries."""
+        from bashgym.trace_capture.collectors.debug import DebugCollector
+
+        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {
+            "sess-abc": MOCK_DEBUG_LOG,
+        })
+        collector = DebugCollector(claude_dir, collected_dir)
+        records = collector.collect("sess-abc")
+        record = records[0]
+
+        # MOCK_DEBUG_LOG has one [SystemPrompt] line
+        assert len(record.system_prompts) == 1
+        assert "path=simple" in record.system_prompts[0]
+
+    def test_collect_extracts_errors(self, tmp_path):
+        """collect() captures [ERROR] log lines."""
+        from bashgym.trace_capture.collectors.debug import DebugCollector
+
+        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {
+            "sess-abc": MOCK_DEBUG_LOG,
+        })
+        collector = DebugCollector(claude_dir, collected_dir)
+        records = collector.collect("sess-abc")
+        record = records[0]
+
+        # MOCK_DEBUG_LOG has 2 [ERROR] lines
+        assert len(record.errors) == 2
+        assert any("LSP server" in e for e in record.errors)
+        assert any("maxBuffer" in e for e in record.errors)
+
+    def test_collect_computes_latencies(self, tmp_path):
+        """collect() computes latency between API request and stream start."""
+        from bashgym.trace_capture.collectors.debug import DebugCollector
+
+        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {
+            "sess-abc": MOCK_DEBUG_LOG,
+        })
+        collector = DebugCollector(claude_dir, collected_dir)
+        records = collector.collect("sess-abc")
+        record = records[0]
+
+        # total_latency_ms should be sum of latencies for both API calls
+        assert record.total_latency_ms > 0
+        assert len(record.metadata.get("latencies_ms", [])) == 2
+
+    def test_collect_missing_session_returns_empty(self, tmp_path):
+        """collect() returns an empty list when the session file doesn't exist."""
+        from bashgym.trace_capture.collectors.debug import DebugCollector
+
+        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {})
+        collector = DebugCollector(claude_dir, collected_dir)
+        records = collector.collect("nonexistent-session")
+
+        assert records == []
+
+    def test_collect_all_processes_all_files(self, tmp_path):
+        """collect_all() processes all debug log files and returns a batch result."""
+        from bashgym.trace_capture.collectors.debug import DebugCollector
+
+        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {
+            "sess-001": MOCK_DEBUG_LOG,
+            "sess-002": MOCK_DEBUG_LOG_WITH_HAIKU,
+        })
+        collector = DebugCollector(claude_dir, collected_dir)
+        result = collector.collect_all()
+
+        assert result.source_type == "debug"
+        assert result.collected == 2
+        assert result.skipped == 0
+        assert len(result.records) == 2
+        assert len(result.errors) == 0
+
+    def test_collect_all_deduplicates(self, tmp_path):
+        """collect_all() skips already-collected sessions."""
+        from bashgym.trace_capture.collectors.debug import DebugCollector
+
+        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {
+            "sess-001": MOCK_DEBUG_LOG,
+            "sess-002": MOCK_DEBUG_LOG_WITH_HAIKU,
+        })
+        collector = DebugCollector(claude_dir, collected_dir)
+
+        # Pre-mark sess-001 as collected
+        collector._save_collected_id("sess-001")
+
+        result = collector.collect_all()
+        assert result.collected == 1
+        assert result.skipped == 1
+
+    def test_collect_all_with_since_filter(self, tmp_path):
+        """collect_all(since=...) respects time filter."""
+        from bashgym.trace_capture.collectors.debug import DebugCollector
+
+        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {
+            "sess-old": MOCK_DEBUG_LOG,
+        })
+        old_file = claude_dir / "debug" / "sess-old.txt"
+        old_time = 1700000000  # 2023-11-14
+        os.utime(old_file, (old_time, old_time))
+
+        collector = DebugCollector(claude_dir, collected_dir)
+        result = collector.collect_all(since="2025-01-01T00:00:00Z")
+        assert result.collected == 0
+
+    def test_collect_extracts_multiple_models(self, tmp_path):
+        """collect() identifies multiple distinct model names."""
+        from bashgym.trace_capture.collectors.debug import DebugCollector
+
+        mixed_log = """\
+2026-02-20T18:00:00.000Z [DEBUG] [init] configureGlobalMTLS starting
+2026-02-20T18:00:01.000Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': not supported.
+2026-02-20T18:00:02.000Z [DEBUG] Tool search disabled for model 'claude-sonnet-4-5-20250929': not supported.
+2026-02-20T18:00:03.000Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': not supported.
+"""
+        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {
+            "sess-multi": mixed_log,
+        })
+        collector = DebugCollector(claude_dir, collected_dir)
+        records = collector.collect("sess-multi")
+        record = records[0]
+
+        models = record.metadata.get("models_used", [])
+        assert "claude-haiku-4-5-20251001" in models
+        assert "claude-sonnet-4-5-20250929" in models
+        # Should be deduplicated
+        assert len(models) == 2
+
+    def test_record_serializes_to_json(self, tmp_path):
+        """DebugRecord produced by collect() is JSON-serializable."""
+        from bashgym.trace_capture.collectors.debug import DebugCollector
+
+        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {
+            "sess-abc": MOCK_DEBUG_LOG,
+        })
+        collector = DebugCollector(claude_dir, collected_dir)
+        records = collector.collect("sess-abc")
+        record = records[0]
+
+        # Should not raise
+        data = record.to_json()
+        serialized = json.dumps(data)
+        assert "sess-abc" in serialized
+
+    def test_collect_stores_session_start_end_times(self, tmp_path):
+        """collect() stores the first and last timestamps from the log."""
+        from bashgym.trace_capture.collectors.debug import DebugCollector
+
+        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {
+            "sess-abc": MOCK_DEBUG_LOG,
+        })
+        collector = DebugCollector(claude_dir, collected_dir)
+        records = collector.collect("sess-abc")
+        record = records[0]
+
+        # The timestamp field should be set to the first log entry timestamp
+        assert "2026-02-20" in record.timestamp
+        # Metadata should contain the session duration info
+        assert "first_timestamp" in record.metadata
+        assert "last_timestamp" in record.metadata
+
+    def test_collect_does_not_store_raw_content(self, tmp_path):
+        """collect() must NOT store raw debug log content (PII safety)."""
+        from bashgym.trace_capture.collectors.debug import DebugCollector
+
+        claude_dir, collected_dir = self._make_debug_dir(tmp_path, {
+            "sess-abc": MOCK_DEBUG_LOG,
+        })
+        collector = DebugCollector(claude_dir, collected_dir)
+        records = collector.collect("sess-abc")
+        record = records[0]
+
+        data = json.dumps(record.to_json())
+        # Should not contain raw log content like file paths from debug
+        assert "configureGlobalMTLS" not in data
+        assert "OAuth token check" not in data
+
+    def test_debug_in_scanner_all_sources(self):
+        """'debug' should be in ALL_SOURCES list."""
+        from bashgym.trace_capture.collectors.scanner import ALL_SOURCES
+        assert "debug" in ALL_SOURCES
+
+    def test_scanner_includes_debug_collector(self):
+        """ClaudeDataScanner should include the DebugCollector."""
+        from bashgym.trace_capture.collectors.scanner import ClaudeDataScanner
+        scanner = ClaudeDataScanner()
+        assert "debug" in scanner._collectors
+
+    def test_debug_collector_exported_from_init(self):
+        """DebugCollector should be importable from the collectors package."""
+        from bashgym.trace_capture.collectors import DebugCollector
+        assert DebugCollector is not None

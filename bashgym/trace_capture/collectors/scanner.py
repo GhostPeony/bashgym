@@ -1,9 +1,10 @@
 """
 ClaudeDataScanner Orchestrator
 
-Provides a single interface to orchestrate all six concrete collectors
+Provides a single interface to orchestrate all seven concrete collectors
 (SubagentCollector, EditCollector, PlanCollector, PromptCollector,
-TodoCollector, EnvironmentCollector) for comprehensive .claude data capture.
+TodoCollector, EnvironmentCollector, DebugCollector) for comprehensive
+.claude data capture.
 
 Usage::
 
@@ -30,6 +31,7 @@ from .plan import PlanCollector
 from .prompt import PromptCollector
 from .todo import TodoCollector
 from .environment import EnvironmentCollector
+from .debug import DebugCollector
 
 
 ALL_SOURCES: List[str] = [
@@ -39,6 +41,7 @@ ALL_SOURCES: List[str] = [
     "prompts",
     "todos",
     "environments",
+    "debug",
 ]
 
 
@@ -67,6 +70,7 @@ class ClaudeDataScanner:
             "prompts": PromptCollector,
             "todos": TodoCollector,
             "environments": EnvironmentCollector,
+            "debug": DebugCollector,
         }
 
     # ------------------------------------------------------------------

@@ -15,7 +15,7 @@ from typing import Dict, List, Optional
 CORE_TOOLS: List[Dict] = [
     {
         "name": "import_traces",
-        "description": "Import data from Claude Code sessions. Can import session traces, subagent conversations, file edits, plans, todos, prompts, and environment data.",
+        "description": "Import data from Claude Code sessions. Can import session traces, subagent conversations, file edits, plans, todos, prompts, environment data, and debug/API traffic metadata.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -23,7 +23,7 @@ CORE_TOOLS: List[Dict] = [
                     "type": "array",
                     "items": {
                         "type": "string",
-                        "enum": ["all", "sessions", "subagents", "edits", "plans", "prompts", "todos", "environments"],
+                        "enum": ["all", "sessions", "subagents", "edits", "plans", "prompts", "todos", "environments", "debug"],
                     },
                     "description": "Which data sources to import. Defaults to ['all'].",
                 },

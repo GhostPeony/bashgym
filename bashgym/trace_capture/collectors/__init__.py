@@ -28,6 +28,7 @@ from .plan import PlanCollector
 from .todo import TodoCollector
 from .prompt import PromptCollector
 from .environment import EnvironmentCollector
+from .debug import DebugCollector
 from .scanner import ClaudeDataScanner, ALL_SOURCES
 
 __all__ = [
@@ -39,6 +40,7 @@ __all__ = [
     "TodoCollector",
     "PromptCollector",
     "EnvironmentCollector",
+    "DebugCollector",
     "SubagentRecord",
     "EditRecord",
     "PlanRecord",

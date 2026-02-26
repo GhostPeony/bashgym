@@ -175,6 +175,66 @@ class TestGeminiSessionImporter:
 
 
 # ---------------------------------------------------------------------------
+# 1b. GeminiSessionImporter - Enrichment metadata
+# ---------------------------------------------------------------------------
+
+class TestGeminiImporterEnrichment:
+    """Tests for enriched conversation metadata in Gemini importer."""
+
+    def test_trace_has_conversation_turns(self, tmp_path):
+        session = [
+            {"role": "user", "parts": [{"text": "hello"}]},
+            {"role": "model", "parts": [{"text": "hi"}]},
+            {"role": "user", "parts": [{"text": "help me"}]},
+            {"role": "model", "parts": [{"functionCall": {"name": "bash", "args": {"command": "ls"}}}]},
+        ]
+        session_file = tmp_path / "session-test.json"
+        session_file.write_text(json.dumps(session))
+        importer = GeminiSessionImporter()
+        steps, metadata = importer.parse_session_file(session_file)
+        assert metadata.get("conversation_turns", 0) >= 2
+        assert isinstance(metadata.get("all_user_prompts", []), list)
+        assert len(metadata.get("all_user_prompts", [])) >= 2
+        assert metadata.get("user_initial_prompt") == "hello"
+
+    def test_trace_has_models_used(self, tmp_path):
+        session = [
+            {"role": "model", "parts": [{"text": "ok"}], "modelVersion": "gemini-2.5-pro"},
+        ]
+        session_file = tmp_path / "session-test2.json"
+        session_file.write_text(json.dumps(session))
+        importer = GeminiSessionImporter()
+        steps, metadata = importer.parse_session_file(session_file)
+        assert "models_used" in metadata
+        assert "gemini-2.5-pro" in metadata["models_used"]
+
+    def test_models_used_deduplicates(self, tmp_path):
+        """Multiple turns with the same modelVersion should not duplicate."""
+        session = [
+            {"role": "model", "parts": [{"text": "a"}], "modelVersion": "gemini-2.5-pro"},
+            {"role": "model", "parts": [{"text": "b"}], "modelVersion": "gemini-2.5-pro"},
+            {"role": "model", "parts": [{"text": "c"}], "modelVersion": "gemini-2.5-flash"},
+        ]
+        session_file = tmp_path / "session-dedup.json"
+        session_file.write_text(json.dumps(session))
+        importer = GeminiSessionImporter()
+        steps, metadata = importer.parse_session_file(session_file)
+        assert sorted(metadata["models_used"]) == ["gemini-2.5-flash", "gemini-2.5-pro"]
+
+    def test_models_used_empty_when_no_model_version(self, tmp_path):
+        """If no entries have modelVersion, models_used should be empty."""
+        session = [
+            {"role": "user", "parts": [{"text": "hi"}]},
+            {"role": "model", "parts": [{"text": "hello"}]},
+        ]
+        session_file = tmp_path / "session-nomodel.json"
+        session_file.write_text(json.dumps(session))
+        importer = GeminiSessionImporter()
+        steps, metadata = importer.parse_session_file(session_file)
+        assert metadata["models_used"] == []
+
+
+# ---------------------------------------------------------------------------
 # 2. CopilotSessionImporter
 # ---------------------------------------------------------------------------
 
@@ -320,6 +380,139 @@ class TestCopilotSessionImporter:
         steps, meta = importer.parse_session_file(session_file)
         assert steps == []
         assert meta["user_initial_prompt"] is None
+
+
+# ---------------------------------------------------------------------------
+# 2b. CopilotImporterEnrichment (conversation + DPO metadata)
+# ---------------------------------------------------------------------------
+
+class TestCopilotImporterEnrichment:
+    """Tests for enriched metadata in Copilot importer."""
+
+    def _make_importer(self, tmp_path, monkeypatch):
+        """Create a CopilotSessionImporter pointing at tmp_path."""
+        bashgym_dir = tmp_path / ".bashgym"
+        bashgym_dir.mkdir(parents=True, exist_ok=True)
+        traces_dir = bashgym_dir / "traces"
+        traces_dir.mkdir(parents=True, exist_ok=True)
+
+        monkeypatch.setattr(
+            "bashgym.trace_capture.importers.copilot_history.CopilotSessionImporter._get_copilot_dir",
+            staticmethod(lambda: tmp_path / ".copilot"),
+        )
+        with patch("bashgym.trace_capture.importers.copilot_history.TraceCapture") as mock_tc:
+            mock_tc_instance = mock_tc.return_value
+            mock_tc_instance.bashgym_dir = bashgym_dir
+            mock_tc_instance.traces_dir = traces_dir
+            importer = CopilotSessionImporter()
+        return importer
+
+    def test_trace_has_conversation_turns(self, tmp_path, monkeypatch):
+        """Conversation turn count and user prompts are extracted."""
+        importer = self._make_importer(tmp_path, monkeypatch)
+
+        session = {
+            "messages": [
+                {"role": "user", "content": "fix the bug"},
+                {"role": "assistant", "content": "Sure", "tool_calls": [{"function": {"name": "bash", "arguments": "{\"command\": \"ls\"}"}}]},
+                {"role": "user", "content": "thanks"},
+            ]
+        }
+        session_file = tmp_path / "session.json"
+        _write_json(session_file, session)
+
+        steps, metadata = importer.parse_session_file(session_file)
+        assert metadata.get("conversation_turns", 0) >= 2
+        assert len(metadata.get("all_user_prompts", [])) >= 2
+
+    def test_trace_has_dpo_metadata(self, tmp_path, monkeypatch):
+        """Accept/reject counts are extracted from suggestions."""
+        importer = self._make_importer(tmp_path, monkeypatch)
+
+        session = {
+            "suggestions": [
+                {"command": "git status", "accepted": True},
+                {"command": "rm -rf /", "accepted": False},
+            ]
+        }
+        session_file = tmp_path / "session2.json"
+        _write_json(session_file, session)
+
+        steps, metadata = importer.parse_session_file(session_file)
+        assert metadata.get("accepted_commands", 0) >= 1
+        assert metadata.get("rejected_commands", 0) >= 1
+
+    def test_trace_has_models_used(self, tmp_path, monkeypatch):
+        """Model names are extracted from session data."""
+        importer = self._make_importer(tmp_path, monkeypatch)
+
+        session = {
+            "model": "gpt-4o",
+            "messages": [
+                {"role": "user", "content": "help me"},
+                {"role": "assistant", "content": "ok", "model": "gpt-4o-mini"},
+            ],
+        }
+        session_file = tmp_path / "session-models.json"
+        _write_json(session_file, session)
+
+        steps, metadata = importer.parse_session_file(session_file)
+        models = metadata.get("models_used", [])
+        assert "gpt-4o" in models
+        assert "gpt-4o-mini" in models
+
+    def test_user_initial_prompt_truncated(self, tmp_path, monkeypatch):
+        """user_initial_prompt is truncated to 500 chars."""
+        importer = self._make_importer(tmp_path, monkeypatch)
+
+        long_prompt = "x" * 1000
+        session = {
+            "messages": [
+                {"role": "user", "content": long_prompt},
+            ]
+        }
+        session_file = tmp_path / "session-long.json"
+        _write_json(session_file, session)
+
+        steps, metadata = importer.parse_session_file(session_file)
+        assert metadata["user_initial_prompt"] is not None
+        assert len(metadata["user_initial_prompt"]) == 500
+
+    def test_enrichment_with_list_sessions(self, tmp_path, monkeypatch):
+        """Metadata is merged correctly for array-of-sessions format."""
+        importer = self._make_importer(tmp_path, monkeypatch)
+
+        session = [
+            {
+                "model": "copilot-v1",
+                "messages": [
+                    {"role": "user", "content": "first session"},
+                ],
+                "suggestions": [
+                    {"command": "ls", "accepted": True},
+                ],
+            },
+            {
+                "model": "copilot-v2",
+                "messages": [
+                    {"role": "user", "content": "second session"},
+                ],
+                "suggestions": [
+                    {"command": "rm -rf /", "accepted": False},
+                ],
+            },
+        ]
+        session_file = tmp_path / "session-list.json"
+        _write_json(session_file, session)
+
+        steps, metadata = importer.parse_session_file(session_file)
+        assert metadata["conversation_turns"] == 2
+        assert len(metadata["all_user_prompts"]) == 2
+        assert metadata["accepted_commands"] == 1
+        assert metadata["rejected_commands"] == 1
+        assert "copilot-v1" in metadata["models_used"]
+        assert "copilot-v2" in metadata["models_used"]
+        assert metadata["user_initial_prompt"] == "first session"
 
 
 # ---------------------------------------------------------------------------

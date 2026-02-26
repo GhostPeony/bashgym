@@ -164,13 +164,20 @@ class CopilotSessionImporter:
         In all patterns, we look for accept/reject metadata for DPO training.
         """
         steps: List[TraceStep] = []
+        models_seen: Set[str] = set()
         meta: Dict[str, Any] = {
             "user_initial_prompt": None,
             "all_user_prompts": [],
             "conversation_turns": 0,
             "accepted_commands": 0,
             "rejected_commands": 0,
+            "models_used": [],
         }
+
+        # Session-level model field
+        session_model = data.get("model", data.get("model_name", ""))
+        if session_model and isinstance(session_model, str):
+            models_seen.add(session_model)
 
         timestamp_base = data.get(
             "timestamp",
@@ -193,6 +200,11 @@ class CopilotSessionImporter:
                 ts = msg.get("timestamp", timestamp_base)
                 if isinstance(ts, (int, float)):
                     ts = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+
+                # Extract model name from message
+                msg_model = msg.get("model", msg.get("model_name", ""))
+                if msg_model and isinstance(msg_model, str):
+                    models_seen.add(msg_model)
 
                 if role == "user" and content:
                     content_str = (
@@ -258,6 +270,9 @@ class CopilotSessionImporter:
                 proposed = suggestion.get(
                     "command", suggestion.get("proposed", "")
                 )
+                sug_model = suggestion.get("model", suggestion.get("model_name", ""))
+                if sug_model and isinstance(sug_model, str):
+                    models_seen.add(sug_model)
                 accepted = suggestion.get("accepted", None)
                 executed = suggestion.get("executed", "")
                 output = suggestion.get("output", "")[:10000]
@@ -308,6 +323,11 @@ class CopilotSessionImporter:
                 ts = turn.get("timestamp", timestamp_base)
                 if isinstance(ts, (int, float)):
                     ts = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+
+                # Extract model name from turn
+                turn_model = turn.get("model", turn.get("model_name", ""))
+                if turn_model and isinstance(turn_model, str):
+                    models_seen.add(turn_model)
 
                 if role == "user" and content:
                     content_str = (
@@ -363,6 +383,9 @@ class CopilotSessionImporter:
                     continue
 
                 proposed = cmd.get("proposed", cmd.get("command", ""))
+                cmd_model = cmd.get("model", cmd.get("model_name", ""))
+                if cmd_model and isinstance(cmd_model, str):
+                    models_seen.add(cmd_model)
                 accepted = cmd.get("accepted", None)
                 executed = cmd.get("executed", proposed)
                 output = cmd.get("output", "")[:10000]
@@ -403,6 +426,8 @@ class CopilotSessionImporter:
                 )
                 steps.append(step)
 
+        meta["models_used"] = sorted(models_seen)
+
         return steps, meta
 
     def parse_session_file(
@@ -436,7 +461,9 @@ class CopilotSessionImporter:
                     "conversation_turns": 0,
                     "accepted_commands": 0,
                     "rejected_commands": 0,
+                    "models_used": [],
                 }
+                all_models: Set[str] = set()
                 for entry in data:
                     if isinstance(entry, dict):
                         s, m = self._extract_steps_from_session(
@@ -449,6 +476,8 @@ class CopilotSessionImporter:
                         combined_meta["conversation_turns"] += m.get("conversation_turns", 0)
                         combined_meta["accepted_commands"] += m.get("accepted_commands", 0)
                         combined_meta["rejected_commands"] += m.get("rejected_commands", 0)
+                        all_models.update(m.get("models_used", []))
+                combined_meta["models_used"] = sorted(all_models)
                 return all_steps, combined_meta
             return [], {"user_initial_prompt": None}
 

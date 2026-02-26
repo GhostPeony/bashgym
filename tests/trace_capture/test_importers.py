@@ -714,3 +714,335 @@ class TestOpenCodeSessionImporter:
         for f, mtime in files:
             assert f.suffix == ".json"
             assert isinstance(mtime, datetime)
+
+
+# ---------------------------------------------------------------------------
+# 3b. OpenCodeImporter - Enrichment metadata
+# ---------------------------------------------------------------------------
+
+class TestOpenCodeImporterEnrichment:
+    """Tests for enriched conversation metadata in OpenCode importer."""
+
+    def _make_importer(self, tmp_path, monkeypatch):
+        """Create an OpenCodeSessionImporter pointing at tmp_path."""
+        bashgym_dir = tmp_path / ".bashgym"
+        bashgym_dir.mkdir(parents=True, exist_ok=True)
+        traces_dir = bashgym_dir / "traces"
+        traces_dir.mkdir(parents=True, exist_ok=True)
+
+        storage_dir = tmp_path / "opencode_storage"
+        storage_dir.mkdir(parents=True, exist_ok=True)
+
+        monkeypatch.setattr(
+            "bashgym.trace_capture.importers.opencode_history.OpenCodeSessionImporter._get_storage_dirs",
+            staticmethod(lambda: [storage_dir]),
+        )
+        with patch("bashgym.trace_capture.importers.opencode_history.TraceCapture") as mock_tc:
+            mock_tc_instance = mock_tc.return_value
+            mock_tc_instance.bashgym_dir = bashgym_dir
+            mock_tc_instance.traces_dir = traces_dir
+            importer = OpenCodeSessionImporter()
+        return importer
+
+    def test_trace_has_conversation_turns(self, tmp_path, monkeypatch):
+        """Conversation turns and user prompts are extracted from file-based parse."""
+        importer = self._make_importer(tmp_path, monkeypatch)
+
+        storage_dir = importer.storage_dirs[0]
+        session_dir = storage_dir / "session" / "proj_enrich"
+        session_dir.mkdir(parents=True)
+
+        session_data = {
+            "title": "Enrichment Test",
+            "messages": [
+                {"role": "user", "content": "fix the tests"},
+                {
+                    "role": "assistant",
+                    "content": "I'll help",
+                    "tool_calls": [
+                        {"name": "bash", "input": {"command": "pytest"}, "output": "ok"}
+                    ],
+                },
+                {"role": "user", "content": "thanks"},
+            ],
+        }
+        session_file = session_dir / "sess-enrich.json"
+        _write_json(session_file, session_data)
+
+        steps, metadata = importer.parse_session_from_files(session_file)
+        assert metadata.get("conversation_turns", 0) >= 2
+        assert len(metadata.get("all_user_prompts", [])) >= 2
+        assert metadata.get("user_initial_prompt") == "fix the tests"
+
+    def test_trace_has_models_used(self, tmp_path, monkeypatch):
+        """Model names are extracted from session and message data."""
+        importer = self._make_importer(tmp_path, monkeypatch)
+
+        storage_dir = importer.storage_dirs[0]
+        session_dir = storage_dir / "session" / "proj_models"
+        session_dir.mkdir(parents=True)
+
+        session_data = {
+            "title": "Model Test",
+            "model": "deepseek-coder-v2",
+            "messages": [
+                {"role": "user", "content": "hello"},
+                {
+                    "role": "assistant",
+                    "model": "qwen-2.5-coder",
+                    "tool_calls": [
+                        {"name": "bash", "input": {"command": "echo hi"}, "output": "hi"}
+                    ],
+                },
+            ],
+        }
+        session_file = session_dir / "sess-models.json"
+        _write_json(session_file, session_data)
+
+        steps, metadata = importer.parse_session_from_files(session_file)
+        models = metadata.get("models_used", [])
+        assert "deepseek-coder-v2" in models
+        assert "qwen-2.5-coder" in models
+
+    def test_models_used_deduplicates(self, tmp_path, monkeypatch):
+        """Repeated model names are deduplicated in models_used."""
+        importer = self._make_importer(tmp_path, monkeypatch)
+
+        storage_dir = importer.storage_dirs[0]
+        session_dir = storage_dir / "session" / "proj_dedup"
+        session_dir.mkdir(parents=True)
+
+        session_data = {
+            "title": "Dedup Test",
+            "model": "gpt-4o",
+            "messages": [
+                {"role": "user", "content": "do something"},
+                {"role": "assistant", "model": "gpt-4o", "content": "done"},
+                {"role": "assistant", "model": "gpt-4o", "content": "also done"},
+            ],
+        }
+        session_file = session_dir / "sess-dedup.json"
+        _write_json(session_file, session_data)
+
+        steps, metadata = importer.parse_session_from_files(session_file)
+        assert metadata["models_used"] == ["gpt-4o"]
+
+    def test_models_used_empty_when_absent(self, tmp_path, monkeypatch):
+        """models_used is an empty list when no model info is present."""
+        importer = self._make_importer(tmp_path, monkeypatch)
+
+        storage_dir = importer.storage_dirs[0]
+        session_dir = storage_dir / "session" / "proj_nomodel"
+        session_dir.mkdir(parents=True)
+
+        session_data = {
+            "title": "No Model",
+            "messages": [
+                {"role": "user", "content": "hi"},
+            ],
+        }
+        session_file = session_dir / "sess-nomodel.json"
+        _write_json(session_file, session_data)
+
+        steps, metadata = importer.parse_session_from_files(session_file)
+        assert metadata["models_used"] == []
+
+    def test_cli_export_has_enrichment(self, tmp_path, monkeypatch):
+        """parse_session_from_cli also extracts conversation metadata and models."""
+        importer = self._make_importer(tmp_path, monkeypatch)
+
+        session_data = {
+            "title": "CLI Enrichment",
+            "model": "claude-3-opus",
+            "messages": [
+                {"role": "user", "content": "Write a test"},
+                {
+                    "role": "assistant",
+                    "model": "gpt-4o",
+                    "tool_calls": [
+                        {"name": "write_file", "input": {"path": "test.py"}, "output": "ok"}
+                    ],
+                },
+                {"role": "user", "content": "run it"},
+            ],
+        }
+
+        steps, metadata = importer.parse_session_from_cli(session_data, "cli-enrich-001")
+        assert metadata["conversation_turns"] == 2
+        assert len(metadata["all_user_prompts"]) == 2
+        assert metadata["user_initial_prompt"] == "Write a test"
+        models = metadata["models_used"]
+        assert "claude-3-opus" in models
+        assert "gpt-4o" in models
+
+    def test_user_initial_prompt_truncated(self, tmp_path, monkeypatch):
+        """user_initial_prompt is truncated to 500 characters."""
+        importer = self._make_importer(tmp_path, monkeypatch)
+
+        storage_dir = importer.storage_dirs[0]
+        session_dir = storage_dir / "session" / "proj_trunc"
+        session_dir.mkdir(parents=True)
+
+        long_prompt = "x" * 1000
+        session_data = {
+            "title": "Truncation Test",
+            "messages": [
+                {"role": "user", "content": long_prompt},
+            ],
+        }
+        session_file = session_dir / "sess-trunc.json"
+        _write_json(session_file, session_data)
+
+        steps, metadata = importer.parse_session_from_files(session_file)
+        assert metadata["user_initial_prompt"] is not None
+        assert len(metadata["user_initial_prompt"]) == 500
+
+
+# ---------------------------------------------------------------------------
+# 4. Codex Importer - Enrichment metadata
+# ---------------------------------------------------------------------------
+
+from bashgym.trace_capture.adapters.codex import parse_codex_transcript
+
+
+class TestCodexImporterEnrichment:
+    """Tests for enriched conversation metadata in Codex importer."""
+
+    def test_trace_has_conversation_turns(self):
+        """Conversation turns are extracted from user messages."""
+        transcript = {
+            "messages": [
+                {"role": "user", "content": "fix the bug"},
+                {
+                    "role": "assistant",
+                    "content": "Sure",
+                    "tool_calls": [
+                        {"name": "bash", "input": {"command": "pytest"}, "output": "ok"}
+                    ],
+                },
+                {"role": "user", "content": "thanks"},
+            ]
+        }
+        steps, metadata = parse_codex_transcript(transcript)
+        assert metadata["conversation_turns"] == 2
+        assert len(metadata["all_user_prompts"]) == 2
+        assert metadata["user_initial_prompt"] == "fix the bug"
+
+    def test_trace_has_models_used(self):
+        """Model names are extracted from session and assistant messages."""
+        transcript = {
+            "model": "o3-mini",
+            "messages": [
+                {"role": "user", "content": "help me code"},
+                {
+                    "role": "assistant",
+                    "model": "codex-v1",
+                    "tool_calls": [
+                        {"name": "bash", "input": {"command": "ls"}}
+                    ],
+                },
+            ],
+        }
+        steps, metadata = parse_codex_transcript(transcript)
+        models = metadata["models_used"]
+        assert "o3-mini" in models
+        assert "codex-v1" in models
+
+    def test_models_used_deduplicates(self):
+        """Repeated model names are deduplicated."""
+        transcript = {
+            "model": "o3-mini",
+            "messages": [
+                {"role": "assistant", "model": "o3-mini", "content": "a"},
+                {"role": "assistant", "model": "o3-mini", "content": "b"},
+            ],
+        }
+        steps, metadata = parse_codex_transcript(transcript)
+        assert metadata["models_used"] == ["o3-mini"]
+
+    def test_models_used_empty_when_absent(self):
+        """models_used is empty when no model info is present."""
+        transcript = {
+            "tool_calls": [
+                {"name": "bash", "input": {"command": "echo hi"}, "output": "hi"}
+            ]
+        }
+        steps, metadata = parse_codex_transcript(transcript)
+        assert metadata["models_used"] == []
+
+    def test_user_prompts_extracted_with_top_level_tool_calls(self):
+        """User prompts are extracted even when tool_calls are at top level."""
+        transcript = {
+            "tool_calls": [
+                {"name": "bash", "input": {"command": "ls"}, "output": "files"}
+            ],
+            "messages": [
+                {"role": "user", "content": "list files"},
+                {"role": "user", "content": "now sort them"},
+            ],
+        }
+        steps, metadata = parse_codex_transcript(transcript)
+        assert metadata["conversation_turns"] == 2
+        assert len(metadata["all_user_prompts"]) == 2
+        assert metadata["user_initial_prompt"] == "list files"
+
+    def test_user_initial_prompt_truncated(self):
+        """user_initial_prompt is truncated to 500 characters."""
+        long_prompt = "y" * 1000
+        transcript = {
+            "messages": [
+                {"role": "user", "content": long_prompt},
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {"name": "bash", "input": {"command": "ls"}}
+                    ],
+                },
+            ],
+        }
+        steps, metadata = parse_codex_transcript(transcript)
+        assert metadata["user_initial_prompt"] is not None
+        assert len(metadata["user_initial_prompt"]) == 500
+
+    def test_empty_transcript_returns_empty_metadata(self):
+        """Empty transcript returns zero counts and empty lists."""
+        steps, metadata = parse_codex_transcript({})
+        assert steps == []
+        assert metadata["conversation_turns"] == 0
+        assert metadata["all_user_prompts"] == []
+        assert metadata["user_initial_prompt"] is None
+        assert metadata["models_used"] == []
+
+    def test_list_transcript_no_user_metadata(self):
+        """A list-format transcript has tool steps but no user metadata."""
+        transcript = [
+            {"name": "bash", "input": {"command": "echo hello"}, "output": "hello"}
+        ]
+        steps, metadata = parse_codex_transcript(transcript)
+        assert len(steps) == 1
+        assert metadata["conversation_turns"] == 0
+        assert metadata["user_initial_prompt"] is None
+
+    def test_user_content_as_list_of_parts(self):
+        """User content in list-of-parts format is handled."""
+        transcript = {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "first part"},
+                        {"type": "text", "text": "second part"},
+                    ],
+                },
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {"name": "bash", "input": {"command": "ls"}}
+                    ],
+                },
+            ],
+        }
+        steps, metadata = parse_codex_transcript(transcript)
+        assert metadata["conversation_turns"] == 1
+        assert "first part" in metadata["all_user_prompts"][0]["text"]
+        assert "second part" in metadata["all_user_prompts"][0]["text"]

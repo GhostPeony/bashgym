@@ -476,17 +476,18 @@ class OpenCodeSessionImporter:
         session_file: Path,
         msg_idx: int,
         storage_dir: Optional[Path] = None,
-    ) -> Tuple[List[TraceStep], Optional[str]]:
+    ) -> Tuple[List[TraceStep], Optional[str], Optional[str]]:
         """
         Extract TraceStep objects from a message dict.
 
         Also loads associated parts from storage if available.
 
         Returns:
-            Tuple of (steps, user_text_or_None)
+            Tuple of (steps, user_text_or_None, model_or_None)
         """
         steps: List[TraceStep] = []
         user_text: Optional[str] = None
+        model: Optional[str] = msg.get("model")
         role = msg.get("role", "")
         timestamp = msg.get(
             "timestamp",
@@ -622,7 +623,7 @@ class OpenCodeSessionImporter:
                                 existing_step.exit_code = 1 if is_error else 0
                                 break
 
-        return steps, user_text
+        return steps, user_text, model
 
     def parse_session_from_files(
         self, session_file: Path
@@ -643,7 +644,9 @@ class OpenCodeSessionImporter:
             "user_initial_prompt": None,
             "all_user_prompts": [],
             "conversation_turns": 0,
+            "models_used": [],
         }
+        models_used: Set[str] = set()
 
         # Load session metadata
         try:
@@ -660,6 +663,11 @@ class OpenCodeSessionImporter:
         meta["opencode_session_title"] = session_data.get("title", "")
         meta["opencode_project_id"] = session_data.get("project_id", "")
 
+        # Session-level model field
+        session_model = session_data.get("model", "")
+        if session_model:
+            models_used.add(session_model)
+
         steps: List[TraceStep] = []
 
         # Try loading messages from the message directory
@@ -668,10 +676,13 @@ class OpenCodeSessionImporter:
         if messages:
             for msg_idx, msg in enumerate(messages):
                 try:
-                    msg_steps, user_text = self._extract_steps_from_message(
+                    msg_steps, user_text, msg_model = self._extract_steps_from_message(
                         msg, session_id, session_file, msg_idx, storage_dir
                     )
                     steps.extend(msg_steps)
+
+                    if msg_model:
+                        models_used.add(msg_model)
 
                     if user_text:
                         meta["conversation_turns"] += 1
@@ -693,10 +704,13 @@ class OpenCodeSessionImporter:
                     if not isinstance(msg, dict):
                         continue
                     try:
-                        msg_steps, user_text = self._extract_steps_from_message(
+                        msg_steps, user_text, msg_model = self._extract_steps_from_message(
                             msg, session_id, session_file, msg_idx
                         )
                         steps.extend(msg_steps)
+
+                        if msg_model:
+                            models_used.add(msg_model)
 
                         if user_text:
                             meta["conversation_turns"] += 1
@@ -709,6 +723,7 @@ class OpenCodeSessionImporter:
                     except Exception:
                         continue
 
+        meta["models_used"] = sorted(models_used)
         return steps, meta
 
     def parse_session_from_cli(
@@ -728,8 +743,15 @@ class OpenCodeSessionImporter:
             "user_initial_prompt": None,
             "all_user_prompts": [],
             "conversation_turns": 0,
+            "models_used": [],
             "opencode_session_title": session_data.get("title", ""),
         }
+        models_used: Set[str] = set()
+
+        # Session-level model field
+        session_model = session_data.get("model", "")
+        if session_model:
+            models_used.add(session_model)
 
         steps: List[TraceStep] = []
         messages = session_data.get("messages", session_data.get("conversation", []))
@@ -744,10 +766,13 @@ class OpenCodeSessionImporter:
             try:
                 # Use a synthetic source file path for CLI exports
                 source = Path(f"<opencode-cli-export:{session_id}>")
-                msg_steps, user_text = self._extract_steps_from_message(
+                msg_steps, user_text, msg_model = self._extract_steps_from_message(
                     msg, session_id, source, msg_idx
                 )
                 steps.extend(msg_steps)
+
+                if msg_model:
+                    models_used.add(msg_model)
 
                 if user_text:
                     meta["conversation_turns"] += 1
@@ -760,6 +785,7 @@ class OpenCodeSessionImporter:
             except Exception:
                 continue
 
+        meta["models_used"] = sorted(models_used)
         return steps, meta
 
     def import_session(

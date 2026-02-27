@@ -349,6 +349,7 @@ class GeminiSessionImporter:
         """
         steps: List[TraceStep] = []
         session_id = session_file.stem
+        models_used: Set[str] = set()
         meta: Dict[str, Any] = {
             "user_initial_prompt": None,
             "all_user_prompts": [],
@@ -415,6 +416,11 @@ class GeminiSessionImporter:
                         if meta["user_initial_prompt"] is None:
                             meta["user_initial_prompt"] = str(user_text)[:500]
 
+                # Capture model version from model turns
+                model_version = entry.get("modelVersion")
+                if model_version and isinstance(model_version, str):
+                    models_used.add(model_version)
+
                 # Extract tool steps from any entry
                 entry_steps = self._extract_tool_steps_from_entry(
                     entry, session_id, session_file, idx
@@ -424,6 +430,9 @@ class GeminiSessionImporter:
             except Exception:
                 # Defensive: skip malformed entries
                 continue
+
+        # Finalize session metadata
+        meta["models_used"] = sorted(models_used)
 
         return steps, meta
 

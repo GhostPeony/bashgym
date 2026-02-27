@@ -89,6 +89,7 @@ export interface TraceQuality {
   length_score: number
   tool_diversity: number
   efficiency_score: number
+  cognitive_quality: number
   total_score: number
 }
 
@@ -116,6 +117,53 @@ export interface TraceInfo {
   repos_count: number
   created_at?: string
   promoted_at?: string
+  tool_breakdown?: Record<string, number>
+  source_tool?: string
+}
+
+export interface TraceDetailInfo extends TraceInfo {
+  duration_seconds?: number
+  step_outcomes?: (boolean | null)[]
+  cognitive_summary?: {
+    planning_phases: number
+    reflections: number
+    thinking_steps: number
+    cognitive_coverage: number
+  }
+  raw_metrics?: {
+    total_steps: number
+    successful_steps: number
+    failed_steps: number
+    unique_tools: number
+    unique_commands: number
+    cognitive_steps: number
+  }
+}
+
+export interface ToolAnalyticsStat {
+  tool: string
+  calls: number
+  sessions: number
+  success_rate: number
+  total_tokens: number
+}
+
+export interface TraceAnalytics {
+  tool_stats: ToolAnalyticsStat[]
+  quality_distribution: Record<string, number>
+  totals: {
+    sessions: number
+    steps: number
+    tokens: number
+  }
+  training_readiness: {
+    sft_ready: number
+    dpo_pairs_possible: number
+    total_trainable: number
+  }
+  source_breakdown: Array<{ source: string; traces: number; steps: number; tokens: number }>
+  cost_total_usd: number
+  avg_quality_score: number
 }
 
 export interface RouterStats {
@@ -278,29 +326,35 @@ export const evaluatorApi = {
 
 // Traces API
 export const tracesApi = {
-  list: (options?: { status?: 'gold' | 'silver' | 'bronze' | 'failed' | 'pending', repo?: string, limit?: number }) => {
+  list: (options?: { status?: 'gold' | 'silver' | 'bronze' | 'failed' | 'pending', repo?: string, source_tool?: string, limit?: number, offset?: number }) => {
     const params = new URLSearchParams()
     if (options?.status) params.set('status', options.status)
     if (options?.repo) params.set('repo', options.repo)
+    if (options?.source_tool) params.set('source_tool', options.source_tool)
     if (options?.limit) params.set('limit', String(options.limit))
+    if (options?.offset) params.set('offset', String(options.offset))
     const queryString = params.toString()
-    return request<TraceInfo[]>(`/traces${queryString ? `?${queryString}` : ''}`)
+    return request<{ traces: TraceInfo[]; total: number; offset: number; limit: number; counts: { gold: number; silver: number; bronze: number; failed: number; pending: number } }>(`/traces${queryString ? `?${queryString}` : ''}`)
   },
 
   listRepos: () =>
     request<RepoInfo[]>('/traces/repos'),
 
-  stats: () =>
-    request<{
+  stats: (options?: { range?: string }) => {
+    const params = new URLSearchParams()
+    if (options?.range) params.set('range', options.range)
+    const qs = params.toString()
+    return request<{
       timeline: { time: string; gold: number; failed: number; pending: number }[]
       totals: { gold: number; failed: number; pending: number; total: number }
-    }>('/traces/stats'),
+    }>(`/traces/stats${qs ? `?${qs}` : ''}`)
+  },
 
   getGold: (limit?: number) =>
     request<TraceInfo[]>(`/traces/gold${limit ? `?limit=${limit}` : ''}`),
 
   get: (traceId: string) =>
-    request<TraceInfo>(`/traces/${traceId}`),
+    request<TraceDetailInfo>(`/traces/${traceId}`),
 
   promote: (traceId: string) =>
     request<{ success: boolean; message: string }>(`/traces/${traceId}/promote`, { method: 'POST' }),
@@ -388,6 +442,36 @@ export const tracesApi = {
       { method: 'POST' }
     ),
 
+  // Import traces from a specific source tool
+  importBySource: (source: string, options?: { days?: number; limit?: number; force?: boolean }) =>
+    request<{
+      source: string
+      imported: number
+      skipped: number
+      errors: number
+      total: number
+      new_trace_ids: string[]
+    }>(`/traces/import/${source}`, {
+      method: 'POST',
+      body: JSON.stringify(options || {}),
+    }),
+
+  // Import traces from all detected source tools
+  importAll: (options?: { days?: number; limit?: number }) =>
+    request<{
+      results: Array<{
+        source: string
+        imported: number
+        skipped: number
+        errors: number
+        total: number
+      }>
+      total_imported: number
+    }>('/traces/import/all', {
+      method: 'POST',
+      body: JSON.stringify(options || {}),
+    }),
+
   // Get count of traces created since a given ISO timestamp
   importSince: (since: string) =>
     request<{ count: number; traces: string[] }>(
@@ -411,7 +495,10 @@ export const tracesApi = {
     }>(`/traces/${traceId}/generate-examples`, {
       method: 'POST',
       body: JSON.stringify(options || {})
-    })
+    }),
+
+  getAnalytics: () =>
+    request<TraceAnalytics>('/traces/analytics')
 }
 
 // Router API

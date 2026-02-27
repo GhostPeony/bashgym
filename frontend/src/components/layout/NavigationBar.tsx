@@ -13,9 +13,7 @@ import {
   Copy
 } from 'lucide-react'
 import { useThemeStore, useUIStore, useTerminalStore } from '../../stores'
-
-// Detect if running in Electron
-const isElectron = typeof window !== 'undefined' && !!(window as any).bashgym?.window
+import { isElectron } from '../../utils/platform'
 
 export function NavigationBar() {
   const { theme, toggleTheme } = useThemeStore()
@@ -144,14 +142,16 @@ export function NavigationBar() {
           )}
         </button>
 
-        {/* Add Terminal */}
-        <button
-          onClick={handleAddTerminal}
-          className="btn-icon text-text-secondary hover:text-accent"
-          title="Add terminal (Ctrl+N)"
-        >
-          <Plus className="w-5 h-5" />
-        </button>
+        {/* Add Terminal — Electron only */}
+        {isElectron && (
+          <button
+            onClick={handleAddTerminal}
+            className="btn-icon text-text-secondary hover:text-accent"
+            title="Add terminal (Ctrl+N)"
+          >
+            <Plus className="w-5 h-5" />
+          </button>
+        )}
 
         {/* Keyboard Shortcuts */}
         <button

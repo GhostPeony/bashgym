@@ -19,6 +19,7 @@ import {
 import { hooksApi, ToolStatus } from '../../services/api'
 import { useTutorialComplete } from '../../hooks'
 import { clsx } from 'clsx'
+import { isWeb } from '../../utils/platform'
 
 // Tool configuration
 const TOOL_CONFIG: Record<string, {
@@ -476,6 +477,27 @@ export function HooksSection() {
           </button>
         </div>
       </div>
+
+      {/* Web mode: Remote connect instructions */}
+      {isWeb && (
+        <>
+          <div className="section-divider" />
+          <div className="space-y-3">
+            <h4 className="font-brand text-sm font-semibold text-text-primary">Connect Remote Traces</h4>
+            <p className="text-xs text-text-muted">
+              Send traces from your local machine to this web instance:
+            </p>
+            <div className="terminal-chrome">
+              <pre className="p-3 text-xs font-mono text-text-secondary">
+{`npx bashgym connect ${window.location.origin} --token YOUR_API_TOKEN`}
+              </pre>
+            </div>
+            <p className="text-xs text-text-muted">
+              Or upload trace files directly via the <strong>Traces</strong> page (drag-and-drop JSONL files).
+            </p>
+          </div>
+        </>
+      )}
 
       {/* How it works */}
       <div className="flex items-start gap-2 p-3 border-brutal border-accent rounded-brutal bg-background-card">

@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { isWeb } from '../utils/platform'
 
 export interface FileNode {
   name: string
@@ -129,10 +130,10 @@ export const useFileStore = create<FileState>((set, get) => ({
   }
 }))
 
-// Initialize with home directory on first use
+// Initialize with home directory on first use (Electron only)
 let initialized = false
 export const initializeFileStore = async () => {
-  if (initialized) return
+  if (initialized || isWeb) return
   initialized = true
 
   try {

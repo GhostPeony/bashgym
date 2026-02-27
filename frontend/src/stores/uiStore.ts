@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export type ViewMode = 'home' | 'workspace' | 'training' | 'router' | 'traces' | 'factory' | 'evaluator' | 'guardrails' | 'profiler' | 'models' | 'huggingface' | 'integration' | 'achievements' | 'orchestrator' | 'pipeline'
+export type ViewMode = 'home' | 'workspace' | 'training' | 'router' | 'traces' | 'factory' | 'evaluator' | 'guardrails' | 'profiler' | 'models' | 'huggingface' | 'integration' | 'achievements' | 'orchestrator' | 'pipeline' | 'download'
 
 interface UIState {
   // Navigation

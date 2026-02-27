@@ -47,6 +47,31 @@ services:
       - bashgym-network
 
   # -------------------------------------------------------------------------
+  # Web: Browser-accessible version (SPA + API, no Electron)
+  # -------------------------------------------------------------------------
+  web:
+    build:
+      context: ..
+      dockerfile: Dockerfile.web
+    container_name: bashgym-web
+    environment:
+      - BASHGYM_MODE=web
+      - HOST=0.0.0.0
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
+      - BASHGYM_API_KEY=${BASHGYM_API_KEY:-}
+      - CORS_ORIGINS=${CORS_ORIGINS:-}
+    ports:
+      - "8003:8003"
+    volumes:
+      - web-data:/app/data
+    networks:
+      - bashgym-network
+    restart: unless-stopped
+    profiles:
+      - web
+
+  # -------------------------------------------------------------------------
   # Metrics: Prometheus metrics collection (optional)
   # -------------------------------------------------------------------------
   # Uncomment to enable metrics collection
@@ -89,6 +114,8 @@ networks:
 # =============================================================================
 volumes:
   arena-data:
+    driver: local
+  web-data:
     driver: local
   # prometheus-data:
   #   driver: local

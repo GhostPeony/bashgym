@@ -32,7 +32,12 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         if request.url.path in PUBLIC_PATHS:
             return await call_next(request)
 
-        # Check API key
+        # Skip auth for non-API routes (SPA static files, assets, index.html)
+        # Only API endpoints require authentication
+        if not request.url.path.startswith("/api/"):
+            return await call_next(request)
+
+        # Check API key for all /api/* routes
         request_key = request.headers.get("X-API-Key", "")
         if request_key != api_key:
             raise HTTPException(status_code=403, detail="Invalid or missing API key")

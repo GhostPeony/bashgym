@@ -479,6 +479,18 @@ class Settings:
         default_factory=lambda: get_env_bool("ORCHESTRATION_ENABLED", False)
     )
 
+    # Web hosting
+    mode: str = field(default_factory=lambda: get_env("BASHGYM_MODE", "desktop"))  # "web" or "desktop"
+    host: str = field(default_factory=lambda: get_env("HOST", "127.0.0.1"))
+    cors_origins: List[str] = field(default_factory=lambda: get_env_list(
+        "CORS_ORIGINS", ["http://localhost:5173", "http://localhost:8003"]
+    ))
+
+    @property
+    def is_web_mode(self) -> bool:
+        """Check if running in web-hosted mode (hides experimental features)."""
+        return self.mode == "web"
+
     def validate(self) -> List[str]:
         """Validate all settings."""
         errors = []

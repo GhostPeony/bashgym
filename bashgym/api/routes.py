@@ -83,9 +83,11 @@ def create_app() -> FastAPI:
     )
 
     # CORS middleware for frontend
+    from bashgym.config import get_settings as _get_settings
+    _settings = _get_settings()
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:5173", "http://localhost:8003"],
+        allow_origins=_settings.cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -3913,26 +3915,208 @@ def create_app() -> FastAPI:
     # Include Factory routes (synthetic data generation)
     app.include_router(factory_router)
 
-    # Include Integration routes (bashbros integration)
-    app.include_router(integration_router)
-
     # Include Achievement routes (stats + achievements)
     app.include_router(achievements_router)
 
     # Include Security Dataset routes
     app.include_router(security_router)
 
-    # Include Orchestrator routes (multi-agent orchestration)
-    app.include_router(orchestrator_router)
-
-    # Include Agent chat routes (system-aware assistant)
-    app.include_router(agent_router)
-
-    # Include Pipeline routes (auto-import pipeline)
-    app.include_router(pipeline_router)
-
     # Include Settings routes (env/API key management)
     app.include_router(settings_router)
+
+    # Experimental routes — desktop only (hidden in web mode)
+    if not _settings.is_web_mode:
+        app.include_router(integration_router)
+        app.include_router(orchestrator_router)
+        app.include_router(agent_router)
+        app.include_router(pipeline_router)
+
+    # =========================================================================
+    # Web-mode endpoints: trace upload, hook receiver, install docs
+    # =========================================================================
+
+    from fastapi import UploadFile, File
+
+    MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50 MB per file
+    MAX_HOOK_PAYLOAD = 10 * 1024 * 1024  # 10 MB per hook payload
+
+    @app.post("/api/traces/upload", tags=["Traces"])
+    async def upload_trace_files(
+        files: List[UploadFile] = File(...),
+    ):
+        """Upload one or more trace session files (multipart form).
+
+        Accepts .json files up to 50 MB each. Files are validated as JSON
+        and saved to the traces directory.
+        """
+        traces_dir = Path(_settings.data.data_dir) / "traces"
+        traces_dir.mkdir(parents=True, exist_ok=True)
+
+        saved = []
+        errors = []
+        for f in files:
+            try:
+                content = await f.read(MAX_UPLOAD_SIZE + 1)
+                if len(content) > MAX_UPLOAD_SIZE:
+                    errors.append(f"{f.filename}: exceeds 50 MB limit")
+                    continue
+                # Validate it's JSON
+                json.loads(content)
+                # Sanitize filename
+                safe_name = re.sub(r'[^\w\-.]', '_', f.filename or 'trace.json')
+                dest = traces_dir / f"uploaded_{uuid.uuid4().hex[:8]}_{safe_name}"
+                dest.write_bytes(content)
+                saved.append(str(dest.name))
+            except json.JSONDecodeError:
+                errors.append(f"{f.filename}: invalid JSON")
+            except Exception as e:
+                errors.append(f"{f.filename}: {str(e)}")
+
+        if saved:
+            await broadcast_trace_event("added", {"uploaded": saved})
+
+        return {"saved": saved, "errors": errors}
+
+    @app.post("/api/traces/hook", tags=["Traces"])
+    async def receive_hook_trace(
+        payload: Dict[str, Any] = Body(..., max_length=MAX_HOOK_PAYLOAD),
+    ):
+        """Receive trace data from remote Claude Code hook instances.
+
+        Accepts hook payloads up to 10 MB. Authenticated via X-API-Key header
+        when BASHGYM_API_KEY is set on the server.
+        """
+        traces_dir = Path(_settings.data.data_dir) / "traces"
+        traces_dir.mkdir(parents=True, exist_ok=True)
+
+        trace_id = payload.get("session_id", uuid.uuid4().hex[:12])
+        # Sanitize trace_id for filesystem safety
+        safe_id = re.sub(r'[^\w\-]', '_', str(trace_id))
+        dest = traces_dir / f"remote_{safe_id}.json"
+        dest.write_text(json.dumps(payload, indent=2))
+
+        await broadcast_trace_event("added", {"remote": str(dest.name)})
+
+        return {"status": "ok", "trace_id": trace_id, "path": str(dest.name)}
+
+    @app.get("/docs/agent-install", tags=["Docs"])
+    async def agent_install_docs():
+        """Structured instructions for AI agents to configure trace hooks.
+
+        Returns markdown that an AI agent (e.g. Claude Code via WebFetch) can
+        read and execute to set up trace forwarding to this server.
+        """
+        from bashgym.config import get_settings as _gs
+        settings = _gs()
+
+        # Build the server URL — best-effort from settings
+        host = settings.host
+        port = 8003  # default
+        base_url = f"http://{host}:{port}" if host != "0.0.0.0" else "http://YOUR_SERVER:8003"
+
+        instructions = f"""# BashGym Trace Hook Setup
+
+## Quick Setup
+
+Add this to your `~/.claude/settings.json` to send traces to the BashGym server:
+
+```json
+{{
+  "hooks": {{
+    "PostToolUse": [
+      {{
+        "matcher": {{"toolName": "*"}},
+        "hooks": [
+          {{
+            "type": "command",
+            "command": "curl -s -X POST {base_url}/api/traces/hook -H 'Content-Type: application/json' -H 'X-API-Key: YOUR_BASHGYM_API_KEY' -d @-"
+          }}
+        ]
+      }}
+    ]
+  }}
+}}
+```
+
+## Steps
+
+1. Open `~/.claude/settings.json` (create it if it doesn't exist)
+2. Add or merge the `hooks` section above
+3. Replace `YOUR_BASHGYM_API_KEY` with your API key (set via `BASHGYM_API_KEY` env var on the server)
+4. Restart Claude Code for hooks to take effect
+
+## Verify
+
+After setup, run a Claude Code session and check:
+- `GET {base_url}/api/traces` should show new traces
+- The BashGym web UI Traces page should update in real-time
+
+## API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/traces/hook` | POST | Receive hook payload (JSON body) |
+| `/api/traces/upload/files` | POST | Upload .json trace files (multipart) |
+| `/api/traces` | GET | List all traces |
+| `/api/health` | GET | Health check |
+
+## Authentication
+
+All endpoints (except `/api/health`) require the `X-API-Key` header when `BASHGYM_API_KEY` is set on the server.
+"""
+        return {"content": instructions, "format": "markdown"}
+
+    # =========================================================================
+    # Static file serving (SPA) — serve built frontend when available
+    # =========================================================================
+    _frontend_dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
+    if _frontend_dist.exists():
+        from starlette.staticfiles import StaticFiles
+        from starlette.responses import FileResponse
+
+        # Serve assets (JS, CSS, images) from /assets/
+        _assets_dir = _frontend_dist / "assets"
+        if _assets_dir.exists():
+            app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="static-assets")
+
+        # Serve static files at root (favicon, icons, etc.)
+        @app.get("/ghost-icon.png")
+        async def ghost_icon():
+            icon_path = _frontend_dist / "ghost-icon.png"
+            if icon_path.exists():
+                return FileResponse(str(icon_path))
+            raise HTTPException(status_code=404)
+
+        @app.get("/favicon.ico")
+        async def favicon():
+            fav_path = _frontend_dist / "favicon.ico"
+            if fav_path.exists():
+                return FileResponse(str(fav_path))
+            raise HTTPException(status_code=404)
+
+        # SPA fallback: all non-API, non-asset routes serve index.html
+        _dist_resolved = _frontend_dist.resolve()
+
+        @app.get("/{full_path:path}", tags=["SPA"])
+        async def spa_fallback(full_path: str):
+            """Serve the SPA for all non-API routes."""
+            # Don't intercept API, WebSocket, or docs routes
+            if full_path.startswith(("api/", "ws", "docs/", "openapi.json")):
+                raise HTTPException(status_code=404)
+
+            # Try to serve the exact file first (e.g., robots.txt)
+            if full_path:
+                file_path = (_frontend_dist / full_path).resolve()
+                # Path traversal guard: ensure resolved path stays within dist/
+                if str(file_path).startswith(str(_dist_resolved)) and file_path.is_file():
+                    return FileResponse(str(file_path))
+
+            # Otherwise serve index.html for SPA routing
+            index_path = _frontend_dist / "index.html"
+            if index_path.exists():
+                return FileResponse(str(index_path))
+
+            raise HTTPException(status_code=404, detail="Frontend not built")
 
     return app
 

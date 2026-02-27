@@ -21,6 +21,7 @@
  * - pong - Heartbeat response
  */
 
+import { useEffect } from 'react'
 import { useTrainingStore, useRouterStore, useTracesStore } from '../stores'
 import { useOrchestratorStore } from '../stores/orchestratorStore'
 
@@ -93,7 +94,16 @@ class WebSocketService {
   private reconnectDelay = 1000
 
   constructor() {
-    this.url = import.meta.env.VITE_WS_URL || 'ws://localhost:8000/ws'
+    const envUrl = import.meta.env.VITE_WS_URL
+    if (envUrl) {
+      this.url = envUrl
+    } else if (typeof window !== 'undefined' && import.meta.env.VITE_MODE === 'web') {
+      // Web mode: derive WebSocket URL from current host (same-origin)
+      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      this.url = `${proto}//${window.location.host}/ws`
+    } else {
+      this.url = 'ws://localhost:8003/ws'
+    }
   }
 
   connect() {
@@ -165,8 +175,8 @@ class WebSocketService {
     // Handle built-in message types
     switch (type) {
       // Training events
-      case MessageTypes.TRAINING_PROGRESS:
-        useTrainingStore.getState().updateMetrics({
+      case MessageTypes.TRAINING_PROGRESS: {
+        const metrics = {
           loss: payload.loss,
           learningRate: payload.learning_rate,
           gradNorm: payload.grad_norm || 0,
@@ -176,8 +186,17 @@ class WebSocketService {
           eta: payload.eta,
           simulation: payload.simulation || false,
           timestamp: Date.now()
-        })
+        }
+        const store = useTrainingStore.getState()
+        if (!store.currentRun && payload.run_id) {
+          // Reconnected to an orphaned training run — hydrate the store
+          console.log('WebSocket: Reconnected to training run', payload.run_id)
+          store.hydrateFromReconnect(payload.run_id, metrics)
+        } else {
+          store.updateMetrics(metrics)
+        }
         break
+      }
 
       case MessageTypes.TRAINING_COMPLETE:
         useTrainingStore.getState().setStatus('completed')
@@ -367,8 +386,6 @@ export const wsService = new WebSocketService()
 
 // React hook for WebSocket subscriptions
 export function useWebSocket(type: string, handler: MessageHandler) {
-  const { useEffect } = require('react')
-
   useEffect(() => {
     const unsubscribe = wsService.subscribe(type, handler)
     return unsubscribe

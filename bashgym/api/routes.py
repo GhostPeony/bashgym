@@ -11,7 +11,7 @@ This module provides REST API endpoints for:
 - WebSocket for real-time updates
 """
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, Body
+from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, Body, Query
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -1192,11 +1192,11 @@ def create_app() -> FastAPI:
         }
 
     @app.get("/api/traces/stats", tags=["Traces"])
-    async def get_trace_stats(range: str = "7d"):
+    async def get_trace_stats(time_range: str = Query("7d", alias="range")):
         """Get trace statistics over time for the dashboard chart.
 
         Args:
-            range: Time range — '24h', '7d', '30d', or 'all'.
+            time_range: Time range — '24h', '7d', '30d', or 'all'.
         """
         from datetime import datetime, timedelta
         from bashgym.config import get_settings, get_bashgym_dir
@@ -1214,10 +1214,10 @@ def create_app() -> FastAPI:
             "30d": {"window": timedelta(days=30),  "bucket_size": timedelta(days=1),  "label_fmt": "%m/%d", "count": 31},
         }
 
-        if range not in range_configs and range != "all":
+        if time_range not in range_configs and time_range != "all":
             raise HTTPException(status_code=400, detail=f"Invalid range. Must be one of: 24h, 7d, 30d, all")
 
-        if range == "all":
+        if time_range == "all":
             # Find earliest trace file across all dirs
             earliest = now
             all_dirs = [
@@ -1244,7 +1244,7 @@ def create_app() -> FastAPI:
             window = span + bucket_size  # ensure earliest falls in first bucket
             bucket_count = max(int(window / bucket_size) + 1, 2)
         else:
-            cfg = range_configs[range]
+            cfg = range_configs[time_range]
             window = cfg["window"]
             bucket_size = cfg["bucket_size"]
             label_fmt = cfg["label_fmt"]

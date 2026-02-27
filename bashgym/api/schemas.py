@@ -257,6 +257,7 @@ class TraceQuality(BaseModel):
     length_score: float = Field(0.0, ge=0.0, le=1.0)
     tool_diversity: float = Field(0.0, ge=0.0, le=1.0, description="Unique tools used score")
     efficiency_score: float = Field(0.0, ge=0.0, le=1.0, description="Error recovery and output quality")
+    cognitive_quality: float = Field(0.0, ge=0.0, le=1.0, description="Thinking, planning, and reflection quality")
     total_score: float = Field(0.0, ge=0.0, le=1.0)
 
 
@@ -293,8 +294,24 @@ class TraceInfo(BaseModel):
     quality: TraceQuality
     repo: Optional[RepoInfo] = Field(None, description="Primary repository for this trace")
     repos_count: int = Field(0, description="Number of repositories touched in this trace")
+    source_tool: str = Field("unknown", description="Source tool that generated this trace (claude_code, gemini_cli, copilot_cli, opencode, codex)")
+    tool_breakdown: Dict[str, int] = Field(default_factory=dict, description="Per-tool call counts")
     created_at: Optional[str] = None
     promoted_at: Optional[str] = None
+
+
+class TraceSummaryDetail(TraceInfo):
+    """Enriched trace info with session metrics for promote/demote decisions."""
+    duration_seconds: Optional[float] = Field(None, description="Session duration from first to last step")
+    step_outcomes: List[Optional[bool]] = Field(default_factory=list, description="Per-step pass/fail for spark chart")
+    cognitive_summary: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Cognitive metrics: planning_phases, reflections, thinking_steps, cognitive_coverage"
+    )
+    raw_metrics: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Aggregate step metrics: total_steps, successful_steps, failed_steps, unique_tools, unique_commands, cognitive_steps"
+    )
 
 
 class TraceDetail(TraceInfo):
@@ -725,3 +742,30 @@ class HooksInstallResponse(BaseModel):
     success: bool
     tools: Dict[str, Any] = Field(default_factory=dict)
     errors: List[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Trace Import
+# ---------------------------------------------------------------------------
+
+class TraceImportRequest(BaseModel):
+    """Request body for trace import endpoints."""
+    days: int = 60
+    limit: int = 100
+    force: bool = False
+
+
+class TraceImportResponse(BaseModel):
+    """Per-source import result."""
+    source: str
+    imported: int
+    skipped: int
+    errors: int
+    total: int
+    new_trace_ids: List[str] = Field(default_factory=list)
+
+
+class TraceImportAllResponse(BaseModel):
+    """Aggregated result from importing all sources."""
+    results: List[Dict[str, Any]] = Field(default_factory=list)
+    total_imported: int = 0

@@ -20,6 +20,7 @@ import uuid
 import json
 import asyncio
 import logging
+import re
 
 # Set up logging for API routes
 logger = logging.getLogger(__name__)
@@ -30,7 +31,7 @@ from bashgym.api.schemas import (
     DataSource,
     ModelInfo, ExportRequest, ExportResponse, ExportFormat,
     SystemStats, HealthCheck,
-    TraceInfo, TraceStatus, TraceQuality, TraceQualityTier, RepoInfo,
+    TraceInfo, TraceSummaryDetail, TraceStatus, TraceQuality, TraceQualityTier, RepoInfo,
     RouterStats, RoutingStrategyEnum,
     SystemInfoResponse, GpuInfo, ModelRecommendations,
     FactoryConfig, ColumnConfig, ColumnConstraint, PrivacyConfig, PromptOptConfig, OutputConfig, SafetyConfig,
@@ -39,7 +40,8 @@ from bashgym.api.schemas import (
     HooksInstallRequest, HooksInstallResponse,
     TrainingExampleResponse, GenerateExamplesRequest, GenerateExamplesResponse,
     ExportExamplesRequest, ExportExamplesResponse,
-    EvaluationRequest, EvaluationResponse, BenchmarkResultSchema, ErrorAnalysisSchema
+    EvaluationRequest, EvaluationResponse, BenchmarkResultSchema, ErrorAnalysisSchema,
+    TraceImportRequest, TraceImportResponse, TraceImportAllResponse,
 )
 from bashgym.api.websocket import (
     handle_websocket, manager,
@@ -49,6 +51,12 @@ from bashgym.api.websocket import (
     broadcast_guardrail_blocked, broadcast_guardrail_warn, broadcast_pii_redacted,
     TrainingProgressCallback, MessageType
 )
+from bashgym.api.training_state import (
+    TrainingRunState, save_run_state, load_run_state, list_run_states,
+    update_run_state, is_process_alive, suspend_process, resume_process,
+    terminate_process,
+)
+from bashgym.api.training_monitor import OrphanedTrainingMonitor
 from bashgym.api.observability_routes import router as observability_router
 from bashgym.api.models_routes import router as models_router
 from bashgym.api.hf_routes import router as hf_router
@@ -98,6 +106,7 @@ def create_app() -> FastAPI:
     app.state.factory_config = None  # Factory configuration
     app.state.synthesis_jobs = {}  # Synthesis job storage
     app.state.evaluation_jobs = {}  # Evaluation job storage
+    app.state.training_monitor = OrphanedTrainingMonitor()  # Orphaned process monitor
 
     @app.on_event("startup")
     async def startup():
@@ -166,12 +175,53 @@ def create_app() -> FastAPI:
         # Start pipeline watcher
         start_pipeline_watcher()
 
+        # Recover orphaned training runs from disk
+        try:
+            orphaned_states = list_run_states()
+            for state in orphaned_states:
+                if state.status in ("running", "paused"):
+                    if is_process_alive(state.pid):
+                        logger.info(
+                            f"Reconnecting to orphaned training {state.run_id} "
+                            f"(PID {state.pid})"
+                        )
+                        # Reconstruct in-memory entry
+                        app.state.training_runs[state.run_id] = {
+                            "run_id": state.run_id,
+                            "strategy": state.config.get("strategy", "sft"),
+                            "status": TrainingStatus.RUNNING if state.status == "running" else TrainingStatus.PAUSED,
+                            "config": state.config,
+                            "started_at": state.started_at,
+                            "pid": state.pid,
+                        }
+                        # Start monitoring via output directory polling
+                        callback = TrainingProgressCallback(state.run_id)
+                        app.state.training_monitor.start_monitoring(
+                            state,
+                            progress_callback=callback.on_progress,
+                            log_callback=callback.on_log,
+                        )
+                    else:
+                        # Process is dead — classify outcome
+                        final_dir = Path(state.output_dir) / "final"
+                        merged_dir = Path(state.output_dir) / "merged"
+                        if final_dir.exists() or merged_dir.exists():
+                            logger.info(f"Orphaned run {state.run_id} completed (final/ found)")
+                            update_run_state(state.output_dir, status="completed")
+                        else:
+                            logger.warning(f"Orphaned run {state.run_id} process dead, marking failed")
+                            update_run_state(state.output_dir, status="failed")
+        except Exception as e:
+            logger.error(f"Error recovering orphaned training runs: {e}")
+
     @app.on_event("shutdown")
     async def shutdown():
         """Cleanup on shutdown."""
         if app.state.router:
             await app.state.router.close()
         stop_pipeline_watcher()
+        # Stop all orphaned training monitors
+        app.state.training_monitor.stop_all()
 
     # =========================================================================
     # WebSocket Endpoint
@@ -686,12 +736,32 @@ def create_app() -> FastAPI:
 
                 app.state.trainer.config = config
 
+                # Determine output dir for state persistence
+                output_dir = str(Path(config.output_dir) / run_id)
+
+                def _on_pid(pid: int, training_run):
+                    """Called immediately after subprocess.Popen — persist PID to disk."""
+                    app.state.training_runs[run_id]["pid"] = pid
+                    state = TrainingRunState(
+                        run_id=run_id,
+                        pid=pid,
+                        status="running",
+                        config=request.dict(),
+                        started_at=app.state.training_runs[run_id].get("started_at", ""),
+                        script_path=str(Path(output_dir) / "train_sft.py"),
+                        dataset_path=str(dataset_path),
+                        output_dir=output_dir,
+                    )
+                    save_run_state(state)
+                    logger.info(f"Persisted run state for {run_id} (PID {pid})")
+
                 if request.strategy == TrainingStrategy.SFT:
                     run = app.state.trainer.train_sft(
                         dataset_path=dataset_path,
                         run_id=run_id,
                         callback=callback.on_progress_sync,
-                        log_callback=callback.on_log_sync
+                        log_callback=callback.on_log_sync,
+                        pid_callback=_on_pid,
                     )
                 elif request.strategy == TrainingStrategy.DPO:
                     run = app.state.trainer.train_dpo(
@@ -728,6 +798,9 @@ def create_app() -> FastAPI:
                 app.state.training_runs[run_id]["status"] = TrainingStatus.COMPLETED
                 app.state.training_runs[run_id]["completed_at"] = datetime.utcnow().isoformat()
                 app.state.training_runs[run_id]["metrics"] = run.metrics if run else {}
+
+                # Persist completed state to disk
+                update_run_state(output_dir, status="completed", completed_at=datetime.utcnow().isoformat())
 
                 await broadcast_training_complete(run_id, run.metrics if run else {})
 
@@ -785,51 +858,100 @@ def create_app() -> FastAPI:
             print(f"[Training] Traceback:\n{traceback.format_exc()}")
             app.state.training_runs[run_id]["status"] = TrainingStatus.FAILED
             app.state.training_runs[run_id]["error"] = error_msg
+            # Persist failed state to disk (output_dir may not exist for early failures)
+            try:
+                run_output_dir = str(Path("data/models") / run_id)
+                update_run_state(run_output_dir, status="failed")
+            except Exception:
+                pass  # State file may not exist yet if failure was before subprocess
             await broadcast_training_failed(run_id, error_msg)
 
     @app.get("/api/training/{run_id}", response_model=TrainingResponse, tags=["Training"])
     async def get_training_status(run_id: str):
         """Get the status of a training run."""
-        if run_id not in app.state.training_runs:
-            raise HTTPException(status_code=404, detail="Training run not found")
+        if run_id in app.state.training_runs:
+            run = app.state.training_runs[run_id]
+            return TrainingResponse(
+                run_id=run_id,
+                status=run["status"],
+                strategy=run["strategy"],
+                error=run.get("error"),
+                started_at=run.get("started_at"),
+                completed_at=run.get("completed_at"),
+                metrics=run.get("metrics")
+            )
 
-        run = app.state.training_runs[run_id]
-        return TrainingResponse(
-            run_id=run_id,
-            status=run["status"],
-            strategy=run["strategy"],
-            error=run.get("error"),  # Include error message if failed
-            started_at=run.get("started_at"),
-            completed_at=run.get("completed_at"),
-            metrics=run.get("metrics")
-        )
+        # Fallback: check persisted state on disk
+        state = load_run_state(str(Path("data/models") / run_id))
+        if state:
+            return TrainingResponse(
+                run_id=state.run_id,
+                status=state.status,
+                strategy=state.config.get("strategy", "sft"),
+                started_at=state.started_at,
+                completed_at=state.completed_at,
+                metrics=state.last_metrics,
+            )
+
+        raise HTTPException(status_code=404, detail="Training run not found")
 
     @app.post("/api/training/{run_id}/pause", tags=["Training"])
     async def pause_training(run_id: str):
-        """Pause a running training job."""
+        """Pause a running training job by suspending the subprocess."""
         if run_id not in app.state.training_runs:
             raise HTTPException(status_code=404, detail="Training run not found")
 
+        pid = app.state.training_runs[run_id].get("pid")
+        if not pid:
+            raise HTTPException(status_code=400, detail="No PID available for this run")
+
+        if not is_process_alive(pid):
+            raise HTTPException(status_code=400, detail="Training process is no longer running")
+
+        if not suspend_process(pid):
+            raise HTTPException(status_code=500, detail="Failed to suspend training process")
+
         app.state.training_runs[run_id]["status"] = TrainingStatus.PAUSED
-        return {"success": True, "message": "Training paused"}
+        update_run_state(str(Path("data/models") / run_id), status="paused")
+        return {"success": True, "message": f"Training paused (PID {pid} suspended)"}
 
     @app.post("/api/training/{run_id}/resume", tags=["Training"])
     async def resume_training(run_id: str):
-        """Resume a paused training job."""
+        """Resume a paused training job by resuming the subprocess."""
         if run_id not in app.state.training_runs:
             raise HTTPException(status_code=404, detail="Training run not found")
 
+        pid = app.state.training_runs[run_id].get("pid")
+        if not pid:
+            raise HTTPException(status_code=400, detail="No PID available for this run")
+
+        if not is_process_alive(pid):
+            raise HTTPException(status_code=400, detail="Training process is no longer running")
+
+        if not resume_process(pid):
+            raise HTTPException(status_code=500, detail="Failed to resume training process")
+
         app.state.training_runs[run_id]["status"] = TrainingStatus.RUNNING
-        return {"success": True, "message": "Training resumed"}
+        update_run_state(str(Path("data/models") / run_id), status="running")
+        return {"success": True, "message": f"Training resumed (PID {pid})"}
 
     @app.post("/api/training/{run_id}/stop", tags=["Training"])
     async def stop_training(run_id: str):
-        """Stop a training job."""
+        """Stop a training job by terminating the subprocess."""
         if run_id not in app.state.training_runs:
             raise HTTPException(status_code=404, detail="Training run not found")
 
-        app.state.training_runs[run_id]["status"] = TrainingStatus.COMPLETED
+        pid = app.state.training_runs[run_id].get("pid")
+        if pid and is_process_alive(pid):
+            terminate_process(pid)
+            logger.info(f"Terminated training process PID {pid} for {run_id}")
+
+        # Stop any orphaned monitor
+        app.state.training_monitor.stop_monitoring(run_id)
+
+        app.state.training_runs[run_id]["status"] = TrainingStatus.FAILED
         app.state.training_runs[run_id]["completed_at"] = datetime.utcnow().isoformat()
+        update_run_state(str(Path("data/models") / run_id), status="failed", completed_at=datetime.utcnow().isoformat())
         return {"success": True, "message": "Training stopped"}
 
     @app.get("/api/training", response_model=List[TrainingResponse], tags=["Training"])
@@ -837,25 +959,39 @@ def create_app() -> FastAPI:
         status: Optional[TrainingStatus] = None,
         limit: int = 50
     ):
-        """List all training runs."""
-        runs = list(app.state.training_runs.values())
-
-        if status:
-            runs = [r for r in runs if r["status"] == status]
-
-        runs = runs[:limit]
-
-        return [
-            TrainingResponse(
+        """List all training runs (in-memory + persisted on disk)."""
+        # Start with in-memory runs
+        seen_ids = set()
+        results = []
+        for r in app.state.training_runs.values():
+            seen_ids.add(r["run_id"])
+            if status and r["status"] != status:
+                continue
+            results.append(TrainingResponse(
                 run_id=r["run_id"],
                 status=r["status"],
                 strategy=r["strategy"],
                 started_at=r.get("started_at"),
                 completed_at=r.get("completed_at"),
                 metrics=r.get("metrics")
-            )
-            for r in runs
-        ]
+            ))
+
+        # Merge persisted runs not already in memory
+        for state in list_run_states():
+            if state.run_id in seen_ids:
+                continue
+            if status and state.status != status.value:
+                continue
+            results.append(TrainingResponse(
+                run_id=state.run_id,
+                status=state.status,
+                strategy=state.config.get("strategy", "sft"),
+                started_at=state.started_at,
+                completed_at=state.completed_at,
+                metrics=state.last_metrics,
+            ))
+
+        return results[:limit]
 
     # =========================================================================
     # Model Endpoints
@@ -897,18 +1033,22 @@ def create_app() -> FastAPI:
     # Trace Endpoints
     # =========================================================================
 
-    @app.get("/api/traces", response_model=List[TraceInfo], tags=["Traces"])
+    @app.get("/api/traces", tags=["Traces"])
     async def list_traces(
         status: Optional[TraceStatus] = None,
         repo: Optional[str] = None,
-        limit: int = 100
+        source_tool: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0
     ):
-        """List all traces.
+        """List traces with pagination.
 
         Args:
             status: Filter by trace status (gold/failed/pending)
             repo: Filter by repository name (supports partial matching)
-            limit: Maximum number of traces to return
+            source_tool: Filter by source tool (claude_code, gemini_cli, copilot_cli, opencode, codex)
+            limit: Maximum number of traces to return per page
+            offset: Number of traces to skip (for pagination)
         """
         from bashgym.config import get_settings
         settings = get_settings()
@@ -936,6 +1076,10 @@ def create_app() -> FastAPI:
 
                         # Apply repo filter
                         if repo and not _matches_repo(data, repo):
+                            continue
+
+                        # Apply source_tool filter
+                        if source_tool and data.get("source_tool", "claude_code") != source_tool:
                             continue
 
                         trace_info = _parse_trace_file(trace_file, data, tier_status)
@@ -985,6 +1129,10 @@ def create_app() -> FastAPI:
                         if repo and not _matches_repo(data, repo):
                             continue
 
+                        # Apply source_tool filter
+                        if source_tool and data.get("source_tool", "unknown") != source_tool:
+                            continue
+
                         trace_info = _parse_imported_trace_file(trace_file, data)
                         if status is None or status == TraceStatus.PENDING:
                             traces.append(trace_info)
@@ -1006,6 +1154,10 @@ def create_app() -> FastAPI:
                             if not repo_match:
                                 continue
 
+                        # Apply source_tool filter (raw traces are from Claude Code)
+                        if source_tool and source_tool != "claude_code":
+                            continue
+
                         trace_info = _parse_raw_trace_file(trace_file, data)
                         if status is None or status == TraceStatus.PENDING:
                             traces.append(trace_info)
@@ -1019,14 +1171,32 @@ def create_app() -> FastAPI:
         # Sort by created_at descending
         traces.sort(key=lambda x: x.created_at or "", reverse=True)
 
-        return traces[:limit]
+        # Count by status across ALL traces (before pagination)
+        from collections import Counter
+        status_counts = Counter(t.status for t in traces)
+
+        total = len(traces)
+        page = traces[offset:offset + limit]
+        return {
+            "traces": page,
+            "total": total,
+            "offset": offset,
+            "limit": limit,
+            "counts": {
+                "gold": status_counts.get(TraceStatus.GOLD, 0),
+                "silver": status_counts.get(TraceStatus.SILVER, 0),
+                "bronze": status_counts.get(TraceStatus.BRONZE, 0),
+                "failed": status_counts.get(TraceStatus.FAILED, 0),
+                "pending": status_counts.get(TraceStatus.PENDING, 0),
+            }
+        }
 
     @app.get("/api/traces/stats", tags=["Traces"])
-    async def get_trace_stats():
+    async def get_trace_stats(range: str = "7d"):
         """Get trace statistics over time for the dashboard chart.
 
-        Returns timeline data with counts of gold/failed/pending traces
-        grouped by time periods (last 24 hours in hourly buckets).
+        Args:
+            range: Time range — '24h', '7d', '30d', or 'all'.
         """
         from datetime import datetime, timedelta
         from bashgym.config import get_settings, get_bashgym_dir
@@ -1035,17 +1205,67 @@ def create_app() -> FastAPI:
         data_dir = Path(settings.data.data_dir)
         global_dir = get_bashgym_dir()
 
-        # Initialize hourly buckets for last 24 hours
         now = datetime.now()
+
+        # Range configuration
+        range_configs = {
+            "24h": {"window": timedelta(hours=24), "bucket_size": timedelta(hours=1), "label_fmt": "%H:%M", "count": 25},
+            "7d":  {"window": timedelta(days=7),   "bucket_size": timedelta(days=1),  "label_fmt": "%a %m/%d", "count": 8},
+            "30d": {"window": timedelta(days=30),  "bucket_size": timedelta(days=1),  "label_fmt": "%m/%d", "count": 31},
+        }
+
+        if range not in range_configs and range != "all":
+            raise HTTPException(status_code=400, detail=f"Invalid range. Must be one of: 24h, 7d, 30d, all")
+
+        if range == "all":
+            # Find earliest trace file across all dirs
+            earliest = now
+            all_dirs = [
+                data_dir / "gold_traces", data_dir / "silver_traces",
+                data_dir / "bronze_traces", data_dir / "failed_traces",
+                global_dir / "traces", data_dir / "traces",
+            ]
+            for d in all_dirs:
+                if d.exists():
+                    for f in d.glob("*.json"):
+                        try:
+                            mtime = datetime.fromtimestamp(f.stat().st_mtime)
+                            if mtime < earliest:
+                                earliest = mtime
+                        except Exception:
+                            continue
+            span = now - earliest
+            if span > timedelta(days=180):
+                bucket_size = timedelta(days=30)
+                label_fmt = "%b %Y"
+            else:
+                bucket_size = timedelta(weeks=1)
+                label_fmt = "%m/%d"
+            window = span + bucket_size  # ensure earliest falls in first bucket
+            bucket_count = max(int(window / bucket_size) + 1, 2)
+        else:
+            cfg = range_configs[range]
+            window = cfg["window"]
+            bucket_size = cfg["bucket_size"]
+            label_fmt = cfg["label_fmt"]
+            bucket_count = cfg["count"]
+
+        # Generate buckets from oldest to newest
         buckets = []
-        for i in range(24, -1, -1):  # 24 hours ago to now
-            bucket_time = now - timedelta(hours=i)
+        for i in range(bucket_count - 1, -1, -1):
+            bucket_time = now - bucket_size * i
+            # Truncate to bucket boundary
+            if bucket_size >= timedelta(days=1):
+                bucket_start = bucket_time.replace(hour=0, minute=0, second=0, microsecond=0)
+            else:
+                bucket_start = bucket_time.replace(minute=0, second=0, microsecond=0)
+            label = "Now" if i == 0 else bucket_time.strftime(label_fmt)
             buckets.append({
-                "time": bucket_time.strftime("%H:%M") if i > 0 else "Now",
-                "hour": bucket_time.replace(minute=0, second=0, microsecond=0),
+                "time": label,
+                "start": bucket_start,
                 "gold": 0,
                 "failed": 0,
-                "pending": 0
+                "pending": 0,
             })
 
         # Count traces by status and time
@@ -1054,29 +1274,28 @@ def create_app() -> FastAPI:
                 return
             for trace_file in trace_dir.glob(pattern):
                 try:
-                    # Get file modification time as proxy for trace time
                     mtime = datetime.fromtimestamp(trace_file.stat().st_mtime)
 
-                    # Also try to extract time from filename (imported_claude_xxx_YYYYMMDD_HHMMSS.json)
+                    # Try to extract time from filename (imported_claude_xxx_YYYYMMDD_HHMMSS.json)
                     fname = trace_file.stem
-                    if "_202" in fname:  # Year prefix
+                    if "_202" in fname:
                         parts = fname.split("_")
-                        for i, part in enumerate(parts):
+                        for idx, part in enumerate(parts):
                             if part.startswith("202") and len(part) == 8:
                                 try:
                                     date_str = part
-                                    time_str = parts[i + 1] if i + 1 < len(parts) else "000000"
+                                    time_str = parts[idx + 1] if idx + 1 < len(parts) else "000000"
                                     mtime = datetime.strptime(f"{date_str}_{time_str[:6]}", "%Y%m%d_%H%M%S")
                                 except (ValueError, IndexError):
                                     pass
                                 break
 
                     # Find matching bucket
-                    for bucket in buckets:
-                        bucket_start = bucket["hour"]
-                        bucket_end = bucket_start + timedelta(hours=1)
-                        if bucket_start <= mtime < bucket_end:
-                            bucket[status] += 1
+                    for b_idx in range(len(buckets)):
+                        b_start = buckets[b_idx]["start"]
+                        b_end = buckets[b_idx + 1]["start"] if b_idx + 1 < len(buckets) else now + timedelta(hours=1)
+                        if b_start <= mtime < b_end:
+                            buckets[b_idx][status] += 1
                             break
                 except Exception:
                     continue
@@ -1134,6 +1353,142 @@ def create_app() -> FastAPI:
                 "pending": total_pending,
                 "total": total_gold + total_failed + total_pending
             }
+        }
+
+    @app.get("/api/traces/analytics", tags=["Traces"])
+    async def get_trace_analytics():
+        """Aggregate analytics across all traces for training pipeline insights."""
+        from bashgym.config import get_settings, get_bashgym_dir
+        settings = get_settings()
+        data_dir = Path(settings.data.data_dir)
+
+        # Aggregate stats
+        tool_stats: Dict[str, Dict[str, Any]] = {}  # tool -> {calls, sessions, successes}
+        quality_distribution = {"gold": 0, "silver": 0, "bronze": 0, "rejected": 0}
+        total_steps = 0
+        total_sessions = 0
+        total_tokens = 0
+        cost_total_usd = 0.0
+        quality_scores = []  # for computing avg_quality_score
+        source_agg: Dict[str, Dict[str, Any]] = {}  # source_tool -> {traces, steps, tokens}
+
+        # Scan all trace directories
+        dirs_to_scan = [
+            (data_dir / "gold_traces", "gold"),
+            (data_dir / "silver_traces", "silver"),
+            (data_dir / "bronze_traces", "bronze"),
+            (data_dir / "failed_traces", "rejected"),
+        ]
+
+        for trace_dir, tier in dirs_to_scan:
+            if not trace_dir.exists():
+                continue
+            for trace_file in trace_dir.glob("*.json"):
+                try:
+                    with open(trace_file) as f:
+                        data = json.load(f)
+
+                    total_sessions += 1
+                    quality_distribution[tier] += 1
+
+                    # Get steps
+                    if isinstance(data, list):
+                        steps = data
+                    else:
+                        steps = data.get("trace", data.get("steps", []))
+
+                    num_steps = len(steps)
+                    total_steps += num_steps
+
+                    # Aggregate source_tool breakdown
+                    if isinstance(data, dict):
+                        src = data.get("source_tool", "claude_code")
+                        metadata = data.get("metadata", {})
+                        cost = metadata.get("api_equivalent_cost_usd", 0) or 0
+                        cost_total_usd += float(cost)
+
+                        # Quality score from metadata or summary
+                        qs = data.get("summary", {}).get("total_score")
+                        if qs is None and metadata:
+                            qs = metadata.get("total_score")
+                        if qs is not None:
+                            quality_scores.append(float(qs))
+                    else:
+                        src = "claude_code"
+
+                    if src not in source_agg:
+                        source_agg[src] = {"traces": 0, "steps": 0, "tokens": 0}
+                    source_agg[src]["traces"] += 1
+                    source_agg[src]["steps"] += num_steps
+
+                    # Aggregate tool usage
+                    for step in steps:
+                        tool = step.get("tool_name", step.get("tool", "unknown"))
+                        if tool not in tool_stats:
+                            tool_stats[tool] = {"calls": 0, "sessions": set(), "successes": 0, "total_tokens": 0}
+                        tool_stats[tool]["calls"] += 1
+                        tool_stats[tool]["sessions"].add(str(trace_file.stem))
+
+                        # Check success
+                        success = step.get("success")
+                        exit_code = step.get("exit_code")
+                        if success is True or exit_code == 0:
+                            tool_stats[tool]["successes"] += 1
+
+                        # Token counting
+                        tokens = step.get("input_tokens", 0) + step.get("output_tokens", 0)
+                        tool_stats[tool]["total_tokens"] += tokens
+                        total_tokens += tokens
+                        source_agg[src]["tokens"] += tokens
+
+                except (json.JSONDecodeError, IOError):
+                    continue
+
+        # Format tool stats (convert sets to counts)
+        formatted_tools = []
+        for tool, stats in sorted(tool_stats.items(), key=lambda x: -x[1]["calls"]):
+            formatted_tools.append({
+                "tool": tool,
+                "calls": stats["calls"],
+                "sessions": len(stats["sessions"]),
+                "success_rate": stats["successes"] / stats["calls"] if stats["calls"] > 0 else 0,
+                "total_tokens": stats["total_tokens"],
+            })
+
+        # Training readiness
+        trainable = quality_distribution["gold"] + quality_distribution["silver"]
+
+        # Format source breakdown
+        source_breakdown = []
+        for src_name, src_stats in sorted(source_agg.items(), key=lambda x: -x[1]["traces"]):
+            source_breakdown.append({
+                "source": src_name,
+                "traces": src_stats["traces"],
+                "steps": src_stats["steps"],
+                "tokens": src_stats["tokens"],
+            })
+
+        avg_quality_score = (
+            sum(quality_scores) / len(quality_scores)
+            if quality_scores else 0.0
+        )
+
+        return {
+            "tool_stats": formatted_tools,
+            "quality_distribution": quality_distribution,
+            "totals": {
+                "sessions": total_sessions,
+                "steps": total_steps,
+                "tokens": total_tokens,
+            },
+            "training_readiness": {
+                "sft_ready": quality_distribution["gold"],
+                "dpo_pairs_possible": min(quality_distribution["silver"], quality_distribution["rejected"]),
+                "total_trainable": trainable,
+            },
+            "source_breakdown": source_breakdown,
+            "cost_total_usd": round(cost_total_usd, 2),
+            "avg_quality_score": round(avg_quality_score, 4),
         }
 
     @app.get("/api/traces/repos", tags=["Traces"])
@@ -1230,6 +1585,48 @@ def create_app() -> FastAPI:
             (git_remote and filter_lower in git_remote.lower())
         )
 
+    def _sanitize_task_description(raw: str, max_length: int = 120) -> str:
+        """Clean a raw user prompt into a concise trace title.
+
+        Strips markdown formatting, numbered lists, bold markers, collapses
+        whitespace, and takes only the first meaningful sentence or phrase.
+        """
+        if not raw:
+            return "Unknown task"
+
+        text = raw.strip()
+
+        # Strip markdown bold/italic markers
+        text = re.sub(r'\*{1,3}([^*]+)\*{1,3}', r'\1', text)
+        # Strip markdown headers
+        text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
+        # Strip markdown links [text](url) -> text
+        text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+        # Strip backtick code markers
+        text = re.sub(r'`+([^`]*)`+', r'\1', text)
+        # Strip numbered list prefixes (1. 2. etc.)
+        text = re.sub(r'^\d+\.\s+', '', text, flags=re.MULTILINE)
+        # Strip bullet points
+        text = re.sub(r'^[-*+]\s+', '', text, flags=re.MULTILINE)
+
+        # Collapse all whitespace (newlines, tabs, multiple spaces) to single space
+        text = re.sub(r'\s+', ' ', text).strip()
+
+        # Take first sentence if it exists and is reasonable length
+        sentence_end = re.search(r'[.!?]\s', text)
+        if sentence_end and sentence_end.start() < max_length:
+            text = text[:sentence_end.start() + 1]
+        elif len(text) > max_length:
+            # Truncate at last word boundary before max_length
+            truncated = text[:max_length]
+            last_space = truncated.rfind(' ')
+            if last_space > max_length * 0.5:
+                text = truncated[:last_space] + '...'
+            else:
+                text = truncated + '...'
+
+        return text
+
     def _parse_imported_trace_file(trace_file: Path, data: Dict) -> TraceInfo:
         """Parse an imported TraceSession file into TraceInfo."""
         trace_steps = data.get("trace", [])
@@ -1260,15 +1657,16 @@ def create_app() -> FastAPI:
         source_tool = data.get("source_tool", "unknown")
 
         # Get task description from metadata (user's initial prompt) or generate from tool usage
-        task_desc = metadata.get("user_initial_prompt", "")
+        task_desc = _sanitize_task_description(metadata.get("user_initial_prompt", ""))
 
-        if not task_desc:
+        # Compute tool breakdown for all imported traces
+        tool_counts = {}
+        for step in trace_steps:
+            tool = step.get("tool_name", "unknown")
+            tool_counts[tool] = tool_counts.get(tool, 0) + 1
+
+        if task_desc == "Unknown task":
             # Fallback: generate description from tool usage summary
-            tool_counts = {}
-            for step in trace_steps:
-                tool = step.get("tool_name", "unknown")
-                tool_counts[tool] = tool_counts.get(tool, 0) + 1
-
             tool_summary = ", ".join([f"{count} {tool}" for tool, count in sorted(tool_counts.items(), key=lambda x: -x[1])[:4]])
             task_desc = f"Imported from {source_tool}: {tool_summary}"
 
@@ -1291,10 +1689,13 @@ def create_app() -> FastAPI:
                 length_score=quality.length_score,
                 tool_diversity=quality.tool_diversity,
                 efficiency_score=quality.efficiency_score,
+                cognitive_quality=quality.cognitive_quality,
                 total_score=quality.total_score
             ),
+            source_tool=source_tool,
             repo=repo_info,
             repos_count=len(repos) if repos else 1,
+            tool_breakdown=tool_counts,
             created_at=data.get("timestamp", datetime.fromtimestamp(trace_file.stat().st_ctime).isoformat()),
             promoted_at=metadata.get("promoted_at")
         )
@@ -1359,26 +1760,34 @@ def create_app() -> FastAPI:
                 length_score=quality.length_score,
                 tool_diversity=quality.tool_diversity,
                 efficiency_score=quality.efficiency_score,
+                cognitive_quality=quality.cognitive_quality,
                 total_score=quality.total_score
             ),
+            source_tool="claude_code",
             repo=repo_info,
             repos_count=len(repos_seen),
+            tool_breakdown=tool_counts,
             created_at=first_timestamp or datetime.fromtimestamp(trace_file.stat().st_ctime).isoformat(),
             promoted_at=None
         )
 
-    def _parse_trace_file(trace_file: Path, data: Dict, status: TraceStatus) -> TraceInfo:
+    def _parse_trace_file(trace_file: Path, data, status: TraceStatus) -> TraceInfo:
         """Parse a trace file into TraceInfo."""
-        metadata = data.get("metadata", {})
-        trace_steps = data.get("trace", [])
+        # Handle both dict-wrapped and raw list traces
+        if isinstance(data, list):
+            metadata = {}
+            trace_steps = data
+        else:
+            metadata = data.get("metadata", {})
+            trace_steps = data.get("trace", data.get("steps", []))
         total_steps = len(trace_steps)
 
         # Calculate quality using centralized calculator
         quality = calculate_quality_breakdown(steps=trace_steps, metadata=metadata)
 
         # Extract repo info
-        primary_repo = data.get("primary_repo", {})
-        repos = data.get("repos", [])
+        primary_repo = data.get("primary_repo", {}) if isinstance(data, dict) else {}
+        repos = data.get("repos", []) if isinstance(data, dict) else []
         repo_info = None
         if primary_repo:
             repo_info = RepoInfo(
@@ -1401,10 +1810,16 @@ def create_app() -> FastAPI:
         else:
             quality_tier = TraceQualityTier.REJECTED
 
+        # Compute tool breakdown
+        tool_counts = {}
+        for step in trace_steps:
+            tool = step.get("tool_name", step.get("tool", "unknown"))
+            tool_counts[tool] = tool_counts.get(tool, 0) + 1
+
         return TraceInfo(
             trace_id=trace_file.stem,
             task_id=metadata.get("task_id", trace_file.stem),
-            task_description=metadata.get("user_initial_prompt", "Unknown task"),
+            task_description=_sanitize_task_description(metadata.get("user_initial_prompt", "")),
             status=status,
             quality_tier=quality_tier,
             steps_count=total_steps,
@@ -1415,10 +1830,13 @@ def create_app() -> FastAPI:
                 length_score=quality.length_score,
                 tool_diversity=quality.tool_diversity,
                 efficiency_score=quality.efficiency_score,
+                cognitive_quality=quality.cognitive_quality,
                 total_score=quality.total_score
             ),
+            source_tool=data.get("source_tool", "claude_code") if isinstance(data, dict) else "claude_code",
             repo=repo_info,
             repos_count=len(repos),
+            tool_breakdown=tool_counts,
             created_at=metadata.get("created_at", datetime.fromtimestamp(trace_file.stat().st_ctime).isoformat()),
             promoted_at=metadata.get("promoted_at")
         )
@@ -1426,16 +1844,18 @@ def create_app() -> FastAPI:
     @app.get("/api/traces/gold", response_model=List[TraceInfo], tags=["Traces"])
     async def list_gold_traces(limit: int = 100):
         """List only gold (successful) traces."""
-        return await list_traces(status=TraceStatus.GOLD, limit=limit)
+        result = await list_traces(status=TraceStatus.GOLD, limit=limit)
+        return result["traces"]
 
-    @app.get("/api/traces/{trace_id}", response_model=TraceInfo, tags=["Traces"])
+    @app.get("/api/traces/{trace_id}", response_model=TraceSummaryDetail, tags=["Traces"])
     async def get_trace(trace_id: str):
-        """Get a specific trace by ID."""
-        from bashgym.config import get_settings
+        """Get a specific trace by ID with enriched detail for promote/demote decisions."""
+        from datetime import datetime
+        from bashgym.config import get_settings, get_bashgym_dir
         settings = get_settings()
         data_dir = Path(settings.data.data_dir)
 
-        # Check all tier directories in priority order
+        # Check all tier directories + pending dirs
         tier_checks = [
             (data_dir / "gold_traces" / f"{trace_id}.json", TraceStatus.GOLD),
             (data_dir / "silver_traces" / f"{trace_id}.json", TraceStatus.SILVER),
@@ -1443,13 +1863,130 @@ def create_app() -> FastAPI:
             (data_dir / "failed_traces" / f"{trace_id}.json", TraceStatus.FAILED),
         ]
 
-        for trace_path, trace_status in tier_checks:
-            if trace_path.exists():
-                with open(trace_path) as f:
-                    data = json.load(f)
-                return _parse_trace_file(trace_path, data, trace_status)
+        # Also check pending directories
+        global_traces_dir = get_bashgym_dir() / "traces"
+        project_traces_dir = data_dir / "traces"
+        for pending_dir in [global_traces_dir, project_traces_dir]:
+            if pending_dir.exists():
+                candidate = pending_dir / f"{trace_id}.json"
+                if candidate.exists():
+                    tier_checks.append((candidate, TraceStatus.PENDING))
 
-        raise HTTPException(status_code=404, detail="Trace not found")
+        trace_path = None
+        trace_status = None
+        data = None
+        for path, status in tier_checks:
+            if path.exists():
+                with open(path, encoding='utf-8') as f:
+                    data = json.load(f)
+                trace_path = path
+                trace_status = status
+                break
+
+        if trace_path is None or data is None:
+            raise HTTPException(status_code=404, detail="Trace not found")
+
+        base_info = _parse_trace_file(trace_path, data, trace_status)
+
+        # Extract steps for enrichment
+        if isinstance(data, list):
+            trace_steps = data
+        else:
+            trace_steps = data.get("trace", data.get("steps", []))
+
+        # Compute duration from timestamps
+        duration_seconds = None
+        timestamps = []
+        for step in trace_steps:
+            ts = step.get("timestamp")
+            if ts:
+                try:
+                    if isinstance(ts, (int, float)):
+                        timestamps.append(ts)
+                    else:
+                        dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+                        timestamps.append(dt.timestamp())
+                except Exception:
+                    pass
+        if len(timestamps) >= 2:
+            duration_seconds = max(timestamps) - min(timestamps)
+
+        # Build step_outcomes
+        step_outcomes = []
+        for step in trace_steps:
+            success = step.get("success")
+            exit_code = step.get("exit_code")
+            if success is not None:
+                step_outcomes.append(bool(success))
+            elif exit_code is not None:
+                step_outcomes.append(exit_code == 0)
+            else:
+                step_outcomes.append(None)
+
+        # Raw metrics
+        unique_tools = set()
+        unique_commands = set()
+        successful = 0
+        failed = 0
+        cognitive_steps = 0
+        planning_phases = 0
+        reflections = 0
+        thinking_steps = 0
+
+        for step in trace_steps:
+            tool = step.get("tool_name", step.get("tool", ""))
+            if tool:
+                unique_tools.add(tool)
+            cmd = step.get("command", "")
+            if cmd:
+                unique_commands.add(cmd.split()[0] if cmd.split() else cmd)
+
+            # Count outcomes
+            s = step.get("success")
+            ec = step.get("exit_code")
+            if s is True or ec == 0:
+                successful += 1
+            elif s is False or (ec is not None and ec != 0):
+                failed += 1
+
+            # Cognitive sub-types
+            step_type = step.get("type", "")
+            tool_lower = tool.lower() if tool else ""
+            if step_type in ("thinking", "thought") or "think" in tool_lower:
+                thinking_steps += 1
+                cognitive_steps += 1
+            elif step_type in ("plan", "planning") or "plan" in tool_lower:
+                planning_phases += 1
+                cognitive_steps += 1
+            elif step_type in ("reflect", "reflection") or "reflect" in tool_lower:
+                reflections += 1
+                cognitive_steps += 1
+
+        raw_metrics = {
+            "total_steps": len(trace_steps),
+            "successful_steps": successful,
+            "failed_steps": failed,
+            "unique_tools": len(unique_tools),
+            "unique_commands": len(unique_commands),
+            "cognitive_steps": cognitive_steps,
+        }
+
+        cognitive_summary = None
+        if cognitive_steps > 0:
+            cognitive_summary = {
+                "planning_phases": planning_phases,
+                "reflections": reflections,
+                "thinking_steps": thinking_steps,
+                "cognitive_coverage": round(cognitive_steps / max(len(trace_steps), 1), 2),
+            }
+
+        return TraceSummaryDetail(
+            **base_info.model_dump(),
+            duration_seconds=duration_seconds,
+            step_outcomes=step_outcomes,
+            cognitive_summary=cognitive_summary,
+            raw_metrics=raw_metrics,
+        )
 
     @app.post("/api/traces/{trace_id}/promote", tags=["Traces"])
     async def promote_trace(trace_id: str, target_tier: str = "gold"):
@@ -1846,6 +2383,134 @@ def create_app() -> FastAPI:
             "errors": len([r for r in results if r.error]),
             "new_trace_ids": new_trace_ids,
         }
+
+    # ------------------------------------------------------------------
+    # Unified trace import endpoints (all sources)
+    # ------------------------------------------------------------------
+
+    # Import handler map: source_name -> callable(TraceImportRequest) -> list
+    def _get_import_handlers():
+        from bashgym.trace_capture.importers import (
+            import_recent,
+            import_gemini_sessions,
+            import_copilot_sessions,
+            import_opencode_sessions,
+        )
+        from bashgym.trace_capture.adapters.codex import import_codex_sessions
+
+        return {
+            "claude": lambda req: import_recent(days=req.days, verbose=False, force=req.force),
+            "gemini": lambda req: import_gemini_sessions(days=req.days, limit=req.limit, verbose=False),
+            "copilot": lambda req: import_copilot_sessions(days=req.days, limit=req.limit, verbose=False),
+            "opencode": lambda req: import_opencode_sessions(days=req.days, limit=req.limit, verbose=False),
+            "codex": lambda req: import_codex_sessions(limit=req.limit),
+        }
+
+    def _build_import_response(source: str, results) -> dict:
+        """Normalise heterogeneous import results into a uniform dict.
+
+        Handles three result shapes:
+        - dataclass objects (Claude ``ImportResult``) with ``.skipped``, ``.error``, ``.destination_file``
+        - standard dicts (Gemini/Copilot/OpenCode) with ``skipped``, ``error``, ``destination_file`` keys
+        - codex dicts with ``trace_file``, ``error`` keys (no ``skipped`` key)
+        """
+        if not results:
+            return {"source": source, "imported": 0, "skipped": 0, "errors": 0, "total": 0, "new_trace_ids": []}
+
+        imported = 0
+        skipped = 0
+        errors = 0
+        new_ids: list[str] = []
+
+        for r in results:
+            # Unify access: support both dataclass attrs and dict keys
+            if isinstance(r, dict):
+                r_skipped = r.get("skipped", False)
+                r_error = r.get("error", None)
+                r_dest = r.get("destination_file") or r.get("trace_file")
+            else:
+                r_skipped = getattr(r, "skipped", False)
+                r_error = getattr(r, "error", None)
+                r_dest = getattr(r, "destination_file", None)
+
+            if r_error:
+                errors += 1
+            elif r_skipped:
+                skipped += 1
+            else:
+                imported += 1
+
+            if r_dest:
+                new_ids.append(str(r_dest))
+
+        return {
+            "source": source,
+            "imported": imported,
+            "skipped": skipped,
+            "errors": errors,
+            "total": len(results),
+            "new_trace_ids": new_ids,
+        }
+
+    # IMPORTANT: /import/all must be registered BEFORE /import/{source}
+    # so FastAPI does not capture "all" as a path parameter.
+
+    @app.post("/api/traces/import/all", tags=["Traces"])
+    async def import_traces_all(request: TraceImportRequest = None):
+        """Import traces from all detected tools.
+
+        Iterates over every known source (claude, gemini, copilot, opencode, codex),
+        runs the importer, and returns per-source results plus an aggregate total.
+        """
+        if request is None:
+            request = TraceImportRequest()
+
+        handlers = _get_import_handlers()
+        all_results: list[dict] = []
+
+        for source, handler in handlers.items():
+            try:
+                results = handler(request)
+                all_results.append(_build_import_response(source, results))
+            except Exception as e:
+                logger.error(f"Import from {source} failed: {e}")
+                all_results.append({
+                    "source": source,
+                    "imported": 0,
+                    "skipped": 0,
+                    "errors": 1,
+                    "total": 0,
+                    "new_trace_ids": [],
+                    "error_detail": str(e),
+                })
+
+        total_imported = sum(r["imported"] for r in all_results)
+        return {"results": all_results, "total_imported": total_imported}
+
+    @app.post("/api/traces/import/{source}", tags=["Traces"])
+    async def import_traces_by_source(source: str, request: TraceImportRequest = None):
+        """Import traces from a specific tool.
+
+        Args:
+            source: One of ``claude``, ``gemini``, ``copilot``, ``opencode``, ``codex``.
+            request: Optional import parameters (days, limit, force).
+        """
+        if request is None:
+            request = TraceImportRequest()
+
+        handlers = _get_import_handlers()
+        if source not in handlers:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown source: {source}. Valid sources: {list(handlers.keys())}",
+            )
+
+        try:
+            results = handlers[source](request)
+            return _build_import_response(source, results)
+        except Exception as e:
+            logger.error(f"Import from {source} failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
 
     @app.get("/api/traces/import-since", tags=["Traces"])
     async def get_traces_since(since: str):

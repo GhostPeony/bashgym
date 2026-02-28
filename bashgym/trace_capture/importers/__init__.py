@@ -22,6 +22,14 @@ from .opencode_history import (
     import_opencode_sessions,
     OpenCodeSessionImporter,
 )
+from .chatgpt import (
+    import_chatgpt_sessions,
+    ChatGPTImporter,
+)
+from .mcp_logs import (
+    import_mcp_logs,
+    MCPLogImporter,
+)
 
 __all__ = [
     # Claude Code
@@ -38,4 +46,10 @@ __all__ = [
     # OpenCode
     "import_opencode_sessions",
     "OpenCodeSessionImporter",
+    # ChatGPT
+    "import_chatgpt_sessions",
+    "ChatGPTImporter",
+    # MCP Tool Logs
+    "import_mcp_logs",
+    "MCPLogImporter",
 ]

@@ -93,9 +93,9 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # API key authentication middleware
-    from bashgym.api.auth import APIKeyMiddleware
-    app.add_middleware(APIKeyMiddleware)
+    # Authentication middleware (supports desktop pass-through + web cookie/API key)
+    from bashgym.api.auth import AuthMiddleware
+    app.add_middleware(AuthMiddleware)
 
     # Initialize state
     app.state.trainer = None
@@ -116,6 +116,13 @@ def create_app() -> FastAPI:
         from bashgym.config import get_settings
         settings = get_settings()
         settings.setup()
+
+        # Initialize auth database and clean up expired sessions
+        from bashgym.api.database import init_db, cleanup_expired_sessions
+        init_db()
+        removed = cleanup_expired_sessions()
+        if removed:
+            logger.info(f"Cleaned up {removed} expired sessions")
 
         # Initialize instrumentation (guardrails + profiler)
         try:
@@ -2400,12 +2407,16 @@ def create_app() -> FastAPI:
         )
         from bashgym.trace_capture.adapters.codex import import_codex_sessions
 
+        from bashgym.trace_capture.importers import import_chatgpt_sessions, import_mcp_logs
+
         return {
             "claude": lambda req: import_recent(days=req.days, verbose=False, force=req.force),
             "gemini": lambda req: import_gemini_sessions(days=req.days, limit=req.limit, verbose=False),
             "copilot": lambda req: import_copilot_sessions(days=req.days, limit=req.limit, verbose=False),
             "opencode": lambda req: import_opencode_sessions(days=req.days, limit=req.limit, verbose=False),
             "codex": lambda req: import_codex_sessions(limit=req.limit),
+            "chatgpt": lambda req: import_chatgpt_sessions(force=req.force),
+            "mcp": lambda req: import_mcp_logs(force=req.force),
         }
 
     def _build_import_response(source: str, results) -> dict:
@@ -3903,6 +3914,10 @@ def create_app() -> FastAPI:
             }
         return {"benchmarks": status}
 
+    # Include auth routes (GitHub OAuth)
+    from bashgym.api.auth_routes import router as auth_router
+    app.include_router(auth_router)
+
     # Include observability routes
     app.include_router(observability_router)
 
@@ -3976,6 +3991,92 @@ def create_app() -> FastAPI:
             await broadcast_trace_event("added", {"uploaded": saved})
 
         return {"saved": saved, "errors": errors}
+
+    from fastapi import Form
+
+    @app.post("/api/traces/upload/import", tags=["Traces"])
+    async def upload_and_import_traces(
+        file: UploadFile = File(...),
+        source: str = Form(...),
+        force: bool = Form(False),
+    ):
+        """Upload and import trace files from external AI tools.
+
+        Accepts:
+        - source=chatgpt: zip or JSON containing conversations.json
+        - source=mcp: JSON or JSONL file with MCP tool call logs
+
+        Files are processed through the appropriate importer and saved
+        as structured trace sessions.
+        """
+        if source not in ("chatgpt", "mcp"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown source: {source}. Supported: chatgpt, mcp",
+            )
+
+        content = await file.read(MAX_UPLOAD_SIZE + 1)
+        if len(content) > MAX_UPLOAD_SIZE:
+            raise HTTPException(status_code=413, detail="File exceeds 50 MB limit")
+
+        import tempfile
+        suffix = f"_{file.filename}" if file.filename else ""
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(content)
+            tmp_path = Path(tmp.name)
+
+        try:
+            if source == "chatgpt":
+                from bashgym.trace_capture.importers.chatgpt import ChatGPTImporter
+                importer = ChatGPTImporter()
+                if file.filename and file.filename.endswith(".zip"):
+                    results = importer.import_from_zip(tmp_path, force=force)
+                else:
+                    results = importer.import_from_json(tmp_path, force=force)
+
+                imported = [r for r in results if not r.skipped and not r.error]
+                skipped = [r for r in results if r.skipped]
+                failed = [r for r in results if r.error]
+
+                resp = {
+                    "source": "chatgpt",
+                    "imported_count": len(imported),
+                    "skipped_count": len(skipped),
+                    "failed_count": len(failed),
+                    "total_steps": sum(r.steps_imported for r in imported),
+                    "errors": [r.error for r in failed if r.error],
+                }
+
+            elif source == "mcp":
+                from bashgym.trace_capture.importers.mcp_logs import MCPLogImporter
+                importer = MCPLogImporter()
+                result = importer.import_from_file(tmp_path, force=force)
+
+                if result.error:
+                    resp = {
+                        "source": "mcp",
+                        "imported_count": 0,
+                        "skipped_count": 0,
+                        "failed_count": 1,
+                        "total_steps": 0,
+                        "errors": [result.error],
+                    }
+                else:
+                    resp = {
+                        "source": "mcp",
+                        "imported_count": 0 if result.skipped else 1,
+                        "skipped_count": 1 if result.skipped else 0,
+                        "failed_count": 0,
+                        "total_steps": result.steps_imported,
+                        "errors": [],
+                    }
+
+            if resp.get("imported_count", 0) > 0:
+                await broadcast_trace_event("added", {"source": source, "count": resp["imported_count"]})
+
+            return resp
+        finally:
+            tmp_path.unlink(missing_ok=True)
 
     @app.post("/api/traces/hook", tags=["Traces"])
     async def receive_hook_trace(

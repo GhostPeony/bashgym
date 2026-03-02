@@ -27,6 +27,7 @@ import {
   Check,
   List
 } from 'lucide-react'
+import TraceUpload from './TraceUpload'
 import {
   XAxis,
   YAxis,
@@ -629,6 +630,9 @@ export function TraceBrowser() {
                 {formatRelativeTime(lastImportTime)}
               </p>
             )}
+
+            {/* File upload for ChatGPT / MCP imports */}
+            <TraceUpload onImportComplete={() => fetchTraces()} />
           </div>
         )}
       </div>

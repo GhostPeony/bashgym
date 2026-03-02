@@ -4,6 +4,7 @@
 import json
 import logging
 import os
+import re
 import secrets
 import subprocess
 from datetime import datetime, timezone, timedelta
@@ -28,6 +29,18 @@ router = APIRouter(prefix="/api/agent", tags=["agent"])
 _skill_registry = SkillRegistry()
 _tool_registry = ToolRegistry()
 _memory = PeonyMemory()
+
+# ---------------------------------------------------------------------------
+# Input validation helpers
+# ---------------------------------------------------------------------------
+
+_SAFE_ID = re.compile(r'^[a-zA-Z0-9_-]{1,64}$')
+
+
+def _validate_session_id(session_id: str) -> str:
+    if not _SAFE_ID.match(session_id):
+        raise HTTPException(status_code=400, detail="Invalid session ID")
+    return session_id
 
 # ---------------------------------------------------------------------------
 # In-memory pending actions (shell confirmation gate)
@@ -745,6 +758,7 @@ async def list_sessions():
 @router.get("/sessions/{session_id}")
 async def load_session(session_id: str):
     """Load messages for a specific session from its JSONL log."""
+    session_id = _validate_session_id(session_id)
     log_path = _get_peony_logs_dir() / f"{session_id}.jsonl"
     if not log_path.exists():
         raise HTTPException(status_code=404, detail="Session not found")
@@ -771,6 +785,7 @@ async def load_session(session_id: str):
 @router.post("/sessions")
 async def save_session(req: SaveSessionRequest):
     """Save a session — writes JSONL file and updates the index."""
+    _validate_session_id(req.session_id)
     logs_dir = _get_peony_logs_dir()
     log_path = logs_dir / f"{req.session_id}.jsonl"
 
@@ -818,6 +833,7 @@ async def save_session(req: SaveSessionRequest):
 @router.delete("/sessions/{session_id}")
 async def delete_session(session_id: str):
     """Delete a session log and remove it from the index."""
+    session_id = _validate_session_id(session_id)
     log_path = _get_peony_logs_dir() / f"{session_id}.jsonl"
     if log_path.exists():
         log_path.unlink()

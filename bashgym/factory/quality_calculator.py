@@ -39,6 +39,7 @@ class QualityBreakdown:
     length_score: float       # 0-1, bell curve around ideal length
     tool_diversity: float     # 0-1, unique tools used
     efficiency_score: float   # 0-1, output quality vs errors
+    cognitive_quality: float  # 0-1, quality of reasoning/thinking data
     total_score: float        # Weighted combination
 
     # Verification flags (derived from metadata, not from score)
@@ -51,6 +52,7 @@ class QualityBreakdown:
     failed_steps: int = 0
     unique_tools_count: int = 0
     unique_commands_count: int = 0
+    cognitive_steps_count: int = 0  # Steps with cognitive data
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for API responses."""
@@ -61,6 +63,7 @@ class QualityBreakdown:
             "length_score": round(self.length_score, 3),
             "tool_diversity": round(self.tool_diversity, 3),
             "efficiency_score": round(self.efficiency_score, 3),
+            "cognitive_quality": round(self.cognitive_quality, 3),
             "total_score": round(self.total_score, 3),
         }
 
@@ -363,6 +366,105 @@ def calculate_efficiency(steps: List[Dict[str, Any]]) -> float:
     return min(max(efficiency, 0.0), 1.0)
 
 
+def calculate_cognitive_quality(steps: List[Dict[str, Any]]) -> tuple[float, int]:
+    """
+    Calculate cognitive quality score based on reasoning data in trace steps.
+
+    Scores based on:
+    1. Presence of thinking blocks (30%): steps with thinking content
+    2. Plan coherence (25%): steps with explicit plans
+    3. Error reflection (25%): steps with reflection after failures
+    4. Reasoning-to-action alignment (20%): cognitive data attached to tool calls
+
+    Inspired by AgentTrace's insight that cognitive quality matters independently
+    of outcome quality. A trace with strong reasoning is valuable training data
+    even if the environment caused failures.
+
+    Args:
+        steps: List of trace steps
+
+    Returns:
+        Tuple of (cognitive_quality 0-1, steps_with_cognitive_count)
+    """
+    if not steps:
+        return 0.0, 0
+
+    steps_with_thinking = 0
+    steps_with_plans = 0
+    steps_with_reflection = 0
+    steps_with_cognitive = 0  # Any cognitive data at all
+    reflection_after_failure = 0
+    failures_seen = 0
+
+    for i, step in enumerate(steps):
+        meta = step.get("metadata", {})
+        cognitive = step.get("cognitive") or meta.get("cognitive") or {}
+
+        has_any_cognitive = False
+
+        # Check for thinking content
+        thinking = cognitive.get("thinking") or meta.get("thinking_content")
+        if thinking and len(str(thinking).strip()) > 10:
+            steps_with_thinking += 1
+            has_any_cognitive = True
+
+        # Check for plan content
+        plan = cognitive.get("plan")
+        if plan and len(str(plan).strip()) > 10:
+            steps_with_plans += 1
+            has_any_cognitive = True
+
+        # Check for reflection content
+        reflection = cognitive.get("reflection")
+        if reflection and len(str(reflection).strip()) > 10:
+            steps_with_reflection += 1
+            has_any_cognitive = True
+
+            # Bonus: reflection after a failure shows error recovery reasoning
+            if failures_seen > 0:
+                reflection_after_failure += 1
+
+        if has_any_cognitive:
+            steps_with_cognitive += 1
+
+        # Track failures for reflection scoring
+        is_failure = (
+            step.get("success") is False or
+            (step.get("exit_code") is not None and step.get("exit_code") != 0)
+        )
+        if is_failure:
+            failures_seen += 1
+
+    total = len(steps)
+
+    # 1. Thinking presence (30%): what fraction of steps have thinking
+    thinking_score = min(steps_with_thinking / total, 1.0) if total > 0 else 0.0
+
+    # 2. Plan coherence (25%): having plans is good, but diminishing returns
+    plan_score = min(steps_with_plans / max(total * 0.3, 1), 1.0)
+
+    # 3. Error reflection (25%): reflection after failures is very valuable
+    if failures_seen > 0:
+        reflection_score = min(reflection_after_failure / failures_seen, 1.0)
+    elif steps_with_reflection > 0:
+        reflection_score = 0.5  # Has reflection but no failures to reflect on
+    else:
+        reflection_score = 0.0
+
+    # 4. Reasoning-to-action alignment (20%): cognitive data attached to actions
+    alignment_score = min(steps_with_cognitive / total, 1.0) if total > 0 else 0.0
+
+    # Combine with weights
+    score = (
+        thinking_score * 0.30 +
+        plan_score * 0.25 +
+        reflection_score * 0.25 +
+        alignment_score * 0.20
+    )
+
+    return min(max(score, 0.0), 1.0), steps_with_cognitive
+
+
 def calculate_quality_breakdown(
     steps: List[Dict[str, Any]],
     verification_passed: Optional[bool] = None,
@@ -395,17 +497,19 @@ def calculate_quality_breakdown(
     length_score = calculate_length_score(len(steps))
     tool_diversity, unique_tools = calculate_tool_diversity(steps)
     efficiency_score = calculate_efficiency(steps)
+    cognitive_quality, cognitive_steps = calculate_cognitive_quality(steps)
 
     # Calculate weighted total
-    # Weights: success=30%, verification=25%, complexity=15%,
-    #          tool_diversity=10%, efficiency=10%, length=10%
+    # Weights: success=25%, verification=20%, cognitive=15%, complexity=15%,
+    #          tool_diversity=10%, efficiency=10%, length=5%
     total_score = (
-        success_rate * 0.30 +
-        verification_score * 0.25 +
+        success_rate * 0.25 +
+        verification_score * 0.20 +
+        cognitive_quality * 0.15 +
         complexity_score * 0.15 +
         tool_diversity * 0.10 +
         efficiency_score * 0.10 +
-        length_score * 0.10
+        length_score * 0.05
     )
 
     # Guard against NaN
@@ -419,6 +523,7 @@ def calculate_quality_breakdown(
         length_score=length_score,
         tool_diversity=tool_diversity,
         efficiency_score=efficiency_score,
+        cognitive_quality=cognitive_quality,
         total_score=total_score,
         has_verification=has_verification,
         verification_passed_flag=verification_passed,
@@ -427,6 +532,7 @@ def calculate_quality_breakdown(
         failed_steps=failed,
         unique_tools_count=unique_tools,
         unique_commands_count=unique_commands,
+        cognitive_steps_count=cognitive_steps,
     )
 
 

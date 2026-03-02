@@ -257,6 +257,9 @@ def create_app() -> FastAPI:
     @app.get("/api/debug/traces", tags=["System"])
     async def debug_traces():
         """Debug endpoint to diagnose trace discovery issues."""
+        import os as _os
+        if _os.environ.get("BASHGYM_MODE", "").lower() == "web":
+            raise HTTPException(status_code=404, detail="Not found")
         from bashgym.config import get_settings, get_bashgym_dir
 
         settings = get_settings()
@@ -2321,6 +2324,38 @@ def create_app() -> FastAPI:
                 success=False,
                 message=f"Export failed: {str(e)}"
             )
+
+    @app.get("/api/training/export/download", tags=["Training Examples"])
+    async def download_training_export(split: str = "train"):
+        """Download the most recent exported JSONL file as a browser download.
+
+        Args:
+            split: Which split to download - 'train' or 'val'
+        """
+        from fastapi.responses import FileResponse
+        from bashgym.config import get_settings
+
+        settings = get_settings()
+        data_dir = Path(settings.data.data_dir)
+        batches_dir = data_dir / "training_batches"
+
+        if split not in ("train", "val"):
+            raise HTTPException(status_code=400, detail="split must be 'train' or 'val'")
+
+        filename = f"{split}.jsonl"
+        file_path = batches_dir / filename
+
+        if not file_path.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=f"No exported {split} file found. Run export first."
+            )
+
+        return FileResponse(
+            path=str(file_path),
+            filename=filename,
+            media_type="application/jsonl",
+        )
 
     @app.post("/api/traces/sync", tags=["Traces"])
     async def sync_traces_to_project():

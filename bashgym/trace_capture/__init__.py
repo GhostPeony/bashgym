@@ -14,7 +14,12 @@ Usage:
     setup_trace_capture(tools)
 """
 
-from .core import TraceCapture, TraceStep, TraceSession
+from .core import TraceCapture, TraceStep, TraceSession, CognitiveData
+from .schema import (
+    TraceEvent, SurfaceType, CognitiveSchema,
+    OperationalBody, CognitiveBody, ContextualBody,
+    validate_event, validate_session, trace_step_to_events,
+)
 from .detector import detect_tools, get_tool_status
 from .setup import setup_trace_capture, uninstall_trace_capture
 
@@ -22,6 +27,18 @@ __all__ = [
     'TraceCapture',
     'TraceStep',
     'TraceSession',
+    'CognitiveData',
+    # Schema validation (AgentTrace-inspired)
+    'TraceEvent',
+    'SurfaceType',
+    'CognitiveSchema',
+    'OperationalBody',
+    'CognitiveBody',
+    'ContextualBody',
+    'validate_event',
+    'validate_session',
+    'trace_step_to_events',
+    # Detection & setup
     'detect_tools',
     'get_tool_status',
     'setup_trace_capture',

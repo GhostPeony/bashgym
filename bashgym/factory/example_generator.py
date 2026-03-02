@@ -10,13 +10,17 @@ Module 3: Data Synthesis (The "Factory")
 
 import json
 import hashlib
+import uuid
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime, timezone
 from enum import Enum
 
-from .data_factory import TrainingExample, DPOExample
+from .data_factory import (
+    TrainingExample, DPOExample, TOOL_SCHEMAS, TOOL_OUTPUT_MAX_CHARS,
+    build_tool_call_messages, _normalize_tool_name, _parse_command_to_arguments
+)
 
 
 class SegmentationType(Enum):
@@ -38,6 +42,8 @@ class TraceStep:
     success: Optional[bool]
     timestamp: Optional[str] = None
     working_dir: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+    span_id: Optional[str] = None  # Causal span: groups reasoning + action
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any], index: int) -> "TraceStep":
@@ -49,7 +55,9 @@ class TraceStep:
             output=data.get("output", data.get("result", ""))[:2000],  # Truncate
             success=data.get("success", data.get("exit_code") == 0 if "exit_code" in data else None),
             timestamp=data.get("timestamp"),
-            working_dir=data.get("cwd", data.get("working_directory"))
+            working_dir=data.get("cwd", data.get("working_directory")),
+            metadata=data.get("metadata"),
+            span_id=data.get("span_id")
         )
 
 
@@ -61,6 +69,8 @@ class TaskSegment:
     start_index: int
     end_index: int
     confidence: float = 0.5  # Confidence in the segmentation
+    repo_name: Optional[str] = None
+    repo_path: Optional[str] = None
 
     @property
     def step_count(self) -> int:
@@ -84,6 +94,9 @@ class ExampleGeneratorConfig:
     # Quality filtering
     min_success_rate: float = 0.5
     require_file_operations: bool = False
+
+    # Cognitive trace settings (AgentTrace-inspired)
+    include_cognitive: bool = True  # Include thinking/reasoning in training examples
 
     # Output settings
     output_dir: str = "data/training_examples"
@@ -183,6 +196,11 @@ Always explain your reasoning before executing commands."""
         if not steps:
             return []
 
+        # Extract repo info from session metadata
+        primary_repo = metadata.get("primary_repo", {})
+        repo_name = primary_repo.get("name") if isinstance(primary_repo, dict) else None
+        repo_path = primary_repo.get("path") if isinstance(primary_repo, dict) else None
+
         if len(steps) <= self.config.max_steps_per_segment:
             # Session is small enough to be a single example
             prompt = self._infer_task_prompt(steps, metadata)
@@ -191,7 +209,9 @@ Always explain your reasoning before executing commands."""
                 inferred_prompt=prompt,
                 start_index=0,
                 end_index=len(steps) - 1,
-                confidence=0.8
+                confidence=0.8,
+                repo_name=repo_name,
+                repo_path=repo_path,
             )]
 
         # Find segment boundaries
@@ -219,7 +239,9 @@ Always explain your reasoning before executing commands."""
                 inferred_prompt=prompt,
                 start_index=start_idx,
                 end_index=min(end_idx, start_idx + self.config.max_steps_per_segment - 1),
-                confidence=0.6
+                confidence=0.6,
+                repo_name=repo_name,
+                repo_path=repo_path,
             ))
 
             start_idx = end_idx + 1
@@ -234,13 +256,48 @@ Always explain your reasoning before executing commands."""
                     inferred_prompt=prompt,
                     start_index=start_idx,
                     end_index=len(steps) - 1,
-                    confidence=0.5
+                    confidence=0.5,
+                    repo_name=repo_name,
+                    repo_path=repo_path,
                 ))
 
         return segments
 
+    def assign_spans(self, steps: List[TraceStep]) -> None:
+        """Assign causal span IDs to groups of related steps.
+
+        A span groups a reasoning chain (thinking → action). New spans start when:
+        - A new thinking/cognitive block appears (new reasoning chain)
+        - There's no cognitive data linking to the previous step
+
+        This enables span-based segmentation: span boundaries are natural
+        task boundaries because each span represents one think-then-act cycle.
+        """
+        current_span = uuid.uuid4().hex[:12]
+
+        for i, step in enumerate(steps):
+            meta = step.metadata or {}
+            cognitive = meta.get("cognitive") or {}
+            has_thinking = bool(cognitive.get("thinking") or meta.get("thinking_content"))
+
+            if i > 0 and has_thinking:
+                # New thinking block = new reasoning chain = new span
+                current_span = uuid.uuid4().hex[:12]
+
+            step.span_id = current_span
+
     def _find_segment_boundaries(self, steps: List[TraceStep]) -> List[int]:
-        """Find indices where segments should end."""
+        """Find indices where segments should end.
+
+        Uses both traditional heuristics and causal span boundaries:
+        - Git commits (strong signal)
+        - Time gaps > threshold
+        - Directory changes
+        - Cognitive span boundaries (new reasoning chain starts)
+        """
+        # Assign spans first so we can use them for boundary detection
+        self.assign_spans(steps)
+
         boundaries = []
 
         for i, step in enumerate(steps):
@@ -259,6 +316,10 @@ Always explain your reasoning before executing commands."""
 
             # Check for directory changes
             elif self._has_directory_change(steps[i-1], step):
+                is_boundary = True
+
+            # Check for cognitive span boundary (new reasoning chain)
+            elif self._has_cognitive_boundary(steps[i-1], step):
                 is_boundary = True
 
             if is_boundary:
@@ -299,6 +360,22 @@ Always explain your reasoning before executing commands."""
                 return True
 
         return False
+
+    def _has_cognitive_boundary(self, prev_step: TraceStep, curr_step: TraceStep) -> bool:
+        """Check if a new reasoning chain starts at curr_step.
+
+        A cognitive boundary occurs when:
+        - The current step has a new span_id (assigned by assign_spans)
+        - AND there's been a meaningful gap in reasoning (not just consecutive
+          tool calls in the same chain)
+
+        This is weaker than git commit or time gap boundaries — it only triggers
+        when the span actually changed AND there are enough steps to warrant
+        splitting.
+        """
+        if not prev_step.span_id or not curr_step.span_id:
+            return False
+        return prev_step.span_id != curr_step.span_id
 
     def _infer_task_prompt(self, steps: List[TraceStep], metadata: Dict[str, Any]) -> str:
         """
@@ -356,15 +433,42 @@ Always explain your reasoning before executing commands."""
         """
         Convert a TaskSegment to a TrainingExample.
 
+        Produces both structured multi-turn messages (with tool_calls and tool
+        roles) and a legacy markdown response for backward compatibility.
+
+        When include_cognitive is enabled (default), injects thinking/reasoning
+        content into assistant messages before tool_calls, teaching the model
+        to reason-then-act.
+
         Args:
             segment: The segment to convert
 
         Returns:
-            TrainingExample in NeMo-compatible format
+            TrainingExample in NeMo-compatible format with structured messages
         """
-        # Build assistant response from steps
-        response_parts = []
+        # Build structured messages from steps, preserving metadata for cognitive extraction
+        raw_steps = []
+        per_step_success = []
+        for step in segment.steps:
+            step_dict = {
+                "tool_name": step.tool_name,
+                "command": step.command,
+                "output": step.output,
+                "success": step.success,
+            }
+            # Preserve metadata so build_tool_call_messages can extract cognitive data
+            if hasattr(step, 'metadata') and step.metadata:
+                step_dict["metadata"] = step.metadata
+            raw_steps.append(step_dict)
+            per_step_success.append(bool(step.success) if step.success is not None else True)
 
+        structured_messages = build_tool_call_messages(
+            raw_steps, self.SYSTEM_PROMPT, segment.inferred_prompt,
+            include_cognitive=self.config.include_cognitive
+        )
+
+        # Also build legacy markdown response for backward compat
+        response_parts = []
         for i, step in enumerate(segment.steps, 1):
             tool_name = step.tool_name.lower()
 
@@ -372,7 +476,7 @@ Always explain your reasoning before executing commands."""
                 response_parts.append(f"**Step {i}: Execute command**")
                 response_parts.append(f"```bash\n{step.command}\n```")
                 if step.output and len(step.output.strip()) > 0:
-                    output = step.output[:500]  # Truncate
+                    output = step.output[:500]
                     response_parts.append(f"Output:\n```\n{output}\n```")
             elif tool_name in ("read", "write", "edit"):
                 response_parts.append(f"**Step {i}: {tool_name.title()} file**")
@@ -403,13 +507,18 @@ Always explain your reasoning before executing commands."""
             system_prompt=self.SYSTEM_PROMPT,
             user_prompt=segment.inferred_prompt,
             assistant_response=assistant_response,
+            messages=structured_messages,
+            tools=TOOL_SCHEMAS,
             metadata={
                 "step_count": segment.step_count,
                 "start_index": segment.start_index,
                 "end_index": segment.end_index,
                 "segmentation_confidence": segment.confidence,
                 "success_rate": success_rate,
-                "generated_at": datetime.now(timezone.utc).isoformat()
+                "per_step_success": per_step_success,
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "repo_name": segment.repo_name,
+                "repo_path": segment.repo_path,
             }
         )
 
@@ -501,6 +610,9 @@ Always explain your reasoning before executing commands."""
         """
         Save examples to a JSONL file (NeMo-compatible format).
 
+        Uses structured multi-turn messages with tool_calls when available,
+        falling back to the legacy 3-message format otherwise.
+
         Args:
             examples: List of TrainingExample objects
             output_path: Path to save the JSONL file
@@ -513,14 +625,8 @@ Always explain your reasoning before executing commands."""
 
         with open(output_path, 'w') as f:
             for example in examples:
-                # Write in NeMo format: just the messages array
-                record = {
-                    "messages": [
-                        {"role": "system", "content": example.system_prompt},
-                        {"role": "user", "content": example.user_prompt},
-                        {"role": "assistant", "content": example.assistant_response}
-                    ]
-                }
+                # Use structured format (to_dict prefers messages when available)
+                record = example.to_dict()
                 f.write(json.dumps(record) + "\n")
 
         print(f"Saved {len(examples)} examples to {output_path}")
@@ -530,7 +636,8 @@ Always explain your reasoning before executing commands."""
         self,
         examples: List[TrainingExample],
         output_dir: Path,
-        train_split: float = 0.9
+        train_split: float = 0.9,
+        repo_filter: Optional[List[str]] = None,
     ) -> Dict[str, Path]:
         """
         Export examples in NeMo training format with train/val split.
@@ -539,6 +646,8 @@ Always explain your reasoning before executing commands."""
             examples: List of training examples
             output_dir: Directory to save files
             train_split: Fraction for training (rest goes to validation)
+            repo_filter: Optional list of repo names to include. When set,
+                only examples whose metadata.repo_name is in this list are exported.
 
         Returns:
             Dict with paths to train and val files
@@ -547,6 +656,11 @@ Always explain your reasoning before executing commands."""
 
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Apply repo filter if specified
+        if repo_filter:
+            filter_set = set(repo_filter)
+            examples = [e for e in examples if e.metadata.get("repo_name") in filter_set]
 
         # Shuffle and split
         shuffled = examples.copy()

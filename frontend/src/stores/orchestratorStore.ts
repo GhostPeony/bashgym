@@ -83,7 +83,12 @@ interface OrchestratorState {
 }
 
 function escapePrompt(prompt: string): string {
-  return prompt.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+  return prompt
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/`/g, '\\`')
+    .replace(/\$/g, '\\$')
+    .replace(/!/g, '\\!')
 }
 
 export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({

@@ -94,6 +94,38 @@ class RepoInfo:
 
 
 @dataclass
+class CognitiveData:
+    """Structured cognitive data extracted from LLM agent reasoning.
+
+    Inspired by AgentTrace's treatment of cognitive traces as first-class
+    telemetry. Separates thinking, planning, reflection, and decision
+    rationale into queryable fields rather than burying them in metadata.
+    """
+    thinking: Optional[str] = None          # Raw thinking/chain-of-thought blocks
+    plan: Optional[str] = None              # Explicit plan or step outline
+    reflection: Optional[str] = None        # Error reflection / self-correction
+    decision_rationale: Optional[str] = None  # Why a specific action was chosen
+    confidence: Optional[float] = None      # Agent's expressed confidence (0-1)
+
+    def is_empty(self) -> bool:
+        return not any([self.thinking, self.plan, self.reflection, self.decision_rationale])
+
+    def to_dict(self) -> Dict[str, Any]:
+        d = {}
+        if self.thinking:
+            d["thinking"] = self.thinking
+        if self.plan:
+            d["plan"] = self.plan
+        if self.reflection:
+            d["reflection"] = self.reflection
+        if self.decision_rationale:
+            d["decision_rationale"] = self.decision_rationale
+        if self.confidence is not None:
+            d["confidence"] = self.confidence
+        return d
+
+
+@dataclass
 class TraceStep:
     """A single step in a trace (tool execution)."""
     step_id: str
@@ -107,6 +139,7 @@ class TraceStep:
     repo: Optional[Dict[str, Any]] = None
     source_tool: str = "unknown"  # claude_code, opencode, aider, etc.
     metadata: Dict[str, Any] = field(default_factory=dict)
+    cognitive: Optional[Dict[str, Any]] = None  # Structured cognitive data (serialized CognitiveData)
 
     @classmethod
     def create(

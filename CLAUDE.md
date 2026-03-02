@@ -392,20 +392,24 @@ Key files:
 Session (traces/*.json)
     │
     ▼ ExampleGenerator.segment_session()
-Segments (logical task boundaries)
+Segments (logical task boundaries, carry repo_name/repo_path)
     │
     ▼ ExampleGenerator.segment_to_example()
-TrainingExample objects
+TrainingExample objects (structured tool-call messages with cognitive tags)
     │
-    ▼ ExampleGenerator.export_for_nemo()
-train.jsonl + val.jsonl
+    ▼ ExampleGenerator.export_for_nemo(repo_filter=["ghostwork"])
+train.jsonl + val.jsonl (optionally filtered by repo)
 ```
 
 Segmentation heuristics:
 - Time gaps > 5 minutes
 - Git commits (task completion)
 - Directory changes (different project)
-- File scope changes
+- Cognitive span boundaries (new reasoning chain)
+
+**Cognitive tags in training examples**: When `include_cognitive=True` (default), assistant messages include `<thinking>`, `<plan>`, and `<reflection>` XML tags wrapping the agent's reasoning before each tool call. Duplicate text across tags is suppressed. Import limits: 10KB for thinking blocks, 5KB for text blocks.
+
+**Repo context**: `TaskSegment` carries `repo_name`/`repo_path` from session metadata's `primary_repo`. These flow into `TrainingExample.metadata` for repo-aware filtering at export time.
 
 ### Trace Classification Criteria
 
@@ -426,11 +430,21 @@ POST /api/traces/{trace_id}/generate-examples
 # List generated examples
 GET /api/training/examples
 
-# Export to NeMo format
+# Export to NeMo format (supports repo_filter for repo-specific training)
 POST /api/training/export
 
 # Start training
 POST /api/training/start
+```
+
+### Programmatic Export with Repo Filter
+
+```python
+from bashgym.factory.example_generator import ExampleGenerator
+gen = ExampleGenerator()
+examples, stats = gen.process_directory(Path("data/gold_traces"))
+# Export only examples from a specific repo
+gen.export_for_nemo(examples, Path("output"), repo_filter=["ghostwork"])
 ```
 
 ### Monitoring Training Progress

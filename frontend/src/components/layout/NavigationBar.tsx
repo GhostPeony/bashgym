@@ -10,15 +10,17 @@ import {
   Home,
   Minus,
   Square,
-  Copy
+  Copy,
+  LogOut
 } from 'lucide-react'
-import { useThemeStore, useUIStore, useTerminalStore } from '../../stores'
-import { isElectron } from '../../utils/platform'
+import { useThemeStore, useUIStore, useTerminalStore, useAuthStore } from '../../stores'
+import { isElectron, isWeb } from '../../utils/platform'
 
 export function NavigationBar() {
   const { theme, toggleTheme } = useThemeStore()
   const { toggleSidebar, overlayView, openOverlay, closeOverlay } = useUIStore()
   const { createTerminal } = useTerminalStore()
+  const { user, isAuthenticated, logout } = useAuthStore()
   const [isMaximized, setIsMaximized] = useState(false)
 
   // Track maximized state
@@ -170,6 +172,32 @@ export function NavigationBar() {
         >
           <Settings className="w-5 h-5" />
         </button>
+
+        {/* User Profile — Web mode only */}
+        {isWeb && isAuthenticated && user && (
+          <>
+            <div className="w-px h-5 bg-border mx-1" />
+            <div className="flex items-center gap-2">
+              {user.avatar_url && (
+                <img
+                  src={user.avatar_url}
+                  alt={user.username}
+                  className="w-7 h-7 rounded-full border border-border"
+                />
+              )}
+              <span className="text-text-secondary font-mono text-xs hidden sm:inline">
+                {user.username}
+              </span>
+              <button
+                onClick={logout}
+                className="btn-icon text-text-secondary hover:text-red-500"
+                title="Sign out"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
+          </>
+        )}
 
         {/* Window Controls — Electron only */}
         {isElectron && (

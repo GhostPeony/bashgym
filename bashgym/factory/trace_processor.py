@@ -264,9 +264,12 @@ class TraceProcessor:
                 "tool": tool_name.lower(),
                 "command": command,
                 "output": output,
-                "success": success
+                "success": success,
+                "exit_code": step.get("exit_code"),
+                "cognitive": step.get("cognitive"),
+                "metadata": step.get("metadata", {}),
             })
-        
+
         return normalized
     
     def _redact_sensitive(self, text: str) -> str:
@@ -395,7 +398,10 @@ class TraceProcessor:
                 "tool": tool_name.lower(),
                 "command": command,
                 "output": output,
-                "success": success
+                "success": success,
+                "exit_code": step.get("exit_code"),
+                "cognitive": step.get("cognitive"),
+                "metadata": step.get("metadata", {}),
             })
 
         return normalized

@@ -360,6 +360,7 @@ class TestQualityBreakdown:
             length_score=0.8,
             tool_diversity=0.75,
             efficiency_score=0.85,
+            cognitive_quality=0.6,
             total_score=0.82,
             total_steps=15,
             successful_steps=14,
@@ -375,14 +376,15 @@ class TestQualityBreakdown:
         assert data["length_score"] == 0.8
         assert data["tool_diversity"] == 0.75
         assert data["efficiency_score"] == 0.85
+        assert data["cognitive_quality"] == 0.6
         assert data["total_score"] == 0.82
 
     def test_weights_sum_to_one(self):
         """Test that quality weights sum to 1.0 (100%)."""
-        # The weights should be: success=30%, verification=25%, complexity=15%,
-        # tool_diversity=10%, efficiency=10%, length=10%
-        weights = [0.30, 0.25, 0.15, 0.10, 0.10, 0.10]
-        assert sum(weights) == 1.0
+        # The weights should be: success=25%, verification=20%, cognitive=15%,
+        # complexity=15%, tool_diversity=10%, efficiency=10%, length=5%
+        weights = [0.25, 0.20, 0.15, 0.15, 0.10, 0.10, 0.05]
+        assert abs(sum(weights) - 1.0) < 0.001
 
 
 if __name__ == "__main__":

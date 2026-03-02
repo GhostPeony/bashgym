@@ -216,9 +216,11 @@ async function request<T>(
     // Direct fetch fallback
     const response = await fetch(`${API_BASE}${endpoint}`, {
       ...options,
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
         'X-API-Key': localStorage.getItem('bashgym_api_key') || '',
+        'X-Requested-With': 'XMLHttpRequest',
         ...options?.headers
       }
     })
@@ -280,7 +282,46 @@ export const trainingApi = {
     request<{ success: boolean; message: string }>(`/training/${runId}/stop`, { method: 'POST' }),
 
   list: (status?: string, limit?: number) =>
-    request<TrainingResponse[]>(`/training${status ? `?status=${status}` : ''}${limit ? `${status ? '&' : '?'}limit=${limit}` : ''}`)
+    request<TrainingResponse[]>(`/training${status ? `?status=${status}` : ''}${limit ? `${status ? '&' : '?'}limit=${limit}` : ''}`),
+
+  // Export training examples to JSONL on the server
+  exportExamples: (options?: { trace_ids?: string[]; include_gold_only?: boolean; train_split?: number }) =>
+    request<{
+      success: boolean
+      train_path?: string
+      val_path?: string
+      train_count: number
+      val_count: number
+      message?: string
+    }>('/training/export', {
+      method: 'POST',
+      body: JSON.stringify(options || {}),
+    }),
+
+  // Download exported JSONL file as browser download
+  downloadExport: async (split: 'train' | 'val' = 'train') => {
+    try {
+      const response = await fetch(`${API_BASE}/training/export/download?split=${split}`, {
+        credentials: 'include',
+      })
+      if (!response.ok) {
+        const text = await response.text()
+        return { ok: false as const, error: text }
+      }
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${split}.jsonl`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      return { ok: true as const, data: { downloaded: true } }
+    } catch (e) {
+      return { ok: false as const, error: String(e) }
+    }
+  },
 }
 
 // Legacy Models API (see modelsApi below for full implementation)
@@ -455,6 +496,38 @@ export const tracesApi = {
       method: 'POST',
       body: JSON.stringify(options || {}),
     }),
+
+  // Upload and import trace files from external AI tools (ChatGPT, MCP)
+  uploadAndImport: async (file: File, source: 'chatgpt' | 'mcp', force = false): Promise<ApiResponse<{
+    source: string
+    imported_count: number
+    skipped_count: number
+    failed_count: number
+    total_steps: number
+    errors: string[]
+  }>> => {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('source', source)
+    formData.append('force', String(force))
+
+    try {
+      const response = await fetch(`${API_BASE}/traces/upload/import`, {
+        method: 'POST',
+        body: formData,
+        credentials: 'include',
+      })
+      const text = await response.text()
+      try {
+        const data = JSON.parse(text)
+        return { ok: response.ok, data }
+      } catch {
+        return { ok: false, error: text }
+      }
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  },
 
   // Import traces from all detected source tools
   importAll: (options?: { days?: number; limit?: number }) =>

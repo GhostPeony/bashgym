@@ -441,6 +441,11 @@ Examples:
         default=100,
         help="Maximum sessions to import per tool (default: 100)"
     )
+    import_all_parser.add_argument(
+        "--force", "-f",
+        action="store_true",
+        help="Re-import even if already imported (overwrites existing traces)"
+    )
 
     # Main command arguments
     parser.add_argument(
@@ -600,6 +605,7 @@ Examples:
         claude_results = import_recent(
             days=args.days,
             verbose=verbose,
+            force=getattr(args, 'force', False),
         )
         claude_imported = sum(1 for r in claude_results if not r.skipped and not r.error)
         claude_steps = sum(r.steps_imported for r in claude_results)

@@ -123,6 +123,7 @@ class TrainingRun:
     dataset_path: Path
     output_path: Path
     status: str = "pending"
+    pid: Optional[int] = None  # Subprocess PID for process control
     metrics: Dict[str, Any] = field(default_factory=dict)
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
@@ -139,6 +140,7 @@ class TrainingRun:
             "dataset_path": str(self.dataset_path),
             "output_path": str(self.output_path),
             "status": self.status,
+            "pid": self.pid,
             "metrics": self.metrics,
             "started_at": self.started_at,
             "completed_at": self.completed_at,
@@ -292,7 +294,8 @@ class Trainer:
         dataset_path: Path,
         run_id: Optional[str] = None,
         callback: Optional[Callable[[Dict[str, Any]], None]] = None,
-        log_callback: Optional[Callable[[str], None]] = None
+        log_callback: Optional[Callable[[str], None]] = None,
+        pid_callback: Optional[Callable[[int, "TrainingRun"], None]] = None,
     ) -> TrainingRun:
         """
         Run Supervised Fine-Tuning.
@@ -324,7 +327,7 @@ class Trainer:
             if self.config.use_nemo_gym:
                 self._train_with_nemo_gym(run, callback)
             else:
-                self._train_with_unsloth_sft(run, callback, log_callback)
+                self._train_with_unsloth_sft(run, callback, log_callback, pid_callback)
 
             run.status = "completed"
             run.completed_at = datetime.now(timezone.utc).isoformat()
@@ -458,7 +461,8 @@ class Trainer:
         self,
         run: TrainingRun,
         callback: Optional[Callable[[Dict[str, Any]], None]] = None,
-        log_callback: Optional[Callable[[str], None]] = None
+        log_callback: Optional[Callable[[str], None]] = None,
+        pid_callback: Optional[Callable[[int, "TrainingRun"], None]] = None,
     ) -> None:
         """
         Train using Unsloth for fast LoRA fine-tuning.
@@ -498,6 +502,17 @@ class Trainer:
                 bufsize=1,
                 cwd=str(Path.cwd())  # Run from project root
             )
+
+            # Store PID for process control (suspend/resume/reconnect)
+            run.pid = process.pid
+            logger.info(f"Training subprocess started with PID {process.pid}")
+
+            # Notify caller of PID (used to persist state to disk immediately)
+            if pid_callback:
+                try:
+                    pid_callback(process.pid, run)
+                except Exception as e:
+                    logger.warning(f"pid_callback error: {e}")
 
             last_loss = None
             last_epoch = 0

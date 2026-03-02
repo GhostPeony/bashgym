@@ -25,6 +25,7 @@ export interface QualityMetrics {
   lengthScore: number
   toolDiversity: number
   efficiencyScore: number
+  cognitiveQuality: number
   totalScore: number
 }
 
@@ -47,6 +48,7 @@ export interface Trace {
   quality: QualityMetrics
   repo?: RepoInfo
   reposCount: number
+  toolBreakdown?: Record<string, number>
   createdAt: number
   promotedAt?: number
 }
@@ -72,6 +74,7 @@ interface TracesState {
 
   // Actions
   setTraces: (traces: Trace[]) => void
+  setCounts: (counts: { gold: number; silver: number; bronze: number; failed: number; pending: number }) => void
   addTrace: (trace: Trace) => void
   selectTrace: (id: string | null) => void
   promoteTrace: (id: string) => void
@@ -101,7 +104,8 @@ export const useTracesStore = create<TracesState>((set, get) => ({
   pendingCount: 0,
 
   setTraces: (traces) => {
-    // Count by status (includes tiered statuses)
+    // Only recount from loaded traces if setCounts hasn't been called with server data
+    // This keeps the store working for callers that don't provide server counts
     const goldCount = traces.filter((t) => t.status === 'gold').length
     const silverCount = traces.filter((t) => t.status === 'silver').length
     const bronzeCount = traces.filter((t) => t.status === 'bronze').length
@@ -109,6 +113,16 @@ export const useTracesStore = create<TracesState>((set, get) => ({
     const pendingCount = traces.filter((t) => t.status === 'pending').length
 
     set({ traces, goldCount, silverCount, bronzeCount, failedCount, pendingCount })
+  },
+
+  setCounts: (counts) => {
+    set({
+      goldCount: counts.gold,
+      silverCount: counts.silver,
+      bronzeCount: counts.bronze,
+      failedCount: counts.failed,
+      pendingCount: counts.pending
+    })
   },
 
   addTrace: (trace) => {
@@ -175,19 +189,19 @@ export const useTracesStore = create<TracesState>((set, get) => ({
   setAvailableRepos: (repos) => set({ availableRepos: repos }),
 
   filteredTraces: () => {
-    const { traces, statusFilter, tierFilter, repoFilter, searchQuery } = get()
+    const { traces, tierFilter, searchQuery } = get()
 
+    // Status and repo filtering is done server-side via API params.
+    // Only tier and search are applied client-side.
     return traces.filter((trace) => {
-      const matchesStatus = statusFilter === 'all' || trace.status === statusFilter
       const matchesTier = tierFilter === 'all' || trace.qualityTier === tierFilter
-      const matchesRepo = !repoFilter || trace.repo?.name === repoFilter
       const matchesSearch =
         !searchQuery ||
         trace.taskDescription.toLowerCase().includes(searchQuery.toLowerCase()) ||
         trace.id.includes(searchQuery) ||
         trace.repo?.name.toLowerCase().includes(searchQuery.toLowerCase())
 
-      return matchesStatus && matchesTier && matchesRepo && matchesSearch
+      return matchesTier && matchesSearch
     })
   }
 }))

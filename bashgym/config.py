@@ -212,6 +212,19 @@ class HuggingFaceSettings:
 
 
 @dataclass
+class OllamaSettings:
+    """Ollama local inference settings."""
+
+    enabled: bool = field(default_factory=lambda: get_env_bool("OLLAMA_ENABLED", True))
+    base_url: str = field(default_factory=lambda: get_env("OLLAMA_BASE_URL", "http://localhost:11434"))
+    default_model: str = field(default_factory=lambda: get_env("OLLAMA_MODEL", ""))
+    auto_register: bool = field(default_factory=lambda: get_env_bool("OLLAMA_AUTO_REGISTER", True))
+    health_interval: int = field(default_factory=lambda: get_env_int("OLLAMA_HEALTH_INTERVAL", 30))
+    request_timeout: int = field(default_factory=lambda: get_env_int("OLLAMA_TIMEOUT", 120))
+    prefer_code_models: bool = field(default_factory=lambda: get_env_bool("OLLAMA_PREFER_CODE", True))
+
+
+@dataclass
 class DockerSettings:
     """Docker and sandbox settings."""
 
@@ -474,6 +487,9 @@ class Settings:
     # HuggingFace integration
     huggingface: HuggingFaceSettings = field(default_factory=HuggingFaceSettings)
 
+    # Ollama local inference
+    ollama: OllamaSettings = field(default_factory=OllamaSettings)
+
     # Feature flags
     orchestration_enabled: bool = field(
         default_factory=lambda: get_env_bool("ORCHESTRATION_ENABLED", False)
@@ -593,6 +609,17 @@ HF_INFERENCE_PROVIDER=serverless
 HF_INFERENCE_ROUTING=cheapest
 HF_DEFAULT_HARDWARE=t4-small
 HF_JOB_TIMEOUT_MINUTES=60
+
+# =============================================
+# Ollama Local Inference (DGX Spark)
+# =============================================
+OLLAMA_ENABLED=true
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=
+OLLAMA_AUTO_REGISTER=true
+OLLAMA_HEALTH_INTERVAL=30
+OLLAMA_TIMEOUT=120
+OLLAMA_PREFER_CODE=true
 
 # Docker/Sandbox Settings
 DOCKER_HOST=unix:///var/run/docker.sock

@@ -177,6 +177,34 @@ export interface RouterStats {
   current_student_rate: number
 }
 
+// Provider Health
+export interface ProviderHealth {
+  available: boolean
+  latency_ms: number
+  error: string | null
+  models_loaded: string[]
+  last_checked: string
+  gpu_memory_used_mb: number | null
+  gpu_memory_total_mb: number | null
+}
+
+export interface ProvidersHealthResponse {
+  providers: Record<string, ProviderHealth>
+  model_map: Record<string, string>
+}
+
+export interface RouterConfigResponse {
+  strategy: string
+  student_rate: number
+  teacher_model: { name: string; type: string } | null
+  student_model: { name: string; type: string } | null
+  providers: {
+    providers: Record<string, any>
+    model_map: Record<string, string>
+    total_models: number
+  }
+}
+
 export interface SystemStats {
   gold_traces_count: number
   silver_traces_count: number
@@ -595,7 +623,16 @@ export const routerApi = {
   setStudentRate: (rate: number) =>
     request<{ success: boolean; rate: number }>(`/router/student-rate?rate=${rate}`, {
       method: 'POST'
-    })
+    }),
+
+  getConfig: () =>
+    request<RouterConfigResponse>('/router/config'),
+
+  setStudentProvider: (providerType: string, modelName: string) =>
+    request<{ success: boolean; provider: string; model: string; is_local: boolean }>(
+      `/router/student-provider?provider_type=${encodeURIComponent(providerType)}&model_name=${encodeURIComponent(modelName)}`,
+      { method: 'POST' }
+    ),
 }
 
 // Verification API
@@ -800,7 +837,16 @@ export const providersApi = {
   deleteOllamaModel: (modelName: string) =>
     request<{ status: string; model: string }>(`/providers/ollama/models/${encodeURIComponent(modelName)}`, {
       method: 'DELETE'
-    })
+    }),
+
+  getHealth: () =>
+    request<ProvidersHealthResponse>('/providers/health'),
+
+  warmupOllamaModel: (modelName: string) =>
+    request<{ success: boolean; model: string }>(
+      `/providers/ollama/warmup?model_name=${encodeURIComponent(modelName)}`,
+      { method: 'POST' }
+    ),
 }
 
 // Factory API - Data Designer, Privacy, Prompt Optimization

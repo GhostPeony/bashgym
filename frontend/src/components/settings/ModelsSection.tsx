@@ -17,6 +17,7 @@ import {
   ChevronRight
 } from 'lucide-react'
 import { providersApi, ProviderStatus, OllamaModel } from '../../services/api'
+import { StudentModelPicker } from './StudentModelPicker'
 import { clsx } from 'clsx'
 
 // Popular models for quick download
@@ -256,6 +257,18 @@ export function ModelsSection() {
               <p className="text-xs text-text-muted text-center py-3 font-mono">
                 No models installed. Download one below.
               </p>
+            )}
+
+            {/* Student Model Picker */}
+            {ollamaModels.length > 0 && (
+              <>
+                <div className="section-divider" />
+                <StudentModelPicker
+                  ollamaModels={ollamaModels}
+                  ollamaAvailable={ollamaAvailable}
+                  onRefresh={fetchData}
+                />
+              </>
             )}
 
             {/* Quick Download */}

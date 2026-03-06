@@ -82,7 +82,7 @@ async def detect_ollama() -> ProviderStatus:
     try:
         is_running = await provider.is_running()
         if is_running:
-            models = await provider.list_models()
+            models = await provider.list_ollama_models()
             return ProviderStatus(
                 type=ProviderType.OLLAMA,
                 name="Ollama",
@@ -242,7 +242,7 @@ async def get_ollama_models() -> List[UnifiedModel]:
     models = []
 
     try:
-        ollama_models = await provider.list_models()
+        ollama_models = await provider.list_ollama_models()
         for m in ollama_models:
             models.append(UnifiedModel(
                 id=f"ollama/{m.name}",

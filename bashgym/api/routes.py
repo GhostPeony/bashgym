@@ -458,7 +458,7 @@ def create_app() -> FastAPI:
                     "models": []
                 }
 
-            models = await provider.list_models()
+            models = await provider.list_ollama_models()
             return {
                 "available": True,
                 "models": [m.to_dict() for m in models]

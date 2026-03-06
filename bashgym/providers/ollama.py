@@ -12,6 +12,9 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any
 from datetime import datetime
+from urllib.parse import urlparse
+
+from bashgym.providers.base import InferenceProvider, ProviderResponse, HealthStatus, ProviderModel
 
 
 @dataclass
@@ -65,11 +68,12 @@ class OllamaModel:
         }
 
 
-class OllamaProvider:
+class OllamaProvider(InferenceProvider):
     """
     Ollama local model provider.
 
     Connects to local Ollama server for model management and inference.
+    Implements InferenceProvider for unified provider API.
     """
 
     DEFAULT_BASE_URL = "http://localhost:11434"
@@ -77,6 +81,26 @@ class OllamaProvider:
     def __init__(self, base_url: Optional[str] = None):
         self.base_url = base_url or self.DEFAULT_BASE_URL
         self._client: Optional[httpx.AsyncClient] = None
+
+    # ── InferenceProvider abstract properties ──────────────────────
+
+    @property
+    def provider_type(self) -> str:
+        return "ollama"
+
+    @property
+    def requires_api_key(self) -> bool:
+        return False
+
+    @property
+    def is_local(self) -> bool:
+        return not self.is_remote
+
+    @property
+    def is_remote(self) -> bool:
+        parsed = urlparse(self.base_url)
+        hostname = parsed.hostname or ""
+        return hostname not in ("localhost", "127.0.0.1", "::1", "0.0.0.0")
 
     @property
     def client(self) -> httpx.AsyncClient:
@@ -99,8 +123,8 @@ class OllamaProvider:
         except (httpx.ConnectError, httpx.TimeoutException):
             return False
 
-    async def list_models(self) -> List[OllamaModel]:
-        """List all available models."""
+    async def list_ollama_models(self) -> List[OllamaModel]:
+        """List all available Ollama models (returns OllamaModel objects)."""
         try:
             response = await self.client.get("/api/tags")
             if response.status_code != 200:
@@ -185,7 +209,7 @@ class OllamaProvider:
         except Exception:
             return False
 
-    async def generate(
+    async def complete(
         self,
         model: str,
         prompt: str,
@@ -195,7 +219,10 @@ class OllamaProvider:
         stream: bool = False
     ) -> Dict[str, Any]:
         """
-        Generate completion from a model.
+        Generate completion from a model (completion-style API).
+
+        This is the original generate() method, renamed to avoid collision
+        with the InferenceProvider ABC's chat-style generate().
 
         Args:
             model: Model name
@@ -288,6 +315,110 @@ class OllamaProvider:
         except Exception as e:
             return {"error": str(e)}
 
+    # ── InferenceProvider ABC implementations ──────────────────────
+
+    async def generate(
+        self,
+        messages: List[Dict[str, str]],
+        model: Optional[str] = None,
+        system_prompt: Optional[str] = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        **kwargs: Any,
+    ) -> ProviderResponse:
+        """Generate a response using the chat API (InferenceProvider interface)."""
+        start = datetime.now()
+        try:
+            chat_messages = list(messages)
+            if system_prompt and not any(m["role"] == "system" for m in chat_messages):
+                chat_messages.insert(0, {"role": "system", "content": system_prompt})
+
+            result = await self.chat(
+                model, chat_messages,
+                temperature=temperature, max_tokens=max_tokens,
+            )
+            latency = (datetime.now() - start).total_seconds() * 1000
+
+            if "error" in result:
+                return ProviderResponse(
+                    content="", model_name=model, provider_type="ollama",
+                    latency_ms=latency, tokens_used=0,
+                    success=False, error=result["error"],
+                )
+
+            content = result.get("message", {}).get("content", "")
+            tokens = result.get("eval_count", 0)
+            return ProviderResponse(
+                content=content, model_name=model, provider_type="ollama",
+                latency_ms=latency, tokens_used=tokens, success=True,
+            )
+        except Exception as e:
+            latency = (datetime.now() - start).total_seconds() * 1000
+            return ProviderResponse(
+                content="", model_name=model, provider_type="ollama",
+                latency_ms=latency, tokens_used=0,
+                success=False, error=str(e),
+            )
+
+    async def health_check(self) -> HealthStatus:
+        """Check Ollama server health and list loaded models."""
+        try:
+            start = datetime.now()
+            running = await self.is_running()
+            latency = (datetime.now() - start).total_seconds() * 1000
+
+            if not running:
+                return HealthStatus(
+                    available=False, latency_ms=latency,
+                    error="Ollama not running",
+                )
+
+            # Check which models are loaded in VRAM via /api/ps
+            models_loaded = []
+            try:
+                response = await self.client.get("/api/ps")
+                if response.status_code == 200:
+                    data = response.json()
+                    models_loaded = [
+                        m.get("name", "") for m in data.get("models", [])
+                    ]
+            except Exception:
+                pass
+
+            return HealthStatus(
+                available=True, latency_ms=latency,
+                models_loaded=models_loaded,
+            )
+        except Exception as e:
+            return HealthStatus(available=False, error=str(e))
+
+    async def list_models(self) -> List[ProviderModel]:
+        """List available models as ProviderModel objects (InferenceProvider interface)."""
+        ollama_models = await self.list_ollama_models()
+        return [
+            ProviderModel(
+                id=f"ollama/{m.name}",
+                name=m.name,
+                provider_type="ollama",
+                size_gb=round(m.size_gb, 2),
+                parameter_size=m.parameter_size,
+                is_code_model=m.is_code_model,
+                is_local=True,
+            )
+            for m in ollama_models
+        ]
+
+    async def warm_up(self, model: Optional[str] = None) -> bool:
+        """Warm up a model by sending a minimal chat request."""
+        try:
+            result = await self.chat(
+                model, [{"role": "user", "content": "hi"}],
+                temperature=0, max_tokens=1,
+            )
+            return "error" not in result
+        except Exception:
+            return False
+
 
 # Singleton instance
 _provider: Optional[OllamaProvider] = None
@@ -307,6 +438,6 @@ def is_ollama_running() -> bool:
     return asyncio.run(get_ollama_provider().is_running())
 
 
-def list_ollama_models() -> List[OllamaModel]:
+def list_ollama_models_sync() -> List[OllamaModel]:
     """List Ollama models (sync wrapper)."""
-    return asyncio.run(get_ollama_provider().list_models())
+    return asyncio.run(get_ollama_provider().list_ollama_models())

@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from pathlib import Path
+import os
 import uuid
 import json
 import asyncio
@@ -109,6 +110,7 @@ def create_app() -> FastAPI:
     app.state.synthesis_jobs = {}  # Synthesis job storage
     app.state.evaluation_jobs = {}  # Evaluation job storage
     app.state.training_monitor = OrphanedTrainingMonitor()  # Orphaned process monitor
+    app.state.provider_registry = None
 
     @app.on_event("startup")
     async def startup():
@@ -173,7 +175,47 @@ def create_app() -> FastAPI:
             from bashgym.factory.data_factory import DataFactory
 
             app.state.trainer = Trainer(TrainerConfig())
-            app.state.router = ModelRouter()
+
+            # Initialize provider registry
+            from bashgym.providers.registry import ProviderRegistry as _ProviderRegistry
+            registry = _ProviderRegistry()
+
+            # Register Anthropic
+            anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
+            if anthropic_key:
+                try:
+                    from bashgym.providers.anthropic import AnthropicProvider
+                    registry.register(AnthropicProvider(api_key=anthropic_key))
+                    logger.info("Registered Anthropic provider")
+                except Exception as e:
+                    logger.warning(f"Failed to register Anthropic provider: {e}")
+
+            # Register NVIDIA NIM
+            nvidia_key = os.environ.get("NVIDIA_API_KEY")
+            if nvidia_key:
+                try:
+                    from bashgym.providers.nim import NIMProvider
+                    registry.register(NIMProvider(api_key=nvidia_key))
+                    logger.info("Registered NIM provider")
+                except Exception as e:
+                    logger.warning(f"Failed to register NIM provider: {e}")
+
+            # Register Ollama (local)
+            from bashgym.config import get_settings as _get_settings
+            _s = _get_settings()
+            if _s.ollama.enabled:
+                try:
+                    from bashgym.providers.ollama import OllamaProvider as _OllamaProvider
+                    ollama_provider = _OllamaProvider(base_url=_s.ollama.base_url)
+                    registry.register(ollama_provider)
+                    logger.info(f"Registered Ollama provider at {_s.ollama.base_url}")
+                except Exception as e:
+                    logger.warning(f"Failed to register Ollama provider: {e}")
+
+            app.state.provider_registry = registry
+
+            # Pass registry to router
+            app.state.router = ModelRouter(registry=registry)
             app.state.verifier = Verifier()
             app.state.trace_processor = TraceProcessor()
             app.state.data_factory = DataFactory()
@@ -183,6 +225,14 @@ def create_app() -> FastAPI:
 
         # Start pipeline watcher
         start_pipeline_watcher()
+
+        # Auto-discover provider models
+        if app.state.provider_registry:
+            try:
+                await app.state.provider_registry.discover_models()
+                logger.info(f"Discovered models: {app.state.provider_registry.get_model_map()}")
+            except Exception as e:
+                logger.warning(f"Model discovery failed: {e}")
 
         # Recover orphaned training runs from disk
         try:
@@ -226,6 +276,8 @@ def create_app() -> FastAPI:
     @app.on_event("shutdown")
     async def shutdown():
         """Cleanup on shutdown."""
+        if hasattr(app.state, 'provider_registry') and app.state.provider_registry:
+            await app.state.provider_registry.close()
         if app.state.router:
             await app.state.router.close()
         stop_pipeline_watcher()
@@ -2904,6 +2956,77 @@ def create_app() -> FastAPI:
             app.state.router.current_student_rate = rate
 
         return {"success": True, "rate": rate}
+
+    @app.get("/api/providers/health", tags=["Providers"])
+    async def get_providers_health():
+        """Get health status of all inference providers."""
+        registry = getattr(app.state, 'provider_registry', None)
+        if not registry:
+            return {"providers": {}, "model_map": {}}
+        health = await registry.check_all_health()
+        return {
+            "providers": {k: v.to_dict() for k, v in health.items()},
+            "model_map": registry.get_model_map(),
+        }
+
+    @app.post("/api/router/student-provider", tags=["Router"])
+    async def set_student_provider(provider_type: str, model_name: str):
+        """Set which provider and model to use as the Student."""
+        registry = getattr(app.state, 'provider_registry', None)
+        if not registry:
+            raise HTTPException(status_code=503, detail="Provider registry not initialized")
+        provider = registry.get_provider(provider_type)
+        if not provider:
+            raise HTTPException(status_code=404, detail=f"Provider '{provider_type}' not registered")
+        registry.map_model(model_name, provider_type)
+        if app.state.router:
+            from bashgym.gym.router import ModelConfig as _ModelConfig, ModelType as _ModelType
+            app.state.router.register_model(_ModelConfig(
+                name=model_name,
+                model_type=_ModelType.STUDENT,
+                endpoint=f"{provider_type}://registry",
+            ))
+        return {
+            "success": True,
+            "provider": provider_type,
+            "model": model_name,
+            "is_local": provider.is_local,
+        }
+
+    @app.get("/api/router/config", tags=["Router"])
+    async def get_router_config():
+        """Get full router configuration including active models."""
+        router = app.state.router
+        registry = getattr(app.state, 'provider_registry', None)
+        result = {
+            "strategy": router.config.strategy.value if router else "unknown",
+            "student_rate": router.current_student_rate if router else 0,
+            "teacher_model": None,
+            "student_model": None,
+            "providers": {},
+        }
+        if router:
+            teacher = router.get_teacher_model()
+            student = router.get_student_model()
+            if teacher:
+                result["teacher_model"] = {"name": teacher.name, "type": teacher.model_type.value}
+            if student:
+                result["student_model"] = {"name": student.name, "type": student.model_type.value}
+        if registry:
+            result["providers"] = registry.get_status_summary()
+        return result
+
+    @app.post("/api/providers/ollama/warmup", tags=["Providers"])
+    async def warmup_ollama_model(model_name: str):
+        """Pre-load an Ollama model into VRAM."""
+        registry = getattr(app.state, 'provider_registry', None)
+        if not registry:
+            raise HTTPException(status_code=503, detail="Registry not initialized")
+        provider = registry.get_provider("ollama")
+        if not provider:
+            raise HTTPException(status_code=503, detail="Ollama provider not registered")
+        success = await provider.warm_up(model_name)
+        return {"success": success, "model": model_name}
 
     # =========================================================================
     # Verification Endpoints

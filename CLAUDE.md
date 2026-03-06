@@ -138,7 +138,7 @@ Routes requests between Teacher (Claude) and Student (fine-tuned) models.
 
 Key classes:
 - `RoutingStrategy` - TEACHER_ONLY, STUDENT_ONLY, CONFIDENCE_BASED, etc.
-- `ModelRouter` - Main routing logic
+- `ModelRouter` - Main routing logic (delegates to ProviderRegistry when available)
 
 #### `settings.py` - Configuration Management
 Centralized settings loaded from environment variables.
@@ -148,6 +148,35 @@ from settings import get_settings
 settings = get_settings()
 print(settings.api.anthropic_api_key)
 print(settings.training.base_model)
+print(settings.ollama.base_url)
+```
+
+### Provider Abstraction Layer
+
+The model router delegates inference to pluggable providers via a `ProviderRegistry`.
+
+| Provider | Class | Local? | API Key | Use Case |
+|----------|-------|--------|---------|----------|
+| Anthropic | `AnthropicProvider` | No | Yes | Teacher (Claude) |
+| NVIDIA NIM | `NIMProvider` | No | Yes | Cloud student inference |
+| Ollama | `OllamaProvider` | Yes | No | Local student inference (DGX Spark) |
+
+**Key files:**
+- `bashgym/providers/base.py` — `InferenceProvider` ABC, `ProviderResponse`, `HealthStatus`
+- `bashgym/providers/registry.py` — `ProviderRegistry` (model↔provider mapping, health monitoring)
+- `bashgym/providers/anthropic.py` — Claude API provider
+- `bashgym/providers/nim.py` — NVIDIA NIM provider
+- `bashgym/providers/ollama.py` — Ollama local provider (with warm-up, VRAM tracking, network security)
+
+**API endpoints:**
+- `GET /api/providers/health` — Health status of all providers
+- `POST /api/router/student-provider?provider_type=ollama&model_name=qwen2.5-coder:7b` — Set student model
+- `GET /api/router/config` — Full router config with active Teacher/Student models
+- `POST /api/providers/ollama/warmup?model_name=...` — Pre-load model into VRAM
+
+**Local inference loop (DGX Spark):**
+```
+Train → GGUF export → Deploy to Ollama → Set as Student → Router sends inference locally → Collect traces → Train again
 ```
 
 ---
@@ -162,6 +191,9 @@ Copy `.env.example` to `.env` and configure:
 | `NVIDIA_API_KEY` | No | NVIDIA NIM API key |
 | `BASE_MODEL` | No | Fine-tuning base model (default: Qwen2.5-Coder-1.5B) |
 | `USE_NEMO_GYM` | No | Enable cloud training (default: false) |
+| `OLLAMA_ENABLED` | No | Enable Ollama local inference (default: true) |
+| `OLLAMA_BASE_URL` | No | Ollama server URL (default: http://localhost:11434) |
+| `OLLAMA_MODEL` | No | Default Ollama model (empty = auto-detect) |
 | `AUGMENTATION_PROVIDER` | No | Data augmentation provider: `anthropic` or `nim` (default: anthropic) |
 
 See `.env.example` for complete list.

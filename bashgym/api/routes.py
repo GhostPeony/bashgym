@@ -578,6 +578,31 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=501, detail="Ollama provider not available")
 
     # =========================================================================
+    # SSH Endpoints
+    # =========================================================================
+
+    @app.get("/api/ssh/preflight", tags=["SSH"])
+    async def ssh_preflight():
+        """Run pre-flight checks on the remote SSH training target."""
+        from bashgym.config import get_settings as _get_settings
+        _s = _get_settings()
+        if not _s.ssh.enabled:
+            return {"ok": False, "error": "SSH remote training not enabled. Set SSH_REMOTE_ENABLED=true"}
+
+        from bashgym.gym.remote_trainer import RemoteTrainer, SSHConfig
+        config = SSHConfig.from_settings(_s.ssh)
+        trainer = RemoteTrainer(config)
+        result = await trainer.preflight_check()
+        return {
+            "ok": result.ok,
+            "python_version": result.python_version,
+            "disk_free_gb": result.disk_free_gb,
+            "error": result.error,
+            "host": _s.ssh.host,
+            "username": _s.ssh.username,
+        }
+
+    # =========================================================================
     # Task Endpoints
     # =========================================================================
 

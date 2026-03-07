@@ -225,6 +225,18 @@ class OllamaSettings:
 
 
 @dataclass
+class SSHSettings:
+    """Remote SSH training settings (DGX Spark)."""
+
+    enabled: bool = field(default_factory=lambda: get_env_bool("SSH_REMOTE_ENABLED", False))
+    host: str = field(default_factory=lambda: get_env("SSH_REMOTE_HOST", ""))
+    port: int = field(default_factory=lambda: get_env_int("SSH_REMOTE_PORT", 22))
+    username: str = field(default_factory=lambda: get_env("SSH_REMOTE_USER", ""))
+    key_path: str = field(default_factory=lambda: get_env("SSH_REMOTE_KEY_PATH", "~/.ssh/id_rsa"))
+    remote_work_dir: str = field(default_factory=lambda: get_env("SSH_REMOTE_WORK_DIR", "~/bashgym-training"))
+
+
+@dataclass
 class DockerSettings:
     """Docker and sandbox settings."""
 
@@ -490,6 +502,9 @@ class Settings:
     # Ollama local inference
     ollama: OllamaSettings = field(default_factory=OllamaSettings)
 
+    # SSH remote training
+    ssh: SSHSettings = field(default_factory=SSHSettings)
+
     # Feature flags
     orchestration_enabled: bool = field(
         default_factory=lambda: get_env_bool("ORCHESTRATION_ENABLED", False)
@@ -620,6 +635,16 @@ OLLAMA_AUTO_REGISTER=true
 OLLAMA_HEALTH_INTERVAL=30
 OLLAMA_TIMEOUT=120
 OLLAMA_PREFER_CODE=true
+
+# =============================================
+# Remote Training via SSH (DGX Spark)
+# =============================================
+SSH_REMOTE_ENABLED=false
+SSH_REMOTE_HOST=
+SSH_REMOTE_USER=
+SSH_REMOTE_PORT=22
+SSH_REMOTE_KEY_PATH=~/.ssh/id_rsa
+SSH_REMOTE_WORK_DIR=~/bashgym-training
 
 # Docker/Sandbox Settings
 DOCKER_HOST=unix:///var/run/docker.sock

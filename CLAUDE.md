@@ -179,6 +179,34 @@ The model router delegates inference to pluggable providers via a `ProviderRegis
 Train → GGUF export → Deploy to Ollama → Set as Student → Router sends inference locally → Collect traces → Train again
 ```
 
+### Remote Training (DGX Spark)
+
+Remote SSH training enables executing training runs on a DGX Spark via SSH, streaming logs back to the dashboard.
+
+**Key files:**
+- `bashgym/gym/remote_trainer.py` — SSH-based remote training execution
+- `bashgym/config.py` — `SSHSettings` reads `SSH_REMOTE_*` env vars
+
+**Flow:** Generate script locally → SFTP upload → SSH exec with nohup → stream logs → SFTP download artifacts
+
+**API:**
+- `GET /api/ssh/preflight` — verify remote machine is ready
+- `POST /api/training/start` with `use_remote_ssh: true` — start remote training
+
+**UI:** "DGX Spark" backend option in Training Config, SSH status in SystemInfoPanel
+
+**Process control:** pause/resume/cancel via SSH signals (SIGSTOP/SIGCONT/SIGTERM)
+
+**Environment variables:**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SSH_REMOTE_ENABLED` | `false` | Enable remote training |
+| `SSH_REMOTE_HOST` | | DGX Spark IP/hostname |
+| `SSH_REMOTE_USER` | | SSH username |
+| `SSH_REMOTE_PORT` | `22` | SSH port |
+| `SSH_REMOTE_KEY_PATH` | `~/.ssh/id_rsa` | Path to SSH private key |
+| `SSH_REMOTE_WORK_DIR` | `~/bashgym-training` | Remote working directory |
+
 ---
 
 ## Environment Variables

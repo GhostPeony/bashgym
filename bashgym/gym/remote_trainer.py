@@ -108,3 +108,100 @@ class RemoteTrainer:
                 python_version=python_version,
                 disk_free_gb=disk_free_gb,
             )
+
+    def _remote_run_dir(self, run_id: str) -> str:
+        """Get the remote directory for a training run."""
+        return f"{self.config.remote_work_dir}/{run_id}"
+
+    async def _upload_files(
+        self,
+        conn,
+        run_id: str,
+        script_path: Path,
+        dataset_path: Path,
+    ) -> None:
+        """Upload training script and dataset to remote via SFTP."""
+        remote_dir = self._remote_run_dir(run_id)
+        sftp = await conn.start_sftp_client()
+        await sftp.makedirs(remote_dir, exist_ok=True)
+        await sftp.put(str(script_path), f"{remote_dir}/{script_path.name}")
+        await sftp.put(str(dataset_path), f"{remote_dir}/{dataset_path.name}")
+        logger.info(f"Uploaded training files to {remote_dir}")
+
+    async def _start_remote_training(self, conn, run_id: str) -> int:
+        """Start training on the remote machine, return PID."""
+        remote_dir = self._remote_run_dir(run_id)
+        cmd = (
+            f"cd {remote_dir} && "
+            f"nohup python3 train_sft.py > training.log 2>&1 & echo $!"
+        )
+        result = await conn.run(cmd, check=False)
+        pid = int(result.stdout.strip())
+        logger.info(f"Remote training started with PID {pid}")
+        return pid
+
+    async def _stream_logs(
+        self,
+        conn,
+        run_id: str,
+        remote_pid: int,
+        log_callback: Optional[Callable[[str], None]] = None,
+        poll_interval: float = 2.0,
+    ) -> None:
+        """Stream training logs from remote machine until process exits."""
+        remote_dir = self._remote_run_dir(run_id)
+        log_file = f"{remote_dir}/training.log"
+        lines_read = 0
+
+        while True:
+            result = await conn.run(
+                f"tail -n +{lines_read + 1} {log_file} 2>/dev/null",
+                check=False,
+            )
+            if result.exit_status == 0 and result.stdout.strip():
+                new_lines = result.stdout.strip().split("\n")
+                for line in new_lines:
+                    if log_callback:
+                        log_callback(line)
+                lines_read += len(new_lines)
+
+            alive = await conn.run(f"kill -0 {remote_pid} 2>/dev/null", check=False)
+            if alive.exit_status != 0:
+                # Process exited — drain any remaining log lines
+                result = await conn.run(
+                    f"tail -n +{lines_read + 1} {log_file} 2>/dev/null",
+                    check=False,
+                )
+                if result.exit_status == 0 and result.stdout.strip():
+                    for line in result.stdout.strip().split("\n"):
+                        if log_callback:
+                            log_callback(line)
+                break
+
+            await asyncio.sleep(poll_interval)
+
+    async def _download_artifacts(
+        self,
+        conn,
+        run_id: str,
+        local_output_dir: Path,
+    ) -> None:
+        """Download trained model artifacts from remote to local."""
+        remote_dir = self._remote_run_dir(run_id)
+        sftp = await conn.start_sftp_client()
+
+        local_output_dir.mkdir(parents=True, exist_ok=True)
+
+        for subdir in ["final", "merged"]:
+            remote_path = f"{remote_dir}/{subdir}"
+            try:
+                entries = await sftp.listdir(remote_path)
+                local_subdir = local_output_dir / subdir
+                local_subdir.mkdir(parents=True, exist_ok=True)
+                for entry in entries:
+                    remote_file = f"{remote_path}/{entry}"
+                    local_file = str(local_subdir / entry)
+                    logger.info(f"Downloading {remote_file} -> {local_file}")
+                    await sftp.get(remote_file, local_file)
+            except Exception as e:
+                logger.warning(f"Could not download {subdir}: {e}")

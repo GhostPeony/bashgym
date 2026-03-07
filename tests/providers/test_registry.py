@@ -10,7 +10,7 @@ from bashgym.providers.base import (
     HealthStatus,
     ProviderModel,
 )
-from bashgym.providers.registry import ProviderRegistry, get_registry, _registry
+from bashgym.providers.registry import ProviderRegistry, get_registry, _registry, _parse_param_size
 
 
 # ── Test double ────────────────────────────────────────────────────
@@ -273,3 +273,100 @@ class TestSingleton:
     def test_get_registry_creates_instance(self):
         r = get_registry()
         assert isinstance(r, ProviderRegistry)
+
+
+# ── TestParseParamSize ───────────────────────────────────────────
+
+
+class TestParseParamSize:
+    def test_parse_normal(self):
+        assert _parse_param_size("35B") == 35.0
+
+    def test_parse_decimal(self):
+        assert _parse_param_size("1.5B") == 1.5
+
+    def test_parse_lowercase(self):
+        assert _parse_param_size("7b") == 7.0
+
+    def test_parse_unknown(self):
+        assert _parse_param_size("unknown") == 0.0
+
+    def test_parse_none(self):
+        assert _parse_param_size(None) == 0.0
+
+    def test_parse_empty(self):
+        assert _parse_param_size("") == 0.0
+
+    def test_parse_no_suffix(self):
+        assert _parse_param_size("14") == 14.0
+
+
+# ── TestSelectBestModel ──────────────────────────────────────────
+
+
+class TestSelectBestModel:
+    def _make_provider_with_models(self, registry, ptype, models):
+        """Register a provider and populate discovered models."""
+        provider = FakeProvider(ptype=ptype)
+        registry.register(provider)
+        for m in models:
+            registry._model_map[m.id] = ptype
+            registry._discovered_models[m.id] = m
+        return provider
+
+    def test_returns_none_when_no_models(self, registry):
+        registry.register(FakeProvider(ptype="ollama"))
+        result = registry.select_best_model("ollama")
+        assert result is None
+
+    def test_default_model_takes_priority(self, registry):
+        small = ProviderModel(id="ollama/small:7b", name="small:7b", provider_type="ollama", parameter_size="7B", is_code_model=True)
+        big = ProviderModel(id="ollama/big:35b", name="big:35b", provider_type="ollama", parameter_size="35B", is_code_model=False)
+        self._make_provider_with_models(registry, "ollama", [small, big])
+
+        result = registry.select_best_model("ollama", default_model="small")
+        assert result is small
+
+    def test_prefers_code_model(self, registry):
+        code7 = ProviderModel(id="ollama/qwen-coder:7b", name="qwen-coder:7b", provider_type="ollama", parameter_size="7B", is_code_model=True)
+        general35 = ProviderModel(id="ollama/llama:35b", name="llama:35b", provider_type="ollama", parameter_size="35B", is_code_model=False)
+        self._make_provider_with_models(registry, "ollama", [code7, general35])
+
+        result = registry.select_best_model("ollama", prefer_code=True)
+        assert result is code7
+
+    def test_picks_largest_code_model(self, registry):
+        code7 = ProviderModel(id="ollama/coder:7b", name="coder:7b", provider_type="ollama", parameter_size="7B", is_code_model=True)
+        code32 = ProviderModel(id="ollama/coder:32b", name="coder:32b", provider_type="ollama", parameter_size="32B", is_code_model=True)
+        self._make_provider_with_models(registry, "ollama", [code7, code32])
+
+        result = registry.select_best_model("ollama", prefer_code=True)
+        assert result is code32
+
+    def test_falls_back_to_largest_when_no_code_models(self, registry):
+        small = ProviderModel(id="ollama/small:7b", name="small:7b", provider_type="ollama", parameter_size="7B", is_code_model=False)
+        big = ProviderModel(id="ollama/big:35b", name="big:35b", provider_type="ollama", parameter_size="35B", is_code_model=False)
+        self._make_provider_with_models(registry, "ollama", [small, big])
+
+        result = registry.select_best_model("ollama", prefer_code=True)
+        assert result is big
+
+    def test_no_prefer_code_picks_largest(self, registry):
+        code7 = ProviderModel(id="ollama/coder:7b", name="coder:7b", provider_type="ollama", parameter_size="7B", is_code_model=True)
+        general35 = ProviderModel(id="ollama/llama:35b", name="llama:35b", provider_type="ollama", parameter_size="35B", is_code_model=False)
+        self._make_provider_with_models(registry, "ollama", [code7, general35])
+
+        result = registry.select_best_model("ollama", prefer_code=False)
+        assert result is general35
+
+    def test_ignores_other_provider_models(self, registry):
+        ollama_model = ProviderModel(id="ollama/qwen:7b", name="qwen:7b", provider_type="ollama", parameter_size="7B")
+        nim_model = ProviderModel(id="nim/qwen:32b", name="qwen:32b", provider_type="nim", parameter_size="32B")
+        self._make_provider_with_models(registry, "ollama", [ollama_model])
+        # Manually add nim model to maps
+        registry.register(FakeProvider(ptype="nim"))
+        registry._model_map[nim_model.id] = "nim"
+        registry._discovered_models[nim_model.id] = nim_model
+
+        result = registry.select_best_model("ollama")
+        assert result is ollama_model

@@ -226,11 +226,28 @@ def create_app() -> FastAPI:
         # Start pipeline watcher
         start_pipeline_watcher()
 
-        # Auto-discover provider models
+        # Auto-discover provider models and auto-select Student
         if app.state.provider_registry:
             try:
                 await app.state.provider_registry.discover_models()
-                logger.info(f"Discovered models: {app.state.provider_registry.get_model_map()}")
+                model_map = app.state.provider_registry.get_model_map()
+                logger.info(f"Discovered models: {model_map}")
+
+                # Auto-select best Ollama model as Student
+                if _s.ollama.enabled and _s.ollama.auto_register:
+                    best = app.state.provider_registry.select_best_model(
+                        provider_type="ollama",
+                        prefer_code=_s.ollama.prefer_code_models,
+                        default_model=_s.ollama.default_model or None,
+                    )
+                    if best and app.state.router:
+                        from bashgym.gym.router import ModelConfig as _ModelConfig, ModelType as _ModelType
+                        app.state.router.register_model(_ModelConfig(
+                            name=best.id,
+                            model_type=_ModelType.STUDENT,
+                            endpoint="ollama://registry",
+                        ))
+                        logger.info(f"Auto-selected Student model: {best.id} ({best.parameter_size})")
             except Exception as e:
                 logger.warning(f"Model discovery failed: {e}")
 

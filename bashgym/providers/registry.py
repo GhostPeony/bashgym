@@ -33,6 +33,7 @@ class ProviderRegistry:
     def __init__(self) -> None:
         self.providers: Dict[str, InferenceProvider] = {}
         self._model_map: Dict[str, str] = {}
+        self._discovered_models: Dict[str, ProviderModel] = {}
         self.health_cache: Dict[str, HealthStatus] = {}
         self._health_listeners: List[Callable] = []
 
@@ -147,6 +148,7 @@ class ProviderRegistry:
                 models = await provider.list_models()
                 discovered[ptype] = models
                 for model in models:
+                    self._discovered_models[model.id] = model
                     if model.id not in self._model_map:
                         self._model_map[model.id] = ptype
                         logger.debug("Auto-mapped %s -> %s", model.id, ptype)
@@ -154,6 +156,51 @@ class ProviderRegistry:
                 logger.exception("Model discovery failed for %s", ptype)
                 discovered[ptype] = []
         return discovered
+
+    # ── Auto-selection ─────────────────────────────────────────────
+
+    def select_best_model(
+        self,
+        provider_type: str,
+        prefer_code: bool = True,
+        default_model: Optional[str] = None,
+    ) -> Optional[ProviderModel]:
+        """
+        Select the best model from a provider for use as Student.
+
+        Priority:
+        1. default_model (if set and exists in discovered models)
+        2. Best code model (if prefer_code is True)
+        3. Largest model by parameter size
+
+        Returns the chosen ProviderModel, or None if no models found.
+        """
+        # Collect models mapped to this provider
+        models: List[ProviderModel] = []
+        for model_id, ptype in self._model_map.items():
+            if ptype != provider_type:
+                continue
+            # We need the ProviderModel metadata; check _discovered cache
+            if model_id in self._discovered_models:
+                models.append(self._discovered_models[model_id])
+
+        if not models:
+            return None
+
+        # Priority 1: explicit default
+        if default_model:
+            for m in models:
+                if default_model in m.name or default_model in m.id:
+                    return m
+
+        # Priority 2: prefer code models (pick largest code model)
+        if prefer_code:
+            code_models = [m for m in models if m.is_code_model]
+            if code_models:
+                return max(code_models, key=lambda m: _parse_param_size(m.parameter_size))
+
+        # Priority 3: largest model
+        return max(models, key=lambda m: _parse_param_size(m.parameter_size))
 
     # ── Status ────────────────────────────────────────────────────
 
@@ -196,3 +243,16 @@ def get_registry() -> ProviderRegistry:
     if _registry is None:
         _registry = ProviderRegistry()
     return _registry
+
+
+def _parse_param_size(param_size: Optional[str]) -> float:
+    """Parse parameter size string like '35B', '7B', '1.5B' into a float for comparison."""
+    if not param_size or param_size == "unknown":
+        return 0.0
+    s = param_size.strip().upper()
+    try:
+        if s.endswith("B"):
+            return float(s[:-1])
+        return float(s)
+    except (ValueError, IndexError):
+        return 0.0

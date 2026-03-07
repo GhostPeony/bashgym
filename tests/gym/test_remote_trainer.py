@@ -126,3 +126,76 @@ class TestUploadAndExecute:
                 log_callback=lambda line: log_lines.append(line),
             ))
             assert len(log_lines) >= 2
+
+
+class TestTrainRemote:
+    @pytest.fixture
+    def trainer(self):
+        config = SSHConfig(
+            host="192.168.1.100",
+            username="ponyo",
+            port=22,
+            key_path="~/.ssh/id_rsa",
+            remote_work_dir="~/bashgym-training",
+        )
+        return RemoteTrainer(config)
+
+    def test_train_remote_orchestrates_full_flow(self, trainer, tmp_path):
+        """Verify train_remote calls preflight, upload, execute, stream, download."""
+        calls = []
+
+        async def mock_preflight():
+            calls.append("preflight")
+            return PreflightResult(ok=True, python_version="3.12")
+
+        async def mock_upload(conn, run_id, script_path, dataset_path):
+            calls.append("upload")
+
+        async def mock_start(conn, run_id):
+            calls.append("start")
+            return 99999
+
+        async def mock_stream(conn, run_id, pid, log_callback=None, poll_interval=None):
+            calls.append("stream")
+
+        async def mock_download(conn, run_id, local_dir):
+            calls.append("download")
+
+        trainer.preflight_check = mock_preflight
+        trainer._upload_files = mock_upload
+        trainer._start_remote_training = mock_start
+        trainer._stream_logs = mock_stream
+        trainer._download_artifacts = mock_download
+        trainer._connect = AsyncMock(return_value=AsyncMock())
+
+        script = tmp_path / "train_sft.py"
+        script.write_text("print('hello')")
+        dataset = tmp_path / "train.jsonl"
+        dataset.write_text("{}")
+
+        result = asyncio.run(trainer.train_remote(
+            run_id="run_test",
+            script_path=script,
+            dataset_path=dataset,
+            local_output_dir=tmp_path / "output",
+        ))
+
+        assert result["success"] is True
+        assert result["remote_pid"] == 99999
+        assert calls == ["preflight", "upload", "start", "stream", "download"]
+
+    def test_train_remote_fails_on_preflight(self, trainer, tmp_path):
+        async def mock_preflight():
+            return PreflightResult(ok=False, error="no unsloth")
+
+        trainer.preflight_check = mock_preflight
+
+        result = asyncio.run(trainer.train_remote(
+            run_id="run_fail",
+            script_path=tmp_path / "x.py",
+            dataset_path=tmp_path / "x.jsonl",
+            local_output_dir=tmp_path / "output",
+        ))
+
+        assert result["success"] is False
+        assert "unsloth" in result["error"]

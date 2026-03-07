@@ -205,3 +205,64 @@ class RemoteTrainer:
                     await sftp.get(remote_file, local_file)
             except Exception as e:
                 logger.warning(f"Could not download {subdir}: {e}")
+
+    async def train_remote(
+        self,
+        run_id: str,
+        script_path: Path,
+        dataset_path: Path,
+        local_output_dir: Path,
+        log_callback: Optional[Callable[[str], None]] = None,
+        pid_callback: Optional[Callable[[int], None]] = None,
+    ) -> Dict[str, Any]:
+        """Full remote training orchestration.
+
+        Runs the complete flow: preflight check -> upload files -> start
+        training -> stream logs -> download artifacts.
+
+        Args:
+            run_id: Unique identifier for this training run.
+            script_path: Local path to the training script.
+            dataset_path: Local path to the training dataset.
+            local_output_dir: Local directory to download artifacts into.
+            log_callback: Optional callback invoked with each log line.
+            pid_callback: Optional callback invoked with the remote PID once training starts.
+
+        Returns:
+            Dict with 'success' bool plus 'remote_pid'/'run_id' on success
+            or 'error' string on failure.
+        """
+        # Pre-flight
+        preflight = await self.preflight_check()
+        if not preflight.ok:
+            return {"success": False, "error": preflight.error}
+
+        try:
+            conn = await self._connect()
+        except Exception as e:
+            return {"success": False, "error": f"SSH connection failed: {e}"}
+
+        async with conn:
+            # Upload
+            await self._upload_files(conn, run_id, script_path, dataset_path)
+
+            # Execute
+            remote_pid = await self._start_remote_training(conn, run_id)
+            if pid_callback:
+                pid_callback(remote_pid)
+
+            # Stream logs until done
+            await self._stream_logs(
+                conn, run_id, remote_pid,
+                log_callback=log_callback,
+                poll_interval=2.0,
+            )
+
+            # Download artifacts
+            await self._download_artifacts(conn, run_id, local_output_dir)
+
+        return {
+            "success": True,
+            "remote_pid": remote_pid,
+            "run_id": run_id,
+        }

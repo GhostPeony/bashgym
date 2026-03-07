@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react'
-import { X, FolderGit2, Database, Sparkles, Info, Cloud, Monitor, Shield, FileText } from 'lucide-react'
+import { X, FolderGit2, Database, Sparkles, Info, Cloud, Monitor, Shield, FileText, Server } from 'lucide-react'
 import type { TrainingConfig as TrainingConfigType, TrainingStrategy, DataSource } from '../../stores'
 import { tracesApi, securityApi, providersApi, RepoInfo, SecurityDatasetInfo, OllamaModel } from '../../services/api'
 import { useTutorialComplete } from '../../hooks'
 import { clsx } from 'clsx'
 
 type TrainingScope = 'all' | 'selected' | 'single'
-type TrainingBackend = 'local' | 'nemo'
+type TrainingBackend = 'local' | 'remote_ssh' | 'nemo'
 
 interface TrainingConfigProps {
   onClose: () => void
@@ -335,12 +335,12 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
             <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-3">
               Training Backend
             </label>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               <button
                 type="button"
                 onClick={() => {
                   setTrainingBackend('local')
-                  setConfig({ ...config, useNemoGym: false })
+                  setConfig({ ...config, useNemoGym: false, useRemoteSSH: false })
                 }}
                 className={clsx(
                   'card p-3 text-center transition-press',
@@ -356,8 +356,25 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
               <button
                 type="button"
                 onClick={() => {
+                  setTrainingBackend('remote_ssh')
+                  setConfig({ ...config, useNemoGym: false, useRemoteSSH: true })
+                }}
+                className={clsx(
+                  'card p-3 text-center transition-press',
+                  trainingBackend === 'remote_ssh'
+                    ? 'border-accent bg-accent-light text-accent-dark'
+                    : 'text-text-secondary'
+                )}
+              >
+                <Server className="w-5 h-5 mx-auto mb-1" />
+                <span className="block font-mono text-xs font-bold uppercase">DGX Spark</span>
+                <span className="block font-mono text-xs mt-1 text-text-muted">Remote SSH</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
                   setTrainingBackend('nemo')
-                  setConfig({ ...config, useNemoGym: true })
+                  setConfig({ ...config, useNemoGym: true, useRemoteSSH: false })
                 }}
                 className={clsx(
                   'card p-3 text-center transition-press',
@@ -377,8 +394,10 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
               <Info className="w-4 h-4 text-accent flex-shrink-0 mt-0.5" />
               <p className="font-mono text-xs text-text-secondary">
                 {trainingBackend === 'local'
-                  ? 'Train locally using your GPU with Unsloth for fast LoRA fine-tuning. Requires CUDA-capable GPU.'
-                  : 'Train using NVIDIA NeMo Microservices for scalable cloud training. Requires NVIDIA_API_KEY.'}
+                  ? 'Train locally using your GPU with Unsloth. Requires CUDA-capable GPU.'
+                  : trainingBackend === 'remote_ssh'
+                    ? 'Train on your DGX Spark via SSH. Requires SSH_REMOTE_* configured in .env.'
+                    : 'Train using NVIDIA NeMo Microservices for scalable cloud training.'}
               </p>
             </div>
           </div>

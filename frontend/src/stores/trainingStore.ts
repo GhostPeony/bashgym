@@ -34,6 +34,7 @@ export interface TrainingConfig {
   selectedRepos?: string[]  // Repos to include in training (empty = all)
   // Training backend
   useNemoGym?: boolean  // Use NVIDIA NeMo cloud training instead of local
+  useRemoteSSH?: boolean  // Execute training on remote DGX Spark via SSH
   // Knowledge Distillation specific
   teacherModel?: string
   temperature?: number
@@ -133,6 +134,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
         max_seq_length: config.maxSeqLength,
         selected_repos: config.selectedRepos,
         use_nemo_gym: config.useNemoGym,
+        use_remote_ssh: config.useRemoteSSH,
         data_source: config.dataSource,
         security_dataset_type: config.securityDatasetType,
         security_dataset_path: config.securityDatasetPath,

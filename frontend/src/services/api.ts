@@ -39,6 +39,7 @@ export interface TrainingRequest {
   auto_export_gguf?: boolean
   gguf_quantization?: string
   use_nemo_gym?: boolean  // Use NVIDIA NeMo cloud training
+  use_remote_ssh?: boolean  // Execute training on remote DGX Spark via SSH
   // Data source selection
   data_source?: 'traces' | 'dataset_path' | 'security_dataset'
   security_dataset_type?: string
@@ -753,6 +754,11 @@ export const systemInfoApi = {
 
   getRecommendations: () =>
     request<ModelRecommendations>('/system/recommendations')
+}
+
+export const sshApi = {
+  preflight: () =>
+    request<{ ok: boolean; python_version?: string; disk_free_gb?: number; error?: string; host?: string; username?: string }>('/ssh/preflight'),
 }
 
 // Model Providers API

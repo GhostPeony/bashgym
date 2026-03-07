@@ -199,3 +199,52 @@ class TestTrainRemote:
 
         assert result["success"] is False
         assert "unsloth" in result["error"]
+
+
+class TestRemoteProcessControl:
+    @pytest.fixture
+    def trainer(self):
+        config = SSHConfig(
+            host="192.168.1.100",
+            username="ponyo",
+            port=22,
+            key_path="~/.ssh/id_rsa",
+            remote_work_dir="~/bashgym-training",
+        )
+        return RemoteTrainer(config)
+
+    def test_pause_sends_sigstop(self, trainer):
+        mock_conn = AsyncMock()
+        mock_conn.run = AsyncMock(return_value=MagicMock(exit_status=0))
+        with patch.object(trainer, '_connect', return_value=mock_conn):
+            result = asyncio.run(trainer.pause_remote(12345))
+            assert result is True
+            mock_conn.run.assert_called_once_with("kill -STOP 12345", check=False)
+
+    def test_resume_sends_sigcont(self, trainer):
+        mock_conn = AsyncMock()
+        mock_conn.run = AsyncMock(return_value=MagicMock(exit_status=0))
+        with patch.object(trainer, '_connect', return_value=mock_conn):
+            result = asyncio.run(trainer.resume_remote(12345))
+            assert result is True
+            mock_conn.run.assert_called_once_with("kill -CONT 12345", check=False)
+
+    def test_cancel_sends_sigterm(self, trainer):
+        mock_conn = AsyncMock()
+        mock_conn.run = AsyncMock(return_value=MagicMock(exit_status=0))
+        with patch.object(trainer, '_connect', return_value=mock_conn):
+            result = asyncio.run(trainer.cancel_remote(12345))
+            assert result is True
+            mock_conn.run.assert_called_once_with("kill -TERM 12345", check=False)
+
+    def test_pause_returns_false_on_failure(self, trainer):
+        mock_conn = AsyncMock()
+        mock_conn.run = AsyncMock(return_value=MagicMock(exit_status=1))
+        with patch.object(trainer, '_connect', return_value=mock_conn):
+            result = asyncio.run(trainer.pause_remote(12345))
+            assert result is False
+
+    def test_cancel_returns_false_on_connection_error(self, trainer):
+        with patch.object(trainer, '_connect', side_effect=OSError("Connection refused")):
+            result = asyncio.run(trainer.cancel_remote(12345))
+            assert result is False

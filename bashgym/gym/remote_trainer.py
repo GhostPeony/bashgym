@@ -206,6 +206,39 @@ class RemoteTrainer:
             except Exception as e:
                 logger.warning(f"Could not download {subdir}: {e}")
 
+    async def pause_remote(self, remote_pid: int) -> bool:
+        """Pause a remote training process."""
+        try:
+            conn = await self._connect()
+            async with conn:
+                result = await conn.run(f"kill -STOP {remote_pid}", check=False)
+                return result.exit_status == 0
+        except Exception as e:
+            logger.error(f"Failed to pause remote PID {remote_pid}: {e}")
+            return False
+
+    async def resume_remote(self, remote_pid: int) -> bool:
+        """Resume a paused remote training process."""
+        try:
+            conn = await self._connect()
+            async with conn:
+                result = await conn.run(f"kill -CONT {remote_pid}", check=False)
+                return result.exit_status == 0
+        except Exception as e:
+            logger.error(f"Failed to resume remote PID {remote_pid}: {e}")
+            return False
+
+    async def cancel_remote(self, remote_pid: int) -> bool:
+        """Cancel a remote training process."""
+        try:
+            conn = await self._connect()
+            async with conn:
+                result = await conn.run(f"kill -TERM {remote_pid}", check=False)
+                return result.exit_status == 0
+        except Exception as e:
+            logger.error(f"Failed to cancel remote PID {remote_pid}: {e}")
+            return False
+
     async def train_remote(
         self,
         run_id: str,

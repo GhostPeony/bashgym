@@ -813,6 +813,7 @@ def create_app() -> FastAPI:
                     auto_export_gguf=request.auto_export_gguf,
                     gguf_quantization=request.gguf_quantization,
                     use_nemo_gym=request.use_nemo_gym,  # Use NeMo cloud training
+                    use_remote_ssh=request.use_remote_ssh,
                 )
 
                 app.state.trainer.config = config

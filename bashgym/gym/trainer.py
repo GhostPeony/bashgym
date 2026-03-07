@@ -112,6 +112,9 @@ class TrainerConfig:
     nemo_gym_endpoint: str = "http://localhost:8080"
     nemo_api_key: Optional[str] = None
 
+    # Remote SSH settings (DGX Spark)
+    use_remote_ssh: bool = False
+
 
 @dataclass
 class TrainingRun:
@@ -324,7 +327,9 @@ class Trainer:
         self.active_runs[run_id] = run
 
         try:
-            if self.config.use_nemo_gym:
+            if self.config.use_remote_ssh:
+                self._train_with_remote_ssh(run, callback, log_callback, pid_callback)
+            elif self.config.use_nemo_gym:
                 self._train_with_nemo_gym(run, callback)
             else:
                 self._train_with_unsloth_sft(run, callback, log_callback, pid_callback)
@@ -1129,6 +1134,39 @@ tokenizer.save_pretrained("{output_path}/final")
 
 print("DPO training complete!")
 '''
+
+    def _train_with_remote_ssh(self, run, callback, log_callback, pid_callback):
+        """Execute training on remote machine via SSH."""
+        from bashgym.gym.remote_trainer import RemoteTrainer, SSHConfig
+        from bashgym.config import get_settings
+
+        settings = get_settings()
+        ssh_config = SSHConfig.from_settings(settings.ssh)
+
+        trainer = RemoteTrainer(ssh_config)
+
+        # Generate script locally (same as local training)
+        script_content = self._generate_unsloth_sft_script(run)
+        script_path = run.output_path / "train_sft.py"
+        run.output_path.mkdir(parents=True, exist_ok=True)
+        script_path.write_text(script_content)
+
+        def _pid_cb(remote_pid):
+            run.pid = remote_pid
+            if pid_callback:
+                pid_callback(remote_pid, run)
+
+        result = asyncio.run(trainer.train_remote(
+            run_id=run.run_id,
+            script_path=script_path,
+            dataset_path=Path(run.dataset_path),
+            local_output_dir=run.output_path,
+            log_callback=log_callback,
+            pid_callback=_pid_cb,
+        ))
+
+        if not result["success"]:
+            raise RuntimeError(f"Remote training failed: {result.get('error')}")
 
     def _train_with_nemo_gym(
         self,

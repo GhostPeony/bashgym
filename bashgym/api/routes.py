@@ -391,11 +391,10 @@ def create_app() -> FastAPI:
         project_traces = data_dir / "traces"
 
         if global_traces.exists():
-            pending_count += len(list(global_traces.glob("session_*.json")))
-            pending_count += len(list(global_traces.glob("imported_*.json")))
+            from bashgym.trace_capture.core import glob_pending_traces
+            pending_count += len(glob_pending_traces(global_traces))
         if project_traces.exists() and project_traces.resolve() != global_traces.resolve():
-            pending_count += len(list(project_traces.glob("session_*.json")))
-            pending_count += len(list(project_traces.glob("imported_*.json")))
+            pending_count += len(glob_pending_traces(project_traces))
 
         return SystemStats(
             gold_traces_count=len(gold_traces),
@@ -1212,7 +1211,8 @@ def create_app() -> FastAPI:
         seen_files = set()  # Track by filename to avoid duplicates
         for pending_dir in pending_dirs:
             # Include both session_*.json and imported_*.json files
-            session_files = list(pending_dir.glob("session_*.json")) + list(pending_dir.glob("imported_*.json"))
+            from bashgym.trace_capture.core import glob_pending_traces
+            session_files = glob_pending_traces(pending_dir)
             print(f"[DEBUG] Found {len(session_files)} trace files in {pending_dir}")
             for trace_file in session_files:
                 # Skip if we've already seen this file (by name)
@@ -1221,8 +1221,8 @@ def create_app() -> FastAPI:
                 seen_files.add(trace_file.name)
                 print(f"[DEBUG] Processing: {trace_file}")
                 try:
-                    with open(trace_file, encoding='utf-8') as f:
-                        data = json.load(f)
+                    from bashgym.trace_capture.core import load_trace_file
+                    data = load_trace_file(trace_file)
 
                     # Handle both raw trace format (list) and imported TraceSession format (dict with trace key)
                     if isinstance(data, dict) and "trace" in data:
@@ -1416,7 +1416,7 @@ def create_app() -> FastAPI:
         count_traces_in_dir(failed_dir, "failed")
 
         # Count pending traces from both locations
-        pending_patterns = ["session_*.json", "imported_*.json"]
+        pending_patterns = ["session_*.json", "session_*.jsonl", "imported_*.json"]
         global_traces_dir = global_dir / "traces"
         project_traces_dir = data_dir / "traces"
 
@@ -1626,9 +1626,11 @@ def create_app() -> FastAPI:
         if global_traces_dir.exists():
             # Include both session_*.json and imported_*.json
             dirs_to_scan.append((global_traces_dir, "session_*.json"))
+            dirs_to_scan.append((global_traces_dir, "session_*.jsonl"))
             dirs_to_scan.append((global_traces_dir, "imported_*.json"))
         if project_traces_dir.exists() and project_traces_dir.resolve() != global_traces_dir.resolve():
             dirs_to_scan.append((project_traces_dir, "session_*.json"))
+            dirs_to_scan.append((project_traces_dir, "session_*.jsonl"))
             dirs_to_scan.append((project_traces_dir, "imported_*.json"))
 
         seen_files = set()  # Track by filename to avoid duplicates
@@ -1641,8 +1643,8 @@ def create_app() -> FastAPI:
                     continue
                 seen_files.add(trace_file.name)
                 try:
-                    with open(trace_file, encoding='utf-8') as f:
-                        data = json.load(f)
+                    from bashgym.trace_capture.core import load_trace_file
+                    data = load_trace_file(trace_file)
 
                     # Handle raw trace format (array of steps)
                     if isinstance(data, list):
@@ -1978,14 +1980,17 @@ def create_app() -> FastAPI:
                 candidate = pending_dir / f"{trace_id}.json"
                 if candidate.exists():
                     tier_checks.append((candidate, TraceStatus.PENDING))
+                candidate_jsonl = pending_dir / f"session_{trace_id}.jsonl"
+                if candidate_jsonl.exists():
+                    tier_checks.append((candidate_jsonl, TraceStatus.PENDING))
 
         trace_path = None
         trace_status = None
         data = None
         for path, status in tier_checks:
             if path.exists():
-                with open(path, encoding='utf-8') as f:
-                    data = json.load(f)
+                from bashgym.trace_capture.core import load_trace_file
+                data = load_trace_file(path)
                 trace_path = path
                 trace_status = status
                 break
@@ -2134,13 +2139,37 @@ def create_app() -> FastAPI:
                 break
 
         if not source_path:
+            # Also search pending directories for JSONL traces
+            from bashgym.config import get_bashgym_dir
+            pending_dirs = [get_bashgym_dir() / "traces", data_dir / "traces"]
+            for dir_path in source_dirs + pending_dirs:
+                for pattern in [f"session_{trace_id}.jsonl", f"{trace_id}.jsonl", f"{trace_id}.json"]:
+                    candidate = dir_path / pattern
+                    if candidate.exists():
+                        source_path = candidate
+                        break
+                if source_path:
+                    break
+
+        if not source_path:
             raise HTTPException(status_code=404, detail="Trace not found")
 
         # Move to target tier
         target_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(source_path) as f:
-            data = json.load(f)
+        from bashgym.trace_capture.core import load_trace_file
+        data = load_trace_file(source_path)
+
+        # If raw step list (from JSONL), wrap into trace dict
+        if isinstance(data, list):
+            if not data:
+                raise HTTPException(status_code=400, detail="Trace file is empty")
+            data = {
+                "trace": data,
+                "metadata": {},
+                "primary_repo": data[0].get("repo", {}),
+                "source_tool": data[0].get("source_tool", "claude_code"),
+            }
 
         # Update metadata
         if "metadata" not in data:
@@ -2487,7 +2516,7 @@ def create_app() -> FastAPI:
             dst.mkdir(parents=True, exist_ok=True)
 
             if src.exists():
-                for f in src.glob("*.json"):
+                for f in list(src.glob("*.json")) + list(src.glob("*.jsonl")):
                     if not (dst / f.name).exists():
                         shutil.copy2(f, dst / f.name)
                         key = "pending" if category == "traces" else category.replace("_traces", "")
@@ -2815,14 +2844,15 @@ def create_app() -> FastAPI:
 
         seen_files = set()
         for pending_dir in pending_dirs:
-            for trace_file in list(pending_dir.glob("session_*.json")) + list(pending_dir.glob("imported_*.json")):
+            from bashgym.trace_capture.core import glob_pending_traces
+            for trace_file in glob_pending_traces(pending_dir):
                 if trace_file.name in seen_files:
                     continue
                 seen_files.add(trace_file.name)
 
                 try:
-                    with open(trace_file, encoding='utf-8') as f:
-                        data = json.load(f)
+                    from bashgym.trace_capture.core import load_trace_file
+                    data = load_trace_file(trace_file)
 
                     metrics = calculate_quality(data)
                     trace_id = trace_file.stem

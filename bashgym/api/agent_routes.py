@@ -160,6 +160,7 @@ async def _gather_system_context() -> str:
         for trace_dir in [get_bashgym_dir() / "traces", data_dir / "traces"]:
             if trace_dir.exists():
                 pending += len(list(trace_dir.glob("session_*.json")))
+                pending += len(list(trace_dir.glob("session_*.jsonl")))
                 pending += len(list(trace_dir.glob("imported_*.json")))
         sections.append(
             f"**System Stats:**\n"

@@ -249,6 +249,38 @@ def _count_tools(steps: list) -> Dict[str, int]:
     return counts
 
 
+def load_trace_file(filepath: Path) -> Any:
+    """Load data from a trace file (JSON array or JSONL format).
+
+    Returns:
+        list for JSONL files (list of step dicts)
+        list or dict for JSON files (raw steps or TraceSession)
+        Empty list on error
+    """
+    try:
+        content = filepath.read_text(encoding='utf-8')
+        if not content.strip():
+            return []
+
+        if filepath.suffix == '.jsonl':
+            return [json.loads(line) for line in content.splitlines() if line.strip()]
+
+        return json.loads(content)
+    except (json.JSONDecodeError, IOError, OSError):
+        return []
+
+
+def glob_pending_traces(directory: Path) -> list:
+    """Glob for pending trace files (session + imported, both .json and .jsonl)."""
+    if not directory.exists():
+        return []
+    return (
+        list(directory.glob("session_*.json"))
+        + list(directory.glob("session_*.jsonl"))
+        + list(directory.glob("imported_*.json"))
+    )
+
+
 # ---------------------------------------------------------------------------
 # Cost estimation for Claude models
 # ---------------------------------------------------------------------------
@@ -344,26 +376,25 @@ class TraceCapture:
     def get_trace_file(self) -> Path:
         """Get the path to the current session's trace file."""
         session_id = self.get_session_id()
-        return self.traces_dir / f"session_{session_id}.json"
+        # Prefer JSONL if it exists, fall back to JSON, default to JSONL for new
+        jsonl_path = self.traces_dir / f"session_{session_id}.jsonl"
+        if jsonl_path.exists():
+            return jsonl_path
+        json_path = self.traces_dir / f"session_{session_id}.json"
+        if json_path.exists():
+            return json_path
+        return jsonl_path
 
     def load_trace(self) -> List[Dict[str, Any]]:
-        """Load the current trace from file."""
+        """Load the current trace from file. Supports JSON array and JSONL."""
         trace_file = self.get_trace_file()
         if not trace_file.exists():
             return []
 
-        try:
-            with open(trace_file, 'r') as f:
-                lock_file(f, exclusive=False)
-                content = f.read()
-                unlock_file(f)
-
-            if not content.strip():
-                return []
-            return json.loads(content)
-        except (json.JSONDecodeError, IOError, OSError) as e:
-            print(f"Warning: Could not load trace file: {e}", file=sys.stderr)
-            return []
+        data = load_trace_file(trace_file)
+        if isinstance(data, list):
+            return data
+        return []
 
     def save_trace(self, trace: List[Dict[str, Any]]) -> None:
         """Save the trace to file."""
@@ -451,7 +482,7 @@ class TraceCapture:
         """Get statistics about captured traces."""
         gold_count = len(list(self.gold_traces_dir.glob("*.json")))
         failed_count = len(list(self.failed_traces_dir.glob("*.json")))
-        pending_count = len(list(self.traces_dir.glob("*.json")))
+        pending_count = len(list(self.traces_dir.glob("*.json"))) + len(list(self.traces_dir.glob("*.jsonl")))
 
         return {
             "gold_traces": gold_count,

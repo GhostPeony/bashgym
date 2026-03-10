@@ -38,6 +38,11 @@ pytest-asyncio>=0.23.0     # Async test support
 pytest-cov>=4.1.0          # Code coverage
 
 # =========================================
+# Remote Training (SSH)
+# =========================================
+asyncssh>=2.14.0               # Async SSH/SFTP for remote training
+
+# =========================================
 # Training Dependencies (Optional)
 # Install with: pip install -r requirements-training.txt
 # These are heavy ML dependencies not needed for basic operation

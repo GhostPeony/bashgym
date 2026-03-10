@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { RefreshCw, Cpu, HardDrive, AlertCircle, CheckCircle2, XCircle } from 'lucide-react'
-import { systemInfoApi, SystemInfo, ModelRecommendations } from '../../services/api'
+import { RefreshCw, Cpu, HardDrive, AlertCircle, CheckCircle2, XCircle, Server, Wifi } from 'lucide-react'
+import { systemInfoApi, providersApi, sshApi, SystemInfo, ModelRecommendations, OllamaModel } from '../../services/api'
 import { clsx } from 'clsx'
 
 interface SystemInfoPanelProps {
@@ -12,6 +12,8 @@ interface SystemInfoPanelProps {
 export function SystemInfoPanel({ onSystemInfo, onRecommendations, compact = false }: SystemInfoPanelProps) {
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null)
   const [recommendations, setRecommendations] = useState<ModelRecommendations | null>(null)
+  const [ollamaStatus, setOllamaStatus] = useState<{ available: boolean; models: OllamaModel[]; studentModel?: string } | null>(null)
+  const [sshStatus, setSshStatus] = useState<{ ok: boolean; python_version?: string; disk_free_gb?: number; error?: string; host?: string; username?: string } | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -20,9 +22,10 @@ export function SystemInfoPanel({ onSystemInfo, onRecommendations, compact = fal
       setLoading(true)
       setError(null)
 
-      const [infoResult, recsResult] = await Promise.all([
+      const [infoResult, recsResult, ollamaResult] = await Promise.all([
         systemInfoApi.getInfo(refresh),
-        systemInfoApi.getRecommendations()
+        systemInfoApi.getRecommendations(),
+        providersApi.getOllamaModels()
       ])
 
       if (infoResult.ok && infoResult.data) {
@@ -36,6 +39,22 @@ export function SystemInfoPanel({ onSystemInfo, onRecommendations, compact = fal
         setRecommendations(recsResult.data)
         onRecommendations?.(recsResult.data)
       }
+
+      if (ollamaResult.ok && ollamaResult.data) {
+        setOllamaStatus({
+          available: ollamaResult.data.available,
+          models: ollamaResult.data.models || [],
+        })
+      }
+
+      // SSH preflight (non-blocking)
+      sshApi.preflight().then((result) => {
+        if (result.ok && result.data) {
+          setSshStatus(result.data)
+        }
+      }).catch(() => {
+        // SSH not configured or server unavailable
+      })
     } catch (err) {
       setError('Failed to connect to API')
     } finally {
@@ -186,6 +205,76 @@ export function SystemInfoPanel({ onSystemInfo, onRecommendations, compact = fal
           </span>
         </div>
       </div>
+
+      {/* Ollama / Remote Inference */}
+      {ollamaStatus && (
+        <div className="card p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Server className={clsx('w-4 h-4', ollamaStatus.available ? 'text-status-success' : 'text-status-error')} />
+            <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">Inference Target</span>
+          </div>
+          {ollamaStatus.available ? (
+            <>
+              <div className="flex items-center gap-2">
+                <Wifi className="w-3.5 h-3.5 text-status-success" />
+                <span className="text-sm font-medium text-text-primary">Ollama Connected</span>
+                <span className="tag tag-accent">{ollamaStatus.models.length} model{ollamaStatus.models.length !== 1 ? 's' : ''}</span>
+              </div>
+              {ollamaStatus.models.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {ollamaStatus.models.slice(0, 3).map((m) => (
+                    <div key={m.name} className="flex items-center justify-between font-mono text-xs text-text-muted">
+                      <span className="flex items-center gap-1.5">
+                        {m.is_code_model && <span className="text-accent">{'</>'}</span>}
+                        {m.name}
+                      </span>
+                      <span>{m.parameter_size} · {m.size_gb.toFixed(1)}GB</span>
+                    </div>
+                  ))}
+                  {ollamaStatus.models.length > 3 && (
+                    <p className="font-mono text-xs text-text-muted">+{ollamaStatus.models.length - 3} more</p>
+                  )}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="flex items-center gap-2 text-text-muted">
+              <XCircle className="w-3.5 h-3.5 text-status-error" />
+              <span className="text-sm">Ollama offline — start with <code className="font-mono text-xs bg-surface px-1 py-0.5">ollama serve</code></span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* DGX Spark Training Target */}
+      {sshStatus && (
+        <div className="card p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Server className={clsx('w-4 h-4', sshStatus.ok ? 'text-status-success' : 'text-status-error')} />
+            <span className="font-mono text-xs uppercase tracking-widest text-text-secondary">Training Target</span>
+          </div>
+          {sshStatus.ok ? (
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <Wifi className="w-3.5 h-3.5 text-status-success" />
+                <span className="text-sm font-medium text-text-primary">DGX Spark Connected</span>
+              </div>
+              <p className="font-mono text-xs text-text-muted">
+                {sshStatus.username}@{sshStatus.host}
+              </p>
+              <p className="font-mono text-xs text-text-muted">
+                {sshStatus.python_version}
+                {sshStatus.disk_free_gb && ` · ${sshStatus.disk_free_gb}GB free`}
+              </p>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 text-text-muted">
+              <XCircle className="w-3.5 h-3.5 text-status-error" />
+              <span className="text-sm">{sshStatus.error || 'SSH not configured'}</span>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Recommendation */}
       {recommendations && (

@@ -12,7 +12,10 @@ Includes:
 - DataDesignerPipeline: NVIDIA NeMo DataDesigner v0.5.0 integration
 """
 
-from bashgym.factory.data_factory import DataFactory, DataFactoryConfig, TrainingExample, DPOExample, SynthesisStrategy
+from bashgym.factory.data_factory import (
+    DataFactory, DataFactoryConfig, TrainingExample, DPOExample, SynthesisStrategy,
+    TOOL_SCHEMAS, TOOL_OUTPUT_MAX_CHARS, build_tool_call_messages,
+)
 from bashgym.factory.trace_processor import TraceProcessor, ProcessedTrace, TraceQualityMetrics
 from bashgym.factory.prompt_optimizer import PromptOptimizer, PromptOptConfig, OptimizationResult
 from bashgym.factory.safe_synthesizer import SafeSynthesizer, SafeSynthesizerConfig, PIIDetection, PrivacyReport
@@ -29,6 +32,9 @@ __all__ = [
     "TrainingExample",
     "DPOExample",
     "SynthesisStrategy",
+    "TOOL_SCHEMAS",
+    "TOOL_OUTPUT_MAX_CHARS",
+    "build_tool_call_messages",
     # Trace Processor
     "TraceProcessor",
     "ProcessedTrace",

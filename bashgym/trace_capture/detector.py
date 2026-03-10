@@ -5,6 +5,7 @@ Auto-detects which AI coding assistants are installed on the system.
 """
 
 import os
+import json
 import shutil
 import platform
 from pathlib import Path
@@ -184,6 +185,101 @@ def detect_cursor() -> ToolInfo:
     )
 
 
+def detect_gemini_cli() -> ToolInfo:
+    """Detect Gemini CLI installation."""
+    home = _get_home_dir()
+    config_path = home / ".gemini"
+    hooks_path = config_path / "hooks"
+
+    # Check if gemini command exists
+    gemini_cmd = shutil.which("gemini")
+    installed = gemini_cmd is not None
+
+    # Check for config directory as fallback
+    if not installed and config_path.exists():
+        installed = True
+
+    # Check if our hooks are installed by reading settings.json for bashgym entries
+    hooks_installed = False
+    settings_path = config_path / "settings.json"
+    if settings_path.exists():
+        try:
+            with open(settings_path, 'r') as f:
+                settings = json.load(f)
+            # Check for bashgym entries in AfterTool hooks
+            after_tool = settings.get("hooks", {}).get("AfterTool", [])
+            for entry in after_tool:
+                if isinstance(entry, dict) and entry.get("name") == "bashgym":
+                    hooks_installed = True
+                    break
+        except (json.JSONDecodeError, IOError, OSError):
+            pass
+
+    return ToolInfo(
+        name="Gemini CLI",
+        installed=installed,
+        hooks_installed=hooks_installed,
+        hooks_path=hooks_path,
+        config_path=config_path,
+        adapter_type="gemini_cli"
+    )
+
+
+def detect_codex() -> ToolInfo:
+    """Detect Codex installation."""
+    home = _get_home_dir()
+    config_path = home / ".codex"
+
+    # Check if codex command exists
+    codex_cmd = shutil.which("codex")
+    installed = codex_cmd is not None
+
+    # Check for config directory as fallback
+    if not installed and config_path.exists():
+        installed = True
+
+    return ToolInfo(
+        name="Codex",
+        installed=installed,
+        hooks_installed=False,  # Import only - no live hooks
+        hooks_path=None,
+        config_path=config_path,
+        adapter_type="codex"
+    )
+
+
+def detect_copilot_cli() -> ToolInfo:
+    """Detect GitHub Copilot CLI installation."""
+    home = _get_home_dir()
+    config_path = home / ".copilot"
+    hooks_path = config_path / "hooks"
+
+    # Check if copilot or github-copilot-cli command exists
+    copilot_cmd = shutil.which("copilot")
+    if not copilot_cmd:
+        copilot_cmd = shutil.which("github-copilot-cli")
+    installed = copilot_cmd is not None
+
+    # Check for config directory as fallback
+    if not installed and config_path.exists():
+        installed = True
+
+    # Check if our hooks config file exists
+    hooks_installed = False
+    bashgym_config = hooks_path / "bashgym-hooks.json"
+    if bashgym_config.exists():
+        hooks_installed = True
+
+    return ToolInfo(
+        name="Copilot CLI",
+        installed=installed,
+        hooks_installed=hooks_installed,
+        hooks_path=hooks_path,
+        config_path=config_path,
+        adapter_type="copilot_cli"
+    )
+
+
 def detect_tools() -> List[ToolInfo]:
     """
     Detect all supported AI coding tools.
@@ -193,6 +289,9 @@ def detect_tools() -> List[ToolInfo]:
     detectors = [
         detect_claude_code,
         detect_opencode,
+        detect_gemini_cli,
+        detect_codex,
+        detect_copilot_cli,
         detect_aider,
         detect_continue,
         detect_cursor,
@@ -249,7 +348,7 @@ def get_primary_tool() -> Optional[ToolInfo]:
     tools = detect_tools()
 
     # Priority order
-    priority = ["claude_code", "opencode", "aider", "continue", "cursor"]
+    priority = ["claude_code", "opencode", "gemini_cli", "codex", "copilot_cli", "aider", "continue", "cursor"]
 
     for adapter_type in priority:
         for tool in tools:

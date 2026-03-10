@@ -4,6 +4,7 @@
 import json
 import logging
 import os
+import re
 import secrets
 import subprocess
 from datetime import datetime, timezone, timedelta
@@ -28,6 +29,18 @@ router = APIRouter(prefix="/api/agent", tags=["agent"])
 _skill_registry = SkillRegistry()
 _tool_registry = ToolRegistry()
 _memory = PeonyMemory()
+
+# ---------------------------------------------------------------------------
+# Input validation helpers
+# ---------------------------------------------------------------------------
+
+_SAFE_ID = re.compile(r'^[a-zA-Z0-9_-]{1,64}$')
+
+
+def _validate_session_id(session_id: str) -> str:
+    if not _SAFE_ID.match(session_id):
+        raise HTTPException(status_code=400, detail="Invalid session ID")
+    return session_id
 
 # ---------------------------------------------------------------------------
 # In-memory pending actions (shell confirmation gate)
@@ -147,6 +160,7 @@ async def _gather_system_context() -> str:
         for trace_dir in [get_bashgym_dir() / "traces", data_dir / "traces"]:
             if trace_dir.exists():
                 pending += len(list(trace_dir.glob("session_*.json")))
+                pending += len(list(trace_dir.glob("session_*.jsonl")))
                 pending += len(list(trace_dir.glob("imported_*.json")))
         sections.append(
             f"**System Stats:**\n"
@@ -303,6 +317,76 @@ async def _execute_tool(name: str, tool_input: dict) -> str:
         result = _tool_registry.list_capabilities(category=tool_input.get("category"))
         return result
 
+    # ----- Data collection tools (local, no HTTP needed) -----
+    if name == "import_traces":
+        from bashgym.trace_capture.collectors.scanner import ClaudeDataScanner
+        scanner = ClaudeDataScanner()
+        sources = tool_input.get("sources", ["all"])
+        dry_run = tool_input.get("dry_run", False)
+        project_filter = tool_input.get("project_filter")
+
+        # Calculate 'since' from days parameter
+        since = None
+        days = tool_input.get("days")
+        if days:
+            since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+        # Resolve "all" or "sessions" — session import goes through existing HTTP endpoint
+        source_list = None  # None means all in scanner
+        if "all" not in sources:
+            source_list = [s for s in sources if s != "sessions"]
+
+        results = {}
+
+        # Handle session import via existing endpoint if requested
+        if source_list is None or "sessions" in sources:
+            try:
+                import httpx
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    resp = await client.post("http://localhost:8003/api/traces/import")
+                    resp.raise_for_status()
+                    results["sessions"] = resp.json()
+            except Exception as e:
+                results["sessions"] = {"error": str(e)}
+
+        if dry_run:
+            scan_results = scanner.scan_all(sources=source_list, since=since, project_filter=project_filter)
+            for src, scan_result in scan_results.items():
+                results[src] = {
+                    "total_found": scan_result.total_found,
+                    "already_collected": scan_result.already_collected,
+                    "new_available": scan_result.new_available,
+                }
+        else:
+            collect_results = scanner.collect_all(sources=source_list, since=since, project_filter=project_filter)
+            for src, batch_result in collect_results.items():
+                results[src] = {
+                    "collected": batch_result.collected_count,
+                    "skipped": batch_result.skipped_count,
+                    "errors": batch_result.error_count,
+                }
+
+        return json.dumps(results)
+
+    if name == "scan_claude_data":
+        from bashgym.trace_capture.collectors.scanner import ClaudeDataScanner
+        scanner = ClaudeDataScanner()
+        scan_results = scanner.scan_all()
+        results = {}
+        for src, scan_result in scan_results.items():
+            results[src] = {
+                "total_found": scan_result.total_found,
+                "already_collected": scan_result.already_collected,
+                "new_available": scan_result.new_available,
+            }
+        return json.dumps(results)
+
+    if name == "get_collection_status":
+        from bashgym.trace_capture.collectors.scanner import ClaudeDataScanner
+        scanner = ClaudeDataScanner()
+        status = scanner.status()
+        return json.dumps(status)
+
     # ----- HTTP-based tools -----
     import httpx
 
@@ -310,13 +394,7 @@ async def _execute_tool(name: str, tool_input: dict) -> str:
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
-            if name == "import_traces":
-                resp = await client.post(f"{base_url}/api/traces/import")
-                resp.raise_for_status()
-                data = resp.json()
-                return json.dumps(data)
-
-            elif name == "get_trace_status":
+            if name == "get_trace_status":
                 resp = await client.get(f"{base_url}/api/stats")
                 resp.raise_for_status()
                 data = resp.json()
@@ -681,6 +759,7 @@ async def list_sessions():
 @router.get("/sessions/{session_id}")
 async def load_session(session_id: str):
     """Load messages for a specific session from its JSONL log."""
+    session_id = _validate_session_id(session_id)
     log_path = _get_peony_logs_dir() / f"{session_id}.jsonl"
     if not log_path.exists():
         raise HTTPException(status_code=404, detail="Session not found")
@@ -707,6 +786,7 @@ async def load_session(session_id: str):
 @router.post("/sessions")
 async def save_session(req: SaveSessionRequest):
     """Save a session — writes JSONL file and updates the index."""
+    _validate_session_id(req.session_id)
     logs_dir = _get_peony_logs_dir()
     log_path = logs_dir / f"{req.session_id}.jsonl"
 
@@ -754,6 +834,7 @@ async def save_session(req: SaveSessionRequest):
 @router.delete("/sessions/{session_id}")
 async def delete_session(session_id: str):
     """Delete a session log and remove it from the index."""
+    session_id = _validate_session_id(session_id)
     log_path = _get_peony_logs_dir() / f"{session_id}.jsonl"
     if log_path.exists():
         log_path.unlink()

@@ -12,10 +12,12 @@ import {
   FolderGit2,
   ArrowRight,
   CheckCircle2,
-  BarChart3
+  BarChart3,
+  Cloud,
+  ExternalLink
 } from 'lucide-react'
 import { useTrainingStore } from '../../stores'
-import { trainingApi, tracesApi, RepoInfo, SystemInfo, ModelRecommendations } from '../../services/api'
+import { trainingApi, tracesApi, hfApi, RepoInfo, SystemInfo, ModelRecommendations } from '../../services/api'
 import { LossCurve } from './LossCurve'
 import { EpochProgress } from './EpochProgress'
 import { MetricsGrid } from './MetricsGrid'
@@ -33,6 +35,13 @@ export function TrainingDashboard() {
   const [goldTraceCount, setGoldTraceCount] = useState(0)
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null)
   const [recommendations, setRecommendations] = useState<ModelRecommendations | null>(null)
+
+  const [exporting, setExporting] = useState(false)
+  const [exportResult, setExportResult] = useState<{ train: number; val: number; trainPath?: string } | null>(null)
+  const [exportError, setExportError] = useState<string | null>(null)
+  const [pushingToHub, setPushingToHub] = useState(false)
+  const [hubResult, setHubResult] = useState<{ repoId: string; url: string } | null>(null)
+  const [hubError, setHubError] = useState<string | null>(null)
 
   const isRunning = currentRun?.status === 'running'
   const isPaused = currentRun?.status === 'paused'
@@ -73,6 +82,54 @@ export function TrainingDashboard() {
     }
   }, [currentRun, isRefreshing, updateMetrics])
 
+  const handleExportAndDownload = useCallback(async () => {
+    setExporting(true)
+    setExportResult(null)
+    setExportError(null)
+    setHubResult(null)
+    setHubError(null)
+
+    const exportResp = await trainingApi.exportExamples()
+    if (!exportResp.ok || !exportResp.data?.success) {
+      setExportError(exportResp.data?.message || exportResp.error || 'Export failed')
+      setExporting(false)
+      return
+    }
+
+    // Extract directory from train_path for HF upload
+    const trainPath = exportResp.data.train_path
+    setExportResult({
+      train: exportResp.data.train_count,
+      val: exportResp.data.val_count,
+      trainPath: trainPath ? trainPath.replace(/[/\\][^/\\]+$/, '') : undefined,
+    })
+
+    // Trigger browser download of train split
+    await trainingApi.downloadExport('train')
+    setExporting(false)
+  }, [])
+
+  const handlePushToHub = useCallback(async () => {
+    if (!exportResult?.trainPath) return
+
+    setPushingToHub(true)
+    setHubResult(null)
+    setHubError(null)
+
+    const resp = await hfApi.uploadDataset({
+      local_path: exportResult.trainPath,
+      repo_name: 'bashgym-training-data',
+      private: true,
+    })
+
+    if (resp.ok && resp.data) {
+      setHubResult({ repoId: resp.data.repo_id, url: resp.data.url })
+    } else {
+      setHubError(resp.error || 'Push to HuggingFace failed')
+    }
+
+    setPushingToHub(false)
+  }, [exportResult])
 
   return (
     <div className="h-full p-6 overflow-auto">
@@ -384,19 +441,98 @@ export function TrainingDashboard() {
 
         {/* Export Section */}
         {!currentRun && goldTraceCount > 0 && (
-          <div className="col-span-12 card p-4">
+          <div className="col-span-12 card p-4 space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="font-brand text-xl text-text-primary">Export Model</h2>
+                <h2 className="font-brand text-xl text-text-primary">Export Training Data</h2>
                 <p className="font-mono text-xs uppercase tracking-widest text-text-muted mt-1">
-                  Export your trained model in various formats
+                  Generate JSONL examples, download locally, or push to HuggingFace Hub
                 </p>
+                {exportResult && (
+                  <p className="font-mono text-xs text-status-success mt-2">
+                    <CheckCircle2 className="w-3 h-3 inline mr-1" />
+                    Exported {exportResult.train} train + {exportResult.val} val examples
+                  </p>
+                )}
+                {exportError && (
+                  <p className="font-mono text-xs text-status-error mt-2">{exportError}</p>
+                )}
               </div>
-              <button className="btn-secondary flex items-center gap-2">
-                <Download className="w-4 h-4" />
-                Export
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleExportAndDownload}
+                  disabled={exporting}
+                  className={clsx(
+                    'btn-primary flex items-center gap-2',
+                    exporting && 'opacity-50 cursor-not-allowed'
+                  )}
+                >
+                  {exporting ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Download className="w-4 h-4" />
+                  )}
+                  {exporting ? 'Exporting...' : 'Export JSONL'}
+                </button>
+                {exportResult && (
+                  <button
+                    onClick={() => trainingApi.downloadExport('val')}
+                    className="btn-secondary flex items-center gap-2"
+                  >
+                    <Download className="w-4 h-4" />
+                    Val Split
+                  </button>
+                )}
+              </div>
             </div>
+
+            {/* Push to HuggingFace Hub */}
+            {exportResult && (
+              <div className="border-t border-border pt-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-brand text-lg text-text-primary flex items-center gap-2">
+                      <Cloud className="w-4 h-4" />
+                      Push to HuggingFace Hub
+                    </h3>
+                    <p className="font-mono text-xs text-text-muted mt-1">
+                      Upload as a private dataset for cloud training with Unsloth or AutoTrain
+                    </p>
+                    {hubResult && (
+                      <a
+                        href={hubResult.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-mono text-xs text-accent hover:text-accent-dark mt-2 inline-flex items-center gap-1"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        {hubResult.repoId}
+                      </a>
+                    )}
+                    {hubError && (
+                      <p className="font-mono text-xs text-status-error mt-2">{hubError}</p>
+                    )}
+                  </div>
+                  <button
+                    onClick={handlePushToHub}
+                    disabled={pushingToHub}
+                    className={clsx(
+                      'btn-secondary flex items-center gap-2',
+                      pushingToHub && 'opacity-50 cursor-not-allowed'
+                    )}
+                  >
+                    {pushingToHub ? (
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                    ) : hubResult ? (
+                      <CheckCircle2 className="w-4 h-4 text-status-success" />
+                    ) : (
+                      <Cloud className="w-4 h-4" />
+                    )}
+                    {pushingToHub ? 'Pushing...' : hubResult ? 'Pushed' : 'Push to Hub'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

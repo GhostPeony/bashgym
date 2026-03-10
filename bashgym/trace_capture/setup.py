@@ -14,8 +14,21 @@ from .adapters import (
     uninstall_claude_code_hooks,
     install_opencode_plugin,
     uninstall_opencode_plugin,
+    install_gemini_cli_hooks,
+    uninstall_gemini_cli_hooks,
+    install_codex_hooks,
+    uninstall_codex_hooks,
+    install_copilot_cli_hooks,
+    uninstall_copilot_cli_hooks,
 )
-from .importers import import_today, import_recent, import_session
+from .importers import (
+    import_today,
+    import_recent,
+    import_session,
+    import_gemini_sessions,
+    import_copilot_sessions,
+    import_opencode_sessions,
+)
 
 
 def setup_trace_capture(
@@ -83,6 +96,45 @@ def setup_trace_capture(
                 results["success"] = False
                 results["errors"].append(f"OpenCode: {message}")
 
+        elif tool == "gemini_cli":
+            success, message = install_gemini_cli_hooks()
+            results["tools"]["gemini_cli"] = {
+                "success": success,
+                "message": message
+            }
+            if verbose:
+                status = "✓" if success else "✗"
+                print(f"  {status} Gemini CLI: {message}")
+            if not success:
+                results["success"] = False
+                results["errors"].append(f"Gemini CLI: {message}")
+
+        elif tool == "codex":
+            success, message = install_codex_hooks()
+            results["tools"]["codex"] = {
+                "success": success,
+                "message": message
+            }
+            if verbose:
+                status = "✓" if success else "✗"
+                print(f"  {status} Codex: {message}")
+            if not success:
+                results["success"] = False
+                results["errors"].append(f"Codex: {message}")
+
+        elif tool == "copilot_cli":
+            success, message = install_copilot_cli_hooks()
+            results["tools"]["copilot_cli"] = {
+                "success": success,
+                "message": message
+            }
+            if verbose:
+                status = "✓" if success else "✗"
+                print(f"  {status} Copilot CLI: {message}")
+            if not success:
+                results["success"] = False
+                results["errors"].append(f"Copilot CLI: {message}")
+
         elif tool in ["aider", "continue", "cursor"]:
             results["tools"][tool] = {
                 "success": False,
@@ -125,7 +177,7 @@ def uninstall_trace_capture(
     }
 
     if all_tools:
-        target_tools = ["claude_code", "opencode"]
+        target_tools = ["claude_code", "opencode", "gemini_cli", "codex", "copilot_cli"]
     elif tools:
         target_tools = tools
     else:
@@ -156,6 +208,36 @@ def uninstall_trace_capture(
             if verbose:
                 status = "✓" if success else "✗"
                 print(f"  {status} OpenCode: {message}")
+
+        elif tool == "gemini_cli":
+            success, message = uninstall_gemini_cli_hooks()
+            results["tools"]["gemini_cli"] = {
+                "success": success,
+                "message": message
+            }
+            if verbose:
+                status = "✓" if success else "✗"
+                print(f"  {status} Gemini CLI: {message}")
+
+        elif tool == "codex":
+            success, message = uninstall_codex_hooks()
+            results["tools"]["codex"] = {
+                "success": success,
+                "message": message
+            }
+            if verbose:
+                status = "✓" if success else "✗"
+                print(f"  {status} Codex: {message}")
+
+        elif tool == "copilot_cli":
+            success, message = uninstall_copilot_cli_hooks()
+            results["tools"]["copilot_cli"] = {
+                "success": success,
+                "message": message
+            }
+            if verbose:
+                status = "✓" if success else "✗"
+                print(f"  {status} Copilot CLI: {message}")
 
     return results
 
@@ -206,16 +288,40 @@ Examples:
   bashgym-setup --status           # Check current status
   bashgym-setup --uninstall        # Remove all hooks
 
+  # Scan and inspect available data
+  bashgym-setup scan                      # Show all available data sources
+  bashgym-setup status                    # Show collection stats per source
+
   # Import Claude Code session history
   bashgym-setup import-today              # Import today's sessions
-  bashgym-setup import-recent             # Import last 60 days
+  bashgym-setup import-recent             # Import last 60 days (sessions)
   bashgym-setup import-recent --days 30   # Import last 30 days
+  bashgym-setup import-recent -S plans    # Import plans from last 60 days
+  bashgym-setup import-recent -S all      # Import all source types
   bashgym-setup import-session <path>     # Import specific session file
+
+  # Import from other tools
+  bashgym-setup import-gemini             # Import Gemini CLI sessions
+  bashgym-setup import-copilot            # Import Copilot CLI sessions
+  bashgym-setup import-opencode           # Import OpenCode sessions
+  bashgym-setup import-all                # Import from all detected tools
         """
     )
 
     # Create subparsers for import commands
     subparsers = parser.add_subparsers(dest="command", help="Import commands")
+
+    # scan subcommand
+    scan_parser = subparsers.add_parser(
+        "scan",
+        help="Scan ~/.claude and show what data is available but not yet collected"
+    )
+
+    # status subcommand
+    status_parser = subparsers.add_parser(
+        "status",
+        help="Show collection stats per source type"
+    )
 
     # import-today subcommand
     import_today_parser = subparsers.add_parser(
@@ -242,6 +348,12 @@ Examples:
         "--project", "-p",
         help="Only import sessions from projects matching this substring"
     )
+    import_recent_parser.add_argument(
+        "--source", "-S",
+        choices=["all", "sessions", "subagents", "edits", "plans", "prompts", "todos", "environments"],
+        default="sessions",
+        help="Data source to import (default: sessions). Use 'all' for everything."
+    )
 
     # import-session subcommand
     import_session_parser = subparsers.add_parser(
@@ -258,11 +370,88 @@ Examples:
         help="Import even if already imported"
     )
 
+    # import-gemini subcommand
+    import_gemini_parser = subparsers.add_parser(
+        "import-gemini",
+        help="Import Gemini CLI session history"
+    )
+    import_gemini_parser.add_argument(
+        "--days", "-d",
+        type=int,
+        default=60,
+        help="Number of days to look back (default: 60)"
+    )
+    import_gemini_parser.add_argument(
+        "--limit", "-l",
+        type=int,
+        default=100,
+        help="Maximum number of sessions to import (default: 100)"
+    )
+
+    # import-copilot subcommand
+    import_copilot_parser = subparsers.add_parser(
+        "import-copilot",
+        help="Import Copilot CLI session history"
+    )
+    import_copilot_parser.add_argument(
+        "--days", "-d",
+        type=int,
+        default=60,
+        help="Number of days to look back (default: 60)"
+    )
+    import_copilot_parser.add_argument(
+        "--limit", "-l",
+        type=int,
+        default=100,
+        help="Maximum number of sessions to import (default: 100)"
+    )
+
+    # import-opencode subcommand
+    import_opencode_parser = subparsers.add_parser(
+        "import-opencode",
+        help="Import OpenCode session history"
+    )
+    import_opencode_parser.add_argument(
+        "--days", "-d",
+        type=int,
+        default=60,
+        help="Number of days to look back (default: 60)"
+    )
+    import_opencode_parser.add_argument(
+        "--limit", "-l",
+        type=int,
+        default=100,
+        help="Maximum number of sessions to import (default: 100)"
+    )
+
+    # import-all subcommand
+    import_all_parser = subparsers.add_parser(
+        "import-all",
+        help="Import session history from all detected tools"
+    )
+    import_all_parser.add_argument(
+        "--days", "-d",
+        type=int,
+        default=60,
+        help="Number of days to look back (default: 60)"
+    )
+    import_all_parser.add_argument(
+        "--limit", "-l",
+        type=int,
+        default=100,
+        help="Maximum sessions to import per tool (default: 100)"
+    )
+    import_all_parser.add_argument(
+        "--force", "-f",
+        action="store_true",
+        help="Re-import even if already imported (overwrites existing traces)"
+    )
+
     # Main command arguments
     parser.add_argument(
         "--tools", "-t",
         nargs="+",
-        choices=["claude_code", "claude", "opencode", "aider"],
+        choices=["claude_code", "claude", "opencode", "gemini_cli", "gemini", "codex", "copilot_cli", "copilot", "aider"],
         help="Specific tools to set up"
     )
     parser.add_argument(
@@ -284,6 +473,36 @@ Examples:
     args = parser.parse_args()
     verbose = not args.quiet
 
+    # Handle scan and status subcommands
+    if args.command == "scan":
+        from bashgym.trace_capture.collectors.scanner import ClaudeDataScanner
+        scanner = ClaudeDataScanner()
+        results = scanner.scan_all()
+        if verbose:
+            print("[BashGym] Data Scan Results")
+            print("=" * 60)
+            print(f"{'Source':<15} {'Total':<10} {'Collected':<12} {'Available':<10}")
+            print("-" * 60)
+            for source, result in results.items():
+                print(f"{source:<15} {result.total_found:<10} {result.already_collected:<12} {result.new_available:<10}")
+            total = sum(r.new_available for r in results.values())
+            print("-" * 60)
+            print(f"{'TOTAL':<15} {'':<10} {'':<12} {total:<10}")
+        return 0
+
+    if args.command == "status":
+        from bashgym.trace_capture.collectors.scanner import ClaudeDataScanner
+        scanner = ClaudeDataScanner()
+        status = scanner.status()
+        if verbose:
+            print("[BashGym] Collection Status")
+            print("=" * 60)
+            print(f"{'Source':<15} {'Total':<10} {'Collected':<12} {'Available':<10}")
+            print("-" * 60)
+            for source, info in status.items():
+                print(f"{source:<15} {info['total']:<10} {info['collected']:<12} {info['available']:<10}")
+        return 0
+
     # Handle import subcommands
     if args.command == "import-today":
         results = import_today(
@@ -297,15 +516,35 @@ Examples:
         return 0
 
     if args.command == "import-recent":
-        results = import_recent(
-            days=args.days,
-            project_filter=args.project,
-            verbose=verbose
-        )
-        imported = sum(1 for r in results if not r.skipped and not r.error)
-        total_steps = sum(r.steps_imported for r in results)
-        if verbose:
-            print(f"\n[BashGym] Imported {imported} session(s), {total_steps} total steps")
+        source = getattr(args, "source", "sessions")
+        if source == "sessions":
+            # Original behavior -- import session transcripts
+            results = import_recent(
+                days=args.days,
+                project_filter=args.project,
+                verbose=verbose
+            )
+            imported = sum(1 for r in results if not r.skipped and not r.error)
+            total_steps = sum(r.steps_imported for r in results)
+            if verbose:
+                print(f"\n[BashGym] Imported {imported} session(s), {total_steps} total steps")
+        else:
+            # New behavior -- use ClaudeDataScanner for collector sources
+            from bashgym.trace_capture.collectors.scanner import ClaudeDataScanner
+            from datetime import datetime, timezone, timedelta
+            scanner = ClaudeDataScanner()
+            since = (datetime.now(timezone.utc) - timedelta(days=args.days)).isoformat()
+            sources = None if source == "all" else [source]
+            results = scanner.collect_all(
+                sources=sources,
+                since=since,
+                project_filter=getattr(args, "project", None),
+            )
+            if verbose:
+                for src, batch in results.items():
+                    print(f"  {src}: collected={batch.collected}, skipped={batch.skipped}, errors={len(batch.errors)}")
+                total = sum(r.collected for r in results.values())
+                print(f"\n[BashGym] Collected {total} record(s) from {len(results)} source(s)")
         return 0
 
     if args.command == "import-session":
@@ -315,6 +554,108 @@ Examples:
             verbose=verbose
         )
         return 0 if not result.error else 1
+
+    if args.command == "import-gemini":
+        results = import_gemini_sessions(
+            days=args.days,
+            limit=args.limit,
+            verbose=verbose,
+        )
+        imported = sum(1 for r in results if not r.get("skipped") and not r.get("error"))
+        total_steps = sum(r.get("steps_imported", 0) for r in results)
+        if verbose:
+            print(f"\n[BashGym] Gemini: Imported {imported} session(s), {total_steps} total steps")
+        return 0
+
+    if args.command == "import-copilot":
+        results = import_copilot_sessions(
+            days=args.days,
+            limit=args.limit,
+            verbose=verbose,
+        )
+        imported = sum(1 for r in results if not r.get("skipped") and not r.get("error"))
+        total_steps = sum(r.get("steps_imported", 0) for r in results)
+        if verbose:
+            print(f"\n[BashGym] Copilot: Imported {imported} session(s), {total_steps} total steps")
+        return 0
+
+    if args.command == "import-opencode":
+        results = import_opencode_sessions(
+            days=args.days,
+            limit=args.limit,
+            verbose=verbose,
+        )
+        imported = sum(1 for r in results if not r.get("skipped") and not r.get("error"))
+        total_steps = sum(r.get("steps_imported", 0) for r in results)
+        if verbose:
+            print(f"\n[BashGym] OpenCode: Imported {imported} session(s), {total_steps} total steps")
+        return 0
+
+    if args.command == "import-all":
+        if verbose:
+            print("[BashGym] Importing from all detected tools...")
+            print()
+
+        grand_total_imported = 0
+        grand_total_steps = 0
+
+        # Claude Code
+        if verbose:
+            print("--- Claude Code ---")
+        claude_results = import_recent(
+            days=args.days,
+            verbose=verbose,
+            force=getattr(args, 'force', False),
+        )
+        claude_imported = sum(1 for r in claude_results if not r.skipped and not r.error)
+        claude_steps = sum(r.steps_imported for r in claude_results)
+        grand_total_imported += claude_imported
+        grand_total_steps += claude_steps
+
+        # Gemini CLI
+        if verbose:
+            print("\n--- Gemini CLI ---")
+        gemini_results = import_gemini_sessions(
+            days=args.days,
+            limit=args.limit,
+            verbose=verbose,
+        )
+        gemini_imported = sum(1 for r in gemini_results if not r.get("skipped") and not r.get("error"))
+        gemini_steps = sum(r.get("steps_imported", 0) for r in gemini_results)
+        grand_total_imported += gemini_imported
+        grand_total_steps += gemini_steps
+
+        # Copilot CLI
+        if verbose:
+            print("\n--- Copilot CLI ---")
+        copilot_results = import_copilot_sessions(
+            days=args.days,
+            limit=args.limit,
+            verbose=verbose,
+        )
+        copilot_imported = sum(1 for r in copilot_results if not r.get("skipped") and not r.get("error"))
+        copilot_steps = sum(r.get("steps_imported", 0) for r in copilot_results)
+        grand_total_imported += copilot_imported
+        grand_total_steps += copilot_steps
+
+        # OpenCode
+        if verbose:
+            print("\n--- OpenCode ---")
+        opencode_results = import_opencode_sessions(
+            days=args.days,
+            limit=args.limit,
+            verbose=verbose,
+        )
+        opencode_imported = sum(1 for r in opencode_results if not r.get("skipped") and not r.get("error"))
+        opencode_steps = sum(r.get("steps_imported", 0) for r in opencode_results)
+        grand_total_imported += opencode_imported
+        grand_total_steps += opencode_steps
+
+        if verbose:
+            print(f"\n[BashGym] Total: Imported {grand_total_imported} session(s), {grand_total_steps} total steps")
+            print(f"  Claude: {claude_imported}, Gemini: {gemini_imported}, "
+                  f"Copilot: {copilot_imported}, OpenCode: {opencode_imported}")
+        return 0
 
     if args.status:
         check_setup_status(verbose=verbose)
@@ -331,6 +672,10 @@ Examples:
         for t in args.tools:
             if t == "claude":
                 tools.append("claude_code")
+            elif t == "gemini":
+                tools.append("gemini_cli")
+            elif t == "copilot":
+                tools.append("copilot_cli")
             else:
                 tools.append(t)
 

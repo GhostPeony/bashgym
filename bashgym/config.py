@@ -88,6 +88,12 @@ class APISettings:
     anthropic_api_key: str = field(default_factory=lambda: get_env("ANTHROPIC_API_KEY"))
     anthropic_model: str = field(default_factory=lambda: get_env("ANTHROPIC_MODEL", "claude-sonnet-4-20250514"))
 
+    # OpenAI
+    openai_api_key: str = field(default_factory=lambda: get_env("OPENAI_API_KEY"))
+
+    # Google (Gemini)
+    google_api_key: str = field(default_factory=lambda: get_env("GOOGLE_API_KEY"))
+
     # NVIDIA
     nvidia_api_key: str = field(default_factory=lambda: get_env("NVIDIA_API_KEY"))
     nemo_endpoint: str = field(default_factory=lambda: get_env("NEMO_ENDPOINT", "http://localhost:8000"))
@@ -203,6 +209,31 @@ class HuggingFaceSettings:
             # Token is set but no username/org - will need to fetch from API
             pass  # This is OK, client will detect it
         return errors
+
+
+@dataclass
+class OllamaSettings:
+    """Ollama local inference settings."""
+
+    enabled: bool = field(default_factory=lambda: get_env_bool("OLLAMA_ENABLED", True))
+    base_url: str = field(default_factory=lambda: get_env("OLLAMA_BASE_URL", "http://localhost:11434"))
+    default_model: str = field(default_factory=lambda: get_env("OLLAMA_MODEL", ""))
+    auto_register: bool = field(default_factory=lambda: get_env_bool("OLLAMA_AUTO_REGISTER", True))
+    health_interval: int = field(default_factory=lambda: get_env_int("OLLAMA_HEALTH_INTERVAL", 30))
+    request_timeout: int = field(default_factory=lambda: get_env_int("OLLAMA_TIMEOUT", 120))
+    prefer_code_models: bool = field(default_factory=lambda: get_env_bool("OLLAMA_PREFER_CODE", True))
+
+
+@dataclass
+class SSHSettings:
+    """Remote SSH training settings (DGX Spark)."""
+
+    enabled: bool = field(default_factory=lambda: get_env_bool("SSH_REMOTE_ENABLED", False))
+    host: str = field(default_factory=lambda: get_env("SSH_REMOTE_HOST", ""))
+    port: int = field(default_factory=lambda: get_env_int("SSH_REMOTE_PORT", 22))
+    username: str = field(default_factory=lambda: get_env("SSH_REMOTE_USER", ""))
+    key_path: str = field(default_factory=lambda: get_env("SSH_REMOTE_KEY_PATH", "~/.ssh/id_rsa"))
+    remote_work_dir: str = field(default_factory=lambda: get_env("SSH_REMOTE_WORK_DIR", "~/bashgym-training"))
 
 
 @dataclass
@@ -468,10 +499,28 @@ class Settings:
     # HuggingFace integration
     huggingface: HuggingFaceSettings = field(default_factory=HuggingFaceSettings)
 
+    # Ollama local inference
+    ollama: OllamaSettings = field(default_factory=OllamaSettings)
+
+    # SSH remote training
+    ssh: SSHSettings = field(default_factory=SSHSettings)
+
     # Feature flags
     orchestration_enabled: bool = field(
         default_factory=lambda: get_env_bool("ORCHESTRATION_ENABLED", False)
     )
+
+    # Web hosting
+    mode: str = field(default_factory=lambda: get_env("BASHGYM_MODE", "desktop"))  # "web" or "desktop"
+    host: str = field(default_factory=lambda: get_env("HOST", "127.0.0.1"))
+    cors_origins: List[str] = field(default_factory=lambda: get_env_list(
+        "CORS_ORIGINS", ["http://localhost:5173", "http://localhost:8003"]
+    ))
+
+    @property
+    def is_web_mode(self) -> bool:
+        """Check if running in web-hosted mode (hides experimental features)."""
+        return self.mode == "web"
 
     def validate(self) -> List[str]:
         """Validate all settings."""
@@ -575,6 +624,27 @@ HF_INFERENCE_PROVIDER=serverless
 HF_INFERENCE_ROUTING=cheapest
 HF_DEFAULT_HARDWARE=t4-small
 HF_JOB_TIMEOUT_MINUTES=60
+
+# =============================================
+# Ollama Local Inference (DGX Spark)
+# =============================================
+OLLAMA_ENABLED=true
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=
+OLLAMA_AUTO_REGISTER=true
+OLLAMA_HEALTH_INTERVAL=30
+OLLAMA_TIMEOUT=120
+OLLAMA_PREFER_CODE=true
+
+# =============================================
+# Remote Training via SSH (DGX Spark)
+# =============================================
+SSH_REMOTE_ENABLED=false
+SSH_REMOTE_HOST=
+SSH_REMOTE_USER=
+SSH_REMOTE_PORT=22
+SSH_REMOTE_KEY_PATH=~/.ssh/id_rsa
+SSH_REMOTE_WORK_DIR=~/bashgym-training
 
 # Docker/Sandbox Settings
 DOCKER_HOST=unix:///var/run/docker.sock

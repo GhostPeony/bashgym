@@ -786,6 +786,16 @@ async def handle_websocket(websocket: WebSocket) -> None:
     - Subscription management
     - Incoming messages
     """
+    # In web mode, verify session cookie before accepting connection
+    import os
+    if os.environ.get("BASHGYM_MODE", "").lower() == "web":
+        from bashgym.api.auth_routes import COOKIE_NAME
+        from bashgym.api.database import get_session_user
+        token = websocket.cookies.get(COOKIE_NAME)
+        if not token or not get_session_user(token):
+            await websocket.close(code=4401, reason="Authentication required")
+            return
+
     await manager.connect(websocket)
 
     try:

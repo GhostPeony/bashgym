@@ -45,11 +45,11 @@ class ThresholdMonitor:
             return False
         if not examples_file.exists():
             return False
-        count = sum(1 for _ in open(examples_file, "r"))
+        count = sum(1 for _ in open(examples_file, "r", encoding="utf-8"))
         last_triggered = self._watermarks.get("train_at", 0)
         return count >= last_triggered + self.config.train_examples_threshold
 
     def mark_train_triggered(self, examples_file: Path) -> None:
-        count = sum(1 for _ in open(examples_file, "r"))
+        count = sum(1 for _ in open(examples_file, "r", encoding="utf-8"))
         self._watermarks["train_at"] = count
         self._save_watermarks()

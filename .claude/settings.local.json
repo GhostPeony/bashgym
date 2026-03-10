@@ -53,7 +53,19 @@
       "WebFetch(domain:neon.com)",
       "WebFetch(domain:api-docs.neon.tech)",
       "WebFetch(domain:v0.dev)",
-      "WebFetch(domain:v0.app)"
+      "WebFetch(domain:v0.app)",
+      "Bash(sort:*)",
+      "WebFetch(domain:geminicli.com)",
+      "WebFetch(domain:developers.openai.com)",
+      "WebFetch(domain:www.rubrik.com)",
+      "WebFetch(domain:shawhin.medium.com)",
+      "WebFetch(domain:aclanthology.org)",
+      "WebFetch(domain:developers.googleblog.com)",
+      "Bash(xargs grep:*)",
+      "Bash(grep:*)",
+      "WebFetch(domain:scale.com)",
+      "WebFetch(domain:art.openpipe.ai)",
+      "WebFetch(domain:openpipe.ai)"
     ]
   }
 }

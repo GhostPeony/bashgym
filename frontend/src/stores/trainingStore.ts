@@ -34,6 +34,7 @@ export interface TrainingConfig {
   selectedRepos?: string[]  // Repos to include in training (empty = all)
   // Training backend
   useNemoGym?: boolean  // Use NVIDIA NeMo cloud training instead of local
+  useRemoteSSH?: boolean  // Execute training on remote DGX Spark via SSH
   // Knowledge Distillation specific
   teacherModel?: string
   temperature?: number
@@ -56,6 +57,7 @@ export interface TrainingRun {
   currentMetrics?: TrainingMetrics
   metricsHistory: TrainingMetrics[]
   error?: string
+  reconnected?: boolean  // True when run was reconnected after backend restart
 }
 
 export interface TrainingLog {
@@ -87,6 +89,7 @@ interface TrainingState {
   setConnected: (connected: boolean) => void
   addLog: (log: TrainingLog) => void
   clearLogs: () => void
+  hydrateFromReconnect: (runId: string, metrics: TrainingMetrics) => void
 
   getRun: (id: string) => TrainingRun | undefined
 }
@@ -131,6 +134,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
         max_seq_length: config.maxSeqLength,
         selected_repos: config.selectedRepos,
         use_nemo_gym: config.useNemoGym,
+        use_remote_ssh: config.useRemoteSSH,
         data_source: config.dataSource,
         security_dataset_type: config.securityDatasetType,
         security_dataset_path: config.securityDatasetPath,
@@ -250,6 +254,35 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
 
   setConnected: (connected: boolean) => {
     set({ isConnected: connected })
+  },
+
+  hydrateFromReconnect: (runId: string, metrics: TrainingMetrics) => {
+    const reconnectedRun: TrainingRun = {
+      id: runId,
+      config: {} as TrainingConfig,  // Will be populated from API
+      status: 'running',
+      startTime: Date.now(),
+      metricsHistory: [metrics],
+      currentMetrics: metrics,
+      reconnected: true,
+    }
+
+    set((state) => ({
+      currentRun: reconnectedRun,
+      runs: [...state.runs, reconnectedRun],
+      lossHistory: metrics.loss != null ? [{ step: metrics.step, loss: metrics.loss }] : [],
+    }))
+
+    // Fetch full run details from API to populate config
+    trainingApi.getStatus(runId).then((response) => {
+      if (response.ok && response.data) {
+        set((state) => ({
+          currentRun: state.currentRun?.id === runId
+            ? { ...state.currentRun, startTime: new Date(response.data!.started_at || Date.now()).getTime() }
+            : state.currentRun,
+        }))
+      }
+    }).catch(() => {})  // Best-effort hydration
   },
 
   getRun: (id: string) => {

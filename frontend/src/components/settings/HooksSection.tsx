@@ -19,6 +19,7 @@ import {
 import { hooksApi, ToolStatus } from '../../services/api'
 import { useTutorialComplete } from '../../hooks'
 import { clsx } from 'clsx'
+import { isWeb } from '../../utils/platform'
 
 // Tool configuration
 const TOOL_CONFIG: Record<string, {
@@ -35,12 +36,33 @@ const TOOL_CONFIG: Record<string, {
     installable: true,
     pluginPath: '~/.claude/hooks/'
   },
+  'Gemini CLI': {
+    icon: Terminal,
+    color: 'text-status-info',
+    description: "Google's AI coding agent",
+    installable: true,
+    pluginPath: '~/.gemini/settings.json'
+  },
   'OpenCode': {
     icon: Sparkles,
     color: 'text-status-info',
     description: 'Open-source AI coding agent',
     installable: true,
     pluginPath: '~/.config/opencode/plugins/'
+  },
+  'Codex': {
+    icon: Terminal,
+    color: 'text-status-success',
+    description: "OpenAI's terminal coding agent",
+    installable: true,
+    pluginPath: '~/.codex/ (import only)'
+  },
+  'Copilot CLI': {
+    icon: Terminal,
+    color: 'text-accent',
+    description: "GitHub's AI CLI assistant",
+    installable: true,
+    pluginPath: '~/.copilot/hooks/'
   },
   'Aider': {
     icon: Terminal,
@@ -99,7 +121,7 @@ function ToolCard({ tool, onInstall, isInstalling }: ToolCardProps) {
   }
   const Icon = config.icon
 
-  // Can install if it's a supported tool (Claude Code or OpenCode)
+  // Can install if the tool has an installable adapter
   const canInstall = config.installable
 
   return (
@@ -258,19 +280,29 @@ export function HooksSection() {
     // Default tools that should always be shown
     const defaultTools: ToolStatus[] = [
       { name: 'Claude Code', installed: false, hooks_installed: false, hooks_path: null, adapter_type: 'claude_code' },
-      { name: 'OpenCode', installed: false, hooks_installed: false, hooks_path: null, adapter_type: 'opencode' }
+      { name: 'Gemini CLI', installed: false, hooks_installed: false, hooks_path: null, adapter_type: 'gemini_cli' },
+      { name: 'OpenCode', installed: false, hooks_installed: false, hooks_path: null, adapter_type: 'opencode' },
+      { name: 'Codex', installed: false, hooks_installed: false, hooks_path: null, adapter_type: 'codex' },
+      { name: 'Copilot CLI', installed: false, hooks_installed: false, hooks_path: null, adapter_type: 'copilot_cli' },
     ]
 
     try {
       const result = await hooksApi.getStatus()
       if (result.ok && result.data) {
         if (result.data.tools && Array.isArray(result.data.tools)) {
-          // Merge API tools with defaults to ensure both Claude Code and OpenCode always appear
+          // Merge API tools with defaults to ensure all supported tools always appear
           const apiToolsMap = new Map(result.data.tools.map((t: ToolStatus) => [t.name, t]))
+          const defaultNames = new Set(defaultTools.map(dt => dt.name))
           const mergedTools = defaultTools.map(dt => {
             const apiTool = apiToolsMap.get(dt.name)
             return apiTool ? { ...dt, ...apiTool } : dt
           })
+          // Append any API tools not already in defaults
+          for (const [name, tool] of apiToolsMap) {
+            if (!defaultNames.has(name)) {
+              mergedTools.push(tool)
+            }
+          }
           setTools(mergedTools)
         } else if (result.data.all_installed !== undefined) {
           // Legacy format - Claude Code only
@@ -318,7 +350,14 @@ export function HooksSection() {
       const result = await hooksApi.install({ tools: [toolType] })
       if (result.ok && result.data) {
         if (result.data.success) {
-          const toolName = toolType === 'claude_code' ? 'Claude Code' : 'OpenCode'
+          const toolNameMap: Record<string, string> = {
+            claude_code: 'Claude Code',
+            gemini_cli: 'Gemini CLI',
+            opencode: 'OpenCode',
+            codex: 'Codex',
+            copilot_cli: 'Copilot CLI',
+          }
+          const toolName = toolNameMap[toolType] || toolType
           setInstallResult({ success: true, message: `${toolName} trace capture plugin installed!` })
           completeTutorialStep('install_hooks')
         } else {
@@ -438,6 +477,27 @@ export function HooksSection() {
           </button>
         </div>
       </div>
+
+      {/* Web mode: Remote connect instructions */}
+      {isWeb && (
+        <>
+          <div className="section-divider" />
+          <div className="space-y-3">
+            <h4 className="font-brand text-sm font-semibold text-text-primary">Connect Remote Traces</h4>
+            <p className="text-xs text-text-muted">
+              Send traces from your local machine to this web instance:
+            </p>
+            <div className="terminal-chrome">
+              <pre className="p-3 text-xs font-mono text-text-secondary">
+{`npx bashgym connect ${window.location.origin} --token YOUR_API_TOKEN`}
+              </pre>
+            </div>
+            <p className="text-xs text-text-muted">
+              Or upload trace files directly via the <strong>Traces</strong> page (drag-and-drop JSONL files).
+            </p>
+          </div>
+        </>
+      )}
 
       {/* How it works */}
       <div className="flex items-start gap-2 p-3 border-brutal border-accent rounded-brutal bg-background-card">

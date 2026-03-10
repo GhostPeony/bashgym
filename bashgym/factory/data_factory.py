@@ -25,6 +25,108 @@ if TYPE_CHECKING:
     from .schema_builder import DataDesignerClient, DataSchema
 
 
+# Tool schemas following the OpenAI function-calling format.
+# These are included in structured training examples so models learn
+# to emit proper tool_calls rather than markdown prose.
+TOOL_SCHEMAS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "Bash",
+            "description": "Execute a shell command",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string", "description": "The shell command to execute"}
+                },
+                "required": ["command"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "Read",
+            "description": "Read file contents",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "The file path to read"},
+                    "offset": {"type": "integer", "description": "Line offset to start reading from"},
+                    "limit": {"type": "integer", "description": "Maximum number of lines to read"}
+                },
+                "required": ["file_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "Write",
+            "description": "Write content to a file",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "The file path to write to"},
+                    "content": {"type": "string", "description": "The content to write"}
+                },
+                "required": ["file_path", "content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "Edit",
+            "description": "Make targeted edits to a file",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "The file path to edit"},
+                    "old_string": {"type": "string", "description": "The text to find and replace"},
+                    "new_string": {"type": "string", "description": "The replacement text"}
+                },
+                "required": ["file_path", "old_string", "new_string"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "Grep",
+            "description": "Search for patterns in files",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pattern": {"type": "string", "description": "The regex pattern to search for"},
+                    "path": {"type": "string", "description": "Directory or file to search in"},
+                    "glob": {"type": "string", "description": "Glob pattern to filter files"}
+                },
+                "required": ["pattern"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "Glob",
+            "description": "Find files matching a glob pattern",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pattern": {"type": "string", "description": "The glob pattern to match files against"},
+                    "path": {"type": "string", "description": "The directory to search in"}
+                },
+                "required": ["pattern"]
+            }
+        }
+    },
+]
+
+# Maximum characters to keep from tool output in training examples
+TOOL_OUTPUT_MAX_CHARS = 2000
+
+
 class SynthesisStrategy(Enum):
     """Data synthesis strategies."""
     DIRECT = "direct"           # Direct trace to training example
@@ -83,9 +185,21 @@ class TrainingExample:
     user_prompt: str
     assistant_response: str
     metadata: Dict[str, Any] = field(default_factory=dict)
+    messages: List[Dict[str, Any]] = field(default_factory=list)  # Structured multi-turn messages
+    tools: List[Dict[str, Any]] = field(default_factory=list)      # Tool schemas used
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary format."""
+        """Convert to dictionary format.
+
+        Prefers structured multi-turn messages (with tool_calls/tool roles)
+        when available. Falls back to legacy 3-message format otherwise.
+        """
+        if self.messages:
+            result = {"messages": self.messages, "metadata": self.metadata}
+            if self.tools:
+                result["tools"] = self.tools
+            return result
+        # Legacy fallback
         return {
             "id": self.example_id,
             "messages": [
@@ -129,6 +243,147 @@ class DPOExample:
             "rejected_response": self.rejected,
             "metadata": self.metadata
         }
+
+
+def _normalize_tool_name(raw: str) -> str:
+    """Normalize tool names from traces to canonical form.
+
+    Traces may record tool names in various forms (e.g. "bash", "execute",
+    "shell"). This maps them to the canonical names used in TOOL_SCHEMAS.
+    """
+    mapping = {
+        "bash": "Bash", "execute": "Bash", "shell": "Bash",
+        "read": "Read", "cat": "Read", "view": "Read",
+        "write": "Write", "create": "Write",
+        "edit": "Edit", "replace": "Edit", "patch": "Edit",
+        "grep": "Grep", "search": "Grep", "rg": "Grep",
+        "glob": "Glob", "find": "Glob", "ls": "Glob",
+    }
+    return mapping.get(raw.lower().strip(), raw.title())
+
+
+def _parse_command_to_arguments(tool_name: str, command: str) -> Dict[str, Any]:
+    """Parse a command string into structured tool arguments.
+
+    Each tool has its own argument schema. This does a best-effort parse
+    from the flat command string stored in traces.
+    """
+    if tool_name == "Bash":
+        return {"command": command}
+    elif tool_name == "Read":
+        return {"file_path": command.strip()}
+    elif tool_name == "Write":
+        parts = command.split("\n", 1)
+        return {"file_path": parts[0].strip(), "content": parts[1] if len(parts) > 1 else ""}
+    elif tool_name == "Edit":
+        return {"file_path": command.strip(), "old_string": "", "new_string": ""}
+    elif tool_name == "Grep":
+        return {"pattern": command.strip()}
+    elif tool_name == "Glob":
+        return {"pattern": command.strip()}
+    return {"input": command}
+
+
+def build_tool_call_messages(
+    steps: List[Dict[str, Any]],
+    system_prompt: str,
+    user_prompt: str,
+    include_cognitive: bool = False
+) -> List[Dict[str, Any]]:
+    """Convert trace steps into structured multi-turn messages with tool_calls.
+
+    Produces a message list compatible with OpenAI/NeMo/TRL tool-calling format:
+      system -> user -> (assistant with tool_calls -> tool response) * N
+
+    When include_cognitive=True, injects the agent's reasoning (thinking blocks
+    and assistant text) as assistant content before each tool_call. This teaches
+    models to reason-then-act rather than just act. Inspired by AgentTrace's
+    treatment of cognitive data as first-class training signal.
+
+    Args:
+        steps: List of step dicts with keys like tool_name, command, output, success.
+        system_prompt: The system prompt to use.
+        user_prompt: The user prompt / task description.
+        include_cognitive: If True, include thinking/reasoning content in assistant
+            messages before tool_calls.
+
+    Returns:
+        List of message dicts with proper roles and tool_call structures.
+    """
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt}
+    ]
+
+    for step in steps:
+        raw_tool = step.get("tool_name", step.get("tool", "unknown"))
+        tool_name = _normalize_tool_name(raw_tool)
+        command = step.get("command", step.get("input", ""))
+        output = step.get("output", step.get("result", ""))
+
+        # Truncate long output
+        if len(output) > TOOL_OUTPUT_MAX_CHARS:
+            output = output[:TOOL_OUTPUT_MAX_CHARS] + "\n... (truncated)"
+
+        arguments = _parse_command_to_arguments(tool_name, command)
+        call_id = f"call_{hashlib.md5(f'{tool_name}{command}'.encode()).hexdigest()[:8]}"
+
+        # Build assistant content from cognitive data when enabled
+        assistant_content = None
+        if include_cognitive:
+            meta = step.get("metadata", {})
+            cognitive = meta.get("cognitive", {})
+            parts = []
+            seen_texts = set()  # Avoid injecting duplicate content
+
+            # Extract thinking content (from structured cognitive or legacy metadata)
+            thinking = cognitive.get("thinking") or meta.get("thinking_content")
+            if thinking:
+                parts.append(f"<thinking>\n{thinking}\n</thinking>")
+                seen_texts.add(thinking.strip())
+
+            # Extract plan
+            plan = cognitive.get("plan")
+            if plan and plan.strip() not in seen_texts:
+                parts.append(f"<plan>\n{plan}\n</plan>")
+                seen_texts.add(plan.strip())
+
+            # Extract reflection
+            reflection = cognitive.get("reflection")
+            if reflection and reflection.strip() not in seen_texts:
+                parts.append(f"<reflection>\n{reflection}\n</reflection>")
+                seen_texts.add(reflection.strip())
+
+            # Extract decision rationale (remainder text)
+            reasoning = cognitive.get("decision_rationale") or meta.get("assistant_text")
+            if reasoning and reasoning.strip() not in seen_texts:
+                parts.append(reasoning)
+
+            if parts:
+                assistant_content = "\n\n".join(parts)
+
+        # Assistant message with tool_call
+        messages.append({
+            "role": "assistant",
+            "content": assistant_content,
+            "tool_calls": [{
+                "id": call_id,
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "arguments": json.dumps(arguments)
+                }
+            }]
+        })
+
+        # Tool response message
+        messages.append({
+            "role": "tool",
+            "tool_call_id": call_id,
+            "content": output if output else "(no output)"
+        })
+
+    return messages
 
 
 class DataFactory:
@@ -244,24 +499,47 @@ Always explain your reasoning before executing commands."""
         if not user_prompt:
             return None
 
-        # Build assistant response from trace
+        # Build assistant response from trace (legacy markdown format)
         assistant_response = self._trace_to_response(trace_steps)
+
+        # Build structured multi-turn messages with tool_calls
+        # Include cognitive data (thinking/reasoning) when available
+        structured_messages = build_tool_call_messages(
+            trace_steps, self.SYSTEM_PROMPT_TEMPLATE, user_prompt,
+            include_cognitive=True
+        )
+
+        # Build per-step success metadata
+        per_step_success = []
+        for step in trace_steps:
+            s = step.get("success", step.get("exit_code") == 0 if "exit_code" in step else None)
+            per_step_success.append(bool(s) if s is not None else True)
 
         # Generate example ID
         example_id = hashlib.sha256(
             f"{user_prompt}{assistant_response}".encode()
         ).hexdigest()[:16]
 
+        # Extract repo context
+        primary_repo = metadata.get("primary_repo", {})
+        if not isinstance(primary_repo, dict):
+            primary_repo = {}
+
         return TrainingExample(
             example_id=example_id,
             system_prompt=self.SYSTEM_PROMPT_TEMPLATE,
             user_prompt=user_prompt,
             assistant_response=assistant_response,
+            messages=structured_messages,
+            tools=TOOL_SCHEMAS,
             metadata={
                 "source_trace": str(trace_path),
                 "task_id": metadata.get("task_id"),
                 "success_rate": trace_data.get("summary", {}).get("success_rate", 0),
-                "total_steps": len(trace_steps)
+                "total_steps": len(trace_steps),
+                "per_step_success": per_step_success,
+                "repo_name": primary_repo.get("name"),
+                "repo_path": primary_repo.get("path"),
             }
         )
 

@@ -1,545 +1,382 @@
 # Bash Gym
 
-**A Self-Improving Agentic Development Gym**
+**Turn your AI coding sessions into fine-tuned models.**
 
 <img width="1563" height="908" alt="Bash Gym home screen" src="https://github.com/user-attachments/assets/472d7ada-d57b-4e79-8604-c27e4fc99348" />
 
-Bash Gym trains smaller language models (SLMs) from agent execution traces. It implements a continuous improvement flywheel where your daily Claude Code usage automatically generates training data for your own personalized coding assistant.
-
-```
-ACT (Arena) → VERIFY (Judge) → SYNTHESIZE (Factory) → TRAIN (Gym) → DEPLOY
-     ↑                                                                  |
-     +------------------------------------------------------------------+
-```
-
 ---
 
-## Why Bash Gym
-
-AI-assisted coding is expensive, latency-bound, and generic. Bash Gym solves all three:
-
-| Problem | How Bash Gym Solves It |
-|---------|----------------------|
-| **API costs at scale** ($50-200/mo per developer) | Route simple tasks to a local 1.5-7B model. 40-70% cost reduction at steady state. |
-| **Latency on simple tasks** (2-8s round-trip) | Local inference for routed tasks (~50ms). 10-50x faster on routine completions. |
-| **Generic behavior** (doesn't know your codebase) | Fine-tuned on *your* coding patterns, conventions, and repositories. |
-| **No learning from corrections** | Every correction and successful interaction becomes training data automatically. |
-| **Vendor lock-in** | You own all traces, models, and training data. Export to HuggingFace, Ollama, or GGUF. |
-
-The flywheel is self-reinforcing: more usage generates more traces, which produce better training data, which improve the student model, which handles more tasks, which generates even more high-quality traces.
-
----
-
-## Key Features
-
-| Feature | Description |
-|---------|-------------|
-| **Autonomous Trace Capture** | Hooks into Claude Code to automatically capture execution traces |
-| **6-Metric Quality Framework** | Comprehensive trace scoring for training data quality |
-| **Privacy by Design** | PII detection across 20+ types with differential privacy support |
-| **Multiple Training Strategies** | SFT, DPO, GRPO, RLVR, and distillation |
-| **Model Registry** | Full lifecycle tracking with lineage, metrics, and artifacts |
-| **Progressive Routing** | Confidence-based handoff from teacher to student models |
-| **Real-Time Dashboard** | Electron + React frontend with WebSocket updates |
-| **Multi-Cloud Deployment** | Export to HuggingFace, NVIDIA NIM, Ollama |
-| **Comprehensive Benchmarks** | HumanEval, MBPP, BigCodeBench, SWE-bench, and more |
-| **Safety Guardrails** | Injection detection, content moderation, dangerous command blocking |
-| **Peony Agent Chat** | In-app assistant with tool-use: import traces, search HuggingFace, trigger training, run shell commands |
-
----
-
-## Quick Start
-
-```bash
-# Clone and install
-git clone https://github.com/GhostPeony/bashgym.git
-cd bashgym
-pip install -r requirements.txt
-cd frontend && npm install && cd ..
-
-# Configure
-cp .env.example .env
-# Edit .env — add ANTHROPIC_API_KEY (the only required key)
-
-# Install trace capture hooks
-cp bashgym/hooks/*.py ~/.claude/hooks/
-
-# Start (pick your platform)
-
-# Windows (PowerShell)
-.\dev.ps1
-
-# macOS / Linux
-./dev.sh
-
-# Any platform (Docker)
-docker compose up
-```
-
-The backend starts on port 8003, the frontend on port 5173. Open `http://localhost:5173` or use `.\dev.ps1 -Electron` / `./dev.sh --electron` for the desktop app.
-
-For training capabilities, also install: `pip install -r requirements-training.txt`
+Your AI coding history is training data. Every session from Claude Code, Gemini CLI, OpenCode, Codex, or Copilot CLI — tool calls, file edits, bash commands, multi-step reasoning — is a structured trace of expert coding behavior. Bash Gym captures those traces, curates them into training examples, and fine-tunes models that learn from how you actually work. Train locally or via the cloud.
 
 ---
 
 ## How It Works
 
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│                       THE OUROBOROS FLYWHEEL                          │
-│                                                                        │
-│    ┌─────────┐    ┌─────────┐    ┌───────────┐    ┌─────────┐        │
-│    │   ACT   │───▶│ VERIFY  │───▶│ SYNTHESIZE│───▶│  TRAIN  │        │
-│    │ (Arena) │    │ (Judge) │    │ (Factory) │    │  (Gym)  │        │
-│    └─────────┘    └─────────┘    └───────────┘    └─────────┘        │
-│         ▲                                              │              │
-│         │                                              │              │
-│         └──────────────── DEPLOY ◀─────────────────────┘              │
-│                           (Router)                                     │
-└──────────────────────────────────────────────────────────────────────┘
+Use any AI coding tool (Claude Code, Gemini CLI, OpenCode, Codex, Copilot CLI)
+        ↓
+Adapters capture every session as structured traces
+        ↓
+Pipeline scores, classifies, and segments traces into training examples
+        ↓
+Fine-tune a model with LoRA (SFT, DPO, or GRPO)
+        ↓
+Export to LoRA adapter, merged weights, or GGUF → run via Ollama
 ```
 
-| Stage | Module | What Happens |
-|-------|--------|--------------|
-| **ACT** | Arena | You use Claude Code normally. Hooks capture every tool call, file edit, and bash command as structured traces. |
-| **VERIFY** | Judge | Traces are scored on 6 quality metrics. Tests validate solutions. Guardrails check safety. |
-| **SYNTHESIZE** | Factory | Gold traces are segmented into training examples. PII is scrubbed. Synthetic augmentation fills gaps. |
-| **TRAIN** | Gym | SFT, DPO, GRPO, RLVR, or distillation fine-tunes a small model (1.5-7B) using Unsloth acceleration. |
-| **DEPLOY** | Router | Confidence-based routing progressively shifts traffic from teacher (Claude) to student (your model). |
+| Stage | What Happens |
+|-------|--------------|
+| **Capture** | Adapters record every tool call, file edit, and command from your AI coding sessions (Claude Code, Gemini CLI, OpenCode, Codex, Copilot CLI) as structured JSON. Historical sessions can be bulk-imported. |
+| **Curate** | Traces are scored on 6 quality metrics. Good sessions become gold training data, bad ones become negative examples for DPO. PII is scrubbed. |
+| **Synthesize** | Gold traces are segmented into task-response pairs. Gaps are filled with synthetic augmentation via NVIDIA NeMo Data Designer or LLM-based generation. |
+| **Train** | SFT, DPO, or GRPO fine-tunes a model using Unsloth (2–5x faster, 50–80% less VRAM). Train locally or via the cloud. |
+| **Evaluate** | 11 benchmarks (HumanEval, MBPP, BigCodeBench, SWE-bench, GSM8K, and more) score the result. |
+| **Route** | Confidence-based routing shifts simple tasks from Claude to your trained model over time. |
+
+The pipeline can run automatically — file watchers monitor session directories across all configured tools and trigger import → classify → train when thresholds are met.
 
 ---
 
-## Glossary
+## Supported AI Coding Tools
 
-Key terms used throughout Bash Gym:
+| Tool | Live Capture | Historical Import | Hook Location |
+|------|-------------|-------------------|---------------|
+| **Claude Code** | Yes | Yes | `~/.claude/hooks/` |
+| **Gemini CLI** | Yes | Yes | `~/.gemini/settings.json` |
+| **OpenCode** | Yes | Yes | `~/.config/opencode/plugins/` |
+| **Codex** | Import only | Yes | `~/.codex/` |
+| **Copilot CLI** | Yes | Yes | `~/.copilot/hooks/` |
 
-| Term | Definition |
-|------|-----------|
-| **Trace** | A complete record of a Claude Code coding session — every tool call, file edit, bash command, and response. Stored as JSON. |
-| **Gold Trace** | A high-quality trace (>=90% success rate, >=0.75 quality score) used as positive training data. |
-| **Failed Trace** | A low-quality trace (<60% success) used as negative examples in DPO training — the model learns what *not* to do. |
-| **Training Example** | A single task-response pair extracted from a trace. One trace may contain multiple examples. Format: NeMo JSONL. |
-| **Session** | A complete coding interaction (one trace). Contains many tool calls. A session is segmented into training examples. |
-| **SFT** | Supervised Fine-Tuning. Trains the model to reproduce successful traces. The simplest and most common strategy. |
-| **DPO** | Direct Preference Optimization. Trains using pairs of good and bad responses, teaching the model to prefer correct behavior. |
-| **GRPO** | Group Relative Policy Optimization. RL-based training where the model generates solutions and learns from reward signals. |
-| **RLVR** | Reinforcement Learning with Verifiable Rewards. Like GRPO but the reward comes from running tests — solutions must actually pass. |
-| **Distillation** | Knowledge transfer from a large teacher model (Claude) to a smaller student model. |
-| **LoRA** | Low-Rank Adaptation. Fine-tunes only ~1% of model parameters, producing a small adapter (~50MB) instead of rewriting the full model. |
-| **QLoRA** | Quantized LoRA. Same as LoRA but loads the base model in 4-bit precision, dramatically reducing VRAM usage. |
-| **GGUF** | A model file format optimized for local inference. Used by Ollama and llama.cpp. Supports various quantization levels (q4, q8, etc.). |
-| **Teacher Model** | The large, expensive cloud model (Claude) that produces high-quality outputs. |
-| **Student Model** | The small, local model (1.5-7B parameters) that you fine-tune to replicate the teacher's behavior. |
-| **Router** | The system that decides whether to send a task to the teacher or student model, based on confidence, complexity, or other strategies. |
-| **Flywheel** | The self-reinforcing loop: Act -> Verify -> Synthesize -> Train -> Deploy -> Act. Each cycle improves the student. |
-| **Arena** | The execution layer. Where Claude Code runs tasks (either natively on your PC or in Docker sandboxes). |
-| **Judge** | The verification layer. Scores traces, runs tests, checks safety, evaluates quality. |
-| **Factory** | The data synthesis layer. Transforms raw traces into training-ready datasets with privacy guarantees. |
-| **Gym** | The training layer. Fine-tunes models using various strategies (SFT, DPO, GRPO, etc.). |
-| **Peony** | The AI assistant built into Bash Gym. Available in-app via the Agent panel with tool-use, and remotely via Discord/Telegram. |
-| **PII** | Personally Identifiable Information. Emails, phone numbers, API keys, etc. Automatically detected and scrubbed from training data. |
-| **Unsloth** | A training acceleration library. Makes fine-tuning 2-5x faster and uses 50-80% less memory. |
+Live capture hooks run silently alongside your coding tool and record sessions in real time. Historical import harvests existing session data already on disk — no hooks needed.
+
+The dashboard **Settings > Agents** tab provides one-click installation for all detected tools.
 
 ---
 
-## Getting Started Tutorial
+## Terminal Canvas
 
-For the complete 10-step walkthrough from install to first trained model, see **[docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)**.
+The workspace is an infinite canvas where terminals, browsers, and integration nodes live side by side and connect with edges to share context.
 
-The short version:
+<img width="1563" height="908" alt="Terminal canvas with connected nodes" src="https://github.com/user-attachments/assets/472d7ada-d57b-4e79-8604-c27e4fc99348" />
 
-1. Install and configure (add `ANTHROPIC_API_KEY` to `.env`)
-2. Install trace capture hooks (`cp bashgym/hooks/*.py ~/.claude/hooks/`)
-3. Use Claude Code normally for a week — traces accumulate automatically
-4. Review and curate traces in the Traces dashboard
-5. Generate training examples from gold traces
-6. Train your first model (SFT on Qwen 1.5B — takes 30-90 min with a GPU)
-7. Deploy to Ollama and enable progressive routing
+**Terminals** are real PTY sessions (xterm.js + WebGL rendering, 10k line scrollback). Agent status is detected live from output — idle, running, tool calling, waiting for input — with CWD extraction from shell prompts. Drag files from the built-in file browser or your OS directly into a terminal to insert the path.
 
-No local GPU? Use [HuggingFace Cloud Training](#huggingface-integration) instead.
+**Browsers** render live pages in a Chromium webview. Take full-page or element-level screenshots (crosshair picker to select a specific element) and route them to connected terminals — feed page screenshots directly to Claude as context.
 
----
+**Integration nodes** plug external services into the canvas:
 
-## Architecture
+| Node | What It Does |
+|------|--------------|
+| **Context** | Freeform notes, file contents, URLs, or snippets. Reload files and fetch URLs on demand. |
+| **Neon** | Connect to a Postgres database. Introspect schema, run queries, send results to terminals as markdown. |
+| **Vercel** | Monitor deployments, pull build logs, generate code with v0, push previews to browser nodes. |
 
-### Layer Architecture
+**Edges are context channels.** Connect any two nodes and content flows between them — schema from Neon, build logs from Vercel, screenshots from browsers, notes from context nodes — all prefilled into linked terminal inputs for review before sending.
 
-| Layer | Module | Purpose | Key Components |
-|-------|--------|---------|----------------|
-| **Arena** | `bashgym.arena` | Execution & instrumentation | Sandbox, Runner, Hooks |
-| **Judge** | `bashgym.judge` | Verification & evaluation | Verifier, Evaluator, Guardrails, Benchmarks |
-| **Factory** | `bashgym.factory` | Data synthesis | DataFactory, TraceProcessor, SafeSynthesizer, SchemaBuilder |
-| **Gym** | `bashgym.gym` | Training & routing | Trainer, Environment, Router |
-| **Models** | `bashgym.models` | Registry & lifecycle | Profile, Registry, Evaluator |
-| **Observability** | `bashgym.observability` | Profiling & tracing | AgentProfiler |
-| **Orchestrator** | `bashgym.orchestrator` | Multi-agent coordination | Agent, TaskDAG, Dispatcher, Synthesizer |
-| **Integrations** | `bashgym.integrations` | External services | NeMo, HuggingFace, Bashbros |
-| **API** | `bashgym.api` | REST & WebSocket | Routes, Schemas, WebSocket |
-| **Assistant** | `assistant/` | Chat interface | Peony (Go), Skills, Identity |
-
-### Project Structure
-
-```
-bashgym/
-├── bashgym/                           # Main Python package
-│   ├── arena/                         # Execution layer (runner, sandbox)
-│   ├── judge/                         # Verification layer (verifier, evaluator, guardrails, benchmarks)
-│   ├── factory/                       # Data synthesis (data_factory, trace_processor, safe_synthesizer, schema_builder)
-│   ├── gym/                           # Training layer (trainer, environment, router)
-│   ├── models/                        # Model registry (profile, registry, evaluator)
-│   ├── hooks/                         # Claude Code instrumentation (post_tool_use, pre_tool_use, stop)
-│   ├── observability/                 # Performance tracking (profiler)
-│   ├── orchestrator/                  # Multi-agent orchestration (agent, task_dag, dispatcher, worktree)
-│   ├── integrations/                  # External integrations (NeMo, HuggingFace, Bashbros)
-│   ├── trace_capture/                 # Trace import system (adapters, importers)
-│   ├── providers/                     # Model providers (Ollama)
-│   └── api/                           # REST API + WebSocket
-│
-├── assistant/                         # Peony chat assistant (Go + Docker)
-│   ├── picoclaw/                      # Go runtime (builds as "peony")
-│   └── workspace/                     # Identity, skills, memory
-│
-├── frontend/                          # Electron + React UI (72+ components)
-│   ├── src/components/                # React components
-│   ├── src/stores/                    # Zustand state management
-│   └── electron/                      # Electron main process
-│
-├── tests/                             # Test suite
-├── docs/                              # Documentation
-├── docker/                            # Docker configuration (sandbox)
-├── docker-compose.yml                 # Full stack: API + Peony assistant
-└── .env.example                       # Environment template
-```
+**Shift+drag** to box-select nodes and auto-connect them in a full mesh. Three view modes: grid (all panels visible), single (one at a time), or canvas (click to open floating popups). Viewport, node positions, and all settings persist across sessions.
 
 ---
 
-## Execution Modes
+## Setup
 
-Bash Gym supports two execution modes. **Native mode is the default** for daily use.
+### Prerequisites
 
-| Mode | Where Claude Runs | Use Case |
-|------|-------------------|----------|
-| **Native** | On your PC directly | Real projects, daily tasks, desktop control |
-| **Sandbox** | Docker containers | Autonomous batch runs for training data |
+| Requirement | Version | Notes |
+|-------------|---------|-------|
+| **Python** | 3.10+ | Backend API and training scripts |
+| **Node.js** | 18+ LTS | Frontend dashboard |
+| **Anthropic API key** | — | Get one at [console.anthropic.com](https://console.anthropic.com/) |
+| **CUDA GPU** | 8GB+ VRAM | Only needed for local training. Not required for trace capture or the dashboard. |
 
-### Native Mode (Default)
+On Windows, `npm install` requires Visual Studio Build Tools with "Desktop development with C++" (for `node-pty` native compilation).
 
-Claude Code runs directly on your system. The hooks silently capture successful executions to build your personalized training dataset. **No Docker required.**
+No GPU? Use [HuggingFace Cloud Training](#cloud-training) instead.
 
-### Sandbox Mode (Optional)
-
-For autonomous batch runs: agents run in isolated Docker containers, network-isolated and resource-limited.
-
----
-
-## Peony Assistant
-
-Peony is the AI assistant built into Bash Gym. She lives in the **Agent** panel and has live access to system context — active training runs, recent traces, GPU status, connected HuggingFace account — and can take real actions on your behalf.
-
-### In-App Tool Use
-
-| Tool | What it does |
-|------|-------------|
-| `import_traces` | Pulls new Claude Code sessions from `~/.claude/projects/` into the pipeline |
-| `classify_pending_traces` | Auto-classifies pending traces into gold/silver/bronze/failed tiers |
-| `start_training` | Kicks off an SFT, DPO, or GRPO training run |
-| `get_training_status` | Reports active jobs, current loss, and ETA |
-| `hf_search_models` | Searches HuggingFace Hub by task, sorted by downloads or likes |
-| `hf_test_inference` | Runs a prompt against any HF Inference API model |
-| `hf_evaluate_model` | Scores a model using accuracy, F1, BLEU, or ROUGE against local validation data |
-| `run_shell_command` | Runs a shell command — always shows a confirmation dialog first |
-
-Shell commands always pause for your approval before running. The command, reason, and output are shown inline in the chat.
-
-### Remote Access (Docker)
-
-Peony is also available as a Discord/Telegram bot via the Docker stack, built on a Go runtime.
+### 1. Install
 
 ```bash
-# Copy config templates and fill in your tokens
-cp assistant/.env.example assistant/.env
-cp assistant/config/config.example.json assistant/config/config.json
-# TELEGRAM_BOT_TOKEN, DISCORD_BOT_TOKEN, ANTHROPIC_API_KEY
+git clone https://github.com/GhostPeony/bashgym.git
+cd bashgym
 
-# Start the full stack
-docker compose up
+# Python dependencies
+pip install -r requirements.txt
 
-# Or run a one-shot query
-docker compose run --rm peony-agent -m "system status"
+# Training dependencies (optional — skip if no local GPU)
+pip install -r requirements-training.txt
+
+# Frontend dependencies
+cd frontend && npm install && cd ..
 ```
 
-Add your Discord/Telegram user ID to the whitelist in `assistant/config/config.json`.
+### 2. Configure
+
+```bash
+cp .env.example .env
+```
+
+Open `.env` and add your API key:
+
+```
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+That's the only required key. Everything else has working defaults. See [Configuration](#configuration) for optional keys.
+
+### 3. Install Trace Capture Hooks
+
+Auto-detect installed tools and configure adapters for all of them:
+
+```bash
+python -m bashgym.trace_capture.setup
+```
+
+Or use the dashboard **Settings > Agents** tab for one-click installation.
+
+To bulk-import historical sessions from all detected tools:
+
+```bash
+python -m bashgym.trace_capture.setup import-all --days 60
+```
+
+Verify: launch the app and check **Settings > Agents** — each configured tool should show "Installed."
+
+### 4. Start
+
+```bash
+# Windows (PowerShell)
+.\dev.ps1                  # Backend + frontend
+.\dev.ps1 -Electron        # Backend + desktop app
+
+# macOS / Linux
+./dev.sh                   # Backend + frontend
+./dev.sh --electron        # Backend + desktop app
+
+# Docker (any platform)
+docker compose up
+```
+
+Backend starts on `localhost:8003`, frontend on `localhost:5173`.
+
+### 5. Use Your AI Coding Tools
+
+That's it. Work on your projects with Claude Code, Gemini CLI, OpenCode, Copilot CLI, or any other configured tool like you always do. Every session is captured automatically. Check the **Traces** tab in the dashboard to watch them accumulate.
+
+Once you have 20–30 gold traces, you're ready to train. See **[docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)** for the full walkthrough from first trace to first trained model.
+
+---
+
+## Platform Overview
+
+### Workspace
+
+See [Terminal Canvas](#terminal-canvas) above for the full breakdown — real PTY terminals, live browsers with element-level screenshots, Neon/Vercel/Context integration nodes, edge-based context routing.
+
+### Data Factory
+
+Trace import, quality scoring, segmentation, and synthetic data generation.
+
+- **Trace import**: Reads from all configured tool session directories — manual, via file watcher, or bulk historical import
+- **Quality scoring**: 6 metrics classify traces as gold, pending, or failed
+- **Segmentation**: Splits multi-task sessions into individual training examples (time gaps, git commits, directory changes)
+- **Synthetic generation**: NVIDIA NeMo Data Designer v0.5.0 integration with 5 pipeline types (`coding_agent_sft`, `coding_agent_dpo`, `tool_use_sft`, `from_external`, `from_unstructured`) plus LLM-based augmentation via Anthropic or NVIDIA NIM
+- **PII scrubbing**: Automatic redaction before training
+
+### Training
+
+See [Training](#training) for details.
+
+- **Strategies**: SFT, DPO, GRPO, RLVR, Distillation
+- **Acceleration**: Unsloth with QLoRA (4-bit quantization) by default
+- **Compute**: Local GPU or HuggingFace cloud
+- **Output**: LoRA adapter, merged weights (16-bit), GGUF (for Ollama/llama.cpp/LM Studio)
+
+### Orchestrator
+
+Multi-agent task decomposition across LLM providers with git worktree isolation.
+
+| Provider | Default Model |
+|----------|---------------|
+| **Anthropic** | `claude-opus-4-6` |
+| **OpenAI** | `gpt-4o` |
+| **Gemini** | `gemini-2.5-pro` |
+| **Ollama** | `qwen2.5-coder:32b` |
+
+Four phases: PLAN → DISPATCH → MONITOR → SYNTHESIZE. Workers always use Claude Code CLI regardless of the planning provider.
+
+### Evaluation
+
+11 benchmarks for scoring trained models:
+
+| Benchmark | Focus |
+|-----------|-------|
+| HumanEval | Function-level code generation (164 problems) |
+| MBPP | Mostly basic programming problems (974 problems) |
+| BigCodeBench | Complex, multi-library coding tasks |
+| SWE-bench | Real GitHub issue resolution |
+| DS-1000 | Data science problems |
+| BFCL | Function calling accuracy |
+| GSM8K | Math reasoning |
+| ARC | Abstract reasoning |
+| HellaSwag | Commonsense inference |
+| ToxiGen | Toxicity detection |
+| BBQ | Bias measurement |
+
+Plus LLM-as-Judge scoring (correctness, helpfulness, safety) and RAG metrics (faithfulness, answer relevancy, context precision) via NeMo Evaluator integration.
+
+### Pipeline
+
+Automated loop: watch → import → classify → train.
+
+- **Watcher**: `watchdog`-based file observer on configured tool session directories with debouncing
+- **Quality gate**: Configurable thresholds for auto-classification
+- **Threshold monitor**: Triggers training when enough gold traces accumulate
+- Can run fully automated or step-by-step from the dashboard
+
+### Agent (Peony)
+
+Built-in assistant with tool use and system context. Available in-app and as a standalone bot.
+
+- **In-app**: Chat panel in the dashboard — can import traces, trigger training, search HuggingFace, run commands
+- **Multi-platform**: Go binary (`picoclaw`) with adapters for Discord, Telegram, Slack, WhatsApp, DingTalk, LINE, Feishu, QQ, and OneBot
+
+### Safety
+
+Guardrails pipeline with 5 check types applied to inputs and outputs:
+
+| Check | Description |
+|-------|-------------|
+| **Injection detection** | Regex patterns for prompt injection attempts |
+| **Content moderation** | Blocks harmful or inappropriate content |
+| **Topic control** | Constrains responses to allowed domains |
+| **Code safety** | Blocks dangerous commands (`rm -rf /`, fork bombs, `curl \| sh`, privilege escalation) |
+| **PII filter** | Opt-in detection and redaction of personal information |
+
+### Observability
+
+Profiler with span-level tracing for agent workflows. Tracks token usage, latency, and guardrail performance. Backend support for Phoenix, Langfuse, and OpenTelemetry.
+
+### Achievements
+
+Gamified progress tracking across trace collection, quality, training, and mastery categories. 5 rarity tiers (common through legendary) with point scoring.
+
+---
+
+## Training
+
+### Strategies
+
+| Strategy | What It Does | When To Use |
+|----------|--------------|-------------|
+| **SFT** | Trains the model to reproduce successful traces | Start here. Works with 20–30 gold traces. |
+| **DPO** | Learns from pairs of good and bad responses | When you have both gold and failed traces. |
+| **GRPO** | RL-based — model generates solutions, learns from verifiable rewards | Advanced. Needs more data. |
+| **RLVR** | Reinforcement learning with verifiable rewards | Alternative RL approach. |
+| **Distillation** | Transfers knowledge from a larger model to a smaller one | When you want a compact model that mimics a larger teacher. |
+
+### Base Models
+
+Tested and supported base models:
+
+| Model | Parameters | VRAM |
+|-------|------------|------|
+| `Qwen/Qwen2.5-Coder-1.5B-Instruct` | 1.5B | 8GB (default) |
+| `Qwen/Qwen2.5-Coder-7B-Instruct` | 7B | 16GB |
+| `meta-llama/Llama-3.2-3B-Instruct` | 3B | 12GB |
+
+All training uses QLoRA (4-bit quantization) by default.
+
+### Output Formats
+
+| Format | Location | Use Case |
+|--------|----------|----------|
+| **LoRA adapter** | `lora_adapters/` | ~50MB, composable, hot-swappable |
+| **Merged weights** | `merged/` | Full 16-bit model, ready for inference |
+| **GGUF** | `exported_gguf/` | Quantized (default `q4_k_m`), for Ollama / llama.cpp / LM Studio / GPT4All |
+
+### Cloud Training
+
+No local GPU? Use HuggingFace Cloud Training (Unsloth Jobs). Multiple GPU tiers available from T4 to H100. Requires HuggingFace Pro subscription.
 
 ---
 
 ## Configuration
 
-### Environment Variables
-
-Copy `.env.example` to `.env` and configure:
+Copy `.env.example` to `.env`:
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `ANTHROPIC_API_KEY` | Yes | - | Claude API key |
-| `NVIDIA_API_KEY` | No | - | NVIDIA NIM API key |
-| `HF_TOKEN` | No | - | HuggingFace token |
-| `BASE_MODEL` | No | `Qwen/Qwen2.5-Coder-1.5B-Instruct` | Base model for fine-tuning |
-| `AUGMENTATION_PROVIDER` | No | `anthropic` | Data augmentation provider |
+| `ANTHROPIC_API_KEY` | Yes | — | Claude API key |
+| `OPENAI_API_KEY` | No | — | OpenAI API key (for Codex trace capture and orchestrator routing) |
+| `GOOGLE_API_KEY` | No | — | Google/Gemini API key (for Gemini CLI trace capture and orchestrator routing) |
+| `BASE_MODEL` | No | `Qwen/Qwen2.5-Coder-1.5B-Instruct` | Fine-tuning base model |
+| `HF_TOKEN` | No | — | HuggingFace token (for cloud training and model push) |
+| `NVIDIA_API_KEY` | No | — | NVIDIA NIM API key (for synthetic data augmentation) |
 | `ROUTING_STRATEGY` | No | `confidence_based` | Model routing strategy |
-| `USE_NEMO_GYM` | No | `false` | Enable cloud training |
+| `AUGMENTATION_PROVIDER` | No | `anthropic` | Synthetic data provider: `anthropic` or `nim` |
 
-### Available Models
-
-#### Claude 4.5 Models (Teacher)
-| Model | API ID | Use Case |
-|-------|--------|----------|
-| **Claude Opus 4.5** | `claude-opus-4-5-20251101` | Best quality |
-| **Claude Sonnet 4.5** | `claude-sonnet-4-5-20250929` | Recommended |
-| **Claude Haiku 4.5** | `claude-haiku-4-5-20251001` | Fast |
-
-#### Fine-Tuning Base Models (Student)
-| Model | Parameters | Use Case |
-|-------|------------|----------|
-| `Qwen/Qwen2.5-Coder-1.5B-Instruct` | 1.5B | Default, fast training |
-| `Qwen/Qwen2.5-Coder-7B-Instruct` | 7B | Better quality |
-| `meta-llama/Llama-3.2-3B-Instruct` | 3B | Alternative |
+API keys can also be managed through the dashboard at **Settings > API Keys**, which provides secure storage via the Electron keychain.
 
 ---
 
-## Frontend Dashboard
+## Project Structure
 
-The Bash Gym frontend is an Electron + React application with real-time WebSocket updates.
-
-| Section | Purpose |
-|---------|---------|
-| **Home** | Central dashboard with flywheel visualization and system overview |
-| **Workspace** | Multi-terminal grid with canvas view, file browser, and live status detection |
-| **Training** | Monitor training progress, view loss curves, track system resources |
-| **Models** | Browse trained models, view lineage, compare performance |
-| **Factory** | Generate synthetic data, manage datasets |
-| **Traces** | Explore gold/silver/bronze/failed traces, view quality metrics |
-| **Agent** | Peony — conversational assistant with live system context and tool-use |
-| **Router** | Monitor teacher/student routing decisions and performance |
-| **Evaluator** | Run benchmarks, view evaluation results |
-| **Guardrails** | Monitor safety checks, PII redaction events |
-| **HuggingFace** | Cloud training, Spaces deployment, dataset management |
-
----
-
-## HuggingFace Integration
-
-Full HuggingFace ecosystem integration for cloud training via Unsloth Jobs, datasets, and deployment.
-
-| Feature | Description |
-|---------|-------------|
-| **Cloud Training (Unsloth Jobs)** | Submit training jobs via `hf jobs uv run` with PEP 723 inline deps |
-| **SFT / DPO / Distillation** | All three training strategies supported in cloud mode |
-| **Model Hub Search** | Search HuggingFace Hub by task, sorted by downloads or likes |
-| **Model Evaluation** | Score any HF model against local validation data using accuracy, F1, BLEU, or ROUGE |
-| **Dataset Management** | Upload and manage training datasets on HF Hub |
-| **Inference API** | Use HuggingFace Inference Providers for generation and embeddings |
-| **Spaces Deployment** | Deploy interactive Gradio demos |
-
-### Hardware Tiers
-
-| Tier | GPU | VRAM | Cost/hr | Best For |
-|------|-----|------|---------|----------|
-| `t4-small` | T4 | 16GB | $0.60 | Small models (<3B) |
-| `a10g-small` | A10G | 24GB | $1.05 | Medium models (3-7B) |
-| `a10g-large` | A10G | 24GB | $1.80 | Longer training runs |
-| `a100-large` | A100 | 80GB | $4.50 | Large models (7B+) |
-| `h100` | H100 | 80GB | $10.00 | Maximum performance |
-
-All GPU tiers require a HuggingFace Pro subscription.
-
----
-
-## API Reference
-
-The API server provides 90+ REST endpoints and WebSocket real-time updates.
-
-```bash
-# Development (hot reload)
-python run_backend.py
-
-# Interactive API docs
-open http://localhost:8003/docs
 ```
-
-For the full endpoint reference, see **[docs/API.md](docs/API.md)**.
-
----
-
-## Docker
-
-### Full Stack (API + Peony Assistant)
-
-```bash
-# Configure secrets
-cp assistant/.env.example assistant/.env
-cp assistant/config/config.example.json assistant/config/config.json
-# Edit both files with your tokens and API keys
-
-# Build and start
-docker compose up --build -d
-
-# View logs
-docker compose logs -f
-
-# One-shot query via Peony
-docker compose run --rm peony-agent -m "system status"
-```
-
-| Service | Image | Purpose |
-|---------|-------|---------|
-| `bashgym-api` | `Dockerfile.api` | FastAPI server on port 8003 with healthcheck |
-| `peony-gateway` | `assistant/Dockerfile` | Long-running Discord/Telegram bot |
-| `peony-agent` | `assistant/Dockerfile` | One-shot CLI queries |
-
-### Sandbox Mode (Arena)
-
-```bash
-cd docker && docker compose build && docker compose up -d
+bashgym/
+├── bashgym/                  # Python package
+│   ├── arena/                # Execution (runner, sandbox)
+│   ├── judge/                # Verification (evaluator, guardrails, benchmarks)
+│   ├── factory/              # Data synthesis (trace processor, example generator, NeMo Data Designer)
+│   ├── gym/                  # Training (trainer, environment, router)
+│   ├── hooks/                # Legacy Claude Code hooks (kept for compatibility)
+│   ├── trace_capture/        # Multi-agent trace capture
+│   │   ├── adapters/         # Tool-specific hooks (Claude Code, Gemini, OpenCode, Codex, Copilot)
+│   │   ├── importers/        # Historical session importers per tool
+│   │   ├── detector.py       # Auto-detection of installed AI coding tools
+│   │   └── setup.py          # CLI for hook installation and bulk import
+│   ├── models/               # Model registry and lifecycle
+│   ├── orchestrator/         # Multi-agent task decomposition (agent, DAG, dispatcher, worktree)
+│   ├── pipeline/             # Automated watcher, quality gate, orchestrator
+│   ├── achievements/         # Progress tracking and gamification
+│   ├── observability/        # Profiler, span tracing, backend integrations
+│   ├── api/                  # REST API + WebSocket
+│   └── integrations/         # HuggingFace, NeMo, Ollama
+│
+├── frontend/                 # Electron + React dashboard
+│   ├── src/components/       # 72+ React components
+│   ├── src/stores/           # Zustand state management
+│   └── electron/             # Main process + secure storage
+│
+├── assistant/                # Peony chat assistant (Go + Docker)
+│   └── picoclaw/             # Multi-platform bot (Discord, Telegram, Slack, etc.)
+│
+├── tests/                    # Test suite
+└── docker-compose.yml        # Full stack deployment
 ```
 
 ---
 
-## Testing
+## FAQ
 
-```bash
-# Run all tests
-pytest tests/ -v
+**Do I need a GPU?**
+No. Trace capture, curation, and the dashboard work without one. Training requires a CUDA GPU (8GB+ VRAM) or you can use HuggingFace Cloud Training.
 
-# With coverage
-pytest tests/ --cov=bashgym --cov-report=html
+**How many traces before I can train?**
+20–30 gold traces for a basic SFT run. 100+ traces produce noticeably better results. More repos and task diversity = more generalizable model.
 
-# Run specific module tests
-pytest tests/test_benchmarks.py -v
-pytest tests/test_data_factory.py -v
-```
+**Does this send my code anywhere?**
+Only to the LLM providers you already use (Anthropic, etc.). Traces, training data, and models stay local. HuggingFace uploads only happen when you explicitly push.
 
----
+**What's a trace vs a training example?**
+A trace is a complete coding session from any supported tool (many tool calls, potentially 30+ minutes). A training example is a single task-response pair extracted from that trace. One trace typically produces 1–5 examples.
 
-## Security
+**Can I use other base models?**
+Yes. Set `BASE_MODEL` in `.env` to a different model ID. Larger models need more VRAM (or use cloud training).
 
-| Feature | Description |
-|---------|-------------|
-| **Sandboxing** | All agent execution in network-isolated Docker containers |
-| **Resource Limits** | Memory and CPU constraints on sandboxes |
-| **Command Blocking** | Blocks rm -rf, fork bombs, disk operations |
-| **API Key Protection** | Sensitive values hidden in logs and responses |
-| **PII Detection** | Automatic detection and redaction across 20+ types |
-| **Injection Detection** | Prompt injection attack prevention |
-| **Content Moderation** | Filtering of harmful content |
-
----
-
-## FAQ & Troubleshooting
-
-### General
-
-**Q: Do I need a GPU to use Bash Gym?**
-A: No. Trace capture, curation, and the dashboard work without a GPU. Training requires a CUDA-capable GPU (8GB+ VRAM for 1.5B models, 16GB+ for 7B). Alternatively, use **HuggingFace Cloud Training** (Unsloth Jobs) to train on remote GPUs — supports T4, A10G, A100, and H100 hardware tiers starting at $0.60/hr with a HuggingFace Pro subscription.
-
-**Q: How many traces do I need before training?**
-A: You can start with as few as 20-30 gold traces for a basic SFT run. 100+ traces produce noticeably better results. The more diverse your traces (different repos, task types), the more generalizable the student model.
-
-**Q: Does Bash Gym send my code to any external service?**
-A: Only to the LLM providers you configure (Anthropic, OpenAI, etc.) — the same calls Claude Code already makes. Traces, training data, and models are stored locally. HuggingFace uploads only happen when you explicitly push.
-
-**Q: What's the difference between a trace and a training example?**
-A: A **trace** is a complete coding session (potentially many tool calls over 30+ minutes). A **training example** is a single task-response pair extracted from that trace. One trace typically produces 1-5 training examples. See the [Glossary](#glossary) for more terms.
-
-**Q: Can I use base models other than Qwen?**
-A: Yes. Set `BASE_MODEL` in your `.env` to any HuggingFace model ID. Qwen2.5-Coder and Llama 3.2 are tested. Any causal LM compatible with HuggingFace Transformers should work with LoRA/QLoRA training.
-
-### Installation & Startup
-
-**Q: Port 8003 is already in use.**
-A: Kill existing processes:
-```bash
-# Windows
-.\kill_api.ps1
-
-# macOS/Linux
-lsof -i :8003 | grep LISTEN
-kill -9 <PID>
-```
-
-**Q: The frontend can't connect to the API.**
-A: Check that the backend is running (`python run_backend.py`). The frontend expects the API at `http://localhost:8003`. If using a different port, update `frontend/.env.local`:
-```
-VITE_API_URL=http://localhost:YOUR_PORT/api
-VITE_WS_URL=ws://localhost:YOUR_PORT/ws
-```
-
-**Q: Hooks show "Not installed" in the sidebar.**
-A: Copy hooks to the correct directory:
-```bash
-cp bashgym/hooks/*.py ~/.claude/hooks/
-```
-Or use **Settings > Trace Capture** to install hooks from the UI.
-
-**Q: `npm install` fails in the frontend directory.**
-A: The frontend uses `node-pty` which requires native compilation. Ensure you have:
-- Node.js 18+ (LTS recommended)
-- Python 3.10+ (for node-gyp)
-- On Windows: Visual Studio Build Tools with "Desktop development with C++"
-
-### Training
-
-**Q: Training fails with "CUDA out of memory".**
-A: Reduce memory usage:
-1. Use QLoRA (4-bit quantization) — enabled by default
-2. Reduce batch size to 1-2
-3. Reduce sequence length (default 2048, try 1024)
-4. Use the smaller 1.5B model instead of 7B
-5. Close other GPU-consuming applications
-
-**Q: Training seems stuck or very slow.**
-A: Check GPU utilization with `nvidia-smi -l 1`. If GPU utilization is 0%, the training process may have crashed silently. Check training logs in the Training dashboard or at `~/.bashgym/models/{run_id}/`.
-
-**Q: Where are my trained models saved?**
-A: Models are saved to `~/.bashgym/models/{run_id}/`:
-- `checkpoint-*/` — intermediate checkpoints
-- `final/` — final LoRA adapter
-- `merged/` — full merged weights (if merge was requested)
-- `model-q4_k_m.gguf` — quantized GGUF (if auto-export enabled)
-
-### Frontend & Electron
-
-**Q: The Electron app refreshes and kills my terminals.**
-A: Ctrl+R is blocked by default. Use **Settings > Reload App** instead.
-
-**Q: Terminal shows no activity / Claude commands aren't detected.**
-A: Restart the Electron app (Settings > Reload App). Terminal status detection parses live output — if the app was updated while running, the detection patterns may be stale.
-
-### Peony Assistant
-
-**Q: How do I set up the Discord bot?**
-A:
-1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
-2. Create a new application and add a Bot
-3. Enable **MESSAGE_CONTENT** intent under Bot settings
-4. Copy the bot token to `assistant/.env` (`DISCORD_BOT_TOKEN=...`)
-5. Add your Discord user ID to the whitelist in `assistant/config/config.json`
-6. Run `docker compose up`
-
-**Q: How do I set up the Telegram bot?**
-A:
-1. Message [@BotFather](https://t.me/BotFather) on Telegram
-2. Create a new bot and copy the token to `assistant/.env` (`TELEGRAM_BOT_TOKEN=...`)
-3. Add your Telegram user ID to the whitelist in `assistant/config/config.json`
-4. Run `docker compose up`
-
----
-
-## Contributing
-
-See **[CONTRIBUTING.md](CONTRIBUTING.md)** for development setup, code style, and PR process.
+**What about synthetic data?**
+The data factory supports NVIDIA NeMo Data Designer for structured synthetic generation, plus LLM-based augmentation using Anthropic or NVIDIA NIM models. Useful for filling gaps in your trace coverage.
 
 ---
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.
+MIT — see [LICENSE](LICENSE).

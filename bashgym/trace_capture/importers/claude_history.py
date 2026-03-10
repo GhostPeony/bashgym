@@ -28,7 +28,9 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any, Set, Tuple
 from dataclasses import dataclass, asdict, field
 
-from ..core import TraceStep, TraceSession, TraceCapture, estimate_cost_usd
+import re as _re
+
+from ..core import TraceStep, TraceSession, TraceCapture, CognitiveData, estimate_cost_usd
 
 # Import instrumentation (optional - graceful degradation if not available)
 try:
@@ -175,6 +177,74 @@ class ClaudeSessionImporter:
             return "\n".join(texts) if texts else None
         return None
 
+    # Patterns indicating agent reflection / self-correction
+    _REFLECTION_PATTERNS = [
+        _re.compile(r"(?:I notice|I see|that didn't work|that failed|let me reconsider|the error|looking at the error|the issue is|the problem is|instead,? I)", _re.IGNORECASE),
+    ]
+
+    # Patterns indicating an explicit plan
+    _PLAN_PATTERNS = [
+        _re.compile(r"(?:(?:my |the )?plan is|here's (?:my |the )?plan|I'll|let me|first,? I|step \d)", _re.IGNORECASE),
+    ]
+
+    @staticmethod
+    def _extract_cognitive(
+        thinking_parts: List[str],
+        text_parts: List[str],
+        thinking_max_chars: int = 10000,
+        text_max_chars: int = 5000,
+    ) -> CognitiveData:
+        """Extract structured cognitive data from thinking and text blocks.
+
+        Separates raw thinking, plans, reflections, and decision rationale
+        into distinct fields for downstream use in training example generation
+        and quality scoring.
+
+        Extracts matching *paragraphs* rather than the entire text block, so
+        plan, reflection, and decision_rationale are semantically distinct.
+        """
+        thinking_raw = "\n".join(thinking_parts)[:thinking_max_chars] if thinking_parts else None
+        text_raw = "\n".join(text_parts)[:text_max_chars] if text_parts else None
+
+        plan_paragraphs: List[str] = []
+        reflection_paragraphs: List[str] = []
+        remainder_paragraphs: List[str] = []
+
+        if text_raw:
+            paragraphs = [p.strip() for p in text_raw.split("\n\n") if p.strip()]
+
+            for para in paragraphs:
+                is_plan = any(pat.search(para) for pat in ClaudeSessionImporter._PLAN_PATTERNS)
+                is_reflection = any(pat.search(para) for pat in ClaudeSessionImporter._REFLECTION_PATTERNS)
+
+                if is_plan:
+                    plan_paragraphs.append(para)
+                if is_reflection:
+                    reflection_paragraphs.append(para)
+                if not is_plan and not is_reflection:
+                    remainder_paragraphs.append(para)
+
+        # Also check thinking blocks for structured patterns
+        if thinking_raw:
+            thinking_paragraphs = [p.strip() for p in thinking_raw.split("\n\n") if p.strip()]
+            for para in thinking_paragraphs:
+                if not plan_paragraphs and any(pat.search(para) for pat in ClaudeSessionImporter._PLAN_PATTERNS):
+                    plan_paragraphs.append(para)
+                if not reflection_paragraphs and any(pat.search(para) for pat in ClaudeSessionImporter._REFLECTION_PATTERNS):
+                    reflection_paragraphs.append(para)
+
+        plan = "\n\n".join(plan_paragraphs) if plan_paragraphs else None
+        reflection = "\n\n".join(reflection_paragraphs) if reflection_paragraphs else None
+        # Decision rationale = text that didn't match plan/reflection patterns
+        decision_rationale = "\n\n".join(remainder_paragraphs) if remainder_paragraphs else text_raw
+
+        return CognitiveData(
+            thinking=thinking_raw,
+            plan=plan,
+            reflection=reflection,
+            decision_rationale=decision_rationale,
+        )
+
     @staticmethod
     def _apply_tool_result(steps: list, tool_use_id: str, result_content, is_error: bool) -> None:
         """Match a tool_result to its corresponding step and update output/success."""
@@ -197,8 +267,8 @@ class ClaudeSessionImporter:
     def parse_session_file(
         self,
         session_file: Path,
-        thinking_max_chars: int = 2000,
-        text_max_chars: int = 2000,
+        thinking_max_chars: int = 10000,
+        text_max_chars: int = 5000,
     ) -> Tuple[List[TraceStep], Dict[str, Any]]:
         """
         Parse a Claude Code session JSONL file and extract all available data.
@@ -242,6 +312,12 @@ class ClaudeSessionImporter:
         }
 
         try:
+            # Thinking/text blocks often arrive in separate assistant events
+            # from the tool_use that follows. Accumulate across events until
+            # a tool_use consumes them.
+            pending_thinking: List[str] = []
+            pending_text: List[str] = []
+
             with open(session_file, 'r', encoding='utf-8') as f:
                 for line in f:
                     line = line.strip()
@@ -289,9 +365,6 @@ class ClaudeSessionImporter:
                         if not isinstance(content, list):
                             continue
 
-                        pending_thinking: List[str] = []
-                        pending_text: List[str] = []
-
                         for item in content:
                             block_type = item.get("type") if isinstance(item, dict) else None
 
@@ -315,6 +388,13 @@ class ClaudeSessionImporter:
                                 tools_used.add(tool_name)
 
                                 if tool_name not in self.EXCLUDED_TOOLS:
+                                    # Extract structured cognitive data
+                                    cognitive = self._extract_cognitive(
+                                        pending_thinking, pending_text,
+                                        thinking_max_chars, text_max_chars,
+                                    )
+                                    cognitive_dict = cognitive.to_dict() if not cognitive.is_empty() else None
+
                                     step = TraceStep(
                                         step_id=f"{session_id}_{tool_id}",
                                         timestamp=timestamp,
@@ -326,6 +406,7 @@ class ClaudeSessionImporter:
                                         cwd=cwd or "",
                                         repo={"path": cwd, "name": Path(cwd).name if cwd else "unknown"},
                                         source_tool="claude_code",
+                                        cognitive=cognitive_dict,
                                         metadata={
                                             "tool_use_id": tool_id,
                                             "session_id": session_id,
@@ -335,6 +416,7 @@ class ClaudeSessionImporter:
                                             "output_tokens": usage.get("output_tokens", 0),
                                             "thinking_content": "\n".join(pending_thinking) if pending_thinking else None,
                                             "assistant_text": "\n".join(pending_text) if pending_text else None,
+                                            "cognitive": cognitive_dict,
                                             "stop_reason": msg.get("stop_reason"),
                                         }
                                     )
@@ -768,7 +850,8 @@ def import_today(
 def import_recent(
     days: int = 60,
     project_filter: Optional[str] = None,
-    verbose: bool = True
+    verbose: bool = True,
+    force: bool = False
 ) -> List[ImportResult]:
     """
     Import recent Claude Code sessions.
@@ -777,6 +860,7 @@ def import_recent(
         days: Number of days to look back (default 60)
         project_filter: Only import from projects matching this substring
         verbose: Print progress messages
+        force: Import even if already imported (overwrites existing traces)
 
     Returns:
         List of ImportResult objects
@@ -796,7 +880,7 @@ def import_recent(
 
     results = []
     for session_file, mtime in session_files:
-        result = importer.import_session(session_file)
+        result = importer.import_session(session_file, force=force)
         results.append(result)
 
         if verbose:

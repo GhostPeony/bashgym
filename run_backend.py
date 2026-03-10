@@ -13,12 +13,19 @@ import os
 
 def main():
     port = "8003"
+    host = os.environ.get("HOST", "127.0.0.1")
 
     # Check for --port argument
     if "--port" in sys.argv:
         idx = sys.argv.index("--port")
         if idx + 1 < len(sys.argv):
             port = sys.argv[idx + 1]
+
+    # Check for --host argument
+    if "--host" in sys.argv:
+        idx = sys.argv.index("--host")
+        if idx + 1 < len(sys.argv):
+            host = sys.argv[idx + 1]
 
     # Set environment
     os.environ.setdefault("PYTHONPATH", os.getcwd())
@@ -27,15 +34,16 @@ def main():
         sys.executable, "-m", "uvicorn",
         "bashgym.api.routes:create_app",
         "--factory",
-        "--host", "127.0.0.1",
+        "--host", host,
         "--port", port,
         "--reload",  # Hot reload enabled!
         "--reload-dir", "bashgym",  # Watch bashgym directory
     ]
 
-    print(f"Starting Bash Gym API on port {port} with hot reload...")
-    print(f"API URL: http://localhost:{port}/api")
-    print(f"Docs: http://localhost:{port}/docs")
+    mode = os.environ.get("BASHGYM_MODE", "desktop")
+    print(f"Starting Bash Gym API on {host}:{port} (mode={mode}) with hot reload...")
+    print(f"API URL: http://{host}:{port}/api")
+    print(f"Docs: http://{host}:{port}/api/docs")
     print("Press Ctrl+C to stop\n")
 
     try:

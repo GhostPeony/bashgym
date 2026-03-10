@@ -519,7 +519,22 @@ class SystemInfoService:
             "warning": None,
         }
 
-        if max_vram >= 24:
+        if max_vram >= 80:
+            recommendations["recommended_models"] = [
+                "Qwen/Qwen2.5-Coder-32B-Instruct",
+                "Qwen/Qwen2.5-Coder-14B-Instruct",
+                "meta-llama/Llama-3.1-8B-Instruct",
+            ]
+            recommendations["recommended_batch_size"] = 8
+            recommendations["recommended_quantization"] = "4bit"
+        elif max_vram >= 48:
+            recommendations["recommended_models"] = [
+                "Qwen/Qwen2.5-Coder-14B-Instruct",
+                "Qwen/Qwen2.5-Coder-7B-Instruct",
+            ]
+            recommendations["recommended_batch_size"] = 4
+            recommendations["recommended_quantization"] = "4bit"
+        elif max_vram >= 24:
             recommendations["recommended_models"] = [
                 "Qwen/Qwen2.5-Coder-7B-Instruct",
                 "Qwen/Qwen2.5-Coder-3B-Instruct",

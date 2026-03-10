@@ -31,6 +31,15 @@ except ImportError:
     HAS_INSTRUMENTATION = False
     Instrumentation = None
 
+# Provider registry (optional)
+try:
+    from bashgym.providers.registry import ProviderRegistry
+    from bashgym.providers.base import ProviderResponse as _ProviderResponse
+    HAS_REGISTRY = True
+except ImportError:
+    HAS_REGISTRY = False
+    ProviderRegistry = None
+
 if TYPE_CHECKING:
     from bashgym.core import Instrumentation
 
@@ -153,7 +162,8 @@ class ModelRouter:
     def __init__(
         self,
         config: Optional[RouterConfig] = None,
-        instrumentation: Optional["Instrumentation"] = None
+        instrumentation: Optional["Instrumentation"] = None,
+        registry=None
     ):
         """Initialize the model router."""
         self.config = config or RouterConfig()
@@ -175,6 +185,9 @@ class ModelRouter:
 
         # Load default models from environment
         self._load_default_models()
+
+        # Provider registry for abstracted inference
+        self.registry = registry
 
     @property
     def instrumentation(self) -> Optional["Instrumentation"]:
@@ -461,6 +474,35 @@ class ModelRouter:
             start_time = datetime.now()
             fell_back = False
             blocked = False
+
+            # Use provider registry if available
+            if self.registry:
+                provider = self.registry.get_provider_for_model(model.name)
+                if provider:
+                    messages = [{"role": "user", "content": prompt}]
+                    try:
+                        provider_resp = await provider.generate(
+                            messages=messages,
+                            model=model.name,
+                            system_prompt=system_prompt,
+                            max_tokens=kwargs.get("max_tokens", model.max_tokens),
+                            temperature=kwargs.get("temperature", model.temperature),
+                        )
+                        response = ModelResponse(
+                            content=provider_resp.content,
+                            model_name=model.name,
+                            model_type=model.model_type,
+                            latency_ms=provider_resp.latency_ms,
+                            tokens_used=provider_resp.tokens_used,
+                            success=provider_resp.success,
+                            error_message=provider_resp.error,
+                            source=provider_resp.provider_type,
+                        )
+                        self._update_model_metrics(model.name, response.latency_ms, response.success)
+                        return response
+                    except Exception as e:
+                        # Fall through to legacy path on registry failure
+                        pass
 
             try:
                 if model.model_type == ModelType.TEACHER:

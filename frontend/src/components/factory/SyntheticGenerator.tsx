@@ -100,7 +100,7 @@ export function SyntheticGenerator({ onStateChange }: SyntheticGeneratorProps) {
           setJobs(jobsResult.data)
         }
         if (tracesResult.ok && tracesResult.data) {
-          setTraceCount(tracesResult.data.length)
+          setTraceCount(Array.isArray(tracesResult.data) ? tracesResult.data.length : tracesResult.data.total)
         }
       } finally {
         setIsLoading(false)

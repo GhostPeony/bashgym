@@ -21,11 +21,13 @@ import {
   Trophy,
   Network,
   Rocket,
-  Workflow
+  Workflow,
+  Download
 } from 'lucide-react'
 import { useUIStore, useTrainingStore } from '../../stores'
 import { hooksApi, systemApi } from '../../services/api'
 import { clsx } from 'clsx'
+import { isElectron, isWeb } from '../../utils/platform'
 
 interface MenuItemProps {
   icon: React.ReactNode
@@ -146,13 +148,19 @@ function SecondarySections() {
     { id: 'router', icon: <GitBranch className="w-4 h-4" />, label: 'Router' },
     { id: 'guardrails', icon: <Shield className="w-4 h-4" />, label: 'Guardrails' },
     { id: 'profiler', icon: <Activity className="w-4 h-4" />, label: 'Profiler' },
-    { id: 'orchestrator', icon: <Network className="w-4 h-4" />, label: 'Orchestrator' },
-    { id: 'pipeline', icon: <Workflow className="w-4 h-4" />, label: 'Pipeline' }
+    // Experimental: Electron-only
+    ...(isElectron ? [
+      { id: 'orchestrator' as SecondaryViewId, icon: <Network className="w-4 h-4" />, label: 'Orchestrator' },
+      { id: 'pipeline' as SecondaryViewId, icon: <Workflow className="w-4 h-4" />, label: 'Pipeline' },
+    ] : [])
   ]
 
   const connectionsItems: CollapsibleSectionProps['items'] = [
     { id: 'huggingface', icon: <Cloud className="w-4 h-4" />, label: 'HuggingFace' },
-    { id: 'integration', icon: <Link2 className="w-4 h-4" />, label: 'Integration' }
+    // Experimental: Electron-only
+    ...(isElectron ? [
+      { id: 'integration' as SecondaryViewId, icon: <Link2 className="w-4 h-4" />, label: 'Integration' },
+    ] : [])
   ]
 
   const progressItems: CollapsibleSectionProps['items'] = [
@@ -236,13 +244,15 @@ export function Sidebar() {
               active={overlayView === 'home'}
               primary
             />
-            <MenuItem
-              icon={<Terminal className="w-4 h-4" />}
-              label="Workspace"
-              onClick={() => handleNavClick(null)}
-              active={overlayView === null}
-              primary
-            />
+            {isElectron && (
+              <MenuItem
+                icon={<Terminal className="w-4 h-4" />}
+                label="Workspace"
+                onClick={() => handleNavClick(null)}
+                active={overlayView === null}
+                primary
+              />
+            )}
             <MenuItem
               icon={<Sparkles className="w-4 h-4" />}
               label="Data Factory"
@@ -258,6 +268,15 @@ export function Sidebar() {
               badge={currentRun ? 'Live' : undefined}
               primary
             />
+            {isWeb && (
+              <MenuItem
+                icon={<Download className="w-4 h-4" />}
+                label="Download App"
+                onClick={() => openOverlay('download')}
+                active={overlayView === 'download'}
+                primary
+              />
+            )}
           </MenuSection>
 
           {/* Secondary Sections */}
@@ -315,7 +334,7 @@ export function Sidebar() {
                   }}
                   className="btn-secondary mt-2 w-full font-mono text-xs text-center py-1.5"
                 >
-                  Setup Hooks →
+                  {isWeb ? 'Connect Traces →' : 'Setup Hooks →'}
                 </button>
               )}
             </div>

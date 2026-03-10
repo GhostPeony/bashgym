@@ -39,6 +39,7 @@ export interface TrainingRequest {
   auto_export_gguf?: boolean
   gguf_quantization?: string
   use_nemo_gym?: boolean  // Use NVIDIA NeMo cloud training
+  use_remote_ssh?: boolean  // Execute training on remote DGX Spark via SSH
   // Data source selection
   data_source?: 'traces' | 'dataset_path' | 'security_dataset'
   security_dataset_type?: string
@@ -89,6 +90,7 @@ export interface TraceQuality {
   length_score: number
   tool_diversity: number
   efficiency_score: number
+  cognitive_quality: number
   total_score: number
 }
 
@@ -116,6 +118,53 @@ export interface TraceInfo {
   repos_count: number
   created_at?: string
   promoted_at?: string
+  tool_breakdown?: Record<string, number>
+  source_tool?: string
+}
+
+export interface TraceDetailInfo extends TraceInfo {
+  duration_seconds?: number
+  step_outcomes?: (boolean | null)[]
+  cognitive_summary?: {
+    planning_phases: number
+    reflections: number
+    thinking_steps: number
+    cognitive_coverage: number
+  }
+  raw_metrics?: {
+    total_steps: number
+    successful_steps: number
+    failed_steps: number
+    unique_tools: number
+    unique_commands: number
+    cognitive_steps: number
+  }
+}
+
+export interface ToolAnalyticsStat {
+  tool: string
+  calls: number
+  sessions: number
+  success_rate: number
+  total_tokens: number
+}
+
+export interface TraceAnalytics {
+  tool_stats: ToolAnalyticsStat[]
+  quality_distribution: Record<string, number>
+  totals: {
+    sessions: number
+    steps: number
+    tokens: number
+  }
+  training_readiness: {
+    sft_ready: number
+    dpo_pairs_possible: number
+    total_trainable: number
+  }
+  source_breakdown: Array<{ source: string; traces: number; steps: number; tokens: number }>
+  cost_total_usd: number
+  avg_quality_score: number
 }
 
 export interface RouterStats {
@@ -127,6 +176,34 @@ export interface RouterStats {
   avg_teacher_latency: number
   avg_student_latency: number
   current_student_rate: number
+}
+
+// Provider Health
+export interface ProviderHealth {
+  available: boolean
+  latency_ms: number
+  error: string | null
+  models_loaded: string[]
+  last_checked: string
+  gpu_memory_used_mb: number | null
+  gpu_memory_total_mb: number | null
+}
+
+export interface ProvidersHealthResponse {
+  providers: Record<string, ProviderHealth>
+  model_map: Record<string, string>
+}
+
+export interface RouterConfigResponse {
+  strategy: string
+  student_rate: number
+  teacher_model: { name: string; type: string } | null
+  student_model: { name: string; type: string } | null
+  providers: {
+    providers: Record<string, any>
+    model_map: Record<string, string>
+    total_models: number
+  }
 }
 
 export interface SystemStats {
@@ -168,9 +245,11 @@ async function request<T>(
     // Direct fetch fallback
     const response = await fetch(`${API_BASE}${endpoint}`, {
       ...options,
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
         'X-API-Key': localStorage.getItem('bashgym_api_key') || '',
+        'X-Requested-With': 'XMLHttpRequest',
         ...options?.headers
       }
     })
@@ -232,7 +311,46 @@ export const trainingApi = {
     request<{ success: boolean; message: string }>(`/training/${runId}/stop`, { method: 'POST' }),
 
   list: (status?: string, limit?: number) =>
-    request<TrainingResponse[]>(`/training${status ? `?status=${status}` : ''}${limit ? `${status ? '&' : '?'}limit=${limit}` : ''}`)
+    request<TrainingResponse[]>(`/training${status ? `?status=${status}` : ''}${limit ? `${status ? '&' : '?'}limit=${limit}` : ''}`),
+
+  // Export training examples to JSONL on the server
+  exportExamples: (options?: { trace_ids?: string[]; include_gold_only?: boolean; train_split?: number }) =>
+    request<{
+      success: boolean
+      train_path?: string
+      val_path?: string
+      train_count: number
+      val_count: number
+      message?: string
+    }>('/training/export', {
+      method: 'POST',
+      body: JSON.stringify(options || {}),
+    }),
+
+  // Download exported JSONL file as browser download
+  downloadExport: async (split: 'train' | 'val' = 'train') => {
+    try {
+      const response = await fetch(`${API_BASE}/training/export/download?split=${split}`, {
+        credentials: 'include',
+      })
+      if (!response.ok) {
+        const text = await response.text()
+        return { ok: false as const, error: text }
+      }
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${split}.jsonl`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      return { ok: true as const, data: { downloaded: true } }
+    } catch (e) {
+      return { ok: false as const, error: String(e) }
+    }
+  },
 }
 
 // Legacy Models API (see modelsApi below for full implementation)
@@ -278,29 +396,35 @@ export const evaluatorApi = {
 
 // Traces API
 export const tracesApi = {
-  list: (options?: { status?: 'gold' | 'silver' | 'bronze' | 'failed' | 'pending', repo?: string, limit?: number }) => {
+  list: (options?: { status?: 'gold' | 'silver' | 'bronze' | 'failed' | 'pending', repo?: string, source_tool?: string, limit?: number, offset?: number }) => {
     const params = new URLSearchParams()
     if (options?.status) params.set('status', options.status)
     if (options?.repo) params.set('repo', options.repo)
+    if (options?.source_tool) params.set('source_tool', options.source_tool)
     if (options?.limit) params.set('limit', String(options.limit))
+    if (options?.offset) params.set('offset', String(options.offset))
     const queryString = params.toString()
-    return request<TraceInfo[]>(`/traces${queryString ? `?${queryString}` : ''}`)
+    return request<{ traces: TraceInfo[]; total: number; offset: number; limit: number; counts: { gold: number; silver: number; bronze: number; failed: number; pending: number } }>(`/traces${queryString ? `?${queryString}` : ''}`)
   },
 
   listRepos: () =>
     request<RepoInfo[]>('/traces/repos'),
 
-  stats: () =>
-    request<{
+  stats: (options?: { range?: string }) => {
+    const params = new URLSearchParams()
+    if (options?.range) params.set('range', options.range)
+    const qs = params.toString()
+    return request<{
       timeline: { time: string; gold: number; failed: number; pending: number }[]
       totals: { gold: number; failed: number; pending: number; total: number }
-    }>('/traces/stats'),
+    }>(`/traces/stats${qs ? `?${qs}` : ''}`)
+  },
 
   getGold: (limit?: number) =>
     request<TraceInfo[]>(`/traces/gold${limit ? `?limit=${limit}` : ''}`),
 
   get: (traceId: string) =>
-    request<TraceInfo>(`/traces/${traceId}`),
+    request<TraceDetailInfo>(`/traces/${traceId}`),
 
   promote: (traceId: string) =>
     request<{ success: boolean; message: string }>(`/traces/${traceId}/promote`, { method: 'POST' }),
@@ -388,6 +512,68 @@ export const tracesApi = {
       { method: 'POST' }
     ),
 
+  // Import traces from a specific source tool
+  importBySource: (source: string, options?: { days?: number; limit?: number; force?: boolean }) =>
+    request<{
+      source: string
+      imported: number
+      skipped: number
+      errors: number
+      total: number
+      new_trace_ids: string[]
+    }>(`/traces/import/${source}`, {
+      method: 'POST',
+      body: JSON.stringify(options || {}),
+    }),
+
+  // Upload and import trace files from external AI tools (ChatGPT, MCP)
+  uploadAndImport: async (file: File, source: 'chatgpt' | 'mcp', force = false): Promise<ApiResponse<{
+    source: string
+    imported_count: number
+    skipped_count: number
+    failed_count: number
+    total_steps: number
+    errors: string[]
+  }>> => {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('source', source)
+    formData.append('force', String(force))
+
+    try {
+      const response = await fetch(`${API_BASE}/traces/upload/import`, {
+        method: 'POST',
+        body: formData,
+        credentials: 'include',
+      })
+      const text = await response.text()
+      try {
+        const data = JSON.parse(text)
+        return { ok: response.ok, data }
+      } catch {
+        return { ok: false, error: text }
+      }
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
+  },
+
+  // Import traces from all detected source tools
+  importAll: (options?: { days?: number; limit?: number }) =>
+    request<{
+      results: Array<{
+        source: string
+        imported: number
+        skipped: number
+        errors: number
+        total: number
+      }>
+      total_imported: number
+    }>('/traces/import/all', {
+      method: 'POST',
+      body: JSON.stringify(options || {}),
+    }),
+
   // Get count of traces created since a given ISO timestamp
   importSince: (since: string) =>
     request<{ count: number; traces: string[] }>(
@@ -411,7 +597,10 @@ export const tracesApi = {
     }>(`/traces/${traceId}/generate-examples`, {
       method: 'POST',
       body: JSON.stringify(options || {})
-    })
+    }),
+
+  getAnalytics: () =>
+    request<TraceAnalytics>('/traces/analytics')
 }
 
 // Router API
@@ -435,7 +624,16 @@ export const routerApi = {
   setStudentRate: (rate: number) =>
     request<{ success: boolean; rate: number }>(`/router/student-rate?rate=${rate}`, {
       method: 'POST'
-    })
+    }),
+
+  getConfig: () =>
+    request<RouterConfigResponse>('/router/config'),
+
+  setStudentProvider: (providerType: string, modelName: string) =>
+    request<{ success: boolean; provider: string; model: string; is_local: boolean }>(
+      `/router/student-provider?provider_type=${encodeURIComponent(providerType)}&model_name=${encodeURIComponent(modelName)}`,
+      { method: 'POST' }
+    ),
 }
 
 // Verification API
@@ -558,6 +756,11 @@ export const systemInfoApi = {
     request<ModelRecommendations>('/system/recommendations')
 }
 
+export const sshApi = {
+  preflight: () =>
+    request<{ ok: boolean; python_version?: string; disk_free_gb?: number; error?: string; host?: string; username?: string }>('/ssh/preflight'),
+}
+
 // Model Providers API
 export interface ProviderStatus {
   type: string
@@ -640,7 +843,16 @@ export const providersApi = {
   deleteOllamaModel: (modelName: string) =>
     request<{ status: string; model: string }>(`/providers/ollama/models/${encodeURIComponent(modelName)}`, {
       method: 'DELETE'
-    })
+    }),
+
+  getHealth: () =>
+    request<ProvidersHealthResponse>('/providers/health'),
+
+  warmupOllamaModel: (modelName: string) =>
+    request<{ success: boolean; model: string }>(
+      `/providers/ollama/warmup?model_name=${encodeURIComponent(modelName)}`,
+      { method: 'POST' }
+    ),
 }
 
 // Factory API - Data Designer, Privacy, Prompt Optimization
@@ -882,14 +1094,40 @@ export interface GuardrailStats {
   block_rate: number
 }
 
+export interface ToolStat {
+  tool: string
+  calls: number
+  avg_duration_ms: number
+  success_rate: number
+  total_tokens: number
+}
+
 export interface TraceSummary {
   trace_id: string
   name: string
   duration_ms: number
   total_spans: number
+  status?: 'success' | 'error' | 'in_progress'
   llm_calls: Record<string, any>
   tool_calls: Record<string, any>
   bottlenecks?: Array<Record<string, any>>
+}
+
+export interface TraceSpan {
+  span_id: string
+  name: string
+  kind: string
+  duration_ms: number
+  status: string
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
+  latency_ms: number
+  attributes: Record<string, any>
+}
+
+export interface TraceDetail extends TraceSummary {
+  spans: TraceSpan[]
 }
 
 export interface ObservabilityMetrics {
@@ -924,7 +1162,10 @@ export const observabilityApi = {
     ),
 
   getTrace: (traceId: string) =>
-    request<TraceSummary>(`/observability/traces/${traceId}`),
+    request<TraceDetail>(`/observability/traces/${traceId}`),
+
+  getToolStats: () =>
+    request<ToolStat[]>('/observability/tool-stats'),
 
   // Guardrail events
   listGuardrailEvents: (options?: {
@@ -2017,4 +2258,41 @@ export const pipelineApi = {
       `/pipeline/trigger/${stage}`,
       { method: 'POST' }
     ),
+}
+
+// Settings API types
+export interface EnvKeyStatus {
+  key: string
+  display_name: string
+  masked_value: string
+  is_set: boolean
+  source: string
+}
+
+export interface EnvKeysResponse {
+  keys: EnvKeyStatus[]
+}
+
+export interface EnvTestResponse {
+  key: string
+  valid: boolean
+  message: string
+  status_code?: number
+}
+
+export const settingsApi = {
+  getEnvKeys: () =>
+    request<EnvKeysResponse>('/settings/env'),
+
+  updateEnvKeys: (values: Record<string, string>) =>
+    request<{ success: boolean; updated: string[] }>('/settings/env', {
+      method: 'PUT',
+      body: JSON.stringify({ values }),
+    }),
+
+  testEnvKey: (key: string, value?: string) =>
+    request<EnvTestResponse>('/settings/env/test', {
+      method: 'POST',
+      body: JSON.stringify({ key, value }),
+    }),
 }

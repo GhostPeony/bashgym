@@ -1,0 +1,250 @@
+"""Tests for RemoteTrainer SSH execution."""
+
+import asyncio
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+from pathlib import Path
+
+from bashgym.gym.remote_trainer import RemoteTrainer, SSHConfig, PreflightResult
+
+
+class TestSSHConfig:
+    def test_from_settings(self):
+        from bashgym.config import SSHSettings
+        settings = SSHSettings()
+        config = SSHConfig.from_settings(settings)
+        assert config.port == 22
+        assert config.remote_work_dir == "~/bashgym-training"
+
+
+class TestPreflight:
+    @pytest.fixture
+    def trainer(self):
+        config = SSHConfig(
+            host="192.168.1.100",
+            username="ponyo",
+            port=22,
+            key_path="~/.ssh/id_rsa",
+            remote_work_dir="~/bashgym-training",
+        )
+        return RemoteTrainer(config)
+
+    def test_preflight_success(self, trainer):
+        mock_conn = AsyncMock()
+        mock_conn.run = AsyncMock(side_effect=[
+            MagicMock(stdout="Python 3.12.0\n", exit_status=0),
+            MagicMock(stdout="", exit_status=0),
+            MagicMock(stdout="50G\n", exit_status=0),
+        ])
+
+        with patch.object(trainer, '_connect', return_value=mock_conn):
+            result = asyncio.run(trainer.preflight_check())
+            assert result.ok is True
+            assert result.python_version == "Python 3.12.0"
+
+    def test_preflight_no_unsloth(self, trainer):
+        mock_conn = AsyncMock()
+        mock_conn.run = AsyncMock(side_effect=[
+            MagicMock(stdout="Python 3.12.0\n", exit_status=0),
+            MagicMock(stdout="ModuleNotFoundError", exit_status=1),
+        ])
+
+        with patch.object(trainer, '_connect', return_value=mock_conn):
+            result = asyncio.run(trainer.preflight_check())
+            assert result.ok is False
+            assert "unsloth" in result.error.lower()
+
+    def test_preflight_connection_failed(self, trainer):
+        with patch.object(trainer, '_connect', side_effect=OSError("Connection refused")):
+            result = asyncio.run(trainer.preflight_check())
+            assert result.ok is False
+            assert "connect" in result.error.lower()
+
+
+class TestUploadAndExecute:
+    @pytest.fixture
+    def trainer(self):
+        config = SSHConfig(
+            host="192.168.1.100",
+            username="ponyo",
+            port=22,
+            key_path="~/.ssh/id_rsa",
+            remote_work_dir="~/bashgym-training",
+        )
+        return RemoteTrainer(config)
+
+    def test_remote_run_dir(self, trainer):
+        run_dir = trainer._remote_run_dir("run_123")
+        assert "bashgym-training" in str(run_dir)
+        assert "run_123" in str(run_dir)
+
+    def test_upload_files(self, trainer):
+        mock_conn = AsyncMock()
+        mock_sftp = AsyncMock()
+        mock_conn.start_sftp_client = AsyncMock(return_value=mock_sftp)
+        mock_sftp.makedirs = AsyncMock()
+        mock_sftp.put = AsyncMock()
+
+        with patch.object(trainer, '_connect', return_value=mock_conn):
+            asyncio.run(trainer._upload_files(
+                mock_conn,
+                run_id="run_123",
+                script_path=Path("/tmp/train.py"),
+                dataset_path=Path("/tmp/train.jsonl"),
+            ))
+            mock_sftp.makedirs.assert_called_once()
+            assert mock_sftp.put.call_count == 2
+
+    def test_execute_returns_remote_pid(self, trainer):
+        mock_conn = AsyncMock()
+        mock_conn.run = AsyncMock(return_value=MagicMock(
+            stdout="12345\n", exit_status=0,
+        ))
+
+        with patch.object(trainer, '_connect', return_value=mock_conn):
+            pid = asyncio.run(trainer._start_remote_training(
+                mock_conn, "run_123",
+            ))
+            assert pid == 12345
+
+    def test_stream_logs_calls_callback(self, trainer):
+        mock_conn = AsyncMock()
+        log_lines = []
+
+        async def mock_run(cmd, check=False):
+            if "tail" in cmd:
+                return MagicMock(stdout="epoch 1 loss 0.5\nepoch 2 loss 0.3\n", exit_status=0)
+            elif "kill -0" in cmd:
+                return MagicMock(exit_status=1)
+            return MagicMock(stdout="", exit_status=0)
+
+        mock_conn.run = mock_run
+
+        with patch.object(trainer, '_connect', return_value=mock_conn):
+            asyncio.run(trainer._stream_logs(
+                mock_conn, "run_123", 12345,
+                log_callback=lambda line: log_lines.append(line),
+            ))
+            assert len(log_lines) >= 2
+
+
+class TestTrainRemote:
+    @pytest.fixture
+    def trainer(self):
+        config = SSHConfig(
+            host="192.168.1.100",
+            username="ponyo",
+            port=22,
+            key_path="~/.ssh/id_rsa",
+            remote_work_dir="~/bashgym-training",
+        )
+        return RemoteTrainer(config)
+
+    def test_train_remote_orchestrates_full_flow(self, trainer, tmp_path):
+        """Verify train_remote calls preflight, upload, execute, stream, download."""
+        calls = []
+
+        async def mock_preflight():
+            calls.append("preflight")
+            return PreflightResult(ok=True, python_version="3.12")
+
+        async def mock_upload(conn, run_id, script_path, dataset_path):
+            calls.append("upload")
+
+        async def mock_start(conn, run_id):
+            calls.append("start")
+            return 99999
+
+        async def mock_stream(conn, run_id, pid, log_callback=None, poll_interval=None):
+            calls.append("stream")
+
+        async def mock_download(conn, run_id, local_dir):
+            calls.append("download")
+
+        trainer.preflight_check = mock_preflight
+        trainer._upload_files = mock_upload
+        trainer._start_remote_training = mock_start
+        trainer._stream_logs = mock_stream
+        trainer._download_artifacts = mock_download
+        trainer._connect = AsyncMock(return_value=AsyncMock())
+
+        script = tmp_path / "train_sft.py"
+        script.write_text("print('hello')")
+        dataset = tmp_path / "train.jsonl"
+        dataset.write_text("{}")
+
+        result = asyncio.run(trainer.train_remote(
+            run_id="run_test",
+            script_path=script,
+            dataset_path=dataset,
+            local_output_dir=tmp_path / "output",
+        ))
+
+        assert result["success"] is True
+        assert result["remote_pid"] == 99999
+        assert calls == ["preflight", "upload", "start", "stream", "download"]
+
+    def test_train_remote_fails_on_preflight(self, trainer, tmp_path):
+        async def mock_preflight():
+            return PreflightResult(ok=False, error="no unsloth")
+
+        trainer.preflight_check = mock_preflight
+
+        result = asyncio.run(trainer.train_remote(
+            run_id="run_fail",
+            script_path=tmp_path / "x.py",
+            dataset_path=tmp_path / "x.jsonl",
+            local_output_dir=tmp_path / "output",
+        ))
+
+        assert result["success"] is False
+        assert "unsloth" in result["error"]
+
+
+class TestRemoteProcessControl:
+    @pytest.fixture
+    def trainer(self):
+        config = SSHConfig(
+            host="192.168.1.100",
+            username="ponyo",
+            port=22,
+            key_path="~/.ssh/id_rsa",
+            remote_work_dir="~/bashgym-training",
+        )
+        return RemoteTrainer(config)
+
+    def test_pause_sends_sigstop(self, trainer):
+        mock_conn = AsyncMock()
+        mock_conn.run = AsyncMock(return_value=MagicMock(exit_status=0))
+        with patch.object(trainer, '_connect', return_value=mock_conn):
+            result = asyncio.run(trainer.pause_remote(12345))
+            assert result is True
+            mock_conn.run.assert_called_once_with("kill -STOP 12345", check=False)
+
+    def test_resume_sends_sigcont(self, trainer):
+        mock_conn = AsyncMock()
+        mock_conn.run = AsyncMock(return_value=MagicMock(exit_status=0))
+        with patch.object(trainer, '_connect', return_value=mock_conn):
+            result = asyncio.run(trainer.resume_remote(12345))
+            assert result is True
+            mock_conn.run.assert_called_once_with("kill -CONT 12345", check=False)
+
+    def test_cancel_sends_sigterm(self, trainer):
+        mock_conn = AsyncMock()
+        mock_conn.run = AsyncMock(return_value=MagicMock(exit_status=0))
+        with patch.object(trainer, '_connect', return_value=mock_conn):
+            result = asyncio.run(trainer.cancel_remote(12345))
+            assert result is True
+            mock_conn.run.assert_called_once_with("kill -TERM 12345", check=False)
+
+    def test_pause_returns_false_on_failure(self, trainer):
+        mock_conn = AsyncMock()
+        mock_conn.run = AsyncMock(return_value=MagicMock(exit_status=1))
+        with patch.object(trainer, '_connect', return_value=mock_conn):
+            result = asyncio.run(trainer.pause_remote(12345))
+            assert result is False
+
+    def test_cancel_returns_false_on_connection_error(self, trainer):
+        with patch.object(trainer, '_connect', side_effect=OSError("Connection refused")):
+            result = asyncio.run(trainer.cancel_remote(12345))
+            assert result is False

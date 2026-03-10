@@ -2,16 +2,16 @@ import { useState, useEffect } from 'react'
 import { Modal } from './Modal'
 import { Button } from './Button'
 import { useUIStore, useAccentStore, ACCENT_PRESETS, TERMINAL_FG_PRESETS } from '../../stores'
-import { HooksSection, ModelsSection } from '../settings'
-import { Settings, Cpu, Terminal, Info, Keyboard, Moon, Sun, Monitor, Dices, RotateCcw, RefreshCw } from 'lucide-react'
+import { HooksSection, ModelsSection, ApiKeysSection } from '../settings'
+import { Palette, Key, Cpu, Terminal, Globe, Moon, Sun, Monitor, Dices, RotateCcw, RefreshCw } from 'lucide-react'
 
-type SettingsTab = 'general' | 'models' | 'capture' | 'terminal' | 'api'
+type SettingsTab = 'appearance' | 'apikeys' | 'models' | 'agents' | 'connection'
 type Theme = 'light' | 'dark' | 'system'
 
 export function SettingsModal() {
   const { isSettingsOpen, setSettingsOpen } = useUIStore()
   const { accentHue, setAccentHue, randomizeHue, resetHue, terminalFgHue, setTerminalFgHue, resetTerminalFgHue } = useAccentStore()
-  const [activeTab, setActiveTab] = useState<SettingsTab>('general')
+  const [activeTab, setActiveTab] = useState<SettingsTab>('appearance')
   const [theme, setTheme] = useState<Theme>('dark')
 
   const [apiUrl, setApiUrl] = useState('http://localhost:8000')
@@ -45,10 +45,11 @@ export function SettingsModal() {
   }
 
   const tabs = [
-    { id: 'general' as const, label: 'General', icon: Settings },
+    { id: 'appearance' as const, label: 'Appearance', icon: Palette },
+    { id: 'apikeys' as const, label: 'API Keys', icon: Key },
     { id: 'models' as const, label: 'Models', icon: Cpu },
-    { id: 'capture' as const, label: 'Trace Capture', icon: Terminal },
-    { id: 'api' as const, label: 'API', icon: Info },
+    { id: 'agents' as const, label: 'Agents', icon: Terminal },
+    { id: 'connection' as const, label: 'Connection', icon: Globe },
   ]
 
   return (
@@ -90,8 +91,8 @@ export function SettingsModal() {
 
         {/* Content */}
         <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden">
-          {/* General Tab */}
-          {activeTab === 'general' && (
+          {/* Appearance Tab */}
+          {activeTab === 'appearance' && (
             <div className="space-y-6">
               {/* Appearance Section */}
               <div>
@@ -329,16 +330,21 @@ export function SettingsModal() {
             <ModelsSection />
           </div>
 
-          {/* Trace Capture Tab */}
-          {activeTab === 'capture' && (
+          {/* API Keys Tab */}
+          {activeTab === 'apikeys' && (
+            <ApiKeysSection />
+          )}
+
+          {/* Agents Tab */}
+          {activeTab === 'agents' && (
             <HooksSection />
           )}
 
-          {/* API Tab */}
-          {activeTab === 'api' && (
+          {/* Connection Tab */}
+          {activeTab === 'connection' && (
             <div className="space-y-4">
               <div className="tag mb-4">
-                <span>API</span>
+                <span>CONNECTION</span>
               </div>
               <div className="space-y-4">
                 <div>

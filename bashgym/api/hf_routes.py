@@ -615,7 +615,17 @@ async def upload_dataset(request: DatasetUploadRequest):
 
     local_path = Path(request.local_path)
     if not local_path.exists():
-        raise HTTPException(status_code=400, detail=f"Path does not exist: {request.local_path}")
+        raise HTTPException(status_code=400, detail="Path does not exist")
+
+    # Validate path containment
+    from bashgym.config import get_settings, get_bashgym_dir
+    resolved = local_path.resolve()
+    allowed_bases = [
+        Path(get_settings().data.data_dir).resolve(),
+        get_bashgym_dir().resolve(),
+    ]
+    if not any(str(resolved).startswith(str(base)) for base in allowed_bases):
+        raise HTTPException(status_code=400, detail="Path must be within the data directory")
 
     try:
         url = manager.upload_training_data(
@@ -645,12 +655,12 @@ async def upload_dataset(request: DatasetUploadRequest):
             train_count=train_count,
             val_count=val_count,
         )
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except HFError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except FileNotFoundError:
+        raise HTTPException(status_code=400, detail="Dataset files not found in the specified directory")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid dataset configuration")
+    except HFError:
+        raise HTTPException(status_code=500, detail="HuggingFace upload failed")
 
 
 @router.get("/models/search")

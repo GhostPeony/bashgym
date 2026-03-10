@@ -85,7 +85,7 @@ async def trigger_pipeline_stage(stage: str):
         from bashgym.trace_capture.core import TraceCapture
         trace_capture = TraceCapture()
         count = 0
-        for trace_file in trace_capture.traces_dir.glob("*.json"):
+        for trace_file in list(trace_capture.traces_dir.glob("*.json")) + list(trace_capture.traces_dir.glob("*.jsonl")):
             result = pipeline.handle_session_file(trace_file)
             if result:
                 count += 1

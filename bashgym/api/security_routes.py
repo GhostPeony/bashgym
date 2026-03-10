@@ -169,8 +169,15 @@ async def start_ingestion(
     if not input_path.exists():
         raise HTTPException(
             status_code=400,
-            detail=f"Dataset file not found: {request.input_path}",
+            detail="Dataset file not found",
         )
+
+    from bashgym.config import get_settings, get_bashgym_dir
+    resolved = input_path.resolve()
+    data_dir = Path(get_settings().data.data_dir).resolve()
+    bashgym_dir = get_bashgym_dir().resolve()
+    if not (str(resolved).startswith(str(data_dir)) or str(resolved).startswith(str(bashgym_dir))):
+        raise HTTPException(status_code=400, detail="Path must be within the data directory")
 
     # Validate mode
     try:

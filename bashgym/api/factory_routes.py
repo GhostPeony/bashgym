@@ -205,7 +205,8 @@ async def run_generation_job(job_id: str, request: SyntheticGenerateRequest):
             raise ValueError(f"Unknown strategy: {request.strategy}")
 
         # Export to NeMo format
-        output_dir = Path(f"data/synthetic/{job_id}")
+        from bashgym.config import get_bashgym_dir
+        output_dir = get_bashgym_dir() / "synthetic" / job_id
         generator.export_to_nemo(tasks, output_dir)
 
         generation_jobs[job_id]["status"] = "completed"
@@ -227,9 +228,11 @@ async def load_traces_for_generation(
     """Load traces from gold_traces directory based on filter."""
     import json
     from pathlib import Path
+    from bashgym.config import get_settings
 
     traces = []
-    traces_dir = Path("data/gold_traces")
+    settings = get_settings()
+    traces_dir = Path(settings.data.gold_traces_dir)
 
     if not traces_dir.exists():
         logger.warning(f"Traces directory not found: {traces_dir}")
@@ -262,8 +265,10 @@ def extract_seed_prompts(traces: List[Dict]) -> List[str]:
     """Extract prompts from traces to use as seeds."""
     prompts = []
     for trace in traces:
-        # Try different prompt locations
-        prompt = trace.get("initial_prompt", "")
+        # Try different prompt locations (metadata.user_initial_prompt is where real data lives)
+        prompt = trace.get("metadata", {}).get("user_initial_prompt", "")
+        if not prompt:
+            prompt = trace.get("initial_prompt", "")
         if not prompt:
             prompt = trace.get("prompt", "")
         if not prompt and "messages" in trace:
@@ -572,7 +577,9 @@ async def run_designer_job(job_id: str, request: DesignerCreateRequest):
         pipeline = DataDesignerPipeline(config)
 
         # Route to appropriate entry point
-        seed = request.seed_source or "data/gold_traces"
+        from bashgym.config import get_settings as _get_settings
+        _settings = _get_settings()
+        seed = request.seed_source or _settings.data.gold_traces_dir
 
         if request.seed_type == "traces":
             df = pipeline.from_traces(Path(seed), request.num_records)

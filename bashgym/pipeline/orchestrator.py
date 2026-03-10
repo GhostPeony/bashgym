@@ -74,7 +74,7 @@ class Pipeline:
             return None
 
         try:
-            with open(result.destination_file, "r") as f:
+            with open(result.destination_file, "r", encoding="utf-8") as f:
                 trace_data = json.load(f)
             summary = trace_data.get("summary", {})
             success_rate = summary.get("success_rate", 0)

@@ -235,8 +235,12 @@
     transition: transform 0.15s ease, box-shadow 0.15s ease;
   }
 
+  .btn-primary:hover {
+    transform: translate(2px, 2px);
+  }
+
   .btn-primary:hover::before {
-    transform: skewX(-4deg) translate(2px, 2px);
+    transform: skewX(-4deg);
     box-shadow: 1px 1px 0px var(--shadow-color);
   }
 
@@ -246,7 +250,7 @@
   }
 
   .dark .btn-primary:hover::before {
-    transform: translate(2px, 2px);
+    box-shadow: 1px 1px 0px var(--shadow-color);
   }
 
   /* Secondary — bordered rectangle */
@@ -1009,6 +1013,22 @@ html.electron-window {
 
 .animate-float {
   animation: float 6s ease-in-out infinite;
+}
+
+/* Slide-in from right — trace detail panel */
+@keyframes slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.25s ease-out both;
 }
 
 /* Scroll reveal */

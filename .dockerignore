@@ -1,0 +1,17 @@
+.git
+.env
+.env.*
+!.env.example
+.claude
+node_modules
+__pycache__
+*.pyc
+data/
+frontend/node_modules
+frontend/dist
+frontend/dist-electron
+frontend/release
+tasks/
+*.egg-info
+.pytest_cache
+.mypy_cache

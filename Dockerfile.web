@@ -1,0 +1,59 @@
+# BashGym Web — multi-stage build
+# Stage 1: Build the frontend SPA (web-only, no Electron)
+# Stage 2: Serve via Python/FastAPI backend
+
+# ── Stage 1: Frontend build ──────────────────────────────────────────────────
+FROM node:20-slim AS frontend
+
+WORKDIR /app/frontend
+
+# Install dependencies first (cache layer)
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm ci --ignore-scripts
+
+# Copy frontend source
+COPY frontend/ .
+
+# Build web version (no Electron plugins)
+RUN npm run web:build
+
+# ── Stage 2: Backend + SPA ───────────────────────────────────────────────────
+FROM python:3.10-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    BASHGYM_MODE=web \
+    HOST=0.0.0.0
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy backend source
+COPY bashgym/ bashgym/
+COPY run_backend.py start_api.py ./
+
+# Copy built SPA from stage 1
+COPY --from=frontend /app/frontend/dist frontend/dist/
+
+# Create data directories
+RUN mkdir -p data/gold_traces data/failed_traces data/models
+
+# Run as non-root user
+RUN useradd -r -m bashgym && \
+    chown -R bashgym:bashgym /app
+USER bashgym
+
+EXPOSE 8003
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD curl -f http://localhost:8003/api/health || exit 1
+
+CMD ["python", "-m", "uvicorn", "bashgym.api.routes:create_app", "--factory", "--host", "0.0.0.0", "--port", "8003"]

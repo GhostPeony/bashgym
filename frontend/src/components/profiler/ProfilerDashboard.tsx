@@ -2,27 +2,24 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   Activity,
   Clock,
-  Cpu,
   Zap,
   BarChart3,
   TrendingUp,
   TrendingDown,
+  AlertCircle,
   AlertTriangle,
   RefreshCw,
   Play,
-  Pause,
-  ChevronDown,
-  ChevronRight,
   Terminal,
   Code,
   FileText,
   MessageSquare,
-  Settings,
   Download,
-  Loader2
+  X,
 } from 'lucide-react'
 import { clsx } from 'clsx'
-import { observabilityApi, TraceSummary, ObservabilityMetrics } from '../../services/api'
+import { observabilityApi, TraceSummary, TraceDetail, TraceSpan, ToolStat, ObservabilityMetrics } from '../../services/api'
+import { SpanTimeline } from './SpanTimeline'
 
 interface ProfileMetric {
   name: string
@@ -30,49 +27,30 @@ interface ProfileMetric {
   unit: string
   trend: 'up' | 'down' | 'stable'
   change: number
-}
-
-interface ToolCall {
-  id: string
-  tool: string
-  timestamp: string
-  duration: number
-  tokens_in: number
-  tokens_out: number
-  status: 'success' | 'error'
-  input_preview: string
-  output_preview: string
-}
-
-interface AgentSession {
-  id: string
-  started_at: string
-  status: 'running' | 'completed' | 'failed'
-  total_duration: number
-  tool_calls: number
-  tokens_used: number
-  model: string
-  task: string
+  accentVar: string
 }
 
 interface Bottleneck {
-  type: 'slow_tool' | 'high_tokens' | 'repeated_errors' | 'long_wait'
+  type: string
   severity: 'low' | 'medium' | 'high'
   description: string
   recommendation: string
+  trace_id?: string
 }
 
 export function ProfilerDashboard() {
   const [isLive, setIsLive] = useState(false)
   const [activeTab, setActiveTab] = useState<'overview' | 'traces' | 'tools' | 'bottlenecks'>('overview')
-  const [selectedTrace, setSelectedTrace] = useState<TraceSummary | null>(null)
-  const [expandedTool, setExpandedTool] = useState<string | null>(null)
+  const [selectedTrace, setSelectedTrace] = useState<TraceDetail | null>(null)
+  const [isLoadingDetail, setIsLoadingDetail] = useState(false)
 
   // API data
   const [metrics, setMetrics] = useState<ObservabilityMetrics | null>(null)
   const [traces, setTraces] = useState<TraceSummary[]>([])
+  const [toolStats, setToolStats] = useState<ToolStat[]>([])
   const [isLoadingMetrics, setIsLoadingMetrics] = useState(false)
   const [isLoadingTraces, setIsLoadingTraces] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   // Computed metrics for display
   const [displayMetrics, setDisplayMetrics] = useState<ProfileMetric[]>([])
@@ -80,52 +58,43 @@ export function ProfilerDashboard() {
   // Fetch metrics
   const fetchMetrics = useCallback(async () => {
     setIsLoadingMetrics(true)
+    setError(null)
     const result = await observabilityApi.getMetrics()
     if (result.ok && result.data) {
       setMetrics(result.data)
 
-      // Convert to display format
       const profilerData = result.data.profiler
       const newMetrics: ProfileMetric[] = []
+      const accents = ['--chart-1', '--chart-2', '--chart-3', '--chart-4']
 
       if (profilerData.total_traces !== undefined) {
         newMetrics.push({
-          name: 'Total Traces',
-          value: profilerData.total_traces,
-          unit: '',
-          trend: 'stable',
-          change: 0
+          name: 'Total Traces', value: profilerData.total_traces,
+          unit: '', trend: 'stable', change: 0, accentVar: accents[0],
         })
       }
       if (profilerData.avg_duration_ms !== undefined) {
         newMetrics.push({
-          name: 'Avg Duration',
-          value: Math.round(profilerData.avg_duration_ms),
-          unit: 'ms',
-          trend: 'stable',
-          change: 0
+          name: 'Avg Duration', value: Math.round(profilerData.avg_duration_ms),
+          unit: 'ms', trend: 'stable', change: 0, accentVar: accents[1],
         })
       }
       if (profilerData.total_tokens !== undefined) {
         newMetrics.push({
-          name: 'Total Tokens',
-          value: profilerData.total_tokens,
-          unit: '',
-          trend: 'stable',
-          change: 0
+          name: 'Total Tokens', value: profilerData.total_tokens,
+          unit: '', trend: 'stable', change: 0, accentVar: accents[2],
         })
       }
       if (profilerData.avg_tokens_per_trace !== undefined) {
         newMetrics.push({
-          name: 'Avg Tokens/Trace',
-          value: Math.round(profilerData.avg_tokens_per_trace),
-          unit: '',
-          trend: 'stable',
-          change: 0
+          name: 'Avg Tokens/Trace', value: Math.round(profilerData.avg_tokens_per_trace),
+          unit: '', trend: 'stable', change: 0, accentVar: accents[3],
         })
       }
 
       setDisplayMetrics(newMetrics)
+    } else if (!result.ok) {
+      setError(result.error || 'Failed to fetch metrics')
     }
     setIsLoadingMetrics(false)
   }, [])
@@ -136,27 +105,50 @@ export function ProfilerDashboard() {
     const result = await observabilityApi.listTraces(50, 0)
     if (result.ok && result.data) {
       setTraces(result.data.traces)
+    } else if (!result.ok) {
+      setError(prev => prev || (result.error || 'Failed to fetch traces'))
     }
     setIsLoadingTraces(false)
+  }, [])
+
+  // Fetch tool stats
+  const fetchToolStats = useCallback(async () => {
+    const result = await observabilityApi.getToolStats()
+    if (result.ok && result.data) {
+      setToolStats(result.data)
+    }
+  }, [])
+
+  // Fetch full trace detail
+  const selectTrace = useCallback(async (trace: TraceSummary) => {
+    setIsLoadingDetail(true)
+    const result = await observabilityApi.getTrace(trace.trace_id)
+    if (result.ok && result.data) {
+      setSelectedTrace(result.data)
+    } else {
+      // Fallback: show summary data without spans
+      setSelectedTrace({ ...trace, spans: [] } as TraceDetail)
+    }
+    setIsLoadingDetail(false)
   }, [])
 
   // Initial fetch
   useEffect(() => {
     fetchMetrics()
     fetchTraces()
-  }, [fetchMetrics, fetchTraces])
+    fetchToolStats()
+  }, [fetchMetrics, fetchTraces, fetchToolStats])
 
   // Live polling
   useEffect(() => {
     if (!isLive) return
-
     const interval = setInterval(() => {
       fetchMetrics()
       fetchTraces()
+      fetchToolStats()
     }, 5000)
-
     return () => clearInterval(interval)
-  }, [isLive, fetchMetrics, fetchTraces])
+  }, [isLive, fetchMetrics, fetchTraces, fetchToolStats])
 
   const getToolIcon = (tool: string) => {
     switch (tool) {
@@ -168,50 +160,64 @@ export function ProfilerDashboard() {
     }
   }
 
-  // Compute tool stats from traces
-  const toolStats = traces.reduce((acc, trace) => {
-    const toolCalls = trace.tool_calls || {}
-    const count = toolCalls.count || 0
-    if (count > 0) {
-      const tool = 'Various' // We don't have per-tool breakdown in current API
-      if (!acc[tool]) {
-        acc[tool] = { tool, calls: 0, avg_duration: 0, success_rate: 100, tokens: 0 }
-      }
-      acc[tool].calls += count
+  // Export handler
+  const handleExport = () => {
+    const exportData = {
+      metrics,
+      traces,
+      toolStats,
+      exportedAt: new Date().toISOString(),
     }
-    return acc
-  }, {} as Record<string, { tool: string; calls: number; avg_duration: number; success_rate: number; tokens: number }>)
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `profiler-export-${new Date().toISOString().slice(0, 10)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
 
-  // Compute bottlenecks from traces
+  // Compute bottlenecks from traces (now populated by backend)
   const bottlenecks: Bottleneck[] = traces
     .filter(t => t.bottlenecks && t.bottlenecks.length > 0)
     .flatMap(t => (t.bottlenecks || []).map((b: any) => ({
       type: b.type || 'slow_tool',
       severity: b.severity || 'medium',
-      description: b.description || `Bottleneck in ${t.name}`,
-      recommendation: b.recommendation || 'Review trace details'
+      description: b.suggestion || b.description || `Bottleneck in ${t.name}`,
+      recommendation: b.recommendation || b.suggestion || 'Review trace details',
+      trace_id: b.trace_id || t.trace_id,
     })))
     .slice(0, 10)
+
+  // Navigate to trace from bottleneck
+  const viewBottleneckTrace = (traceId: string) => {
+    const trace = traces.find(t => t.trace_id === traceId)
+    if (trace) {
+      setActiveTab('traces')
+      selectTrace(trace)
+    }
+  }
 
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
       <div className="p-6 border-b-brutal border-border">
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="font-brand text-3xl text-text-primary">Agent Profiler</h1>
-            <p className="text-sm text-text-secondary mt-1">
-              Real-time performance monitoring and bottleneck detection
-            </p>
+          <div className="flex items-center gap-3">
+            <span className="tag"><span>Observability</span></span>
+            <div>
+              <h1 className="font-brand text-3xl text-text-primary">Agent Profiler</h1>
+              <p className="text-sm text-text-secondary mt-1">
+                Real-time performance monitoring and bottleneck detection
+              </p>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setIsLive(!isLive)}
               className={clsx(
-                'flex items-center gap-2 px-4 py-2 font-mono text-xs uppercase tracking-widest border-brutal rounded-brutal transition-press',
-                isLive
-                  ? 'bg-status-success text-white border-status-success shadow-brutal-sm'
-                  : 'bg-background-card text-text-secondary border-border hover-press'
+                'flex items-center gap-2',
+                isLive ? 'btn-primary' : 'btn-secondary'
               )}
             >
               {isLive ? (
@@ -227,14 +233,14 @@ export function ProfilerDashboard() {
               )}
             </button>
             <button
-              onClick={() => { fetchMetrics(); fetchTraces(); }}
+              onClick={() => { fetchMetrics(); fetchTraces(); fetchToolStats(); }}
               disabled={isLoadingMetrics || isLoadingTraces}
               className="btn-secondary flex items-center gap-2"
             >
               <RefreshCw className={clsx('w-4 h-4', (isLoadingMetrics || isLoadingTraces) && 'animate-spin')} />
               Refresh
             </button>
-            <button className="btn-secondary flex items-center gap-2">
+            <button onClick={handleExport} className="btn-secondary flex items-center gap-2">
               <Download className="w-4 h-4" />
               Export
             </button>
@@ -246,7 +252,7 @@ export function ProfilerDashboard() {
           {[
             { id: 'overview' as const, label: 'Overview', icon: BarChart3 },
             { id: 'traces' as const, label: 'Traces', icon: Activity, badge: traces.length },
-            { id: 'tools' as const, label: 'Tool Analytics', icon: Zap },
+            { id: 'tools' as const, label: 'Tool Analytics', icon: Zap, badge: toolStats.length },
             { id: 'bottlenecks' as const, label: 'Bottlenecks', icon: AlertTriangle, badge: bottlenecks.length },
           ].map(tab => (
             <button
@@ -262,14 +268,23 @@ export function ProfilerDashboard() {
               <tab.icon className="w-4 h-4" />
               {tab.label}
               {tab.badge !== undefined && tab.badge > 0 && (
-                <span className="ml-1 px-1.5 py-0.5 text-xs border-brutal rounded-brutal bg-background-card text-text-primary">
-                  {tab.badge}
-                </span>
+                <span className="tag ml-1"><span>{tab.badge}</span></span>
               )}
             </button>
           ))}
         </div>
       </div>
+
+      {/* Error banner */}
+      {error && (
+        <div className="mx-6 mt-4 p-3 border-l-[4px] border-l-status-error bg-status-error/10 border-brutal flex items-center gap-3">
+          <AlertCircle className="w-5 h-5 text-status-error flex-shrink-0" />
+          <span className="text-sm text-text-primary flex-1">{error}</span>
+          <button onClick={() => setError(null)} className="btn-ghost p-1">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       <div className="flex-1 overflow-auto p-6">
         {activeTab === 'overview' && (
@@ -278,7 +293,11 @@ export function ProfilerDashboard() {
             {displayMetrics.length > 0 ? (
               <div className="grid grid-cols-4 gap-4">
                 {displayMetrics.map(metric => (
-                  <div key={metric.name} className="card card-accent border-brutal shadow-brutal-sm rounded-brutal bg-background-card p-4">
+                  <div
+                    key={metric.name}
+                    className="card p-4"
+                    style={{ borderLeftWidth: '4px', borderLeftColor: `var(${metric.accentVar})` }}
+                  >
                     <div className="flex items-center justify-between mb-2">
                       <span className="font-mono text-xs uppercase tracking-widest text-text-muted">{metric.name}</span>
                       {metric.trend === 'up' && <TrendingUp className="w-4 h-4 text-status-success" />}
@@ -303,7 +322,7 @@ export function ProfilerDashboard() {
                 ))}
               </div>
             ) : (
-              <div className="card border-brutal shadow-brutal-sm rounded-brutal bg-background-card p-8 text-center">
+              <div className="card p-8 text-center">
                 <Activity className="w-12 h-12 text-text-muted mx-auto mb-3" />
                 <h3 className="font-brand text-xl text-text-primary mb-2">
                   {isLoadingMetrics ? 'Loading metrics...' : 'No profiler data yet'}
@@ -314,9 +333,11 @@ export function ProfilerDashboard() {
               </div>
             )}
 
+            <div className="section-divider" />
+
             {/* Guardrail Stats Summary */}
             {metrics?.guardrails && (
-              <div className="card border-brutal shadow-brutal-sm rounded-brutal bg-background-card p-4">
+              <div className="card p-4">
                 <h3 className="font-brand text-xl text-text-primary mb-4">Guardrails Summary</h3>
                 <div className="section-divider mb-4" />
                 <div className="grid grid-cols-4 gap-4">
@@ -348,9 +369,11 @@ export function ProfilerDashboard() {
               </div>
             )}
 
+            <div className="section-divider" />
+
             {/* Recent Traces */}
             {traces.length > 0 && (
-              <div className="card border-brutal shadow-brutal-sm rounded-brutal bg-background-card">
+              <div className="card">
                 <div className="p-4 border-b-brutal border-border">
                   <h3 className="font-brand text-xl text-text-primary">Recent Traces</h3>
                 </div>
@@ -358,7 +381,7 @@ export function ProfilerDashboard() {
                   {traces.slice(0, 5).map(trace => (
                     <button
                       key={trace.trace_id}
-                      onClick={() => setSelectedTrace(trace)}
+                      onClick={() => { setActiveTab('traces'); selectTrace(trace); }}
                       className={clsx(
                         'w-full p-4 text-left hover:bg-background-secondary transition-press',
                         selectedTrace?.trace_id === trace.trace_id && 'bg-accent-light'
@@ -366,7 +389,12 @@ export function ProfilerDashboard() {
                     >
                       <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-2">
-                          <span className="status-dot status-success" />
+                          <span className={clsx(
+                            'status-dot',
+                            trace.status === 'error' ? 'status-error' :
+                            trace.status === 'in_progress' ? 'status-warning' :
+                            'status-success'
+                          )} />
                           <span className="font-medium text-text-primary">{trace.name}</span>
                         </div>
                         <span className="font-mono text-xs text-text-muted">
@@ -398,105 +426,133 @@ export function ProfilerDashboard() {
         )}
 
         {activeTab === 'traces' && (
-          <div className="space-y-4">
-            {traces.length === 0 ? (
-              <div className="card border-brutal shadow-brutal-sm rounded-brutal bg-background-card p-12 text-center">
-                <Terminal className="w-12 h-12 text-text-muted mx-auto mb-4" />
-                <h3 className="font-brand text-xl text-text-primary mb-2">No traces recorded</h3>
-                <p className="text-text-muted text-sm">Run tasks to capture execution traces</p>
-              </div>
-            ) : (
-              <div className="card border-brutal shadow-brutal-sm rounded-brutal bg-background-card">
-                <div className="p-4 border-b-brutal border-border flex items-center justify-between">
-                  <h3 className="font-brand text-xl text-text-primary">Execution Traces</h3>
-                  <span className="font-mono text-xs uppercase tracking-widest text-text-muted">{traces.length} traces</span>
+          <div className={clsx('flex gap-4', selectedTrace && 'h-full')}>
+            {/* Trace list — shrinks when detail is open */}
+            <div className={clsx(
+              'space-y-4 overflow-auto',
+              selectedTrace ? 'w-1/2 flex-shrink-0' : 'w-full'
+            )}>
+              {traces.length === 0 ? (
+                <div className="card p-12 text-center">
+                  <Terminal className="w-12 h-12 text-text-muted mx-auto mb-3" />
+                  <h3 className="font-brand text-xl text-text-primary mb-2">No traces recorded</h3>
+                  <p className="text-sm text-text-muted">Run tasks to capture execution traces</p>
                 </div>
-                <div className="divide-y divide-border max-h-[600px] overflow-y-auto">
-                  {traces.map(trace => (
-                    <div key={trace.trace_id} className="p-4 hover:bg-background-secondary transition-press">
-                      <div className="flex items-center gap-3">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="font-medium text-text-primary">{trace.name}</span>
-                            <span className="tag">
-                              <span>{trace.total_spans} spans</span>
+              ) : (
+                <div className="card">
+                  <div className="p-4 border-b-brutal border-border flex items-center justify-between">
+                    <h3 className="font-brand text-xl text-text-primary">Execution Traces</h3>
+                    <span className="tag"><span>{traces.length} traces</span></span>
+                  </div>
+                  <div className="divide-y divide-border max-h-[600px] overflow-y-auto">
+                    {traces.map(trace => (
+                      <div
+                        key={trace.trace_id}
+                        className={clsx(
+                          'p-4 hover:bg-background-secondary transition-press cursor-pointer',
+                          selectedTrace?.trace_id === trace.trace_id && 'bg-accent-light'
+                        )}
+                        onClick={() => selectTrace(trace)}
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className={clsx(
+                            'status-dot flex-shrink-0',
+                            trace.status === 'error' ? 'status-error' :
+                            trace.status === 'in_progress' ? 'status-warning' :
+                            'status-success'
+                          )} />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="font-medium text-text-primary truncate">{trace.name}</span>
+                              <span className="tag flex-shrink-0">
+                                <span>{trace.total_spans} spans</span>
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-4 font-mono text-xs text-text-muted">
+                              <span>ID: {trace.trace_id.slice(0, 12)}...</span>
+                              <span>{trace.duration_ms.toFixed(0)}ms</span>
+                              {trace.llm_calls?.count > 0 && (
+                                <span>LLM: {trace.llm_calls.count}</span>
+                              )}
+                              {trace.tool_calls?.count > 0 && (
+                                <span>Tools: {trace.tool_calls.count}</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {trace.bottlenecks && trace.bottlenecks.length > 0 && (
+                          <div className="mt-2 flex items-center gap-2">
+                            <AlertTriangle className="w-4 h-4 text-status-warning" />
+                            <span className="font-mono text-xs text-status-warning">
+                              {trace.bottlenecks.length} bottleneck(s) detected
                             </span>
                           </div>
-                          <div className="flex items-center gap-4 font-mono text-xs text-text-muted">
-                            <span>ID: {trace.trace_id.slice(0, 12)}...</span>
-                            <span>Duration: {trace.duration_ms.toFixed(0)}ms</span>
-                            {trace.llm_calls?.count && (
-                              <span>LLM calls: {trace.llm_calls.count}</span>
-                            )}
-                            {trace.tool_calls?.count && (
-                              <span>Tool calls: {trace.tool_calls.count}</span>
-                            )}
-                          </div>
-                        </div>
-                        <button
-                          onClick={() => setSelectedTrace(trace)}
-                          className="btn-secondary text-sm"
-                        >
-                          View Details
-                        </button>
+                        )}
                       </div>
-
-                      {/* Bottlenecks indicator */}
-                      {trace.bottlenecks && trace.bottlenecks.length > 0 && (
-                        <div className="mt-2 flex items-center gap-2">
-                          <AlertTriangle className="w-4 h-4 text-status-warning" />
-                          <span className="font-mono text-xs text-status-warning">
-                            {trace.bottlenecks.length} bottleneck(s) detected
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
 
-            {/* Selected Trace Details */}
+            {/* Trace detail — slides in from right */}
             {selectedTrace && (
-              <div className="card card-accent border-brutal shadow-brutal-sm rounded-brutal bg-background-card p-4">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-brand text-xl text-text-primary">Trace Details: {selectedTrace.name}</h3>
-                  <button
-                    onClick={() => setSelectedTrace(null)}
-                    className="btn-ghost font-mono text-xs uppercase tracking-widest"
-                  >
-                    Close
-                  </button>
-                </div>
-                <div className="section-divider mb-4" />
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="p-3 bg-background-secondary border-brutal border-border rounded-brutal">
-                    <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Trace ID</div>
-                    <div className="text-sm text-text-primary font-mono">{selectedTrace.trace_id}</div>
+              <div className="w-1/2 flex-shrink-0 animate-slide-in-right overflow-auto">
+                <div className="card card-accent p-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-brand text-xl text-text-primary truncate">
+                      {isLoadingDetail ? 'Loading...' : selectedTrace.name}
+                    </h3>
+                    <button
+                      onClick={() => setSelectedTrace(null)}
+                      className="btn-ghost p-1"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
                   </div>
-                  <div className="p-3 bg-background-secondary border-brutal border-border rounded-brutal">
-                    <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Duration</div>
-                    <div className="font-brand text-xl text-text-primary">{selectedTrace.duration_ms.toFixed(2)}ms</div>
-                  </div>
-                  <div className="p-3 bg-background-secondary border-brutal border-border rounded-brutal">
-                    <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Total Spans</div>
-                    <div className="font-brand text-xl text-text-primary">{selectedTrace.total_spans}</div>
-                  </div>
-                  <div className="p-3 bg-background-secondary border-brutal border-border rounded-brutal">
-                    <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">LLM Calls</div>
-                    <div className="font-brand text-xl text-text-primary">{selectedTrace.llm_calls?.count || 0}</div>
-                  </div>
-                  {selectedTrace.llm_calls?.total_tokens && (
+                  <div className="section-divider mb-4" />
+                  <div className="grid grid-cols-2 gap-3 mb-4">
                     <div className="p-3 bg-background-secondary border-brutal border-border rounded-brutal">
-                      <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Total Tokens</div>
-                      <div className="font-brand text-xl text-text-primary">{selectedTrace.llm_calls.total_tokens.toLocaleString()}</div>
+                      <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Trace ID</div>
+                      <div className="text-sm text-text-primary font-mono truncate">{selectedTrace.trace_id}</div>
                     </div>
-                  )}
-                  {selectedTrace.tool_calls?.count && (
                     <div className="p-3 bg-background-secondary border-brutal border-border rounded-brutal">
-                      <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Tool Calls</div>
-                      <div className="font-brand text-xl text-text-primary">{selectedTrace.tool_calls.count}</div>
+                      <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Duration</div>
+                      <div className="font-brand text-xl text-text-primary">{selectedTrace.duration_ms.toFixed(0)}ms</div>
                     </div>
+                    <div className="p-3 bg-background-secondary border-brutal border-border rounded-brutal">
+                      <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Total Spans</div>
+                      <div className="font-brand text-xl text-text-primary">{selectedTrace.total_spans}</div>
+                    </div>
+                    <div className="p-3 bg-background-secondary border-brutal border-border rounded-brutal">
+                      <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">LLM Calls</div>
+                      <div className="font-brand text-xl text-text-primary">{selectedTrace.llm_calls?.count || 0}</div>
+                    </div>
+                    {selectedTrace.llm_calls?.total_tokens > 0 && (
+                      <div className="p-3 bg-background-secondary border-brutal border-border rounded-brutal">
+                        <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Total Tokens</div>
+                        <div className="font-brand text-xl text-text-primary">{selectedTrace.llm_calls.total_tokens.toLocaleString()}</div>
+                      </div>
+                    )}
+                    {selectedTrace.tool_calls?.count > 0 && (
+                      <div className="p-3 bg-background-secondary border-brutal border-border rounded-brutal">
+                        <div className="font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Tool Calls</div>
+                        <div className="font-brand text-xl text-text-primary">{selectedTrace.tool_calls.count}</div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Span timeline waterfall */}
+                  {selectedTrace.spans && selectedTrace.spans.length > 0 && (
+                    <>
+                      <div className="section-divider mb-4" />
+                      <h4 className="font-brand text-lg text-text-primary mb-3">Span Timeline</h4>
+                      <SpanTimeline
+                        spans={selectedTrace.spans}
+                        totalDurationMs={selectedTrace.duration_ms}
+                      />
+                    </>
                   )}
                 </div>
               </div>
@@ -506,73 +562,74 @@ export function ProfilerDashboard() {
 
         {activeTab === 'tools' && (
           <div className="space-y-6">
-            {Object.keys(toolStats).length === 0 ? (
-              <div className="card border-brutal shadow-brutal-sm rounded-brutal bg-background-card p-12 text-center">
-                <Zap className="w-12 h-12 text-text-muted mx-auto mb-4" />
+            {toolStats.length === 0 ? (
+              <div className="card p-12 text-center">
+                <Zap className="w-12 h-12 text-text-muted mx-auto mb-3" />
                 <h3 className="font-brand text-xl text-text-primary mb-2">No tool analytics yet</h3>
-                <p className="text-text-muted text-sm">Run tasks to collect tool performance data</p>
+                <p className="text-sm text-text-muted">Run tasks to collect tool performance data</p>
               </div>
             ) : (
-              <>
-                <div className="card border-brutal shadow-brutal-sm rounded-brutal bg-background-card">
-                  <div className="p-4 border-b-brutal border-border">
-                    <h3 className="font-brand text-xl text-text-primary">Tool Performance</h3>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead className="bg-background-secondary border-b-brutal border-border">
-                        <tr>
-                          <th className="px-4 py-3 text-left font-mono text-xs uppercase tracking-widest text-text-muted">Tool</th>
-                          <th className="px-4 py-3 text-right font-mono text-xs uppercase tracking-widest text-text-muted">Calls</th>
-                          <th className="px-4 py-3 text-right font-mono text-xs uppercase tracking-widest text-text-muted">Avg Duration</th>
-                          <th className="px-4 py-3 text-right font-mono text-xs uppercase tracking-widest text-text-muted">Success Rate</th>
-                          <th className="px-4 py-3 text-left font-mono text-xs uppercase tracking-widest text-text-muted">Performance</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-border">
-                        {Object.values(toolStats).map(stat => {
-                          const Icon = getToolIcon(stat.tool)
-                          return (
-                            <tr key={stat.tool} className="hover:bg-background-secondary transition-press">
-                              <td className="px-4 py-3">
-                                <div className="flex items-center gap-2">
-                                  <Icon className="w-4 h-4 text-accent" />
-                                  <span className="font-medium text-text-primary">{stat.tool}</span>
-                                </div>
-                              </td>
-                              <td className="px-4 py-3 text-right font-brand text-lg text-text-primary">{stat.calls}</td>
-                              <td className="px-4 py-3 text-right font-mono text-sm text-text-primary">{stat.avg_duration}ms</td>
-                              <td className="px-4 py-3 text-right">
-                                <span className={clsx(
-                                  'font-mono text-sm',
-                                  stat.success_rate >= 95 ? 'text-status-success' :
-                                  stat.success_rate >= 85 ? 'text-status-warning' :
-                                  'text-status-error'
-                                )}>
-                                  {stat.success_rate}%
-                                </span>
-                              </td>
-                              <td className="px-4 py-3">
-                                <div className="progress-bar w-24">
-                                  <div
-                                    className={clsx(
-                                      'progress-fill',
-                                      stat.success_rate >= 95 ? '!bg-status-success' :
-                                      stat.success_rate >= 85 ? '!bg-status-warning' :
-                                      '!bg-status-error'
-                                    )}
-                                    style={{ width: `${stat.success_rate}%` }}
-                                  />
-                                </div>
-                              </td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
+              <div className="card">
+                <div className="p-4 border-b-brutal border-border">
+                  <h3 className="font-brand text-xl text-text-primary">Tool Performance</h3>
                 </div>
-              </>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-background-secondary border-b-brutal border-border">
+                      <tr>
+                        <th className="px-4 py-3 text-left font-mono text-xs uppercase tracking-widest text-text-muted">Tool</th>
+                        <th className="px-4 py-3 text-right font-mono text-xs uppercase tracking-widest text-text-muted">Calls</th>
+                        <th className="px-4 py-3 text-right font-mono text-xs uppercase tracking-widest text-text-muted">Avg Duration</th>
+                        <th className="px-4 py-3 text-right font-mono text-xs uppercase tracking-widest text-text-muted">Success Rate</th>
+                        <th className="px-4 py-3 text-left font-mono text-xs uppercase tracking-widest text-text-muted">Performance</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {toolStats.map(stat => {
+                        const Icon = getToolIcon(stat.tool)
+                        const barColor = stat.success_rate >= 95
+                          ? 'var(--status-success)'
+                          : stat.success_rate >= 85
+                          ? 'var(--status-warning)'
+                          : 'var(--status-error)'
+                        return (
+                          <tr key={stat.tool} className="hover:bg-background-secondary transition-press">
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-2">
+                                <Icon className="w-4 h-4 text-accent" />
+                                <span className="font-medium text-text-primary">{stat.tool}</span>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-right font-brand text-lg text-text-primary">{stat.calls}</td>
+                            <td className="px-4 py-3 text-right font-mono text-sm text-text-primary">{stat.avg_duration_ms}ms</td>
+                            <td className="px-4 py-3 text-right">
+                              <span className={clsx(
+                                'font-mono text-sm',
+                                stat.success_rate >= 95 ? 'text-status-success' :
+                                stat.success_rate >= 85 ? 'text-status-warning' :
+                                'text-status-error'
+                              )}>
+                                {stat.success_rate}%
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="progress-bar w-24">
+                                <div
+                                  className="progress-fill"
+                                  style={{
+                                    width: `${stat.success_rate}%`,
+                                    background: barColor,
+                                  }}
+                                />
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             )}
           </div>
         )}
@@ -580,17 +637,17 @@ export function ProfilerDashboard() {
         {activeTab === 'bottlenecks' && (
           <div className="space-y-4">
             {bottlenecks.length === 0 ? (
-              <div className="card border-brutal shadow-brutal-sm rounded-brutal bg-background-card p-12 text-center">
-                <AlertTriangle className="w-12 h-12 text-text-muted mx-auto mb-4" />
+              <div className="card p-12 text-center">
+                <AlertTriangle className="w-12 h-12 text-text-muted mx-auto mb-3" />
                 <h3 className="font-brand text-xl text-text-primary mb-2">No bottlenecks detected</h3>
-                <p className="text-text-muted text-sm">Great! Your agent tasks are running efficiently</p>
+                <p className="text-sm text-text-muted">Your agent tasks are running efficiently</p>
               </div>
             ) : (
               bottlenecks.map((bottleneck, idx) => (
                 <div
                   key={idx}
                   className={clsx(
-                    'card border-brutal shadow-brutal-sm rounded-brutal bg-background-card p-4 border-l-[4px]',
+                    'card p-4 border-l-[4px]',
                     bottleneck.severity === 'high' ? 'border-l-status-error' :
                     bottleneck.severity === 'medium' ? 'border-l-status-warning' :
                     'border-l-status-info'
@@ -616,9 +673,14 @@ export function ProfilerDashboard() {
                         </span>
                       </div>
                       <p className="text-sm text-text-muted mb-2">{bottleneck.recommendation}</p>
-                      <button className="font-mono text-xs uppercase tracking-widest text-accent hover:text-accent-dark">
-                        View details
-                      </button>
+                      {bottleneck.trace_id && (
+                        <button
+                          onClick={() => viewBottleneckTrace(bottleneck.trace_id!)}
+                          className="font-mono text-xs uppercase tracking-widest text-accent hover:text-accent-dark"
+                        >
+                          View details
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -626,7 +688,7 @@ export function ProfilerDashboard() {
             )}
 
             {/* Optimization Tips */}
-            <div className="card border-brutal shadow-brutal-sm rounded-brutal bg-background-card p-4 border-l-[4px] border-l-status-info">
+            <div className="card p-4 border-l-[4px] border-l-status-info">
               <h3 className="font-brand text-xl text-text-primary mb-3">Optimization Tips</h3>
               <div className="section-divider mb-3" />
               <ul className="space-y-2 text-sm text-text-secondary">

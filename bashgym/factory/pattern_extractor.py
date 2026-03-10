@@ -1,6 +1,7 @@
 # bashgym/factory/pattern_extractor.py
 """Pattern extraction from execution traces for synthetic data generation."""
 
+import json
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Dict, List, ClassVar
@@ -256,8 +257,11 @@ class PatternExtractor:
 
         for trace in traces:
             # Extract prompt/task description
-            summary = trace.get("summary", {})
-            prompt = summary.get("task_description", "") or summary.get("prompt", "")
+            # Real traces store prompts in metadata.user_initial_prompt
+            prompt = trace.get("metadata", {}).get("user_initial_prompt", "")
+            if not prompt:
+                summary = trace.get("summary", {})
+                prompt = summary.get("task_description", "") or summary.get("prompt", "")
             if prompt:
                 all_prompts.append(prompt)
                 task_type = self._classify_task_type(prompt)
@@ -267,16 +271,23 @@ class PatternExtractor:
             trace_steps = trace.get("trace", [])
             tools = []
             for step in trace_steps:
-                tool_name = step.get("tool", "")
+                # Real traces use "tool_name", fall back to "tool" for compatibility
+                tool_name = step.get("tool_name") or step.get("tool", "")
                 if tool_name:
                     tools.append(tool_name)
 
                 # Extract file paths from tool inputs
+                # Real traces store command as a JSON string, not input as a dict
                 input_data = step.get("input", {})
-                if "file_path" in input_data:
-                    all_files.append(input_data["file_path"])
-                if "path" in input_data:
-                    all_files.append(input_data["path"])
+                if not input_data:
+                    try:
+                        input_data = json.loads(step.get("command", "{}"))
+                    except (json.JSONDecodeError, TypeError):
+                        input_data = {}
+                if isinstance(input_data, dict):
+                    for key in ("file_path", "path"):
+                        if key in input_data:
+                            all_files.append(input_data[key])
 
             if tools:
                 all_tool_sequences.append(tools)

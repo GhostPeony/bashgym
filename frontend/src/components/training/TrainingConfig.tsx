@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react'
-import { X, FolderGit2, Database, Sparkles, Info, Cloud, Monitor, Shield, FileText } from 'lucide-react'
+import { X, FolderGit2, Database, Sparkles, Info, Cloud, Monitor, Shield, FileText, Server } from 'lucide-react'
 import type { TrainingConfig as TrainingConfigType, TrainingStrategy, DataSource } from '../../stores'
-import { tracesApi, securityApi, RepoInfo, SecurityDatasetInfo } from '../../services/api'
+import { tracesApi, securityApi, providersApi, RepoInfo, SecurityDatasetInfo, OllamaModel } from '../../services/api'
 import { useTutorialComplete } from '../../hooks'
 import { clsx } from 'clsx'
 
 type TrainingScope = 'all' | 'selected' | 'single'
-type TrainingBackend = 'local' | 'nemo'
+type TrainingBackend = 'local' | 'remote_ssh' | 'nemo'
 
 interface TrainingConfigProps {
   onClose: () => void
@@ -20,6 +20,9 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
   const [trainingBackend, setTrainingBackend] = useState<TrainingBackend>('local')
   const [dataSource, setDataSource] = useState<DataSource>('traces')
   const [securityDatasets, setSecurityDatasets] = useState<SecurityDatasetInfo[]>([])
+  const [ollamaModels, setOllamaModels] = useState<OllamaModel[]>([])
+  const [customModelInput, setCustomModelInput] = useState('')
+  const [showCustomModel, setShowCustomModel] = useState(false)
   const { complete: completeTutorialStep } = useTutorialComplete()
 
   const [config, setConfig] = useState<TrainingConfigType>({
@@ -46,7 +49,7 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
     securityBalanceClasses: true
   })
 
-  // Fetch available repos and security datasets on mount
+  // Fetch available repos, security datasets, and Ollama models on mount
   useEffect(() => {
     tracesApi.listRepos().then((result) => {
       if (result.ok && result.data) {
@@ -56,6 +59,11 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
     securityApi.listDatasets().then((result) => {
       if (result.ok && result.data) {
         setSecurityDatasets(result.data)
+      }
+    })
+    providersApi.getOllamaModels().then((result) => {
+      if (result.ok && result.data?.models) {
+        setOllamaModels(result.data.models)
       }
     })
   }, [])
@@ -327,12 +335,12 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
             <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-3">
               Training Backend
             </label>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               <button
                 type="button"
                 onClick={() => {
                   setTrainingBackend('local')
-                  setConfig({ ...config, useNemoGym: false })
+                  setConfig({ ...config, useNemoGym: false, useRemoteSSH: false })
                 }}
                 className={clsx(
                   'card p-3 text-center transition-press',
@@ -348,8 +356,25 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
               <button
                 type="button"
                 onClick={() => {
+                  setTrainingBackend('remote_ssh')
+                  setConfig({ ...config, useNemoGym: false, useRemoteSSH: true })
+                }}
+                className={clsx(
+                  'card p-3 text-center transition-press',
+                  trainingBackend === 'remote_ssh'
+                    ? 'border-accent bg-accent-light text-accent-dark'
+                    : 'text-text-secondary'
+                )}
+              >
+                <Server className="w-5 h-5 mx-auto mb-1" />
+                <span className="block font-mono text-xs font-bold uppercase">DGX Spark</span>
+                <span className="block font-mono text-xs mt-1 text-text-muted">Remote SSH</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
                   setTrainingBackend('nemo')
-                  setConfig({ ...config, useNemoGym: true })
+                  setConfig({ ...config, useNemoGym: true, useRemoteSSH: false })
                 }}
                 className={clsx(
                   'card p-3 text-center transition-press',
@@ -369,8 +394,10 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
               <Info className="w-4 h-4 text-accent flex-shrink-0 mt-0.5" />
               <p className="font-mono text-xs text-text-secondary">
                 {trainingBackend === 'local'
-                  ? 'Train locally using your GPU with Unsloth for fast LoRA fine-tuning. Requires CUDA-capable GPU.'
-                  : 'Train using NVIDIA NeMo Microservices for scalable cloud training. Requires NVIDIA_API_KEY.'}
+                  ? 'Train locally using your GPU with Unsloth. Requires CUDA-capable GPU.'
+                  : trainingBackend === 'remote_ssh'
+                    ? 'Train on your DGX Spark via SSH. Requires SSH_REMOTE_* configured in .env.'
+                    : 'Train using NVIDIA NeMo Microservices for scalable cloud training.'}
               </p>
             </div>
           </div>
@@ -406,23 +433,68 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
               Base Model
             </label>
             <select
-              value={config.baseModel}
-              onChange={(e) => setConfig({ ...config, baseModel: e.target.value })}
+              value={showCustomModel ? '__custom__' : config.baseModel}
+              onChange={(e) => {
+                if (e.target.value === '__custom__') {
+                  setShowCustomModel(true)
+                } else {
+                  setShowCustomModel(false)
+                  setConfig({ ...config, baseModel: e.target.value })
+                }
+              }}
               className="input w-full"
             >
-              <optgroup label="Qwen (Recommended)">
+              <optgroup label="Qwen 3.5 (Feb 2026)">
+                <option value="Qwen/Qwen3.5-0.8B">Qwen3.5-0.8B (dense)</option>
+                <option value="Qwen/Qwen3.5-4B">Qwen3.5-4B (dense)</option>
+                <option value="Qwen/Qwen3.5-9B">Qwen3.5-9B (dense)</option>
+                <option value="Qwen/Qwen3.5-27B">Qwen3.5-27B (dense)</option>
+                <option value="Qwen/Qwen3.5-35B-A3B">Qwen3.5-35B-A3B (MoE, ~74GB VRAM)</option>
+              </optgroup>
+              <optgroup label="Qwen 2.5 Coder">
                 <option value="Qwen/Qwen2.5-Coder-1.5B-Instruct">Qwen2.5-Coder-1.5B-Instruct</option>
                 <option value="Qwen/Qwen2.5-Coder-3B-Instruct">Qwen2.5-Coder-3B-Instruct</option>
                 <option value="Qwen/Qwen2.5-Coder-7B-Instruct">Qwen2.5-Coder-7B-Instruct</option>
+                <option value="Qwen/Qwen2.5-Coder-14B-Instruct">Qwen2.5-Coder-14B-Instruct</option>
+                <option value="Qwen/Qwen2.5-Coder-32B-Instruct">Qwen2.5-Coder-32B-Instruct</option>
               </optgroup>
               <optgroup label="Llama">
                 <option value="meta-llama/Llama-3.2-1B-Instruct">Llama-3.2-1B-Instruct</option>
                 <option value="meta-llama/Llama-3.2-3B-Instruct">Llama-3.2-3B-Instruct</option>
+                <option value="meta-llama/Llama-3.1-8B-Instruct">Llama-3.1-8B-Instruct</option>
+              </optgroup>
+              <optgroup label="DeepSeek">
+                <option value="deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct">DeepSeek-Coder-V2-Lite</option>
+                <option value="deepseek-ai/deepseek-coder-6.7b-instruct">DeepSeek-Coder-6.7B</option>
               </optgroup>
               <optgroup label="Other">
                 <option value="mistralai/Mistral-7B-Instruct-v0.3">Mistral-7B-Instruct</option>
+                <option value="google/gemma-2-9b-it">Gemma-2-9B-IT</option>
               </optgroup>
+              <option value="__custom__">Custom model...</option>
             </select>
+
+            {/* Custom model input */}
+            {showCustomModel && (
+              <div className="flex gap-2 mt-2">
+                <input
+                  type="text"
+                  value={customModelInput}
+                  onChange={(e) => {
+                    setCustomModelInput(e.target.value)
+                    setConfig({ ...config, baseModel: e.target.value })
+                  }}
+                  className="input flex-1"
+                  placeholder="org/model-name (HuggingFace ID or Ollama tag)"
+                  autoFocus
+                />
+              </div>
+            )}
+
+            <p className="font-mono text-xs text-text-muted mt-2">
+              Select a HuggingFace model to fine-tune, or enter a custom model ID.
+              {ollamaModels.length > 0 && ' After training, deploy to Ollama for inference on your DGX Spark.'}
+            </p>
           </div>
 
           {/* Dataset Path - only for traces/custom JSONL modes */}

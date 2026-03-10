@@ -15,7 +15,46 @@ from typing import Dict, List, Optional
 CORE_TOOLS: List[Dict] = [
     {
         "name": "import_traces",
-        "description": "Import new Claude Code sessions from the local history directory into the trace store.",
+        "description": "Import data from Claude Code sessions. Can import session traces, subagent conversations, file edits, plans, todos, prompts, environment data, and debug/API traffic metadata.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "sources": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["all", "sessions", "subagents", "edits", "plans", "prompts", "todos", "environments", "debug"],
+                    },
+                    "description": "Which data sources to import. Defaults to ['all'].",
+                },
+                "days": {
+                    "type": "integer",
+                    "description": "Only import data from the last N days. Defaults to 60.",
+                },
+                "project_filter": {
+                    "type": "string",
+                    "description": "Only import from projects matching this substring.",
+                },
+                "dry_run": {
+                    "type": "boolean",
+                    "description": "If true, scan and report what would be imported without actually importing.",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "scan_claude_data",
+        "description": "Scan ~/.claude and show what data is available but not yet imported. Shows counts per source type.",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    {
+        "name": "get_collection_status",
+        "description": "Show current collection stats per source type: total found, already collected, and available to collect.",
         "input_schema": {
             "type": "object",
             "properties": {},

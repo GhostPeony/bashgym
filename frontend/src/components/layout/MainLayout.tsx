@@ -1,9 +1,8 @@
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { MessageSquare } from 'lucide-react'
 import { NavigationBar } from './NavigationBar'
 import { Sidebar } from './Sidebar'
 import { StatusBar } from './StatusBar'
-import { TerminalGrid } from '../terminal/TerminalGrid'
 import { TrainingDashboard } from '../training/TrainingDashboard'
 import { RouterDashboard } from '../router/RouterDashboard'
 import { TraceBrowser } from '../traces/TraceBrowser'
@@ -13,16 +12,40 @@ import { GuardrailsDashboard } from '../guardrails/GuardrailsDashboard'
 import { ProfilerDashboard } from '../profiler/ProfilerDashboard'
 import { ModelBrowser, ModelProfilePage, ModelComparison, ModelTrends } from '../models'
 import { HFDashboard } from '../huggingface'
-import { IntegrationDashboard } from '../integration/IntegrationDashboard'
 import { AchievementsView } from '../achievements/AchievementsView'
-import { OrchestratorDashboard } from '../orchestrator/OrchestratorDashboard'
-import { PipelineDashboard } from '../pipeline/PipelineDashboard'
-import { AgentChat } from '../agent/AgentChat'
 import { HomeScreen, TutorialChecklist, TutorialTooltip } from '../home'
 import { KeyboardShortcutsModal } from '../common/KeyboardShortcutsModal'
 import { useUIStore } from '../../stores'
+import { isElectron, isWeb } from '../../utils/platform'
+
+// Electron-only components — tree-shaken from web builds because isElectron
+// is a build-time constant (VITE_MODE !== 'web' → true in Electron, false in web)
+const TerminalGrid = isElectron
+  ? lazy(() => import('../terminal/TerminalGrid').then(m => ({ default: m.TerminalGrid })))
+  : null
+const AgentChat = isElectron
+  ? lazy(() => import('../agent/AgentChat').then(m => ({ default: m.AgentChat })))
+  : null
+const OrchestratorDashboard = isElectron
+  ? lazy(() => import('../orchestrator/OrchestratorDashboard').then(m => ({ default: m.OrchestratorDashboard })))
+  : null
+const PipelineDashboard = isElectron
+  ? lazy(() => import('../pipeline/PipelineDashboard').then(m => ({ default: m.PipelineDashboard })))
+  : null
+const IntegrationDashboard = isElectron
+  ? lazy(() => import('../integration/IntegrationDashboard').then(m => ({ default: m.IntegrationDashboard })))
+  : null
+
+// Web-only components
+const DownloadPage = isWeb
+  ? lazy(() => import('../download/DownloadPage').then(m => ({ default: m.DownloadPage })))
+  : null
 
 type ModelSubView = 'browser' | 'profile' | 'comparison' | 'trends'
+
+function LazyFallback() {
+  return <div className="flex-1 flex items-center justify-center text-text-muted font-mono text-sm">Loading...</div>
+}
 
 export function MainLayout() {
   const { isSidebarOpen, overlayView, openOverlay, isAgentChatOpen, toggleAgentChat } = useUIStore()
@@ -52,10 +75,21 @@ export function MainLayout() {
             </div>
           )}
 
-          {/* Terminal Grid - Always rendered, persists in background */}
-          <div className={`flex-1 ${showWorkspace ? 'block' : 'hidden'}`}>
-            <TerminalGrid />
-          </div>
+          {/* Terminal Grid - Always rendered, persists in background (Electron only) */}
+          {TerminalGrid && (
+            <div className={`flex-1 ${showWorkspace ? 'block' : 'hidden'}`}>
+              <Suspense fallback={<LazyFallback />}>
+                <TerminalGrid />
+              </Suspense>
+            </div>
+          )}
+
+          {/* Web: show home when workspace is selected (no terminal) */}
+          {!TerminalGrid && showWorkspace && (
+            <div className="flex-1 overflow-auto">
+              <HomeScreen />
+            </div>
+          )}
 
           {/* Dashboard Overlays */}
           {overlayView === 'training' && (
@@ -160,9 +194,11 @@ export function MainLayout() {
             </div>
           )}
 
-          {overlayView === 'integration' && (
+          {overlayView === 'integration' && IntegrationDashboard && (
             <div className="flex-1 overflow-auto">
-              <IntegrationDashboard />
+              <Suspense fallback={<LazyFallback />}>
+                <IntegrationDashboard />
+              </Suspense>
             </div>
           )}
 
@@ -172,15 +208,27 @@ export function MainLayout() {
             </div>
           )}
 
-          {overlayView === 'orchestrator' && (
+          {overlayView === 'orchestrator' && OrchestratorDashboard && (
             <div className="flex-1 overflow-auto">
-              <OrchestratorDashboard />
+              <Suspense fallback={<LazyFallback />}>
+                <OrchestratorDashboard />
+              </Suspense>
             </div>
           )}
 
-          {overlayView === 'pipeline' && (
+          {overlayView === 'pipeline' && PipelineDashboard && (
             <div className="flex-1 overflow-auto">
-              <PipelineDashboard />
+              <Suspense fallback={<LazyFallback />}>
+                <PipelineDashboard />
+              </Suspense>
+            </div>
+          )}
+
+          {overlayView === 'download' && DownloadPage && (
+            <div className="flex-1 overflow-auto">
+              <Suspense fallback={<LazyFallback />}>
+                <DownloadPage />
+              </Suspense>
             </div>
           )}
         </main>
@@ -196,11 +244,15 @@ export function MainLayout() {
       {/* Global Modals */}
       <KeyboardShortcutsModal />
 
-      {/* Agent Chat Panel */}
-      <AgentChat />
+      {/* Agent Chat Panel — Electron only (spawns Claude CLI subprocesses) */}
+      {AgentChat && (
+        <Suspense fallback={null}>
+          <AgentChat />
+        </Suspense>
+      )}
 
-      {/* Floating Agent Button — visible on all pages when chat is closed */}
-      {!isAgentChatOpen && (
+      {/* Floating Agent Button — Electron only */}
+      {AgentChat && !isAgentChatOpen && (
         <button
           onClick={toggleAgentChat}
           className="fixed bottom-6 right-6 z-40 w-12 h-12 border-brutal border-border rounded-full bg-accent text-white shadow-brutal flex items-center justify-center hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all"

@@ -187,7 +187,8 @@ See [Training](#training) for details.
 
 - **Strategies**: SFT, DPO, GRPO, RLVR, Distillation
 - **Acceleration**: Unsloth with QLoRA (4-bit quantization) by default
-- **Compute**: Local GPU or HuggingFace cloud
+- **Providers**: Pluggable inference via Anthropic, NVIDIA NIM, and Ollama with auto-discovery and health monitoring
+- **Compute**: Local GPU, remote SSH (e.g. DGX Spark), or HuggingFace cloud
 - **Output**: LoRA adapter, merged weights (16-bit), GGUF (for Ollama/llama.cpp/LM Studio)
 
 ### Orchestrator
@@ -293,6 +294,10 @@ All training uses QLoRA (4-bit quantization) by default.
 | **Merged weights** | `merged/` | Full 16-bit model, ready for inference |
 | **GGUF** | `exported_gguf/` | Quantized (default `q4_k_m`), for Ollama / llama.cpp / LM Studio / GPT4All |
 
+### Remote SSH Training
+
+Train on a remote machine (e.g. NVIDIA DGX Spark) over SSH. The dashboard uploads the training script, streams logs in real time, and supports pause/resume/cancel. Configure via `SSH_REMOTE_*` environment variables. The dashboard shows connection status and a pre-flight check before each run.
+
 ### Cloud Training
 
 No local GPU? Use HuggingFace Cloud Training (Unsloth Jobs). Multiple GPU tiers available from T4 to H100. Requires HuggingFace Pro subscription.
@@ -313,6 +318,11 @@ Copy `.env.example` to `.env`:
 | `NVIDIA_API_KEY` | No | — | NVIDIA NIM API key (for synthetic data augmentation) |
 | `ROUTING_STRATEGY` | No | `confidence_based` | Model routing strategy |
 | `AUGMENTATION_PROVIDER` | No | `anthropic` | Synthetic data provider: `anthropic` or `nim` |
+| `OLLAMA_ENABLED` | No | `true` | Enable Ollama local inference provider |
+| `OLLAMA_BASE_URL` | No | `http://localhost:11434` | Ollama server URL |
+| `SSH_REMOTE_HOST` | No | — | Remote training host (e.g. DGX Spark IP) |
+| `SSH_REMOTE_USER` | No | — | SSH username for remote training |
+| `SSH_REMOTE_KEY_PATH` | No | `~/.ssh/id_rsa` | Path to SSH private key |
 
 API keys can also be managed through the dashboard at **Settings > API Keys**, which provides secure storage via the Electron keychain.
 

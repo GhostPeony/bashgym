@@ -42,7 +42,7 @@ class PipelineConfig:
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             json.dump(self.to_dict(), f, indent=2)
 
     @classmethod
@@ -50,7 +50,7 @@ class PipelineConfig:
         if not path.exists():
             return cls()
         try:
-            with open(path, "r") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 return cls.from_dict(json.load(f))
         except (json.JSONDecodeError, IOError):
             return cls()

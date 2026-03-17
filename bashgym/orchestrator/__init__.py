@@ -29,6 +29,12 @@ from bashgym.orchestrator.dispatcher import WorkerPool
 from bashgym.orchestrator.worktree import WorktreeManager
 from bashgym.orchestrator.agent import OrchestrationAgent
 from bashgym.orchestrator.synthesizer import ResultSynthesizer, SynthesisReport
+from bashgym.orchestrator.shared_state import (
+    SharedState,
+    ScopedView,
+    StateChange,
+    ConflictInfo,
+)
 
 __all__ = [
     # Provider config
@@ -50,4 +56,9 @@ __all__ = [
     "OrchestrationAgent",
     "ResultSynthesizer",
     "SynthesisReport",
+    # Shared state
+    "SharedState",
+    "ScopedView",
+    "StateChange",
+    "ConflictInfo",
 ]

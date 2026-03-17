@@ -21,8 +21,11 @@ from datetime import datetime, timezone
 from enum import Enum
 import hashlib
 
+from .decision_extractor import Decision
+
 if TYPE_CHECKING:
     from .schema_builder import DataDesignerClient, DataSchema
+    from .trace_processor import ProcessedTrace
 
 
 # Tool schemas following the OpenAI function-calling format.
@@ -846,6 +849,99 @@ Generate {num_variations} variations in JSON format:
                 "failed_trace": str(failed_trace_path)
             }
         )
+
+    def generate_decision_level_dpo_pairs(
+        self,
+        trace: "ProcessedTrace",
+    ) -> List[DPOExample]:
+        """Generate step-level DPO pairs from structured decisions in a trace.
+
+        For each Decision where outcome == "FAILURE" followed by a later
+        successful decision on a similar intent, produce a DPO pair:
+            - rejected = the failed decision's chosen action
+            - chosen   = the next successful action
+
+        This is more fine-grained than whole-trace DPO: the model learns
+        which *individual* steps were wrong and what to do instead.
+
+        Args:
+            trace: A ProcessedTrace that has been through DecisionExtractor.
+
+        Returns:
+            List of DPOExample for step-level preference learning.
+        """
+        if not trace.decisions:
+            return []
+
+        dpo_pairs: List[DPOExample] = []
+
+        for i, decision in enumerate(trace.decisions):
+            if decision.outcome != "FAILURE":
+                continue
+
+            # Search forward for the next successful decision
+            successor: Optional[Decision] = None
+            for j in range(i + 1, len(trace.decisions)):
+                if trace.decisions[j].outcome == "SUCCESS":
+                    successor = trace.decisions[j]
+                    break
+
+            if successor is None:
+                continue
+
+            # Build a contextual prompt from the task + the state at this step
+            context_steps = trace.normalized_steps[:decision.step_index]
+            context_summary = ""
+            if context_steps:
+                # Show the last 3 steps for context
+                recent = context_steps[-3:]
+                context_parts = []
+                for s in recent:
+                    tool = s.get("tool", "unknown")
+                    cmd = s.get("command", "")[:200]
+                    out = s.get("output", "")[:200]
+                    context_parts.append(f"[{tool}] {cmd}\n-> {out}")
+                context_summary = "\n".join(context_parts)
+
+            prompt = f"{self.SYSTEM_PROMPT_TEMPLATE}\n\nUser: {trace.task_prompt}"
+            if context_summary:
+                prompt += f"\n\nRecent context:\n{context_summary}"
+
+            prompt += f"\n\nIntent: {decision.intent}"
+
+            # Build rejected (failed step) and chosen (successful step) responses
+            rejected = self._format_decision_as_response(decision)
+            chosen = self._format_decision_as_response(successor)
+
+            example_id = hashlib.sha256(
+                f"dpo_decision_{trace.trace_id}_{decision.step_index}_{successor.step_index}".encode()
+            ).hexdigest()[:16]
+
+            dpo_pairs.append(DPOExample(
+                example_id=example_id,
+                prompt=prompt,
+                chosen=chosen,
+                rejected=rejected,
+                metadata={
+                    "source_trace": trace.trace_id,
+                    "failed_step_index": decision.step_index,
+                    "success_step_index": successor.step_index,
+                    "failed_intent": decision.intent,
+                    "success_intent": successor.intent,
+                    "decision_level": True,
+                }
+            ))
+
+        return dpo_pairs
+
+    @staticmethod
+    def _format_decision_as_response(decision: Decision) -> str:
+        """Format a Decision as a readable response string for DPO."""
+        parts = []
+        if decision.reasoning:
+            parts.append(f"Reasoning: {decision.reasoning}")
+        parts.append(f"Action: [{decision.tool_used}] {decision.chosen}")
+        return "\n".join(parts)
 
     async def process_trace_directory(
         self,

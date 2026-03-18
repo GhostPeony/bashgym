@@ -22,13 +22,7 @@ pip install -r requirements.txt
 cd frontend && npm install
 
 # Run tests
-pytest test_bashgym.py -v
-
-# Run with a task
-python main.py --task "Write a hello world script"
-
-# Get help
-python main.py --help
+pytest tests/ -v
 ```
 
 ---
@@ -52,36 +46,18 @@ python main.py --help
 | Layer | Files | Purpose |
 |-------|-------|---------|
 | **Arena** | `sandbox.py`, `agent_runner.py` | Docker sandbox execution, Claude CLI wrapper |
-| **Judge** | `verifier.py`, `verify.sh` | Test execution, solution validation |
-| **Factory** | `data_factory.py`, `trace_processor.py`, `example_generator.py` | Training data synthesis from traces |
-| **Gym** | `trainer.py`, `gym_env.py`, `model_router.py` | SFT/DPO/GRPO training, RL environment |
+| **Judge** | `verifier.py`, `semantic_judge.py` | Test execution, LLM-based quality evaluation |
+| **Factory** | `data_factory.py`, `trace_processor.py`, `decision_extractor.py`, `example_generator.py` | Training data synthesis, decision logging |
+| **Gym** | `trainer.py`, `gym_env.py`, `model_router.py`, `training_goal.py`, `prompt_evolver.py` | Training, goal tracking, prompt evolution |
+| **Events** | `events/bus.py`, `events/types.py` | Typed EventBus with WebSocket bridge |
+| **Orchestrator** | `agent.py`, `shared_state.py`, `context_builder.py` | Multi-agent decomposition, shared memory |
 | **Config** | `settings.py` | Centralized configuration |
-| **Hooks** | `post_tool_use.py`, `session_end.py` | Claude Code instrumentation |
 
 ---
 
 ## File Reference
 
 ### Core Modules
-
-#### `main.py` - Pipeline Orchestrator
-Entry point for the system. Handles CLI arguments and orchestrates the full pipeline.
-
-```bash
-# Single task
-python main.py --task "Refactor utils.py"
-
-# Batch processing
-python main.py --batch tasks.jsonl --output results/
-
-# Training
-python main.py --train --dataset data/sft_batch.jsonl --strategy sft
-```
-
-Key classes:
-- `BashGymConfig` - Main configuration dataclass
-- `BashGym` - Main orchestrator class
-- `parse_args()` - CLI argument parser
 
 #### `sandbox.py` - Docker Sandbox Manager
 Manages isolated Docker containers for safe code execution.
@@ -275,29 +251,20 @@ Key coding models available via `NIM_ENDPOINT`:
 
 ## Testing
 
-The test suite in `test_bashgym.py` provides 72 test functions covering all modules.
+Tests are organized under the `tests/` directory.
 
 ```bash
 # Run all tests
-pytest test_bashgym.py -v
+pytest tests/ -v
 
 # Run specific module tests
-pytest test_bashgym.py::TestTrainer -v
+pytest tests/gym/ -v
+pytest tests/api/ -v
+pytest tests/factory/ -v
 
 # With coverage
-pytest test_bashgym.py --cov=. --cov-report=html
+pytest tests/ --cov=bashgym --cov-report=html
 ```
-
-### Test Classes
-
-- `TestSettings` - Configuration loading
-- `TestSandboxManager` - Dangerous command detection
-- `TestVerifier` - Test file discovery
-- `TestTraceProcessor` - Quality scoring, redaction
-- `TestDataFactory` - Training example creation
-- `TestTrainer` - Script generation
-- `TestBashGymEnv` - Environment step/reset
-- `TestModelRouter` - Routing strategies
 
 ---
 
@@ -308,7 +275,7 @@ pytest test_bashgym.py --cov=. --cov-report=html
 1. Add strategy to `TrainingStrategy` enum in `trainer.py`
 2. Implement `train_{strategy}()` method in `Trainer` class
 3. Add script generation in `_generate_{strategy}_script()`
-4. Add tests in `test_bashgym.py`
+4. Add tests in `tests/gym/`
 
 ### Modifying Sandbox Security
 
@@ -331,14 +298,11 @@ Current blocked patterns:
 ## Docker Setup
 
 ```bash
-# Build containers
-docker-compose -f docker/docker-compose.yml build
-
-# Start services
-docker-compose -f docker/docker-compose.yml up -d
+# Build and start services
+docker-compose up -d
 
 # View logs
-docker-compose -f docker/docker-compose.yml logs -f arena
+docker-compose logs -f bashgym-api
 ```
 
 ---
@@ -386,26 +350,30 @@ python -c "from settings import get_settings; get_settings().api.validate()"
 ## Directory Structure
 
 ```
-bashgym/
-├── main.py              # CLI entry point
-├── settings.py          # Configuration
-├── sandbox.py           # Docker sandbox (Arena)
-├── agent_runner.py      # Claude CLI wrapper (Arena)
-├── verifier.py          # Test execution (Judge)
-├── verify.sh            # Verification script (Judge)
-├── data_factory.py      # Training data synthesis (Factory)
-├── trace_processor.py   # Trace processing (Factory)
-├── trainer.py           # Model training (Gym)
-├── gym_env.py           # RL environment (Gym)
-├── model_router.py      # Model routing (Gym)
-├── post_tool_use.py     # Claude hook
-├── session_end.py       # Claude hook
-├── test_bashgym.py     # Test suite
-├── requirements.txt     # Core dependencies
-├── requirements-training.txt  # ML dependencies
-├── pyproject.toml       # Package config
-├── .env.example         # Environment template
-└── docker/              # Docker configuration
+bashgym/                 # Core Python package
+├── api/                 # FastAPI routes, schemas, WebSocket
+├── arena/               # Docker sandbox, Claude CLI wrapper
+├── events/              # Typed EventBus (bus, types, WebSocket bridge)
+├── judge/               # Verification, semantic judge, evaluator
+├── factory/             # Training data synthesis, decision extractor
+├── gym/                 # Training loop, autoresearch, training goals, prompt evolver
+├── providers/           # Inference providers (Anthropic, NIM, Ollama)
+├── trace_capture/       # Import traces from Claude, Gemini, Copilot
+├── orchestrator/        # Task decomposition, shared state, context builder
+├── pipeline/            # Pipeline config and threshold monitoring
+├── integrations/        # HuggingFace, NeMo
+├── agent/               # Memory, tools, skills
+└── config.py            # Settings management
+frontend/                # React + Vite + Electron UI
+tests/                   # Test suite
+assistant/               # Peony assistant gateway
+run_backend.py           # Backend entry point (uvicorn)
+dev.ps1 / dev.sh         # Dev environment launchers
+requirements.txt         # Core dependencies
+requirements-training.txt # ML dependencies
+Dockerfile.api           # API container
+Dockerfile.web           # Full-stack container
+docker-compose.yml       # Production stack
     ├── Dockerfile.arena
     ├── Dockerfile.sandbox
     └── docker-compose.yml
@@ -581,15 +549,9 @@ python run_backend.py
 cd frontend && npm run dev
 ```
 
-**Production-style backend** (no hot reload):
-```bash
-python start_api.py            # Port 8003, no reload
-```
-
 **Kill bashgym processes** (Windows):
 ```powershell
-.\kill_api.ps1                 # Kill all uvicorn processes
-.\find_port.ps1                # Find what's on port 8003
+Get-Process -Name "python" | Where-Object { $_.CommandLine -like "*uvicorn*" } | Stop-Process
 ```
 
 ### Known Issues

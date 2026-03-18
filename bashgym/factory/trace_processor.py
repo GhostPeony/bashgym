@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from .safe_synthesizer import SafeSynthesizer
 
 from .quality_calculator import calculate_quality_breakdown
+from .decision_extractor import DecisionExtractor, Decision
 
 
 @dataclass
@@ -91,14 +92,15 @@ class TraceQualityMetrics:
 @dataclass
 class ProcessedTrace:
     """A processed and normalized trace."""
-    
+
     trace_id: str
     original_path: Path
     task_prompt: str
     normalized_steps: List[Dict[str, Any]]
     quality_metrics: TraceQualityMetrics
     metadata: Dict[str, Any] = field(default_factory=dict)
-    
+    decisions: List[Decision] = field(default_factory=list)
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return {
@@ -111,7 +113,9 @@ class ProcessedTrace:
                 "total_steps": self.quality_metrics.total_steps,
                 "verification_passed": self.quality_metrics.verification_passed
             },
-            "metadata": self.metadata
+            "metadata": self.metadata,
+            "decision_count": len(self.decisions),
+            "decisions": [d.to_dict() for d in self.decisions],
         }
 
 
@@ -226,15 +230,22 @@ class TraceProcessor:
             if "bashbros_extensions" in raw_trace:
                 processed_metadata["bashbros_extensions"] = raw_trace["bashbros_extensions"]
 
+        # Extract structured decisions from normalized steps
+        extractor = DecisionExtractor()
+        decisions = extractor.extract(
+            normalized_steps, raw_trace.get("cognitive_data")
+        )
+
         return ProcessedTrace(
             trace_id=trace_id,
             original_path=trace_path,
             task_prompt=task_prompt,
             normalized_steps=normalized_steps,
             quality_metrics=quality_metrics,
-            metadata=processed_metadata
+            metadata=processed_metadata,
+            decisions=decisions,
         )
-    
+
     def _normalize_steps(self, raw_steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Normalize trace steps.
@@ -357,13 +368,20 @@ class TraceProcessor:
             if "bashbros_extensions" in raw_trace:
                 processed_metadata["bashbros_extensions"] = raw_trace["bashbros_extensions"]
 
+        # Extract structured decisions from normalized steps
+        extractor = DecisionExtractor()
+        decisions = extractor.extract(
+            normalized_steps, raw_trace.get("cognitive_data")
+        )
+
         return ProcessedTrace(
             trace_id=trace_id,
             original_path=trace_path,
             task_prompt=task_prompt,
             normalized_steps=normalized_steps,
             quality_metrics=quality_metrics,
-            metadata=processed_metadata
+            metadata=processed_metadata,
+            decisions=decisions,
         )
 
     async def _normalize_steps_async(

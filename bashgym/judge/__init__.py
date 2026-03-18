@@ -5,12 +5,14 @@ Includes:
 - EvaluatorClient: NeMo Evaluator integration
 - NemoGuard: Guardrails and safety checks
 - BenchmarkRunner: Standard code benchmarks
+- SemanticJudge: LLM-based quality evaluation
 """
 
 from bashgym.judge.verifier import Verifier, VerificationConfig, VerificationResult, VerificationStatus
 from bashgym.judge.evaluator import EvaluatorClient, EvaluatorConfig, EvaluationResult, JudgeScore
 from bashgym.judge.guardrails import NemoGuard, GuardrailsConfig, GuardrailResult, CheckResult
 from bashgym.judge.benchmarks import BenchmarkRunner, BenchmarkConfig, BenchmarkResult, BenchmarkType
+from bashgym.judge.semantic_judge import SemanticJudge, SemanticVerdict
 
 __all__ = [
     # Verifier
@@ -33,4 +35,7 @@ __all__ = [
     "BenchmarkConfig",
     "BenchmarkResult",
     "BenchmarkType",
+    # Semantic Judge
+    "SemanticJudge",
+    "SemanticVerdict",
 ]

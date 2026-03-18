@@ -6,15 +6,24 @@ Provides real-time updates for:
 - Task status changes
 - Trace events
 - Router statistics
+
+Events flow through the typed EventBus (bashgym.events). The ConnectionManager
+registers as a global handler that bridges every typed event into a WSMessage
+and broadcasts it to all connected WebSocket clients.
 """
 
 import asyncio
+import dataclasses
 import json
+import logging
 from typing import Dict, Set, Any, Optional, Callable, List
 from datetime import datetime
 from fastapi import WebSocket, WebSocketDisconnect
 from dataclasses import dataclass, asdict
 from enum import Enum
+
+from bashgym.events.bus import event_bus
+from bashgym.events import types as ev
 
 
 class MessageType(str, Enum):
@@ -207,6 +216,57 @@ class ConnectionManager:
 # Global connection manager
 manager = ConnectionManager()
 
+# Module-level logger
+_logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# EventBus → WebSocket Bridge
+# =============================================================================
+
+def _serialize_event_payload(event: Any) -> Dict[str, Any]:
+    """Convert a typed event dataclass to a JSON-safe dict payload.
+
+    Strips the `event_type` and `timestamp` fields from the payload since
+    they are carried on the WSMessage envelope instead.
+    """
+    raw = dataclasses.asdict(event)
+    # Remove envelope fields -- they live on WSMessage
+    raw.pop("event_type", None)
+    raw.pop("timestamp", None)
+    # Convert any remaining datetime values to ISO strings
+    for key, value in raw.items():
+        if isinstance(value, datetime):
+            raw[key] = value.isoformat()
+    return raw
+
+
+async def _eventbus_ws_bridge(event: Any) -> None:
+    """Global EventBus handler that bridges typed events to WebSocket.
+
+    Takes any typed event emitted on the bus, wraps it in a WSMessage using
+    the event's ``event_type`` string, and broadcasts to all connected clients.
+    This preserves full backward compatibility with the existing wire format.
+    """
+    if not dataclasses.is_dataclass(event):
+        return
+
+    event_type_str = getattr(event, "event_type", None)
+    if event_type_str is None:
+        return
+
+    payload = _serialize_event_payload(event)
+    message = WSMessage(type=event_type_str, payload=payload)
+
+    try:
+        await manager.broadcast(message)
+    except Exception:
+        _logger.exception("Failed to broadcast event %s via WebSocket", event_type_str)
+
+
+# Register the bridge as a global handler so every event reaches WebSocket
+event_bus.on_all(_eventbus_ws_bridge)
+
 
 class TrainingProgressCallback:
     """
@@ -230,21 +290,17 @@ class TrainingProgressCallback:
 
     async def on_progress(self, metrics: Dict[str, Any]) -> None:
         """Called on each training step/epoch."""
-        message = WSMessage(
-            type=MessageType.TRAINING_PROGRESS,
-            payload={
-                "run_id": self.run_id,
-                "epoch": metrics.get("epoch"),
-                "total_epochs": metrics.get("total_epochs"),
-                "step": metrics.get("step", 0),
-                "total_steps": metrics.get("total_steps", 0),
-                "loss": metrics.get("loss"),
-                "learning_rate": metrics.get("learning_rate"),
-                "grad_norm": metrics.get("grad_norm", 0),
-                "eta": metrics.get("eta")
-            }
-        )
-        await manager.broadcast(message)
+        await event_bus.emit_async(ev.TrainingProgress(
+            run_id=self.run_id,
+            epoch=metrics.get("epoch"),
+            total_epochs=metrics.get("total_epochs"),
+            step=metrics.get("step", 0),
+            total_steps=metrics.get("total_steps", 0),
+            loss=metrics.get("loss"),
+            learning_rate=metrics.get("learning_rate"),
+            grad_norm=metrics.get("grad_norm", 0),
+            eta=metrics.get("eta"),
+        ))
 
     def on_progress_sync(self, metrics: Dict[str, Any]) -> None:
         """Synchronous version for non-async training loops."""
@@ -294,52 +350,22 @@ class TrainingProgressCallback:
 
 async def broadcast_training_complete(run_id: str, metrics: Dict[str, Any]) -> None:
     """Broadcast training completion."""
-    message = WSMessage(
-        type=MessageType.TRAINING_COMPLETE,
-        payload={
-            "run_id": run_id,
-            "metrics": metrics
-        }
-    )
-    await manager.broadcast(message)
+    await event_bus.emit_async(ev.TrainingComplete(run_id=run_id, metrics=metrics))
 
 
 async def broadcast_training_failed(run_id: str, error: str) -> None:
     """Broadcast training failure."""
-    message = WSMessage(
-        type=MessageType.TRAINING_FAILED,
-        payload={
-            "run_id": run_id,
-            "error": error
-        }
-    )
-    await manager.broadcast(message)
+    await event_bus.emit_async(ev.TrainingFailed(run_id=run_id, error=error))
 
 
 async def broadcast_training_log(run_id: str, log_line: str, level: str = "info") -> None:
     """Broadcast a training log line."""
-    message = WSMessage(
-        type=MessageType.TRAINING_LOG,
-        payload={
-            "run_id": run_id,
-            "message": log_line,
-            "level": level
-        }
-    )
-    await manager.broadcast(message)
+    await event_bus.emit_async(ev.TrainingLog(run_id=run_id, message=log_line, level=level))
 
 
 async def broadcast_task_status(task_id: str, status: str, result: Any = None) -> None:
     """Broadcast task status update."""
-    message = WSMessage(
-        type=MessageType.TASK_STATUS,
-        payload={
-            "task_id": task_id,
-            "status": status,
-            "result": result
-        }
-    )
-    await manager.broadcast(message)
+    await event_bus.emit_async(ev.TaskStatus(task_id=task_id, status=status, result=result))
 
 
 async def broadcast_trace_event(
@@ -348,22 +374,31 @@ async def broadcast_trace_event(
     trace_data: Dict[str, Any] = None
 ) -> None:
     """Broadcast trace-related events."""
-    message = WSMessage(
-        type=event_type,
-        payload={
-            "trace_id": trace_id,
-            "data": trace_data or {}
-        }
-    )
-    await manager.broadcast(message)
+    # Map MessageType to the appropriate typed event
+    data = trace_data or {}
+    type_str = event_type.value if isinstance(event_type, MessageType) else str(event_type)
+    if type_str == MessageType.TRACE_ADDED.value:
+        await event_bus.emit_async(ev.TraceAdded(trace_id=trace_id, data=data))
+    elif type_str == MessageType.TRACE_PROMOTED.value:
+        await event_bus.emit_async(ev.TracePromoted(trace_id=trace_id, data=data))
+    elif type_str == MessageType.TRACE_DEMOTED.value:
+        await event_bus.emit_async(ev.TraceDemoted(trace_id=trace_id, data=data))
+    else:
+        # Fallback: direct broadcast for unknown trace event types
+        message = WSMessage(type=type_str, payload={"trace_id": trace_id, "data": data})
+        await manager.broadcast(message)
 
 
 async def broadcast_router_stats(stats: Dict[str, Any]) -> None:
-    """Broadcast router statistics."""
-    message = WSMessage(
-        type=MessageType.ROUTER_STATS,
-        payload=stats
-    )
+    """Broadcast router statistics.
+
+    The original wire format puts the stats dict directly as the payload
+    (not nested under a key), so we broadcast the WSMessage directly to
+    preserve backward compatibility, then emit the typed event for any
+    internal EventBus subscribers (the bridge skips re-broadcasting).
+    """
+    # Direct broadcast preserving wire format (payload = flat stats dict)
+    message = WSMessage(type=MessageType.ROUTER_STATS, payload=stats)
     await manager.broadcast(message)
 
 
@@ -373,15 +408,9 @@ async def broadcast_verification_result(
     details: Dict[str, Any] = None
 ) -> None:
     """Broadcast verification results."""
-    message = WSMessage(
-        type=MessageType.VERIFICATION_RESULT,
-        payload={
-            "task_id": task_id,
-            "passed": passed,
-            "details": details or {}
-        }
+    await event_bus.emit_async(
+        ev.VerificationResult(task_id=task_id, passed=passed, details=details or {})
     )
-    await manager.broadcast(message)
 
 
 async def broadcast_guardrail_event(
@@ -394,18 +423,27 @@ async def broadcast_guardrail_event(
     details: Dict[str, Any] = None
 ) -> None:
     """Broadcast guardrail events (blocked, warned, PII redacted)."""
-    message = WSMessage(
-        type=event_type,
-        payload={
-            "check_type": check_type,
-            "location": location,
-            "action": action,
-            "confidence": confidence,
-            "content_preview": content_preview[:100] if content_preview else None,
-            "details": details or {}
-        }
-    )
-    await manager.broadcast(message)
+    type_str = event_type.value if isinstance(event_type, MessageType) else str(event_type)
+    preview = content_preview[:100] if content_preview else None
+
+    if type_str == MessageType.GUARDRAIL_BLOCKED.value:
+        await event_bus.emit_async(ev.GuardrailBlocked(
+            check_type=check_type, location=location, action=action,
+            confidence=confidence, content_preview=preview, details=details or {},
+        ))
+    elif type_str == MessageType.GUARDRAIL_WARN.value:
+        await event_bus.emit_async(ev.GuardrailWarn(
+            check_type=check_type, location=location, action=action,
+            confidence=confidence, content_preview=preview, details=details or {},
+        ))
+    else:
+        # Fallback for unknown guardrail types
+        message = WSMessage(type=type_str, payload={
+            "check_type": check_type, "location": location, "action": action,
+            "confidence": confidence, "content_preview": preview,
+            "details": details or {},
+        })
+        await manager.broadcast(message)
 
 
 async def broadcast_guardrail_blocked(
@@ -453,16 +491,10 @@ async def broadcast_pii_redacted(
     details: Dict[str, Any] = None
 ) -> None:
     """Broadcast that PII was redacted from content."""
-    message = WSMessage(
-        type=MessageType.GUARDRAIL_PII_REDACTED,
-        payload={
-            "location": location,
-            "redaction_count": redaction_count,
-            "pii_types": pii_types or [],
-            "details": details or {}
-        }
-    )
-    await manager.broadcast(message)
+    await event_bus.emit_async(ev.GuardrailPiiRedacted(
+        location=location, redaction_count=redaction_count,
+        pii_types=pii_types or [], details=details or {},
+    ))
 
 
 # =============================================================================
@@ -471,92 +503,53 @@ async def broadcast_pii_redacted(
 
 async def broadcast_hf_job_started(job_id: str, hardware: str, repo_id: str = None) -> None:
     """Broadcast when a HuggingFace job starts."""
-    message = WSMessage(
-        type=MessageType.HF_JOB_STARTED,
-        payload={
-            "job_id": job_id,
-            "hardware": hardware,
-            "repo_id": repo_id,
-        }
+    await event_bus.emit_async(
+        ev.HFJobStarted(job_id=job_id, hardware=hardware, repo_id=repo_id)
     )
-    await manager.broadcast(message)
 
 
 async def broadcast_hf_job_log(job_id: str, log_line: str, level: str = "info") -> None:
     """Broadcast a HuggingFace job log line."""
-    message = WSMessage(
-        type=MessageType.HF_JOB_LOG,
-        payload={
-            "job_id": job_id,
-            "log": log_line,
-            "level": level,
-        }
+    await event_bus.emit_async(
+        ev.HFJobLog(job_id=job_id, log=log_line, level=level)
     )
-    await manager.broadcast(message)
 
 
 async def broadcast_hf_job_completed(job_id: str, model_repo: str = None, metrics: Dict[str, Any] = None) -> None:
     """Broadcast when a HuggingFace job completes successfully."""
-    message = WSMessage(
-        type=MessageType.HF_JOB_COMPLETED,
-        payload={
-            "job_id": job_id,
-            "model_repo": model_repo,
-            "metrics": metrics or {},
-        }
+    await event_bus.emit_async(
+        ev.HFJobCompleted(job_id=job_id, model_repo=model_repo, metrics=metrics or {})
     )
-    await manager.broadcast(message)
 
 
 async def broadcast_hf_job_failed(job_id: str, error: str, logs: str = None) -> None:
     """Broadcast when a HuggingFace job fails."""
-    message = WSMessage(
-        type=MessageType.HF_JOB_FAILED,
-        payload={
-            "job_id": job_id,
-            "error": error,
-            "logs": logs,
-        }
+    await event_bus.emit_async(
+        ev.HFJobFailed(job_id=job_id, error=error, logs=logs)
     )
-    await manager.broadcast(message)
 
 
 async def broadcast_hf_job_metrics(
     job_id: str, metrics: Dict[str, Any]
 ) -> None:
     """Broadcast real-time training metrics from a HuggingFace cloud job."""
-    message = WSMessage(
-        type=MessageType.HF_JOB_METRICS,
-        payload={
-            "job_id": job_id,
-            "metrics": metrics,
-        }
+    await event_bus.emit_async(
+        ev.HFJobMetrics(job_id=job_id, metrics=metrics)
     )
-    await manager.broadcast(message)
 
 
 async def broadcast_hf_space_ready(space_name: str, url: str) -> None:
     """Broadcast when a HuggingFace Space is ready."""
-    message = WSMessage(
-        type=MessageType.HF_SPACE_READY,
-        payload={
-            "space_name": space_name,
-            "url": url,
-        }
+    await event_bus.emit_async(
+        ev.HFSpaceReady(space_name=space_name, url=url)
     )
-    await manager.broadcast(message)
 
 
 async def broadcast_hf_space_error(space_name: str, error: str) -> None:
     """Broadcast when a HuggingFace Space encounters an error."""
-    message = WSMessage(
-        type=MessageType.HF_SPACE_ERROR,
-        payload={
-            "space_name": space_name,
-            "error": error,
-        }
+    await event_bus.emit_async(
+        ev.HFSpaceError(space_name=space_name, error=error)
     )
-    await manager.broadcast(message)
 
 
 # =============================================================================
@@ -571,17 +564,10 @@ async def broadcast_integration_trace_received(
     verified: bool = False
 ) -> None:
     """Broadcast when a new trace is received from bashbros."""
-    message = WSMessage(
-        type=MessageType.INTEGRATION_TRACE_RECEIVED,
-        payload={
-            "filename": filename,
-            "task": task[:100] if task else "",
-            "source": source,
-            "steps": steps,
-            "verified": verified,
-        }
-    )
-    await manager.broadcast(message)
+    await event_bus.emit_async(ev.IntegrationTraceReceived(
+        filename=filename, task=task[:100] if task else "",
+        source=source, steps=steps, verified=verified,
+    ))
 
 
 async def broadcast_integration_trace_processed(
@@ -591,16 +577,9 @@ async def broadcast_integration_trace_processed(
     error: str = None
 ) -> None:
     """Broadcast when a trace has been processed."""
-    message = WSMessage(
-        type=MessageType.INTEGRATION_TRACE_PROCESSED,
-        payload={
-            "filename": filename,
-            "success": success,
-            "trace_id": trace_id,
-            "error": error,
-        }
-    )
-    await manager.broadcast(message)
+    await event_bus.emit_async(ev.IntegrationTraceProcessed(
+        filename=filename, success=success, trace_id=trace_id, error=error,
+    ))
 
 
 async def broadcast_integration_model_exported(
@@ -611,17 +590,11 @@ async def broadcast_integration_model_exported(
     quality_avg: float = 0.0
 ) -> None:
     """Broadcast when a model has been exported to GGUF for bashbros sidekick."""
-    message = WSMessage(
-        type=MessageType.INTEGRATION_MODEL_EXPORTED,
-        payload={
-            "version": version,
-            "gguf_path": gguf_path,
-            "ollama_registered": ollama_registered,
-            "traces_used": traces_used,
-            "quality_avg": quality_avg,
-        }
-    )
-    await manager.broadcast(message)
+    await event_bus.emit_async(ev.IntegrationModelExported(
+        version=version, gguf_path=gguf_path,
+        ollama_registered=ollama_registered,
+        traces_used=traces_used, quality_avg=quality_avg,
+    ))
 
 
 async def broadcast_integration_model_rollback(
@@ -629,32 +602,19 @@ async def broadcast_integration_model_rollback(
     previous_version: str = None
 ) -> None:
     """Broadcast when model has been rolled back to a previous version."""
-    message = WSMessage(
-        type=MessageType.INTEGRATION_MODEL_ROLLBACK,
-        payload={
-            "version": version,
-            "previous_version": previous_version,
-        }
-    )
-    await manager.broadcast(message)
+    await event_bus.emit_async(ev.IntegrationModelRollback(
+        version=version, previous_version=previous_version,
+    ))
 
 
 async def broadcast_integration_linked() -> None:
     """Broadcast when bashbros integration is linked."""
-    message = WSMessage(
-        type=MessageType.INTEGRATION_LINKED,
-        payload={"linked": True}
-    )
-    await manager.broadcast(message)
+    await event_bus.emit_async(ev.IntegrationLinked())
 
 
 async def broadcast_integration_unlinked() -> None:
     """Broadcast when bashbros integration is unlinked."""
-    message = WSMessage(
-        type=MessageType.INTEGRATION_UNLINKED,
-        payload={"linked": False}
-    )
-    await manager.broadcast(message)
+    await event_bus.emit_async(ev.IntegrationUnlinked())
 
 
 async def broadcast_integration_training_triggered(
@@ -663,15 +623,9 @@ async def broadcast_integration_training_triggered(
     run_id: str = None
 ) -> None:
     """Broadcast when auto-training is triggered by bashbros integration."""
-    message = WSMessage(
-        type=MessageType.INTEGRATION_TRAINING_TRIGGERED,
-        payload={
-            "gold_traces": gold_traces,
-            "threshold": threshold,
-            "run_id": run_id,
-        }
-    )
-    await manager.broadcast(message)
+    await event_bus.emit_async(ev.IntegrationTrainingTriggered(
+        gold_traces=gold_traces, threshold=threshold, run_id=run_id,
+    ))
 
 
 # =============================================================================
@@ -682,16 +636,10 @@ async def broadcast_orchestration_task_started(
     job_id: str, task_id: str, task_title: str, worker_count: int = 0
 ) -> None:
     """Broadcast when an orchestration task worker is spawned."""
-    message = WSMessage(
-        type=MessageType.ORCHESTRATION_TASK_STARTED,
-        payload={
-            "job_id": job_id,
-            "task_id": task_id,
-            "task_title": task_title,
-            "active_workers": worker_count,
-        }
-    )
-    await manager.broadcast(message)
+    await event_bus.emit_async(ev.TaskStarted(
+        job_id=job_id, task_id=task_id,
+        task_title=task_title, active_workers=worker_count,
+    ))
 
 
 async def broadcast_orchestration_task_completed(
@@ -699,50 +647,35 @@ async def broadcast_orchestration_task_completed(
     duration_seconds: float, newly_unblocked: int = 0
 ) -> None:
     """Broadcast when an orchestration task completes successfully."""
-    message = WSMessage(
-        type=MessageType.ORCHESTRATION_TASK_COMPLETED,
-        payload={
-            "job_id": job_id,
-            "task_id": task_id,
-            "cost_usd": round(cost_usd, 4),
-            "duration_seconds": round(duration_seconds, 1),
-            "newly_unblocked": newly_unblocked,
-        }
-    )
-    await manager.broadcast(message)
+    await event_bus.emit_async(ev.TaskCompleted(
+        job_id=job_id, task_id=task_id,
+        cost_usd=round(cost_usd, 4),
+        duration_seconds=round(duration_seconds, 1),
+        newly_unblocked=newly_unblocked,
+    ))
 
 
 async def broadcast_orchestration_task_failed(
     job_id: str, task_id: str, error: str, will_retry: bool = False
 ) -> None:
     """Broadcast when an orchestration task fails."""
-    message = WSMessage(
-        type=MessageType.ORCHESTRATION_TASK_FAILED,
-        payload={
-            "job_id": job_id,
-            "task_id": task_id,
-            "error": error[:500],
-            "will_retry": will_retry,
-        }
-    )
-    await manager.broadcast(message)
+    await event_bus.emit_async(ev.TaskFailed(
+        job_id=job_id, task_id=task_id,
+        error=error[:500], will_retry=will_retry,
+    ))
 
 
 async def broadcast_orchestration_budget_update(
     job_id: str, spent_usd: float, budget_usd: float, task_count: int = 0
 ) -> None:
     """Broadcast budget status update during orchestration."""
-    message = WSMessage(
-        type=MessageType.ORCHESTRATION_BUDGET_UPDATE,
-        payload={
-            "job_id": job_id,
-            "spent_usd": round(spent_usd, 4),
-            "budget_usd": round(budget_usd, 2),
-            "remaining_usd": round(budget_usd - spent_usd, 4),
-            "tasks_completed": task_count,
-        }
-    )
-    await manager.broadcast(message)
+    await event_bus.emit_async(ev.BudgetUpdate(
+        job_id=job_id,
+        spent_usd=round(spent_usd, 4),
+        budget_usd=round(budget_usd, 2),
+        remaining_usd=round(budget_usd - spent_usd, 4),
+        tasks_completed=task_count,
+    ))
 
 
 async def broadcast_orchestration_complete(
@@ -751,27 +684,25 @@ async def broadcast_orchestration_complete(
     merge_successes: int = 0, merge_failures: int = 0,
 ) -> None:
     """Broadcast when entire orchestration job finishes."""
-    message = WSMessage(
-        type=MessageType.ORCHESTRATION_COMPLETE,
-        payload={
-            "job_id": job_id,
-            "completed": completed,
-            "failed": failed,
-            "total_cost_usd": round(total_cost, 4),
-            "total_time_seconds": round(total_time, 1),
-            "merge_successes": merge_successes,
-            "merge_failures": merge_failures,
-        }
-    )
-    await manager.broadcast(message)
+    await event_bus.emit_async(ev.OrchestrationComplete(
+        job_id=job_id, completed=completed, failed=failed,
+        total_cost_usd=round(total_cost, 4),
+        total_time_seconds=round(total_time, 1),
+        merge_successes=merge_successes, merge_failures=merge_failures,
+    ))
 
 
 async def broadcast_pipeline_event(
     event_type: MessageType, payload: Dict[str, Any]
 ) -> None:
-    """Broadcast a pipeline event to all connected clients."""
+    """Broadcast a pipeline event to all connected clients.
+
+    This is a generic pipeline broadcast. Since the payload is freeform,
+    we dispatch directly via WSMessage rather than through a typed event.
+    Callers that know the specific event type should use the EventBus directly.
+    """
     message = WSMessage(
-        type=event_type,
+        type=event_type.value if isinstance(event_type, MessageType) else str(event_type),
         payload=payload,
     )
     await manager.broadcast(message)

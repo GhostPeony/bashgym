@@ -39,6 +39,13 @@ from bashgym.orchestrator.prompts import (
     RETRY_ANALYSIS_SYSTEM, RETRY_ANALYSIS_TEMPLATE,
 )
 from bashgym.orchestrator.context_builder import WorkerContextBuilder
+from bashgym.orchestrator.shared_state import SharedState
+
+# Optional fast-loop prompt evolution
+try:
+    from bashgym.gym.prompt_evolver import PromptEvolver
+except ImportError:
+    PromptEvolver = None  # type: ignore[misc,assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +79,7 @@ class OrchestrationAgent:
         use_worktrees: bool = True,
         job_id: Optional[str] = None,
         model_router=None,
+        prompt_evolver: Optional["PromptEvolver"] = None,
         on_task_started: Optional[Callable[[TaskNode], Awaitable[None]]] = None,
         on_task_completed: Optional[Callable[[TaskNode, WorkerResult], Awaitable[None]]] = None,
         on_task_failed: Optional[Callable[[TaskNode, WorkerResult], Awaitable[None]]] = None,
@@ -98,6 +106,9 @@ class OrchestrationAgent:
             model_router: Optional ModelRouter for student model routing.
                          When set, LOW priority tasks are routed through
                          the router's confidence-based strategy.
+            prompt_evolver: Optional PromptEvolver for fast-loop prompt
+                          mutation. When set with a best_variant, evolved
+                          prompt patches are applied to worker identity layers.
             on_task_started: Callback when a task starts
             on_task_completed: Callback when a task completes
             on_task_failed: Callback when a task fails
@@ -107,6 +118,7 @@ class OrchestrationAgent:
         self.use_worktrees = use_worktrees
         self.job_id = job_id or ""
         self.model_router = model_router
+        self.prompt_evolver = prompt_evolver
 
         if repo_path and use_worktrees:
             self.worktrees = WorktreeManager(repo_path)
@@ -115,6 +127,7 @@ class OrchestrationAgent:
 
         self.dag: Optional[TaskDAG] = None
         self.context_builder: Optional[WorkerContextBuilder] = None
+        self.shared_state: SharedState = SharedState()
         self._spec_title: str = ""
 
         # Budget tracking
@@ -222,6 +235,9 @@ class OrchestrationAgent:
                if self._budget_limit_usd else "")
         )
 
+        # Detect shared-state write-key conflicts between parallel tasks
+        self._detect_state_conflicts(dag)
+
         while not dag.is_complete():
             # Budget check before spawning more
             if self._budget_exceeded:
@@ -280,6 +296,14 @@ class OrchestrationAgent:
                     f"Task {result.task_id} completed. "
                     f"{len(newly_ready)} tasks unblocked."
                 )
+
+                # Poll completed worker's shared state contributions
+                completed_task = dag.nodes.get(result.task_id)
+                if completed_task and completed_task.worktree_path:
+                    await self.shared_state.poll_worktree_state(
+                        str(completed_task.worktree_path),
+                        result.task_id,
+                    )
 
                 # Append completion update to running workers' CLAUDE.md
                 if self.context_builder:
@@ -382,10 +406,23 @@ class OrchestrationAgent:
         # Write CLAUDE.md to worktree for dynamic context
         if self.context_builder and task.worktree_path:
             try:
-                self.context_builder.write_claude_md(task, task.worktree_path)
+                self.context_builder.write_claude_md(
+                    task,
+                    task.worktree_path,
+                    shared_state=self.shared_state,
+                )
             except Exception as e:
                 logger.warning(
                     f"Failed to write CLAUDE.md for {task.id}: {e}"
+                )
+
+        # Write current shared state snapshot so the worker can read it
+        if task.worktree_path:
+            try:
+                await self.shared_state.write_state_file(str(task.worktree_path))
+            except Exception as e:
+                logger.warning(
+                    f"Failed to write shared state for {task.id}: {e}"
                 )
 
         # Build worker config — cap per-worker budget to remaining job budget
@@ -409,6 +446,23 @@ class OrchestrationAgent:
             system_prompt = self.context_builder.build_system_prompt(task)
         else:
             system_prompt = WORKER_SYSTEM_PROMPT
+
+        # Fast-loop: apply evolved prompt patches if available
+        if self.prompt_evolver and self.prompt_evolver.best_variant:
+            try:
+                system_prompt = self.prompt_evolver.apply_to_prompt(
+                    system_prompt, self.prompt_evolver.best_variant
+                )
+                logger.debug(
+                    "Applied evolved prompt variant %s to task %s",
+                    self.prompt_evolver.best_variant.variant_id[:8],
+                    task.id,
+                )
+            except Exception as e:
+                logger.warning(
+                    "Failed to apply evolved prompt to task %s: %s",
+                    task.id, e,
+                )
 
         config = WorkerConfig(
             model=worker_model,
@@ -512,6 +566,43 @@ class OrchestrationAgent:
             previous_output=result.output[:1000],
             original_prompt=original_prompt,
         )
+
+    # =========================================================================
+    # Shared State Conflict Detection
+    # =========================================================================
+
+    def _detect_state_conflicts(self, dag: TaskDAG) -> None:
+        """Detect and log overlapping write keys between parallel tasks.
+
+        Builds a write-key map from each task's `provides` contracts
+        and warns about keys that multiple parallel tasks claim to write.
+        """
+        task_write_keys: dict[str, set[str]] = {}
+
+        for task_id, task in dag.nodes.items():
+            keys: set[str] = set()
+            for contract in task.provides:
+                # Use file + exports as write keys
+                file = contract.get("file", "")
+                exports = contract.get("exports", [])
+                if file:
+                    keys.add(file)
+                for export in exports:
+                    keys.add(f"{file}:{export}" if file else export)
+            if keys:
+                task_write_keys[task_id] = keys
+
+        if not task_write_keys:
+            return
+
+        conflicts = self.shared_state.detect_conflicts(task_write_keys)
+        if conflicts:
+            logger.warning(
+                f"Shared state conflicts detected: "
+                f"{len(conflicts)} overlapping write keys"
+            )
+            for conflict in conflicts:
+                logger.warning(f"  {conflict.description}")
 
     # =========================================================================
     # Student Model Routing

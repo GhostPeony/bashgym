@@ -49,6 +49,11 @@ class PreflightResult:
     python_version: Optional[str] = None
     disk_free_gb: Optional[float] = None
     error: Optional[str] = None
+    # Enhanced device info
+    hostname: Optional[str] = None
+    os_info: Optional[str] = None
+    cuda_version: Optional[str] = None
+    gpus: Optional[List[Dict[str, Any]]] = None
 
 
 class RemoteTrainer:
@@ -66,6 +71,7 @@ class RemoteTrainer:
             username=self.config.username,
             client_keys=[str(key_path)],
             known_hosts=None,
+            connect_timeout=10,
         )
 
     async def preflight_check(self) -> PreflightResult:
@@ -77,13 +83,13 @@ class RemoteTrainer:
 
         async with conn:
             # Check Python
-            result = await conn.run("python3 --version", check=False)
+            result = await conn.run(self._venv_cmd("python3 --version"), check=False)
             if result.exit_status != 0:
                 return PreflightResult(ok=False, error="python3 not found on remote")
             python_version = result.stdout.strip()
 
             # Check Unsloth
-            result = await conn.run('python3 -c "import unsloth"', check=False)
+            result = await conn.run(self._venv_cmd('python3 -c "import unsloth"'), check=False)
             if result.exit_status != 0:
                 return PreflightResult(
                     ok=False,
@@ -103,11 +109,63 @@ class RemoteTrainer:
                 except (ValueError, AttributeError):
                     pass
 
-            return PreflightResult(
+            result = PreflightResult(
                 ok=True,
                 python_version=python_version,
                 disk_free_gb=disk_free_gb,
             )
+
+            # Hostname
+            try:
+                r = await conn.run('hostname', timeout=5)
+                result.hostname = r.stdout.strip()
+            except Exception:
+                pass
+
+            # OS info
+            try:
+                r = await conn.run('uname -sr', timeout=5)
+                result.os_info = r.stdout.strip()
+            except Exception:
+                pass
+
+            # GPU info
+            try:
+                r = await conn.run(
+                    'nvidia-smi --query-gpu=name,memory.total,memory.free'
+                    ' --format=csv,noheader,nounits',
+                    timeout=10,
+                )
+                gpus = []
+                for row in r.stdout.strip().splitlines():
+                    parts = [p.strip() for p in row.split(',')]
+                    if len(parts) == 3:
+                        gpus.append({
+                            "name": parts[0],
+                            "vram_total_gb": round(float(parts[1]) / 1024, 1),
+                            "vram_free_gb": round(float(parts[2]) / 1024, 1),
+                        })
+                if gpus:
+                    result.gpus = gpus
+            except Exception:
+                pass
+
+            # CUDA version
+            try:
+                import re
+                r = await conn.run('nvidia-smi | head -3', timeout=10)
+                m = re.search(r'CUDA Version:\s*([\d.]+)', r.stdout)
+                if m:
+                    result.cuda_version = m.group(1)
+            except Exception:
+                pass
+
+            return result
+
+    def _venv_cmd(self, cmd: str) -> str:
+        """Wrap a command with venv activation."""
+        venv = f"{self.config.remote_work_dir}/venv"
+        return f"source {venv}/bin/activate 2>/dev/null; {cmd}"
 
     def _remote_run_dir(self, run_id: str) -> str:
         """Get the remote directory for a training run."""
@@ -133,7 +191,7 @@ class RemoteTrainer:
         remote_dir = self._remote_run_dir(run_id)
         cmd = (
             f"cd {remote_dir} && "
-            f"nohup python3 train_sft.py > training.log 2>&1 & echo $!"
+            f"nohup bash -c '{self._venv_cmd('python3 train_sft.py')}' > training.log 2>&1 & echo $!"
         )
         result = await conn.run(cmd, check=False)
         pid = int(result.stdout.strip())

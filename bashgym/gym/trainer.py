@@ -1285,10 +1285,13 @@ print("DPO training complete!")
         Strategy-aware: generates the correct script based on run.strategy.
         """
         from bashgym.gym.remote_trainer import RemoteTrainer, SSHConfig
-        from bashgym.config import get_settings
 
-        settings = get_settings()
-        ssh_config = SSHConfig.from_settings(settings.ssh)
+        # Use pre-resolved ssh_config from route handler, or fall back to env vars
+        ssh_config = getattr(self, 'ssh_config', None)
+        if ssh_config is None:
+            from bashgym.config import get_settings
+            settings = get_settings()
+            ssh_config = SSHConfig.from_settings(settings.ssh)
 
         trainer = RemoteTrainer(ssh_config)
 

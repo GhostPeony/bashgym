@@ -70,6 +70,7 @@ from bashgym.api.agent_routes import router as agent_router
 from bashgym.api.pipeline_routes import router as pipeline_router, start_pipeline_watcher, stop_pipeline_watcher
 from bashgym.api.settings_routes import router as settings_router
 from bashgym.api.autoresearch_routes import router as autoresearch_router
+from bashgym.api.device_routes import router as device_router, get_registry as get_device_registry
 from bashgym.factory.quality_calculator import calculate_quality_breakdown
 
 
@@ -255,6 +256,15 @@ def create_app() -> FastAPI:
                         logger.info(f"Auto-selected Student model: {best.id} ({best.parameter_size})")
             except Exception as e:
                 logger.warning(f"Model discovery failed: {e}")
+
+        # Auto-import SSH device from .env on first run
+        try:
+            registry = get_device_registry()
+            imported = await registry.auto_import_from_env()
+            if imported:
+                logger.info(f"Auto-imported SSH device from .env: {imported.name} ({imported.host})")
+        except Exception as e:
+            logger.warning(f"Failed to auto-import SSH device: {e}")
 
         # Recover orphaned training runs from disk
         try:
@@ -627,11 +637,42 @@ def create_app() -> FastAPI:
 
     @app.get("/api/ssh/preflight", tags=["SSH"])
     async def ssh_preflight():
-        """Run pre-flight checks on the remote SSH training target."""
+        """Run pre-flight checks on the default remote training device."""
+        # Try device registry first
+        try:
+            registry = get_device_registry()
+            default_device = await registry.get_default()
+            if default_device:
+                from bashgym.gym.remote_trainer import RemoteTrainer, SSHConfig
+                ssh_config = SSHConfig(
+                    host=default_device.host,
+                    port=default_device.port,
+                    username=default_device.username,
+                    key_path=default_device.key_path,
+                    remote_work_dir=default_device.work_dir,
+                )
+                trainer = RemoteTrainer(ssh_config)
+                result = await trainer.preflight_check()
+                return {
+                    "ok": result.ok,
+                    "python_version": result.python_version,
+                    "disk_free_gb": result.disk_free_gb,
+                    "error": result.error,
+                    "host": default_device.host,
+                    "username": default_device.username,
+                    "hostname": getattr(result, 'hostname', None),
+                    "os_info": getattr(result, 'os_info', None),
+                    "cuda_version": getattr(result, 'cuda_version', None),
+                    "gpus": getattr(result, 'gpus', None),
+                }
+        except Exception as e:
+            logger.warning(f"Device registry preflight failed, falling back to env: {e}")
+
+        # Fallback to env vars
         from bashgym.config import get_settings as _get_settings
         _s = _get_settings()
         if not _s.ssh.enabled:
-            return {"ok": False, "error": "SSH remote training not enabled. Set SSH_REMOTE_ENABLED=true"}
+            return {"ok": False, "error": "No SSH devices configured and SSH_REMOTE_ENABLED not set."}
 
         from bashgym.gym.remote_trainer import RemoteTrainer, SSHConfig
         config = SSHConfig.from_settings(_s.ssh)
@@ -903,6 +944,31 @@ def create_app() -> FastAPI:
                 )
 
                 app.state.trainer.config = config
+
+                # Resolve device for remote SSH training
+                if config.use_remote_ssh:
+                    ssh_config = None
+                    device_id_to_use = getattr(request, 'device_id', None)
+                    try:
+                        registry = get_device_registry()
+                        if device_id_to_use:
+                            device = await registry.get_device(device_id_to_use)
+                        else:
+                            device = await registry.get_default()
+                        if device:
+                            from bashgym.gym.remote_trainer import SSHConfig
+                            ssh_config = SSHConfig(
+                                host=device.host,
+                                port=device.port,
+                                username=device.username,
+                                key_path=device.key_path,
+                                remote_work_dir=device.work_dir,
+                            )
+                    except Exception as e:
+                        logger.warning(f"Device resolution failed, falling back to env: {e}")
+                    app.state.trainer.ssh_config = ssh_config
+                else:
+                    app.state.trainer.ssh_config = None
 
                 # Determine output dir for state persistence
                 output_dir = str(Path(config.output_dir) / run_id)
@@ -4115,6 +4181,9 @@ def create_app() -> FastAPI:
 
     # Include AutoResearch routes (hyperparameter search)
     app.include_router(autoresearch_router)
+
+    # Include Device routes (SSH device registry)
+    app.include_router(device_router)
 
     # Experimental routes — desktop only (hidden in web mode)
     if not _settings.is_web_mode:

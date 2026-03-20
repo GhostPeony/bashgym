@@ -884,7 +884,10 @@ if __name__ == "__main__":
         self.active_runs[run_id] = run
 
         try:
-            self._train_with_distillation(run, callback, log_callback, pid_callback)
+            if self.config.use_remote_ssh:
+                self._train_with_remote_ssh(run, callback, log_callback, pid_callback)
+            else:
+                self._train_with_distillation(run, callback, log_callback, pid_callback)
             run.status = "completed"
             run.completed_at = datetime.now(timezone.utc).isoformat()
 
@@ -1277,7 +1280,10 @@ print("DPO training complete!")
 '''
 
     def _train_with_remote_ssh(self, run, callback, log_callback, pid_callback):
-        """Execute training on remote machine via SSH."""
+        """Execute training on remote machine via SSH.
+
+        Strategy-aware: generates the correct script based on run.strategy.
+        """
         from bashgym.gym.remote_trainer import RemoteTrainer, SSHConfig
         from bashgym.config import get_settings
 
@@ -1286,10 +1292,23 @@ print("DPO training complete!")
 
         trainer = RemoteTrainer(ssh_config)
 
-        # Generate script locally (same as local training)
-        script_content = self._generate_unsloth_sft_script(run)
-        script_path = run.output_path / "train_sft.py"
+        # Generate the correct script based on strategy
         run.output_path.mkdir(parents=True, exist_ok=True)
+
+        if run.strategy == TrainingStrategy.DISTILLATION:
+            script_content = self._generate_distillation_script(run)
+            script_path = run.output_path / "train_distillation.py"
+        elif run.strategy == TrainingStrategy.DPO:
+            script_content = self._generate_unsloth_dpo_script(run)
+            script_path = run.output_path / "train_dpo.py"
+        elif run.strategy in (TrainingStrategy.GRPO, TrainingStrategy.RLVR):
+            grpo_trainer = GRPOTrainer(self.config)
+            script_content = grpo_trainer._generate_grpo_script(run)
+            script_path = run.output_path / "train_grpo.py"
+        else:
+            script_content = self._generate_unsloth_sft_script(run)
+            script_path = run.output_path / "train_sft.py"
+
         script_path.write_text(script_content)
 
         def _pid_cb(remote_pid):
@@ -1630,7 +1649,10 @@ class GRPOTrainer(Trainer):
         self.active_runs[run_id] = run
 
         try:
-            self._run_grpo_loop(run, verifier_fn, callback, log_callback, pid_callback)
+            if self.config.use_remote_ssh:
+                self._train_with_remote_ssh(run, callback, log_callback, pid_callback)
+            else:
+                self._run_grpo_loop(run, verifier_fn, callback, log_callback, pid_callback)
             run.status = "completed"
             run.completed_at = datetime.now(timezone.utc).isoformat()
 

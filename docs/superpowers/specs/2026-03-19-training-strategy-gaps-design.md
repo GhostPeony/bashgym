@@ -265,8 +265,8 @@ def train_rlvr(
     This is GRPO with verification-based reward signals.
     Dataset must include 'tests' field with pytest-compatible test code.
     """
-    # Use a config copy to avoid thread-safety issues with shared config
-    grpo_config = copy.copy(self.config)
+    # Use a deep copy to avoid thread-safety issues with shared config (mutable list fields)
+    grpo_config = copy.deepcopy(self.config)
     grpo_config.grpo_reward_mode = "verification"
 
     grpo_trainer = GRPOTrainer(grpo_config)

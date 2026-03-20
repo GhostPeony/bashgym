@@ -157,6 +157,7 @@ class TrainingRequest(BaseModel):
     # Backend selection
     use_nemo_gym: bool = Field(False, description="Use NVIDIA NeMo cloud training instead of local")
     use_remote_ssh: bool = Field(False, description="Execute training on remote DGX Spark via SSH")
+    device_id: Optional[str] = Field(None, description="Target device ID for remote SSH training (uses default if omitted)")
     selected_repos: Optional[List[str]] = Field(None, description="Repos to include (None or empty = all repos)")
     # Data source selection
     data_source: DataSource = Field(DataSource.TRACES, description="Source of training data")

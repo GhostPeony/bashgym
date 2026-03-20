@@ -850,7 +850,9 @@ if __name__ == "__main__":
         self,
         dataset_path: Path,
         run_id: Optional[str] = None,
-        callback: Optional[Callable[[Dict[str, Any]], None]] = None
+        callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        log_callback: Optional[Callable[[str], None]] = None,
+        pid_callback: Optional[Callable[[int, "TrainingRun"], None]] = None,
     ) -> TrainingRun:
         """
         Run Knowledge Distillation training.
@@ -881,7 +883,7 @@ if __name__ == "__main__":
         self.active_runs[run_id] = run
 
         try:
-            self._train_with_distillation(run, callback)
+            self._train_with_distillation(run, callback, log_callback, pid_callback)
             run.status = "completed"
             run.completed_at = datetime.now(timezone.utc).isoformat()
 
@@ -903,44 +905,149 @@ if __name__ == "__main__":
     def _train_with_distillation(
         self,
         run: TrainingRun,
-        callback: Optional[Callable[[Dict[str, Any]], None]] = None
+        callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        log_callback: Optional[Callable[[str], None]] = None,
+        pid_callback: Optional[Callable[[int, "TrainingRun"], None]] = None,
     ) -> None:
-        """Train using knowledge distillation."""
-        # Generate distillation training script
+        """Train using knowledge distillation (offline — teacher traces as training data)."""
+        import re
+
         script_content = self._generate_distillation_script(run)
         script_path = run.output_path / "train_distillation.py"
         run.output_path.mkdir(parents=True, exist_ok=True)
         script_path.write_text(script_content)
 
-        print(f"Starting Knowledge Distillation run: {run.run_id}")
-        print(f"Teacher: {self.config.teacher_model}")
-        print(f"Student: {self.config.base_model}")
-        print(f"Dataset: {run.dataset_path}")
-        print(f"Output: {run.output_path}")
+        python_exe = self._get_training_python()
+        logger.info(f"Starting Distillation run: {run.run_id}")
+        logger.info(f"Teacher: {self.config.teacher_model}")
+        logger.info(f"Student: {self.config.base_model}")
+        logger.info(f"Dataset: {run.dataset_path}")
+        logger.info(f"Output: {run.output_path}")
+        logger.info(f"Script: {script_path}")
+        logger.info(f"Python: {python_exe}")
 
-        # Simulate training
-        if callback:
-            for epoch in range(self.config.num_epochs):
-                callback({
-                    "epoch": epoch + 1,
-                    "total_epochs": self.config.num_epochs,
-                    "student_loss": 2.0 - (epoch * 0.25),
-                    "distillation_loss": 1.5 - (epoch * 0.2),
-                    "kl_divergence": 0.8 - (epoch * 0.15)
-                })
+        try:
+            process = subprocess.Popen(
+                [python_exe, str(script_path)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                cwd=str(Path.cwd())
+            )
 
-        run.metrics = {
-            "final_student_loss": 1.25,
-            "final_distillation_loss": 0.9,
-            "final_kl_divergence": 0.35,
-            "epochs_completed": self.config.num_epochs,
-            "teacher_model": self.config.teacher_model
-        }
+            run.pid = process.pid
+            logger.info(f"Distillation subprocess started with PID {process.pid}")
 
-        print(f"Distillation completed. Model saved to: {run.output_path}")
+            if pid_callback:
+                try:
+                    pid_callback(process.pid, run)
+                except Exception as e:
+                    logger.warning(f"pid_callback error: {e}")
+
+            last_loss = None
+            last_epoch = 0
+            last_step = 0
+            last_grad_norm = None
+            samples_processed = 0
+            start_time = datetime.now(timezone.utc)
+            estimated_total_steps = 1000
+
+            for line in process.stdout:
+                line = line.strip()
+                if line:
+                    logger.info(f"[Distillation] {line}")
+
+                    if log_callback:
+                        try:
+                            log_callback(line)
+                        except Exception as e:
+                            logger.warning(f"Log callback error: {e}")
+
+                    loss_match = re.search(r"'loss':\s*([\d.]+)", line)
+                    epoch_match = re.search(r"'epoch':\s*([\d.]+)", line)
+                    step_match = re.search(r"'step':\s*(\d+)", line)
+                    grad_norm_match = re.search(r"'grad_norm':\s*([\d.]+)", line)
+                    progress_match = re.search(r"(\d+)%\|[^|]*\|\s*(\d+)/(\d+)", line)
+                    unsloth_steps_match = re.search(r"Total steps\s*=\s*(\d+)", line)
+
+                    if loss_match:
+                        last_loss = float(loss_match.group(1))
+                    if epoch_match:
+                        last_epoch = int(float(epoch_match.group(1)))
+                    if step_match:
+                        last_step = int(step_match.group(1))
+                        samples_processed = last_step * self.config.batch_size
+                    if grad_norm_match:
+                        last_grad_norm = float(grad_norm_match.group(1))
+                    if unsloth_steps_match:
+                        estimated_total_steps = int(unsloth_steps_match.group(1))
+                    if progress_match:
+                        last_step = int(progress_match.group(2))
+                        estimated_total_steps = int(progress_match.group(3))
+                        samples_processed = last_step * self.config.batch_size
+
+                    eta = None
+                    if last_step > 0 and estimated_total_steps > 0:
+                        elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
+                        steps_remaining = estimated_total_steps - last_step
+                        if steps_remaining > 0:
+                            time_per_step = elapsed / last_step
+                            eta_seconds = steps_remaining * time_per_step
+                            if eta_seconds < 60:
+                                eta = f"{int(eta_seconds)}s"
+                            elif eta_seconds < 3600:
+                                eta = f"{int(eta_seconds / 60)}m"
+                            else:
+                                eta = f"{int(eta_seconds / 3600)}h {int((eta_seconds % 3600) / 60)}m"
+
+                    if callback and (progress_match or loss_match):
+                        callback({
+                            "epoch": last_epoch,
+                            "total_epochs": self.config.num_epochs,
+                            "step": last_step,
+                            "total_steps": estimated_total_steps,
+                            "loss": last_loss,
+                            "learning_rate": self.config.learning_rate,
+                            "grad_norm": last_grad_norm,
+                            "eta": eta,
+                            "samples_processed": samples_processed,
+                        })
+
+                    if loss_match and last_loss is not None and last_step > 0:
+                        run.add_loss_point(
+                            step=last_step,
+                            loss=last_loss,
+                            epoch=last_epoch,
+                            learning_rate=self.config.learning_rate,
+                        )
+
+            return_code = process.wait()
+
+            if return_code != 0:
+                raise RuntimeError(f"Distillation script exited with code {return_code}")
+
+            run.metrics = {
+                "final_loss": last_loss or 0.0,
+                "epochs_completed": self.config.num_epochs,
+                "samples_processed": samples_processed,
+                "teacher_model": self.config.teacher_model,
+            }
+
+            logger.info(f"Distillation completed. Model saved to: {run.output_path}")
+
+        except FileNotFoundError as e:
+            raise RuntimeError(f"Python interpreter not found: {e}")
+        except Exception as e:
+            logger.error(f"Distillation training failed: {e}")
+            raise
 
     def _generate_distillation_script(self, run: TrainingRun) -> str:
         """Generate Knowledge Distillation training script."""
+        # Use forward slashes for cross-platform compatibility
+        dataset_path = str(run.dataset_path).replace("\\", "/")
+        output_path = str(run.output_path).replace("\\", "/")
+
         return f'''#!/usr/bin/env python3
 """
 Auto-generated Knowledge Distillation Script for BashGym
@@ -987,7 +1094,7 @@ student_model = FastLanguageModel.get_peft_model(
 )
 
 # Load dataset (should contain prompts and optionally teacher outputs)
-dataset = load_dataset("json", data_files="{run.dataset_path}", split="train")
+dataset = load_dataset("json", data_files="{dataset_path}", split="train")
 
 def distillation_loss(student_logits, teacher_logits, labels, alpha=ALPHA, temperature=TEMPERATURE):
     """
@@ -1008,7 +1115,7 @@ def distillation_loss(student_logits, teacher_logits, labels, alpha=ALPHA, tempe
 
 # Training arguments
 training_args = TrainingArguments(
-    output_dir="{run.output_path}",
+    output_dir="{output_path}",
     per_device_train_batch_size={self.config.batch_size},
     gradient_accumulation_steps={self.config.gradient_accumulation_steps},
     warmup_ratio={self.config.warmup_ratio},
@@ -1045,18 +1152,18 @@ trainer.train()
 
 # Save final model
 print("Saving distilled model...")
-student_model.save_pretrained("{run.output_path}/final")
-tokenizer.save_pretrained("{run.output_path}/final")
+student_model.save_pretrained("{output_path}/final")
+tokenizer.save_pretrained("{output_path}/final")
 
 # Save LoRA adapters separately
 student_model.save_pretrained_merged(
-    "{run.output_path}/merged",
+    "{output_path}/merged",
     tokenizer,
     save_method="merged_16bit",
 )
 
 print("Knowledge distillation complete!")
-print(f"Student model saved to: {run.output_path}/final")
+print(f"Student model saved to: {output_path}/final")
 '''
 
     def _generate_unsloth_dpo_script(self, run: TrainingRun) -> str:

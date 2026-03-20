@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from enum import Enum
 import subprocess
 import shutil
+import copy
 
 # Model profile integration
 try:
@@ -1041,6 +1042,35 @@ if __name__ == "__main__":
         except Exception as e:
             logger.error(f"Distillation training failed: {e}")
             raise
+
+    def train_rlvr(
+        self,
+        dataset_path: Path,
+        run_id: Optional[str] = None,
+        callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        log_callback: Optional[Callable[[str], None]] = None,
+        pid_callback: Optional[Callable[[int, "TrainingRun"], None]] = None,
+    ) -> TrainingRun:
+        """
+        Run RL with Verifiable Rewards.
+
+        This is GRPO with verification-based reward signals.
+        Dataset must include 'tests' field with pytest-compatible test code.
+        """
+        grpo_config = copy.deepcopy(self.config)
+        grpo_config.grpo_reward_mode = "verification"
+
+        grpo_trainer = GRPOTrainer(grpo_config)
+        run = grpo_trainer.train_grpo(
+            dataset_path=dataset_path,
+            verifier_fn=lambda p, r: 0.0,
+            run_id=run_id,
+            callback=callback,
+            log_callback=log_callback,
+            pid_callback=pid_callback,
+        )
+        run.strategy = TrainingStrategy.RLVR
+        return run
 
     def _generate_distillation_script(self, run: TrainingRun) -> str:
         """Generate Knowledge Distillation training script."""

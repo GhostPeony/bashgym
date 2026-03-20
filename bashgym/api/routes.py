@@ -69,6 +69,7 @@ from bashgym.api.orchestrator_routes import router as orchestrator_router
 from bashgym.api.agent_routes import router as agent_router
 from bashgym.api.pipeline_routes import router as pipeline_router, start_pipeline_watcher, stop_pipeline_watcher
 from bashgym.api.settings_routes import router as settings_router
+from bashgym.api.autoresearch_routes import router as autoresearch_router
 from bashgym.factory.quality_calculator import calculate_quality_breakdown
 
 
@@ -111,6 +112,10 @@ def create_app() -> FastAPI:
     app.state.evaluation_jobs = {}  # Evaluation job storage
     app.state.training_monitor = OrphanedTrainingMonitor()  # Orphaned process monitor
     app.state.provider_registry = None
+    app.state.autoresearcher = None  # AutoResearch hyperparameter search
+    app.state.trace_researcher = None  # Trace Research data curation search
+    from bashgym.api.trace_cache import TraceIndexCache
+    app.state.trace_cache = TraceIndexCache()
 
     @app.on_event("startup")
     async def startup():
@@ -168,7 +173,7 @@ def create_app() -> FastAPI:
 
         # Initialize components lazily
         try:
-            from bashgym.gym.trainer import Trainer, TrainerConfig
+            from bashgym.gym.trainer import Trainer, TrainerConfig, GRPOTrainer
             from bashgym.gym.router import ModelRouter, RouterConfig
             from bashgym.judge.verifier import Verifier
             from bashgym.factory.trace_processor import TraceProcessor
@@ -289,6 +294,46 @@ def create_app() -> FastAPI:
                             update_run_state(state.output_dir, status="failed")
         except Exception as e:
             logger.error(f"Error recovering orphaned training runs: {e}")
+
+        # Build trace metadata index cache
+        try:
+            from bashgym.config import get_settings as _gs, get_bashgym_dir
+            _data_dir = Path(_gs().data.data_dir)
+            _tier_dirs = [
+                (_data_dir / "gold_traces", TraceStatus.GOLD),
+                (_data_dir / "silver_traces", TraceStatus.SILVER),
+                (_data_dir / "bronze_traces", TraceStatus.BRONZE),
+                (_data_dir / "failed_traces", TraceStatus.FAILED),
+            ]
+            _global_traces = get_bashgym_dir() / "traces"
+            _project_traces = _data_dir / "traces"
+            _pending_dirs = []
+            if _global_traces.exists():
+                _pending_dirs.append(_global_traces)
+            if _project_traces.exists() and _project_traces.resolve() != _global_traces.resolve():
+                _pending_dirs.append(_project_traces)
+
+            def _parse_pending_for_cache(trace_file, data):
+                if isinstance(data, dict) and "trace" in data:
+                    if not data.get("trace"):
+                        return None
+                    return _parse_imported_trace_file(trace_file, data)
+                elif isinstance(data, list) and len(data) > 0:
+                    return _parse_raw_trace_file(trace_file, data)
+                return None
+
+            app.state.trace_cache.build_index(
+                tier_dirs=_tier_dirs,
+                pending_dirs=_pending_dirs,
+                parse_tiered_fn=_parse_trace_file,
+                parse_pending_fn=_parse_pending_for_cache,
+            )
+            # Store dir config for refresh calls
+            app.state._trace_tier_dirs = _tier_dirs
+            app.state._trace_pending_dirs = _pending_dirs
+            app.state._trace_parse_pending = _parse_pending_for_cache
+        except Exception as e:
+            logger.error(f"Failed to build trace index: {e}")
 
     @app.on_event("shutdown")
     async def shutdown():
@@ -826,17 +871,34 @@ def create_app() -> FastAPI:
                 # Update trainer config
                 config = TrainerConfig(
                     base_model=request.base_model or "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+                    model_type=request.model_type or "qwen",
                     strategy=TS(request.strategy.value),
                     num_epochs=request.num_epochs,
                     batch_size=request.batch_size,
                     learning_rate=request.learning_rate,
+                    warmup_ratio=request.warmup_ratio,
+                    gradient_accumulation_steps=request.gradient_accumulation_steps,
                     max_seq_length=request.max_seq_length,
+                    save_steps=request.save_steps,
+                    # LoRA
                     use_lora=request.use_lora,
                     lora_r=request.lora_rank or 16,
                     lora_alpha=request.lora_alpha or 32,
+                    lora_dropout=request.lora_dropout,
+                    load_in_4bit=request.load_in_4bit,
+                    # Strategy-specific
+                    dpo_beta=request.dpo_beta,
+                    grpo_num_generations=request.grpo_num_generations,
+                    grpo_temperature=request.grpo_temperature,
+                    grpo_reward_mode=getattr(request, 'grpo_reward_mode', 'syntax'),
+                    # Knowledge Distillation
+                    teacher_model=request.teacher_model or "claude-sonnet-4-20250514",
+                    teacher_temperature=request.teacher_temperature,
+                    distillation_alpha=request.distillation_alpha,
+                    # Export & backend
                     auto_export_gguf=request.auto_export_gguf,
                     gguf_quantization=request.gguf_quantization,
-                    use_nemo_gym=request.use_nemo_gym,  # Use NeMo cloud training
+                    use_nemo_gym=request.use_nemo_gym,
                     use_remote_ssh=request.use_remote_ssh,
                 )
 
@@ -875,31 +937,34 @@ def create_app() -> FastAPI:
                         run_id=run_id,
                         callback=callback.on_progress_sync
                     )
-                else:
-                    # GRPO training (use dedicated GRPO trainer)
-                    logger.info("Running GRPO training...")
-                    run = app.state.trainer.train_grpo(
+                elif request.strategy == TrainingStrategy.DISTILLATION:
+                    run = app.state.trainer.train_distillation(
                         dataset_path=dataset_path,
                         run_id=run_id,
-                        callback=callback.on_progress_sync
-                    ) if hasattr(app.state.trainer, 'train_grpo') else None
-
-                    if run is None:
-                        # Fallback simulation for GRPO
-                        logger.warning("GRPO trainer not available, running simulation")
-                        for epoch in range(request.num_epochs):
-                            await callback.on_progress({
-                                "epoch": epoch + 1,
-                                "total_epochs": request.num_epochs,
-                                "step": (epoch + 1) * 50,
-                                "total_steps": request.num_epochs * 50,
-                                "loss": 2.5 - (epoch * 0.3),
-                                "learning_rate": request.learning_rate,
-                                "grad_norm": 0.5 - (epoch * 0.05),
-                                "eta": f"{(request.num_epochs - epoch - 1) * 2}m",
-                                "simulation": True
-                            })
-                            await asyncio.sleep(1)
+                        callback=callback.on_progress_sync,
+                        log_callback=callback.on_log_sync,
+                        pid_callback=_on_pid,
+                    )
+                elif request.strategy.value == "grpo":
+                    grpo_trainer = GRPOTrainer(app.state.trainer.config)
+                    run = grpo_trainer.train_grpo(
+                        dataset_path=dataset_path,
+                        verifier_fn=lambda p, r: 0.0,
+                        run_id=run_id,
+                        callback=callback.on_progress_sync,
+                        log_callback=callback.on_log_sync,
+                        pid_callback=_on_pid,
+                    )
+                elif request.strategy.value == "rlvr":
+                    run = app.state.trainer.train_rlvr(
+                        dataset_path=dataset_path,
+                        run_id=run_id,
+                        callback=callback.on_progress_sync,
+                        log_callback=callback.on_log_sync,
+                        pid_callback=_on_pid,
+                    )
+                else:
+                    raise ValueError(f"Unknown training strategy: {request.strategy}")
 
                 app.state.training_runs[run_id]["status"] = TrainingStatus.COMPLETED
                 app.state.training_runs[run_id]["completed_at"] = datetime.utcnow().isoformat()
@@ -1147,156 +1212,27 @@ def create_app() -> FastAPI:
         limit: int = 50,
         offset: int = 0
     ):
-        """List traces with pagination.
+        """List traces with pagination (served from in-memory cache)."""
+        cache = app.state.trace_cache
 
-        Args:
-            status: Filter by trace status (gold/failed/pending)
-            repo: Filter by repository name (supports partial matching)
-            source_tool: Filter by source tool (claude_code, gemini_cli, copilot_cli, opencode, codex)
-            limit: Maximum number of traces to return per page
-            offset: Number of traces to skip (for pagination)
-        """
-        from bashgym.config import get_settings
-        settings = get_settings()
-        data_dir = Path(settings.data.data_dir)
+        if not cache.initialized:
+            raise HTTPException(status_code=503, detail="Trace index still building")
 
-        print(f"[DEBUG] list_traces called - data_dir: {data_dir}")
+        # Incremental refresh picks up new/deleted files
+        cache.refresh(
+            tier_dirs=app.state._trace_tier_dirs,
+            pending_dirs=app.state._trace_pending_dirs,
+            parse_tiered_fn=_parse_trace_file,
+            parse_pending_fn=app.state._trace_parse_pending,
+        )
 
-        traces = []
-
-        # Load tiered traces (gold/silver/bronze) and failed
-        # Tier directories map to TraceStatus
-        tier_dirs = [
-            (data_dir / "gold_traces", TraceStatus.GOLD),
-            (data_dir / "silver_traces", TraceStatus.SILVER),
-            (data_dir / "bronze_traces", TraceStatus.BRONZE),
-            (data_dir / "failed_traces", TraceStatus.FAILED),
-        ]
-
-        for tier_dir, tier_status in tier_dirs:
-            if tier_dir.exists():
-                for trace_file in tier_dir.glob("*.json"):
-                    try:
-                        with open(trace_file, encoding='utf-8') as f:
-                            data = json.load(f)
-
-                        # Apply repo filter
-                        if repo and not _matches_repo(data, repo):
-                            continue
-
-                        # Apply source_tool filter
-                        if source_tool and data.get("source_tool", "claude_code") != source_tool:
-                            continue
-
-                        trace_info = _parse_trace_file(trace_file, data, tier_status)
-                        if status is None or status == tier_status:
-                            traces.append(trace_info)
-                    except Exception:
-                        continue
-
-        # Load pending traces (raw session traces and imported traces)
-        # Check BOTH global ~/.bashgym/traces/ AND project data/traces/
-        from bashgym.config import get_bashgym_dir
-        global_traces_dir = get_bashgym_dir() / "traces"
-        project_traces_dir = data_dir / "traces"
-
-        pending_dirs = []
-        if global_traces_dir.exists():
-            pending_dirs.append(global_traces_dir)
-        if project_traces_dir.exists() and project_traces_dir.resolve() != global_traces_dir.resolve():
-            pending_dirs.append(project_traces_dir)
-
-        print(f"[DEBUG] Checking pending dirs: {pending_dirs}")
-
-        seen_files = set()  # Track by filename to avoid duplicates
-        for pending_dir in pending_dirs:
-            # Include both session_*.json and imported_*.json files
-            from bashgym.trace_capture.core import glob_pending_traces
-            session_files = glob_pending_traces(pending_dir)
-            print(f"[DEBUG] Found {len(session_files)} trace files in {pending_dir}")
-            for trace_file in session_files:
-                # Skip if we've already seen this file (by name)
-                if trace_file.name in seen_files:
-                    continue
-                seen_files.add(trace_file.name)
-                print(f"[DEBUG] Processing: {trace_file}")
-                try:
-                    from bashgym.trace_capture.core import load_trace_file
-                    data = load_trace_file(trace_file)
-
-                    # Handle both raw trace format (list) and imported TraceSession format (dict with trace key)
-                    if isinstance(data, dict) and "trace" in data:
-                        # Imported TraceSession format
-                        trace_steps = data.get("trace", [])
-                        print(f"[DEBUG] Loaded imported trace with {len(trace_steps)} steps")
-                        if not trace_steps:
-                            continue
-
-                        # Apply repo filter
-                        if repo and not _matches_repo(data, repo):
-                            continue
-
-                        # Apply source_tool filter
-                        if source_tool and data.get("source_tool", "unknown") != source_tool:
-                            continue
-
-                        trace_info = _parse_imported_trace_file(trace_file, data)
-                        if status is None or status == TraceStatus.PENDING:
-                            traces.append(trace_info)
-
-                    elif isinstance(data, list):
-                        # Raw session trace format (array of steps)
-                        print(f"[DEBUG] Loaded raw trace with {len(data)} entries")
-                        if len(data) == 0:
-                            continue
-
-                        # Apply repo filter
-                        if repo:
-                            repo_match = False
-                            for step in data:
-                                step_repo = step.get("repo", {})
-                                if step_repo and repo.lower() in step_repo.get("name", "").lower():
-                                    repo_match = True
-                                    break
-                            if not repo_match:
-                                continue
-
-                        # Apply source_tool filter (raw traces are from Claude Code)
-                        if source_tool and source_tool != "claude_code":
-                            continue
-
-                        trace_info = _parse_raw_trace_file(trace_file, data)
-                        if status is None or status == TraceStatus.PENDING:
-                            traces.append(trace_info)
-                    else:
-                        print(f"[DEBUG] Skipping - unrecognized format")
-                        continue
-                except Exception as e:
-                    print(f"[DEBUG] Error parsing {trace_file}: {e}")
-                    continue
-
-        # Sort by created_at descending
-        traces.sort(key=lambda x: x.created_at or "", reverse=True)
-
-        # Count by status across ALL traces (before pagination)
-        from collections import Counter
-        status_counts = Counter(t.status for t in traces)
-
-        total = len(traces)
-        page = traces[offset:offset + limit]
-        return {
-            "traces": page,
-            "total": total,
-            "offset": offset,
-            "limit": limit,
-            "counts": {
-                "gold": status_counts.get(TraceStatus.GOLD, 0),
-                "silver": status_counts.get(TraceStatus.SILVER, 0),
-                "bronze": status_counts.get(TraceStatus.BRONZE, 0),
-                "failed": status_counts.get(TraceStatus.FAILED, 0),
-                "pending": status_counts.get(TraceStatus.PENDING, 0),
-            }
-        }
+        return cache.query(
+            status=status,
+            repo=repo,
+            source_tool=source_tool,
+            limit=limit,
+            offset=offset,
+        )
 
     @app.get("/api/traces/stats", tags=["Traces"])
     async def get_trace_stats(time_range: str = Query("7d", alias="range")):
@@ -2183,6 +2119,9 @@ def create_app() -> FastAPI:
 
         source_path.unlink()
 
+        # Invalidate cache — force re-index on next request
+        app.state.trace_cache.invalidate(trace_id)
+
         # Broadcast event
         await broadcast_trace_event(MessageType.TRACE_PROMOTED, trace_id)
 
@@ -2245,6 +2184,9 @@ def create_app() -> FastAPI:
             json.dump(data, f, indent=2)
 
         source_path.unlink()
+
+        # Invalidate cache
+        app.state.trace_cache.invalidate(trace_id)
 
         # Broadcast event
         await broadcast_trace_event(MessageType.TRACE_DEMOTED, trace_id)
@@ -2918,6 +2860,7 @@ def create_app() -> FastAPI:
                         target_path = target_dir / f"{trace_id}.json"
                         target_dir.mkdir(parents=True, exist_ok=True)
                         shutil.move(str(trace_file), str(target_path))
+                        app.state.trace_cache.invalidate(trace_id)
 
                 except Exception as e:
                     print(f"[DEBUG] Error processing {trace_file}: {e}")
@@ -4169,6 +4112,9 @@ def create_app() -> FastAPI:
 
     # Include Settings routes (env/API key management)
     app.include_router(settings_router)
+
+    # Include AutoResearch routes (hyperparameter search)
+    app.include_router(autoresearch_router)
 
     # Experimental routes — desktop only (hidden in web mode)
     if not _settings.is_web_mode:

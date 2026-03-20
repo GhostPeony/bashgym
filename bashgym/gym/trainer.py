@@ -87,6 +87,7 @@ class TrainerConfig:
     # GRPO settings
     grpo_num_generations: int = 4
     grpo_temperature: float = 0.7
+    grpo_reward_mode: str = "syntax"  # "syntax", "execution", "verification"
 
     # Knowledge Distillation settings
     teacher_model: str = "claude-sonnet-4-20250514"  # Teacher model for distillation
@@ -106,6 +107,9 @@ class TrainerConfig:
     # Hardware settings
     device_map: str = "auto"
     use_flash_attention: bool = True
+    # Missing fields referenced by _save_model_profile()
+    weight_decay: float = 0.01
+    use_gradient_checkpointing: bool = True
 
     # NeMo Gym settings (for cloud training)
     use_nemo_gym: bool = False

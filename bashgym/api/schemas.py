@@ -35,6 +35,8 @@ class TrainingStrategy(str, Enum):
     SFT = "sft"
     DPO = "dpo"
     GRPO = "grpo"
+    RLVR = "rlvr"
+    DISTILLATION = "distillation"
 
 
 class ExportFormat(str, Enum):
@@ -126,16 +128,33 @@ class TrainingRequest(BaseModel):
     strategy: TrainingStrategy = Field(TrainingStrategy.SFT, description="Training strategy")
     dataset_path: Optional[str] = Field(None, description="Path to training data")
     base_model: Optional[str] = Field(None, description="Override base model")
+    model_type: Optional[str] = Field(None, description="Model architecture type (qwen, llama, mistral, phi). Auto-detected if omitted.")
     num_epochs: int = Field(3, description="Number of training epochs", ge=1, le=100)
     batch_size: int = Field(1, description="Training batch size (use 1 for 12GB VRAM)", ge=1, le=64)
     learning_rate: float = Field(2e-5, description="Learning rate")
+    warmup_ratio: float = Field(0.1, description="Warmup ratio (fraction of total steps)", ge=0.0, le=1.0)
+    gradient_accumulation_steps: int = Field(8, description="Gradient accumulation steps (effective batch = batch_size * this)", ge=1, le=128)
+    max_seq_length: int = Field(2048, description="Maximum sequence length")
+    save_steps: int = Field(100, description="Save checkpoint every N steps", ge=10)
+    # LoRA settings
     use_lora: bool = Field(True, description="Use LoRA for efficient fine-tuning")
     lora_rank: Optional[int] = Field(16, description="LoRA rank")
     lora_alpha: Optional[int] = Field(32, description="LoRA alpha")
-    warmup_steps: int = Field(100, description="Warmup steps")
-    max_seq_length: int = Field(2048, description="Maximum sequence length")
+    lora_dropout: float = Field(0.05, description="LoRA dropout rate", ge=0.0, le=0.5)
+    load_in_4bit: bool = Field(True, description="Load model in 4-bit quantization (QLoRA)")
+    # Strategy-specific settings
+    dpo_beta: float = Field(0.1, description="DPO beta parameter (controls divergence penalty)", ge=0.01, le=1.0)
+    grpo_num_generations: int = Field(4, description="GRPO: number of generations per prompt", ge=2, le=16)
+    grpo_temperature: float = Field(0.7, description="GRPO: sampling temperature", ge=0.1, le=2.0)
+    grpo_reward_mode: str = Field("syntax", description="GRPO reward mode: syntax, execution, or verification")
+    # Knowledge Distillation settings
+    teacher_model: Optional[str] = Field(None, description="Teacher model for distillation")
+    teacher_temperature: float = Field(0.7, description="KD: softmax temperature for soft labels", ge=0.1, le=10.0)
+    distillation_alpha: float = Field(0.5, description="KD: weight for soft labels vs hard labels (0=task only, 1=KD only)", ge=0.0, le=1.0)
+    # Export settings
     auto_export_gguf: bool = Field(True, description="Export to GGUF after training")
     gguf_quantization: str = Field("q4_k_m", description="GGUF quantization level")
+    # Backend selection
     use_nemo_gym: bool = Field(False, description="Use NVIDIA NeMo cloud training instead of local")
     use_remote_ssh: bool = Field(False, description="Execute training on remote DGX Spark via SSH")
     selected_repos: Optional[List[str]] = Field(None, description="Repos to include (None or empty = all repos)")
@@ -770,3 +789,120 @@ class TraceImportAllResponse(BaseModel):
     """Aggregated result from importing all sources."""
     results: List[Dict[str, Any]] = Field(default_factory=list)
     total_imported: int = 0
+
+
+# =============================================================================
+# AutoResearch Schemas
+# =============================================================================
+
+class AutoResearchRequest(BaseModel):
+    """Request to start an autoresearch hyperparameter search."""
+    search_params: List[str] = Field(
+        default_factory=lambda: ["learning_rate", "lora_r", "lora_alpha", "warmup_ratio"],
+        description="TrainerConfig fields to search over",
+    )
+    max_experiments: int = Field(50, ge=1, le=500, description="Maximum number of experiments")
+    train_steps: int = Field(100, ge=10, le=10000, description="Training steps per experiment")
+    dataset_subset_ratio: float = Field(0.1, ge=0.01, le=1.0, description="Fraction of training data per experiment")
+    eval_metric: str = Field("val_loss", description="Metric to optimize (lower is better for loss)")
+    mutation_rate: float = Field(0.3, ge=0.05, le=1.0, description="Probability of mutating each param")
+    mutation_scale: float = Field(0.2, ge=0.01, le=1.0, description="Scale of mutations")
+    base_config: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Override base TrainerConfig values (e.g. learning_rate, lora_r)"
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "search_params": ["learning_rate", "lora_r", "lora_alpha", "warmup_ratio"],
+                "max_experiments": 50,
+                "train_steps": 100,
+                "mutation_rate": 0.3,
+                "mutation_scale": 0.2,
+                "base_config": {"learning_rate": 2e-5, "lora_r": 16},
+            }
+        }
+
+
+class ExperimentResultSchema(BaseModel):
+    """Result of a single autoresearch experiment."""
+    experiment_id: int = Field(..., description="Experiment number (1-indexed)")
+    config_snapshot: Dict[str, Any] = Field(..., description="Hyperparameter values used")
+    metric_value: float = Field(..., description="Evaluation metric result")
+    improved: bool = Field(..., description="Whether this beat the previous best")
+    duration_seconds: float = Field(..., description="Wall-clock time for this experiment")
+    timestamp: str = Field(..., description="ISO 8601 timestamp")
+
+
+class AutoResearchStatusResponse(BaseModel):
+    """Full autoresearch status response."""
+    status: str = Field(..., description="Current status: idle, running, paused, completed, failed, stopped")
+    total_experiments: int = Field(0, description="Total experiments planned")
+    completed_experiments: int = Field(0, description="Experiments completed so far")
+    best_metric: Optional[float] = Field(None, description="Best metric value achieved")
+    best_config: Dict[str, Any] = Field(default_factory=dict, description="Current best hyperparameter config")
+    search_params: List[str] = Field(default_factory=list, description="Parameters being searched")
+    experiments: List[ExperimentResultSchema] = Field(default_factory=list, description="All experiment results")
+    started_at: Optional[str] = Field(None, description="When the search started")
+    completed_at: Optional[str] = Field(None, description="When the search finished")
+    error: Optional[str] = Field(None, description="Error message if failed")
+
+
+# =============================================================================
+# Trace Research Schemas (Data-centric AutoResearch)
+# =============================================================================
+
+class TraceResearchRequest(BaseModel):
+    """Request to start trace data research."""
+    search_params: List[str] = Field(
+        default_factory=lambda: [
+            "min_success_rate", "min_quality_score", "max_steps_per_example",
+            "include_cognitive", "silver_inclusion_ratio", "time_gap_threshold_minutes"
+        ],
+        description="DataPipelineConfig fields to search over"
+    )
+    max_experiments: int = Field(30, ge=1, le=200)
+    mutation_rate: float = Field(0.4, ge=0.05, le=1.0)
+    mutation_scale: float = Field(0.25, ge=0.01, le=1.0)
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "search_params": [
+                    "min_success_rate", "min_quality_score",
+                    "include_cognitive", "silver_inclusion_ratio"
+                ],
+                "max_experiments": 30,
+                "mutation_rate": 0.4,
+                "mutation_scale": 0.25,
+            }
+        }
+
+
+class TraceExperimentResultSchema(BaseModel):
+    """Result of a single trace research experiment."""
+    experiment_id: int = Field(..., description="Experiment number (1-indexed)")
+    config_snapshot: Dict[str, Any] = Field(..., description="Data pipeline parameter values used")
+    examples_generated: int = Field(..., description="Number of training examples produced")
+    unique_repos: int = Field(..., description="Number of distinct repos in generated data")
+    avg_example_length: float = Field(..., description="Average steps per example")
+    metric_value: float = Field(..., description="Evaluation metric result (val_loss)")
+    improved: bool = Field(..., description="Whether this beat the previous best")
+    duration_seconds: float = Field(..., description="Wall-clock time for this experiment")
+    timestamp: str = Field(..., description="ISO 8601 timestamp")
+
+
+class TraceResearchStatusResponse(BaseModel):
+    """Full trace research status."""
+    status: str = Field(..., description="Current status: idle, running, paused, completed, failed, stopped")
+    total_experiments: int = Field(0, description="Total experiments planned")
+    completed_experiments: int = Field(0, description="Experiments completed so far")
+    best_metric: Optional[float] = Field(None, description="Best metric value achieved")
+    best_pipeline: Dict[str, Any] = Field(default_factory=dict, description="Current best data pipeline config")
+    best_data_stats: Dict[str, Any] = Field(default_factory=dict, description="Data stats for best pipeline")
+    search_params: List[str] = Field(default_factory=list, description="Parameters being searched")
+    experiments: List[TraceExperimentResultSchema] = Field(default_factory=list, description="All experiment results")
+    started_at: Optional[str] = Field(None, description="When the search started")
+    completed_at: Optional[str] = Field(None, description="When the search finished")
+    error: Optional[str] = Field(None, description="Error message if failed")

@@ -1569,7 +1569,9 @@ class GRPOTrainer(Trainer):
         dataset_path: Path,
         verifier_fn: Callable[[str, str], float],
         run_id: Optional[str] = None,
-        callback: Optional[Callable[[Dict[str, Any]], None]] = None
+        callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        log_callback: Optional[Callable[[str], None]] = None,
+        pid_callback: Optional[Callable[[int, "TrainingRun"], None]] = None,
     ) -> TrainingRun:
         """
         Run GRPO training with verifiable rewards.
@@ -1598,7 +1600,7 @@ class GRPOTrainer(Trainer):
         self.active_runs[run_id] = run
 
         try:
-            self._run_grpo_loop(run, verifier_fn, callback)
+            self._run_grpo_loop(run, verifier_fn, callback, log_callback, pid_callback)
             run.status = "completed"
             run.completed_at = datetime.now(timezone.utc).isoformat()
 
@@ -1616,7 +1618,9 @@ class GRPOTrainer(Trainer):
         self,
         run: TrainingRun,
         verifier_fn: Callable[[str, str], float],
-        callback: Optional[Callable[[Dict[str, Any]], None]] = None
+        callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        log_callback: Optional[Callable[[str], None]] = None,
+        pid_callback: Optional[Callable[[int, "TrainingRun"], None]] = None,
     ) -> None:
         """
         Execute the GRPO training loop.
@@ -1627,6 +1631,8 @@ class GRPOTrainer(Trainer):
         3. Compute relative advantages
         4. Update policy
         """
+        import re
+
         print(f"Starting GRPO training: {run.run_id}")
         print(f"Generations per prompt: {self.config.grpo_num_generations}")
 
@@ -1636,23 +1642,138 @@ class GRPOTrainer(Trainer):
         run.output_path.mkdir(parents=True, exist_ok=True)
         script_path.write_text(script_content)
 
-        # Simulate GRPO training
-        if callback:
-            for epoch in range(self.config.num_epochs):
-                callback({
-                    "epoch": epoch + 1,
-                    "total_epochs": self.config.num_epochs,
-                    "avg_reward": 0.3 + (epoch * 0.15),
-                    "policy_loss": 0.5 - (epoch * 0.1)
-                })
+        python_exe = self._get_training_python()
+        logger.info(f"Starting GRPO training run: {run.run_id}")
+        logger.info(f"Dataset: {run.dataset_path}")
+        logger.info(f"Output: {run.output_path}")
+        logger.info(f"Script: {script_path}")
+        logger.info(f"Python: {python_exe}")
 
-        run.metrics = {
-            "final_avg_reward": 0.75,
-            "final_policy_loss": 0.2,
-            "epochs_completed": self.config.num_epochs
-        }
+        try:
+            process = subprocess.Popen(
+                [python_exe, str(script_path)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                cwd=str(Path.cwd())
+            )
 
-        print(f"GRPO training completed. Model saved to: {run.output_path}")
+            run.pid = process.pid
+            logger.info(f"GRPO subprocess started with PID {process.pid}")
+
+            if pid_callback:
+                try:
+                    pid_callback(process.pid, run)
+                except Exception as e:
+                    logger.warning(f"pid_callback error: {e}")
+
+            last_loss = None
+            last_epoch = 0
+            last_step = 0
+            samples_processed = 0
+            last_avg_reward = None
+            last_kl_divergence = None
+            last_policy_loss = None
+            start_time = datetime.now(timezone.utc)
+            estimated_total_steps = 1000
+
+            for line in process.stdout:
+                line = line.strip()
+                if line:
+                    logger.info(f"[GRPO Training] {line}")
+
+                    if log_callback:
+                        try:
+                            log_callback(line)
+                        except Exception as e:
+                            logger.warning(f"Log callback error: {e}")
+
+                    # Standard HuggingFace metrics
+                    loss_match = re.search(r"'loss':\s*([\d.-]+)", line)
+                    epoch_match = re.search(r"'epoch':\s*([\d.]+)", line)
+                    step_match = re.search(r"'step':\s*(\d+)", line)
+                    progress_match = re.search(r"(\d+)%\|[^|]*\|\s*(\d+)/(\d+)", line)
+                    unsloth_steps_match = re.search(r"Total steps\s*=\s*(\d+)", line)
+
+                    # GRPO-specific trl metrics
+                    reward_match = re.search(r"'reward':\s*([\d.-]+)", line)
+                    mean_reward_match = re.search(r"'mean_reward':\s*([\d.-]+)", line)
+                    kl_match = re.search(r"'kl':\s*([\d.-]+)", line)
+                    policy_loss_match = re.search(r"'policy_loss':\s*([\d.-]+)", line)
+
+                    if loss_match:
+                        last_loss = float(loss_match.group(1))
+                    if epoch_match:
+                        last_epoch = int(float(epoch_match.group(1)))
+                    if step_match:
+                        last_step = int(step_match.group(1))
+                        samples_processed = last_step * self.config.batch_size
+                    if unsloth_steps_match:
+                        estimated_total_steps = int(unsloth_steps_match.group(1))
+                    if progress_match:
+                        last_step = int(progress_match.group(2))
+                        estimated_total_steps = int(progress_match.group(3))
+                        samples_processed = last_step * self.config.batch_size
+                    if reward_match:
+                        last_avg_reward = float(reward_match.group(1))
+                    if mean_reward_match:
+                        last_avg_reward = float(mean_reward_match.group(1))
+                    if kl_match:
+                        last_kl_divergence = float(kl_match.group(1))
+                    if policy_loss_match:
+                        last_policy_loss = float(policy_loss_match.group(1))
+
+                    eta = None
+                    if last_step > 0 and estimated_total_steps > 0:
+                        elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
+                        steps_remaining = estimated_total_steps - last_step
+                        if steps_remaining > 0:
+                            time_per_step = elapsed / last_step
+                            eta_seconds = steps_remaining * time_per_step
+                            if eta_seconds < 60:
+                                eta = f"{int(eta_seconds)}s"
+                            elif eta_seconds < 3600:
+                                eta = f"{int(eta_seconds / 60)}m"
+                            else:
+                                eta = f"{int(eta_seconds / 3600)}h {int((eta_seconds % 3600) / 60)}m"
+
+                    if callback and (progress_match or loss_match or reward_match or mean_reward_match):
+                        callback({
+                            "epoch": last_epoch,
+                            "total_epochs": self.config.num_epochs,
+                            "step": last_step,
+                            "total_steps": estimated_total_steps,
+                            "loss": last_loss,
+                            "learning_rate": self.config.learning_rate,
+                            "eta": eta,
+                            "samples_processed": samples_processed,
+                            "avg_reward": last_avg_reward,
+                            "kl_divergence": last_kl_divergence,
+                            "policy_loss": last_policy_loss,
+                        })
+
+            return_code = process.wait()
+
+            if return_code != 0:
+                raise RuntimeError(f"GRPO training script exited with code {return_code}")
+
+            run.metrics = {
+                "final_loss": last_loss or 0.0,
+                "epochs_completed": self.config.num_epochs,
+                "samples_processed": samples_processed,
+                "final_avg_reward": last_avg_reward,
+                "final_kl_divergence": last_kl_divergence,
+                "final_policy_loss": last_policy_loss,
+            }
+
+            logger.info(f"GRPO training completed. Model saved to: {run.output_path}")
+
+        except FileNotFoundError as e:
+            raise RuntimeError(f"Python interpreter not found: {e}")
+        except Exception as e:
+            logger.error(f"GRPO training failed: {e}")
+            raise
 
     def _generate_grpo_script(self, run: TrainingRun) -> str:
         """Generate GRPO training script using trl.GRPOTrainer with tiered reward functions."""

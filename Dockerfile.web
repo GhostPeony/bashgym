@@ -38,13 +38,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy backend source
 COPY bashgym/ bashgym/
-COPY run_backend.py start_api.py ./
+COPY run_backend.py ./
 
 # Copy built SPA from stage 1
 COPY --from=frontend /app/frontend/dist frontend/dist/
 
 # Create data directories
-RUN mkdir -p data/gold_traces data/failed_traces data/models
+# Create data directories (traces live at ~/.bashgym/ at runtime)
+RUN mkdir -p data/models
 
 # Run as non-root user
 RUN useradd -r -m bashgym && \

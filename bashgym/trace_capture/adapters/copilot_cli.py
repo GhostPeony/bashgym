@@ -6,13 +6,10 @@ Uses a JSON config file in ~/.copilot/hooks/ that points
 to our hook scripts.
 """
 
-import os
 import json
-import shutil
+import os
 import platform
 from pathlib import Path
-from typing import Tuple
-
 
 # Hook config file that Copilot CLI reads
 HOOKS_CONFIG_FILE = "bashgym-hooks.json"
@@ -20,7 +17,7 @@ HOOKS_CONFIG_FILE = "bashgym-hooks.json"
 
 def _get_copilot_dir() -> Path:
     """Get the Copilot CLI config directory."""
-    if platform.system() == 'Windows':
+    if platform.system() == "Windows":
         home = Path(os.environ.get("USERPROFILE", ""))
     else:
         home = Path.home()
@@ -65,21 +62,15 @@ def _build_hooks_config() -> dict:
         "version": "1.0.0",
         "description": "Bash Gym trace capture hooks for Copilot CLI",
         "hooks": {
-            "after_tool": {
-                "command": f"{env_prefix} python {after_tool_path}",
-                "timeout": 5000
-            },
-            "session_end": {
-                "command": f"{env_prefix} python {session_end_path}",
-                "timeout": 5000
-            }
-        }
+            "after_tool": {"command": f"{env_prefix} python {after_tool_path}", "timeout": 5000},
+            "session_end": {"command": f"{env_prefix} python {session_end_path}", "timeout": 5000},
+        },
     }
 
     return config
 
 
-def install_copilot_cli_hooks() -> Tuple[bool, str]:
+def install_copilot_cli_hooks() -> tuple[bool, str]:
     """
     Install Bash Gym hooks for Copilot CLI.
 
@@ -99,14 +90,14 @@ def install_copilot_cli_hooks() -> Tuple[bool, str]:
     config = _build_hooks_config()
 
     try:
-        with open(config_path, 'w') as f:
+        with open(config_path, "w") as f:
             json.dump(config, f, indent=2)
         return True, f"Installed Copilot CLI hooks config at {config_path}"
-    except (IOError, OSError) as e:
+    except OSError as e:
         return False, f"Failed to install Copilot CLI hooks: {e}"
 
 
-def uninstall_copilot_cli_hooks() -> Tuple[bool, str]:
+def uninstall_copilot_cli_hooks() -> tuple[bool, str]:
     """
     Uninstall Bash Gym hooks from Copilot CLI.
 
@@ -123,7 +114,7 @@ def uninstall_copilot_cli_hooks() -> Tuple[bool, str]:
     try:
         config_path.unlink()
         return True, f"Removed Copilot CLI hooks config from {config_path}"
-    except (IOError, OSError) as e:
+    except OSError as e:
         return False, f"Failed to remove Copilot CLI hooks: {e}"
 
 

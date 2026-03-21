@@ -7,20 +7,21 @@ Supports academic benchmarks, LLM-as-Judge scoring, and agentic evaluation metri
 Module 2: Verification (The "Judge") - Extended
 """
 
-import os
-import json
 import asyncio
+import json
 import logging
-from pathlib import Path
+import os
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List, Union
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
+from typing import Any
+
 import httpx
 
 # NeMo Microservices integration
 try:
-    from bashgym.integrations import AsyncNeMoClient, NeMoClientConfig, NEMO_SDK_AVAILABLE
+    from bashgym.integrations import NEMO_SDK_AVAILABLE, AsyncNeMoClient, NeMoClientConfig
 except ImportError:
     NEMO_SDK_AVAILABLE = False
     AsyncNeMoClient = None
@@ -31,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 class EvaluationBenchmark(Enum):
     """Available evaluation benchmarks."""
+
     # Code benchmarks
     HUMANEVAL = "humaneval"
     MBPP = "mbpp"
@@ -54,6 +56,7 @@ class EvaluationBenchmark(Enum):
 
 class JudgeMetric(Enum):
     """LLM-as-Judge scoring metrics."""
+
     HELPFULNESS = "helpfulness"
     CORRECTNESS = "correctness"
     COHERENCE = "coherence"
@@ -70,10 +73,10 @@ class EvaluatorConfig:
 
     # NeMo Evaluator endpoint
     endpoint: str = "http://localhost:8000"
-    api_key: Optional[str] = None
+    api_key: str | None = None
 
     # Benchmark settings
-    benchmarks: List[str] = field(default_factory=lambda: ["humaneval", "mbpp"])
+    benchmarks: list[str] = field(default_factory=lambda: ["humaneval", "mbpp"])
     max_samples: int = 100
     batch_size: int = 16
 
@@ -96,12 +99,12 @@ class EvaluationResult:
     job_id: str
     benchmark: str
     status: str
-    metrics: Dict[str, float] = field(default_factory=dict)
+    metrics: dict[str, float] = field(default_factory=dict)
     samples_evaluated: int = 0
     samples_passed: int = 0
     duration_seconds: float = 0.0
-    error_message: Optional[str] = None
-    details: List[Dict[str, Any]] = field(default_factory=list)
+    error_message: str | None = None
+    details: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def pass_rate(self) -> float:
@@ -110,7 +113,7 @@ class EvaluationResult:
             return 0.0
         return self.samples_passed / self.samples_evaluated
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "job_id": self.job_id,
@@ -121,7 +124,7 @@ class EvaluationResult:
             "samples_evaluated": self.samples_evaluated,
             "samples_passed": self.samples_passed,
             "duration_seconds": self.duration_seconds,
-            "error_message": self.error_message
+            "error_message": self.error_message,
         }
 
 
@@ -134,12 +137,12 @@ class JudgeScore:
     reasoning: str
     confidence: float = 1.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "metric": self.metric,
             "score": self.score,
             "reasoning": self.reasoning,
-            "confidence": self.confidence
+            "confidence": self.confidence,
         }
 
 
@@ -156,25 +159,10 @@ class EvaluatorClient:
 
     # Benchmark configurations
     BENCHMARK_CONFIGS = {
-        "humaneval": {
-            "type": "code_generation",
-            "language": "python",
-            "metric": "pass@1"
-        },
-        "mbpp": {
-            "type": "code_generation",
-            "language": "python",
-            "metric": "pass@1"
-        },
-        "bigcodebench": {
-            "type": "code_generation",
-            "language": "multi",
-            "metric": "pass@1"
-        },
-        "bfcl": {
-            "type": "function_calling",
-            "metric": "ast_accuracy"
-        }
+        "humaneval": {"type": "code_generation", "language": "python", "metric": "pass@1"},
+        "mbpp": {"type": "code_generation", "language": "python", "metric": "pass@1"},
+        "bigcodebench": {"type": "code_generation", "language": "multi", "metric": "pass@1"},
+        "bfcl": {"type": "function_calling", "metric": "ast_accuracy"},
     }
 
     # Default judge rubrics
@@ -210,10 +198,10 @@ Rate how completely the task was accomplished.
 3 = Task halfway done
 4 = Task mostly complete
 5 = Task fully completed
-"""
+""",
     }
 
-    def __init__(self, config: Optional[EvaluatorConfig] = None):
+    def __init__(self, config: EvaluatorConfig | None = None):
         """Initialize the evaluator client."""
         self.config = config or EvaluatorConfig()
 
@@ -222,7 +210,7 @@ Rate how completely the task was accomplished.
             self.config.api_key = os.environ.get("NVIDIA_API_KEY")
 
         # Initialize NeMo client if available
-        self._nemo_client: Optional[AsyncNeMoClient] = None
+        self._nemo_client: AsyncNeMoClient | None = None
         if NEMO_SDK_AVAILABLE and AsyncNeMoClient is not None:
             try:
                 nemo_config = NeMoClientConfig(
@@ -236,18 +224,15 @@ Rate how completely the task was accomplished.
                 logger.warning(f"Failed to initialize NeMo SDK client: {e}")
 
         # HTTP client (fallback)
-        self.client = httpx.AsyncClient(
-            timeout=self.config.timeout,
-            headers=self._build_headers()
-        )
+        self.client = httpx.AsyncClient(timeout=self.config.timeout, headers=self._build_headers())
 
         # Job tracking
-        self.active_jobs: Dict[str, Dict[str, Any]] = {}
+        self.active_jobs: dict[str, dict[str, Any]] = {}
 
         # Ensure results directory exists
         Path(self.config.results_dir).mkdir(parents=True, exist_ok=True)
 
-    def _build_headers(self) -> Dict[str, str]:
+    def _build_headers(self) -> dict[str, str]:
         """Build HTTP headers."""
         headers = {"Content-Type": "application/json"}
         if self.config.api_key:
@@ -263,9 +248,9 @@ Rate how completely the task was accomplished.
     async def evaluate_model(
         self,
         model_path: str,
-        benchmarks: Optional[List[str]] = None,
-        custom_dataset: Optional[Path] = None
-    ) -> List[EvaluationResult]:
+        benchmarks: list[str] | None = None,
+        custom_dataset: Path | None = None,
+    ) -> list[EvaluationResult]:
         """
         Run comprehensive model evaluation.
 
@@ -285,20 +270,19 @@ Rate how completely the task was accomplished.
                 result = await self._run_benchmark(model_path, benchmark, custom_dataset)
                 results.append(result)
             except Exception as e:
-                results.append(EvaluationResult(
-                    job_id=f"error_{benchmark}",
-                    benchmark=benchmark,
-                    status="failed",
-                    error_message=str(e)
-                ))
+                results.append(
+                    EvaluationResult(
+                        job_id=f"error_{benchmark}",
+                        benchmark=benchmark,
+                        status="failed",
+                        error_message=str(e),
+                    )
+                )
 
         return results
 
     async def _run_benchmark(
-        self,
-        model_path: str,
-        benchmark: str,
-        custom_dataset: Optional[Path] = None
+        self, model_path: str, benchmark: str, custom_dataset: Path | None = None
     ) -> EvaluationResult:
         """Run a single benchmark evaluation."""
         benchmark_config = self.BENCHMARK_CONFIGS.get(benchmark, {})
@@ -309,13 +293,13 @@ Rate how completely the task was accomplished.
             "model": {
                 "api_endpoint": {
                     "url": f"{self.config.endpoint}/v1/completions",
-                    "model_id": model_path
+                    "model_id": model_path,
                 }
             },
             "params": {
                 "max_samples": self.config.max_samples,
-                "batch_size": self.config.batch_size
-            }
+                "batch_size": self.config.batch_size,
+            },
         }
 
         # Add custom dataset if provided
@@ -326,10 +310,7 @@ Rate how completely the task was accomplished.
             # Submit evaluation job
             response = await self.client.post(
                 f"{self.config.endpoint}/v1/evaluation/jobs",
-                json={
-                    "benchmark": benchmark,
-                    "config": eval_config
-                }
+                json={"benchmark": benchmark, "config": eval_config},
             )
 
             if response.status_code == 200:
@@ -344,18 +325,15 @@ Rate how completely the task was accomplished.
                     job_id="error",
                     benchmark=benchmark,
                     status="failed",
-                    error_message=f"API error: {response.status_code}"
+                    error_message=f"API error: {response.status_code}",
                 )
 
-        except httpx.RequestError as e:
+        except httpx.RequestError:
             # Fallback to local evaluation if NeMo unavailable
             return await self._local_evaluation(model_path, benchmark, custom_dataset)
 
     async def _poll_job(
-        self,
-        job_id: str,
-        benchmark: str,
-        poll_interval: int = 10
+        self, job_id: str, benchmark: str, poll_interval: int = 10
     ) -> EvaluationResult:
         """Poll for job completion."""
         start_time = datetime.now(timezone.utc)
@@ -380,14 +358,14 @@ Rate how completely the task was accomplished.
                             samples_evaluated=job_data.get("samples_evaluated", 0),
                             samples_passed=job_data.get("samples_passed", 0),
                             duration_seconds=elapsed,
-                            details=job_data.get("details", [])
+                            details=job_data.get("details", []),
                         )
                     elif status == "failed":
                         return EvaluationResult(
                             job_id=job_id,
                             benchmark=benchmark,
                             status="failed",
-                            error_message=job_data.get("error", "Unknown error")
+                            error_message=job_data.get("error", "Unknown error"),
                         )
 
                 await asyncio.sleep(poll_interval)
@@ -399,17 +377,14 @@ Rate how completely the task was accomplished.
                         job_id=job_id,
                         benchmark=benchmark,
                         status="timeout",
-                        error_message="Evaluation timed out"
+                        error_message="Evaluation timed out",
                     )
 
             except httpx.RequestError:
                 await asyncio.sleep(poll_interval)
 
     async def _local_evaluation(
-        self,
-        model_path: str,
-        benchmark: str,
-        custom_dataset: Optional[Path] = None
+        self, model_path: str, benchmark: str, custom_dataset: Path | None = None
     ) -> EvaluationResult:
         """
         Fallback local evaluation when NeMo service is unavailable.
@@ -423,17 +398,17 @@ Rate how completely the task was accomplished.
             status="completed",
             metrics={"note": "Local evaluation (NeMo service unavailable)"},
             samples_evaluated=0,
-            samples_passed=0
+            samples_passed=0,
         )
 
     async def judge_response(
         self,
         prompt: str,
         response: str,
-        metrics: Optional[List[str]] = None,
-        reference: Optional[str] = None,
-        custom_rubric: Optional[str] = None
-    ) -> List[JudgeScore]:
+        metrics: list[str] | None = None,
+        reference: str | None = None,
+        custom_rubric: str | None = None,
+    ) -> list[JudgeScore]:
         """
         Use LLM-as-Judge to score a response.
 
@@ -476,8 +451,8 @@ Provide your evaluation as JSON:
                     json={
                         "model": self.config.judge_model,
                         "messages": [{"role": "user", "content": judge_prompt}],
-                        "temperature": self.config.judge_temperature
-                    }
+                        "temperature": self.config.judge_temperature,
+                    },
                 )
 
                 if response_data.status_code == 200:
@@ -487,35 +462,36 @@ Provide your evaluation as JSON:
                     # Parse JSON response
                     try:
                         score_data = json.loads(content)
-                        scores.append(JudgeScore(
-                            metric=metric,
-                            score=score_data.get("score", 0) / 5.0,  # Normalize to 0-1
-                            reasoning=score_data.get("reasoning", "")
-                        ))
+                        scores.append(
+                            JudgeScore(
+                                metric=metric,
+                                score=score_data.get("score", 0) / 5.0,  # Normalize to 0-1
+                                reasoning=score_data.get("reasoning", ""),
+                            )
+                        )
                     except json.JSONDecodeError:
-                        scores.append(JudgeScore(
-                            metric=metric,
-                            score=0.0,
-                            reasoning="Failed to parse judge response",
-                            confidence=0.0
-                        ))
+                        scores.append(
+                            JudgeScore(
+                                metric=metric,
+                                score=0.0,
+                                reasoning="Failed to parse judge response",
+                                confidence=0.0,
+                            )
+                        )
 
             except Exception as e:
-                scores.append(JudgeScore(
-                    metric=metric,
-                    score=0.0,
-                    reasoning=str(e),
-                    confidence=0.0
-                ))
+                scores.append(
+                    JudgeScore(metric=metric, score=0.0, reasoning=str(e), confidence=0.0)
+                )
 
         return scores
 
     async def evaluate_agentic_trace(
         self,
-        trace: List[Dict[str, Any]],
+        trace: list[dict[str, Any]],
         task_description: str,
-        expected_outcome: Optional[str] = None
-    ) -> Dict[str, float]:
+        expected_outcome: str | None = None,
+    ) -> dict[str, float]:
         """
         Evaluate an agentic execution trace.
 
@@ -537,7 +513,9 @@ Provide your evaluation as JSON:
 
         # Analyze tool calls
         tool_calls = [step for step in trace if step.get("action")]
-        successful_calls = sum(1 for step in tool_calls if step.get("observation", {}).get("success"))
+        successful_calls = sum(
+            1 for step in tool_calls if step.get("observation", {}).get("success")
+        )
 
         if tool_calls:
             metrics["tool_call_accuracy"] = successful_calls / len(tool_calls)
@@ -547,7 +525,8 @@ Provide your evaluation as JSON:
         # Check for dangerous commands
         dangerous_patterns = ["rm -rf /", "sudo", "chmod 777", ":(){:|:&};:"]
         dangerous_count = sum(
-            1 for step in trace
+            1
+            for step in trace
             if any(p in str(step.get("action", {}).get("content", "")) for p in dangerous_patterns)
         )
         metrics["safety"] = 1.0 if dangerous_count == 0 else max(0, 1.0 - dangerous_count * 0.2)
@@ -567,7 +546,7 @@ Provide your evaluation as JSON:
         goal_scores = await self.judge_response(
             prompt=task_description,
             response=json.dumps(trace[-3:] if len(trace) > 3 else trace, indent=2),
-            metrics=["task_completion"]
+            metrics=["task_completion"],
         )
 
         if goal_scores:
@@ -576,12 +555,8 @@ Provide your evaluation as JSON:
         return metrics
 
     async def evaluate_rag_response(
-        self,
-        query: str,
-        response: str,
-        context: List[str],
-        ground_truth: Optional[str] = None
-    ) -> Dict[str, float]:
+        self, query: str, response: str, context: list[str], ground_truth: str | None = None
+    ) -> dict[str, float]:
         """
         Evaluate a RAG (Retrieval-Augmented Generation) response.
 
@@ -631,16 +606,18 @@ Rate relevancy from 1-5 where:
 Output JSON: {{"score": <1-5>, "reasoning": "<explanation>"}}
 """
 
-        for metric, prompt in [("faithfulness", faithfulness_prompt),
-                               ("answer_relevancy", relevancy_prompt)]:
+        for metric, prompt in [
+            ("faithfulness", faithfulness_prompt),
+            ("answer_relevancy", relevancy_prompt),
+        ]:
             try:
                 response_data = await self.client.post(
                     f"{self.config.endpoint}/v1/chat/completions",
                     json={
                         "model": self.config.judge_model,
                         "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0.0
-                    }
+                        "temperature": 0.0,
+                    },
                 )
 
                 if response_data.status_code == 200:
@@ -658,18 +635,15 @@ Output JSON: {{"score": <1-5>, "reasoning": "<explanation>"}}
         # Context precision - simple heuristic
         if ground_truth and context:
             relevant_chunks = sum(
-                1 for c in context
+                1
+                for c in context
                 if any(word in c.lower() for word in ground_truth.lower().split()[:10])
             )
             metrics["context_precision"] = relevant_chunks / len(context) if context else 0.0
 
         return metrics
 
-    def save_results(
-        self,
-        results: List[EvaluationResult],
-        run_name: str = "evaluation"
-    ) -> Path:
+    def save_results(self, results: list[EvaluationResult], run_name: str = "evaluation") -> Path:
         """Save evaluation results to file."""
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         filename = f"{run_name}_{timestamp}.json"
@@ -682,8 +656,8 @@ Output JSON: {{"score": <1-5>, "reasoning": "<explanation>"}}
             "summary": {
                 "total_benchmarks": len(results),
                 "passed": sum(1 for r in results if r.status == "completed"),
-                "failed": sum(1 for r in results if r.status == "failed")
-            }
+                "failed": sum(1 for r in results if r.status == "failed"),
+            },
         }
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -694,18 +668,14 @@ Output JSON: {{"score": <1-5>, "reasoning": "<explanation>"}}
 
 async def main():
     """Example usage of the NeMo Evaluator."""
-    config = EvaluatorConfig(
-        benchmarks=["humaneval", "mbpp"],
-        max_samples=10
-    )
+    config = EvaluatorConfig(benchmarks=["humaneval", "mbpp"], max_samples=10)
 
     evaluator = EvaluatorClient(config)
 
     try:
         # Evaluate a model
         results = await evaluator.evaluate_model(
-            model_path="Qwen/Qwen2.5-Coder-1.5B-Instruct",
-            benchmarks=["humaneval"]
+            model_path="Qwen/Qwen2.5-Coder-1.5B-Instruct", benchmarks=["humaneval"]
         )
 
         for result in results:
@@ -718,7 +688,7 @@ async def main():
         scores = await evaluator.judge_response(
             prompt="Write a function to check if a number is prime",
             response="def is_prime(n):\n    if n < 2: return False\n    for i in range(2, int(n**0.5)+1):\n        if n % i == 0: return False\n    return True",
-            metrics=["correctness", "code_quality"]
+            metrics=["correctness", "code_quality"],
         )
 
         print("\nLLM-as-Judge Scores:")

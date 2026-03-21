@@ -11,7 +11,6 @@ Module: Orchestrator
 import asyncio
 import logging
 from pathlib import Path
-from typing import Dict, Optional
 
 from bashgym.orchestrator.models import MergeResult
 
@@ -28,12 +27,12 @@ class WorktreeManager:
     def __init__(
         self,
         repo_path: Path,
-        worktree_base: Optional[Path] = None,
+        worktree_base: Path | None = None,
     ):
         self.repo_path = Path(repo_path)
         self.worktree_base = worktree_base or (self.repo_path / ".worktrees")
-        self.active_worktrees: Dict[str, Path] = {}
-        self._branches: Dict[str, str] = {}  # task_id -> branch_name
+        self.active_worktrees: dict[str, Path] = {}
+        self._branches: dict[str, str] = {}  # task_id -> branch_name
 
     async def create(
         self,
@@ -58,8 +57,13 @@ class WorktreeManager:
 
         # Create the worktree with a new branch
         proc = await asyncio.create_subprocess_exec(
-            "git", "worktree", "add",
-            str(worktree_path), "-b", branch_name, base_branch,
+            "git",
+            "worktree",
+            "add",
+            str(worktree_path),
+            "-b",
+            branch_name,
+            base_branch,
             cwd=str(self.repo_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -71,17 +75,18 @@ class WorktreeManager:
             # Branch might already exist, try without -b
             if "already exists" in error:
                 proc = await asyncio.create_subprocess_exec(
-                    "git", "worktree", "add",
-                    str(worktree_path), branch_name,
+                    "git",
+                    "worktree",
+                    "add",
+                    str(worktree_path),
+                    branch_name,
                     cwd=str(self.repo_path),
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
                 stdout, stderr = await proc.communicate()
                 if proc.returncode != 0:
-                    raise RuntimeError(
-                        f"Failed to create worktree: {stderr.decode().strip()}"
-                    )
+                    raise RuntimeError(f"Failed to create worktree: {stderr.decode().strip()}")
             else:
                 raise RuntimeError(f"Failed to create worktree: {error}")
 
@@ -119,7 +124,10 @@ class WorktreeManager:
 
         # Get list of files changed in the branch
         diff_proc = await asyncio.create_subprocess_exec(
-            "git", "diff", "--name-only", f"{target_branch}...{branch}",
+            "git",
+            "diff",
+            "--name-only",
+            f"{target_branch}...{branch}",
             cwd=str(self.repo_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -129,8 +137,12 @@ class WorktreeManager:
 
         # Perform the merge
         proc = await asyncio.create_subprocess_exec(
-            "git", "merge", branch, "--no-ff",
-            "-m", f"Merge task/{task_id}: {branch}",
+            "git",
+            "merge",
+            branch,
+            "--no-ff",
+            "-m",
+            f"Merge task/{task_id}: {branch}",
             cwd=str(self.repo_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -144,7 +156,10 @@ class WorktreeManager:
             if "CONFLICT" in error or "conflict" in stdout.decode():
                 # Get list of conflicting files
                 conflict_proc = await asyncio.create_subprocess_exec(
-                    "git", "diff", "--name-only", "--diff-filter=U",
+                    "git",
+                    "diff",
+                    "--name-only",
+                    "--diff-filter=U",
                     cwd=str(self.repo_path),
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
@@ -154,15 +169,15 @@ class WorktreeManager:
 
                 # Abort the merge
                 await asyncio.create_subprocess_exec(
-                    "git", "merge", "--abort",
+                    "git",
+                    "merge",
+                    "--abort",
                     cwd=str(self.repo_path),
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
 
-                logger.warning(
-                    f"Merge conflicts for task {task_id}: {conflicts}"
-                )
+                logger.warning(f"Merge conflicts for task {task_id}: {conflicts}")
                 return MergeResult(
                     task_id=task_id,
                     branch=branch,
@@ -202,7 +217,11 @@ class WorktreeManager:
 
             # Remove the worktree
             proc = await asyncio.create_subprocess_exec(
-                "git", "worktree", "remove", str(worktree_path), "--force",
+                "git",
+                "worktree",
+                "remove",
+                str(worktree_path),
+                "--force",
                 cwd=str(self.repo_path),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -215,7 +234,10 @@ class WorktreeManager:
         if task_id in self._branches:
             branch = self._branches[task_id]
             proc = await asyncio.create_subprocess_exec(
-                "git", "branch", "-d", branch,
+                "git",
+                "branch",
+                "-d",
+                branch,
                 cwd=str(self.repo_path),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -233,7 +255,9 @@ class WorktreeManager:
 
         # Prune any stale worktree references
         proc = await asyncio.create_subprocess_exec(
-            "git", "worktree", "prune",
+            "git",
+            "worktree",
+            "prune",
             cwd=str(self.repo_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

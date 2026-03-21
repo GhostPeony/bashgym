@@ -2,11 +2,11 @@
 
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Dict, Optional
 
-from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+from watchdog.observers import Observer
 
 from .config import PipelineConfig
 
@@ -18,7 +18,7 @@ class _SessionFileHandler(FileSystemEventHandler):
         super().__init__()
         self._debounce = debounce_seconds
         self._on_stable = on_stable
-        self._timers: Dict[str, threading.Timer] = {}
+        self._timers: dict[str, threading.Timer] = {}
         self._lock = threading.Lock()
 
     def _handle(self, path_str: str) -> None:
@@ -62,7 +62,7 @@ class ImportWatcher:
         self.config = config
         self._watch_dir = watch_dir
         self._on_import = on_import
-        self._observer: Optional[Observer] = None
+        self._observer: Observer | None = None
         self._running = False
 
     def start(self) -> None:
@@ -80,9 +80,7 @@ class ImportWatcher:
         if self._watch_dir.exists():
             self._observer.schedule(handler, str(self._watch_dir), recursive=True)
         else:
-            wait_thread = threading.Thread(
-                target=self._wait_for_dir, args=(handler,), daemon=True
-            )
+            wait_thread = threading.Thread(target=self._wait_for_dir, args=(handler,), daemon=True)
             wait_thread.start()
 
         self._observer.start()

@@ -10,17 +10,17 @@ Captures the model's reasoning and planning before each tool execution:
 This helps capture the "why" behind tool choices for better training data.
 """
 
-import os
-import sys
 import json
-import uuid
+import os
 import platform
+import sys
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Any
 
 # Cross-platform file locking
-if platform.system() == 'Windows':
+if platform.system() == "Windows":
     import msvcrt
 
     def lock_file(f, exclusive=False):
@@ -31,6 +31,7 @@ if platform.system() == 'Windows':
             msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
         except OSError:
             pass
+
 else:
     import fcntl
 
@@ -43,14 +44,14 @@ else:
 
 def get_bashgym_dir() -> Path:
     """Get the global Bash Gym directory (~/.bashgym/)."""
-    if platform.system() == 'Windows':
+    if platform.system() == "Windows":
         base = Path(os.environ.get("USERPROFILE", ""))
     else:
         base = Path.home()
     return base / ".bashgym"
 
 
-def get_session_id() -> Optional[str]:
+def get_session_id() -> str | None:
     """Get the current session ID."""
     session_file = get_bashgym_dir() / "current_session_id"
     if session_file.exists():
@@ -64,20 +65,20 @@ def get_pending_file() -> Path:
     return bashgym_dir / "pending_tool_use.json"
 
 
-def save_pending_tool_use(tool_info: Dict[str, Any]) -> None:
+def save_pending_tool_use(tool_info: dict[str, Any]) -> None:
     """Save pending tool use info to be merged with post_tool_use."""
     pending_file = get_pending_file()
 
     try:
-        with open(pending_file, 'w') as f:
+        with open(pending_file, "w") as f:
             lock_file(f, exclusive=True)
             json.dump(tool_info, f, indent=2)
             unlock_file(f)
-    except (IOError, OSError) as e:
+    except OSError as e:
         print(f"Warning: Could not save pending tool use: {e}", file=sys.stderr)
 
 
-def extract_reasoning(event: Dict[str, Any]) -> Dict[str, Any]:
+def extract_reasoning(event: dict[str, Any]) -> dict[str, Any]:
     """Extract reasoning and planning information from the event."""
 
     tool_name = event.get("tool_name", event.get("tool", "unknown"))

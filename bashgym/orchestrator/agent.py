@@ -22,30 +22,28 @@ Module: Orchestrator
 """
 
 import logging
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Optional, List, Callable, Awaitable
 
-from bashgym.orchestrator.models import (
-    OrchestratorSpec, TaskNode, TaskStatus,
-    WorkerConfig, WorkerResult,
-    LLMConfig, LLMProvider,
-)
-from bashgym.orchestrator.task_dag import TaskDAG
-from bashgym.orchestrator.dispatcher import WorkerPool
-from bashgym.orchestrator.worktree import WorktreeManager
-from bashgym.orchestrator.synthesizer import ResultSynthesizer, SynthesisReport
-from bashgym.orchestrator.prompts import (
-    WORKER_SYSTEM_PROMPT, RETRY_PROMPT_TEMPLATE,
-    RETRY_ANALYSIS_SYSTEM, RETRY_ANALYSIS_TEMPLATE,
-)
 from bashgym.orchestrator.context_builder import WorkerContextBuilder
-from bashgym.orchestrator.shared_state import SharedState
-
-# Optional fast-loop prompt evolution
-try:
-    from bashgym.gym.prompt_evolver import PromptEvolver
-except ImportError:
-    PromptEvolver = None  # type: ignore[misc,assignment]
+from bashgym.orchestrator.dispatcher import WorkerPool
+from bashgym.orchestrator.models import (
+    LLMConfig,
+    OrchestratorSpec,
+    TaskNode,
+    TaskStatus,
+    WorkerConfig,
+    WorkerResult,
+)
+from bashgym.orchestrator.prompts import (
+    RETRY_ANALYSIS_SYSTEM,
+    RETRY_ANALYSIS_TEMPLATE,
+    RETRY_PROMPT_TEMPLATE,
+    WORKER_SYSTEM_PROMPT,
+)
+from bashgym.orchestrator.synthesizer import ResultSynthesizer, SynthesisReport
+from bashgym.orchestrator.task_dag import TaskDAG
+from bashgym.orchestrator.worktree import WorktreeManager
 
 logger = logging.getLogger(__name__)
 
@@ -73,16 +71,15 @@ class OrchestrationAgent:
 
     def __init__(
         self,
-        llm_config: Optional[LLMConfig] = None,
+        llm_config: LLMConfig | None = None,
         max_workers: int = 5,
-        repo_path: Optional[Path] = None,
+        repo_path: Path | None = None,
         use_worktrees: bool = True,
-        job_id: Optional[str] = None,
+        job_id: str | None = None,
         model_router=None,
-        prompt_evolver: Optional["PromptEvolver"] = None,
-        on_task_started: Optional[Callable[[TaskNode], Awaitable[None]]] = None,
-        on_task_completed: Optional[Callable[[TaskNode, WorkerResult], Awaitable[None]]] = None,
-        on_task_failed: Optional[Callable[[TaskNode, WorkerResult], Awaitable[None]]] = None,
+        on_task_started: Callable[[TaskNode], Awaitable[None]] | None = None,
+        on_task_completed: Callable[[TaskNode, WorkerResult], Awaitable[None]] | None = None,
+        on_task_failed: Callable[[TaskNode, WorkerResult], Awaitable[None]] | None = None,
     ):
         """Initialize the orchestration agent.
 
@@ -106,9 +103,6 @@ class OrchestrationAgent:
             model_router: Optional ModelRouter for student model routing.
                          When set, LOW priority tasks are routed through
                          the router's confidence-based strategy.
-            prompt_evolver: Optional PromptEvolver for fast-loop prompt
-                          mutation. When set with a best_variant, evolved
-                          prompt patches are applied to worker identity layers.
             on_task_started: Callback when a task starts
             on_task_completed: Callback when a task completes
             on_task_failed: Callback when a task fails
@@ -118,16 +112,14 @@ class OrchestrationAgent:
         self.use_worktrees = use_worktrees
         self.job_id = job_id or ""
         self.model_router = model_router
-        self.prompt_evolver = prompt_evolver
 
         if repo_path and use_worktrees:
             self.worktrees = WorktreeManager(repo_path)
         else:
             self.worktrees = None
 
-        self.dag: Optional[TaskDAG] = None
-        self.context_builder: Optional[WorkerContextBuilder] = None
-        self.shared_state: SharedState = SharedState()
+        self.dag: TaskDAG | None = None
+        self.context_builder: WorkerContextBuilder | None = None
         self._spec_title: str = ""
 
         # Budget tracking
@@ -164,8 +156,7 @@ class OrchestrationAgent:
         provider_name = self.llm_config.provider.value
         model_name = self.llm_config.model
         logger.info(
-            f"Decomposing spec: {spec.title} "
-            f"(provider={provider_name}, model={model_name})"
+            f"Decomposing spec: {spec.title} " f"(provider={provider_name}, model={model_name})"
         )
         self.dag = await TaskDAG.from_spec(spec, self.llm_config)
         self._spec_title = spec.title
@@ -181,8 +172,7 @@ class OrchestrationAgent:
         )
 
         logger.info(
-            f"Decomposed into {task_count} tasks, "
-            f"{len(conflicts)} potential file conflicts"
+            f"Decomposed into {task_count} tasks, " f"{len(conflicts)} potential file conflicts"
         )
 
         return self.dag
@@ -193,10 +183,10 @@ class OrchestrationAgent:
 
     async def execute(
         self,
-        dag: Optional[TaskDAG] = None,
+        dag: TaskDAG | None = None,
         base_branch: str = "main",
-        budget_usd: Optional[float] = None,
-    ) -> List[WorkerResult]:
+        budget_usd: float | None = None,
+    ) -> list[WorkerResult]:
         """Execute an approved TaskDAG.
 
         1. Get ready tasks (no unmet dependencies)
@@ -221,7 +211,7 @@ class OrchestrationAgent:
         if not dag:
             raise ValueError("No DAG to execute. Call submit_spec() first.")
 
-        results: List[WorkerResult] = []
+        results: list[WorkerResult] = []
         total_tasks = len(dag.nodes)
 
         # Initialize budget tracking
@@ -231,12 +221,8 @@ class OrchestrationAgent:
 
         logger.info(
             f"Starting execution of {total_tasks} tasks"
-            + (f" (budget: ${self._budget_limit_usd:.2f})"
-               if self._budget_limit_usd else "")
+            + (f" (budget: ${self._budget_limit_usd:.2f})" if self._budget_limit_usd else "")
         )
-
-        # Detect shared-state write-key conflicts between parallel tasks
-        self._detect_state_conflicts(dag)
 
         while not dag.is_complete():
             # Budget check before spawning more
@@ -251,20 +237,20 @@ class OrchestrationAgent:
             if not ready and self.pool.active_count == 0:
                 # No ready tasks and no active workers = deadlock
                 blocked = [
-                    t for t in dag.nodes.values()
+                    t
+                    for t in dag.nodes.values()
                     if t.status in (TaskStatus.PENDING, TaskStatus.BLOCKED)
                 ]
                 if blocked:
                     logger.error(
-                        f"Deadlock detected: {len(blocked)} tasks stuck. "
-                        f"Marking as failed."
+                        f"Deadlock detected: {len(blocked)} tasks stuck. " f"Marking as failed."
                     )
                     for task in blocked:
                         task.status = TaskStatus.FAILED
                 break
 
             # Spawn workers for ready tasks (up to available slots)
-            for task in ready[:self.pool.available_slots]:
+            for task in ready[: self.pool.available_slots]:
                 await self._spawn_task_worker(task, dag, base_branch)
 
             if self.pool.active_count == 0:
@@ -293,23 +279,12 @@ class OrchestrationAgent:
             if result.success:
                 newly_ready = dag.mark_completed(result.task_id, result)
                 logger.info(
-                    f"Task {result.task_id} completed. "
-                    f"{len(newly_ready)} tasks unblocked."
+                    f"Task {result.task_id} completed. " f"{len(newly_ready)} tasks unblocked."
                 )
-
-                # Poll completed worker's shared state contributions
-                completed_task = dag.nodes.get(result.task_id)
-                if completed_task and completed_task.worktree_path:
-                    await self.shared_state.poll_worktree_state(
-                        str(completed_task.worktree_path),
-                        result.task_id,
-                    )
 
                 # Append completion update to running workers' CLAUDE.md
                 if self.context_builder:
-                    update_text = self.context_builder.build_update(
-                        result.task_id, result
-                    )
+                    update_text = self.context_builder.build_update(result.task_id, result)
                     if update_text:
                         for other in dag.nodes.values():
                             if (
@@ -317,9 +292,7 @@ class OrchestrationAgent:
                                 and other.worktree_path
                                 and other.id != result.task_id
                             ):
-                                self.context_builder.append_update(
-                                    other.worktree_path, update_text
-                                )
+                                self.context_builder.append_update(other.worktree_path, update_text)
 
                 await self._broadcast_task_completed(result, len(newly_ready))
                 if self._on_task_completed:
@@ -359,9 +332,11 @@ class OrchestrationAgent:
         return {
             "spent_usd": round(self._total_spent_usd, 4),
             "limit_usd": round(self._budget_limit_usd, 2),
-            "remaining_usd": round(
-                max(0, self._budget_limit_usd - self._total_spent_usd), 4
-            ) if self._budget_limit_usd else None,
+            "remaining_usd": (
+                round(max(0, self._budget_limit_usd - self._total_spent_usd), 4)
+                if self._budget_limit_usd
+                else None
+            ),
             "exceeded": self._budget_exceeded,
         }
 
@@ -406,24 +381,9 @@ class OrchestrationAgent:
         # Write CLAUDE.md to worktree for dynamic context
         if self.context_builder and task.worktree_path:
             try:
-                self.context_builder.write_claude_md(
-                    task,
-                    task.worktree_path,
-                    shared_state=self.shared_state,
-                )
+                self.context_builder.write_claude_md(task, task.worktree_path)
             except Exception as e:
-                logger.warning(
-                    f"Failed to write CLAUDE.md for {task.id}: {e}"
-                )
-
-        # Write current shared state snapshot so the worker can read it
-        if task.worktree_path:
-            try:
-                await self.shared_state.write_state_file(str(task.worktree_path))
-            except Exception as e:
-                logger.warning(
-                    f"Failed to write shared state for {task.id}: {e}"
-                )
+                logger.warning(f"Failed to write CLAUDE.md for {task.id}: {e}")
 
         # Build worker config — cap per-worker budget to remaining job budget
         worker_budget = task.budget_usd
@@ -446,23 +406,6 @@ class OrchestrationAgent:
             system_prompt = self.context_builder.build_system_prompt(task)
         else:
             system_prompt = WORKER_SYSTEM_PROMPT
-
-        # Fast-loop: apply evolved prompt patches if available
-        if self.prompt_evolver and self.prompt_evolver.best_variant:
-            try:
-                system_prompt = self.prompt_evolver.apply_to_prompt(
-                    system_prompt, self.prompt_evolver.best_variant
-                )
-                logger.debug(
-                    "Applied evolved prompt variant %s to task %s",
-                    self.prompt_evolver.best_variant.variant_id[:8],
-                    task.id,
-                )
-            except Exception as e:
-                logger.warning(
-                    "Failed to apply evolved prompt to task %s: %s",
-                    task.id, e,
-                )
 
         config = WorkerConfig(
             model=worker_model,
@@ -502,19 +445,14 @@ class OrchestrationAgent:
 
             task.status = TaskStatus.PENDING
 
-            await self._broadcast_task_failed(
-                result, will_retry=True
-            )
+            await self._broadcast_task_failed(result, will_retry=True)
             logger.info(
-                f"Retrying task {task.id} "
-                f"(attempt {task.retry_count}/{task.max_retries})"
+                f"Retrying task {task.id} " f"(attempt {task.retry_count}/{task.max_retries})"
             )
         else:
             blocked = dag.mark_failed(result.task_id, result.error or "")
 
-            await self._broadcast_task_failed(
-                result, will_retry=False
-            )
+            await self._broadcast_task_failed(result, will_retry=False)
             logger.warning(
                 f"Task {task.id} failed after {task.retry_count} retries. "
                 f"{len(blocked)} tasks blocked."
@@ -552,8 +490,7 @@ class OrchestrationAgent:
 
             if improved and len(improved.strip()) > 20:
                 logger.info(
-                    f"LLM rewrote retry prompt for task {task.id} "
-                    f"({len(improved)} chars)"
+                    f"LLM rewrote retry prompt for task {task.id} " f"({len(improved)} chars)"
                 )
                 return improved.strip()
 
@@ -566,43 +503,6 @@ class OrchestrationAgent:
             previous_output=result.output[:1000],
             original_prompt=original_prompt,
         )
-
-    # =========================================================================
-    # Shared State Conflict Detection
-    # =========================================================================
-
-    def _detect_state_conflicts(self, dag: TaskDAG) -> None:
-        """Detect and log overlapping write keys between parallel tasks.
-
-        Builds a write-key map from each task's `provides` contracts
-        and warns about keys that multiple parallel tasks claim to write.
-        """
-        task_write_keys: dict[str, set[str]] = {}
-
-        for task_id, task in dag.nodes.items():
-            keys: set[str] = set()
-            for contract in task.provides:
-                # Use file + exports as write keys
-                file = contract.get("file", "")
-                exports = contract.get("exports", [])
-                if file:
-                    keys.add(file)
-                for export in exports:
-                    keys.add(f"{file}:{export}" if file else export)
-            if keys:
-                task_write_keys[task_id] = keys
-
-        if not task_write_keys:
-            return
-
-        conflicts = self.shared_state.detect_conflicts(task_write_keys)
-        if conflicts:
-            logger.warning(
-                f"Shared state conflicts detected: "
-                f"{len(conflicts)} overlapping write keys"
-            )
-            for conflict in conflicts:
-                logger.warning(f"  {conflict.description}")
 
     # =========================================================================
     # Student Model Routing
@@ -642,6 +542,7 @@ class OrchestrationAgent:
 
             # ModelType.STUDENT means the router chose the student
             from bashgym.gym.router import ModelType
+
             return decision.model_type == ModelType.STUDENT
 
         except Exception as e:
@@ -683,6 +584,7 @@ class OrchestrationAgent:
         """Broadcast task started event via WebSocket."""
         try:
             from bashgym.api.websocket import broadcast_orchestration_task_started
+
             await broadcast_orchestration_task_started(
                 job_id=self.job_id,
                 task_id=task.id,
@@ -692,12 +594,11 @@ class OrchestrationAgent:
         except Exception:
             pass  # WebSocket not available (e.g., CLI mode)
 
-    async def _broadcast_task_completed(
-        self, result: WorkerResult, newly_unblocked: int
-    ) -> None:
+    async def _broadcast_task_completed(self, result: WorkerResult, newly_unblocked: int) -> None:
         """Broadcast task completed event via WebSocket."""
         try:
             from bashgym.api.websocket import broadcast_orchestration_task_completed
+
             await broadcast_orchestration_task_completed(
                 job_id=self.job_id,
                 task_id=result.task_id,
@@ -708,12 +609,11 @@ class OrchestrationAgent:
         except Exception:
             pass
 
-    async def _broadcast_task_failed(
-        self, result: WorkerResult, will_retry: bool
-    ) -> None:
+    async def _broadcast_task_failed(self, result: WorkerResult, will_retry: bool) -> None:
         """Broadcast task failed event via WebSocket."""
         try:
             from bashgym.api.websocket import broadcast_orchestration_task_failed
+
             await broadcast_orchestration_task_failed(
                 job_id=self.job_id,
                 task_id=result.task_id,
@@ -723,14 +623,13 @@ class OrchestrationAgent:
         except Exception:
             pass
 
-    async def _broadcast_budget_update(
-        self, dag: TaskDAG, results: List[WorkerResult]
-    ) -> None:
+    async def _broadcast_budget_update(self, dag: TaskDAG, results: list[WorkerResult]) -> None:
         """Broadcast budget status via WebSocket."""
         if not self._budget_limit_usd:
             return
         try:
             from bashgym.api.websocket import broadcast_orchestration_budget_update
+
             await broadcast_orchestration_budget_update(
                 job_id=self.job_id,
                 spent_usd=self._total_spent_usd,
@@ -744,6 +643,7 @@ class OrchestrationAgent:
         """Broadcast orchestration complete event via WebSocket."""
         try:
             from bashgym.api.websocket import broadcast_orchestration_complete
+
             await broadcast_orchestration_complete(
                 job_id=self.job_id,
                 completed=report.completed_tasks,
@@ -760,7 +660,7 @@ class OrchestrationAgent:
     # Trace Ingestion (for training pipeline)
     # =========================================================================
 
-    async def ingest_traces(self, results: List[WorkerResult]) -> int:
+    async def ingest_traces(self, results: list[WorkerResult]) -> int:
         """Feed orchestration traces into the Factory training pipeline.
 
         Imports Claude Code session traces from completed workers using
@@ -794,19 +694,15 @@ class OrchestrationAgent:
             session_file = self._find_session_file(importer, result.session_id)
             if not session_file:
                 logger.debug(
-                    f"Session file not found for {result.task_id} "
-                    f"(session {result.session_id})"
+                    f"Session file not found for {result.task_id} " f"(session {result.session_id})"
                 )
                 continue
 
             try:
-                import_result = await importer.import_session_async(
-                    session_file, force=False
-                )
+                import_result = await importer.import_session_async(session_file, force=False)
                 if import_result.error:
                     logger.warning(
-                        f"Trace import failed for {result.task_id}: "
-                        f"{import_result.error}"
+                        f"Trace import failed for {result.task_id}: " f"{import_result.error}"
                     )
                 elif import_result.skipped:
                     logger.debug(
@@ -828,7 +724,6 @@ class OrchestrationAgent:
     @staticmethod
     def _find_session_file(importer, session_id: str):
         """Find a Claude Code session file by session ID."""
-        from pathlib import Path
 
         projects_dir = importer.find_projects_dir()
         if not projects_dir:

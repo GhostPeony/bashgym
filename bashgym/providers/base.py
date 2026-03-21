@@ -10,7 +10,7 @@ No imports from other bashgym modules to avoid circular dependencies.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 @dataclass
@@ -23,10 +23,10 @@ class ProviderResponse:
     latency_ms: float
     tokens_used: int
     success: bool
-    error: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "content": self.content,
             "model_name": self.model_name,
@@ -45,15 +45,13 @@ class HealthStatus:
 
     available: bool
     latency_ms: float = 0.0
-    error: Optional[str] = None
-    models_loaded: List[str] = field(default_factory=list)
-    last_checked: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
-    gpu_memory_used_mb: Optional[float] = None
-    gpu_memory_total_mb: Optional[float] = None
+    error: str | None = None
+    models_loaded: list[str] = field(default_factory=list)
+    last_checked: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    gpu_memory_used_mb: float | None = None
+    gpu_memory_total_mb: float | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "available": self.available,
             "latency_ms": self.latency_ms,
@@ -72,13 +70,13 @@ class ProviderModel:
     id: str
     name: str
     provider_type: str
-    size_gb: Optional[float] = None
-    parameter_size: Optional[str] = None
+    size_gb: float | None = None
+    parameter_size: str | None = None
     is_code_model: bool = False
     is_local: bool = False
-    context_length: Optional[int] = None
+    context_length: int | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "name": self.name,
@@ -120,9 +118,9 @@ class InferenceProvider(ABC):
     @abstractmethod
     async def generate(
         self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
-        system_prompt: Optional[str] = None,
+        messages: list[dict[str, str]],
+        model: str | None = None,
+        system_prompt: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
         **kwargs: Any,
@@ -136,11 +134,11 @@ class InferenceProvider(ABC):
         ...
 
     @abstractmethod
-    async def list_models(self) -> List[ProviderModel]:
+    async def list_models(self) -> list[ProviderModel]:
         """List available models from this provider."""
         ...
 
-    async def warm_up(self, model: Optional[str] = None) -> bool:
+    async def warm_up(self, model: str | None = None) -> bool:
         """
         Warm up the provider, optionally loading a specific model.
 

@@ -7,13 +7,12 @@ Train smaller language models from agent execution traces.
 __version__ = "0.1.0"
 
 # Core imports for convenience
-from bashgym.config import Settings, get_settings
-
 # Layer imports
-from bashgym.arena import SandboxManager, AgentRunner
-from bashgym.judge import Verifier
+from bashgym.arena import AgentRunner, SandboxManager
+from bashgym.config import Settings, get_settings
 from bashgym.factory import DataFactory, TraceProcessor
-from bashgym.gym import Trainer, BashGymEnv, ModelRouter
+from bashgym.gym import BashGymEnv, ModelRouter, Trainer
+from bashgym.judge import Verifier
 
 __all__ = [
     # Config

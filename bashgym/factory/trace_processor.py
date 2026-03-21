@@ -9,22 +9,19 @@ Extended with Safe Synthesizer integration for privacy-preserving processing.
 Module 3: Data Synthesis (The "Factory")
 """
 
-import os
+import hashlib
 import json
 import re
-import asyncio
-from pathlib import Path
-from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List, Tuple, Set, TYPE_CHECKING
-from datetime import datetime, timezone
 from collections import defaultdict
-import hashlib
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from .safe_synthesizer import SafeSynthesizer
 
 from .quality_calculator import calculate_quality_breakdown
-from .decision_extractor import DecisionExtractor, Decision
 
 
 @dataclass
@@ -74,12 +71,12 @@ class TraceQualityMetrics:
         - Length (10%)
         """
         score = (
-            self.success_rate * 0.30 +
-            self.verification_score * 0.25 +
-            self.complexity_score * 0.15 +
-            self.tool_diversity * 0.10 +
-            self.efficiency_score * 0.10 +
-            self.length_score * 0.10
+            self.success_rate * 0.30
+            + self.verification_score * 0.25
+            + self.complexity_score * 0.15
+            + self.tool_diversity * 0.10
+            + self.efficiency_score * 0.10
+            + self.length_score * 0.10
         )
 
         # Guard against NaN
@@ -96,12 +93,11 @@ class ProcessedTrace:
     trace_id: str
     original_path: Path
     task_prompt: str
-    normalized_steps: List[Dict[str, Any]]
+    normalized_steps: list[dict[str, Any]]
     quality_metrics: TraceQualityMetrics
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    decisions: List[Decision] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "trace_id": self.trace_id,
@@ -111,11 +107,9 @@ class ProcessedTrace:
                 "score": self.quality_metrics.quality_score,
                 "success_rate": self.quality_metrics.success_rate,
                 "total_steps": self.quality_metrics.total_steps,
-                "verification_passed": self.quality_metrics.verification_passed
+                "verification_passed": self.quality_metrics.verification_passed,
             },
             "metadata": self.metadata,
-            "decision_count": len(self.decisions),
-            "decisions": [d.to_dict() for d in self.decisions],
         }
 
 
@@ -133,22 +127,22 @@ class TraceProcessor:
 
     # Common command patterns to normalize
     COMMAND_PATTERNS = {
-        r'cd\s+[\w/.-]+': 'cd <path>',
-        r'cat\s+[\w/.-]+': 'cat <file>',
-        r'ls\s+-?\w*\s*[\w/.-]*': 'ls <options> <path>',
-        r'grep\s+.*': 'grep <pattern> <file>',
-        r'sed\s+.*': 'sed <expression> <file>',
-        r'pip\s+install\s+.*': 'pip install <packages>',
-        r'python\s+[\w/.-]+': 'python <script>',
-        r'git\s+\w+.*': 'git <command>',
+        r"cd\s+[\w/.-]+": "cd <path>",
+        r"cat\s+[\w/.-]+": "cat <file>",
+        r"ls\s+-?\w*\s*[\w/.-]*": "ls <options> <path>",
+        r"grep\s+.*": "grep <pattern> <file>",
+        r"sed\s+.*": "sed <expression> <file>",
+        r"pip\s+install\s+.*": "pip install <packages>",
+        r"python\s+[\w/.-]+": "python <script>",
+        r"git\s+\w+.*": "git <command>",
     }
 
     # Sensitive patterns to redact (fallback when Safe Synthesizer not available)
     SENSITIVE_PATTERNS = [
         r'(?i)(api[_-]?key|token|secret|password|auth)\s*[=:]\s*["\']?[\w-]+["\']?',
-        r'(?i)bearer\s+[\w.-]+',
-        r'sk-[a-zA-Z0-9]+',  # OpenAI-style keys
-        r'nvapi-[a-zA-Z0-9-]+',  # NVIDIA API keys
+        r"(?i)bearer\s+[\w.-]+",
+        r"sk-[a-zA-Z0-9]+",  # OpenAI-style keys
+        r"nvapi-[a-zA-Z0-9-]+",  # NVIDIA API keys
     ]
 
     def __init__(
@@ -156,7 +150,7 @@ class TraceProcessor:
         min_quality_score: float = 0.3,
         max_output_length: int = 5000,
         deduplicate: bool = True,
-        safe_synthesizer: Optional["SafeSynthesizer"] = None
+        safe_synthesizer: Optional["SafeSynthesizer"] = None,
     ):
         """Initialize the trace processor.
 
@@ -169,53 +163,53 @@ class TraceProcessor:
         self.min_quality_score = min_quality_score
         self.max_output_length = max_output_length
         self.deduplicate = deduplicate
-        self.seen_hashes: Set[str] = set()
+        self.seen_hashes: set[str] = set()
         self.safe_synthesizer = safe_synthesizer
-    
-    def process_trace(self, trace_path: Path) -> Optional[ProcessedTrace]:
+
+    def process_trace(self, trace_path: Path) -> ProcessedTrace | None:
         """
         Process a single trace file.
-        
+
         Args:
             trace_path: Path to the trace JSON file
-            
+
         Returns:
             ProcessedTrace or None if trace doesn't meet quality threshold
         """
         try:
-            with open(trace_path, 'r') as f:
+            with open(trace_path) as f:
                 raw_trace = json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
+        except (OSError, json.JSONDecodeError) as e:
             print(f"Error loading trace {trace_path}: {e}")
             return None
-        
+
         # Extract components
         metadata = raw_trace.get("metadata", {})
         raw_steps = raw_trace.get("trace", [])
-        
+
         # Get task prompt
         task_prompt = metadata.get("user_initial_prompt", "")
         if not task_prompt:
             return None
-        
+
         # Normalize steps
         normalized_steps = self._normalize_steps(raw_steps)
-        
+
         # Calculate quality metrics
         quality_metrics = self._calculate_quality(raw_trace, normalized_steps)
-        
+
         # Check quality threshold
         if quality_metrics.quality_score < self.min_quality_score:
             return None
-        
+
         # Generate trace ID
         trace_id = self._generate_trace_id(task_prompt, normalized_steps)
-        
+
         # Check for duplicates
         if self.deduplicate and trace_id in self.seen_hashes:
             return None
         self.seen_hashes.add(trace_id)
-        
+
         # Build processed metadata, preserving bashbros extensions if present
         processed_metadata = {
             "original_metadata": metadata,
@@ -230,12 +224,6 @@ class TraceProcessor:
             if "bashbros_extensions" in raw_trace:
                 processed_metadata["bashbros_extensions"] = raw_trace["bashbros_extensions"]
 
-        # Extract structured decisions from normalized steps
-        extractor = DecisionExtractor()
-        decisions = extractor.extract(
-            normalized_steps, raw_trace.get("cognitive_data")
-        )
-
         return ProcessedTrace(
             trace_id=trace_id,
             original_path=trace_path,
@@ -243,46 +231,49 @@ class TraceProcessor:
             normalized_steps=normalized_steps,
             quality_metrics=quality_metrics,
             metadata=processed_metadata,
-            decisions=decisions,
         )
 
-    def _normalize_steps(self, raw_steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _normalize_steps(self, raw_steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """
         Normalize trace steps.
-        
+
         - Redact sensitive information
         - Truncate long outputs
         - Standardize field names
         """
         normalized = []
-        
+
         for step in raw_steps:
             # Extract fields with fallbacks
             tool_name = step.get("tool_name", step.get("tool", "unknown"))
             command = step.get("command", step.get("input", ""))
             output = step.get("output", step.get("result", ""))
-            success = step.get("success", step.get("exit_code") == 0 if "exit_code" in step else None)
-            
+            success = step.get(
+                "success", step.get("exit_code") == 0 if "exit_code" in step else None
+            )
+
             # Redact sensitive information
             command = self._redact_sensitive(str(command))
             output = self._redact_sensitive(str(output))
-            
+
             # Truncate long outputs
             if len(output) > self.max_output_length:
-                output = output[:self.max_output_length] + "\n... [truncated]"
-            
-            normalized.append({
-                "tool": tool_name.lower(),
-                "command": command,
-                "output": output,
-                "success": success,
-                "exit_code": step.get("exit_code"),
-                "cognitive": step.get("cognitive"),
-                "metadata": step.get("metadata", {}),
-            })
+                output = output[: self.max_output_length] + "\n... [truncated]"
+
+            normalized.append(
+                {
+                    "tool": tool_name.lower(),
+                    "command": command,
+                    "output": output,
+                    "success": success,
+                    "exit_code": step.get("exit_code"),
+                    "cognitive": step.get("cognitive"),
+                    "metadata": step.get("metadata", {}),
+                }
+            )
 
         return normalized
-    
+
     def _redact_sensitive(self, text: str) -> str:
         """Redact sensitive information from text using regex patterns."""
         for pattern in self.SENSITIVE_PATTERNS:
@@ -309,7 +300,7 @@ class TraceProcessor:
             # Fallback to regex on any error
             return self._redact_sensitive(text)
 
-    async def process_trace_async(self, trace_path: Path) -> Optional[ProcessedTrace]:
+    async def process_trace_async(self, trace_path: Path) -> ProcessedTrace | None:
         """
         Process a single trace file with async Safe Synthesizer support.
 
@@ -320,9 +311,9 @@ class TraceProcessor:
             ProcessedTrace or None if trace doesn't meet quality threshold
         """
         try:
-            with open(trace_path, 'r') as f:
+            with open(trace_path) as f:
                 raw_trace = json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
+        except (OSError, json.JSONDecodeError) as e:
             print(f"Error loading trace {trace_path}: {e}")
             return None
 
@@ -368,12 +359,6 @@ class TraceProcessor:
             if "bashbros_extensions" in raw_trace:
                 processed_metadata["bashbros_extensions"] = raw_trace["bashbros_extensions"]
 
-        # Extract structured decisions from normalized steps
-        extractor = DecisionExtractor()
-        decisions = extractor.extract(
-            normalized_steps, raw_trace.get("cognitive_data")
-        )
-
         return ProcessedTrace(
             trace_id=trace_id,
             original_path=trace_path,
@@ -381,13 +366,9 @@ class TraceProcessor:
             normalized_steps=normalized_steps,
             quality_metrics=quality_metrics,
             metadata=processed_metadata,
-            decisions=decisions,
         )
 
-    async def _normalize_steps_async(
-        self,
-        raw_steps: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
+    async def _normalize_steps_async(self, raw_steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """
         Normalize trace steps with async Safe Synthesizer support.
         """
@@ -398,7 +379,9 @@ class TraceProcessor:
             tool_name = step.get("tool_name", step.get("tool", "unknown"))
             command = step.get("command", step.get("input", ""))
             output = step.get("output", step.get("result", ""))
-            success = step.get("success", step.get("exit_code") == 0 if "exit_code" in step else None)
+            success = step.get(
+                "success", step.get("exit_code") == 0 if "exit_code" in step else None
+            )
 
             # Redact sensitive information
             if self.safe_synthesizer:
@@ -410,25 +393,25 @@ class TraceProcessor:
 
             # Truncate long outputs
             if len(output) > self.max_output_length:
-                output = output[:self.max_output_length] + "\n... [truncated]"
+                output = output[: self.max_output_length] + "\n... [truncated]"
 
-            normalized.append({
-                "tool": tool_name.lower(),
-                "command": command,
-                "output": output,
-                "success": success,
-                "exit_code": step.get("exit_code"),
-                "cognitive": step.get("cognitive"),
-                "metadata": step.get("metadata", {}),
-            })
+            normalized.append(
+                {
+                    "tool": tool_name.lower(),
+                    "command": command,
+                    "output": output,
+                    "success": success,
+                    "exit_code": step.get("exit_code"),
+                    "cognitive": step.get("cognitive"),
+                    "metadata": step.get("metadata", {}),
+                }
+            )
 
         return normalized
 
     async def process_directory_async(
-        self,
-        trace_dir: Path,
-        output_path: Optional[Path] = None
-    ) -> List[ProcessedTrace]:
+        self, trace_dir: Path, output_path: Path | None = None
+    ) -> list[ProcessedTrace]:
         """
         Process all traces in a directory with async support.
 
@@ -456,11 +439,9 @@ class TraceProcessor:
             self._save_processed(processed, output_path)
 
         return processed
-    
+
     def _calculate_quality(
-        self,
-        raw_trace: Dict[str, Any],
-        normalized_steps: List[Dict[str, Any]]
+        self, raw_trace: dict[str, Any], normalized_steps: list[dict[str, Any]]
     ) -> TraceQualityMetrics:
         """Calculate quality metrics for a trace using the centralized calculator."""
         metadata = raw_trace.get("metadata", {})
@@ -490,7 +471,7 @@ class TraceProcessor:
 
         return metrics
 
-    def _calculate_complexity(self, steps: List[Dict[str, Any]]) -> float:
+    def _calculate_complexity(self, steps: list[dict[str, Any]]) -> float:
         """
         Calculate complexity score for a trace.
 
@@ -498,87 +479,75 @@ class TraceProcessor:
         Returns normalized score (0-1).
         """
         from .quality_calculator import calculate_complexity
+
         score, _ = calculate_complexity(steps)
         return score
-    
-    def _generate_trace_id(
-        self,
-        task_prompt: str,
-        steps: List[Dict[str, Any]]
-    ) -> str:
+
+    def _generate_trace_id(self, task_prompt: str, steps: list[dict[str, Any]]) -> str:
         """Generate a unique ID for a trace based on content."""
         # Create a canonical representation
         canonical = {
             "task": task_prompt.strip().lower(),
-            "commands": [s.get("command", "")[:100] for s in steps]
+            "commands": [s.get("command", "")[:100] for s in steps],
         }
-        
+
         content = json.dumps(canonical, sort_keys=True)
         return hashlib.sha256(content.encode()).hexdigest()[:16]
-    
+
     def process_directory(
-        self,
-        trace_dir: Path,
-        output_path: Optional[Path] = None
-    ) -> List[ProcessedTrace]:
+        self, trace_dir: Path, output_path: Path | None = None
+    ) -> list[ProcessedTrace]:
         """
         Process all traces in a directory.
-        
+
         Args:
             trace_dir: Directory containing trace files
             output_path: Optional path to save processed traces
-            
+
         Returns:
             List of processed traces
         """
         processed = []
         trace_files = list(Path(trace_dir).glob("*.json"))
-        
+
         print(f"Processing {len(trace_files)} traces from {trace_dir}...")
-        
+
         for trace_path in trace_files:
             result = self.process_trace(trace_path)
             if result:
                 processed.append(result)
-        
+
         print(f"Processed {len(processed)} traces (filtered {len(trace_files) - len(processed)})")
-        
+
         # Save if output path provided
         if output_path and processed:
             self._save_processed(processed, output_path)
-        
+
         return processed
-    
-    def _save_processed(
-        self,
-        traces: List[ProcessedTrace],
-        output_path: Path
-    ) -> None:
+
+    def _save_processed(self, traces: list[ProcessedTrace], output_path: Path) -> None:
         """Save processed traces to a file."""
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        with open(output_path, 'w') as f:
+
+        with open(output_path, "w") as f:
             for trace in traces:
                 f.write(json.dumps(trace.to_dict()) + "\n")
-        
+
         print(f"Saved {len(traces)} processed traces to {output_path}")
-    
-    def extract_command_patterns(
-        self,
-        traces: List[ProcessedTrace]
-    ) -> Dict[str, int]:
+
+    def extract_command_patterns(self, traces: list[ProcessedTrace]) -> dict[str, int]:
         """
         Extract common command patterns from traces.
-        
+
         Useful for understanding what commands the agent uses most.
         """
         pattern_counts = defaultdict(int)
-        
+
         for trace in traces:
             for step in trace.normalized_steps:
                 cmd = step.get("command", "")
-                
+
                 # Try to match known patterns
                 matched = False
                 for pattern, normalized in self.COMMAND_PATTERNS.items():
@@ -586,66 +555,57 @@ class TraceProcessor:
                         pattern_counts[normalized] += 1
                         matched = True
                         break
-                
+
                 if not matched:
                     # Extract command name
                     parts = cmd.split()
                     if parts:
                         pattern_counts[parts[0]] += 1
-        
+
         return dict(sorted(pattern_counts.items(), key=lambda x: -x[1]))
-    
-    def generate_statistics(
-        self,
-        traces: List[ProcessedTrace]
-    ) -> Dict[str, Any]:
+
+    def generate_statistics(self, traces: list[ProcessedTrace]) -> dict[str, Any]:
         """Generate statistics about processed traces."""
         if not traces:
             return {"error": "No traces to analyze"}
-        
+
         quality_scores = [t.quality_metrics.quality_score for t in traces]
         step_counts = [t.quality_metrics.total_steps for t in traces]
         success_rates = [t.quality_metrics.success_rate for t in traces]
-        
+
         return {
             "total_traces": len(traces),
             "quality_scores": {
                 "mean": sum(quality_scores) / len(quality_scores),
                 "min": min(quality_scores),
-                "max": max(quality_scores)
+                "max": max(quality_scores),
             },
             "step_counts": {
                 "mean": sum(step_counts) / len(step_counts),
                 "min": min(step_counts),
-                "max": max(step_counts)
+                "max": max(step_counts),
             },
             "success_rates": {
                 "mean": sum(success_rates) / len(success_rates),
                 "min": min(success_rates),
-                "max": max(success_rates)
+                "max": max(success_rates),
             },
-            "verification_passed": sum(
-                1 for t in traces if t.quality_metrics.verification_passed
-            ),
-            "command_patterns": self.extract_command_patterns(traces)
+            "verification_passed": sum(1 for t in traces if t.quality_metrics.verification_passed),
+            "command_patterns": self.extract_command_patterns(traces),
         }
 
 
 def main():
     """Example usage of the Trace Processor."""
-    processor = TraceProcessor(
-        min_quality_score=0.3,
-        deduplicate=True
-    )
-    
+    processor = TraceProcessor(min_quality_score=0.3, deduplicate=True)
+
     # Process gold traces
     gold_dir = Path("data/gold_traces")
     if gold_dir.exists():
         processed = processor.process_directory(
-            gold_dir,
-            output_path=Path("data/processed_traces/gold_processed.jsonl")
+            gold_dir, output_path=Path("data/processed_traces/gold_processed.jsonl")
         )
-        
+
         # Generate statistics
         stats = processor.generate_statistics(processed)
         print("\nTrace Statistics:")

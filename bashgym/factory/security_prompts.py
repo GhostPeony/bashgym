@@ -10,8 +10,7 @@ Two modes:
 - Enriched: LLM generates detailed reasoning chains (uses build_enrichment_prompt)
 """
 
-from typing import Any, Dict, Optional
-
+from typing import Any
 
 # =============================================================================
 # System Prompts (one per security domain)
@@ -49,7 +48,8 @@ NETWORK_SYSTEM_PROMPT = (
 # User Prompt Templates
 # =============================================================================
 
-def phishing_user_prompt(sample: Dict[str, Any]) -> str:
+
+def phishing_user_prompt(sample: dict[str, Any]) -> str:
     """Build user prompt for phishing analysis from a dataset sample."""
     url = sample.get("url", "N/A")
     target = sample.get("target", sample.get("target_brand", ""))
@@ -74,7 +74,7 @@ def phishing_user_prompt(sample: Dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
-def malware_user_prompt(sample: Dict[str, Any]) -> str:
+def malware_user_prompt(sample: dict[str, Any]) -> str:
     """Build user prompt for malware analysis from a dataset sample."""
     parts = ["Analyze the following file for malware indicators:\n"]
 
@@ -130,7 +130,7 @@ def malware_user_prompt(sample: Dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
-def network_user_prompt(sample: Dict[str, Any]) -> str:
+def network_user_prompt(sample: dict[str, Any]) -> str:
     """Build user prompt for network intrusion detection from a CIC-IDS sample."""
     parts = ["Analyze the following network flow for intrusion indicators:\n"]
 
@@ -182,7 +182,8 @@ def network_user_prompt(sample: Dict[str, Any]) -> str:
 # Direct-Mode Response Builders
 # =============================================================================
 
-def phishing_assistant_response_direct(sample: Dict[str, Any]) -> str:
+
+def phishing_assistant_response_direct(sample: dict[str, Any]) -> str:
     """Build a template-based assistant response for phishing classification."""
     # Determine label
     is_phishing = _is_phishing(sample)
@@ -212,17 +213,17 @@ def phishing_assistant_response_direct(sample: Dict[str, Any]) -> str:
             parts.append("- URL contains obfuscation characters")
         if threat:
             parts.append(f"- Associated threat: {threat}")
-        parts.append(f"\n**Verdict:** This URL is classified as phishing.")
+        parts.append("\n**Verdict:** This URL is classified as phishing.")
     else:
         parts.append("**URL Analysis:**")
         parts.append("- No phishing indicators detected")
         parts.append("- Domain appears legitimate")
-        parts.append(f"\n**Verdict:** This URL is classified as legitimate.")
+        parts.append("\n**Verdict:** This URL is classified as legitimate.")
 
     return "\n".join(parts)
 
 
-def malware_assistant_response_direct(sample: Dict[str, Any]) -> str:
+def malware_assistant_response_direct(sample: dict[str, Any]) -> str:
     """Build a template-based assistant response for malware classification."""
     is_malware = _is_malware(sample)
     label = "MALWARE" if is_malware else "BENIGN"
@@ -256,7 +257,9 @@ def malware_assistant_response_direct(sample: Dict[str, Any]) -> str:
         try:
             imp_count = int(num_imports)
             if imp_count > 100:
-                parts.append(f"- High import count ({imp_count}) may indicate complex functionality")
+                parts.append(
+                    f"- High import count ({imp_count}) may indicate complex functionality"
+                )
             elif imp_count < 5:
                 parts.append(f"- Very low import count ({imp_count}) suggests runtime resolution")
         except (ValueError, TypeError):
@@ -288,7 +291,7 @@ def malware_assistant_response_direct(sample: Dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
-def network_assistant_response_direct(sample: Dict[str, Any]) -> str:
+def network_assistant_response_direct(sample: dict[str, Any]) -> str:
     """Build a template-based assistant response for network flow classification."""
     label_raw = sample.get("Label", sample.get("label", "BENIGN"))
     is_attack = str(label_raw).strip().upper() != "BENIGN"
@@ -306,7 +309,9 @@ def network_assistant_response_direct(sample: Dict[str, Any]) -> str:
         if duration < 1000:
             parts.append(f"- Very short flow duration ({duration:.0f} us) may indicate scanning")
         elif duration > 60_000_000:
-            parts.append(f"- Long flow duration ({duration/1_000_000:.1f}s) suggests persistent connection")
+            parts.append(
+                f"- Long flow duration ({duration/1_000_000:.1f}s) suggests persistent connection"
+            )
 
     # Packet asymmetry
     fwd_pkts = _safe_float(sample, "Total Fwd Packets", "total_fwd_packets")
@@ -330,7 +335,9 @@ def network_assistant_response_direct(sample: Dict[str, Any]) -> str:
     flow_bytes = _safe_float(sample, "Flow Bytes/s", "flow_bytes_s")
     if flow_bytes is not None:
         if flow_bytes > 1_000_000:
-            parts.append(f"- High throughput ({flow_bytes:.0f} bytes/s) may indicate DDoS or exfiltration")
+            parts.append(
+                f"- High throughput ({flow_bytes:.0f} bytes/s) may indicate DDoS or exfiltration"
+            )
 
     if is_attack:
         parts.append(f"\n**Verdict:** This flow is classified as an attack ({label}).")
@@ -344,11 +351,9 @@ def network_assistant_response_direct(sample: Dict[str, Any]) -> str:
 # Enrichment Prompt Builder (for enriched mode)
 # =============================================================================
 
+
 def build_enrichment_prompt(
-    domain: str,
-    sample: Dict[str, Any],
-    user_prompt: str,
-    direct_response: str
+    domain: str, sample: dict[str, Any], user_prompt: str, direct_response: str
 ) -> str:
     """Build a prompt asking an LLM to generate a detailed reasoning chain.
 
@@ -376,7 +381,8 @@ def build_enrichment_prompt(
 # Helpers
 # =============================================================================
 
-def _is_phishing(sample: Dict[str, Any]) -> bool:
+
+def _is_phishing(sample: dict[str, Any]) -> bool:
     """Determine if a sample represents a phishing URL."""
     # PhishTank: verified=true means confirmed phishing
     if sample.get("verified") in (True, "yes", "true", "True"):
@@ -394,7 +400,7 @@ def _is_phishing(sample: Dict[str, Any]) -> bool:
     return True
 
 
-def _is_malware(sample: Dict[str, Any]) -> bool:
+def _is_malware(sample: dict[str, Any]) -> bool:
     """Determine if a sample represents malware."""
     label = sample.get("label", sample.get("avclass", ""))
     if isinstance(label, (int, float)):
@@ -416,7 +422,7 @@ def _extract_domain(url: str) -> str:
     # Remove protocol
     for prefix in ("https://", "http://", "ftp://"):
         if url.lower().startswith(prefix):
-            url = url[len(prefix):]
+            url = url[len(prefix) :]
             break
     # Remove path and query
     domain = url.split("/")[0].split("?")[0].split("#")[0]
@@ -426,11 +432,7 @@ def _extract_domain(url: str) -> str:
     return domain
 
 
-def _safe_float(
-    sample: Dict[str, Any],
-    key1: str,
-    key2: Optional[str] = None
-) -> Optional[float]:
+def _safe_float(sample: dict[str, Any], key1: str, key2: str | None = None) -> float | None:
     """Safely extract a float value from a sample dict."""
     val = sample.get(key1)
     if val is None and key2:
@@ -443,7 +445,7 @@ def _safe_float(
         return None
 
 
-def _format_sample(sample: Dict[str, Any]) -> str:
+def _format_sample(sample: dict[str, Any]) -> str:
     """Format a sample dict as readable key-value pairs."""
     lines = []
     for key, val in sample.items():

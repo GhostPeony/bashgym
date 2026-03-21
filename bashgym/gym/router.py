@@ -27,6 +27,7 @@ import httpx
 # Import instrumentation (optional)
 try:
     from bashgym.core import Instrumentation, get_instrumentation
+
     HAS_INSTRUMENTATION = True
 except ImportError:
     HAS_INSTRUMENTATION = False
@@ -35,6 +36,7 @@ except ImportError:
 # Provider registry (optional)
 try:
     from bashgym.providers.registry import ProviderRegistry
+
     HAS_REGISTRY = True
 except ImportError:
     HAS_REGISTRY = False
@@ -46,13 +48,15 @@ if TYPE_CHECKING:
 
 class ModelType(Enum):
     """Types of models in the system."""
-    TEACHER = "teacher"      # Claude (high capability)
-    STUDENT = "student"      # Fine-tuned SLM
-    HYBRID = "hybrid"        # Mix of both
+
+    TEACHER = "teacher"  # Claude (high capability)
+    STUDENT = "student"  # Fine-tuned SLM
+    HYBRID = "hybrid"  # Mix of both
 
 
 class RoutingStrategy(Enum):
     """Strategies for routing requests."""
+
     TEACHER_ONLY = "teacher_only"
     STUDENT_ONLY = "student_only"
     CONFIDENCE_BASED = "confidence_based"
@@ -89,7 +93,7 @@ class RouterConfig:
 
     # Progressive handoff settings
     student_sample_rate: float = 0.1  # Start with 10% to student
-    max_student_rate: float = 0.9     # Cap at 90% to student
+    max_student_rate: float = 0.9  # Cap at 90% to student
     improvement_increment: float = 0.05
 
     # Fallback settings
@@ -126,7 +130,7 @@ class RoutingDecision:
             "strategy": self.strategy_used.value,
             "confidence": self.confidence,
             "task_complexity": self.task_complexity,
-            "timestamp": self.timestamp
+            "timestamp": self.timestamp,
         }
 
 
@@ -163,7 +167,7 @@ class ModelRouter:
         self,
         config: RouterConfig | None = None,
         instrumentation: Optional["Instrumentation"] = None,
-        registry=None
+        registry=None,
     ):
         """Initialize the model router."""
         self.config = config or RouterConfig()
@@ -197,7 +201,10 @@ class ModelRouter:
     def get_guardrail_events(self) -> list[dict[str, Any]]:
         """Get guardrail events from routing."""
         if self._instrumentation:
-            return [e.to_dict() for e in self._instrumentation.get_guardrail_events(model_source="student")]
+            return [
+                e.to_dict()
+                for e in self._instrumentation.get_guardrail_events(model_source="student")
+            ]
         return []
 
     def _load_default_models(self) -> None:
@@ -205,26 +212,30 @@ class ModelRouter:
         # Teacher model (Claude)
         anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
         if anthropic_key:
-            self.register_model(ModelConfig(
-                name="claude-sonnet",
-                model_type=ModelType.TEACHER,
-                endpoint="https://api.anthropic.com/v1/messages",
-                api_key=anthropic_key,
-                max_tokens=8192,
-                temperature=0.7
-            ))
+            self.register_model(
+                ModelConfig(
+                    name="claude-sonnet",
+                    model_type=ModelType.TEACHER,
+                    endpoint="https://api.anthropic.com/v1/messages",
+                    api_key=anthropic_key,
+                    max_tokens=8192,
+                    temperature=0.7,
+                )
+            )
 
         # Student model (NVIDIA NIM or local)
         nvidia_key = os.environ.get("NVIDIA_API_KEY")
         if nvidia_key:
-            self.register_model(ModelConfig(
-                name="llama-student",
-                model_type=ModelType.STUDENT,
-                endpoint="https://integrate.api.nvidia.com/v1/chat/completions",
-                api_key=nvidia_key,
-                max_tokens=4096,
-                temperature=0.7
-            ))
+            self.register_model(
+                ModelConfig(
+                    name="llama-student",
+                    model_type=ModelType.STUDENT,
+                    endpoint="https://integrate.api.nvidia.com/v1/chat/completions",
+                    api_key=nvidia_key,
+                    max_tokens=4096,
+                    temperature=0.7,
+                )
+            )
 
     def register_model(self, model_config: ModelConfig) -> None:
         """Register a model with the router."""
@@ -249,7 +260,7 @@ class ModelRouter:
         prompt: str,
         request_id: str | None = None,
         task_complexity: float | None = None,
-        force_model: str | None = None
+        force_model: str | None = None,
     ) -> RoutingDecision:
         """
         Decide which model to route a request to.
@@ -274,7 +285,7 @@ class ModelRouter:
                 model_type=model.model_type,
                 strategy_used=RoutingStrategy.TEACHER_ONLY,
                 confidence=1.0,
-                task_complexity=task_complexity or 0.5
+                task_complexity=task_complexity or 0.5,
             )
             self._log_decision(decision)
             return decision
@@ -314,7 +325,7 @@ class ModelRouter:
             model_type=selected.model_type,
             strategy_used=self.config.strategy,
             confidence=confidence,
-            task_complexity=task_complexity
+            task_complexity=task_complexity,
         )
 
         self._log_decision(decision)
@@ -342,10 +353,21 @@ class ModelRouter:
 
         # Technical terms
         technical_terms = [
-            "refactor", "optimize", "debug", "architecture",
-            "async", "concurrent", "distributed", "scale",
-            "security", "authentication", "encryption",
-            "database", "migration", "deploy", "kubernetes"
+            "refactor",
+            "optimize",
+            "debug",
+            "architecture",
+            "async",
+            "concurrent",
+            "distributed",
+            "scale",
+            "security",
+            "authentication",
+            "encryption",
+            "database",
+            "migration",
+            "deploy",
+            "kubernetes",
         ]
         prompt_lower = prompt.lower()
         tech_count = sum(1 for term in technical_terms if term in prompt_lower)
@@ -358,10 +380,7 @@ class ModelRouter:
 
         return min(score, 1.0)
 
-    def _route_by_confidence(
-        self,
-        prompt: str
-    ) -> tuple[ModelConfig | None, float]:
+    def _route_by_confidence(self, prompt: str) -> tuple[ModelConfig | None, float]:
         """Route based on student model confidence."""
         student = self.get_student_model()
         teacher = self.get_teacher_model()
@@ -377,10 +396,7 @@ class ModelRouter:
         else:
             return teacher, 1.0
 
-    def _route_by_complexity(
-        self,
-        complexity: float
-    ) -> tuple[ModelConfig | None, float]:
+    def _route_by_complexity(self, complexity: float) -> tuple[ModelConfig | None, float]:
         """Route based on task complexity."""
         student = self.get_student_model()
         teacher = self.get_teacher_model()
@@ -420,11 +436,7 @@ class ModelRouter:
             return teacher, 0.5
 
     async def generate(
-        self,
-        prompt: str,
-        system_prompt: str | None = None,
-        request_id: str | None = None,
-        **kwargs
+        self, prompt: str, system_prompt: str | None = None, request_id: str | None = None, **kwargs
     ) -> ModelResponse:
         """
         Generate a response using the routed model with instrumentation.
@@ -442,16 +454,14 @@ class ModelRouter:
         trace_id = ""
         if self._instrumentation and self.config.enable_profiling:
             trace_id = self._instrumentation.start_trace(
-                f"router:{request_id or 'unnamed'}",
-                metadata={"prompt_preview": prompt[:100]}
+                f"router:{request_id or 'unnamed'}", metadata={"prompt_preview": prompt[:100]}
             )
 
         try:
             # Check input with guardrails
             if self._instrumentation and self.config.enable_guardrails:
                 async with self._instrumentation.instrument_input(
-                    prompt,
-                    location="router.input"
+                    prompt, location="router.input"
                 ) as ctx:
                     if not ctx.allowed:
                         return ModelResponse(
@@ -463,7 +473,7 @@ class ModelRouter:
                             success=False,
                             error_message="Input blocked by guardrails",
                             blocked_by_guardrails=True,
-                            source="blocked"
+                            source="blocked",
                         )
                     prompt = ctx.content  # Use potentially filtered prompt
 
@@ -496,7 +506,9 @@ class ModelRouter:
                             error_message=provider_resp.error,
                             source=provider_resp.provider_type,
                         )
-                        self._update_model_metrics(model.name, response.latency_ms, response.success)
+                        self._update_model_metrics(
+                            model.name, response.latency_ms, response.success
+                        )
                         return response
                     except Exception:
                         # Fall through to legacy path on registry failure
@@ -507,7 +519,9 @@ class ModelRouter:
                     response = await self._call_anthropic(model, prompt, system_prompt, **kwargs)
                     response.source = "teacher"
                 else:
-                    response = await self._call_openai_compatible(model, prompt, system_prompt, **kwargs)
+                    response = await self._call_openai_compatible(
+                        model, prompt, system_prompt, **kwargs
+                    )
                     response.source = "student"
 
                     # Check student output with guardrails
@@ -515,7 +529,7 @@ class ModelRouter:
                         async with self._instrumentation.instrument_output(
                             response.content,
                             location="router.student_output",
-                            model_source="student"
+                            model_source="student",
                         ) as ctx:
                             if not ctx.allowed:
                                 # Student output blocked - fallback to teacher
@@ -539,7 +553,7 @@ class ModelRouter:
                                                 output_tokens=teacher_response.tokens_used,
                                                 latency_ms=teacher_response.latency_ms,
                                                 model_source="teacher",
-                                                fallback=True
+                                                fallback=True,
                                             )
 
                                         return teacher_response
@@ -554,7 +568,7 @@ class ModelRouter:
                                         success=False,
                                         error_message="Output blocked by guardrails",
                                         blocked_by_guardrails=True,
-                                        source="student"
+                                        source="student",
                                     )
                             else:
                                 # Apply any PII filtering
@@ -573,7 +587,7 @@ class ModelRouter:
                         input_tokens=0,
                         output_tokens=response.tokens_used,
                         latency_ms=response.latency_ms,
-                        model_source=response.source
+                        model_source=response.source,
                     )
 
                 return response
@@ -587,7 +601,9 @@ class ModelRouter:
                 if self.config.fallback_to_teacher and model.model_type == ModelType.STUDENT:
                     teacher = self.get_teacher_model()
                     if teacher:
-                        teacher_response = await self._call_anthropic(teacher, prompt, system_prompt, **kwargs)
+                        teacher_response = await self._call_anthropic(
+                            teacher, prompt, system_prompt, **kwargs
+                        )
                         teacher_response.source = "teacher"
                         teacher_response.fell_back_to_teacher = True
                         return teacher_response
@@ -600,7 +616,7 @@ class ModelRouter:
                     tokens_used=0,
                     success=False,
                     error_message=str(e),
-                    source=model.model_type.value
+                    source=model.model_type.value,
                 )
 
         finally:
@@ -609,11 +625,7 @@ class ModelRouter:
                 self._instrumentation.end_trace(trace_id)
 
     async def _call_anthropic(
-        self,
-        model: ModelConfig,
-        prompt: str,
-        system_prompt: str | None = None,
-        **kwargs
+        self, model: ModelConfig, prompt: str, system_prompt: str | None = None, **kwargs
     ) -> ModelResponse:
         """Call Anthropic API."""
         start_time = datetime.now()
@@ -623,7 +635,7 @@ class ModelRouter:
         payload = {
             "model": "claude-sonnet-4-20250514",
             "max_tokens": kwargs.get("max_tokens", model.max_tokens),
-            "messages": messages
+            "messages": messages,
         }
 
         if system_prompt:
@@ -634,9 +646,9 @@ class ModelRouter:
             headers={
                 "x-api-key": model.api_key,
                 "anthropic-version": "2023-06-01",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
             },
-            json=payload
+            json=payload,
         )
 
         latency = (datetime.now() - start_time).total_seconds() * 1000
@@ -652,17 +664,13 @@ class ModelRouter:
                 model_type=model.model_type,
                 latency_ms=latency,
                 tokens_used=tokens,
-                success=True
+                success=True,
             )
         else:
             raise Exception(f"API error: {response.status_code} - {response.text}")
 
     async def _call_openai_compatible(
-        self,
-        model: ModelConfig,
-        prompt: str,
-        system_prompt: str | None = None,
-        **kwargs
+        self, model: ModelConfig, prompt: str, system_prompt: str | None = None, **kwargs
     ) -> ModelResponse:
         """Call OpenAI-compatible API (NVIDIA NIM, local models)."""
         start_time = datetime.now()
@@ -676,18 +684,14 @@ class ModelRouter:
             "model": kwargs.get("model_name", "meta/llama-3.1-8b-instruct"),
             "messages": messages,
             "max_tokens": kwargs.get("max_tokens", model.max_tokens),
-            "temperature": kwargs.get("temperature", model.temperature)
+            "temperature": kwargs.get("temperature", model.temperature),
         }
 
         headers = {"Content-Type": "application/json"}
         if model.api_key:
             headers["Authorization"] = f"Bearer {model.api_key}"
 
-        response = await self.client.post(
-            model.endpoint,
-            headers=headers,
-            json=payload
-        )
+        response = await self.client.post(model.endpoint, headers=headers, json=payload)
 
         latency = (datetime.now() - start_time).total_seconds() * 1000
 
@@ -702,17 +706,12 @@ class ModelRouter:
                 model_type=model.model_type,
                 latency_ms=latency,
                 tokens_used=tokens,
-                success=True
+                success=True,
             )
         else:
             raise Exception(f"API error: {response.status_code} - {response.text}")
 
-    def _update_model_metrics(
-        self,
-        model_name: str,
-        latency_ms: float,
-        success: bool
-    ) -> None:
+    def _update_model_metrics(self, model_name: str, latency_ms: float, success: bool) -> None:
         """Update model performance metrics."""
         if model_name not in self.models:
             return
@@ -722,21 +721,18 @@ class ModelRouter:
 
         # Update rolling average latency
         model.avg_latency_ms = (
-            (model.avg_latency_ms * (model.total_requests - 1) + latency_ms)
-            / model.total_requests
-        )
+            model.avg_latency_ms * (model.total_requests - 1) + latency_ms
+        ) / model.total_requests
 
         # Update success rate
         if success:
             model.success_rate = (
-                (model.success_rate * (model.total_requests - 1) + 1.0)
-                / model.total_requests
-            )
+                model.success_rate * (model.total_requests - 1) + 1.0
+            ) / model.total_requests
         else:
             model.success_rate = (
-                (model.success_rate * (model.total_requests - 1))
-                / model.total_requests
-            )
+                model.success_rate * (model.total_requests - 1)
+            ) / model.total_requests
 
     def update_student_performance(self, success_rate: float) -> None:
         """
@@ -748,13 +744,13 @@ class ModelRouter:
             # Student doing well - increase usage
             self.current_student_rate = min(
                 self.current_student_rate + self.config.improvement_increment,
-                self.config.max_student_rate
+                self.config.max_student_rate,
             )
         elif success_rate < 0.5:
             # Student struggling - decrease usage
             self.current_student_rate = max(
                 self.current_student_rate - self.config.improvement_increment,
-                self.config.student_sample_rate
+                self.config.student_sample_rate,
             )
 
     def _log_decision(self, decision: RoutingDecision) -> None:
@@ -766,7 +762,7 @@ class ModelRouter:
             date_str = datetime.now().strftime("%Y%m%d")
             log_path = Path(self.config.metrics_dir) / f"routing_{date_str}.jsonl"
 
-            with open(log_path, 'a') as f:
+            with open(log_path, "a") as f:
                 f.write(json.dumps(decision.to_dict()) + "\n")
 
     def get_routing_stats(self) -> dict[str, Any]:
@@ -774,10 +770,7 @@ class ModelRouter:
         if not self.routing_history:
             return {"error": "No routing history"}
 
-        teacher_count = sum(
-            1 for d in self.routing_history
-            if d.model_type == ModelType.TEACHER
-        )
+        teacher_count = sum(1 for d in self.routing_history if d.model_type == ModelType.TEACHER)
         student_count = len(self.routing_history) - teacher_count
 
         return {
@@ -786,16 +779,17 @@ class ModelRouter:
             "student_requests": student_count,
             "student_rate": student_count / len(self.routing_history),
             "current_student_rate": self.current_student_rate,
-            "avg_complexity": sum(d.task_complexity for d in self.routing_history) / len(self.routing_history),
+            "avg_complexity": sum(d.task_complexity for d in self.routing_history)
+            / len(self.routing_history),
             "models": {
                 name: {
                     "type": model.model_type.value,
                     "requests": model.total_requests,
                     "success_rate": model.success_rate,
-                    "avg_latency_ms": model.avg_latency_ms
+                    "avg_latency_ms": model.avg_latency_ms,
                 }
                 for name, model in self.models.items()
-            }
+            },
         }
 
     async def close(self) -> None:
@@ -805,10 +799,7 @@ class ModelRouter:
 
 async def main():
     """Example usage of the Model Router."""
-    config = RouterConfig(
-        strategy=RoutingStrategy.PROGRESSIVE,
-        student_sample_rate=0.2
-    )
+    config = RouterConfig(strategy=RoutingStrategy.PROGRESSIVE, student_sample_rate=0.2)
 
     router = ModelRouter(config)
 
@@ -817,7 +808,7 @@ async def main():
         "Fix the typo in README.md",
         "Refactor the authentication system to use OAuth2 with PKCE flow",
         "Add a print statement to debug.py",
-        "Implement a distributed cache with Redis cluster support"
+        "Implement a distributed cache with Redis cluster support",
     ]
 
     for prompt in prompts:

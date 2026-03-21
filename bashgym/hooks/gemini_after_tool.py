@@ -15,18 +15,19 @@ Environment vars available from Gemini CLI:
   GEMINI_CWD - Current working directory
 """
 
-import os
-import sys
 import json
-import uuid
-import subprocess
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Optional, Dict, Any, List
+import os
 
 # Cross-platform file locking
 import platform
-if platform.system() == 'Windows':
+import subprocess
+import sys
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+if platform.system() == "Windows":
     import msvcrt
 
     def lock_file(f, exclusive=False):
@@ -39,6 +40,7 @@ if platform.system() == 'Windows':
             msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
         except OSError:
             pass  # File may not have been locked
+
 else:
     import fcntl
 
@@ -53,14 +55,14 @@ else:
 
 def get_bashgym_dir() -> Path:
     """Get the global Bash Gym directory (~/.bashgym/)."""
-    if platform.system() == 'Windows':
+    if platform.system() == "Windows":
         base = Path(os.environ.get("USERPROFILE", ""))
     else:
         base = Path.home()
     return base / ".bashgym"
 
 
-def get_repo_info(cwd: str) -> Dict[str, Any]:
+def get_repo_info(cwd: str) -> dict[str, Any]:
     """Get information about the current git repository."""
     cwd_path = Path(cwd)
 
@@ -69,27 +71,36 @@ def get_repo_info(cwd: str) -> Dict[str, Any]:
         "name": cwd_path.name,
         "git_remote": None,
         "git_branch": None,
-        "is_git_repo": False
+        "is_git_repo": False,
     }
 
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--is-inside-work-tree"],
-            capture_output=True, text=True, cwd=cwd_path, timeout=5
+            capture_output=True,
+            text=True,
+            cwd=cwd_path,
+            timeout=5,
         )
         if result.returncode == 0:
             repo_info["is_git_repo"] = True
 
             result = subprocess.run(
                 ["git", "remote", "get-url", "origin"],
-                capture_output=True, text=True, cwd=cwd_path, timeout=5
+                capture_output=True,
+                text=True,
+                cwd=cwd_path,
+                timeout=5,
             )
             if result.returncode == 0:
                 repo_info["git_remote"] = result.stdout.strip()
 
             result = subprocess.run(
                 ["git", "branch", "--show-current"],
-                capture_output=True, text=True, cwd=cwd_path, timeout=5
+                capture_output=True,
+                text=True,
+                cwd=cwd_path,
+                timeout=5,
             )
             if result.returncode == 0:
                 repo_info["git_branch"] = result.stdout.strip()
@@ -118,7 +129,9 @@ def get_session_id() -> str:
     if session_file.exists():
         return session_file.read_text().strip()
 
-    session_id = f"gemini_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+    session_id = (
+        f"gemini_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+    )
     session_file.write_text(session_id)
     return session_id
 
@@ -143,13 +156,13 @@ def generate_step_id() -> str:
     return f"{get_timestamp()}_{uuid.uuid4().hex[:8]}"
 
 
-def safe_json_load(file_path: Path) -> List[Dict[str, Any]]:
+def safe_json_load(file_path: Path) -> list[dict[str, Any]]:
     """Safely load JSON from file with file locking."""
     if not file_path.exists():
         return []
 
     try:
-        with open(file_path, 'r') as f:
+        with open(file_path) as f:
             lock_file(f, exclusive=False)
             content = f.read()
             unlock_file(f)
@@ -157,24 +170,24 @@ def safe_json_load(file_path: Path) -> List[Dict[str, Any]]:
         if not content.strip():
             return []
         return json.loads(content)
-    except (json.JSONDecodeError, IOError, OSError) as e:
+    except (json.JSONDecodeError, OSError) as e:
         print(f"Warning: Could not load trace file: {e}", file=sys.stderr)
         return []
 
 
-def safe_json_dump(data: List[Dict[str, Any]], file_path: Path) -> None:
+def safe_json_dump(data: list[dict[str, Any]], file_path: Path) -> None:
     """Safely write JSON to file with file locking."""
     try:
-        with open(file_path, 'w') as f:
+        with open(file_path, "w") as f:
             lock_file(f, exclusive=True)
             json.dump(data, f, indent=2, ensure_ascii=False)
             unlock_file(f)
-    except (IOError, OSError) as e:
+    except OSError as e:
         print(f"Error: Could not write trace file: {e}", file=sys.stderr)
         sys.exit(1)
 
 
-def process_tool_event(event: Dict[str, Any]) -> None:
+def process_tool_event(event: dict[str, Any]) -> None:
     """
     Process a Gemini CLI tool event.
 
@@ -222,7 +235,7 @@ def process_tool_event(event: Dict[str, Any]) -> None:
         "metadata": {
             "gemini_session_id": os.environ.get("GEMINI_SESSION_ID"),
             "gemini_project_dir": os.environ.get("GEMINI_PROJECT_DIR"),
-        }
+        },
     }
 
     # Append to trace file
@@ -231,8 +244,10 @@ def process_tool_event(event: Dict[str, Any]) -> None:
     trace.append(step)
     safe_json_dump(trace, trace_file)
 
-    print(f"[BashGym] Captured: {tool_name} - {command[:50]}... ({repo_info['name']})",
-          file=sys.stderr)
+    print(
+        f"[BashGym] Captured: {tool_name} - {command[:50]}... ({repo_info['name']})",
+        file=sys.stderr,
+    )
 
 
 def main():

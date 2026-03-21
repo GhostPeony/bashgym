@@ -5,9 +5,9 @@ Downloads and caches benchmark datasets on first use.
 Datasets are cached in ~/.cache/huggingface/datasets/
 """
 
-from typing import List, Dict, Any, Optional
-import logging
 import json
+import logging
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -35,10 +35,10 @@ class BenchmarkLoader:
         "swe_bench": ("princeton-nlp/SWE-bench_Lite", None, "test"),
     }
 
-    _cache: Dict[str, Any] = {}
+    _cache: dict[str, Any] = {}
 
     @classmethod
-    def load(cls, benchmark_id: str, num_samples: Optional[int] = None) -> List[Dict]:
+    def load(cls, benchmark_id: str, num_samples: int | None = None) -> list[dict]:
         """
         Load benchmark dataset, using cache if available.
 
@@ -117,7 +117,7 @@ class BenchmarkLoader:
             return []
 
     @classmethod
-    def _load_bfcl(cls, num_samples: Optional[int] = None) -> List[Dict]:
+    def _load_bfcl(cls, num_samples: int | None = None) -> list[dict]:
         """
         Load BFCL using direct file download to avoid schema conflicts.
 
@@ -148,9 +148,9 @@ class BenchmarkLoader:
                 file_path = hf_hub_download(
                     repo_id="gorilla-llm/Berkeley-Function-Calling-Leaderboard",
                     filename=filename,
-                    repo_type="dataset"
+                    repo_type="dataset",
                 )
-                with open(file_path, 'r', encoding='utf-8') as f:
+                with open(file_path, encoding="utf-8") as f:
                     for line in f:
                         line = line.strip()
                         if line:
@@ -172,7 +172,7 @@ class BenchmarkLoader:
         return all_data[:num_samples] if num_samples else all_data
 
     @classmethod
-    def _load_bbq(cls, num_samples: Optional[int] = None) -> List[Dict]:
+    def _load_bbq(cls, num_samples: int | None = None) -> list[dict]:
         """
         Load BBQ dataset which uses category-based splits.
 
@@ -217,7 +217,7 @@ class BenchmarkLoader:
             return []
 
     @classmethod
-    def get_dataset_info(cls, benchmark_id: str) -> Dict[str, Any]:
+    def get_dataset_info(cls, benchmark_id: str) -> dict[str, Any]:
         """Get information about a benchmark dataset."""
         if benchmark_id not in cls.DATASETS:
             return {"error": f"Unknown benchmark: {benchmark_id}"}
@@ -237,7 +237,7 @@ class BenchmarkLoader:
         return info
 
     @classmethod
-    def clear_cache(cls, benchmark_id: Optional[str] = None):
+    def clear_cache(cls, benchmark_id: str | None = None):
         """Clear cached datasets."""
         if benchmark_id:
             cls._cache.pop(benchmark_id, None)

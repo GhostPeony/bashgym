@@ -8,7 +8,7 @@ Environment variables always take precedence over stored secrets.
 import json
 import logging
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -16,24 +16,25 @@ logger = logging.getLogger(__name__)
 def get_secrets_path() -> Path:
     """Get the path to the secrets file."""
     from bashgym.config import get_bashgym_dir
+
     return get_bashgym_dir() / "secrets.json"
 
 
-def load_secrets() -> Dict[str, Any]:
+def load_secrets() -> dict[str, Any]:
     """Load secrets from the secrets file."""
     secrets_path = get_secrets_path()
     if not secrets_path.exists():
         return {}
 
     try:
-        with open(secrets_path, "r") as f:
+        with open(secrets_path) as f:
             return json.load(f)
-    except (json.JSONDecodeError, IOError) as e:
+    except (OSError, json.JSONDecodeError) as e:
         logger.warning(f"Failed to load secrets: {e}")
         return {}
 
 
-def save_secrets(secrets: Dict[str, Any]) -> None:
+def save_secrets(secrets: dict[str, Any]) -> None:
     """Save secrets to the secrets file."""
     secrets_path = get_secrets_path()
     secrets_path.parent.mkdir(parents=True, exist_ok=True)
@@ -45,12 +46,13 @@ def save_secrets(secrets: Dict[str, Any]) -> None:
     try:
         import os
         import stat
+
         os.chmod(secrets_path, stat.S_IRUSR | stat.S_IWUSR)  # 600
     except (ImportError, OSError):
         pass  # Windows or permission error
 
 
-def get_secret(key: str) -> Optional[str]:
+def get_secret(key: str) -> str | None:
     """
     Get a secret value.
 

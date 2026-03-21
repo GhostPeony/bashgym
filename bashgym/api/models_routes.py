@@ -10,119 +10,126 @@ Provides REST API endpoints for:
 - Custom evaluation set management
 """
 
-from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
-from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
 from datetime import datetime
 from pathlib import Path
+from typing import Any
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from pydantic import BaseModel
 
 from bashgym.models import (
-    get_registry,
+    CustomEvalRunner,
     ModelProfile,
     get_eval_generator,
-    CustomEvalRunner,
-    CustomEvalSet,
+    get_registry,
 )
-
 
 # Pydantic models for API
 
+
 class ModelSummary(BaseModel):
     """Summary of a model for list views."""
+
     model_id: str
     display_name: str
     description: str
-    tags: List[str]
+    tags: list[str]
     starred: bool
     base_model: str
     training_strategy: str
     status: str
     created_at: str
     # Quick stats
-    custom_eval_pass_rate: Optional[float] = None
-    benchmark_avg_score: Optional[float] = None
+    custom_eval_pass_rate: float | None = None
+    benchmark_avg_score: float | None = None
     model_size_display: str
-    inference_latency_ms: Optional[float] = None
+    inference_latency_ms: float | None = None
     training_duration_display: str
 
 
 class ModelProfileResponse(BaseModel):
     """Full model profile response."""
+
     # Identity
     model_id: str
     run_id: str
     display_name: str
     description: str
-    tags: List[str]
+    tags: list[str]
     starred: bool
     created_at: str
 
     # Lineage
     base_model: str
     training_strategy: str
-    teacher_model: Optional[str] = None
-    training_traces: List[str]
-    parent_model: Optional[str] = None
-    training_repos: List[str]
+    teacher_model: str | None = None
+    training_traces: list[str]
+    parent_model: str | None = None
+    training_repos: list[str]
 
     # Training
-    config: Dict[str, Any]
-    started_at: Optional[str] = None
-    completed_at: Optional[str] = None
+    config: dict[str, Any]
+    started_at: str | None = None
+    completed_at: str | None = None
     duration_seconds: float
     training_duration_display: str
-    loss_curve: List[Dict[str, Any]]
-    final_metrics: Dict[str, float]
+    loss_curve: list[dict[str, Any]]
+    final_metrics: dict[str, float]
 
     # Artifacts
-    artifacts: Dict[str, Any]
+    artifacts: dict[str, Any]
     model_dir: str
 
     # Evaluations
-    benchmarks: Dict[str, Any]
-    custom_evals: Dict[str, Any]
-    evaluation_history: List[Dict[str, Any]]
+    benchmarks: dict[str, Any]
+    custom_evals: dict[str, Any]
+    evaluation_history: list[dict[str, Any]]
 
     # Operational
     model_size_bytes: int
     model_size_display: str
-    model_size_params: Optional[str] = None
-    inference_latency_ms: Optional[float] = None
+    model_size_params: str | None = None
+    inference_latency_ms: float | None = None
     status: str
-    deployed_to: Optional[str] = None
+    deployed_to: str | None = None
 
     # Computed
-    custom_eval_pass_rate: Optional[float] = None
-    benchmark_avg_score: Optional[float] = None
+    custom_eval_pass_rate: float | None = None
+    benchmark_avg_score: float | None = None
 
 
 class ModelListResponse(BaseModel):
     """Response for model list endpoint."""
-    models: List[ModelSummary]
+
+    models: list[ModelSummary]
     total: int
 
 
 class ModelUpdateRequest(BaseModel):
     """Request to update model metadata."""
-    display_name: Optional[str] = None
-    description: Optional[str] = None
-    tags: Optional[List[str]] = None
-    starred: Optional[bool] = None
+
+    display_name: str | None = None
+    description: str | None = None
+    tags: list[str] | None = None
+    starred: bool | None = None
 
 
 class CompareRequest(BaseModel):
     """Request to compare multiple models."""
-    model_ids: List[str]
-    metrics: Optional[List[str]] = None
+
+    model_ids: list[str]
+    metrics: list[str] | None = None
 
 
 class CompareResponse(BaseModel):
     """Response for model comparison."""
-    models: Dict[str, Dict[str, Any]]
+
+    models: dict[str, dict[str, Any]]
 
 
 class LeaderboardEntry(BaseModel):
     """Entry in the leaderboard."""
+
     rank: int
     model_id: str
     display_name: str
@@ -133,12 +140,14 @@ class LeaderboardEntry(BaseModel):
 
 class LeaderboardResponse(BaseModel):
     """Response for leaderboard endpoint."""
+
     metric: str
-    entries: List[LeaderboardEntry]
+    entries: list[LeaderboardEntry]
 
 
 class TrendDataPoint(BaseModel):
     """Data point for trend charts."""
+
     timestamp: str
     model_id: str
     display_name: str
@@ -147,11 +156,13 @@ class TrendDataPoint(BaseModel):
 
 class TrendsResponse(BaseModel):
     """Response for trends endpoint."""
+
     metric: str
-    data: List[TrendDataPoint]
+    data: list[TrendDataPoint]
 
 
 # Helper functions
+
 
 def profile_to_summary(profile: ModelProfile) -> ModelSummary:
     """Convert ModelProfile to ModelSummary."""
@@ -219,10 +230,10 @@ router = APIRouter(prefix="/api/models", tags=["models"])
 
 @router.get("", response_model=ModelListResponse)
 async def list_models(
-    strategy: Optional[str] = Query(None, description="Filter by training strategy"),
-    base_model: Optional[str] = Query(None, description="Filter by base model (partial match)"),
-    status: Optional[str] = Query(None, description="Filter by status"),
-    tags: Optional[str] = Query(None, description="Filter by tags (comma-separated)"),
+    strategy: str | None = Query(None, description="Filter by training strategy"),
+    base_model: str | None = Query(None, description="Filter by base model (partial match)"),
+    status: str | None = Query(None, description="Filter by status"),
+    tags: str | None = Query(None, description="Filter by tags (comma-separated)"),
     starred: bool = Query(False, description="Only show starred models"),
     sort_by: str = Query("created_at", description="Sort field"),
     sort_order: str = Query("desc", description="Sort order (asc/desc)"),
@@ -254,13 +265,15 @@ async def list_models(
     )
 
     # Get total count (without pagination)
-    total = len(registry.list(
-        strategy=strategy,
-        base_model=base_model,
-        status=status,
-        tags=tag_list,
-        starred_only=starred,
-    ))
+    total = len(
+        registry.list(
+            strategy=strategy,
+            base_model=base_model,
+            status=status,
+            tags=tag_list,
+            starred_only=starred,
+        )
+    )
 
     return ModelListResponse(
         models=[profile_to_summary(p) for p in profiles],
@@ -423,7 +436,7 @@ async def trigger_evaluation(model_id: str):
     return {
         "status": "queued",
         "model_id": model_id,
-        "message": "Evaluation queued - results will be available shortly"
+        "message": "Evaluation queued - results will be available shortly",
     }
 
 
@@ -475,45 +488,50 @@ async def rescan_model(model_id: str):
 # Custom Evaluation Set Endpoints
 # ==============================================================================
 
+
 class EvalSetSummary(BaseModel):
     """Summary of a custom eval set."""
+
     eval_set_id: str
     name: str
     description: str
     num_cases: int
     generation_mode: str  # replay, variation, or manual
-    source_traces: List[str]
+    source_traces: list[str]
     created_at: str
 
 
 class EvalCaseResponse(BaseModel):
     """An eval case in the set."""
+
     case_id: str
     name: str
     description: str
-    system_prompt: Optional[str] = None
+    system_prompt: str | None = None
     user_prompt: str
     expected_behavior: str
-    verification: Dict[str, Any]
-    source_trace_id: Optional[str] = None
+    verification: dict[str, Any]
+    source_trace_id: str | None = None
 
 
 class EvalSetResponse(BaseModel):
     """Full eval set response."""
+
     eval_set_id: str
     name: str
     description: str
-    cases: List[EvalCaseResponse]
+    cases: list[EvalCaseResponse]
     generation_mode: str
-    source_traces: List[str]
+    source_traces: list[str]
     created_at: str
 
 
 class GenerateEvalSetRequest(BaseModel):
     """Request to generate an eval set from gold traces."""
+
     name: str
-    description: Optional[str] = None
-    trace_ids: Optional[List[str]] = None  # None = use all gold traces
+    description: str | None = None
+    trace_ids: list[str] | None = None  # None = use all gold traces
     mode: str = "both"  # replay, variation, or both
     max_cases: int = 50
     include_failed_traces: bool = False
@@ -521,6 +539,7 @@ class GenerateEvalSetRequest(BaseModel):
 
 class RunEvalRequest(BaseModel):
     """Request to run an eval set against a model."""
+
     eval_set_id: str
     max_tokens: int = 4096
     temperature: float = 0.0
@@ -528,6 +547,7 @@ class RunEvalRequest(BaseModel):
 
 class RunEvalResponse(BaseModel):
     """Response from running an eval."""
+
     model_id: str
     eval_set_id: str
     status: str
@@ -535,14 +555,14 @@ class RunEvalResponse(BaseModel):
     failed: int
     total: int
     pass_rate: float
-    results: List[Dict[str, Any]]
+    results: list[dict[str, Any]]
 
 
 # Eval sets router (nested under /api/models)
 eval_router = APIRouter(prefix="/eval-sets", tags=["eval-sets"])
 
 
-@eval_router.get("", response_model=List[EvalSetSummary])
+@eval_router.get("", response_model=list[EvalSetSummary])
 async def list_eval_sets():
     """
     List all custom evaluation sets.
@@ -587,13 +607,17 @@ async def get_eval_set(eval_set_id: str):
                 system_prompt=case.system_prompt,
                 user_prompt=case.user_prompt,
                 expected_behavior=case.expected_behavior,
-                verification=case.verification.to_dict() if hasattr(case.verification, 'to_dict') else {
-                    "method": case.verification.method,
-                    "expected_output": case.verification.expected_output,
-                    "test_command": case.verification.test_command,
-                    "check_files": case.verification.check_files,
-                    "llm_criteria": case.verification.llm_criteria,
-                },
+                verification=(
+                    case.verification.to_dict()
+                    if hasattr(case.verification, "to_dict")
+                    else {
+                        "method": case.verification.method,
+                        "expected_output": case.verification.expected_output,
+                        "test_command": case.verification.test_command,
+                        "check_files": case.verification.check_files,
+                        "llm_criteria": case.verification.llm_criteria,
+                    }
+                ),
                 source_trace_id=case.source_trace_id,
             )
             for case in eval_set.cases
@@ -632,7 +656,7 @@ async def generate_eval_set(request: GenerateEvalSetRequest, background_tasks: B
             "eval_set_id": eval_set.eval_set_id,
             "name": eval_set.name,
             "num_cases": len(eval_set.cases),
-            "message": f"Generated {len(eval_set.cases)} eval cases"
+            "message": f"Generated {len(eval_set.cases)} eval cases",
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -689,6 +713,7 @@ async def run_eval_on_model(model_id: str, request: RunEvalRequest):
 
         # Update model profile with eval results
         from bashgym.models import CustomEvalResult
+
         eval_result = CustomEvalResult(
             eval_set_id=request.eval_set_id,
             eval_type=eval_set.generation_mode,
@@ -696,11 +721,18 @@ async def run_eval_on_model(model_id: str, request: RunEvalRequest):
             total=len(results),
             pass_rate=pass_rate,
             evaluated_at=datetime.now(),
-            case_results=[r.to_dict() if hasattr(r, 'to_dict') else {
-                "case_id": r.case_id,
-                "passed": r.passed,
-                "error": r.error,
-            } for r in results],
+            case_results=[
+                (
+                    r.to_dict()
+                    if hasattr(r, "to_dict")
+                    else {
+                        "case_id": r.case_id,
+                        "passed": r.passed,
+                        "error": r.error,
+                    }
+                )
+                for r in results
+            ],
         )
         profile.custom_evals[request.eval_set_id] = eval_result
         profile.save()
@@ -713,13 +745,18 @@ async def run_eval_on_model(model_id: str, request: RunEvalRequest):
             failed=failed,
             total=len(results),
             pass_rate=pass_rate,
-            results=[{
-                "case_id": r.case_id,
-                "case_name": next((c.name for c in eval_set.cases if c.case_id == r.case_id), r.case_id),
-                "passed": r.passed,
-                "output": r.output[:500] if r.output else None,  # Truncate long outputs
-                "error": r.error,
-            } for r in results],
+            results=[
+                {
+                    "case_id": r.case_id,
+                    "case_name": next(
+                        (c.name for c in eval_set.cases if c.case_id == r.case_id), r.case_id
+                    ),
+                    "passed": r.passed,
+                    "output": r.output[:500] if r.output else None,  # Truncate long outputs
+                    "error": r.error,
+                }
+                for r in results
+            ],
         )
 
     except Exception as e:
@@ -730,9 +767,11 @@ async def run_eval_on_model(model_id: str, request: RunEvalRequest):
 # Deploy and Download Endpoints
 # ==============================================================================
 
+
 class DeployOllamaRequest(BaseModel):
     """Request to deploy a model to Ollama."""
-    model_name: Optional[str] = None  # Default: use display_name
+
+    model_name: str | None = None  # Default: use display_name
     quantization: str = "q4_k_m"
 
 
@@ -765,12 +804,11 @@ async def deploy_to_ollama(model_id: str, request: DeployOllamaRequest):
             # TODO: Trigger GGUF export
             raise HTTPException(
                 status_code=400,
-                detail=f"No GGUF export found with quantization {request.quantization}. Export first."
+                detail=f"No GGUF export found with quantization {request.quantization}. Export first.",
             )
         else:
             raise HTTPException(
-                status_code=400,
-                detail="No merged model found. Complete training first."
+                status_code=400, detail="No merged model found. Complete training first."
             )
 
     # Verify GGUF file exists
@@ -790,26 +828,23 @@ SYSTEM """You are a helpful coding assistant trained with Bash Gym."""
 
     try:
         # Write Modelfile
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.modelfile', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".modelfile", delete=False) as f:
             f.write(modelfile_content)
             modelfile_path = f.name
 
         # Create model in Ollama
         result = subprocess.run(
-            ['ollama', 'create', model_name, '-f', modelfile_path],
+            ["ollama", "create", model_name, "-f", modelfile_path],
             capture_output=True,
             text=True,
-            timeout=300  # 5 minute timeout
+            timeout=300,  # 5 minute timeout
         )
 
         # Clean up
         Path(modelfile_path).unlink(missing_ok=True)
 
         if result.returncode != 0:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Ollama create failed: {result.stderr}"
-            )
+            raise HTTPException(status_code=500, detail=f"Ollama create failed: {result.stderr}")
 
         # Update profile
         profile.deployed_to = f"ollama:{model_name}"
@@ -818,15 +853,14 @@ SYSTEM """You are a helpful coding assistant trained with Bash Gym."""
         return {
             "status": "deployed",
             "model_name": model_name,
-            "message": f"Model deployed to Ollama as '{model_name}'. Run with: ollama run {model_name}"
+            "message": f"Model deployed to Ollama as '{model_name}'. Run with: ollama run {model_name}",
         }
 
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="Ollama create timed out")
     except FileNotFoundError:
         raise HTTPException(
-            status_code=503,
-            detail="Ollama not installed. Install from https://ollama.ai"
+            status_code=503, detail="Ollama not installed. Install from https://ollama.ai"
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -861,7 +895,9 @@ async def download_artifact(
 
         # Check if artifact is within model directory or its subdirectories
         if not str(artifact_resolved).startswith(str(model_resolved)):
-            raise HTTPException(status_code=403, detail="Access denied: path outside model directory")
+            raise HTTPException(
+                status_code=403, detail="Access denied: path outside model directory"
+            )
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid path")
 
@@ -869,9 +905,7 @@ async def download_artifact(
         raise HTTPException(status_code=404, detail="Artifact not found")
 
     return FileResponse(
-        path=str(artifact_path),
-        filename=artifact_path.name,
-        media_type="application/octet-stream"
+        path=str(artifact_path), filename=artifact_path.name, media_type="application/octet-stream"
     )
 
 

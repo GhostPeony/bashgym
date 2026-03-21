@@ -12,7 +12,7 @@ SubagentRecord objects with tool usage, token counts, and step details.
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 from .base import (
     BaseCollector,
@@ -43,9 +43,9 @@ class SubagentCollector(BaseCollector):
 
     def _find_subagent_files(
         self,
-        since: Optional[str] = None,
-        project_filter: Optional[str] = None,
-    ) -> List[Tuple[Path, str, str]]:
+        since: str | None = None,
+        project_filter: str | None = None,
+    ) -> list[tuple[Path, str, str]]:
         """Find all subagent JSONL files under the projects directory.
 
         Parameters
@@ -66,14 +66,14 @@ class SubagentCollector(BaseCollector):
             return []
 
         # Parse the optional since timestamp
-        since_dt: Optional[datetime] = None
+        since_dt: datetime | None = None
         if since:
             try:
                 since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
             except ValueError:
                 since_dt = None
 
-        results: List[Tuple[Path, str, str]] = []
+        results: list[tuple[Path, str, str]] = []
 
         for project_dir in projects_dir.iterdir():
             if not project_dir.is_dir():
@@ -115,7 +115,7 @@ class SubagentCollector(BaseCollector):
         filepath: Path,
         session_id: str,
         agent_id: str,
-    ) -> Optional[SubagentRecord]:
+    ) -> SubagentRecord | None:
         """Parse a single subagent JSONL file into a SubagentRecord.
 
         Parameters
@@ -131,20 +131,20 @@ class SubagentCollector(BaseCollector):
         -------
         SubagentRecord or None if the file is empty / unparseable.
         """
-        models_used: Set[str] = set()
-        tools_used: Set[str] = set()
-        steps: List[Dict[str, Any]] = []
+        models_used: set[str] = set()
+        tools_used: set[str] = set()
+        steps: list[dict[str, Any]] = []
         total_input_tokens = 0
         total_output_tokens = 0
         total_tool_calls = 0
-        user_prompt: Optional[str] = None
-        slug: Optional[str] = None
-        file_agent_id: Optional[str] = None
-        timestamp: Optional[str] = None
+        user_prompt: str | None = None
+        slug: str | None = None
+        file_agent_id: str | None = None
+        timestamp: str | None = None
         found_any_event = False
 
         try:
-            with open(filepath, "r", encoding="utf-8") as f:
+            with open(filepath, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line:
@@ -213,14 +213,16 @@ class SubagentCollector(BaseCollector):
                                 if tool_name:
                                     tools_used.add(tool_name)
 
-                                steps.append({
-                                    "tool_name": tool_name,
-                                    "input": tool_input,
-                                    "tool_use_id": tool_id,
-                                    "model": model,
-                                })
+                                steps.append(
+                                    {
+                                        "tool_name": tool_name,
+                                        "input": tool_input,
+                                        "tool_use_id": tool_id,
+                                        "model": model,
+                                    }
+                                )
 
-        except (IOError, OSError):
+        except OSError:
             return None
 
         if not found_any_event:
@@ -259,8 +261,8 @@ class SubagentCollector(BaseCollector):
 
     def scan(
         self,
-        since: Optional[str] = None,
-        project_filter: Optional[str] = None,
+        since: str | None = None,
+        project_filter: str | None = None,
     ) -> CollectorScanResult:
         """Scan for subagent files without collecting anything."""
         files = self._find_subagent_files(since=since, project_filter=project_filter)
@@ -287,7 +289,7 @@ class SubagentCollector(BaseCollector):
             estimated_size_bytes=estimated_bytes,
         )
 
-    def collect(self, session_id: str) -> List[SubagentRecord]:
+    def collect(self, session_id: str) -> list[SubagentRecord]:
         """Collect all subagent records for a specific session.
 
         Parameters
@@ -300,7 +302,7 @@ class SubagentCollector(BaseCollector):
         list of SubagentRecord
         """
         files = self._find_subagent_files()
-        records: List[SubagentRecord] = []
+        records: list[SubagentRecord] = []
 
         for filepath, file_session_id, agent_id in files:
             if file_session_id != session_id:
@@ -314,8 +316,8 @@ class SubagentCollector(BaseCollector):
 
     def collect_all(
         self,
-        since: Optional[str] = None,
-        project_filter: Optional[str] = None,
+        since: str | None = None,
+        project_filter: str | None = None,
     ) -> CollectorBatchResult:
         """Collect all uncollected subagent records.
 
@@ -326,8 +328,8 @@ class SubagentCollector(BaseCollector):
 
         collected = 0
         skipped = 0
-        errors: List[str] = []
-        records: List[SubagentRecord] = []
+        errors: list[str] = []
+        records: list[SubagentRecord] = []
 
         for filepath, session_id, agent_id in files:
             record_id = f"{session_id}/{agent_id}"

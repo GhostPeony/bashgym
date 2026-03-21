@@ -7,10 +7,11 @@ Provides REST endpoints for managing the auto-import pipeline:
 - Manual stage triggers
 """
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
-from typing import Dict, Any
 import asyncio
 import logging
+from typing import Any
+
+from fastapi import APIRouter, HTTPException
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +25,8 @@ def _get_pipeline():
     """Get or create the Pipeline singleton."""
     global _pipeline
     if _pipeline is None:
+        from bashgym.api.websocket import MessageType, broadcast_pipeline_event
         from bashgym.pipeline.orchestrator import Pipeline
-        from bashgym.api.websocket import broadcast_pipeline_event, MessageType
 
         def on_pipeline_event(event_type: str, payload):
             type_map = {
@@ -57,7 +58,7 @@ async def get_pipeline_config():
 
 
 @router.put("/config")
-async def update_pipeline_config(updates: Dict[str, Any]):
+async def update_pipeline_config(updates: dict[str, Any]):
     """Update pipeline configuration. Hot-reloads all components."""
     pipeline = _get_pipeline()
     new_config = pipeline.save_config(updates)
@@ -77,15 +78,19 @@ async def trigger_pipeline_stage(stage: str):
     pipeline = _get_pipeline()
     if stage == "import":
         from bashgym.trace_capture.importers.claude_history import ClaudeSessionImporter
+
         importer = ClaudeSessionImporter()
         results = importer.import_recent(days=60, verbose=False)
         imported = [r for r in results if not r.skipped and not r.error]
         return {"imported": len(imported), "total": len(results)}
     elif stage == "classify":
         from bashgym.trace_capture.core import TraceCapture
+
         trace_capture = TraceCapture()
         count = 0
-        for trace_file in list(trace_capture.traces_dir.glob("*.json")) + list(trace_capture.traces_dir.glob("*.jsonl")):
+        for trace_file in list(trace_capture.traces_dir.glob("*.json")) + list(
+            trace_capture.traces_dir.glob("*.jsonl")
+        ):
             result = pipeline.handle_session_file(trace_file)
             if result:
                 count += 1

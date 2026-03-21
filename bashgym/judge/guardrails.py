@@ -7,20 +7,19 @@ using NVIDIA NeMo Guardrails (NemoGuard) for agentic workflows.
 Module 2: Verification (The "Judge") - Safety Extension
 """
 
-import os
-import json
 import asyncio
+import os
 import re
-from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List, Tuple
-from datetime import datetime, timezone
 from enum import Enum
+from typing import Any
+
 import httpx
 
 
 class GuardrailAction(Enum):
     """Actions to take when guardrail triggers."""
+
     ALLOW = "allow"
     BLOCK = "block"
     WARN = "warn"
@@ -29,6 +28,7 @@ class GuardrailAction(Enum):
 
 class GuardrailType(Enum):
     """Types of guardrail checks."""
+
     INJECTION_DETECTION = "injection"
     CONTENT_MODERATION = "content"
     TOPIC_CONTROL = "topic"
@@ -43,7 +43,7 @@ class GuardrailsConfig:
 
     # NemoGuard endpoint
     endpoint: str = "http://localhost:8000"
-    api_key: Optional[str] = None
+    api_key: str | None = None
 
     # Enabled checks
     injection_detection: bool = True
@@ -52,22 +52,31 @@ class GuardrailsConfig:
     pii_filtering: bool = False
 
     # Topic control
-    allowed_topics: List[str] = field(default_factory=list)
-    blocked_topics: List[str] = field(default_factory=list)
+    allowed_topics: list[str] = field(default_factory=list)
+    blocked_topics: list[str] = field(default_factory=list)
 
     # Code safety settings
-    blocked_commands: List[str] = field(default_factory=lambda: [
-        "rm -rf /", "rm -rf /*", ":(){:|:&};:",
-        "dd if=/dev/zero", "mkfs.", "> /dev/sda",
-        "chmod -R 777 /", "sudo rm -rf",
-    ])
-    blocked_patterns: List[str] = field(default_factory=lambda: [
-        r"rm\s+-rf\s+/",
-        r">\s*/dev/sd[a-z]",
-        r"chmod\s+777\s+/",
-        r"curl.*\|.*sh",
-        r"wget.*\|.*bash",
-    ])
+    blocked_commands: list[str] = field(
+        default_factory=lambda: [
+            "rm -rf /",
+            "rm -rf /*",
+            ":(){:|:&};:",
+            "dd if=/dev/zero",
+            "mkfs.",
+            "> /dev/sda",
+            "chmod -R 777 /",
+            "sudo rm -rf",
+        ]
+    )
+    blocked_patterns: list[str] = field(
+        default_factory=lambda: [
+            r"rm\s+-rf\s+/",
+            r">\s*/dev/sd[a-z]",
+            r"chmod\s+777\s+/",
+            r"curl.*\|.*sh",
+            r"wget.*\|.*bash",
+        ]
+    )
 
     # Colang configuration path (for advanced rules)
     colang_config_path: str = ""
@@ -87,10 +96,10 @@ class GuardrailResult:
     confidence: float
     reason: str
     original_content: str
-    modified_content: Optional[str] = None
-    details: Dict[str, Any] = field(default_factory=dict)
+    modified_content: str | None = None
+    details: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "type": self.guardrail_type.value,
             "action": self.action.value,
@@ -98,7 +107,7 @@ class GuardrailResult:
             "confidence": self.confidence,
             "reason": self.reason,
             "modified_content": self.modified_content,
-            "details": self.details
+            "details": self.details,
         }
 
 
@@ -108,16 +117,16 @@ class CheckResult:
 
     passed: bool
     action: GuardrailAction
-    results: List[GuardrailResult]
+    results: list[GuardrailResult]
     final_content: str
-    blocked_reason: Optional[str] = None
+    blocked_reason: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "passed": self.passed,
             "action": self.action.value,
             "blocked_reason": self.blocked_reason,
-            "checks": [r.to_dict() for r in self.results]
+            "checks": [r.to_dict() for r in self.results],
         }
 
 
@@ -158,7 +167,7 @@ class NemoGuard:
         "weapons",
     ]
 
-    def __init__(self, config: Optional[GuardrailsConfig] = None):
+    def __init__(self, config: GuardrailsConfig | None = None):
         """Initialize NemoGuard client."""
         self.config = config or GuardrailsConfig()
 
@@ -167,20 +176,15 @@ class NemoGuard:
             self.config.api_key = os.environ.get("NVIDIA_API_KEY")
 
         # HTTP client
-        self.client = httpx.AsyncClient(
-            timeout=30.0,
-            headers=self._build_headers()
-        )
+        self.client = httpx.AsyncClient(timeout=30.0, headers=self._build_headers())
 
         # Compile patterns
-        self._injection_patterns = [
-            re.compile(p, re.IGNORECASE) for p in self.INJECTION_PATTERNS
-        ]
+        self._injection_patterns = [re.compile(p, re.IGNORECASE) for p in self.INJECTION_PATTERNS]
         self._blocked_patterns = [
             re.compile(p, re.IGNORECASE) for p in self.config.blocked_patterns
         ]
 
-    def _build_headers(self) -> Dict[str, str]:
+    def _build_headers(self) -> dict[str, str]:
         """Build HTTP headers."""
         headers = {"Content-Type": "application/json"}
         if self.config.api_key:
@@ -238,7 +242,7 @@ class NemoGuard:
             action=final_action,
             results=results,
             final_content=final_content,
-            blocked_reason=blocked_reason
+            blocked_reason=blocked_reason,
         )
 
     async def check_output(self, content: str) -> CheckResult:
@@ -287,7 +291,7 @@ class NemoGuard:
             action=final_action,
             results=results,
             final_content=final_content,
-            blocked_reason=blocked_reason
+            blocked_reason=blocked_reason,
         )
 
     async def check_command(self, command: str) -> CheckResult:
@@ -307,7 +311,7 @@ class NemoGuard:
             action=result.action,
             results=[result],
             final_content=command,
-            blocked_reason=result.reason if result.triggered else None
+            blocked_reason=result.reason if result.triggered else None,
         )
 
     async def _check_injection(self, content: str) -> GuardrailResult:
@@ -322,14 +326,13 @@ class NemoGuard:
                     confidence=0.9,
                     reason=f"Potential injection detected: matches pattern '{pattern.pattern}'",
                     original_content=content,
-                    details={"pattern": pattern.pattern}
+                    details={"pattern": pattern.pattern},
                 )
 
         # Try NemoGuard API for advanced detection
         try:
             response = await self.client.post(
-                f"{self.config.endpoint}/v1/guardrails/injection",
-                json={"text": content}
+                f"{self.config.endpoint}/v1/guardrails/injection", json={"text": content}
             )
 
             if response.status_code == 200:
@@ -344,7 +347,7 @@ class NemoGuard:
                         confidence=score,
                         reason="Injection detected by NemoGuard",
                         original_content=content,
-                        details=result
+                        details=result,
                     )
 
         except httpx.RequestError:
@@ -356,7 +359,7 @@ class NemoGuard:
             triggered=False,
             confidence=1.0,
             reason="No injection detected",
-            original_content=content
+            original_content=content,
         )
 
     async def _check_content_moderation(self, content: str) -> GuardrailResult:
@@ -365,10 +368,7 @@ class NemoGuard:
         try:
             response = await self.client.post(
                 f"{self.config.endpoint}/v1/guardrails/moderate",
-                json={
-                    "text": content,
-                    "categories": self.MODERATION_CATEGORIES
-                }
+                json={"text": content, "categories": self.MODERATION_CATEGORIES},
             )
 
             if response.status_code == 200:
@@ -385,7 +385,7 @@ class NemoGuard:
                             confidence=max_score,
                             reason=f"Content policy violation: {violations[0].get('category', 'unknown')}",
                             original_content=content,
-                            details={"violations": violations}
+                            details={"violations": violations},
                         )
 
         except httpx.RequestError:
@@ -397,7 +397,7 @@ class NemoGuard:
             triggered=False,
             confidence=1.0,
             reason="Content passes moderation",
-            original_content=content
+            original_content=content,
         )
 
     async def _check_topic(self, content: str) -> GuardrailResult:
@@ -414,14 +414,13 @@ class NemoGuard:
                     confidence=0.9,
                     reason=f"Blocked topic detected: {topic}",
                     original_content=content,
-                    details={"blocked_topic": topic}
+                    details={"blocked_topic": topic},
                 )
 
         # Check allowed topics (if specified)
         if self.config.allowed_topics:
             topic_found = any(
-                topic.lower() in content_lower
-                for topic in self.config.allowed_topics
+                topic.lower() in content_lower for topic in self.config.allowed_topics
             )
             if not topic_found:
                 return GuardrailResult(
@@ -431,7 +430,7 @@ class NemoGuard:
                     confidence=0.7,
                     reason="Content does not match allowed topics",
                     original_content=content,
-                    details={"allowed_topics": self.config.allowed_topics}
+                    details={"allowed_topics": self.config.allowed_topics},
                 )
 
         return GuardrailResult(
@@ -440,7 +439,7 @@ class NemoGuard:
             triggered=False,
             confidence=1.0,
             reason="Topic check passed",
-            original_content=content
+            original_content=content,
         )
 
     def _check_code_safety(self, content: str) -> GuardrailResult:
@@ -455,7 +454,7 @@ class NemoGuard:
                     confidence=1.0,
                     reason=f"Dangerous command detected: {blocked}",
                     original_content=content,
-                    details={"blocked_command": blocked}
+                    details={"blocked_command": blocked},
                 )
 
         # Check blocked patterns
@@ -469,7 +468,7 @@ class NemoGuard:
                     confidence=0.95,
                     reason=f"Dangerous pattern detected: {match.group()}",
                     original_content=content,
-                    details={"pattern": pattern.pattern, "match": match.group()}
+                    details={"pattern": pattern.pattern, "match": match.group()},
                 )
 
         # Check for privilege escalation
@@ -488,7 +487,7 @@ class NemoGuard:
                     confidence=0.8,
                     reason="Potential privilege escalation detected",
                     original_content=content,
-                    details={"pattern": pattern}
+                    details={"pattern": pattern},
                 )
 
         return GuardrailResult(
@@ -497,16 +496,16 @@ class NemoGuard:
             triggered=False,
             confidence=1.0,
             reason="Code safety check passed",
-            original_content=content
+            original_content=content,
         )
 
-    async def _filter_pii(self, content: str) -> Tuple[GuardrailResult, str]:
+    async def _filter_pii(self, content: str) -> tuple[GuardrailResult, str]:
         """Filter PII from content."""
         # Simple PII patterns
         pii_patterns = {
-            "email": r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b',
-            "phone": r'\b(?:\+?1[-.\s]?)?\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4}\b',
-            "ssn": r'\b\d{3}[-\s]?\d{2}[-\s]?\d{4}\b',
+            "email": r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
+            "phone": r"\b(?:\+?1[-.\s]?)?\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4}\b",
+            "ssn": r"\b\d{3}[-\s]?\d{2}[-\s]?\d{4}\b",
         }
 
         modified = content
@@ -520,16 +519,23 @@ class NemoGuard:
 
         triggered = len(found_pii) > 0
 
-        return GuardrailResult(
-            guardrail_type=GuardrailType.PII_FILTER,
-            action=GuardrailAction.MODIFY if triggered else GuardrailAction.ALLOW,
-            triggered=triggered,
-            confidence=1.0 if triggered else 0.0,
-            reason=f"Found and redacted {len(found_pii)} PII instances" if triggered else "No PII found",
-            original_content=content,
-            modified_content=modified if triggered else None,
-            details={"pii_found": found_pii}
-        ), modified
+        return (
+            GuardrailResult(
+                guardrail_type=GuardrailType.PII_FILTER,
+                action=GuardrailAction.MODIFY if triggered else GuardrailAction.ALLOW,
+                triggered=triggered,
+                confidence=1.0 if triggered else 0.0,
+                reason=(
+                    f"Found and redacted {len(found_pii)} PII instances"
+                    if triggered
+                    else "No PII found"
+                ),
+                original_content=content,
+                modified_content=modified if triggered else None,
+                details={"pii_found": found_pii},
+            ),
+            modified,
+        )
 
 
 async def main():
@@ -538,7 +544,7 @@ async def main():
         injection_detection=True,
         content_moderation=True,
         code_safety=True,
-        blocked_topics=["politics", "religion"]
+        blocked_topics=["politics", "religion"],
     )
 
     guard = NemoGuard(config)

@@ -6,18 +6,18 @@ This adapter provides session import functionality only,
 converting Codex transcript files into BashGym trace format.
 """
 
-import os
 import json
-import uuid
+import os
 import platform
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Tuple, List, Dict, Any, Optional
+from typing import Any
 
 
 def _get_codex_dir() -> Path:
     """Get the Codex config/data directory."""
-    if platform.system() == 'Windows':
+    if platform.system() == "Windows":
         home = Path(os.environ.get("USERPROFILE", ""))
     else:
         home = Path.home()
@@ -26,7 +26,7 @@ def _get_codex_dir() -> Path:
 
 def _get_bashgym_dir() -> Path:
     """Get the global Bash Gym directory (~/.bashgym/)."""
-    if platform.system() == 'Windows':
+    if platform.system() == "Windows":
         base = Path(os.environ.get("USERPROFILE", ""))
     else:
         base = Path.home()
@@ -40,7 +40,7 @@ def _get_traces_dir() -> Path:
     return traces_dir
 
 
-def install_codex_hooks() -> Tuple[bool, str]:
+def install_codex_hooks() -> tuple[bool, str]:
     """
     Codex has no hook system - return informational message.
 
@@ -49,12 +49,11 @@ def install_codex_hooks() -> Tuple[bool, str]:
     """
     return (
         True,
-        "Codex uses session import (no live hooks). "
-        "Use 'Import Sessions' to pull transcripts."
+        "Codex uses session import (no live hooks). " "Use 'Import Sessions' to pull transcripts.",
     )
 
 
-def uninstall_codex_hooks() -> Tuple[bool, str]:
+def uninstall_codex_hooks() -> tuple[bool, str]:
     """
     Codex has no hooks to uninstall.
 
@@ -64,7 +63,7 @@ def uninstall_codex_hooks() -> Tuple[bool, str]:
     return True, "Codex has no hooks to uninstall"
 
 
-def _convert_tool_call(tool_call: Dict[str, Any], cwd: str) -> Dict[str, Any]:
+def _convert_tool_call(tool_call: dict[str, Any], cwd: str) -> dict[str, Any]:
     """Convert a Codex tool call to a BashGym trace step."""
     tool_name = tool_call.get("name", tool_call.get("tool", "unknown"))
     tool_input = tool_call.get("input", tool_call.get("arguments", {}))
@@ -98,11 +97,11 @@ def _convert_tool_call(tool_call: Dict[str, Any], cwd: str) -> Dict[str, Any]:
         "success": exit_code == 0 if exit_code is not None else None,
         "cwd": cwd,
         "source_tool": "codex",
-        "metadata": {}
+        "metadata": {},
     }
 
 
-def _extract_user_text(msg: Dict[str, Any]) -> Optional[str]:
+def _extract_user_text(msg: dict[str, Any]) -> str | None:
     """
     Extract user text from a message dict.
 
@@ -128,7 +127,7 @@ def _extract_user_text(msg: Dict[str, Any]) -> Optional[str]:
 
 def parse_codex_transcript(
     transcript: Any,
-) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """
     Parse a Codex transcript and extract trace steps plus conversation metadata.
 
@@ -140,7 +139,7 @@ def parse_codex_transcript(
         metadata contains: conversation_turns, all_user_prompts,
         user_initial_prompt, models_used.
     """
-    meta: Dict[str, Any] = {
+    meta: dict[str, Any] = {
         "conversation_turns": 0,
         "all_user_prompts": [],
         "user_initial_prompt": None,
@@ -160,7 +159,7 @@ def parse_codex_transcript(
             models_used.add(session_model)
 
     # Extract tool calls and user messages from transcript
-    tool_calls: List[Dict[str, Any]] = []
+    tool_calls: list[dict[str, Any]] = []
     if isinstance(transcript, dict):
         # Look for tool_calls in various locations
         tool_calls = transcript.get("tool_calls", [])
@@ -179,10 +178,12 @@ def parse_codex_transcript(
                     user_text = _extract_user_text(msg)
                     if user_text:
                         meta["conversation_turns"] += 1
-                        meta["all_user_prompts"].append({
-                            "text": user_text,
-                            "timestamp": msg.get("timestamp"),
-                        })
+                        meta["all_user_prompts"].append(
+                            {
+                                "text": user_text,
+                                "timestamp": msg.get("timestamp"),
+                            }
+                        )
                         if meta["user_initial_prompt"] is None:
                             meta["user_initial_prompt"] = user_text[:500]
 
@@ -209,10 +210,12 @@ def parse_codex_transcript(
                     user_text = _extract_user_text(msg)
                     if user_text:
                         meta["conversation_turns"] += 1
-                        meta["all_user_prompts"].append({
-                            "text": user_text,
-                            "timestamp": msg.get("timestamp"),
-                        })
+                        meta["all_user_prompts"].append(
+                            {
+                                "text": user_text,
+                                "timestamp": msg.get("timestamp"),
+                            }
+                        )
                         if meta["user_initial_prompt"] is None:
                             meta["user_initial_prompt"] = user_text[:500]
 
@@ -225,7 +228,7 @@ def parse_codex_transcript(
         tool_calls = transcript
 
     # Convert tool calls to trace steps
-    trace_steps: List[Dict[str, Any]] = []
+    trace_steps: list[dict[str, Any]] = []
     for tool_call in tool_calls:
         if isinstance(tool_call, dict):
             step = _convert_tool_call(tool_call, cwd)
@@ -235,7 +238,7 @@ def parse_codex_transcript(
     return trace_steps, meta
 
 
-def import_codex_sessions(limit: int = 50) -> List[Dict[str, Any]]:
+def import_codex_sessions(limit: int = 50) -> list[dict[str, Any]]:
     """
     Import Codex session transcripts into BashGym trace format.
 
@@ -272,7 +275,7 @@ def import_codex_sessions(limit: int = 50) -> List[Dict[str, Any]]:
     unique_files = unique_files[:limit]
 
     for transcript_file in unique_files:
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "session_file": str(transcript_file),
             "trace_file": None,
             "steps_imported": 0,
@@ -280,9 +283,9 @@ def import_codex_sessions(limit: int = 50) -> List[Dict[str, Any]]:
         }
 
         try:
-            with open(transcript_file, 'r') as f:
+            with open(transcript_file) as f:
                 transcript = json.load(f)
-        except (json.JSONDecodeError, IOError, OSError) as e:
+        except (json.JSONDecodeError, OSError) as e:
             result["error"] = str(e)
             results.append(result)
             continue
@@ -313,14 +316,14 @@ def import_codex_sessions(limit: int = 50) -> List[Dict[str, Any]]:
 
         if trace_steps:
             try:
-                with open(trace_file, 'w') as f:
+                with open(trace_file, "w") as f:
                     json.dump(trace_output, f, indent=2, ensure_ascii=False)
                 result["trace_file"] = str(trace_file)
                 result["steps_imported"] = len(trace_steps)
                 result["conversation_turns"] = meta.get("conversation_turns", 0)
                 result["user_initial_prompt"] = meta.get("user_initial_prompt")
                 result["models_used"] = meta.get("models_used", [])
-            except (IOError, OSError) as e:
+            except OSError as e:
                 result["error"] = str(e)
 
         results.append(result)

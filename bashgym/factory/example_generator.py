@@ -8,69 +8,75 @@ This module segments sessions and converts them to NeMo-compatible training form
 Module 3: Data Synthesis (The "Factory")
 """
 
-import json
 import hashlib
+import json
 import uuid
-from pathlib import Path
-from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List, Tuple
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
+from typing import Any
 
 from .data_factory import (
-    TrainingExample, DPOExample, TOOL_SCHEMAS, TOOL_OUTPUT_MAX_CHARS,
-    build_tool_call_messages, _normalize_tool_name, _parse_command_to_arguments
+    TOOL_SCHEMAS,
+    TrainingExample,
+    build_tool_call_messages,
 )
 
 
 class SegmentationType(Enum):
     """Strategies for segmenting sessions into examples."""
-    TIME_GAP = "time_gap"           # Segment at time gaps > threshold
-    GIT_COMMIT = "git_commit"       # Segment at git commits
+
+    TIME_GAP = "time_gap"  # Segment at time gaps > threshold
+    GIT_COMMIT = "git_commit"  # Segment at git commits
     DIRECTORY_CHANGE = "directory_change"  # Segment when working directory changes
-    FILE_SCOPE = "file_scope"       # Segment when file scope changes significantly
-    COMBINED = "combined"           # Use all heuristics
+    FILE_SCOPE = "file_scope"  # Segment when file scope changes significantly
+    COMBINED = "combined"  # Use all heuristics
 
 
 @dataclass
 class TraceStep:
     """A single step from a trace session."""
+
     index: int
     tool_name: str
     command: str
     output: str
-    success: Optional[bool]
-    timestamp: Optional[str] = None
-    working_dir: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
-    span_id: Optional[str] = None  # Causal span: groups reasoning + action
+    success: bool | None
+    timestamp: str | None = None
+    working_dir: str | None = None
+    metadata: dict[str, Any] | None = None
+    span_id: str | None = None  # Causal span: groups reasoning + action
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any], index: int) -> "TraceStep":
+    def from_dict(cls, data: dict[str, Any], index: int) -> "TraceStep":
         """Create TraceStep from dictionary."""
         return cls(
             index=index,
             tool_name=data.get("tool_name", data.get("tool", "unknown")),
             command=data.get("command", data.get("input", "")),
             output=data.get("output", data.get("result", ""))[:2000],  # Truncate
-            success=data.get("success", data.get("exit_code") == 0 if "exit_code" in data else None),
+            success=data.get(
+                "success", data.get("exit_code") == 0 if "exit_code" in data else None
+            ),
             timestamp=data.get("timestamp"),
             working_dir=data.get("cwd", data.get("working_directory")),
             metadata=data.get("metadata"),
-            span_id=data.get("span_id")
+            span_id=data.get("span_id"),
         )
 
 
 @dataclass
 class TaskSegment:
     """A segment of steps that represent a coherent task."""
-    steps: List[TraceStep]
+
+    steps: list[TraceStep]
     inferred_prompt: str
     start_index: int
     end_index: int
     confidence: float = 0.5  # Confidence in the segmentation
-    repo_name: Optional[str] = None
-    repo_path: Optional[str] = None
+    repo_name: str | None = None
+    repo_path: str | None = None
 
     @property
     def step_count(self) -> int:
@@ -147,12 +153,12 @@ Always explain your reasoning before executing commands."""
         "config": ["config", "setup", "install", "configure"],
     }
 
-    def __init__(self, config: Optional[ExampleGeneratorConfig] = None):
+    def __init__(self, config: ExampleGeneratorConfig | None = None):
         """Initialize the Example Generator."""
         self.config = config or ExampleGeneratorConfig()
         Path(self.config.output_dir).mkdir(parents=True, exist_ok=True)
 
-    def load_session(self, session_path: Path) -> Tuple[List[TraceStep], Dict[str, Any]]:
+    def load_session(self, session_path: Path) -> tuple[list[TraceStep], dict[str, Any]]:
         """
         Load a session trace file.
 
@@ -162,7 +168,7 @@ Always explain your reasoning before executing commands."""
         Returns:
             Tuple of (steps, metadata)
         """
-        with open(session_path, 'r', encoding='utf-8', errors='replace') as f:
+        with open(session_path, encoding="utf-8", errors="replace") as f:
             data = json.load(f)
 
         # Handle both formats: {"trace": [...], "metadata": {...}} or [...]
@@ -176,7 +182,9 @@ Always explain your reasoning before executing commands."""
         steps = [TraceStep.from_dict(s, i) for i, s in enumerate(raw_steps)]
         return steps, metadata
 
-    def segment_session(self, steps: List[TraceStep], metadata: Dict[str, Any]) -> List[TaskSegment]:
+    def segment_session(
+        self, steps: list[TraceStep], metadata: dict[str, Any]
+    ) -> list[TaskSegment]:
         """
         Segment a session into logical task boundaries.
 
@@ -204,15 +212,17 @@ Always explain your reasoning before executing commands."""
         if len(steps) <= self.config.max_steps_per_segment:
             # Session is small enough to be a single example
             prompt = self._infer_task_prompt(steps, metadata)
-            return [TaskSegment(
-                steps=steps,
-                inferred_prompt=prompt,
-                start_index=0,
-                end_index=len(steps) - 1,
-                confidence=0.8,
-                repo_name=repo_name,
-                repo_path=repo_path,
-            )]
+            return [
+                TaskSegment(
+                    steps=steps,
+                    inferred_prompt=prompt,
+                    start_index=0,
+                    end_index=len(steps) - 1,
+                    confidence=0.8,
+                    repo_name=repo_name,
+                    repo_path=repo_path,
+                )
+            ]
 
         # Find segment boundaries
         boundaries = self._find_segment_boundaries(steps)
@@ -222,7 +232,7 @@ Always explain your reasoning before executing commands."""
         start_idx = 0
 
         for end_idx in boundaries:
-            segment_steps = steps[start_idx:end_idx + 1]
+            segment_steps = steps[start_idx : end_idx + 1]
 
             # Skip segments that are too small
             if len(segment_steps) < self.config.min_steps_per_segment:
@@ -230,19 +240,21 @@ Always explain your reasoning before executing commands."""
 
             # Truncate segments that are too large
             if len(segment_steps) > self.config.max_steps_per_segment:
-                segment_steps = segment_steps[:self.config.max_steps_per_segment]
+                segment_steps = segment_steps[: self.config.max_steps_per_segment]
 
             prompt = self._infer_task_prompt(segment_steps, metadata)
 
-            segments.append(TaskSegment(
-                steps=segment_steps,
-                inferred_prompt=prompt,
-                start_index=start_idx,
-                end_index=min(end_idx, start_idx + self.config.max_steps_per_segment - 1),
-                confidence=0.6,
-                repo_name=repo_name,
-                repo_path=repo_path,
-            ))
+            segments.append(
+                TaskSegment(
+                    steps=segment_steps,
+                    inferred_prompt=prompt,
+                    start_index=start_idx,
+                    end_index=min(end_idx, start_idx + self.config.max_steps_per_segment - 1),
+                    confidence=0.6,
+                    repo_name=repo_name,
+                    repo_path=repo_path,
+                )
+            )
 
             start_idx = end_idx + 1
 
@@ -251,19 +263,21 @@ Always explain your reasoning before executing commands."""
             remaining = steps[start_idx:]
             if len(remaining) >= self.config.min_steps_per_segment:
                 prompt = self._infer_task_prompt(remaining, metadata)
-                segments.append(TaskSegment(
-                    steps=remaining,
-                    inferred_prompt=prompt,
-                    start_index=start_idx,
-                    end_index=len(steps) - 1,
-                    confidence=0.5,
-                    repo_name=repo_name,
-                    repo_path=repo_path,
-                ))
+                segments.append(
+                    TaskSegment(
+                        steps=remaining,
+                        inferred_prompt=prompt,
+                        start_index=start_idx,
+                        end_index=len(steps) - 1,
+                        confidence=0.5,
+                        repo_name=repo_name,
+                        repo_path=repo_path,
+                    )
+                )
 
         return segments
 
-    def assign_spans(self, steps: List[TraceStep]) -> None:
+    def assign_spans(self, steps: list[TraceStep]) -> None:
         """Assign causal span IDs to groups of related steps.
 
         A span groups a reasoning chain (thinking → action). New spans start when:
@@ -286,7 +300,7 @@ Always explain your reasoning before executing commands."""
 
             step.span_id = current_span
 
-    def _find_segment_boundaries(self, steps: List[TraceStep]) -> List[int]:
+    def _find_segment_boundaries(self, steps: list[TraceStep]) -> list[int]:
         """Find indices where segments should end.
 
         Uses both traditional heuristics and causal span boundaries:
@@ -311,15 +325,15 @@ Always explain your reasoning before executing commands."""
                 is_boundary = True
 
             # Check for time gaps
-            elif self._has_time_gap(steps[i-1], step):
+            elif self._has_time_gap(steps[i - 1], step):
                 is_boundary = True
 
             # Check for directory changes
-            elif self._has_directory_change(steps[i-1], step):
+            elif self._has_directory_change(steps[i - 1], step):
                 is_boundary = True
 
             # Check for cognitive span boundary (new reasoning chain)
-            elif self._has_cognitive_boundary(steps[i-1], step):
+            elif self._has_cognitive_boundary(steps[i - 1], step):
                 is_boundary = True
 
             if is_boundary:
@@ -338,8 +352,8 @@ Always explain your reasoning before executing commands."""
             return False
 
         try:
-            prev_time = datetime.fromisoformat(prev_step.timestamp.replace('Z', '+00:00'))
-            curr_time = datetime.fromisoformat(curr_step.timestamp.replace('Z', '+00:00'))
+            prev_time = datetime.fromisoformat(prev_step.timestamp.replace("Z", "+00:00"))
+            curr_time = datetime.fromisoformat(curr_step.timestamp.replace("Z", "+00:00"))
             gap_minutes = (curr_time - prev_time).total_seconds() / 60
             return gap_minutes > self.config.time_gap_minutes
         except (ValueError, TypeError):
@@ -377,7 +391,7 @@ Always explain your reasoning before executing commands."""
             return False
         return prev_step.span_id != curr_step.span_id
 
-    def _infer_task_prompt(self, steps: List[TraceStep], metadata: Dict[str, Any]) -> str:
+    def _infer_task_prompt(self, steps: list[TraceStep], metadata: dict[str, Any]) -> str:
         """
         Infer a task prompt from the steps.
 
@@ -425,8 +439,12 @@ Always explain your reasoning before executing commands."""
             tool = step.tool_name.lower()
             tool_counts[tool] = tool_counts.get(tool, 0) + 1
 
-        tool_summary = ", ".join([f"{count} {tool}" for tool, count in
-                                  sorted(tool_counts.items(), key=lambda x: -x[1])[:3]])
+        tool_summary = ", ".join(
+            [
+                f"{count} {tool}"
+                for tool, count in sorted(tool_counts.items(), key=lambda x: -x[1])[:3]
+            ]
+        )
         return f"Coding task: {tool_summary}"
 
     def segment_to_example(self, segment: TaskSegment) -> TrainingExample:
@@ -457,14 +475,16 @@ Always explain your reasoning before executing commands."""
                 "success": step.success,
             }
             # Preserve metadata so build_tool_call_messages can extract cognitive data
-            if hasattr(step, 'metadata') and step.metadata:
+            if hasattr(step, "metadata") and step.metadata:
                 step_dict["metadata"] = step.metadata
             raw_steps.append(step_dict)
             per_step_success.append(bool(step.success) if step.success is not None else True)
 
         structured_messages = build_tool_call_messages(
-            raw_steps, self.SYSTEM_PROMPT, segment.inferred_prompt,
-            include_cognitive=self.config.include_cognitive
+            raw_steps,
+            self.SYSTEM_PROMPT,
+            segment.inferred_prompt,
+            include_cognitive=self.config.include_cognitive,
         )
 
         # Also build legacy markdown response for backward compat
@@ -519,10 +539,10 @@ Always explain your reasoning before executing commands."""
                 "generated_at": datetime.now(timezone.utc).isoformat(),
                 "repo_name": segment.repo_name,
                 "repo_path": segment.repo_path,
-            }
+            },
         )
 
-    def generate_examples(self, session_path: Path) -> List[TrainingExample]:
+    def generate_examples(self, session_path: Path) -> list[TrainingExample]:
         """
         Generate training examples from a session file.
 
@@ -536,7 +556,7 @@ Always explain your reasoning before executing commands."""
         """
         try:
             steps, metadata = self.load_session(session_path)
-        except (json.JSONDecodeError, IOError) as e:
+        except (OSError, json.JSONDecodeError) as e:
             print(f"Error loading session {session_path}: {e}")
             return []
 
@@ -562,10 +582,8 @@ Always explain your reasoning before executing commands."""
         return examples
 
     def process_directory(
-        self,
-        trace_dir: Path,
-        output_path: Optional[Path] = None
-    ) -> Tuple[List[TrainingExample], Dict[str, Any]]:
+        self, trace_dir: Path, output_path: Path | None = None
+    ) -> tuple[list[TrainingExample], dict[str, Any]]:
         """
         Process all sessions in a directory.
 
@@ -581,7 +599,7 @@ Always explain your reasoning before executing commands."""
             "sessions_processed": 0,
             "sessions_skipped": 0,
             "examples_generated": 0,
-            "total_steps": 0
+            "total_steps": 0,
         }
 
         trace_files = list(Path(trace_dir).glob("*.json"))
@@ -606,7 +624,7 @@ Always explain your reasoning before executing commands."""
 
         return all_examples, stats
 
-    def save_examples(self, examples: List[TrainingExample], output_path: Path) -> Path:
+    def save_examples(self, examples: list[TrainingExample], output_path: Path) -> Path:
         """
         Save examples to a JSONL file (NeMo-compatible format).
 
@@ -623,7 +641,7 @@ Always explain your reasoning before executing commands."""
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(output_path, 'w') as f:
+        with open(output_path, "w") as f:
             for example in examples:
                 # Use structured format (to_dict prefers messages when available)
                 record = example.to_dict()
@@ -634,11 +652,11 @@ Always explain your reasoning before executing commands."""
 
     def export_for_nemo(
         self,
-        examples: List[TrainingExample],
+        examples: list[TrainingExample],
         output_dir: Path,
         train_split: float = 0.9,
-        repo_filter: Optional[List[str]] = None,
-    ) -> Dict[str, Path]:
+        repo_filter: list[str] | None = None,
+    ) -> dict[str, Path]:
         """
         Export examples in NeMo training format with train/val split.
 
@@ -682,7 +700,7 @@ Always explain your reasoning before executing commands."""
             "train": train_path,
             "validation": val_path,
             "train_count": len(train_examples),
-            "val_count": len(val_examples)
+            "val_count": len(val_examples),
         }
 
 
@@ -694,22 +712,18 @@ def main():
     trace_dir = Path("data/traces")
     if trace_dir.exists():
         examples, stats = generator.process_directory(
-            trace_dir,
-            output_path=Path("data/training_examples/generated.jsonl")
+            trace_dir, output_path=Path("data/training_examples/generated.jsonl")
         )
 
-        print(f"\nStatistics:")
+        print("\nStatistics:")
         print(f"  Sessions processed: {stats['sessions_processed']}")
         print(f"  Sessions skipped: {stats['sessions_skipped']}")
         print(f"  Examples generated: {stats['examples_generated']}")
         print(f"  Total steps: {stats['total_steps']}")
 
         if examples:
-            export_result = generator.export_for_nemo(
-                examples,
-                Path("data/training_batches")
-            )
-            print(f"\nExported for NeMo training:")
+            export_result = generator.export_for_nemo(examples, Path("data/training_batches"))
+            print("\nExported for NeMo training:")
             print(f"  Train: {export_result['train']} ({export_result['train_count']} examples)")
             print(f"  Val: {export_result['validation']} ({export_result['val_count']} examples)")
     else:

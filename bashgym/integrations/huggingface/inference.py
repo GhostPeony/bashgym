@@ -46,16 +46,15 @@ Usage:
 """
 
 import logging
-from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List, Union
+from dataclasses import dataclass
 from enum import Enum
+from typing import Any
 
 from .client import (
-    HuggingFaceClient,
-    HFQuotaExceededError,
     HFAuthError,
     HFError,
-    HF_HUB_AVAILABLE,
+    HFQuotaExceededError,
+    HuggingFaceClient,
 )
 
 logger = logging.getLogger(__name__)
@@ -64,6 +63,7 @@ logger = logging.getLogger(__name__)
 # Try to import the inference client from huggingface_hub
 try:
     from huggingface_hub import InferenceClient as _HFInferenceClient
+
     HF_INFERENCE_AVAILABLE = True
 except ImportError:
     HF_INFERENCE_AVAILABLE = False
@@ -74,8 +74,10 @@ except ImportError:
 # Enums
 # =============================================================================
 
+
 class InferenceProvider(Enum):
     """HuggingFace Inference API providers."""
+
     AUTO = "auto"
     SERVERLESS = "serverless"
     DEDICATED = "dedicated"
@@ -84,6 +86,7 @@ class InferenceProvider(Enum):
 
 class RoutingStrategy(Enum):
     """Routing strategies for model selection."""
+
     FASTEST = "fastest"
     CHEAPEST = "cheapest"
     QUALITY = "quality"
@@ -92,6 +95,7 @@ class RoutingStrategy(Enum):
 # =============================================================================
 # Data Classes
 # =============================================================================
+
 
 @dataclass
 class HFInferenceConfig:
@@ -103,13 +107,13 @@ class HFInferenceConfig:
     routing: str = "fastest"
     """Routing strategy: 'fastest', 'cheapest', or 'quality'."""
 
-    bill_to: Optional[str] = None
+    bill_to: str | None = None
     """Organization ID to bill for inference usage (for Pro/Enterprise)."""
 
     timeout: float = 30.0
     """Request timeout in seconds."""
 
-    def validate(self) -> List[str]:
+    def validate(self) -> list[str]:
         """Validate the configuration."""
         errors = []
 
@@ -146,10 +150,10 @@ class InferenceUsage:
     cost_usd: float = 0.0
     """Estimated cost in USD (if available)."""
 
-    latency_ms: Optional[float] = None
+    latency_ms: float | None = None
     """Request latency in milliseconds."""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "provider": self.provider,
@@ -176,10 +180,10 @@ class GenerationResponse:
     usage: InferenceUsage
     """Usage information."""
 
-    finish_reason: Optional[str] = None
+    finish_reason: str | None = None
     """Reason for generation stopping (length, eos, etc.)."""
 
-    raw_response: Optional[Dict[str, Any]] = None
+    raw_response: dict[str, Any] | None = None
     """Raw API response for debugging."""
 
 
@@ -187,13 +191,13 @@ class GenerationResponse:
 class EmbeddingResponse:
     """Response from embedding generation."""
 
-    embeddings: List[List[float]]
+    embeddings: list[list[float]]
     """List of embedding vectors."""
 
     usage: InferenceUsage
     """Usage information."""
 
-    raw_response: Optional[Dict[str, Any]] = None
+    raw_response: dict[str, Any] | None = None
     """Raw API response for debugging."""
 
 
@@ -201,16 +205,16 @@ class EmbeddingResponse:
 class ClassificationResponse:
     """Response from text classification."""
 
-    labels: Dict[str, float]
+    labels: dict[str, float]
     """Label scores as {label: score} dictionary."""
 
     usage: InferenceUsage
     """Usage information."""
 
-    top_label: Optional[str] = None
+    top_label: str | None = None
     """Highest scoring label."""
 
-    raw_response: Optional[Dict[str, Any]] = None
+    raw_response: dict[str, Any] | None = None
     """Raw API response for debugging."""
 
 
@@ -262,6 +266,7 @@ def _estimate_tokens(text: str) -> int:
 # HF Inference Client
 # =============================================================================
 
+
 class HFInferenceClient:
     """
     Client for HuggingFace Inference API.
@@ -301,9 +306,9 @@ class HFInferenceClient:
 
     def __init__(
         self,
-        token: Optional[str] = None,
-        config: Optional[HFInferenceConfig] = None,
-        hf_client: Optional[HuggingFaceClient] = None,
+        token: str | None = None,
+        config: HFInferenceConfig | None = None,
+        hf_client: HuggingFaceClient | None = None,
     ):
         """
         Initialize the HuggingFace Inference Client.
@@ -318,7 +323,7 @@ class HFInferenceClient:
         self._token = token
         self._inference_client = None
         self._initialized = False
-        self._init_error: Optional[str] = None
+        self._init_error: str | None = None
 
         # Validate config
         errors = self._config.validate()
@@ -352,6 +357,7 @@ class HFInferenceClient:
             # Try to get from settings or cached token
             try:
                 from bashgym.config import get_settings
+
                 token = get_settings().huggingface.token
             except Exception:
                 pass
@@ -359,6 +365,7 @@ class HFInferenceClient:
             if not token:
                 try:
                     from huggingface_hub import HfFolder
+
                     token = HfFolder.get_token()
                 except Exception:
                     pass
@@ -384,7 +391,7 @@ class HFInferenceClient:
         self._ensure_initialized()
         return self._inference_client is not None
 
-    def _parse_model_routing(self, model: str) -> tuple[str, Optional[str]]:
+    def _parse_model_routing(self, model: str) -> tuple[str, str | None]:
         """
         Parse model ID and routing suffix.
 
@@ -436,7 +443,7 @@ class HFInferenceClient:
         max_tokens: int = 256,
         temperature: float = 0.7,
         top_p: float = 0.95,
-        stop: Optional[List[str]] = None,
+        stop: list[str] | None = None,
         **kwargs,
     ) -> GenerationResponse:
         """
@@ -469,6 +476,7 @@ class HFInferenceClient:
         logger.debug(f"Generating with model={model}, routing={routing}")
 
         import time
+
         start_time = time.time()
 
         try:
@@ -491,16 +499,24 @@ class HFInferenceClient:
                 text = response.generated_text
                 finish_reason = getattr(response, "finish_reason", None)
                 # Extract token counts if available
-                input_tokens = getattr(
-                    getattr(response, "details", None),
-                    "prefill_tokens",
-                    _estimate_tokens(prompt),
-                ) if hasattr(response, "details") else _estimate_tokens(prompt)
-                output_tokens = getattr(
-                    getattr(response, "details", None),
-                    "generated_tokens",
-                    _estimate_tokens(text),
-                ) if hasattr(response, "details") else _estimate_tokens(text)
+                input_tokens = (
+                    getattr(
+                        getattr(response, "details", None),
+                        "prefill_tokens",
+                        _estimate_tokens(prompt),
+                    )
+                    if hasattr(response, "details")
+                    else _estimate_tokens(prompt)
+                )
+                output_tokens = (
+                    getattr(
+                        getattr(response, "details", None),
+                        "generated_tokens",
+                        _estimate_tokens(text),
+                    )
+                    if hasattr(response, "details")
+                    else _estimate_tokens(text)
+                )
             else:
                 # Simple string response
                 text = str(response)
@@ -532,7 +548,7 @@ class HFInferenceClient:
     def embed(
         self,
         model: str,
-        texts: Union[str, List[str]],
+        texts: str | list[str],
         **kwargs,
     ) -> EmbeddingResponse:
         """
@@ -563,6 +579,7 @@ class HFInferenceClient:
         logger.debug(f"Embedding {len(texts)} texts with model={model}")
 
         import time
+
         start_time = time.time()
 
         try:
@@ -614,7 +631,7 @@ class HFInferenceClient:
         self,
         model: str,
         text: str,
-        candidate_labels: Optional[List[str]] = None,
+        candidate_labels: list[str] | None = None,
         **kwargs,
     ) -> ClassificationResponse:
         """
@@ -642,6 +659,7 @@ class HFInferenceClient:
         logger.debug(f"Classifying text with model={model}")
 
         import time
+
         start_time = time.time()
 
         try:
@@ -664,7 +682,7 @@ class HFInferenceClient:
             latency_ms = (time.time() - start_time) * 1000
 
             # Parse response into label scores
-            labels: Dict[str, float] = {}
+            labels: dict[str, float] = {}
             top_label = None
             max_score = -1
 
@@ -717,7 +735,7 @@ class HFInferenceClient:
     def chat(
         self,
         model: str,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         max_tokens: int = 256,
         temperature: float = 0.7,
         **kwargs,
@@ -743,6 +761,7 @@ class HFInferenceClient:
         logger.debug(f"Chat completion with model={model}")
 
         import time
+
         start_time = time.time()
 
         try:
@@ -809,12 +828,12 @@ class HFInferenceClient:
 # Singleton Access
 # =============================================================================
 
-_inference_client: Optional[HFInferenceClient] = None
+_inference_client: HFInferenceClient | None = None
 
 
 def get_inference_client(
-    token: Optional[str] = None,
-    config: Optional[HFInferenceConfig] = None,
+    token: str | None = None,
+    config: HFInferenceConfig | None = None,
     force_new: bool = False,
 ) -> HFInferenceClient:
     """

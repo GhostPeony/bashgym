@@ -95,6 +95,7 @@ def update_run_state(output_dir: str, **updates) -> TrainingRunState | None:
 # Process control (cross-platform)
 # ---------------------------------------------------------------------------
 
+
 def is_process_alive(pid: int) -> bool:
     """Check if a process is still running."""
     if platform.system() == "Windows":
@@ -137,6 +138,7 @@ def suspend_process(pid: int) -> bool:
         return False
     else:
         import signal
+
         try:
             os.kill(pid, signal.SIGSTOP)
             logger.info(f"Sent SIGSTOP to process {pid}")
@@ -165,6 +167,7 @@ def resume_process(pid: int) -> bool:
         return False
     else:
         import signal
+
         try:
             os.kill(pid, signal.SIGCONT)
             logger.info(f"Sent SIGCONT to process {pid}")
@@ -193,6 +196,7 @@ def terminate_process(pid: int, timeout: float = 5.0) -> bool:
     else:
         import signal
         import time
+
         try:
             os.kill(pid, signal.SIGTERM)
             # Wait for graceful exit

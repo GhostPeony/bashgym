@@ -12,18 +12,19 @@ allowing for both per-repo specialized training and cross-repo generalist traini
 Module 1: Agent Instrumentation (The "Recorder")
 """
 
-import os
-import sys
 import json
-import uuid
-import subprocess
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Optional, Dict, Any, List
+import os
 
 # Cross-platform file locking
 import platform
-if platform.system() == 'Windows':
+import subprocess
+import sys
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+if platform.system() == "Windows":
     import msvcrt
 
     def lock_file(f, exclusive=False):
@@ -36,6 +37,7 @@ if platform.system() == 'Windows':
             msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
         except OSError:
             pass  # File may not have been locked
+
 else:
     import fcntl
 
@@ -50,14 +52,14 @@ else:
 
 def get_bashgym_dir() -> Path:
     """Get the global Bash Gym directory (~/.bashgym/)."""
-    if platform.system() == 'Windows':
+    if platform.system() == "Windows":
         base = Path(os.environ.get("USERPROFILE", ""))
     else:
         base = Path.home()
     return base / ".bashgym"
 
 
-def get_repo_info() -> Dict[str, Any]:
+def get_repo_info() -> dict[str, Any]:
     """Get information about the current git repository."""
     cwd = Path.cwd()
 
@@ -66,14 +68,17 @@ def get_repo_info() -> Dict[str, Any]:
         "name": cwd.name,
         "git_remote": None,
         "git_branch": None,
-        "is_git_repo": False
+        "is_git_repo": False,
     }
 
     try:
         # Check if we're in a git repo
         result = subprocess.run(
             ["git", "rev-parse", "--is-inside-work-tree"],
-            capture_output=True, text=True, cwd=cwd, timeout=5
+            capture_output=True,
+            text=True,
+            cwd=cwd,
+            timeout=5,
         )
         if result.returncode == 0:
             repo_info["is_git_repo"] = True
@@ -81,7 +86,10 @@ def get_repo_info() -> Dict[str, Any]:
             # Get remote URL
             result = subprocess.run(
                 ["git", "remote", "get-url", "origin"],
-                capture_output=True, text=True, cwd=cwd, timeout=5
+                capture_output=True,
+                text=True,
+                cwd=cwd,
+                timeout=5,
             )
             if result.returncode == 0:
                 repo_info["git_remote"] = result.stdout.strip()
@@ -89,7 +97,10 @@ def get_repo_info() -> Dict[str, Any]:
             # Get current branch
             result = subprocess.run(
                 ["git", "branch", "--show-current"],
-                capture_output=True, text=True, cwd=cwd, timeout=5
+                capture_output=True,
+                text=True,
+                cwd=cwd,
+                timeout=5,
             )
             if result.returncode == 0:
                 repo_info["git_branch"] = result.stdout.strip()
@@ -129,22 +140,43 @@ def get_trace_file() -> Path:
 # Configuration - Capture ALL tools for comprehensive training data
 RELEVANT_TOOLS = {
     # Core file operations
-    "Bash", "Edit", "Write", "Read",
-    "bash", "edit", "write", "read",
+    "Bash",
+    "Edit",
+    "Write",
+    "Read",
+    "bash",
+    "edit",
+    "write",
+    "read",
     # Search tools (important for understanding agent search patterns)
-    "Glob", "Grep", "glob", "grep",
+    "Glob",
+    "Grep",
+    "glob",
+    "grep",
     # Web tools
-    "WebFetch", "WebSearch", "webfetch", "websearch",
+    "WebFetch",
+    "WebSearch",
+    "webfetch",
+    "websearch",
     # Task management
-    "Task", "TodoWrite", "task", "todowrite",
+    "Task",
+    "TodoWrite",
+    "task",
+    "todowrite",
     # User interaction
-    "AskUserQuestion", "askuserquestion",
+    "AskUserQuestion",
+    "askuserquestion",
     # Notebook operations
-    "NotebookEdit", "notebookedit",
+    "NotebookEdit",
+    "notebookedit",
     # Planning
-    "EnterPlanMode", "ExitPlanMode", "enterplanmode", "exitplanmode",
+    "EnterPlanMode",
+    "ExitPlanMode",
+    "enterplanmode",
+    "exitplanmode",
     # Skills
-    "Skill", "skill",
+    "Skill",
+    "skill",
 }
 
 
@@ -158,13 +190,13 @@ def generate_step_id() -> str:
     return f"{get_timestamp()}_{uuid.uuid4().hex[:8]}"
 
 
-def safe_json_load(file_path: Path) -> List[Dict[str, Any]]:
+def safe_json_load(file_path: Path) -> list[dict[str, Any]]:
     """Safely load JSON from file with file locking."""
     if not file_path.exists():
         return []
 
     try:
-        with open(file_path, 'r') as f:
+        with open(file_path) as f:
             lock_file(f, exclusive=False)
             content = f.read()
             unlock_file(f)
@@ -172,24 +204,24 @@ def safe_json_load(file_path: Path) -> List[Dict[str, Any]]:
         if not content.strip():
             return []
         return json.loads(content)
-    except (json.JSONDecodeError, IOError, OSError) as e:
+    except (json.JSONDecodeError, OSError) as e:
         print(f"Warning: Could not load trace file: {e}", file=sys.stderr)
         return []
 
 
-def safe_json_dump(data: List[Dict[str, Any]], file_path: Path) -> None:
+def safe_json_dump(data: list[dict[str, Any]], file_path: Path) -> None:
     """Safely write JSON to file with file locking."""
     try:
-        with open(file_path, 'w') as f:
+        with open(file_path, "w") as f:
             lock_file(f, exclusive=True)
             json.dump(data, f, indent=2, ensure_ascii=False)
             unlock_file(f)
-    except (IOError, OSError) as e:
+    except OSError as e:
         print(f"Error: Could not write trace file: {e}", file=sys.stderr)
         sys.exit(1)
 
 
-def extract_tool_info(event: Dict[str, Any], repo_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def extract_tool_info(event: dict[str, Any], repo_info: dict[str, Any]) -> dict[str, Any] | None:
     """
     Extract relevant information from a tool use event.
 
@@ -231,7 +263,7 @@ def extract_tool_info(event: Dict[str, Any], repo_info: Dict[str, Any]) -> Optio
         "exit_code": exit_code,
         "cwd": os.getcwd(),
         "success": exit_code == 0 if exit_code is not None else None,
-        "repo": repo_info
+        "repo": repo_info,
     }
 
 
@@ -267,7 +299,9 @@ def process_hook_event(event_json: str) -> None:
         tool_info = extract_tool_info(evt, repo_info)
         if tool_info:
             trace.append(tool_info)
-            print(f"[BashGym] Captured: {tool_info['tool_name']} - {tool_info['command'][:50]}... ({repo_info['name']})")
+            print(
+                f"[BashGym] Captured: {tool_info['tool_name']} - {tool_info['command'][:50]}... ({repo_info['name']})"
+            )
 
     # Save updated trace
     if trace:

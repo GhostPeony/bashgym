@@ -22,9 +22,11 @@ PIPELINES: dict[str, Callable] = {}
 
 def register_pipeline(name: str):
     """Decorator to register a pipeline builder function."""
+
     def decorator(fn):
         PIPELINES[name] = fn
         return fn
+
     return decorator
 
 

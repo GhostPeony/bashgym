@@ -6,7 +6,6 @@ System prompts and templates for the orchestrator and worker agents.
 Module: Orchestrator
 """
 
-
 WORKER_SYSTEM_PROMPT = """You are a focused software development agent working on a specific task within a larger project.
 
 Your task has been assigned by an orchestrator that decomposed a development specification into independent subtasks. You are responsible for completing ONLY your assigned task.
@@ -56,25 +55,14 @@ def build_worker_system_prompt(
 
     parts.append("")
     parts.append("## Rules")
+    parts.append("- Only modify files you own. Read any file freely.")
     parts.append(
-        "- Only modify files you own. Read any file freely."
+        "- If you need a function/class from another task, " "import it — do not redefine it."
     )
-    parts.append(
-        "- If you need a function/class from another task, "
-        "import it — do not redefine it."
-    )
-    parts.append(
-        "- Keep changes minimal and focused on your task."
-    )
-    parts.append(
-        "- Run tests after making changes to verify correctness."
-    )
-    parts.append(
-        "- Your work will be merged with other parallel workers."
-    )
-    parts.append(
-        "- Avoid large-scale refactoring."
-    )
+    parts.append("- Keep changes minimal and focused on your task.")
+    parts.append("- Run tests after making changes to verify correctness.")
+    parts.append("- Your work will be merged with other parallel workers.")
+    parts.append("- Avoid large-scale refactoring.")
 
     return "\n".join(p for p in parts if p is not None)
 

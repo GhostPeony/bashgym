@@ -10,21 +10,14 @@ hyperparameter tuning.
 
 import asyncio
 import copy
-import json
 import logging
 import math
 import random
 import time
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Callable, Coroutine, Dict, List, Optional, Tuple
-
-from bashgym.gym.training_goal import (
-    GoalProgress,
-    OutcomeAggregator,
-    TrainingGoal,
-)
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +26,7 @@ logger = logging.getLogger(__name__)
 # Search Space
 # =============================================================================
 
-DATA_SEARCH_SPACE: Dict[str, Dict[str, Any]] = {
+DATA_SEARCH_SPACE: dict[str, dict[str, Any]] = {
     "min_success_rate": {
         "type": "float",
         "min": 0.3,
@@ -129,7 +122,7 @@ class TraceExperimentResult:
     """Result of a single trace research experiment."""
 
     experiment_id: int
-    config_snapshot: Dict[str, Any]
+    config_snapshot: dict[str, Any]
     # Data metrics
     examples_generated: int
     unique_repos: int
@@ -139,14 +132,13 @@ class TraceExperimentResult:
     improved: bool
     duration_seconds: float
     timestamp: str
-    goal_progress: Optional[Dict[str, Any]] = None
 
 
 @dataclass
 class TraceResearchConfig:
     """Configuration for the trace research loop."""
 
-    search_params: List[str] = field(
+    search_params: list[str] = field(
         default_factory=lambda: [
             "min_success_rate",
             "min_quality_score",
@@ -186,7 +178,7 @@ def _simulate_metric(
     pipeline: DataPipelineConfig,
     experiment_number: int,
     total_experiments: int,
-) -> Tuple[float, Dict[str, Any]]:
+) -> tuple[float, dict[str, Any]]:
     """Simulate a realistic metric and data stats for a pipeline config.
 
     Models these dynamics:
@@ -301,34 +293,20 @@ class TraceResearcher:
     Uses a simple evolutionary strategy: start from default data pipeline
     config, mutate parameters, evaluate by simulating training, keep
     improvements, iterate.
-
-    Optionally accepts a TrainingGoal for multi-criteria optimization
-    with constraint enforcement and stall detection. When no goal is
-    provided, behavior is identical to the original single-metric approach.
     """
 
-    def __init__(
-        self,
-        config: TraceResearchConfig,
-        goal: Optional[TrainingGoal] = None,
-    ):
+    def __init__(self, config: TraceResearchConfig):
         self.config = config
         self.best_pipeline = DataPipelineConfig()
         self.best_metric: float = float("inf")
-        self.best_data_stats: Dict[str, Any] = {}
-        self.experiments: List[TraceExperimentResult] = []
+        self.best_data_stats: dict[str, Any] = {}
+        self.experiments: list[TraceExperimentResult] = []
         self.status: str = TraceResearchStatus.IDLE
         self._running = False
         self._paused = False
-        self._error: Optional[str] = None
-        self._started_at: Optional[str] = None
-        self._completed_at: Optional[str] = None
-
-        # Goal-based optimization (optional)
-        self.goal = goal
-        self.aggregator: Optional[OutcomeAggregator] = None
-        if goal is not None:
-            self.aggregator = OutcomeAggregator(goal)
+        self._error: str | None = None
+        self._started_at: str | None = None
+        self._completed_at: str | None = None
 
     # -----------------------------------------------------------------
     # Mutation
@@ -373,7 +351,7 @@ class TraceResearcher:
         self,
         pipeline: DataPipelineConfig,
         experiment_number: int,
-    ) -> Tuple[float, Dict[str, Any]]:
+    ) -> tuple[float, dict[str, Any]]:
         """Evaluate a data pipeline configuration.
 
         In simulation mode: generates a realistic metric based on the
@@ -395,7 +373,7 @@ class TraceResearcher:
 
     async def run_loop(
         self,
-        callback: Optional[Callable[..., Coroutine]] = None,
+        callback: Callable[..., Coroutine] | None = None,
     ):
         """Main trace research loop.
 
@@ -410,18 +388,9 @@ class TraceResearcher:
         self._error = None
         self._completed_at = None
 
-        # Import event bus lazily to avoid circular imports
-        try:
-            from bashgym.events import event_bus
-            from bashgym.events.types import GoalProgressed
-            _has_events = True
-        except ImportError:
-            _has_events = False
-
         logger.info(
             f"[TraceResearch] Starting loop: {self.config.max_experiments} experiments, "
             f"params={self.config.search_params}"
-            + (f", goal={len(self.goal.criteria)} criteria" if self.goal else "")
         )
 
         try:
@@ -464,93 +433,11 @@ class TraceResearcher:
                     self.best_pipeline = candidate
                     self.best_metric = metric
                     self.best_data_stats = data_stats
-                    logger.info(
-                        f"[TraceResearch] Experiment {i+1}: IMPROVED to {metric:.4f}"
-                    )
-
-                # Goal-based progress tracking
-                goal_progress_data: Optional[Dict[str, Any]] = None
-                if self.aggregator is not None:
-                    # Build metrics dict for the aggregator
-                    experiment_metrics: Dict[str, Any] = {
-                        "eval_loss": metric,
-                        "experiment_number": i + 1,
-                        "duration_seconds": round(duration, 2),
-                    }
-                    # Include data stats as metrics so goals can target them
-                    experiment_metrics.update(data_stats)
-
-                    progress = self.aggregator.record(experiment_metrics)
-                    goal_progress_data = {
-                        "criteria_scores": progress.criteria_scores,
-                        "weighted_score": progress.weighted_score,
-                        "constraints_status": progress.constraints_status,
-                        "recommendation": progress.recommendation,
-                        "reasoning": progress.reasoning,
-                    }
-
-                    # Emit goal progress event
-                    if _has_events:
-                        event_bus.emit(GoalProgressed(
-                            experiment_id=str(i + 1),
-                            weighted_score=progress.weighted_score,
-                            recommendation=progress.recommendation,
-                            criteria_scores=progress.criteria_scores,
-                            constraints_status=progress.constraints_status,
-                            reasoning=progress.reasoning,
-                        ))
-
-                    # Act on recommendation
-                    if progress.recommendation == "complete":
-                        logger.info(
-                            f"[TraceResearch] Goal recommends COMPLETE at experiment {i+1}: "
-                            f"{progress.reasoning}"
-                        )
-                        self.status = TraceResearchStatus.COMPLETED
-                        # Build result before breaking
-                        result = TraceExperimentResult(
-                            experiment_id=i + 1,
-                            config_snapshot={
-                                p: getattr(candidate, p) for p in self.config.search_params
-                            },
-                            examples_generated=data_stats["examples_generated"],
-                            unique_repos=data_stats["unique_repos"],
-                            avg_example_length=data_stats["avg_example_length"],
-                            metric_value=metric,
-                            improved=improved,
-                            duration_seconds=round(duration, 2),
-                            timestamp=datetime.now(timezone.utc).isoformat(),
-                            goal_progress=goal_progress_data,
-                        )
-                        self.experiments.append(result)
-                        if callback:
-                            try:
-                                await callback(
-                                    result,
-                                    self.best_pipeline,
-                                    self.best_metric,
-                                    self.best_data_stats,
-                                )
-                            except Exception as cb_err:
-                                logger.warning(f"[TraceResearch] Callback error: {cb_err}")
-                        break
-
-                    elif progress.recommendation == "adjust":
-                        # Increase mutation rate to explore more
-                        old_rate = self.config.mutation_rate
-                        self.config.mutation_rate = min(
-                            1.0, self.config.mutation_rate * 1.5
-                        )
-                        logger.info(
-                            f"[TraceResearch] Goal recommends ADJUST: mutation_rate "
-                            f"{old_rate:.2f} -> {self.config.mutation_rate:.2f}"
-                        )
+                    logger.info(f"[TraceResearch] Experiment {i+1}: IMPROVED to {metric:.4f}")
 
                 result = TraceExperimentResult(
                     experiment_id=i + 1,
-                    config_snapshot={
-                        p: getattr(candidate, p) for p in self.config.search_params
-                    },
+                    config_snapshot={p: getattr(candidate, p) for p in self.config.search_params},
                     examples_generated=data_stats["examples_generated"],
                     unique_repos=data_stats["unique_repos"],
                     avg_example_length=data_stats["avg_example_length"],
@@ -558,7 +445,6 @@ class TraceResearcher:
                     improved=improved,
                     duration_seconds=round(duration, 2),
                     timestamp=datetime.now(timezone.utc).isoformat(),
-                    goal_progress=goal_progress_data,
                 )
                 self.experiments.append(result)
 
@@ -614,18 +500,16 @@ class TraceResearcher:
     # Status
     # -----------------------------------------------------------------
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Return a serializable status dict."""
-        status = {
+        return {
             "status": self.status,
             "total_experiments": self.config.max_experiments,
             "completed_experiments": len(self.experiments),
             "best_metric": (
                 round(self.best_metric, 4) if self.best_metric < float("inf") else None
             ),
-            "best_pipeline": {
-                p: getattr(self.best_pipeline, p) for p in self.config.search_params
-            },
+            "best_pipeline": {p: getattr(self.best_pipeline, p) for p in self.config.search_params},
             "best_data_stats": self.best_data_stats,
             "search_params": self.config.search_params,
             "experiments": [
@@ -639,7 +523,6 @@ class TraceResearcher:
                     "improved": e.improved,
                     "duration_seconds": e.duration_seconds,
                     "timestamp": e.timestamp,
-                    "goal_progress": e.goal_progress,
                 }
                 for e in self.experiments
             ],
@@ -647,15 +530,3 @@ class TraceResearcher:
             "completed_at": self._completed_at,
             "error": self._error,
         }
-
-        # Include goal status if present
-        if self.aggregator is not None and self.aggregator.history:
-            latest = self.aggregator.history[-1][1]
-            status["goal_progress"] = {
-                "weighted_score": latest.weighted_score,
-                "criteria_scores": latest.criteria_scores,
-                "constraints_status": latest.constraints_status,
-                "recommendation": latest.recommendation,
-            }
-
-        return status

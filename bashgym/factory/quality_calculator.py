@@ -9,23 +9,22 @@ Module: Factory Layer - Data Quality Assessment
 
 import re
 from dataclasses import dataclass
-from typing import Dict, Any, List, Optional
-
+from typing import Any
 
 # Command patterns to identify for complexity scoring
 COMMAND_PATTERNS = {
-    r'cd\s+[\w/.-]+': 'cd <path>',
-    r'cat\s+[\w/.-]+': 'cat <file>',
-    r'ls\s+-?\w*\s*[\w/.-]*': 'ls <options> <path>',
-    r'grep\s+.*': 'grep <pattern> <file>',
-    r'sed\s+.*': 'sed <expression> <file>',
-    r'pip\s+install\s+.*': 'pip install <packages>',
-    r'python\s+[\w/.-]+': 'python <script>',
-    r'git\s+\w+.*': 'git <command>',
-    r'npm\s+\w+.*': 'npm <command>',
-    r'yarn\s+\w+.*': 'yarn <command>',
-    r'docker\s+\w+.*': 'docker <command>',
-    r'make\s+\w*': 'make <target>',
+    r"cd\s+[\w/.-]+": "cd <path>",
+    r"cat\s+[\w/.-]+": "cat <file>",
+    r"ls\s+-?\w*\s*[\w/.-]*": "ls <options> <path>",
+    r"grep\s+.*": "grep <pattern> <file>",
+    r"sed\s+.*": "sed <expression> <file>",
+    r"pip\s+install\s+.*": "pip install <packages>",
+    r"python\s+[\w/.-]+": "python <script>",
+    r"git\s+\w+.*": "git <command>",
+    r"npm\s+\w+.*": "npm <command>",
+    r"yarn\s+\w+.*": "yarn <command>",
+    r"docker\s+\w+.*": "docker <command>",
+    r"make\s+\w*": "make <target>",
 }
 
 
@@ -33,18 +32,18 @@ COMMAND_PATTERNS = {
 class QualityBreakdown:
     """Complete quality breakdown for a trace."""
 
-    success_rate: float       # 0-1, % of successful steps
-    verification_score: float # 0-1, verification passed/attempted
-    complexity_score: float   # 0-1, based on tool diversity + command patterns
-    length_score: float       # 0-1, bell curve around ideal length
-    tool_diversity: float     # 0-1, unique tools used
-    efficiency_score: float   # 0-1, output quality vs errors
+    success_rate: float  # 0-1, % of successful steps
+    verification_score: float  # 0-1, verification passed/attempted
+    complexity_score: float  # 0-1, based on tool diversity + command patterns
+    length_score: float  # 0-1, bell curve around ideal length
+    tool_diversity: float  # 0-1, unique tools used
+    efficiency_score: float  # 0-1, output quality vs errors
     cognitive_quality: float  # 0-1, quality of reasoning/thinking data
-    total_score: float        # Weighted combination
+    total_score: float  # Weighted combination
 
     # Verification flags (derived from metadata, not from score)
     has_verification: bool = False
-    verification_passed_flag: Optional[bool] = None  # True/False/None
+    verification_passed_flag: bool | None = None  # True/False/None
 
     # Raw metrics for debugging/display
     total_steps: int = 0
@@ -54,7 +53,7 @@ class QualityBreakdown:
     unique_commands_count: int = 0
     cognitive_steps_count: int = 0  # Steps with cognitive data
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for API responses."""
         return {
             "success_rate": round(self.success_rate, 3),
@@ -68,7 +67,7 @@ class QualityBreakdown:
         }
 
 
-def calculate_success_rate(steps: List[Dict[str, Any]]) -> tuple[float, int, int]:
+def calculate_success_rate(steps: list[dict[str, Any]]) -> tuple[float, int, int]:
     """
     Calculate success rate from steps.
 
@@ -103,10 +102,7 @@ def calculate_success_rate(steps: List[Dict[str, Any]]) -> tuple[float, int, int
     return rate, successful, failed
 
 
-def calculate_verification_score(
-    verification_passed: Optional[bool],
-    has_verification: bool
-) -> float:
+def calculate_verification_score(verification_passed: bool | None, has_verification: bool) -> float:
     """
     Calculate verification score.
 
@@ -129,7 +125,7 @@ def calculate_verification_score(
         return 0.5
 
 
-def calculate_complexity(steps: List[Dict[str, Any]]) -> tuple[float, int]:
+def calculate_complexity(steps: list[dict[str, Any]]) -> tuple[float, int]:
     """
     Calculate complexity score based on tool diversity, command patterns, and control flow.
 
@@ -243,7 +239,7 @@ def calculate_length_score(total_steps: int) -> float:
         return 0.2
 
 
-def calculate_tool_diversity(steps: List[Dict[str, Any]]) -> tuple[float, int]:
+def calculate_tool_diversity(steps: list[dict[str, Any]]) -> tuple[float, int]:
     """
     Calculate tool diversity score based on unique tools used.
 
@@ -282,7 +278,7 @@ def calculate_tool_diversity(steps: List[Dict[str, Any]]) -> tuple[float, int]:
         return 1.0, count
 
 
-def calculate_efficiency(steps: List[Dict[str, Any]]) -> float:
+def calculate_efficiency(steps: list[dict[str, Any]]) -> float:
     """
     Calculate efficiency score based on work quality.
 
@@ -307,10 +303,10 @@ def calculate_efficiency(steps: List[Dict[str, Any]]) -> float:
 
     for i, step in enumerate(steps):
         is_failure = (
-            step.get("success") is False or
-            (step.get("exit_code") is not None and step.get("exit_code") != 0) or
-            step.get("is_error") is True or
-            step.get("error") is not None
+            step.get("success") is False
+            or (step.get("exit_code") is not None and step.get("exit_code") != 0)
+            or step.get("is_error") is True
+            or step.get("error") is not None
         )
 
         if is_failure:
@@ -319,9 +315,9 @@ def calculate_efficiency(steps: List[Dict[str, Any]]) -> float:
             if i + 1 < len(steps):
                 next_step = steps[i + 1]
                 next_success = (
-                    next_step.get("success") is True or
-                    next_step.get("exit_code") == 0 or
-                    (next_step.get("success") is None and next_step.get("exit_code") is None)
+                    next_step.get("success") is True
+                    or next_step.get("exit_code") == 0
+                    or (next_step.get("success") is None and next_step.get("exit_code") is None)
                 )
                 if next_success:
                     failures_recovered += 1
@@ -357,16 +353,12 @@ def calculate_efficiency(steps: List[Dict[str, Any]]) -> float:
     retry_score = unique_commands / total_commands if total_commands > 0 else 1.0
 
     # Combine with weights
-    efficiency = (
-        recovery_score * 0.4 +
-        meaningful_score * 0.4 +
-        retry_score * 0.2
-    )
+    efficiency = recovery_score * 0.4 + meaningful_score * 0.4 + retry_score * 0.2
 
     return min(max(efficiency, 0.0), 1.0)
 
 
-def calculate_cognitive_quality(steps: List[Dict[str, Any]]) -> tuple[float, int]:
+def calculate_cognitive_quality(steps: list[dict[str, Any]]) -> tuple[float, int]:
     """
     Calculate cognitive quality score based on reasoning data in trace steps.
 
@@ -428,9 +420,8 @@ def calculate_cognitive_quality(steps: List[Dict[str, Any]]) -> tuple[float, int
             steps_with_cognitive += 1
 
         # Track failures for reflection scoring
-        is_failure = (
-            step.get("success") is False or
-            (step.get("exit_code") is not None and step.get("exit_code") != 0)
+        is_failure = step.get("success") is False or (
+            step.get("exit_code") is not None and step.get("exit_code") != 0
         )
         if is_failure:
             failures_seen += 1
@@ -456,20 +447,17 @@ def calculate_cognitive_quality(steps: List[Dict[str, Any]]) -> tuple[float, int
 
     # Combine with weights
     score = (
-        thinking_score * 0.30 +
-        plan_score * 0.25 +
-        reflection_score * 0.25 +
-        alignment_score * 0.20
+        thinking_score * 0.30 + plan_score * 0.25 + reflection_score * 0.25 + alignment_score * 0.20
     )
 
     return min(max(score, 0.0), 1.0), steps_with_cognitive
 
 
 def calculate_quality_breakdown(
-    steps: List[Dict[str, Any]],
-    verification_passed: Optional[bool] = None,
+    steps: list[dict[str, Any]],
+    verification_passed: bool | None = None,
     has_verification: bool = False,
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: dict[str, Any] | None = None,
 ) -> QualityBreakdown:
     """
     Calculate complete quality breakdown for a trace.
@@ -503,13 +491,13 @@ def calculate_quality_breakdown(
     # Weights: success=25%, verification=20%, cognitive=15%, complexity=15%,
     #          tool_diversity=10%, efficiency=10%, length=5%
     total_score = (
-        success_rate * 0.25 +
-        verification_score * 0.20 +
-        cognitive_quality * 0.15 +
-        complexity_score * 0.15 +
-        tool_diversity * 0.10 +
-        efficiency_score * 0.10 +
-        length_score * 0.05
+        success_rate * 0.25
+        + verification_score * 0.20
+        + cognitive_quality * 0.15
+        + complexity_score * 0.15
+        + tool_diversity * 0.10
+        + efficiency_score * 0.10
+        + length_score * 0.05
     )
 
     # Guard against NaN
@@ -536,7 +524,7 @@ def calculate_quality_breakdown(
     )
 
 
-def calculate_quality_from_trace(trace_data: Dict[str, Any]) -> QualityBreakdown:
+def calculate_quality_from_trace(trace_data: dict[str, Any]) -> QualityBreakdown:
     """
     Calculate quality breakdown from a complete trace dictionary.
 
@@ -551,7 +539,4 @@ def calculate_quality_from_trace(trace_data: Dict[str, Any]) -> QualityBreakdown
     steps = trace_data.get("trace", [])
     metadata = trace_data.get("metadata", {})
 
-    return calculate_quality_breakdown(
-        steps=steps,
-        metadata=metadata
-    )
+    return calculate_quality_breakdown(steps=steps, metadata=metadata)

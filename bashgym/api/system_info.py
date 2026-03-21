@@ -9,15 +9,15 @@ Provides hardware detection for:
 - Python environment
 """
 
-import subprocess
-import platform
-import psutil
-import time
-import logging
 import json
-from typing import Optional, List, Dict, Any
+import logging
+import platform
+import subprocess
+import time
 from dataclasses import dataclass, field
-from functools import lru_cache
+from typing import Any
+
+import psutil
 
 logger = logging.getLogger(__name__)
 
@@ -25,15 +25,16 @@ logger = logging.getLogger(__name__)
 @dataclass
 class GpuInfo:
     """GPU information."""
-    vendor: str           # 'NVIDIA', 'AMD', 'Intel', 'Apple'
-    model: str            # 'RTX 4090', 'RX 7900 XT', etc.
-    vram: float           # VRAM in GB (0 if unknown)
-    vram_used: Optional[float] = None  # Used VRAM in GB
-    driver: Optional[str] = None
-    temperature: Optional[float] = None  # GPU temperature in Celsius
-    utilization: Optional[float] = None  # GPU utilization percentage
 
-    def to_dict(self) -> Dict[str, Any]:
+    vendor: str  # 'NVIDIA', 'AMD', 'Intel', 'Apple'
+    model: str  # 'RTX 4090', 'RX 7900 XT', etc.
+    vram: float  # VRAM in GB (0 if unknown)
+    vram_used: float | None = None  # Used VRAM in GB
+    driver: str | None = None
+    temperature: float | None = None  # GPU temperature in Celsius
+    utilization: float | None = None  # GPU utilization percentage
+
+    def to_dict(self) -> dict[str, Any]:
         return {
             "vendor": self.vendor,
             "model": self.model,
@@ -48,17 +49,18 @@ class GpuInfo:
 @dataclass
 class SystemInfo:
     """Full system information."""
-    gpus: List[GpuInfo] = field(default_factory=list)
-    total_ram: float = 0.0        # RAM in GB
-    available_ram: float = 0.0    # Available RAM in GB
-    platform_name: str = ""       # 'win32', 'darwin', 'linux'
-    arch: str = ""                # 'x64', 'arm64'
-    cuda_available: bool = False
-    cuda_version: Optional[str] = None
-    python_available: bool = True
-    python_version: Optional[str] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    gpus: list[GpuInfo] = field(default_factory=list)
+    total_ram: float = 0.0  # RAM in GB
+    available_ram: float = 0.0  # Available RAM in GB
+    platform_name: str = ""  # 'win32', 'darwin', 'linux'
+    arch: str = ""  # 'x64', 'arm64'
+    cuda_available: bool = False
+    cuda_version: str | None = None
+    python_available: bool = True
+    python_version: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
         return {
             "gpus": [g.to_dict() for g in self.gpus],
             "total_ram": self.total_ram,
@@ -76,7 +78,7 @@ class SystemInfoService:
     """Service for detecting system hardware information."""
 
     def __init__(self):
-        self._cached_info: Optional[SystemInfo] = None
+        self._cached_info: SystemInfo | None = None
         self._cache_timestamp: float = 0
         self._cache_ttl: float = 30.0  # 30 seconds cache
 
@@ -84,7 +86,11 @@ class SystemInfoService:
         """Get full system information with caching."""
         now = time.time()
 
-        if not force_refresh and self._cached_info and (now - self._cache_timestamp) < self._cache_ttl:
+        if (
+            not force_refresh
+            and self._cached_info
+            and (now - self._cache_timestamp) < self._cache_ttl
+        ):
             logger.debug("Returning cached system info")
             return self._cached_info
 
@@ -126,13 +132,15 @@ class SystemInfoService:
         )
         self._cache_timestamp = now
 
-        logger.info(f"System info detected: {len(gpus)} GPU(s), {memory['total']:.1f}GB RAM, CUDA: {cuda_info['available']}")
+        logger.info(
+            f"System info detected: {len(gpus)} GPU(s), {memory['total']:.1f}GB RAM, CUDA: {cuda_info['available']}"
+        )
         return self._cached_info
 
-    def get_gpus(self) -> List[GpuInfo]:
+    def get_gpus(self) -> list[GpuInfo]:
         """Get GPU information."""
         logger.debug("Starting GPU detection...")
-        gpus: List[GpuInfo] = []
+        gpus: list[GpuInfo] = []
 
         # Try NVIDIA first (most common for ML)
         nvidia_gpus = self._get_nvidia_gpus()
@@ -161,18 +169,20 @@ class SystemInfoService:
         # Fallback
         if not gpus:
             logger.warning("No GPUs detected by any method")
-            gpus.append(GpuInfo(
-                vendor="Unknown",
-                model="No GPU detected",
-                vram=0.0,
-            ))
+            gpus.append(
+                GpuInfo(
+                    vendor="Unknown",
+                    model="No GPU detected",
+                    vram=0.0,
+                )
+            )
 
         logger.debug(f"GPU detection complete. Found {len(gpus)} GPU(s)")
         return gpus
 
-    def _get_nvidia_gpus(self) -> List[GpuInfo]:
+    def _get_nvidia_gpus(self) -> list[GpuInfo]:
         """Get NVIDIA GPU info via nvidia-smi or pynvml."""
-        gpus: List[GpuInfo] = []
+        gpus: list[GpuInfo] = []
 
         # Try pynvml first (more reliable library-based approach)
         gpus = self._get_nvidia_via_pynvml()
@@ -187,7 +197,7 @@ class SystemInfoService:
                 [
                     "nvidia-smi",
                     "--query-gpu=name,memory.total,memory.used,utilization.gpu,temperature.gpu,driver_version",
-                    "--format=csv,noheader,nounits"
+                    "--format=csv,noheader,nounits",
                 ],
                 capture_output=True,
                 text=True,
@@ -211,15 +221,17 @@ class SystemInfoService:
                             utilization = None
                             temperature = None
 
-                        gpus.append(GpuInfo(
-                            vendor="NVIDIA",
-                            model=name,
-                            vram=round(vram_gb, 1),
-                            vram_used=round(vram_used_gb, 1) if vram_used_gb else None,
-                            driver=driver if driver != "[N/A]" else None,
-                            temperature=temperature,
-                            utilization=utilization,
-                        ))
+                        gpus.append(
+                            GpuInfo(
+                                vendor="NVIDIA",
+                                model=name,
+                                vram=round(vram_gb, 1),
+                                vram_used=round(vram_used_gb, 1) if vram_used_gb else None,
+                                driver=driver if driver != "[N/A]" else None,
+                                temperature=temperature,
+                                utilization=utilization,
+                            )
+                        )
                         logger.debug(f"Found NVIDIA GPU via nvidia-smi: {name} ({vram_gb:.1f}GB)")
             else:
                 logger.debug(f"nvidia-smi returned no data. Return code: {result.returncode}")
@@ -234,11 +246,12 @@ class SystemInfoService:
 
         return gpus
 
-    def _get_nvidia_via_pynvml(self) -> List[GpuInfo]:
+    def _get_nvidia_via_pynvml(self) -> list[GpuInfo]:
         """Get NVIDIA GPU info via pynvml library (more reliable)."""
-        gpus: List[GpuInfo] = []
+        gpus: list[GpuInfo] = []
         try:
             import pynvml
+
             pynvml.nvmlInit()
             device_count = pynvml.nvmlDeviceGetCount()
 
@@ -246,11 +259,11 @@ class SystemInfoService:
                 handle = pynvml.nvmlDeviceGetHandleByIndex(i)
                 name = pynvml.nvmlDeviceGetName(handle)
                 if isinstance(name, bytes):
-                    name = name.decode('utf-8')
+                    name = name.decode("utf-8")
 
                 mem_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
-                vram_gb = mem_info.total / (1024 ** 3)  # bytes to GB
-                vram_used_gb = mem_info.used / (1024 ** 3)
+                vram_gb = mem_info.total / (1024**3)  # bytes to GB
+                vram_used_gb = mem_info.used / (1024**3)
 
                 try:
                     util = pynvml.nvmlDeviceGetUtilizationRates(handle)
@@ -259,26 +272,30 @@ class SystemInfoService:
                     utilization = None
 
                 try:
-                    temperature = pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU)
+                    temperature = pynvml.nvmlDeviceGetTemperature(
+                        handle, pynvml.NVML_TEMPERATURE_GPU
+                    )
                 except pynvml.NVMLError:
                     temperature = None
 
                 try:
                     driver = pynvml.nvmlSystemGetDriverVersion()
                     if isinstance(driver, bytes):
-                        driver = driver.decode('utf-8')
+                        driver = driver.decode("utf-8")
                 except pynvml.NVMLError:
                     driver = None
 
-                gpus.append(GpuInfo(
-                    vendor="NVIDIA",
-                    model=name,
-                    vram=round(vram_gb, 1),
-                    vram_used=round(vram_used_gb, 1),
-                    driver=driver,
-                    temperature=temperature,
-                    utilization=utilization,
-                ))
+                gpus.append(
+                    GpuInfo(
+                        vendor="NVIDIA",
+                        model=name,
+                        vram=round(vram_gb, 1),
+                        vram_used=round(vram_used_gb, 1),
+                        driver=driver,
+                        temperature=temperature,
+                        utilization=utilization,
+                    )
+                )
                 logger.debug(f"Found NVIDIA GPU via pynvml: {name} ({vram_gb:.1f}GB)")
 
             pynvml.nvmlShutdown()
@@ -289,9 +306,9 @@ class SystemInfoService:
 
         return gpus
 
-    def _get_amd_gpus(self) -> List[GpuInfo]:
+    def _get_amd_gpus(self) -> list[GpuInfo]:
         """Get AMD GPU info via rocm-smi."""
-        gpus: List[GpuInfo] = []
+        gpus: list[GpuInfo] = []
         logger.debug("Trying AMD ROCm detection...")
         try:
             # Get GPU name
@@ -313,6 +330,7 @@ class SystemInfoService:
             if name_result.returncode == 0 and "GPU" in name_result.stdout:
                 # Parse GPU names
                 import re
+
                 gpu_names = re.findall(r"GPU\[\d+\]\s+:\s+Card series:\s+(.+)", name_result.stdout)
                 if not gpu_names:
                     gpu_names = ["AMD GPU (ROCm)"]
@@ -321,21 +339,29 @@ class SystemInfoService:
                 vram_gb = 0.0
                 if mem_result.returncode == 0:
                     # Look for "VRAM Total Memory" line
-                    total_match = re.search(r"VRAM Total Memory.*?(\d+)\s*(?:MB|MiB)", mem_result.stdout, re.IGNORECASE)
+                    total_match = re.search(
+                        r"VRAM Total Memory.*?(\d+)\s*(?:MB|MiB)", mem_result.stdout, re.IGNORECASE
+                    )
                     if total_match:
                         vram_gb = float(total_match.group(1)) / 1024
                     else:
                         # Try GB format
-                        total_match = re.search(r"VRAM Total Memory.*?(\d+(?:\.\d+)?)\s*(?:GB|GiB)", mem_result.stdout, re.IGNORECASE)
+                        total_match = re.search(
+                            r"VRAM Total Memory.*?(\d+(?:\.\d+)?)\s*(?:GB|GiB)",
+                            mem_result.stdout,
+                            re.IGNORECASE,
+                        )
                         if total_match:
                             vram_gb = float(total_match.group(1))
 
                 for name in gpu_names:
-                    gpus.append(GpuInfo(
-                        vendor="AMD",
-                        model=name.strip(),
-                        vram=round(vram_gb, 1),
-                    ))
+                    gpus.append(
+                        GpuInfo(
+                            vendor="AMD",
+                            model=name.strip(),
+                            vram=round(vram_gb, 1),
+                        )
+                    )
                     logger.debug(f"Found AMD GPU via ROCm: {name.strip()} ({vram_gb:.1f}GB)")
         except subprocess.TimeoutExpired:
             logger.debug("rocm-smi timed out")
@@ -346,9 +372,9 @@ class SystemInfoService:
 
         return gpus
 
-    def _get_windows_gpus(self) -> List[GpuInfo]:
+    def _get_windows_gpus(self) -> list[GpuInfo]:
         """Get GPU info on Windows via WMI."""
-        gpus: List[GpuInfo] = []
+        gpus: list[GpuInfo] = []
         try:
             logger.debug("Querying Windows WMI for GPU info...")
             # Use PowerShell to query WMI - increased timeout for slower systems
@@ -357,7 +383,7 @@ class SystemInfoService:
                     "powershell",
                     "-NoProfile",  # Skip profile loading for faster startup
                     "-Command",
-                    "Get-CimInstance Win32_VideoController | Select-Object Name, AdapterRAM, DriverVersion | ConvertTo-Json"
+                    "Get-CimInstance Win32_VideoController | Select-Object Name, AdapterRAM, DriverVersion | ConvertTo-Json",
                 ],
                 capture_output=True,
                 text=True,
@@ -386,21 +412,25 @@ class SystemInfoService:
                     vram_gb = 0.0
                     if adapter_ram:
                         try:
-                            vram_gb = round(int(adapter_ram) / (1024 ** 3), 1)
+                            vram_gb = round(int(adapter_ram) / (1024**3), 1)
                         except (ValueError, TypeError):
                             logger.debug(f"Could not parse AdapterRAM: {adapter_ram}")
 
                     vendor = self._detect_vendor(name)
 
-                    gpus.append(GpuInfo(
-                        vendor=vendor,
-                        model=name,
-                        vram=vram_gb,
-                        driver=controller.get("DriverVersion"),
-                    ))
+                    gpus.append(
+                        GpuInfo(
+                            vendor=vendor,
+                            model=name,
+                            vram=vram_gb,
+                            driver=controller.get("DriverVersion"),
+                        )
+                    )
                     logger.debug(f"Found GPU via WMI: {vendor} {name} ({vram_gb}GB)")
             else:
-                logger.debug(f"WMI query returned no data or failed. Return code: {result.returncode}")
+                logger.debug(
+                    f"WMI query returned no data or failed. Return code: {result.returncode}"
+                )
                 if result.stderr:
                     logger.debug(f"stderr: {result.stderr[:200]}")
         except subprocess.TimeoutExpired:
@@ -425,18 +455,18 @@ class SystemInfoService:
             return "Apple"
         return "Unknown"
 
-    def _get_memory_info(self) -> Dict[str, float]:
+    def _get_memory_info(self) -> dict[str, float]:
         """Get system memory info."""
         try:
             mem = psutil.virtual_memory()
             return {
-                "total": round(mem.total / (1024 ** 3), 1),  # Convert to GB
-                "available": round(mem.available / (1024 ** 3), 1),
+                "total": round(mem.total / (1024**3), 1),  # Convert to GB
+                "available": round(mem.available / (1024**3), 1),
             }
         except Exception:
             return {"total": 0.0, "available": 0.0}
 
-    def _get_cuda_info(self) -> Dict[str, Any]:
+    def _get_cuda_info(self) -> dict[str, Any]:
         """Detect CUDA availability and version."""
         # Try nvidia-smi first (indicates CUDA driver is installed)
         try:
@@ -457,6 +487,7 @@ class SystemInfoService:
                     )
                     if nvcc_result.returncode == 0:
                         import re
+
                         match = re.search(r"release (\d+\.\d+)", nvcc_result.stdout)
                         if match:
                             return {"available": True, "version": match.group(1)}
@@ -471,6 +502,7 @@ class SystemInfoService:
         # Try PyTorch CUDA detection as fallback
         try:
             import torch
+
             if torch.cuda.is_available():
                 version = torch.version.cuda or "unknown"
                 return {"available": True, "version": version}
@@ -492,12 +524,13 @@ class SystemInfoService:
 
         return {"available": False}
 
-    def _get_python_info(self) -> Dict[str, Any]:
+    def _get_python_info(self) -> dict[str, Any]:
         """Get Python version info."""
         import sys
+
         return {
             "available": True,
-            "version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+            "version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
         }
 
     def clear_cache(self) -> None:
@@ -505,7 +538,7 @@ class SystemInfoService:
         self._cached_info = None
         self._cache_timestamp = 0
 
-    def get_model_recommendations(self) -> Dict[str, Any]:
+    def get_model_recommendations(self) -> dict[str, Any]:
         """Get model recommendations based on available VRAM."""
         info = self.get_system_info()
         max_vram = max((g.vram for g in info.gpus), default=0)
@@ -565,13 +598,15 @@ class SystemInfoService:
             recommendations["warning"] = "Limited VRAM - use small models with QLoRA"
         else:
             recommendations["recommended_models"] = []
-            recommendations["warning"] = "Insufficient VRAM for local training. Consider cloud training or CPU-only inference."
+            recommendations["warning"] = (
+                "Insufficient VRAM for local training. Consider cloud training or CPU-only inference."
+            )
 
         return recommendations
 
 
 # Singleton instance
-_system_info_service: Optional[SystemInfoService] = None
+_system_info_service: SystemInfoService | None = None
 
 
 def get_system_info_service() -> SystemInfoService:

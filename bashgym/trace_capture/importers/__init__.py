@@ -4,31 +4,31 @@ Trace Importers
 Import traces from various sources into BashGym format.
 """
 
+from .chatgpt import (
+    ChatGPTImporter,
+    import_chatgpt_sessions,
+)
 from .claude_history import (
-    import_today,
+    ClaudeSessionImporter,
     import_recent,
     import_session,
-    ClaudeSessionImporter,
-)
-from .gemini_history import (
-    import_gemini_sessions,
-    GeminiSessionImporter,
+    import_today,
 )
 from .copilot_history import (
-    import_copilot_sessions,
     CopilotSessionImporter,
+    import_copilot_sessions,
 )
-from .opencode_history import (
-    import_opencode_sessions,
-    OpenCodeSessionImporter,
-)
-from .chatgpt import (
-    import_chatgpt_sessions,
-    ChatGPTImporter,
+from .gemini_history import (
+    GeminiSessionImporter,
+    import_gemini_sessions,
 )
 from .mcp_logs import (
-    import_mcp_logs,
     MCPLogImporter,
+    import_mcp_logs,
+)
+from .opencode_history import (
+    OpenCodeSessionImporter,
+    import_opencode_sessions,
 )
 
 __all__ = [

@@ -6,7 +6,7 @@ using models like Qwen Coder, Llama, and others hosted on NVIDIA's platform.
 """
 
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import httpx
 
@@ -59,7 +59,7 @@ class NIMProvider(InferenceProvider):
     def __init__(
         self,
         api_key: str,
-        endpoint: Optional[str] = None,
+        endpoint: str | None = None,
         default_model: str = "qwen/qwen2.5-coder-7b-instruct",
         timeout: float = 120.0,
     ):
@@ -86,9 +86,9 @@ class NIMProvider(InferenceProvider):
 
     async def generate(
         self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
-        system_prompt: Optional[str] = None,
+        messages: list[dict[str, str]],
+        model: str | None = None,
+        system_prompt: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
         **kwargs: Any,
@@ -213,7 +213,7 @@ class NIMProvider(InferenceProvider):
 
     # ── List models ────────────────────────────────────────────────
 
-    async def list_models(self) -> List[ProviderModel]:
+    async def list_models(self) -> list[ProviderModel]:
         """Return the static catalog of key NIM models."""
         return list(_NIM_MODELS)
 

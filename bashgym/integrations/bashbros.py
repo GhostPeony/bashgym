@@ -17,35 +17,36 @@ Data Flow:
     bashbros captures traces -> bashgym trains -> GGUF to Ollama -> bashbros sidekick improves
 """
 
-import os
 import json
-import asyncio
 import logging
+import platform
 import shutil
 import subprocess
-from pathlib import Path
+import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List, Callable
 from datetime import datetime, timezone
 from enum import Enum
-import threading
-import platform
+from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 class CaptureMode(Enum):
     """Capture mode for trace collection."""
-    EVERYTHING = "everything"           # Capture all sessions
-    SUCCESSFUL_ONLY = "successful_only" # Only verified successful
+
+    EVERYTHING = "everything"  # Capture all sessions
+    SUCCESSFUL_ONLY = "successful_only"  # Only verified successful
     SIDEKICK_CURATED = "sidekick_curated"  # AI sidekick picks teachable moments
 
 
 class TrainingTrigger(Enum):
     """When to trigger automatic training."""
-    MANUAL = "manual"           # Only on user request
-    QUALITY_BASED = "quality_based"   # When gold traces >= threshold
-    SCHEDULED = "scheduled"     # On a schedule (daily, weekly)
+
+    MANUAL = "manual"  # Only on user request
+    QUALITY_BASED = "quality_based"  # When gold traces >= threshold
+    SCHEDULED = "scheduled"  # On a schedule (daily, weekly)
 
 
 @dataclass
@@ -53,12 +54,12 @@ class IntegrationSettings:
     """Shared settings between bashbros and bashgym."""
 
     version: str = "1.0"
-    updated_at: Optional[str] = None
-    updated_by: Optional[str] = None
+    updated_at: str | None = None
+    updated_by: str | None = None
 
     # Integration state
     enabled: bool = False
-    linked_at: Optional[str] = None
+    linked_at: str | None = None
 
     # Capture settings
     capture_mode: CaptureMode = CaptureMode.SUCCESSFUL_ONLY
@@ -71,14 +72,14 @@ class IntegrationSettings:
 
     # Security settings
     bashbros_primary: bool = True
-    policy_path: Optional[str] = None
+    policy_path: str | None = None
 
     # Model sync settings
     auto_export_ollama: bool = True
     ollama_model_name: str = "bashgym-sidekick"
     notify_on_update: bool = True
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
             "version": self.version,
@@ -105,11 +106,11 @@ class IntegrationSettings:
                 "auto_export_ollama": self.auto_export_ollama,
                 "ollama_model_name": self.ollama_model_name,
                 "notify_on_update": self.notify_on_update,
-            }
+            },
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "IntegrationSettings":
+    def from_dict(cls, data: dict[str, Any]) -> "IntegrationSettings":
         """Create from dictionary."""
         settings = cls()
         settings.version = data.get("version", "1.0")
@@ -150,21 +151,23 @@ class IntegrationSettings:
 @dataclass
 class ModelVersion:
     """A version of the exported model."""
+
     version: str
     created: str
     traces_used: int
     quality_avg: float
-    gguf_path: Optional[str] = None
+    gguf_path: str | None = None
 
 
 @dataclass
 class ModelManifest:
     """Manifest tracking model versions."""
+
     latest: str = "v0"
-    versions: List[ModelVersion] = field(default_factory=list)
+    versions: list[ModelVersion] = field(default_factory=list)
     rollback_available: bool = False
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "latest": self.latest,
             "versions": [
@@ -181,19 +184,21 @@ class ModelManifest:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ModelManifest":
+    def from_dict(cls, data: dict[str, Any]) -> "ModelManifest":
         manifest = cls()
         manifest.latest = data.get("latest", "v0")
         manifest.rollback_available = data.get("rollback_available", False)
 
         for v in data.get("versions", []):
-            manifest.versions.append(ModelVersion(
-                version=v.get("version", ""),
-                created=v.get("created", ""),
-                traces_used=v.get("traces_used", 0),
-                quality_avg=v.get("quality_avg", 0.0),
-                gguf_path=v.get("gguf_path"),
-            ))
+            manifest.versions.append(
+                ModelVersion(
+                    version=v.get("version", ""),
+                    created=v.get("created", ""),
+                    traces_used=v.get("traces_used", 0),
+                    quality_avg=v.get("quality_avg", 0.0),
+                    gguf_path=v.get("gguf_path"),
+                )
+            )
 
         return manifest
 
@@ -201,15 +206,16 @@ class ModelManifest:
 @dataclass
 class IntegrationStatus:
     """Current status of the integration."""
+
     bashbros_connected: bool = False
     bashgym_connected: bool = False
-    last_trace_received: Optional[str] = None
+    last_trace_received: str | None = None
     pending_traces: int = 0
     processed_traces: int = 0
-    current_model_version: Optional[str] = None
+    current_model_version: str | None = None
     training_in_progress: bool = False
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "bashbros_connected": self.bashbros_connected,
             "bashgym_connected": self.bashgym_connected,
@@ -237,8 +243,8 @@ class BashbrosIntegration:
 
     def __init__(
         self,
-        integration_dir: Optional[Path] = None,
-        trace_callback: Optional[Callable[[Path], None]] = None,
+        integration_dir: Path | None = None,
+        trace_callback: Callable[[Path], None] | None = None,
     ):
         """Initialize the integration.
 
@@ -246,7 +252,9 @@ class BashbrosIntegration:
             integration_dir: Path to shared integration directory
             trace_callback: Callback when new trace is received
         """
-        self.integration_dir = Path(integration_dir) if integration_dir else self.DEFAULT_INTEGRATION_DIR
+        self.integration_dir = (
+            Path(integration_dir) if integration_dir else self.DEFAULT_INTEGRATION_DIR
+        )
         self.trace_callback = trace_callback
 
         # Directory structure
@@ -259,11 +267,11 @@ class BashbrosIntegration:
         self.status_dir = self.integration_dir / "status"
 
         # State
-        self._settings: Optional[IntegrationSettings] = None
-        self._manifest: Optional[ModelManifest] = None
-        self._watcher_thread: Optional[threading.Thread] = None
+        self._settings: IntegrationSettings | None = None
+        self._manifest: ModelManifest | None = None
+        self._watcher_thread: threading.Thread | None = None
         self._watching = False
-        self._lock_file: Optional[Path] = None
+        self._lock_file: Path | None = None
 
     def setup(self) -> bool:
         """Initialize the integration directory structure.
@@ -354,14 +362,15 @@ class BashbrosIntegration:
         """Broadcast an integration event via WebSocket (non-blocking)."""
         try:
             import asyncio
+
             from bashgym.api.websocket import (
                 broadcast_integration_linked,
-                broadcast_integration_unlinked,
-                broadcast_integration_trace_received,
-                broadcast_integration_trace_processed,
                 broadcast_integration_model_exported,
                 broadcast_integration_model_rollback,
+                broadcast_integration_trace_processed,
+                broadcast_integration_trace_received,
                 broadcast_integration_training_triggered,
+                broadcast_integration_unlinked,
             )
 
             coro = None
@@ -405,7 +414,7 @@ class BashbrosIntegration:
             self._settings = self._load_settings()
         return self._settings
 
-    def update_settings(self, updates: Dict[str, Any]) -> IntegrationSettings:
+    def update_settings(self, updates: dict[str, Any]) -> IntegrationSettings:
         """Update integration settings.
 
         Args:
@@ -467,7 +476,7 @@ class BashbrosIntegration:
         settings_path = self.config_dir / "settings.json"
         if settings_path.exists():
             try:
-                with open(settings_path, 'r') as f:
+                with open(settings_path) as f:
                     data = json.load(f)
                 return IntegrationSettings.from_dict(data)
             except Exception as e:
@@ -482,7 +491,7 @@ class BashbrosIntegration:
         # Acquire lock
         self._acquire_lock(lock_path)
         try:
-            with open(settings_path, 'w') as f:
+            with open(settings_path, "w") as f:
                 json.dump(self._settings.to_dict(), f, indent=2)
         finally:
             self._release_lock(lock_path)
@@ -494,21 +503,25 @@ class BashbrosIntegration:
 
         if platform.system() == "Windows":
             import msvcrt
-            self._lock_fd = open(lock_path, 'r+')
+
+            self._lock_fd = open(lock_path, "r+")
             msvcrt.locking(self._lock_fd.fileno(), msvcrt.LK_LOCK, 1)
         else:
             import fcntl
-            self._lock_fd = open(lock_path, 'r+')
+
+            self._lock_fd = open(lock_path, "r+")
             fcntl.flock(self._lock_fd.fileno(), fcntl.LOCK_EX)
 
     def _release_lock(self, lock_path: Path) -> None:
         """Release file lock."""
-        if hasattr(self, '_lock_fd') and self._lock_fd:
+        if hasattr(self, "_lock_fd") and self._lock_fd:
             if platform.system() == "Windows":
                 import msvcrt
+
                 msvcrt.locking(self._lock_fd.fileno(), msvcrt.LK_UNLCK, 1)
             else:
                 import fcntl
+
                 fcntl.flock(self._lock_fd.fileno(), fcntl.LOCK_UN)
             self._lock_fd.close()
             self._lock_fd = None
@@ -548,6 +561,7 @@ class BashbrosIntegration:
                 if not self._watching:
                     break
                 import time
+
                 time.sleep(0.1)
 
     def _process_pending_traces(self) -> int:
@@ -598,24 +612,23 @@ class BashbrosIntegration:
             True if processing successful
         """
         try:
-            with open(trace_path, 'r') as f:
+            with open(trace_path) as f:
                 trace_data = json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
+        except (OSError, json.JSONDecodeError) as e:
             logger.error(f"Failed to load trace {trace_path}: {e}")
-            self._broadcast_event("trace_processed",
-                filename=trace_path.name,
-                success=False,
-                error=str(e)
+            self._broadcast_event(
+                "trace_processed", filename=trace_path.name, success=False, error=str(e)
             )
             return False
 
         # Validate trace format
         if not self._validate_trace(trace_data):
             logger.warning(f"Invalid trace format: {trace_path}")
-            self._broadcast_event("trace_processed",
+            self._broadcast_event(
+                "trace_processed",
                 filename=trace_path.name,
                 success=False,
-                error="Invalid trace format"
+                error="Invalid trace format",
             )
             return False
 
@@ -625,12 +638,13 @@ class BashbrosIntegration:
         verified = metadata.get("verification_passed", False)
 
         # Broadcast trace received
-        self._broadcast_event("trace_received",
+        self._broadcast_event(
+            "trace_received",
             filename=trace_path.name,
             task=task,
             source=metadata.get("source_tool", "bashbros"),
             steps=steps,
-            verified=verified
+            verified=verified,
         )
 
         # Check capture mode filter
@@ -648,14 +662,11 @@ class BashbrosIntegration:
                 logger.error(f"Trace callback error: {e}")
 
         # Broadcast processed
-        self._broadcast_event("trace_processed",
-            filename=trace_path.name,
-            success=True
-        )
+        self._broadcast_event("trace_processed", filename=trace_path.name, success=True)
 
         return True
 
-    def _validate_trace(self, trace_data: Dict[str, Any]) -> bool:
+    def _validate_trace(self, trace_data: dict[str, Any]) -> bool:
         """Validate trace format is compatible with bashgym.
 
         Required fields:
@@ -695,7 +706,7 @@ class BashbrosIntegration:
             return 0
         return len(list(self.processed_dir.glob("*.json")))
 
-    def list_pending_traces(self) -> List[Dict[str, Any]]:
+    def list_pending_traces(self) -> list[dict[str, Any]]:
         """List pending traces with metadata."""
         traces = []
         if not self.pending_dir.exists():
@@ -703,16 +714,18 @@ class BashbrosIntegration:
 
         for trace_file in self.pending_dir.glob("*.json"):
             try:
-                with open(trace_file, 'r') as f:
+                with open(trace_file) as f:
                     data = json.load(f)
                 metadata = data.get("metadata", {})
-                traces.append({
-                    "filename": trace_file.name,
-                    "task": metadata.get("user_initial_prompt", "")[:100],
-                    "source": metadata.get("source_tool", "unknown"),
-                    "verified": metadata.get("verification_passed", False),
-                    "steps": len(data.get("trace", [])),
-                })
+                traces.append(
+                    {
+                        "filename": trace_file.name,
+                        "task": metadata.get("user_initial_prompt", "")[:100],
+                        "source": metadata.get("source_tool", "unknown"),
+                        "verified": metadata.get("verification_passed", False),
+                        "steps": len(data.get("trace", [])),
+                    }
+                )
             except Exception:
                 pass
 
@@ -728,7 +741,7 @@ class BashbrosIntegration:
         quantization: str = "q4_k_m",
         traces_used: int = 0,
         quality_avg: float = 0.0,
-    ) -> Optional[Path]:
+    ) -> Path | None:
         """Export a trained model to GGUF format and register with Ollama.
 
         Args:
@@ -803,18 +816,21 @@ class BashbrosIntegration:
         # Register with Ollama if enabled
         ollama_registered = False
         if settings.auto_export_ollama:
-            ollama_registered = self._register_with_ollama(gguf_path, settings.ollama_model_name, new_version)
+            ollama_registered = self._register_with_ollama(
+                gguf_path, settings.ollama_model_name, new_version
+            )
 
         # Update status
         self._update_status()
 
         # Broadcast model exported event
-        self._broadcast_event("model_exported",
+        self._broadcast_event(
+            "model_exported",
             version=new_version,
             gguf_path=str(gguf_path),
             ollama_registered=ollama_registered,
             traces_used=traces_used,
-            quality_avg=quality_avg
+            quality_avg=quality_avg,
         )
 
         logger.info(f"Model exported to GGUF: {gguf_path}")
@@ -833,14 +849,18 @@ class BashbrosIntegration:
 
             result = subprocess.run(
                 [
-                    "python", "-m", "llama_cpp.llama_convert",
+                    "python",
+                    "-m",
+                    "llama_cpp.llama_convert",
                     str(model_path),
-                    "--outfile", str(f16_path),
-                    "--outtype", "f16"
+                    "--outfile",
+                    str(f16_path),
+                    "--outtype",
+                    "f16",
                 ],
                 capture_output=True,
                 text=True,
-                timeout=600
+                timeout=600,
             )
 
             if result.returncode != 0:
@@ -849,15 +869,10 @@ class BashbrosIntegration:
 
             # Then quantize
             result = subprocess.run(
-                [
-                    "llama-quantize",
-                    str(f16_path),
-                    str(output_path),
-                    quantization
-                ],
+                ["llama-quantize", str(f16_path), str(output_path), quantization],
                 capture_output=True,
                 text=True,
-                timeout=600
+                timeout=600,
             )
 
             # Clean up temp file
@@ -879,7 +894,7 @@ class BashbrosIntegration:
 
         # Fallback: Use unsloth's GGUF export if available
         try:
-            export_script = f'''
+            export_script = f"""
 from unsloth import FastLanguageModel
 model, tokenizer = FastLanguageModel.from_pretrained("{model_path}")
 model.save_pretrained_gguf(
@@ -887,12 +902,9 @@ model.save_pretrained_gguf(
     tokenizer,
     quantization_method="{quantization}"
 )
-'''
+"""
             result = subprocess.run(
-                ["python", "-c", export_script],
-                capture_output=True,
-                text=True,
-                timeout=600
+                ["python", "-c", export_script], capture_output=True, text=True, timeout=600
             )
 
             if result.returncode == 0:
@@ -921,12 +933,7 @@ model.save_pretrained_gguf(
         """
         # Check if Ollama is available
         try:
-            result = subprocess.run(
-                ["ollama", "list"],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
+            result = subprocess.run(["ollama", "list"], capture_output=True, text=True, timeout=10)
             if result.returncode != 0:
                 logger.warning("Ollama not available")
                 return False
@@ -956,7 +963,7 @@ PARAMETER top_p 0.9
                 ["ollama", "create", full_name, "-f", str(modelfile_path)],
                 capture_output=True,
                 text=True,
-                timeout=300
+                timeout=300,
             )
 
             if result.returncode == 0:
@@ -966,7 +973,7 @@ PARAMETER top_p 0.9
                 subprocess.run(
                     ["ollama", "cp", full_name, f"{model_name}:latest"],
                     capture_output=True,
-                    timeout=30
+                    timeout=30,
                 )
                 return True
             else:
@@ -994,7 +1001,7 @@ PARAMETER top_p 0.9
         sorted_versions = sorted(
             manifest.versions,
             key=lambda v: int(v.version[1:]) if v.version.startswith("v") else 0,
-            reverse=True
+            reverse=True,
         )
 
         # Archive older versions
@@ -1010,7 +1017,7 @@ PARAMETER top_p 0.9
         self._manifest = manifest
         self._save_manifest()
 
-    def get_model_versions(self) -> List[Dict[str, Any]]:
+    def get_model_versions(self) -> list[dict[str, Any]]:
         """Get list of available model versions."""
         manifest = self._load_manifest()
         return [
@@ -1070,17 +1077,12 @@ PARAMETER top_p 0.9
         settings = self.get_settings()
         if settings.auto_export_ollama:
             self._register_with_ollama(
-                Path(target_version.gguf_path),
-                settings.ollama_model_name,
-                version
+                Path(target_version.gguf_path), settings.ollama_model_name, version
             )
 
         # Broadcast rollback event
         previous_version = manifest.latest if manifest.latest != version else None
-        self._broadcast_event("model_rollback",
-            version=version,
-            previous_version=previous_version
-        )
+        self._broadcast_event("model_rollback", version=version, previous_version=previous_version)
 
         logger.info(f"Rolled back to model version {version}")
         return True
@@ -1090,7 +1092,7 @@ PARAMETER top_p 0.9
         manifest_path = self.models_dir / "manifest.json"
         if manifest_path.exists():
             try:
-                with open(manifest_path, 'r') as f:
+                with open(manifest_path) as f:
                     data = json.load(f)
                 return ModelManifest.from_dict(data)
             except Exception as e:
@@ -1100,7 +1102,7 @@ PARAMETER top_p 0.9
     def _save_manifest(self) -> None:
         """Save model manifest to file."""
         manifest_path = self.models_dir / "manifest.json"
-        with open(manifest_path, 'w') as f:
+        with open(manifest_path, "w") as f:
             json.dump(self._manifest.to_dict(), f, indent=2)
 
     # =========================================================================
@@ -1115,7 +1117,7 @@ PARAMETER top_p 0.9
         bashbros_status = self.status_dir / "bashbros.json"
         if bashbros_status.exists():
             try:
-                with open(bashbros_status, 'r') as f:
+                with open(bashbros_status) as f:
                     data = json.load(f)
                 # Check if heartbeat is recent (within 5 minutes)
                 heartbeat = data.get("heartbeat")
@@ -1138,7 +1140,7 @@ PARAMETER top_p 0.9
         training_status = self.status_dir / "training.json"
         if training_status.exists():
             try:
-                with open(training_status, 'r') as f:
+                with open(training_status) as f:
                     data = json.load(f)
                 status.training_in_progress = data.get("state") == "running"
             except Exception:
@@ -1157,10 +1159,12 @@ PARAMETER top_p 0.9
             "model_version": self._load_manifest().latest if self._manifest else None,
         }
 
-        with open(status_path, 'w') as f:
+        with open(status_path, "w") as f:
             json.dump(status_data, f, indent=2)
 
-    def update_training_status(self, state: str, run_id: Optional[str] = None, model: Optional[str] = None) -> None:
+    def update_training_status(
+        self, state: str, run_id: str | None = None, model: str | None = None
+    ) -> None:
         """Update training status file.
 
         Args:
@@ -1176,7 +1180,7 @@ PARAMETER top_p 0.9
             "model": model,
         }
 
-        with open(status_path, 'w') as f:
+        with open(status_path, "w") as f:
             json.dump(status_data, f, indent=2)
 
     # =========================================================================
@@ -1192,7 +1196,7 @@ PARAMETER top_p 0.9
         settings = self.get_settings()
         return settings.enabled and settings.bashbros_primary
 
-    def get_bashbros_policy_path(self) -> Optional[Path]:
+    def get_bashbros_policy_path(self) -> Path | None:
         """Get path to bashbros security policy file.
 
         Returns:
@@ -1213,7 +1217,7 @@ PARAMETER top_p 0.9
 
 
 # Singleton instance
-_integration: Optional[BashbrosIntegration] = None
+_integration: BashbrosIntegration | None = None
 
 
 def get_integration() -> BashbrosIntegration:

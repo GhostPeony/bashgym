@@ -8,15 +8,16 @@ and unstructured documents through DataDesigner's column DAG execution engine.
 Module 3: Data Synthesis (The "Factory") - DataDesigner Integration
 """
 
-import os
 import json
 import logging
-from pathlib import Path
+import os
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List, TYPE_CHECKING
+from pathlib import Path
+from typing import Any
 
 try:
     import pandas as pd
+
     PANDAS_AVAILABLE = True
 except ImportError:
     PANDAS_AVAILABLE = False
@@ -25,6 +26,7 @@ except ImportError:
 try:
     import data_designer.config as dd
     from data_designer.interface import DataDesigner
+
     DATA_DESIGNER_AVAILABLE = True
 except ImportError:
     DATA_DESIGNER_AVAILABLE = False
@@ -42,7 +44,7 @@ class PipelineConfig:
     # LLM provider settings
     provider: str = "nvidia"
     provider_endpoint: str = "https://integrate.api.nvidia.com/v1"
-    provider_api_key: Optional[str] = None
+    provider_api_key: str | None = None
 
     # Model aliases
     text_model: str = "meta/llama-3.3-70b-instruct"
@@ -64,7 +66,7 @@ class PipelineConfig:
     temperature_judge: float = 0.1
 
     # Seed source
-    seed_source: Optional[str] = None
+    seed_source: str | None = None
 
     def __post_init__(self):
         if isinstance(self.output_dir, str):
@@ -89,7 +91,7 @@ class DataDesignerPipeline:
     - Processor filtering for quality control
     """
 
-    def __init__(self, config: Optional[PipelineConfig] = None):
+    def __init__(self, config: PipelineConfig | None = None):
         self.config = config or PipelineConfig()
         self._designer = None
         self._builder = None
@@ -100,8 +102,7 @@ class DataDesignerPipeline:
         if self._designer is None:
             if not DATA_DESIGNER_AVAILABLE:
                 raise ImportError(
-                    "data-designer>=0.5.0 is required. "
-                    "Install with: pip install data-designer"
+                    "data-designer>=0.5.0 is required. " "Install with: pip install data-designer"
                 )
             self._designer = DataDesigner()
         return self._designer
@@ -113,7 +114,7 @@ class DataDesignerPipeline:
     def from_traces(
         self,
         trace_dir: Path,
-        num_records: Optional[int] = None,
+        num_records: int | None = None,
     ) -> "pd.DataFrame":
         """Generate training data using gold traces as seed dataset.
 
@@ -146,9 +147,9 @@ class DataDesignerPipeline:
     def from_dataset(
         self,
         source: str,
-        num_records: Optional[int] = None,
-        column_mapping: Optional[Dict[str, str]] = None,
-        subset: Optional[str] = None,
+        num_records: int | None = None,
+        column_mapping: dict[str, str] | None = None,
+        subset: str | None = None,
         split: str = "train",
     ) -> "pd.DataFrame":
         """Generate training data from a HuggingFace dataset or local file.
@@ -170,10 +171,12 @@ class DataDesignerPipeline:
         source_path = Path(source)
         if source_path.exists():
             # Local file
-            builder.with_seed_dataset(dd.FileSeedSource(
-                path=str(source_path),
-                column_mapping=column_mapping,
-            ))
+            builder.with_seed_dataset(
+                dd.FileSeedSource(
+                    path=str(source_path),
+                    column_mapping=column_mapping,
+                )
+            )
         else:
             # Treat as HuggingFace dataset
             seed_kwargs = {"path": source, "split": split}
@@ -189,7 +192,7 @@ class DataDesignerPipeline:
     def from_unstructured(
         self,
         path: Path,
-        num_records: Optional[int] = None,
+        num_records: int | None = None,
     ) -> "pd.DataFrame":
         """Generate training data from unstructured documents.
 
@@ -220,7 +223,7 @@ class DataDesignerPipeline:
     def from_config(
         self,
         config_path: str,
-        num_records: Optional[int] = None,
+        num_records: int | None = None,
     ) -> "pd.DataFrame":
         """Generate from a custom DataDesigner config file.
 
@@ -239,6 +242,7 @@ class DataDesignerPipeline:
 
         if config_file.suffix in (".yaml", ".yml"):
             import yaml
+
             with open(config_file) as f:
                 raw = yaml.safe_load(f)
         elif config_file.suffix == ".json":
@@ -267,7 +271,7 @@ class DataDesignerPipeline:
         builder = self._get_pipeline_builder()
         return self.designer.preview(builder, num_rows=num_records)
 
-    def validate(self) -> Dict[str, Any]:
+    def validate(self) -> dict[str, Any]:
         """Validate pipeline configuration without running generation.
 
         Returns:
@@ -292,8 +296,8 @@ class DataDesignerPipeline:
     def export_nemo(
         self,
         df: "pd.DataFrame",
-        output_dir: Optional[Path] = None,
-    ) -> Dict[str, Any]:
+        output_dir: Path | None = None,
+    ) -> dict[str, Any]:
         """Export generated data to NeMo train/val JSONL format.
 
         Splits data according to train_val_split and converts to
@@ -358,6 +362,7 @@ class DataDesignerPipeline:
             )
 
         import tempfile
+
         tmp_path = Path(tempfile.gettempdir()) / "bashgym_dataset.parquet"
         df.to_parquet(tmp_path)
         api = HfApi()
@@ -386,8 +391,7 @@ class DataDesignerPipeline:
         """
         if not DATA_DESIGNER_AVAILABLE:
             raise ImportError(
-                "data-designer>=0.5.0 is required. "
-                "Install with: pip install data-designer"
+                "data-designer>=0.5.0 is required. " "Install with: pip install data-designer"
             )
 
         from bashgym.factory.designer_pipelines import PIPELINES
@@ -404,20 +408,18 @@ class DataDesignerPipeline:
                     return dd.DataDesignerConfigBuilder.from_config(json.load(f))
             elif config_path.suffix in (".yaml", ".yml"):
                 import yaml
+
                 with open(config_path) as f:
                     return dd.DataDesignerConfigBuilder.from_config(yaml.safe_load(f))
 
         available = list(PIPELINES.keys())
-        raise ValueError(
-            f"Unknown pipeline '{self.config.pipeline}'. "
-            f"Available: {available}"
-        )
+        raise ValueError(f"Unknown pipeline '{self.config.pipeline}'. " f"Available: {available}")
 
     # =========================================================================
     # Seed Extraction
     # =========================================================================
 
-    def _extract_seeds_from_traces(self, trace_dir: Path) -> List[Dict[str, Any]]:
+    def _extract_seeds_from_traces(self, trace_dir: Path) -> list[dict[str, Any]]:
         """Extract seed task prompts from gold traces.
 
         Each trace yields one seed record with:
@@ -431,9 +433,9 @@ class DataDesignerPipeline:
 
         for trace_file in trace_dir.glob("*.json"):
             try:
-                with open(trace_file, "r", encoding="utf-8", errors="replace") as f:
+                with open(trace_file, encoding="utf-8", errors="replace") as f:
                     trace_data = json.load(f)
-            except (json.JSONDecodeError, IOError):
+            except (OSError, json.JSONDecodeError):
                 continue
 
             if not isinstance(trace_data, dict):
@@ -445,9 +447,7 @@ class DataDesignerPipeline:
                 continue
 
             trace_steps = trace_data.get("trace", [])
-            tools_used = list({
-                s.get("tool_name", "unknown") for s in trace_steps
-            })
+            tools_used = list({s.get("tool_name", "unknown") for s in trace_steps})
 
             # Infer complexity from step count
             step_count = len(trace_steps)
@@ -461,17 +461,19 @@ class DataDesignerPipeline:
             # Detect primary language from file extensions
             language = self._detect_language(trace_steps)
 
-            seeds.append({
-                "seed_task": prompt,
-                "seed_tools": ", ".join(tools_used),
-                "seed_complexity": complexity,
-                "seed_language": language,
-                "seed_step_count": step_count,
-            })
+            seeds.append(
+                {
+                    "seed_task": prompt,
+                    "seed_tools": ", ".join(tools_used),
+                    "seed_complexity": complexity,
+                    "seed_language": language,
+                    "seed_step_count": step_count,
+                }
+            )
 
         return seeds
 
-    def _extract_seeds_from_unstructured(self, path: Path) -> List[Dict[str, Any]]:
+    def _extract_seeds_from_unstructured(self, path: Path) -> list[dict[str, Any]]:
         """Extract seed data from unstructured documents.
 
         Supports:
@@ -493,7 +495,7 @@ class DataDesignerPipeline:
         for file_path in files[:500]:  # Cap at 500 files
             try:
                 content = file_path.read_text(encoding="utf-8", errors="replace")
-            except (IOError, UnicodeDecodeError):
+            except (OSError, UnicodeDecodeError):
                 continue
 
             if not content.strip():
@@ -505,26 +507,40 @@ class DataDesignerPipeline:
 
             ext = file_path.suffix.lstrip(".")
             lang_map = {
-                "py": "python", "ts": "typescript", "js": "javascript",
-                "rs": "rust", "go": "go", "md": "markdown", "txt": "text",
+                "py": "python",
+                "ts": "typescript",
+                "js": "javascript",
+                "rs": "rust",
+                "go": "go",
+                "md": "markdown",
+                "txt": "text",
             }
 
-            seeds.append({
-                "seed_task": f"Work with {file_path.name}",
-                "seed_context": content,
-                "seed_language": lang_map.get(ext, ext),
-                "seed_file_type": ext,
-            })
+            seeds.append(
+                {
+                    "seed_task": f"Work with {file_path.name}",
+                    "seed_context": content,
+                    "seed_language": lang_map.get(ext, ext),
+                    "seed_file_type": ext,
+                }
+            )
 
         return seeds
 
-    def _detect_language(self, trace_steps: List[Dict[str, Any]]) -> str:
+    def _detect_language(self, trace_steps: list[dict[str, Any]]) -> str:
         """Detect primary programming language from trace steps."""
-        ext_counts: Dict[str, int] = {}
+        ext_counts: dict[str, int] = {}
         ext_to_lang = {
-            ".py": "python", ".ts": "typescript", ".js": "javascript",
-            ".rs": "rust", ".go": "go", ".sh": "bash", ".rb": "ruby",
-            ".java": "java", ".cpp": "cpp", ".c": "c",
+            ".py": "python",
+            ".ts": "typescript",
+            ".js": "javascript",
+            ".rs": "rust",
+            ".go": "go",
+            ".sh": "bash",
+            ".rb": "ruby",
+            ".java": "java",
+            ".cpp": "cpp",
+            ".c": "c",
         }
 
         for step in trace_steps:

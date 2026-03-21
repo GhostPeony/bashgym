@@ -13,19 +13,17 @@ Instrumentation:
 Module 4: Training (The "Gym")
 """
 
-import os
 import json
-import asyncio
-from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List, Tuple, Callable, TYPE_CHECKING
 from datetime import datetime, timezone
 from enum import Enum
-import random
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Optional
 
 # Import instrumentation (optional)
 try:
-    from bashgym.core import get_instrumentation, Instrumentation
+    from bashgym.core import Instrumentation, get_instrumentation
+
     HAS_INSTRUMENTATION = True
 except ImportError:
     HAS_INSTRUMENTATION = False
@@ -37,6 +35,7 @@ if TYPE_CHECKING:
 
 class ActionType(Enum):
     """Types of actions the agent can take."""
+
     BASH = "bash"
     READ = "read"
     WRITE = "write"
@@ -50,14 +49,10 @@ class Action:
 
     action_type: ActionType
     content: str
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "type": self.action_type.value,
-            "content": self.content,
-            "metadata": self.metadata
-        }
+    def to_dict(self) -> dict[str, Any]:
+        return {"type": self.action_type.value, "content": self.content, "metadata": self.metadata}
 
 
 @dataclass
@@ -67,14 +62,14 @@ class Observation:
     content: str
     success: bool
     done: bool
-    info: Dict[str, Any] = field(default_factory=dict)
+    info: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "content": self.content,
             "success": self.success,
             "done": self.done,
-            "info": self.info
+            "info": self.info,
         }
 
 
@@ -124,10 +119,10 @@ class BashGymEnv:
 
     def __init__(
         self,
-        config: Optional[GymEnvConfig] = None,
+        config: GymEnvConfig | None = None,
         sandbox_manager=None,
         verifier=None,
-        instrumentation: Optional["Instrumentation"] = None
+        instrumentation: Optional["Instrumentation"] = None,
     ):
         """Initialize the gym environment."""
         self.config = config or GymEnvConfig()
@@ -141,13 +136,13 @@ class BashGymEnv:
                 self._instrumentation = get_instrumentation()
 
         # Episode state
-        self.current_task: Optional[str] = None
-        self.current_sandbox_id: Optional[str] = None
+        self.current_task: str | None = None
+        self.current_sandbox_id: str | None = None
         self.step_count: int = 0
-        self.trajectory: List[Dict[str, Any]] = []
+        self.trajectory: list[dict[str, Any]] = []
         self.episode_reward: float = 0.0
         self.done: bool = False
-        self._current_trace_id: Optional[str] = None
+        self._current_trace_id: str | None = None
 
         # Ensure trajectory directory exists
         Path(self.config.trajectory_dir).mkdir(parents=True, exist_ok=True)
@@ -157,17 +152,14 @@ class BashGymEnv:
         """Get the instrumentation instance."""
         return self._instrumentation
 
-    def get_guardrail_events(self) -> List[Dict[str, Any]]:
+    def get_guardrail_events(self) -> list[dict[str, Any]]:
         """Get guardrail events from this environment's session."""
         if self._instrumentation:
             return [e.to_dict() for e in self._instrumentation.get_guardrail_events()]
         return []
 
     def reset(
-        self,
-        task: str,
-        task_id: Optional[str] = None,
-        initial_files: Optional[Dict[str, str]] = None
+        self, task: str, task_id: str | None = None, initial_files: dict[str, str] | None = None
     ) -> Observation:
         """
         Reset the environment with a new task.
@@ -199,14 +191,13 @@ class BashGymEnv:
         if self._instrumentation and self.config.enable_profiling:
             self._current_trace_id = self._instrumentation.start_trace(
                 f"episode:{task_id or 'unnamed'}",
-                metadata={"task": task[:200], "max_steps": self.config.max_steps}
+                metadata={"task": task[:200], "max_steps": self.config.max_steps},
             )
 
         # Create new sandbox if enabled
         if self.config.use_sandbox and self.sandbox_manager:
             sandbox = self.sandbox_manager.create_sandbox(
-                task_id=task_id,
-                initial_files=initial_files
+                task_id=task_id, initial_files=initial_files
             )
             self.current_sandbox_id = sandbox.sandbox_id
             self.sandbox_manager.start_sandbox(sandbox.sandbox_id)
@@ -216,7 +207,7 @@ class BashGymEnv:
             content=f"Task: {task}\n\nYou are in a fresh workspace. Begin by exploring and planning your approach.",
             success=True,
             done=False,
-            info={"step": 0, "task": task}
+            info={"step": 0, "task": task},
         )
 
         # Log initial state
@@ -224,7 +215,7 @@ class BashGymEnv:
 
         return initial_obs
 
-    def step(self, action: Action) -> Tuple[Observation, float, bool, Dict[str, Any]]:
+    def step(self, action: Action) -> tuple[Observation, float, bool, dict[str, Any]]:
         """
         Execute an action and return the result.
 
@@ -267,12 +258,12 @@ class BashGymEnv:
         info = {
             "step": self.step_count,
             "episode_reward": self.episode_reward,
-            "action_type": action.action_type.value
+            "action_type": action.action_type.value,
         }
 
         return obs, reward, self.done, info
 
-    def _execute_action(self, action: Action) -> Tuple[Observation, float]:
+    def _execute_action(self, action: Action) -> tuple[Observation, float]:
         """Execute an action and return observation and immediate reward."""
 
         if action.action_type == ActionType.BASH:
@@ -286,35 +277,36 @@ class BashGymEnv:
         elif action.action_type == ActionType.SUBMIT:
             return self._execute_submit()
         else:
-            return Observation(
-                content=f"Unknown action type: {action.action_type}",
-                success=False,
-                done=False
-            ), -0.1
+            return (
+                Observation(
+                    content=f"Unknown action type: {action.action_type}", success=False, done=False
+                ),
+                -0.1,
+            )
 
-    def _execute_bash(self, command: str) -> Tuple[Observation, float]:
+    def _execute_bash(self, command: str) -> tuple[Observation, float]:
         """Execute a bash command."""
         if not self.sandbox_manager or not self.current_sandbox_id:
             # Simulate execution for testing
-            return Observation(
-                content=f"[Simulated] Executed: {command}",
-                success=True,
-                done=False
-            ), 0.0
+            return (
+                Observation(content=f"[Simulated] Executed: {command}", success=True, done=False),
+                0.0,
+            )
 
         result = self.sandbox_manager.execute_command(
-            self.current_sandbox_id,
-            command,
-            timeout=self.config.timeout_per_step
+            self.current_sandbox_id, command, timeout=self.config.timeout_per_step
         )
 
         if result.get("blocked"):
-            return Observation(
-                content="Command blocked: potentially dangerous",
-                success=False,
-                done=False,
-                info={"blocked": True}
-            ), -0.2
+            return (
+                Observation(
+                    content="Command blocked: potentially dangerous",
+                    success=False,
+                    done=False,
+                    info={"blocked": True},
+                ),
+                -0.2,
+            )
 
         success = result["exit_code"] == 0
         content = result["stdout"] if success else result["stderr"]
@@ -323,62 +315,56 @@ class BashGymEnv:
             content=content or "(no output)",
             success=success,
             done=False,
-            info={"exit_code": result["exit_code"]}
-        ), 0.0 if success else -0.05
+            info={"exit_code": result["exit_code"]},
+        ), (0.0 if success else -0.05)
 
-    def _execute_read(self, file_path: str) -> Tuple[Observation, float]:
+    def _execute_read(self, file_path: str) -> tuple[Observation, float]:
         """Read a file."""
         command = f"cat {file_path}"
         return self._execute_bash(command)
 
-    def _execute_write(
-        self,
-        content: str,
-        metadata: Dict[str, Any]
-    ) -> Tuple[Observation, float]:
+    def _execute_write(self, content: str, metadata: dict[str, Any]) -> tuple[Observation, float]:
         """Write content to a file."""
         file_path = metadata.get("file_path", "output.txt")
         # Escape content for shell
-        escaped_content = content.replace("'", "'\"'\"'")
+        content.replace("'", "'\"'\"'")
         command = f"cat > {file_path} << 'OUROBOROS_EOF'\n{content}\nOUROBOROS_EOF"
         return self._execute_bash(command)
 
-    def _execute_edit(
-        self,
-        edit_spec: str,
-        metadata: Dict[str, Any]
-    ) -> Tuple[Observation, float]:
+    def _execute_edit(self, edit_spec: str, metadata: dict[str, Any]) -> tuple[Observation, float]:
         """Edit a file using sed or similar."""
         file_path = metadata.get("file_path", "")
         if not file_path:
-            return Observation(
-                content="Error: file_path required for edit",
-                success=False,
-                done=False
-            ), -0.1
+            return (
+                Observation(
+                    content="Error: file_path required for edit", success=False, done=False
+                ),
+                -0.1,
+            )
 
         # Use sed for simple edits
         command = f"sed -i '{edit_spec}' {file_path}"
         return self._execute_bash(command)
 
-    def _execute_submit(self) -> Tuple[Observation, float]:
+    def _execute_submit(self) -> tuple[Observation, float]:
         """Submit the solution for verification."""
-        return Observation(
-            content="Solution submitted for verification.",
-            success=True,
-            done=True,
-            info={"submitted": True}
-        ), 0.0
+        return (
+            Observation(
+                content="Solution submitted for verification.",
+                success=True,
+                done=True,
+                info={"submitted": True},
+            ),
+            0.0,
+        )
 
     # =========================================================================
     # Async Methods with Instrumentation
     # =========================================================================
 
     async def step_async(
-        self,
-        action: Action,
-        model_source: Optional[str] = None
-    ) -> Tuple[Observation, float, bool, Dict[str, Any]]:
+        self, action: Action, model_source: str | None = None
+    ) -> tuple[Observation, float, bool, dict[str, Any]]:
         """
         Execute an action with instrumentation (async).
 
@@ -424,7 +410,7 @@ class BashGymEnv:
             "episode_reward": self.episode_reward,
             "action_type": action.action_type.value,
             "blocked": was_blocked,
-            "model_source": model_source
+            "model_source": model_source,
         }
 
         # End trace if episode is done
@@ -435,17 +421,13 @@ class BashGymEnv:
         return obs, reward, self.done, info
 
     async def _execute_action_async(
-        self,
-        action: Action,
-        model_source: Optional[str] = None
-    ) -> Tuple[Observation, float, bool]:
+        self, action: Action, model_source: str | None = None
+    ) -> tuple[Observation, float, bool]:
         """Execute an action with guardrails and profiling (async)."""
         was_blocked = False
 
         if action.action_type == ActionType.BASH:
-            obs, reward, was_blocked = await self._execute_bash_async(
-                action.content, model_source
-            )
+            obs, reward, was_blocked = await self._execute_bash_async(action.content, model_source)
             return obs, reward, was_blocked
 
         elif action.action_type == ActionType.READ:
@@ -461,17 +443,19 @@ class BashGymEnv:
 
             if self._instrumentation and self.config.enable_guardrails:
                 async with self._instrumentation.instrument_output(
-                    content,
-                    location="gym.execute_write",
-                    model_source=model_source
+                    content, location="gym.execute_write", model_source=model_source
                 ) as ctx:
                     if not ctx.allowed:
-                        return Observation(
-                            content="Write blocked: content failed safety check",
-                            success=False,
-                            done=False,
-                            info={"blocked": True}
-                        ), self.config.blocked_action_penalty, True
+                        return (
+                            Observation(
+                                content="Write blocked: content failed safety check",
+                                success=False,
+                                done=False,
+                                info={"blocked": True},
+                            ),
+                            self.config.blocked_action_penalty,
+                            True,
+                        )
                     content = ctx.content  # May have PII filtered
 
             command = f"cat > {file_path} << 'OUROBOROS_EOF'\n{content}\nOUROBOROS_EOF"
@@ -481,11 +465,13 @@ class BashGymEnv:
         elif action.action_type == ActionType.EDIT:
             file_path = action.metadata.get("file_path", "")
             if not file_path:
-                return Observation(
-                    content="Error: file_path required for edit",
-                    success=False,
-                    done=False
-                ), -0.1, False
+                return (
+                    Observation(
+                        content="Error: file_path required for edit", success=False, done=False
+                    ),
+                    -0.1,
+                    False,
+                )
 
             command = f"sed -i '{action.content}' {file_path}"
             obs, reward, was_blocked = await self._execute_bash_async(command, model_source)
@@ -495,59 +481,69 @@ class BashGymEnv:
             return self._execute_submit()[0], self._execute_submit()[1], False
 
         else:
-            return Observation(
-                content=f"Unknown action type: {action.action_type}",
-                success=False,
-                done=False
-            ), -0.1, False
+            return (
+                Observation(
+                    content=f"Unknown action type: {action.action_type}", success=False, done=False
+                ),
+                -0.1,
+                False,
+            )
 
     async def _execute_bash_async(
-        self,
-        command: str,
-        model_source: Optional[str] = None
-    ) -> Tuple[Observation, float, bool]:
+        self, command: str, model_source: str | None = None
+    ) -> tuple[Observation, float, bool]:
         """Execute a bash command with guardrails and profiling (async)."""
-        was_blocked = False
 
         # Use instrumentation if available
         if self._instrumentation and self.config.enable_guardrails:
             async with self._instrumentation.instrument_command(
-                command,
-                location="gym.execute_bash",
-                model_source=model_source
+                command, location="gym.execute_bash", model_source=model_source
             ) as ctx:
                 if not ctx.allowed:
                     # Command was blocked by guardrails
-                    return Observation(
-                        content=f"Command blocked: {ctx.check_result.blocked_reason if ctx.check_result else 'safety violation'}",
-                        success=False,
-                        done=False,
-                        info={"blocked": True, "reason": ctx.check_result.blocked_reason if ctx.check_result else None}
-                    ), self.config.blocked_action_penalty, True
+                    return (
+                        Observation(
+                            content=f"Command blocked: {ctx.check_result.blocked_reason if ctx.check_result else 'safety violation'}",
+                            success=False,
+                            done=False,
+                            info={
+                                "blocked": True,
+                                "reason": (
+                                    ctx.check_result.blocked_reason if ctx.check_result else None
+                                ),
+                            },
+                        ),
+                        self.config.blocked_action_penalty,
+                        True,
+                    )
 
                 # Command allowed - execute it
                 if not self.sandbox_manager or not self.current_sandbox_id:
                     ctx.set_result(success=True, output=f"[Simulated] {command}")
-                    return Observation(
-                        content=f"[Simulated] Executed: {command}",
-                        success=True,
-                        done=False
-                    ), 0.0, False
+                    return (
+                        Observation(
+                            content=f"[Simulated] Executed: {command}", success=True, done=False
+                        ),
+                        0.0,
+                        False,
+                    )
 
                 result = self.sandbox_manager.execute_command(
-                    self.current_sandbox_id,
-                    command,
-                    timeout=self.config.timeout_per_step
+                    self.current_sandbox_id, command, timeout=self.config.timeout_per_step
                 )
 
                 if result.get("blocked"):
                     ctx.set_result(success=False, output="Sandbox blocked")
-                    return Observation(
-                        content="Command blocked by sandbox",
-                        success=False,
-                        done=False,
-                        info={"blocked": True}
-                    ), self.config.blocked_action_penalty, True
+                    return (
+                        Observation(
+                            content="Command blocked by sandbox",
+                            success=False,
+                            done=False,
+                            info={"blocked": True},
+                        ),
+                        self.config.blocked_action_penalty,
+                        True,
+                    )
 
                 success = result["exit_code"] == 0
                 content = result["stdout"] if success else result["stderr"]
@@ -555,15 +551,19 @@ class BashGymEnv:
                 ctx.set_result(
                     success=success,
                     output=content[:100] if content else "",
-                    exit_code=result["exit_code"]
+                    exit_code=result["exit_code"],
                 )
 
-                return Observation(
-                    content=content or "(no output)",
-                    success=success,
-                    done=False,
-                    info={"exit_code": result["exit_code"]}
-                ), 0.0 if success else -0.05, False
+                return (
+                    Observation(
+                        content=content or "(no output)",
+                        success=success,
+                        done=False,
+                        info={"exit_code": result["exit_code"]},
+                    ),
+                    0.0 if success else -0.05,
+                    False,
+                )
 
         else:
             # No instrumentation - fall back to sync version
@@ -581,8 +581,7 @@ class BashGymEnv:
             sandbox = self.sandbox_manager.active_sandboxes.get(self.current_sandbox_id)
             if sandbox:
                 result = self.verifier.verify(
-                    workspace_path=sandbox.workspace_path,
-                    task_id=self.current_sandbox_id
+                    workspace_path=sandbox.workspace_path, task_id=self.current_sandbox_id
                 )
 
                 if result.success:
@@ -599,18 +598,10 @@ class BashGymEnv:
     def _terminal_observation(self) -> Observation:
         """Return a terminal observation."""
         return Observation(
-            content="Episode has ended.",
-            success=True,
-            done=True,
-            info={"terminal": True}
+            content="Episode has ended.", success=True, done=True, info={"terminal": True}
         )
 
-    def _log_step(
-        self,
-        action: Optional[Action],
-        observation: Observation,
-        reward: float
-    ) -> None:
+    def _log_step(self, action: Action | None, observation: Observation, reward: float) -> None:
         """Log a step to the trajectory."""
         if not self.config.log_trajectory:
             return
@@ -621,12 +612,12 @@ class BashGymEnv:
             "action": action.to_dict() if action else None,
             "observation": observation.to_dict(),
             "reward": reward,
-            "cumulative_reward": self.episode_reward
+            "cumulative_reward": self.episode_reward,
         }
 
         self.trajectory.append(step_data)
 
-    def save_trajectory(self, path: Optional[Path] = None) -> Path:
+    def save_trajectory(self, path: Path | None = None) -> Path:
         """Save the current trajectory to a file."""
         if path is None:
             timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -637,16 +628,16 @@ class BashGymEnv:
             "total_steps": self.step_count,
             "total_reward": self.episode_reward,
             "success": self.episode_reward > 0,
-            "trajectory": self.trajectory
+            "trajectory": self.trajectory,
         }
 
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, 'w') as f:
+        with open(path, "w") as f:
             json.dump(trajectory_data, f, indent=2)
 
         return path
 
-    def get_trajectory(self) -> List[Dict[str, Any]]:
+    def get_trajectory(self) -> list[dict[str, Any]]:
         """Get the current trajectory."""
         return self.trajectory.copy()
 
@@ -668,22 +659,15 @@ class BatchGymEnv:
     def __init__(
         self,
         num_envs: int = 4,
-        config: Optional[GymEnvConfig] = None,
+        config: GymEnvConfig | None = None,
         sandbox_manager=None,
-        verifier=None
+        verifier=None,
     ):
         """Initialize batch environment."""
         self.num_envs = num_envs
-        self.envs = [
-            BashGymEnv(config, sandbox_manager, verifier)
-            for _ in range(num_envs)
-        ]
+        self.envs = [BashGymEnv(config, sandbox_manager, verifier) for _ in range(num_envs)]
 
-    def reset_all(
-        self,
-        task: str,
-        task_id_prefix: Optional[str] = None
-    ) -> List[Observation]:
+    def reset_all(self, task: str, task_id_prefix: str | None = None) -> list[Observation]:
         """Reset all environments with the same task."""
         observations = []
         for i, env in enumerate(self.envs):
@@ -693,9 +677,8 @@ class BatchGymEnv:
         return observations
 
     def step_all(
-        self,
-        actions: List[Action]
-    ) -> List[Tuple[Observation, float, bool, Dict[str, Any]]]:
+        self, actions: list[Action]
+    ) -> list[tuple[Observation, float, bool, dict[str, Any]]]:
         """Execute actions in all environments."""
         results = []
         for env, action in zip(self.envs, actions):
@@ -703,11 +686,11 @@ class BatchGymEnv:
             results.append(result)
         return results
 
-    def get_all_trajectories(self) -> List[List[Dict[str, Any]]]:
+    def get_all_trajectories(self) -> list[list[dict[str, Any]]]:
         """Get trajectories from all environments."""
         return [env.get_trajectory() for env in self.envs]
 
-    def get_rewards(self) -> List[float]:
+    def get_rewards(self) -> list[float]:
         """Get episode rewards from all environments."""
         return [env.episode_reward for env in self.envs]
 
@@ -721,25 +704,20 @@ def main():
     """Example usage of the Gym Environment."""
     # Create environment
     config = GymEnvConfig(
-        max_steps=10,
-        success_reward=1.0,
-        use_sandbox=False  # Disable sandbox for demo
+        max_steps=10, success_reward=1.0, use_sandbox=False  # Disable sandbox for demo
     )
 
     env = BashGymEnv(config)
 
     # Reset with a task
-    obs = env.reset(
-        task="Create a Python script that prints 'Hello, World!'",
-        task_id="demo_task"
-    )
+    obs = env.reset(task="Create a Python script that prints 'Hello, World!'", task_id="demo_task")
     print(f"Initial observation: {obs.content}")
 
     # Simulate some actions
     actions = [
         Action(ActionType.BASH, "echo 'print(\"Hello, World!\")' > hello.py"),
         Action(ActionType.BASH, "python hello.py"),
-        Action(ActionType.SUBMIT, "")
+        Action(ActionType.SUBMIT, ""),
     ]
 
     for action in actions:

@@ -14,12 +14,15 @@ Module: Orchestrator
 import json
 import logging
 from collections import defaultdict
-from typing import Optional, Dict, List, Set, Tuple
 
 from bashgym.orchestrator.models import (
-    TaskNode, TaskStatus, TaskPriority,
-    OrchestratorSpec, WorkerResult,
-    LLMConfig, LLMProvider,
+    LLMConfig,
+    LLMProvider,
+    OrchestratorSpec,
+    TaskNode,
+    TaskPriority,
+    TaskStatus,
+    WorkerResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -27,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 class CyclicDependencyError(Exception):
     """Raised when the task DAG contains a cycle."""
+
     pass
 
 
@@ -38,7 +42,7 @@ class TaskDAG:
     """
 
     def __init__(self):
-        self.nodes: Dict[str, TaskNode] = {}
+        self.nodes: dict[str, TaskNode] = {}
 
     def add_task(self, task: TaskNode) -> None:
         """Add a task node to the DAG.
@@ -54,7 +58,7 @@ class TaskDAG:
             raise ValueError(f"Task '{task.id}' already exists in DAG")
         self.nodes[task.id] = task
 
-    def get_ready_tasks(self) -> List[TaskNode]:
+    def get_ready_tasks(self) -> list[TaskNode]:
         """Get tasks whose dependencies are all completed.
 
         Returns tasks in priority order (CRITICAL first, LOW last).
@@ -80,7 +84,7 @@ class TaskDAG:
         ready.sort(key=lambda t: t.priority.value)
         return ready
 
-    def topological_sort(self) -> List[TaskNode]:
+    def topological_sort(self) -> list[TaskNode]:
         """Return tasks in valid execution order.
 
         Uses Kahn's algorithm for topological sorting.
@@ -92,8 +96,8 @@ class TaskDAG:
             CyclicDependencyError: If the DAG contains cycles
         """
         # Build adjacency and in-degree maps
-        in_degree: Dict[str, int] = {tid: 0 for tid in self.nodes}
-        children: Dict[str, List[str]] = defaultdict(list)
+        in_degree: dict[str, int] = {tid: 0 for tid in self.nodes}
+        children: dict[str, list[str]] = defaultdict(list)
 
         for tid, task in self.nodes.items():
             for dep_id in task.dependencies:
@@ -120,13 +124,11 @@ class TaskDAG:
         if len(result) != len(self.nodes):
             processed = {t.id for t in result}
             remaining = set(self.nodes.keys()) - processed
-            raise CyclicDependencyError(
-                f"Cyclic dependency detected involving tasks: {remaining}"
-            )
+            raise CyclicDependencyError(f"Cyclic dependency detected involving tasks: {remaining}")
 
         return result
 
-    def mark_completed(self, task_id: str, result: WorkerResult) -> List[TaskNode]:
+    def mark_completed(self, task_id: str, result: WorkerResult) -> list[TaskNode]:
         """Mark a task as completed and return newly unblocked tasks.
 
         Args:
@@ -161,7 +163,7 @@ class TaskDAG:
 
         return newly_ready
 
-    def mark_failed(self, task_id: str, error: str) -> List[TaskNode]:
+    def mark_failed(self, task_id: str, error: str) -> list[TaskNode]:
         """Mark a task as failed. Returns tasks that are now blocked.
 
         Args:
@@ -180,7 +182,7 @@ class TaskDAG:
         # Find all tasks transitively dependent on this one
         blocked = []
         to_check = [task_id]
-        visited: Set[str] = set()
+        visited: set[str] = set()
 
         while to_check:
             current = to_check.pop(0)
@@ -196,7 +198,7 @@ class TaskDAG:
 
         return blocked
 
-    def get_critical_path(self) -> List[TaskNode]:
+    def get_critical_path(self) -> list[TaskNode]:
         """Calculate the longest dependency chain (minimum total time).
 
         Uses estimated_turns as the weight for each task.
@@ -207,11 +209,10 @@ class TaskDAG:
         sorted_tasks = self.topological_sort()
 
         # For each node, compute longest path ending at that node
-        dist: Dict[str, float] = {tid: 0 for tid in self.nodes}
-        predecessor: Dict[str, Optional[str]] = {tid: None for tid in self.nodes}
+        dist: dict[str, float] = {tid: 0 for tid in self.nodes}
+        predecessor: dict[str, str | None] = {tid: None for tid in self.nodes}
 
         for task in sorted_tasks:
-            task_weight = task.estimated_turns
             for dep_id in task.dependencies:
                 if dep_id in self.nodes:
                     new_dist = dist[dep_id] + self.nodes[dep_id].estimated_turns
@@ -226,7 +227,7 @@ class TaskDAG:
 
         # Trace back
         path = []
-        current: Optional[str] = end_id
+        current: str | None = end_id
         while current is not None:
             path.append(self.nodes[current])
             current = predecessor[current]
@@ -234,7 +235,7 @@ class TaskDAG:
         path.reverse()
         return path
 
-    def detect_file_conflicts(self) -> List[Tuple[str, str, List[str]]]:
+    def detect_file_conflicts(self) -> list[tuple[str, str, list[str]]]:
         """Find task pairs that touch the same files (potential merge conflicts).
 
         Returns:
@@ -248,7 +249,7 @@ class TaskDAG:
                 continue
             files_a = set(task_a.files_touched)
 
-            for task_b in task_list[i + 1:]:
+            for task_b in task_list[i + 1 :]:
                 if not task_b.files_touched:
                     continue
                 # Skip if one depends on the other (sequential, not conflicting)
@@ -266,30 +267,26 @@ class TaskDAG:
         terminal = {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED}
         return all(task.status in terminal for task in self.nodes.values())
 
-    def completed_tasks(self) -> List[str]:
+    def completed_tasks(self) -> list[str]:
         """Return IDs of all completed tasks."""
-        return [
-            tid for tid, task in self.nodes.items()
-            if task.status == TaskStatus.COMPLETED
-        ]
+        return [tid for tid, task in self.nodes.items() if task.status == TaskStatus.COMPLETED]
 
     @property
-    def stats(self) -> Dict[str, int]:
+    def stats(self) -> dict[str, int]:
         """Get task counts by status."""
-        counts: Dict[str, int] = {}
+        counts: dict[str, int] = {}
         for task in self.nodes.values():
             status = task.status.value
             counts[status] = counts.get(status, 0) + 1
         return counts
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """Serialize DAG for API responses."""
         return {
             "tasks": [task.to_dict() for task in self.nodes.values()],
             "stats": self.stats,
             "file_conflicts": [
-                {"task_a": a, "task_b": b, "files": f}
-                for a, b, f in self.detect_file_conflicts()
+                {"task_a": a, "task_b": b, "files": f} for a, b, f in self.detect_file_conflicts()
             ],
         }
 
@@ -348,8 +345,7 @@ async def _call_llm(
         if config.provider == LLMProvider.ANTHROPIC:
             if not api_key:
                 raise ValueError(
-                    "Anthropic API key required. "
-                    "Set ANTHROPIC_API_KEY environment variable."
+                    "Anthropic API key required. " "Set ANTHROPIC_API_KEY environment variable."
                 )
             response = await client.post(
                 base_url,
@@ -370,8 +366,7 @@ async def _call_llm(
             )
             if response.status_code != 200:
                 raise RuntimeError(
-                    f"Anthropic API error ({response.status_code}): "
-                    f"{response.text[:500]}"
+                    f"Anthropic API error ({response.status_code}): " f"{response.text[:500]}"
                 )
             result = response.json()
             return result["content"][0]["text"]
@@ -379,8 +374,7 @@ async def _call_llm(
         elif config.provider == LLMProvider.OPENAI:
             if not api_key:
                 raise ValueError(
-                    "OpenAI API key required. "
-                    "Set OPENAI_API_KEY environment variable."
+                    "OpenAI API key required. " "Set OPENAI_API_KEY environment variable."
                 )
             response = await client.post(
                 base_url,
@@ -400,8 +394,7 @@ async def _call_llm(
             )
             if response.status_code != 200:
                 raise RuntimeError(
-                    f"OpenAI API error ({response.status_code}): "
-                    f"{response.text[:500]}"
+                    f"OpenAI API error ({response.status_code}): " f"{response.text[:500]}"
                 )
             result = response.json()
             return result["choices"][0]["message"]["content"]
@@ -409,14 +402,10 @@ async def _call_llm(
         elif config.provider == LLMProvider.GEMINI:
             if not api_key:
                 raise ValueError(
-                    "Google API key required. "
-                    "Set GOOGLE_API_KEY environment variable."
+                    "Google API key required. " "Set GOOGLE_API_KEY environment variable."
                 )
             # Gemini uses generateContent endpoint
-            url = (
-                f"{base_url}/models/{config.model}:generateContent"
-                f"?key={api_key}"
-            )
+            url = f"{base_url}/models/{config.model}:generateContent" f"?key={api_key}"
             response = await client.post(
                 url,
                 headers={"Content-Type": "application/json"},
@@ -438,8 +427,7 @@ async def _call_llm(
             )
             if response.status_code != 200:
                 raise RuntimeError(
-                    f"Gemini API error ({response.status_code}): "
-                    f"{response.text[:500]}"
+                    f"Gemini API error ({response.status_code}): " f"{response.text[:500]}"
                 )
             result = response.json()
             return result["candidates"][0]["content"]["parts"][0]["text"]
@@ -463,8 +451,7 @@ async def _call_llm(
             )
             if response.status_code != 200:
                 raise RuntimeError(
-                    f"Ollama API error ({response.status_code}): "
-                    f"{response.text[:500]}"
+                    f"Ollama API error ({response.status_code}): " f"{response.text[:500]}"
                 )
             result = response.json()
             return result["message"]["content"]
@@ -476,7 +463,7 @@ async def _call_llm(
 def _build_decomposition_prompt(spec: OrchestratorSpec) -> str:
     """Build the user prompt for spec decomposition."""
     parts = [
-        f"# Development Specification\n\n",
+        "# Development Specification\n\n",
         f"## Title\n{spec.title}\n\n",
         f"## Description\n{spec.description}\n\n",
     ]
@@ -565,9 +552,7 @@ def _parse_decomposition(content: str) -> "TaskDAG":
         logger.warning("Decomposition produced cyclic dependencies, removing edges")
         # Break cycles by removing the last dependency from each cycle participant
         for task in dag.nodes.values():
-            task.dependencies = [
-                d for d in task.dependencies if d in dag.nodes
-            ]
+            task.dependencies = [d for d in task.dependencies if d in dag.nodes]
 
     return dag
 

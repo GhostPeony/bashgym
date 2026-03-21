@@ -7,20 +7,21 @@ NVIDIA NeMo Data Designer column types (Sampler, LLM, Expression, Validator).
 Module 3: Data Synthesis (The "Factory") - Enhanced Data Generation
 """
 
-import os
-import json
 import asyncio
-from pathlib import Path
-from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List, Union, Callable
-from datetime import datetime, timezone
-from enum import Enum
-import httpx
+import json
+import os
 import random
+from dataclasses import dataclass, field
+from enum import Enum
+from pathlib import Path
+from typing import Any
+
+import httpx
 
 
 class ColumnType(Enum):
     """Data Designer column types."""
+
     # Sampler columns (deterministic/random)
     CATEGORY = "category"
     PERSON = "person"
@@ -52,17 +53,17 @@ class ColumnDefinition:
 
     name: str
     column_type: ColumnType
-    params: Dict[str, Any] = field(default_factory=dict)
-    depends_on: List[str] = field(default_factory=list)
+    params: dict[str, Any] = field(default_factory=dict)
+    depends_on: list[str] = field(default_factory=list)
     description: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "type": self.column_type.value,
             "params": self.params,
             "depends_on": self.depends_on,
-            "description": self.description
+            "description": self.description,
         }
 
 
@@ -71,18 +72,18 @@ class DataSchema:
     """A complete data generation schema."""
 
     name: str
-    columns: List[ColumnDefinition] = field(default_factory=list)
+    columns: list[ColumnDefinition] = field(default_factory=list)
     num_rows: int = 100
-    seed: Optional[int] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    seed: int | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "columns": [c.to_dict() for c in self.columns],
             "num_rows": self.num_rows,
             "seed": self.seed,
-            "metadata": self.metadata
+            "metadata": self.metadata,
         }
 
 
@@ -106,46 +107,45 @@ class SchemaBuilder:
     def category(
         self,
         name: str,
-        categories: List[str],
-        weights: Optional[List[float]] = None,
-        description: str = ""
+        categories: list[str],
+        weights: list[float] | None = None,
+        description: str = "",
     ) -> "SchemaBuilder":
         """Add a category column (randomly samples from list)."""
-        self.schema.columns.append(ColumnDefinition(
-            name=name,
-            column_type=ColumnType.CATEGORY,
-            params={
-                "categories": categories,
-                "weights": weights or [1.0 / len(categories)] * len(categories)
-            },
-            description=description
-        ))
+        self.schema.columns.append(
+            ColumnDefinition(
+                name=name,
+                column_type=ColumnType.CATEGORY,
+                params={
+                    "categories": categories,
+                    "weights": weights or [1.0 / len(categories)] * len(categories),
+                },
+                description=description,
+            )
+        )
         return self
 
     def person(
-        self,
-        name: str,
-        locale: str = "en_US",
-        gender: Optional[str] = None,
-        description: str = ""
+        self, name: str, locale: str = "en_US", gender: str | None = None, description: str = ""
     ) -> "SchemaBuilder":
         """Add a person name column."""
-        self.schema.columns.append(ColumnDefinition(
-            name=name,
-            column_type=ColumnType.PERSON,
-            params={"locale": locale, "gender": gender},
-            description=description
-        ))
+        self.schema.columns.append(
+            ColumnDefinition(
+                name=name,
+                column_type=ColumnType.PERSON,
+                params={"locale": locale, "gender": gender},
+                description=description,
+            )
+        )
         return self
 
     def uuid(self, name: str, description: str = "") -> "SchemaBuilder":
         """Add a UUID column."""
-        self.schema.columns.append(ColumnDefinition(
-            name=name,
-            column_type=ColumnType.UUID,
-            params={},
-            description=description
-        ))
+        self.schema.columns.append(
+            ColumnDefinition(
+                name=name, column_type=ColumnType.UUID, params={}, description=description
+            )
+        )
         return self
 
     def datetime(
@@ -154,77 +154,69 @@ class SchemaBuilder:
         start: str = "2020-01-01",
         end: str = "2024-12-31",
         format: str = "%Y-%m-%d %H:%M:%S",
-        description: str = ""
+        description: str = "",
     ) -> "SchemaBuilder":
         """Add a datetime column."""
-        self.schema.columns.append(ColumnDefinition(
-            name=name,
-            column_type=ColumnType.DATETIME,
-            params={"start": start, "end": end, "format": format},
-            description=description
-        ))
+        self.schema.columns.append(
+            ColumnDefinition(
+                name=name,
+                column_type=ColumnType.DATETIME,
+                params={"start": start, "end": end, "format": format},
+                description=description,
+            )
+        )
         return self
 
     def gaussian(
-        self,
-        name: str,
-        mean: float = 0.0,
-        std: float = 1.0,
-        description: str = ""
+        self, name: str, mean: float = 0.0, std: float = 1.0, description: str = ""
     ) -> "SchemaBuilder":
         """Add a Gaussian (normal distribution) column."""
-        self.schema.columns.append(ColumnDefinition(
-            name=name,
-            column_type=ColumnType.GAUSSIAN,
-            params={"mean": mean, "std": std},
-            description=description
-        ))
+        self.schema.columns.append(
+            ColumnDefinition(
+                name=name,
+                column_type=ColumnType.GAUSSIAN,
+                params={"mean": mean, "std": std},
+                description=description,
+            )
+        )
         return self
 
-    def poisson(
-        self,
-        name: str,
-        lam: float = 5.0,
-        description: str = ""
-    ) -> "SchemaBuilder":
+    def poisson(self, name: str, lam: float = 5.0, description: str = "") -> "SchemaBuilder":
         """Add a Poisson distribution column."""
-        self.schema.columns.append(ColumnDefinition(
-            name=name,
-            column_type=ColumnType.POISSON,
-            params={"lambda": lam},
-            description=description
-        ))
+        self.schema.columns.append(
+            ColumnDefinition(
+                name=name,
+                column_type=ColumnType.POISSON,
+                params={"lambda": lam},
+                description=description,
+            )
+        )
         return self
 
-    def bernoulli(
-        self,
-        name: str,
-        p: float = 0.5,
-        description: str = ""
-    ) -> "SchemaBuilder":
+    def bernoulli(self, name: str, p: float = 0.5, description: str = "") -> "SchemaBuilder":
         """Add a Bernoulli (boolean) column."""
-        self.schema.columns.append(ColumnDefinition(
-            name=name,
-            column_type=ColumnType.BERNOULLI,
-            params={"p": p},
-            description=description
-        ))
+        self.schema.columns.append(
+            ColumnDefinition(
+                name=name,
+                column_type=ColumnType.BERNOULLI,
+                params={"p": p},
+                description=description,
+            )
+        )
         return self
 
     def uniform(
-        self,
-        name: str,
-        low: float = 0.0,
-        high: float = 1.0,
-        description: str = ""
+        self, name: str, low: float = 0.0, high: float = 1.0, description: str = ""
     ) -> "SchemaBuilder":
         """Add a uniform distribution column."""
-        self.schema.columns.append(ColumnDefinition(
-            name=name,
-            column_type=ColumnType.UNIFORM,
-            params={"low": low, "high": high},
-            description=description
-        ))
+        self.schema.columns.append(
+            ColumnDefinition(
+                name=name,
+                column_type=ColumnType.UNIFORM,
+                params={"low": low, "high": high},
+                description=description,
+            )
+        )
         return self
 
     # ==================== LLM Columns ====================
@@ -236,22 +228,24 @@ class SchemaBuilder:
         model: str = "meta/llama-3.1-70b-instruct",
         temperature: float = 0.7,
         max_tokens: int = 1024,
-        depends_on: Optional[List[str]] = None,
-        description: str = ""
+        depends_on: list[str] | None = None,
+        description: str = "",
     ) -> "SchemaBuilder":
         """Add an LLM-generated column."""
-        self.schema.columns.append(ColumnDefinition(
-            name=name,
-            column_type=ColumnType.LLM,
-            params={
-                "prompt": prompt,
-                "model": model,
-                "temperature": temperature,
-                "max_tokens": max_tokens
-            },
-            depends_on=depends_on or [],
-            description=description
-        ))
+        self.schema.columns.append(
+            ColumnDefinition(
+                name=name,
+                column_type=ColumnType.LLM,
+                params={
+                    "prompt": prompt,
+                    "model": model,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                },
+                depends_on=depends_on or [],
+                description=description,
+            )
+        )
         return self
 
     def code(
@@ -260,103 +254,101 @@ class SchemaBuilder:
         task_description: str,
         language: str = "python",
         model: str = "qwen/qwen2.5-coder-72b-instruct",
-        depends_on: Optional[List[str]] = None,
-        description: str = ""
+        depends_on: list[str] | None = None,
+        description: str = "",
     ) -> "SchemaBuilder":
         """Add a code generation column."""
         prompt = f"Write {language} code for the following task:\n\n{{{{ {task_description} }}}}\n\nOutput only the code, no explanations."
-        self.schema.columns.append(ColumnDefinition(
-            name=name,
-            column_type=ColumnType.CODE,
-            params={
-                "prompt": prompt,
-                "model": model,
-                "language": language,
-                "temperature": 0.3,
-                "max_tokens": 2048
-            },
-            depends_on=depends_on or [],
-            description=description
-        ))
+        self.schema.columns.append(
+            ColumnDefinition(
+                name=name,
+                column_type=ColumnType.CODE,
+                params={
+                    "prompt": prompt,
+                    "model": model,
+                    "language": language,
+                    "temperature": 0.3,
+                    "max_tokens": 2048,
+                },
+                depends_on=depends_on or [],
+                description=description,
+            )
+        )
         return self
 
     def structured(
         self,
         name: str,
         prompt: str,
-        json_schema: Dict[str, Any],
+        json_schema: dict[str, Any],
         model: str = "meta/llama-3.1-70b-instruct",
-        depends_on: Optional[List[str]] = None,
-        description: str = ""
+        depends_on: list[str] | None = None,
+        description: str = "",
     ) -> "SchemaBuilder":
         """Add a structured JSON output column."""
-        self.schema.columns.append(ColumnDefinition(
-            name=name,
-            column_type=ColumnType.STRUCTURED,
-            params={
-                "prompt": prompt,
-                "json_schema": json_schema,
-                "model": model,
-                "temperature": 0.3
-            },
-            depends_on=depends_on or [],
-            description=description
-        ))
+        self.schema.columns.append(
+            ColumnDefinition(
+                name=name,
+                column_type=ColumnType.STRUCTURED,
+                params={
+                    "prompt": prompt,
+                    "json_schema": json_schema,
+                    "model": model,
+                    "temperature": 0.3,
+                },
+                depends_on=depends_on or [],
+                description=description,
+            )
+        )
         return self
 
     # ==================== Expression Columns ====================
 
     def expression(
-        self,
-        name: str,
-        expression: str,
-        depends_on: List[str],
-        description: str = ""
+        self, name: str, expression: str, depends_on: list[str], description: str = ""
     ) -> "SchemaBuilder":
         """Add a computed expression column (Jinja2)."""
-        self.schema.columns.append(ColumnDefinition(
-            name=name,
-            column_type=ColumnType.EXPRESSION,
-            params={"expression": expression},
-            depends_on=depends_on,
-            description=description
-        ))
+        self.schema.columns.append(
+            ColumnDefinition(
+                name=name,
+                column_type=ColumnType.EXPRESSION,
+                params={"expression": expression},
+                depends_on=depends_on,
+                description=description,
+            )
+        )
         return self
 
     def jinja(
-        self,
-        name: str,
-        template: str,
-        depends_on: List[str],
-        description: str = ""
+        self, name: str, template: str, depends_on: list[str], description: str = ""
     ) -> "SchemaBuilder":
         """Add a Jinja2 template column."""
-        self.schema.columns.append(ColumnDefinition(
-            name=name,
-            column_type=ColumnType.JINJA,
-            params={"template": template},
-            depends_on=depends_on,
-            description=description
-        ))
+        self.schema.columns.append(
+            ColumnDefinition(
+                name=name,
+                column_type=ColumnType.JINJA,
+                params={"template": template},
+                depends_on=depends_on,
+                description=description,
+            )
+        )
         return self
 
     # ==================== Validator Columns ====================
 
     def python_validator(
-        self,
-        name: str,
-        validation_code: str,
-        depends_on: List[str],
-        description: str = ""
+        self, name: str, validation_code: str, depends_on: list[str], description: str = ""
     ) -> "SchemaBuilder":
         """Add a Python validation column."""
-        self.schema.columns.append(ColumnDefinition(
-            name=name,
-            column_type=ColumnType.PYTHON_VALIDATOR,
-            params={"code": validation_code},
-            depends_on=depends_on,
-            description=description
-        ))
+        self.schema.columns.append(
+            ColumnDefinition(
+                name=name,
+                column_type=ColumnType.PYTHON_VALIDATOR,
+                params={"code": validation_code},
+                depends_on=depends_on,
+                description=description,
+            )
+        )
         return self
 
     # ==================== Build Methods ====================
@@ -388,21 +380,14 @@ class DataDesignerClient:
     Generates synthetic data based on schemas.
     """
 
-    def __init__(
-        self,
-        endpoint: str = "http://localhost:8000",
-        api_key: Optional[str] = None
-    ):
+    def __init__(self, endpoint: str = "http://localhost:8000", api_key: str | None = None):
         """Initialize the Data Designer client."""
         self.endpoint = endpoint
         self.api_key = api_key or os.environ.get("NVIDIA_API_KEY")
 
-        self.client = httpx.AsyncClient(
-            timeout=300.0,
-            headers=self._build_headers()
-        )
+        self.client = httpx.AsyncClient(timeout=300.0, headers=self._build_headers())
 
-    def _build_headers(self) -> Dict[str, str]:
+    def _build_headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -413,10 +398,8 @@ class DataDesignerClient:
         await self.client.aclose()
 
     async def generate(
-        self,
-        schema: DataSchema,
-        output_path: Optional[Path] = None
-    ) -> List[Dict[str, Any]]:
+        self, schema: DataSchema, output_path: Path | None = None
+    ) -> list[dict[str, Any]]:
         """
         Generate synthetic data from a schema.
 
@@ -440,7 +423,9 @@ class DataDesignerClient:
                 # Check dependencies
                 for dep in column.depends_on:
                     if dep not in record:
-                        raise ValueError(f"Column {column.name} depends on {dep} which hasn't been generated")
+                        raise ValueError(
+                            f"Column {column.name} depends on {dep} which hasn't been generated"
+                        )
 
                 # Generate value based on column type
                 value = await self._generate_column_value(column, record, i)
@@ -458,10 +443,7 @@ class DataDesignerClient:
         return records
 
     async def _generate_column_value(
-        self,
-        column: ColumnDefinition,
-        context: Dict[str, Any],
-        row_index: int
+        self, column: ColumnDefinition, context: dict[str, Any], row_index: int
     ) -> Any:
         """Generate a value for a column."""
         params = column.params
@@ -475,15 +457,26 @@ class DataDesignerClient:
         elif column.column_type == ColumnType.PERSON:
             # Simplified - in production use faker library
             first_names = ["Alex", "Jordan", "Taylor", "Morgan", "Casey", "Jamie", "Riley", "Quinn"]
-            last_names = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis"]
+            last_names = [
+                "Smith",
+                "Johnson",
+                "Williams",
+                "Brown",
+                "Jones",
+                "Garcia",
+                "Miller",
+                "Davis",
+            ]
             return f"{random.choice(first_names)} {random.choice(last_names)}"
 
         elif column.column_type == ColumnType.UUID:
             import uuid
+
             return str(uuid.uuid4())
 
         elif column.column_type == ColumnType.DATETIME:
             from datetime import datetime as dt
+
             start = dt.strptime(params["start"], "%Y-%m-%d")
             end = dt.strptime(params["end"], "%Y-%m-%d")
             delta = (end - start).days
@@ -519,11 +512,7 @@ class DataDesignerClient:
 
         return None
 
-    async def _generate_llm_value(
-        self,
-        column: ColumnDefinition,
-        context: Dict[str, Any]
-    ) -> str:
+    async def _generate_llm_value(self, column: ColumnDefinition, context: dict[str, Any]) -> str:
         """Generate a value using LLM."""
         params = column.params
         prompt = params["prompt"]
@@ -531,6 +520,7 @@ class DataDesignerClient:
         # Substitute context variables using Jinja2
         try:
             from jinja2 import Environment
+
             prompt = Environment().from_string(prompt).render(**context)
         except ImportError:
             for key, value in context.items():
@@ -543,8 +533,8 @@ class DataDesignerClient:
                     "model": params.get("model", "meta/llama-3.1-70b-instruct"),
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": params.get("temperature", 0.7),
-                    "max_tokens": params.get("max_tokens", 1024)
-                }
+                    "max_tokens": params.get("max_tokens", 1024),
+                },
             )
 
             if response.status_code == 200:
@@ -556,16 +546,13 @@ class DataDesignerClient:
 
         return "[Generation failed]"
 
-    def _evaluate_expression(
-        self,
-        column: ColumnDefinition,
-        context: Dict[str, Any]
-    ) -> str:
+    def _evaluate_expression(self, column: ColumnDefinition, context: dict[str, Any]) -> str:
         """Evaluate a Jinja2 expression."""
         template_str = column.params.get("expression") or column.params.get("template", "")
 
         try:
             from jinja2 import Environment
+
             env = Environment()
             template = env.from_string(template_str)
             return template.render(**context)
@@ -576,11 +563,7 @@ class DataDesignerClient:
                 result = result.replace(f"{{{{ {key} }}}}", str(value))
             return result
 
-    def _run_validator(
-        self,
-        column: ColumnDefinition,
-        context: Dict[str, Any]
-    ) -> bool:
+    def _run_validator(self, column: ColumnDefinition, context: dict[str, Any]) -> bool:
         """Run Python validator code."""
         code = column.params.get("code", "True")
 
@@ -594,10 +577,9 @@ class DataDesignerClient:
 
 # ==================== Predefined Schema Templates ====================
 
+
 def coding_task_schema(
-    languages: List[str] = None,
-    difficulties: List[str] = None,
-    num_rows: int = 100
+    languages: list[str] = None, difficulties: list[str] = None, num_rows: int = 100
 ) -> DataSchema:
     """Create a schema for generating coding task datasets."""
     languages = languages or ["python", "javascript", "rust", "go"]
@@ -608,13 +590,16 @@ def coding_task_schema(
         .uuid("task_id", description="Unique task identifier")
         .category("language", languages, description="Programming language")
         .category("difficulty", difficulties, weights=[0.4, 0.4, 0.2])
-        .category("task_type", [
-            "function_implementation",
-            "bug_fix",
-            "code_optimization",
-            "test_writing",
-            "refactoring"
-        ])
+        .category(
+            "task_type",
+            [
+                "function_implementation",
+                "bug_fix",
+                "code_optimization",
+                "test_writing",
+                "refactoring",
+            ],
+        )
         .person("author", description="Task author name")
         .datetime("created_at", start="2024-01-01", end="2024-12-31")
         .llm(
@@ -629,14 +614,14 @@ The task should be:
 Output only the task description, starting with "Write a..."
 """,
             depends_on=["language", "difficulty", "task_type"],
-            description="The task description"
+            description="The task description",
         )
         .code(
             "reference_solution",
             task_description="task_description",
             language="{{ language }}",
             depends_on=["task_description", "language"],
-            description="Reference solution code"
+            description="Reference solution code",
         )
         .with_rows(num_rows)
         .build()
@@ -644,23 +629,16 @@ Output only the task description, starting with "Write a..."
 
 
 def conversation_schema(
-    personas: List[str] = None,
-    topics: List[str] = None,
-    num_rows: int = 100
+    personas: list[str] = None, topics: list[str] = None, num_rows: int = 100
 ) -> DataSchema:
     """Create a schema for generating conversation datasets."""
     personas = personas or [
         "helpful assistant",
         "expert programmer",
         "patient teacher",
-        "curious learner"
+        "curious learner",
     ]
-    topics = topics or [
-        "software development",
-        "debugging",
-        "code review",
-        "architecture design"
-    ]
+    topics = topics or ["software development", "debugging", "code review", "architecture design"]
 
     return (
         SchemaBuilder("conversations")
@@ -671,12 +649,12 @@ def conversation_schema(
         .llm(
             "user_message",
             prompt="Generate a realistic user question about {{ topic }} that a {{ persona }} would answer. Complexity level: {{ complexity | int }}/10.",
-            depends_on=["persona", "topic", "complexity"]
+            depends_on=["persona", "topic", "complexity"],
         )
         .llm(
             "assistant_response",
             prompt="As a {{ persona }}, provide a helpful response to: {{ user_message }}",
-            depends_on=["persona", "user_message"]
+            depends_on=["persona", "user_message"],
         )
         .with_rows(num_rows)
         .build()
@@ -696,12 +674,12 @@ async def main():
         .llm(
             "task_prompt",
             prompt="Generate a {{ complexity }} agentic coding task involving {{ task_type }}. Be specific and actionable.",
-            depends_on=["task_type", "complexity"]
+            depends_on=["task_type", "complexity"],
         )
         .expression(
             "full_prompt",
             expression="[{{ requester }}] {{ task_prompt }}",
-            depends_on=["requester", "task_prompt"]
+            depends_on=["requester", "task_prompt"],
         )
         .with_rows(10)
         .with_seed(42)
@@ -716,8 +694,7 @@ async def main():
 
     try:
         records = await client.generate(
-            schema,
-            output_path=Path("data/synthetic/agentic_tasks.jsonl")
+            schema, output_path=Path("data/synthetic/agentic_tasks.jsonl")
         )
 
         print(f"\nGenerated {len(records)} records:")

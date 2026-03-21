@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 
 try:
     import data_designer.config as dd
+
     DATA_DESIGNER_AVAILABLE = True
 except ImportError:
     DATA_DESIGNER_AVAILABLE = False
@@ -92,100 +93,110 @@ def build_external_pipeline(config: PipelineConfig) -> dd.DataDesignerConfigBuil
 
     # --- Augmentation style diversity ---
 
-    builder.add_column(dd.SamplerColumnConfig(
-        name="augmentation_style",
-        sampler_type=dd.SamplerType.CATEGORY,
-        params=dd.CategorySamplerParams(
-            values=[
-                "rephrase",         # Reword the task
-                "extend",           # Add complexity
-                "simplify",         # Make it easier
-                "agent_format",     # Convert to agent tool-use style
-            ],
-            weights=[0.3, 0.25, 0.15, 0.3],
-        ),
-    ))
+    builder.add_column(
+        dd.SamplerColumnConfig(
+            name="augmentation_style",
+            sampler_type=dd.SamplerType.CATEGORY,
+            params=dd.CategorySamplerParams(
+                values=[
+                    "rephrase",  # Reword the task
+                    "extend",  # Add complexity
+                    "simplify",  # Make it easier
+                    "agent_format",  # Convert to agent tool-use style
+                ],
+                weights=[0.3, 0.25, 0.15, 0.3],
+            ),
+        )
+    )
 
-    builder.add_column(dd.SamplerColumnConfig(
-        name="target_format",
-        sampler_type=dd.SamplerType.CATEGORY,
-        params=dd.CategorySamplerParams(
-            values=["step_by_step", "tool_use", "explanation_first", "code_first"],
-            weights=[0.3, 0.3, 0.2, 0.2],
-        ),
-    ))
+    builder.add_column(
+        dd.SamplerColumnConfig(
+            name="target_format",
+            sampler_type=dd.SamplerType.CATEGORY,
+            params=dd.CategorySamplerParams(
+                values=["step_by_step", "tool_use", "explanation_first", "code_first"],
+                weights=[0.3, 0.3, 0.2, 0.2],
+            ),
+        )
+    )
 
     # --- Rewrite task prompt for agent training ---
 
-    builder.add_column(dd.LLMTextColumnConfig(
-        name="task_prompt",
-        model_alias="text-model",
-        prompt=(
-            "You are rewriting a coding task for training an AI coding agent.\n\n"
-            "Original task: {{ seed_task }}\n"
-            "{% if seed_context %}Context: {{ seed_context }}\n{% endif %}"
-            "Augmentation style: {{ augmentation_style }}\n\n"
-            "Rewrite this as a clear, specific task that a developer would give "
-            "to an AI coding assistant. If the style is 'agent_format', include "
-            "details about files and project structure. If 'extend', add additional "
-            "requirements. If 'simplify', focus on the core ask.\n\n"
-            "Output ONLY the rewritten task prompt."
-        ),
-    ))
+    builder.add_column(
+        dd.LLMTextColumnConfig(
+            name="task_prompt",
+            model_alias="text-model",
+            prompt=(
+                "You are rewriting a coding task for training an AI coding agent.\n\n"
+                "Original task: {{ seed_task }}\n"
+                "{% if seed_context %}Context: {{ seed_context }}\n{% endif %}"
+                "Augmentation style: {{ augmentation_style }}\n\n"
+                "Rewrite this as a clear, specific task that a developer would give "
+                "to an AI coding assistant. If the style is 'agent_format', include "
+                "details about files and project structure. If 'extend', add additional "
+                "requirements. If 'simplify', focus on the core ask.\n\n"
+                "Output ONLY the rewritten task prompt."
+            ),
+        )
+    )
 
     # --- Generate agent-style response ---
 
-    builder.add_column(dd.LLMTextColumnConfig(
-        name="solution",
-        model_alias="code-model",
-        prompt=(
-            "You are a coding AI agent. Solve this task showing your work.\n\n"
-            "Task: {{ task_prompt }}\n"
-            "{% if seed_response %}Reference approach: {{ seed_response }}\n{% endif %}"
-            "Response format: {{ target_format }}\n\n"
-            "If format is 'tool_use', show your solution as tool calls:\n"
-            "[tool_name] arguments\n"
-            "If 'step_by_step', number each step.\n"
-            "If 'explanation_first', explain before showing code.\n"
-            "If 'code_first', show the code then explain."
-        ),
-    ))
+    builder.add_column(
+        dd.LLMTextColumnConfig(
+            name="solution",
+            model_alias="code-model",
+            prompt=(
+                "You are a coding AI agent. Solve this task showing your work.\n\n"
+                "Task: {{ task_prompt }}\n"
+                "{% if seed_response %}Reference approach: {{ seed_response }}\n{% endif %}"
+                "Response format: {{ target_format }}\n\n"
+                "If format is 'tool_use', show your solution as tool calls:\n"
+                "[tool_name] arguments\n"
+                "If 'step_by_step', number each step.\n"
+                "If 'explanation_first', explain before showing code.\n"
+                "If 'code_first', show the code then explain."
+            ),
+        )
+    )
 
     # --- Quality check ---
 
-    builder.add_column(dd.LLMJudgeColumnConfig(
-        name="quality_score",
-        model_alias="judge-model",
-        prompt=(
-            "Evaluate this task-solution pair for training a coding AI agent:\n\n"
-            "Task: {{ task_prompt }}\n\n"
-            "Solution:\n{{ solution }}"
-        ),
-        scores=[
-            dd.Score(
-                name="relevance",
-                description="Does the solution address the task?",
-                options={
-                    "5": "Perfectly addresses the task",
-                    "4": "Mostly relevant, minor drift",
-                    "3": "Partially relevant",
-                    "2": "Significant mismatch",
-                    "1": "Completely off-topic",
-                },
+    builder.add_column(
+        dd.LLMJudgeColumnConfig(
+            name="quality_score",
+            model_alias="judge-model",
+            prompt=(
+                "Evaluate this task-solution pair for training a coding AI agent:\n\n"
+                "Task: {{ task_prompt }}\n\n"
+                "Solution:\n{{ solution }}"
             ),
-            dd.Score(
-                name="training_value",
-                description="Would this be a good training example?",
-                options={
-                    "5": "Excellent training example",
-                    "4": "Good training example",
-                    "3": "Acceptable",
-                    "2": "Low value, too generic or too niche",
-                    "1": "Not suitable for training",
-                },
-            ),
-        ],
-    ))
+            scores=[
+                dd.Score(
+                    name="relevance",
+                    description="Does the solution address the task?",
+                    options={
+                        "5": "Perfectly addresses the task",
+                        "4": "Mostly relevant, minor drift",
+                        "3": "Partially relevant",
+                        "2": "Significant mismatch",
+                        "1": "Completely off-topic",
+                    },
+                ),
+                dd.Score(
+                    name="training_value",
+                    description="Would this be a good training example?",
+                    options={
+                        "5": "Excellent training example",
+                        "4": "Good training example",
+                        "3": "Acceptable",
+                        "2": "Low value, too generic or too niche",
+                        "1": "Not suitable for training",
+                    },
+                ),
+            ],
+        )
+    )
 
     # --- Filter ---
 

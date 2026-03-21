@@ -2,7 +2,6 @@
 
 import json
 from pathlib import Path
-from typing import Optional
 
 from .config import PipelineConfig
 
@@ -10,7 +9,7 @@ from .config import PipelineConfig
 class ThresholdMonitor:
     """Monitors counts and triggers downstream stages when thresholds are met."""
 
-    def __init__(self, config: PipelineConfig, watermark_path: Optional[Path] = None):
+    def __init__(self, config: PipelineConfig, watermark_path: Path | None = None):
         self.config = config
         self._watermark_path = watermark_path
         self._watermarks = self._load_watermarks()
@@ -19,7 +18,7 @@ class ThresholdMonitor:
         if self._watermark_path and self._watermark_path.exists():
             try:
                 return json.loads(self._watermark_path.read_text())
-            except (json.JSONDecodeError, IOError):
+            except (OSError, json.JSONDecodeError):
                 pass
         return {}
 
@@ -45,11 +44,11 @@ class ThresholdMonitor:
             return False
         if not examples_file.exists():
             return False
-        count = sum(1 for _ in open(examples_file, "r", encoding="utf-8"))
+        count = sum(1 for _ in open(examples_file, encoding="utf-8"))
         last_triggered = self._watermarks.get("train_at", 0)
         return count >= last_triggered + self.config.train_examples_threshold
 
     def mark_train_triggered(self, examples_file: Path) -> None:
-        count = sum(1 for _ in open(examples_file, "r", encoding="utf-8"))
+        count = sum(1 for _ in open(examples_file, encoding="utf-8"))
         self._watermarks["train_at"] = count
         self._save_watermarks()

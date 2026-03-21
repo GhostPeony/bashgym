@@ -71,6 +71,7 @@ def _clear_session_cookie(response: Response) -> None:
 def _prune_stale_states() -> None:
     """Remove OAuth state tokens older than 10 minutes, and enforce max size."""
     import time
+
     cutoff = time.time() - 600
     stale = [k for k, v in _oauth_states.items() if v < cutoff]
     for k in stale:
@@ -106,7 +107,6 @@ async def github_login(request: Request):
 @router.get("/github/callback")
 async def github_callback(request: Request, code: str = "", state: str = ""):
     """Exchange GitHub OAuth code for access token, create session."""
-    import time
 
     if not code or not state:
         return JSONResponse({"error": "Missing code or state"}, status_code=400)

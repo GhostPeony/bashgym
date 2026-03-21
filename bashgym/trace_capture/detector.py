@@ -4,30 +4,31 @@ AI Coding Tool Detector
 Auto-detects which AI coding assistants are installed on the system.
 """
 
-import os
 import json
-import shutil
+import os
 import platform
-from pathlib import Path
+import shutil
 from dataclasses import dataclass
-from typing import List, Optional, Dict, Any
+from pathlib import Path
+from typing import Any
 
 
 @dataclass
 class ToolInfo:
     """Information about a detected AI coding tool."""
+
     name: str
     installed: bool
-    version: Optional[str] = None
+    version: str | None = None
     hooks_installed: bool = False
-    hooks_path: Optional[Path] = None
-    config_path: Optional[Path] = None
+    hooks_path: Path | None = None
+    config_path: Path | None = None
     adapter_type: str = "unknown"  # claude_code, opencode, aider, generic
 
 
 def _get_home_dir() -> Path:
     """Get the user's home directory."""
-    if platform.system() == 'Windows':
+    if platform.system() == "Windows":
         return Path(os.environ.get("USERPROFILE", ""))
     return Path.home()
 
@@ -59,7 +60,7 @@ def detect_claude_code() -> ToolInfo:
         hooks_installed=hooks_installed,
         hooks_path=hooks_path,
         config_path=config_path,
-        adapter_type="claude_code"
+        adapter_type="claude_code",
     )
 
 
@@ -68,7 +69,7 @@ def detect_opencode() -> ToolInfo:
     home = _get_home_dir()
 
     # OpenCode config locations - check multiple possible paths
-    if platform.system() == 'Windows':
+    if platform.system() == "Windows":
         # Windows: check both .config and AppData
         possible_configs = [
             home / ".config" / "opencode",
@@ -120,7 +121,7 @@ def detect_opencode() -> ToolInfo:
         hooks_installed=hooks_installed,
         hooks_path=plugins_path,
         config_path=config_path,
-        adapter_type="opencode"
+        adapter_type="opencode",
     )
 
 
@@ -139,7 +140,7 @@ def detect_aider() -> ToolInfo:
         hooks_installed=False,  # Not yet supported
         hooks_path=None,
         config_path=config_path,
-        adapter_type="aider"
+        adapter_type="aider",
     )
 
 
@@ -157,7 +158,7 @@ def detect_continue() -> ToolInfo:
         hooks_installed=False,  # Not yet supported
         hooks_path=None,
         config_path=config_path,
-        adapter_type="continue"
+        adapter_type="continue",
     )
 
 
@@ -166,9 +167,9 @@ def detect_cursor() -> ToolInfo:
     home = _get_home_dir()
 
     # Cursor is an app, check for config
-    if platform.system() == 'Windows':
+    if platform.system() == "Windows":
         config_path = home / "AppData" / "Roaming" / "Cursor"
-    elif platform.system() == 'Darwin':
+    elif platform.system() == "Darwin":
         config_path = home / "Library" / "Application Support" / "Cursor"
     else:
         config_path = home / ".config" / "Cursor"
@@ -181,7 +182,7 @@ def detect_cursor() -> ToolInfo:
         hooks_installed=False,  # Not yet supported
         hooks_path=None,
         config_path=config_path,
-        adapter_type="cursor"
+        adapter_type="cursor",
     )
 
 
@@ -204,7 +205,7 @@ def detect_gemini_cli() -> ToolInfo:
     settings_path = config_path / "settings.json"
     if settings_path.exists():
         try:
-            with open(settings_path, 'r') as f:
+            with open(settings_path) as f:
                 settings = json.load(f)
             # Check for bashgym entries in AfterTool hooks
             after_tool = settings.get("hooks", {}).get("AfterTool", [])
@@ -212,7 +213,7 @@ def detect_gemini_cli() -> ToolInfo:
                 if isinstance(entry, dict) and entry.get("name") == "bashgym":
                     hooks_installed = True
                     break
-        except (json.JSONDecodeError, IOError, OSError):
+        except (json.JSONDecodeError, OSError):
             pass
 
     return ToolInfo(
@@ -221,7 +222,7 @@ def detect_gemini_cli() -> ToolInfo:
         hooks_installed=hooks_installed,
         hooks_path=hooks_path,
         config_path=config_path,
-        adapter_type="gemini_cli"
+        adapter_type="gemini_cli",
     )
 
 
@@ -244,7 +245,7 @@ def detect_codex() -> ToolInfo:
         hooks_installed=False,  # Import only - no live hooks
         hooks_path=None,
         config_path=config_path,
-        adapter_type="codex"
+        adapter_type="codex",
     )
 
 
@@ -276,11 +277,11 @@ def detect_copilot_cli() -> ToolInfo:
         hooks_installed=hooks_installed,
         hooks_path=hooks_path,
         config_path=config_path,
-        adapter_type="copilot_cli"
+        adapter_type="copilot_cli",
     )
 
 
-def detect_tools() -> List[ToolInfo]:
+def detect_tools() -> list[ToolInfo]:
     """
     Detect all supported AI coding tools.
 
@@ -308,7 +309,7 @@ def detect_tools() -> List[ToolInfo]:
     return tools
 
 
-def get_tool_status() -> Dict[str, Any]:
+def get_tool_status() -> dict[str, Any]:
     """
     Get a summary of all detected tools and their status.
 
@@ -335,11 +336,11 @@ def get_tool_status() -> Dict[str, Any]:
             "configured_count": len(configured_tools),
             "installed_names": [t.name for t in installed_tools],
             "configured_names": [t.name for t in configured_tools],
-        }
+        },
     }
 
 
-def get_primary_tool() -> Optional[ToolInfo]:
+def get_primary_tool() -> ToolInfo | None:
     """
     Get the primary (preferred) AI coding tool.
 
@@ -348,7 +349,16 @@ def get_primary_tool() -> Optional[ToolInfo]:
     tools = detect_tools()
 
     # Priority order
-    priority = ["claude_code", "opencode", "gemini_cli", "codex", "copilot_cli", "aider", "continue", "cursor"]
+    priority = [
+        "claude_code",
+        "opencode",
+        "gemini_cli",
+        "codex",
+        "copilot_cli",
+        "aider",
+        "continue",
+        "cursor",
+    ]
 
     for adapter_type in priority:
         for tool in tools:

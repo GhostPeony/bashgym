@@ -29,7 +29,6 @@ Design constraints (from the task spec):
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 from .base import (
     BaseCollector,
@@ -37,7 +36,6 @@ from .base import (
     CollectorScanResult,
     DebugRecord,
 )
-
 
 # ---------------------------------------------------------------------------
 # Regex patterns for extracting data from debug log lines
@@ -59,9 +57,7 @@ _STREAM_START_RE = re.compile(r"Stream started - received first chunk")
 _MODEL_RE = re.compile(r"Tool search disabled for model '([^']+)'")
 
 # Token counts from autocompact
-_AUTOCOMPACT_RE = re.compile(
-    r"autocompact: tokens=(\d+) threshold=(\d+) effectiveWindow=(\d+)"
-)
+_AUTOCOMPACT_RE = re.compile(r"autocompact: tokens=(\d+) threshold=(\d+) effectiveWindow=(\d+)")
 
 # System prompt configuration
 _SYSTEM_PROMPT_RE = re.compile(r"\[SystemPrompt\]\s+(.*)")
@@ -70,12 +66,10 @@ _SYSTEM_PROMPT_RE = re.compile(r"\[SystemPrompt\]\s+(.*)")
 _ERROR_RE = re.compile(r"\[ERROR\]\s+(.*)")
 
 # Attribution / billing header
-_ATTRIBUTION_RE = re.compile(
-    r"attribution header x-anthropic-billing-header:\s+(.*)"
-)
+_ATTRIBUTION_RE = re.compile(r"attribution header x-anthropic-billing-header:\s+(.*)")
 
 
-def _parse_timestamp(ts_str: str) -> Optional[datetime]:
+def _parse_timestamp(ts_str: str) -> datetime | None:
     """Parse an ISO-8601 timestamp string to a datetime object.
 
     Returns None if parsing fails.
@@ -112,8 +106,8 @@ class DebugCollector(BaseCollector):
 
     def _find_debug_files(
         self,
-        since: Optional[str] = None,
-    ) -> List[Path]:
+        since: str | None = None,
+    ) -> list[Path]:
         """Find all debug log .txt files, optionally filtered by date.
 
         Parameters
@@ -130,11 +124,11 @@ class DebugCollector(BaseCollector):
         if not debug_dir.exists():
             return []
 
-        since_dt: Optional[datetime] = None
+        since_dt: datetime | None = None
         if since:
             since_dt = _parse_timestamp(since)
 
-        results: List[Path] = []
+        results: list[Path] = []
         for filepath in debug_dir.glob("*.txt"):
             if not filepath.is_file():
                 continue
@@ -154,7 +148,7 @@ class DebugCollector(BaseCollector):
 
         return results
 
-    def _parse_debug_log(self, filepath: Path) -> Optional[DebugRecord]:
+    def _parse_debug_log(self, filepath: Path) -> DebugRecord | None:
         """Parse a single debug log file into a DebugRecord.
 
         Extracts only structural metadata -- never stores raw user
@@ -173,22 +167,22 @@ class DebugCollector(BaseCollector):
 
         try:
             content = filepath.read_text(encoding="utf-8", errors="replace")
-        except (IOError, OSError):
+        except OSError:
             return None
 
         # Accumulators
         api_call_count = 0
-        models_used: Dict[str, bool] = {}
-        token_snapshots: List[int] = []
-        system_prompts: List[str] = []
-        errors: List[str] = []
-        latencies_ms: List[float] = []
+        models_used: dict[str, bool] = {}
+        token_snapshots: list[int] = []
+        system_prompts: list[str] = []
+        errors: list[str] = []
+        latencies_ms: list[float] = []
 
-        first_timestamp: Optional[str] = None
-        last_timestamp: Optional[str] = None
+        first_timestamp: str | None = None
+        last_timestamp: str | None = None
 
         # Track pending API request timestamps to compute latency
-        pending_api_request_ts: Optional[datetime] = None
+        pending_api_request_ts: datetime | None = None
 
         for line in content.splitlines():
             if not line:
@@ -196,8 +190,8 @@ class DebugCollector(BaseCollector):
 
             # Extract timestamp from line
             ts_match = _TS_RE.match(line)
-            line_ts_str: Optional[str] = None
-            line_ts: Optional[datetime] = None
+            line_ts_str: str | None = None
+            line_ts: datetime | None = None
             if ts_match:
                 line_ts_str = ts_match.group(1)
                 line_ts = _parse_timestamp(line_ts_str)
@@ -248,7 +242,9 @@ class DebugCollector(BaseCollector):
 
         # Build timestamp from first log entry or file modification time
         if first_timestamp:
-            timestamp = first_timestamp + "Z" if not first_timestamp.endswith("Z") else first_timestamp
+            timestamp = (
+                first_timestamp + "Z" if not first_timestamp.endswith("Z") else first_timestamp
+            )
         else:
             try:
                 mtime = filepath.stat().st_mtime
@@ -281,8 +277,8 @@ class DebugCollector(BaseCollector):
 
     def scan(
         self,
-        since: Optional[str] = None,
-        project_filter: Optional[str] = None,
+        since: str | None = None,
+        project_filter: str | None = None,
     ) -> CollectorScanResult:
         """Scan for debug log files without collecting anything."""
         files = self._find_debug_files(since=since)
@@ -309,7 +305,7 @@ class DebugCollector(BaseCollector):
             estimated_size_bytes=estimated_bytes,
         )
 
-    def collect(self, session_id: str) -> List[DebugRecord]:
+    def collect(self, session_id: str) -> list[DebugRecord]:
         """Collect debug metadata for a single session.
 
         Parameters
@@ -333,8 +329,8 @@ class DebugCollector(BaseCollector):
 
     def collect_all(
         self,
-        since: Optional[str] = None,
-        project_filter: Optional[str] = None,
+        since: str | None = None,
+        project_filter: str | None = None,
     ) -> CollectorBatchResult:
         """Collect debug metadata for all uncollected sessions.
 
@@ -345,8 +341,8 @@ class DebugCollector(BaseCollector):
 
         collected = 0
         skipped = 0
-        errors: List[str] = []
-        records: List[DebugRecord] = []
+        errors: list[str] = []
+        records: list[DebugRecord] = []
 
         for filepath in files:
             session_id = filepath.stem

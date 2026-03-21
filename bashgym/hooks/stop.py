@@ -11,16 +11,16 @@ Captures session interruption/stop events:
 This helps understand why sessions ended and capture partial solutions.
 """
 
-import os
-import sys
 import json
+import os
 import platform
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any
 
 # Cross-platform file locking
-if platform.system() == 'Windows':
+if platform.system() == "Windows":
     import msvcrt
 
     def lock_file(f, exclusive=False):
@@ -31,6 +31,7 @@ if platform.system() == 'Windows':
             msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
         except OSError:
             pass
+
 else:
     import fcntl
 
@@ -43,14 +44,14 @@ else:
 
 def get_bashgym_dir() -> Path:
     """Get the global Bash Gym directory (~/.bashgym/)."""
-    if platform.system() == 'Windows':
+    if platform.system() == "Windows":
         base = Path(os.environ.get("USERPROFILE", ""))
     else:
         base = Path.home()
     return base / ".bashgym"
 
 
-def get_session_id() -> Optional[str]:
+def get_session_id() -> str | None:
     """Get the current session ID."""
     session_file = get_bashgym_dir() / "current_session_id"
     if session_file.exists():
@@ -63,7 +64,7 @@ def get_traces_dir() -> Path:
     return get_bashgym_dir() / "traces"
 
 
-def update_session_metadata(stop_reason: str, stop_details: Dict[str, Any]) -> None:
+def update_session_metadata(stop_reason: str, stop_details: dict[str, Any]) -> None:
     """Update session metadata with stop information."""
     session_id = get_session_id()
     if not session_id:
@@ -76,7 +77,7 @@ def update_session_metadata(stop_reason: str, stop_details: Dict[str, Any]) -> N
         return
 
     try:
-        with open(metadata_file, 'r') as f:
+        with open(metadata_file) as f:
             lock_file(f, exclusive=False)
             metadata = json.load(f)
             unlock_file(f)
@@ -86,16 +87,16 @@ def update_session_metadata(stop_reason: str, stop_details: Dict[str, Any]) -> N
         metadata["stopped_at"] = datetime.now(timezone.utc).isoformat()
         metadata["status"] = "stopped"
 
-        with open(metadata_file, 'w') as f:
+        with open(metadata_file, "w") as f:
             lock_file(f, exclusive=True)
             json.dump(metadata, f, indent=2)
             unlock_file(f)
 
-    except (IOError, OSError, json.JSONDecodeError) as e:
+    except (OSError, json.JSONDecodeError) as e:
         print(f"Warning: Could not update session metadata: {e}", file=sys.stderr)
 
 
-def append_to_trace(stop_event: Dict[str, Any]) -> None:
+def append_to_trace(stop_event: dict[str, Any]) -> None:
     """Append stop event to the session trace."""
     session_id = get_session_id()
     if not session_id:
@@ -108,23 +109,23 @@ def append_to_trace(stop_event: Dict[str, Any]) -> None:
         return
 
     try:
-        with open(trace_file, 'r') as f:
+        with open(trace_file) as f:
             lock_file(f, exclusive=False)
             traces = json.load(f)
             unlock_file(f)
 
         traces.append(stop_event)
 
-        with open(trace_file, 'w') as f:
+        with open(trace_file, "w") as f:
             lock_file(f, exclusive=True)
             json.dump(traces, f, indent=2)
             unlock_file(f)
 
-    except (IOError, OSError, json.JSONDecodeError) as e:
+    except (OSError, json.JSONDecodeError) as e:
         print(f"Warning: Could not append to trace: {e}", file=sys.stderr)
 
 
-def process_stop_event(event: Dict[str, Any]) -> Dict[str, Any]:
+def process_stop_event(event: dict[str, Any]) -> dict[str, Any]:
     """Process the stop event and extract relevant information."""
 
     # Determine stop reason
@@ -174,7 +175,7 @@ def main():
             "error_message": stop_event.get("error_message"),
             "tools_used_count": stop_event.get("tools_used_count"),
             "last_tool": stop_event.get("last_tool"),
-        }
+        },
     )
 
     # Append to trace

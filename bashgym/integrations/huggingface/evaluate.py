@@ -7,7 +7,7 @@ Wraps the `evaluate` library for running metrics on local validation data.
 import json
 import logging
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +21,8 @@ class HFEvaluator:
         self,
         model_id: str,
         metric_name: str = "accuracy",
-        validation_data_path: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        validation_data_path: str | None = None,
+    ) -> dict[str, Any]:
         """Evaluate a model using a HuggingFace metric on local validation data.
 
         This is a lightweight evaluation that loads the metric module and computes
@@ -92,7 +92,9 @@ class HFEvaluator:
                         elif "messages" in row:
                             # NeMo format: use assistant message as reference
                             msgs = row["messages"]
-                            asst = next((m["content"] for m in msgs if m["role"] == "assistant"), None)
+                            asst = next(
+                                (m["content"] for m in msgs if m["role"] == "assistant"), None
+                            )
                             if asst:
                                 references.append(asst)
                                 predictions.append(asst)  # Self-evaluation placeholder
@@ -167,11 +169,10 @@ class HFEvaluator:
                     "score": None,
                 }
 
-        import asyncio
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, _compute)
 
-    async def available_metrics(self) -> List[str]:
+    async def available_metrics(self) -> list[str]:
         """Return list of supported metrics."""
         return SUPPORTED_METRICS
 

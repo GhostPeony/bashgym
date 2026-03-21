@@ -9,35 +9,38 @@ Captures full lifecycle data:
 - Evaluations: benchmarks, custom evals
 """
 
+import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-import json
+from typing import Any
 
 
 @dataclass
 class LossPoint:
     """A single point on the loss curve."""
+
     step: int
     loss: float
-    val_loss: Optional[float] = None
-    learning_rate: Optional[float] = None
-    epoch: Optional[int] = None
+    val_loss: float | None = None
+    learning_rate: float | None = None
+    epoch: int | None = None
 
 
 @dataclass
 class CheckpointInfo:
     """Information about a saved checkpoint."""
+
     path: str
     step: int
-    epoch: Optional[int] = None
-    loss: Optional[float] = None
+    epoch: int | None = None
+    loss: float | None = None
 
 
 @dataclass
 class GGUFExport:
     """Information about a GGUF export."""
+
     path: str
     quantization: str  # e.g., "Q4_K_M", "Q8_0"
     size_bytes: int
@@ -47,12 +50,13 @@ class GGUFExport:
 @dataclass
 class ModelArtifacts:
     """All artifacts associated with a model."""
-    checkpoints: List[CheckpointInfo] = field(default_factory=list)
-    final_adapter_path: Optional[str] = None
-    merged_path: Optional[str] = None
-    gguf_exports: List[GGUFExport] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    checkpoints: list[CheckpointInfo] = field(default_factory=list)
+    final_adapter_path: str | None = None
+    merged_path: str | None = None
+    gguf_exports: list[GGUFExport] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
         return {
             "checkpoints": [
                 {"path": c.path, "step": c.step, "epoch": c.epoch, "loss": c.loss}
@@ -65,21 +69,18 @@ class ModelArtifacts:
                     "path": g.path,
                     "quantization": g.quantization,
                     "size_bytes": g.size_bytes,
-                    "created_at": g.created_at.isoformat()
+                    "created_at": g.created_at.isoformat(),
                 }
                 for g in self.gguf_exports
-            ]
+            ],
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ModelArtifacts":
+    def from_dict(cls, data: dict[str, Any]) -> "ModelArtifacts":
         return cls(
             checkpoints=[
                 CheckpointInfo(
-                    path=c["path"],
-                    step=c["step"],
-                    epoch=c.get("epoch"),
-                    loss=c.get("loss")
+                    path=c["path"], step=c["step"], epoch=c.get("epoch"), loss=c.get("loss")
                 )
                 for c in data.get("checkpoints", [])
             ],
@@ -90,57 +91,59 @@ class ModelArtifacts:
                     path=g["path"],
                     quantization=g["quantization"],
                     size_bytes=g["size_bytes"],
-                    created_at=datetime.fromisoformat(g["created_at"])
+                    created_at=datetime.fromisoformat(g["created_at"]),
                 )
                 for g in data.get("gguf_exports", [])
-            ]
+            ],
         )
 
 
 @dataclass
 class BenchmarkResult:
     """Result from a standard benchmark."""
+
     benchmark_name: str
     score: float  # Primary score (e.g., pass@1)
     passed: int
     total: int
-    metrics: Dict[str, float] = field(default_factory=dict)  # Additional metrics
+    metrics: dict[str, float] = field(default_factory=dict)  # Additional metrics
     evaluated_at: datetime = field(default_factory=datetime.now)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "benchmark_name": self.benchmark_name,
             "score": self.score,
             "passed": self.passed,
             "total": self.total,
             "metrics": self.metrics,
-            "evaluated_at": self.evaluated_at.isoformat()
+            "evaluated_at": self.evaluated_at.isoformat(),
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "BenchmarkResult":
+    def from_dict(cls, data: dict[str, Any]) -> "BenchmarkResult":
         return cls(
             benchmark_name=data["benchmark_name"],
             score=data["score"],
             passed=data["passed"],
             total=data["total"],
             metrics=data.get("metrics", {}),
-            evaluated_at=datetime.fromisoformat(data["evaluated_at"])
+            evaluated_at=datetime.fromisoformat(data["evaluated_at"]),
         )
 
 
 @dataclass
 class CustomEvalResult:
     """Result from a custom evaluation set."""
+
     eval_set_id: str
     eval_type: str  # "replay" or "variation"
     passed: int
     total: int
     pass_rate: float
-    failures: List[Dict[str, Any]] = field(default_factory=list)  # Failed case details
+    failures: list[dict[str, Any]] = field(default_factory=list)  # Failed case details
     evaluated_at: datetime = field(default_factory=datetime.now)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "eval_set_id": self.eval_set_id,
             "eval_type": self.eval_type,
@@ -148,11 +151,11 @@ class CustomEvalResult:
             "total": self.total,
             "pass_rate": self.pass_rate,
             "failures": self.failures,
-            "evaluated_at": self.evaluated_at.isoformat()
+            "evaluated_at": self.evaluated_at.isoformat(),
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "CustomEvalResult":
+    def from_dict(cls, data: dict[str, Any]) -> "CustomEvalResult":
         return cls(
             eval_set_id=data["eval_set_id"],
             eval_type=data["eval_type"],
@@ -160,33 +163,34 @@ class CustomEvalResult:
             total=data["total"],
             pass_rate=data["pass_rate"],
             failures=data.get("failures", []),
-            evaluated_at=datetime.fromisoformat(data["evaluated_at"])
+            evaluated_at=datetime.fromisoformat(data["evaluated_at"]),
         )
 
 
 @dataclass
 class EvaluationRecord:
     """A timestamped evaluation snapshot for tracking trends."""
-    evaluated_at: datetime
-    benchmarks: Dict[str, float]  # benchmark_name -> score
-    custom_eval_score: Optional[float] = None
-    overall_score: Optional[float] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    evaluated_at: datetime
+    benchmarks: dict[str, float]  # benchmark_name -> score
+    custom_eval_score: float | None = None
+    overall_score: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
         return {
             "evaluated_at": self.evaluated_at.isoformat(),
             "benchmarks": self.benchmarks,
             "custom_eval_score": self.custom_eval_score,
-            "overall_score": self.overall_score
+            "overall_score": self.overall_score,
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "EvaluationRecord":
+    def from_dict(cls, data: dict[str, Any]) -> "EvaluationRecord":
         return cls(
             evaluated_at=datetime.fromisoformat(data["evaluated_at"]),
             benchmarks=data.get("benchmarks", {}),
             custom_eval_score=data.get("custom_eval_score"),
-            overall_score=data.get("overall_score")
+            overall_score=data.get("overall_score"),
         )
 
 
@@ -199,49 +203,49 @@ class ModelProfile:
     """
 
     # Identity
-    model_id: str                                    # Unique identifier
-    run_id: str                                      # Training run ID
-    display_name: str                                # User-editable name
-    description: str = ""                            # User-editable description
-    tags: List[str] = field(default_factory=list)   # e.g., ["production", "v3"]
-    starred: bool = False                            # Pinned to top
+    model_id: str  # Unique identifier
+    run_id: str  # Training run ID
+    display_name: str  # User-editable name
+    description: str = ""  # User-editable description
+    tags: list[str] = field(default_factory=list)  # e.g., ["production", "v3"]
+    starred: bool = False  # Pinned to top
     created_at: datetime = field(default_factory=datetime.now)
 
     # Lineage
-    base_model: str = ""                             # e.g., "Qwen2.5-Coder-1.5B"
-    training_strategy: str = "sft"                   # sft, dpo, grpo, distillation
-    teacher_model: Optional[str] = None              # If distillation
-    training_traces: List[str] = field(default_factory=list)  # Gold trace IDs used
-    parent_model: Optional[str] = None               # If fine-tuned from trained model
-    training_repos: List[str] = field(default_factory=list)   # Repos traces came from
+    base_model: str = ""  # e.g., "Qwen2.5-Coder-1.5B"
+    training_strategy: str = "sft"  # sft, dpo, grpo, distillation
+    teacher_model: str | None = None  # If distillation
+    training_traces: list[str] = field(default_factory=list)  # Gold trace IDs used
+    parent_model: str | None = None  # If fine-tuned from trained model
+    training_repos: list[str] = field(default_factory=list)  # Repos traces came from
 
     # Training
-    config: Dict[str, Any] = field(default_factory=dict)  # Full TrainerConfig
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
+    config: dict[str, Any] = field(default_factory=dict)  # Full TrainerConfig
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
     duration_seconds: float = 0.0
-    loss_curve: List[Dict[str, Any]] = field(default_factory=list)  # [{step, loss}, ...]
-    final_metrics: Dict[str, float] = field(default_factory=dict)   # {final_loss, epochs}
+    loss_curve: list[dict[str, Any]] = field(default_factory=list)  # [{step, loss}, ...]
+    final_metrics: dict[str, float] = field(default_factory=dict)  # {final_loss, epochs}
 
     # Artifacts
     artifacts: ModelArtifacts = field(default_factory=ModelArtifacts)
     model_dir: str = ""  # Path to model directory
 
     # Evaluations
-    benchmarks: Dict[str, BenchmarkResult] = field(default_factory=dict)
-    custom_evals: Dict[str, CustomEvalResult] = field(default_factory=dict)
-    evaluation_history: List[EvaluationRecord] = field(default_factory=list)
+    benchmarks: dict[str, BenchmarkResult] = field(default_factory=dict)
+    custom_evals: dict[str, CustomEvalResult] = field(default_factory=dict)
+    evaluation_history: list[EvaluationRecord] = field(default_factory=list)
 
     # Operational
     model_size_bytes: int = 0
-    model_size_params: Optional[str] = None          # e.g., "1.5B"
-    inference_latency_ms: Optional[float] = None
-    status: str = "pending"                          # pending, training, ready, needs_eval, archived
-    deployed_to: Optional[str] = None                # e.g., "ollama:bashgym-v3"
+    model_size_params: str | None = None  # e.g., "1.5B"
+    inference_latency_ms: float | None = None
+    status: str = "pending"  # pending, training, ready, needs_eval, archived
+    deployed_to: str | None = None  # e.g., "ollama:bashgym-v3"
 
     # Computed properties
     @property
-    def custom_eval_pass_rate(self) -> Optional[float]:
+    def custom_eval_pass_rate(self) -> float | None:
         """Aggregate pass rate across all custom evals."""
         if not self.custom_evals:
             return None
@@ -250,7 +254,7 @@ class ModelProfile:
         return (total_passed / total_total * 100) if total_total > 0 else 0.0
 
     @property
-    def benchmark_avg_score(self) -> Optional[float]:
+    def benchmark_avg_score(self) -> float | None:
         """Average score across all benchmarks."""
         if not self.benchmarks:
             return None
@@ -261,10 +265,10 @@ class ModelProfile:
         """Human-readable model size."""
         if self.model_size_bytes == 0:
             return "Unknown"
-        gb = self.model_size_bytes / (1024 ** 3)
+        gb = self.model_size_bytes / (1024**3)
         if gb >= 1:
             return f"{gb:.1f}GB"
-        mb = self.model_size_bytes / (1024 ** 2)
+        mb = self.model_size_bytes / (1024**2)
         return f"{mb:.0f}MB"
 
     @property
@@ -278,7 +282,7 @@ class ModelProfile:
             return f"{hours}h {minutes}m"
         return f"{minutes}m"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize profile to dictionary."""
         return {
             # Identity
@@ -289,7 +293,6 @@ class ModelProfile:
             "tags": self.tags,
             "starred": self.starred,
             "created_at": self.created_at.isoformat(),
-
             # Lineage
             "base_model": self.base_model,
             "training_strategy": self.training_strategy,
@@ -297,7 +300,6 @@ class ModelProfile:
             "training_traces": self.training_traces,
             "parent_model": self.parent_model,
             "training_repos": self.training_repos,
-
             # Training
             "config": self.config,
             "started_at": self.started_at.isoformat() if self.started_at else None,
@@ -305,16 +307,13 @@ class ModelProfile:
             "duration_seconds": self.duration_seconds,
             "loss_curve": self.loss_curve,
             "final_metrics": self.final_metrics,
-
             # Artifacts
             "artifacts": self.artifacts.to_dict(),
             "model_dir": self.model_dir,
-
             # Evaluations
             "benchmarks": {k: v.to_dict() for k, v in self.benchmarks.items()},
             "custom_evals": {k: v.to_dict() for k, v in self.custom_evals.items()},
             "evaluation_history": [e.to_dict() for e in self.evaluation_history],
-
             # Operational
             "model_size_bytes": self.model_size_bytes,
             "model_size_params": self.model_size_params,
@@ -324,7 +323,7 @@ class ModelProfile:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ModelProfile":
+    def from_dict(cls, data: dict[str, Any]) -> "ModelProfile":
         """Deserialize profile from dictionary."""
         return cls(
             # Identity
@@ -335,7 +334,6 @@ class ModelProfile:
             tags=data.get("tags", []),
             starred=data.get("starred", False),
             created_at=datetime.fromisoformat(data["created_at"]),
-
             # Lineage
             base_model=data.get("base_model", ""),
             training_strategy=data.get("training_strategy", "sft"),
@@ -343,33 +341,30 @@ class ModelProfile:
             training_traces=data.get("training_traces", []),
             parent_model=data.get("parent_model"),
             training_repos=data.get("training_repos", []),
-
             # Training
             config=data.get("config", {}),
-            started_at=datetime.fromisoformat(data["started_at"]) if data.get("started_at") else None,
-            completed_at=datetime.fromisoformat(data["completed_at"]) if data.get("completed_at") else None,
+            started_at=(
+                datetime.fromisoformat(data["started_at"]) if data.get("started_at") else None
+            ),
+            completed_at=(
+                datetime.fromisoformat(data["completed_at"]) if data.get("completed_at") else None
+            ),
             duration_seconds=data.get("duration_seconds", 0.0),
             loss_curve=data.get("loss_curve", []),
             final_metrics=data.get("final_metrics", {}),
-
             # Artifacts
             artifacts=ModelArtifacts.from_dict(data.get("artifacts", {})),
             model_dir=data.get("model_dir", ""),
-
             # Evaluations
             benchmarks={
-                k: BenchmarkResult.from_dict(v)
-                for k, v in data.get("benchmarks", {}).items()
+                k: BenchmarkResult.from_dict(v) for k, v in data.get("benchmarks", {}).items()
             },
             custom_evals={
-                k: CustomEvalResult.from_dict(v)
-                for k, v in data.get("custom_evals", {}).items()
+                k: CustomEvalResult.from_dict(v) for k, v in data.get("custom_evals", {}).items()
             },
             evaluation_history=[
-                EvaluationRecord.from_dict(e)
-                for e in data.get("evaluation_history", [])
+                EvaluationRecord.from_dict(e) for e in data.get("evaluation_history", [])
             ],
-
             # Operational
             model_size_bytes=data.get("model_size_bytes", 0),
             model_size_params=data.get("model_size_params"),
@@ -378,7 +373,7 @@ class ModelProfile:
             deployed_to=data.get("deployed_to"),
         )
 
-    def save(self, path: Optional[Path] = None) -> Path:
+    def save(self, path: Path | None = None) -> Path:
         """Save profile to JSON file."""
         if path is None:
             path = Path(self.model_dir) / "model_profile.json"
@@ -411,7 +406,7 @@ class ModelProfile:
             evaluated_at=datetime.now(),
             benchmarks={k: v.score for k, v in self.benchmarks.items()},
             custom_eval_score=self.custom_eval_pass_rate,
-            overall_score=self.benchmark_avg_score
+            overall_score=self.benchmark_avg_score,
         )
         self.evaluation_history.append(record)
 

@@ -136,6 +136,7 @@ def create_app() -> FastAPI:
 
     # CORS middleware for frontend
     from bashgym.config import get_settings as _get_settings
+
     _settings = _get_settings()
     app.add_middleware(
         CORSMiddleware,
@@ -147,6 +148,7 @@ def create_app() -> FastAPI:
 
     # Authentication middleware (supports desktop pass-through + web cookie/API key)
     from bashgym.api.auth import AuthMiddleware
+
     app.add_middleware(AuthMiddleware)
 
     # Initialize state
@@ -165,17 +167,20 @@ def create_app() -> FastAPI:
     app.state.autoresearcher = None  # AutoResearch hyperparameter search
     app.state.trace_researcher = None  # Trace Research data curation search
     from bashgym.api.trace_cache import TraceIndexCache
+
     app.state.trace_cache = TraceIndexCache()
 
     @app.on_event("startup")
     async def startup():
         """Initialize Bash Gym components on startup."""
         from bashgym.config import get_settings
+
         settings = get_settings()
         settings.setup()
 
         # Initialize auth database and clean up expired sessions
         from bashgym.api.database import cleanup_expired_sessions, init_db
+
         init_db()
         removed = cleanup_expired_sessions()
         if removed:
@@ -184,10 +189,12 @@ def create_app() -> FastAPI:
         # Initialize instrumentation (guardrails + profiler)
         try:
             from bashgym.core import get_instrumentation
+
             app.state.instrumentation = get_instrumentation()
 
             # Register WebSocket callback for guardrail events
             if app.state.instrumentation:
+
                 async def on_guardrail_event(event):
                     """Broadcast guardrail events via WebSocket."""
                     if event.action_taken.value == "block":
@@ -195,23 +202,27 @@ def create_app() -> FastAPI:
                             check_type=event.check_type.value,
                             location=event.location,
                             confidence=event.confidence,
-                            content_preview=event.original_content[:100] if event.original_content else None,
-                            details=event.details
+                            content_preview=(
+                                event.original_content[:100] if event.original_content else None
+                            ),
+                            details=event.details,
                         )
                     elif event.action_taken.value == "warn":
                         await broadcast_guardrail_warn(
                             check_type=event.check_type.value,
                             location=event.location,
                             confidence=event.confidence,
-                            content_preview=event.original_content[:100] if event.original_content else None,
-                            details=event.details
+                            content_preview=(
+                                event.original_content[:100] if event.original_content else None
+                            ),
+                            details=event.details,
                         )
                     elif event.action_taken.value == "modify":
                         await broadcast_pii_redacted(
                             location=event.location,
                             redaction_count=1,
                             pii_types=[event.check_type.value],
-                            details=event.details
+                            details=event.details,
                         )
 
                 app.state.instrumentation.on_event(on_guardrail_event)
@@ -233,6 +244,7 @@ def create_app() -> FastAPI:
 
             # Initialize provider registry
             from bashgym.providers.registry import ProviderRegistry as _ProviderRegistry
+
             registry = _ProviderRegistry()
 
             # Register Anthropic
@@ -240,6 +252,7 @@ def create_app() -> FastAPI:
             if anthropic_key:
                 try:
                     from bashgym.providers.anthropic import AnthropicProvider
+
                     registry.register(AnthropicProvider(api_key=anthropic_key))
                     logger.info("Registered Anthropic provider")
                 except Exception as e:
@@ -250,6 +263,7 @@ def create_app() -> FastAPI:
             if nvidia_key:
                 try:
                     from bashgym.providers.nim import NIMProvider
+
                     registry.register(NIMProvider(api_key=nvidia_key))
                     logger.info("Registered NIM provider")
                 except Exception as e:
@@ -257,10 +271,12 @@ def create_app() -> FastAPI:
 
             # Register Ollama (local)
             from bashgym.config import get_settings as _get_settings
+
             _s = _get_settings()
             if _s.ollama.enabled:
                 try:
                     from bashgym.providers.ollama import OllamaProvider as _OllamaProvider
+
                     ollama_provider = _OllamaProvider(base_url=_s.ollama.base_url)
                     registry.register(ollama_provider)
                     logger.info(f"Registered Ollama provider at {_s.ollama.base_url}")
@@ -298,12 +314,17 @@ def create_app() -> FastAPI:
                     if best and app.state.router:
                         from bashgym.gym.router import ModelConfig as _ModelConfig
                         from bashgym.gym.router import ModelType as _ModelType
-                        app.state.router.register_model(_ModelConfig(
-                            name=best.id,
-                            model_type=_ModelType.STUDENT,
-                            endpoint="ollama://registry",
-                        ))
-                        logger.info(f"Auto-selected Student model: {best.id} ({best.parameter_size})")
+
+                        app.state.router.register_model(
+                            _ModelConfig(
+                                name=best.id,
+                                model_type=_ModelType.STUDENT,
+                                endpoint="ollama://registry",
+                            )
+                        )
+                        logger.info(
+                            f"Auto-selected Student model: {best.id} ({best.parameter_size})"
+                        )
             except Exception as e:
                 logger.warning(f"Model discovery failed: {e}")
 
@@ -312,7 +333,9 @@ def create_app() -> FastAPI:
             registry = get_device_registry()
             imported = await registry.auto_import_from_env()
             if imported:
-                logger.info(f"Auto-imported SSH device from .env: {imported.name} ({imported.host})")
+                logger.info(
+                    f"Auto-imported SSH device from .env: {imported.name} ({imported.host})"
+                )
         except Exception as e:
             logger.warning(f"Failed to auto-import SSH device: {e}")
 
@@ -330,7 +353,11 @@ def create_app() -> FastAPI:
                         app.state.training_runs[state.run_id] = {
                             "run_id": state.run_id,
                             "strategy": state.config.get("strategy", "sft"),
-                            "status": TrainingStatus.RUNNING if state.status == "running" else TrainingStatus.PAUSED,
+                            "status": (
+                                TrainingStatus.RUNNING
+                                if state.status == "running"
+                                else TrainingStatus.PAUSED
+                            ),
                             "config": state.config,
                             "started_at": state.started_at,
                             "pid": state.pid,
@@ -350,7 +377,9 @@ def create_app() -> FastAPI:
                             logger.info(f"Orphaned run {state.run_id} completed (final/ found)")
                             update_run_state(state.output_dir, status="completed")
                         else:
-                            logger.warning(f"Orphaned run {state.run_id} process dead, marking failed")
+                            logger.warning(
+                                f"Orphaned run {state.run_id} process dead, marking failed"
+                            )
                             update_run_state(state.output_dir, status="failed")
         except Exception as e:
             logger.error(f"Error recovering orphaned training runs: {e}")
@@ -359,6 +388,7 @@ def create_app() -> FastAPI:
         try:
             from bashgym.config import get_bashgym_dir
             from bashgym.config import get_settings as _gs
+
             _data_dir = Path(_gs().data.data_dir)
             _tier_dirs = [
                 (_data_dir / "gold_traces", TraceStatus.GOLD),
@@ -399,7 +429,7 @@ def create_app() -> FastAPI:
     @app.on_event("shutdown")
     async def shutdown():
         """Cleanup on shutdown."""
-        if hasattr(app.state, 'provider_registry') and app.state.provider_registry:
+        if hasattr(app.state, "provider_registry") and app.state.provider_registry:
             await app.state.provider_registry.close()
         if app.state.router:
             await app.state.router.close()
@@ -424,15 +454,14 @@ def create_app() -> FastAPI:
     async def health_check():
         """Check API health status."""
         return HealthCheck(
-            status="healthy",
-            timestamp=datetime.utcnow().isoformat(),
-            version="0.1.0"
+            status="healthy", timestamp=datetime.utcnow().isoformat(), version="0.1.0"
         )
 
     @app.get("/api/debug/traces", tags=["System"])
     async def debug_traces():
         """Debug endpoint to diagnose trace discovery issues."""
         import os as _os
+
         if _os.environ.get("BASHGYM_MODE", "").lower() == "web":
             raise HTTPException(status_code=404, detail="Not found")
         from bashgym.config import get_bashgym_dir, get_settings
@@ -441,11 +470,7 @@ def create_app() -> FastAPI:
         data_dir = Path(settings.data.data_dir)
         global_dir = get_bashgym_dir()
 
-        result = {
-            "data_dir": str(data_dir),
-            "global_dir": str(global_dir),
-            "directories": {}
-        }
+        result = {"data_dir": str(data_dir), "global_dir": str(global_dir), "directories": {}}
 
         # Check all trace directories (including tiered: gold/silver/bronze)
         dirs_to_check = {
@@ -462,11 +487,7 @@ def create_app() -> FastAPI:
         }
 
         for name, path in dirs_to_check.items():
-            dir_info = {
-                "path": str(path),
-                "exists": path.exists(),
-                "files": []
-            }
+            dir_info = {"path": str(path), "exists": path.exists(), "files": []}
             if path.exists():
                 files = list(path.glob("*.json"))
                 dir_info["count"] = len(files)
@@ -479,16 +500,33 @@ def create_app() -> FastAPI:
     async def get_system_stats():
         """Get system statistics."""
         from bashgym.config import get_bashgym_dir, get_settings
+
         settings = get_settings()
 
         data_dir = Path(settings.data.data_dir)
         global_dir = get_bashgym_dir()
 
         # Count traces in tiered directories (gold/silver/bronze/failed)
-        gold_traces = list((data_dir / "gold_traces").glob("*.json")) if (data_dir / "gold_traces").exists() else []
-        silver_traces = list((data_dir / "silver_traces").glob("*.json")) if (data_dir / "silver_traces").exists() else []
-        bronze_traces = list((data_dir / "bronze_traces").glob("*.json")) if (data_dir / "bronze_traces").exists() else []
-        failed_traces = list((data_dir / "failed_traces").glob("*.json")) if (data_dir / "failed_traces").exists() else []
+        gold_traces = (
+            list((data_dir / "gold_traces").glob("*.json"))
+            if (data_dir / "gold_traces").exists()
+            else []
+        )
+        silver_traces = (
+            list((data_dir / "silver_traces").glob("*.json"))
+            if (data_dir / "silver_traces").exists()
+            else []
+        )
+        bronze_traces = (
+            list((data_dir / "bronze_traces").glob("*.json"))
+            if (data_dir / "bronze_traces").exists()
+            else []
+        )
+        failed_traces = (
+            list((data_dir / "failed_traces").glob("*.json"))
+            if (data_dir / "failed_traces").exists()
+            else []
+        )
         models = list((data_dir / "models").iterdir()) if (data_dir / "models").exists() else []
 
         # Count pending traces from both global and project directories
@@ -498,6 +536,7 @@ def create_app() -> FastAPI:
 
         if global_traces.exists():
             from bashgym.trace_capture.core import glob_pending_traces
+
             pending_count += len(glob_pending_traces(global_traces))
         if project_traces.exists() and project_traces.resolve() != global_traces.resolve():
             pending_count += len(glob_pending_traces(project_traces))
@@ -512,7 +551,9 @@ def create_app() -> FastAPI:
             base_model=settings.training.base_model,
             auto_export_gguf=True,
             active_tasks=len([t for t in app.state.tasks.values() if t.get("status") == "running"]),
-            active_training_runs=len([r for r in app.state.training_runs.values() if r.get("status") == "running"])
+            active_training_runs=len(
+                [r for r in app.state.training_runs.values() if r.get("status") == "running"]
+            ),
         )
 
     # =========================================================================
@@ -528,15 +569,18 @@ def create_app() -> FastAPI:
         info = service.get_system_info(force_refresh=refresh)
 
         return SystemInfoResponse(
-            gpus=[GpuInfo(
-                vendor=g.vendor,
-                model=g.model,
-                vram=g.vram,
-                vram_used=g.vram_used,
-                driver=g.driver,
-                temperature=g.temperature,
-                utilization=g.utilization,
-            ) for g in info.gpus],
+            gpus=[
+                GpuInfo(
+                    vendor=g.vendor,
+                    model=g.model,
+                    vram=g.vram,
+                    vram_used=g.vram_used,
+                    driver=g.driver,
+                    temperature=g.temperature,
+                    utilization=g.utilization,
+                )
+                for g in info.gpus
+            ],
             total_ram=info.total_ram,
             available_ram=info.available_ram,
             platform=info.platform_name,
@@ -555,15 +599,18 @@ def create_app() -> FastAPI:
         service = get_system_info_service()
         gpus = service.get_gpus()
 
-        return [GpuInfo(
-            vendor=g.vendor,
-            model=g.model,
-            vram=g.vram,
-            vram_used=g.vram_used,
-            driver=g.driver,
-            temperature=g.temperature,
-            utilization=g.utilization,
-        ) for g in gpus]
+        return [
+            GpuInfo(
+                vendor=g.vendor,
+                model=g.model,
+                vram=g.vram,
+                vram_used=g.vram_used,
+                driver=g.driver,
+                temperature=g.temperature,
+                utilization=g.utilization,
+            )
+            for g in gpus
+        ]
 
     @app.get("/api/system/recommendations", response_model=ModelRecommendations, tags=["System"])
     async def get_model_recommendations():
@@ -584,36 +631,34 @@ def create_app() -> FastAPI:
         """Detect all available model providers (local and cloud)."""
         try:
             from bashgym.providers import detect_providers
+
             providers = await detect_providers()
             return {
                 "providers": [p.to_dict() for p in providers],
                 "summary": {
                     "available": len([p for p in providers if p.available]),
-                    "total": len(providers)
-                }
+                    "total": len(providers),
+                },
             }
         except ImportError:
             return {"providers": [], "summary": {"available": 0, "total": 0}}
 
     @app.get("/api/providers/models", tags=["Providers"])
     async def get_available_models(
-        include_local: bool = True,
-        include_cloud: bool = True,
-        code_only: bool = False
+        include_local: bool = True, include_cloud: bool = True, code_only: bool = False
     ):
         """Get all available models organized by category."""
         try:
             from bashgym.providers import get_available_models as get_models
+
             models = await get_models(
-                include_local=include_local,
-                include_cloud=include_cloud,
-                code_only=code_only
+                include_local=include_local, include_cloud=include_cloud, code_only=code_only
             )
             return {
                 "local": [m.to_dict() for m in models["local"]],
                 "training": [m.to_dict() for m in models["training"]],
                 "teacher": [m.to_dict() for m in models["teacher"]],
-                "inference": [m.to_dict() for m in models["inference"]]
+                "inference": [m.to_dict() for m in models["inference"]],
             }
         except ImportError:
             return {"local": [], "training": [], "teacher": [], "inference": []}
@@ -623,20 +668,18 @@ def create_app() -> FastAPI:
         """Get models from local Ollama installation."""
         try:
             from bashgym.providers.ollama import get_ollama_provider
+
             provider = get_ollama_provider()
 
             if not await provider.is_running():
                 return {
                     "available": False,
                     "error": "Ollama not running. Start with: ollama serve",
-                    "models": []
+                    "models": [],
                 }
 
             models = await provider.list_ollama_models()
-            return {
-                "available": True,
-                "models": [m.to_dict() for m in models]
-            }
+            return {"available": True, "models": [m.to_dict() for m in models]}
         except ImportError:
             return {"available": False, "error": "Ollama provider not installed", "models": []}
 
@@ -645,6 +688,7 @@ def create_app() -> FastAPI:
         """Pull (download) a model from Ollama registry."""
         try:
             from bashgym.providers.ollama import get_ollama_provider
+
             provider = get_ollama_provider()
 
             if not await provider.is_running():
@@ -659,7 +703,7 @@ def create_app() -> FastAPI:
             return {
                 "status": "pulling",
                 "model": model_name,
-                "message": f"Started downloading {model_name}"
+                "message": f"Started downloading {model_name}",
             }
         except ImportError:
             raise HTTPException(status_code=501, detail="Ollama provider not available")
@@ -669,6 +713,7 @@ def create_app() -> FastAPI:
         """Delete a model from Ollama."""
         try:
             from bashgym.providers.ollama import get_ollama_provider
+
             provider = get_ollama_provider()
 
             if not await provider.is_running():
@@ -695,6 +740,7 @@ def create_app() -> FastAPI:
             default_device = await registry.get_default()
             if default_device:
                 from bashgym.gym.remote_trainer import RemoteTrainer, SSHConfig
+
                 ssh_config = SSHConfig(
                     host=default_device.host,
                     port=default_device.port,
@@ -711,21 +757,26 @@ def create_app() -> FastAPI:
                     "error": result.error,
                     "host": default_device.host,
                     "username": default_device.username,
-                    "hostname": getattr(result, 'hostname', None),
-                    "os_info": getattr(result, 'os_info', None),
-                    "cuda_version": getattr(result, 'cuda_version', None),
-                    "gpus": getattr(result, 'gpus', None),
+                    "hostname": getattr(result, "hostname", None),
+                    "os_info": getattr(result, "os_info", None),
+                    "cuda_version": getattr(result, "cuda_version", None),
+                    "gpus": getattr(result, "gpus", None),
                 }
         except Exception as e:
             logger.warning(f"Device registry preflight failed, falling back to env: {e}")
 
         # Fallback to env vars
         from bashgym.config import get_settings as _get_settings
+
         _s = _get_settings()
         if not _s.ssh.enabled:
-            return {"ok": False, "error": "No SSH devices configured and SSH_REMOTE_ENABLED not set."}
+            return {
+                "ok": False,
+                "error": "No SSH devices configured and SSH_REMOTE_ENABLED not set.",
+            }
 
         from bashgym.gym.remote_trainer import RemoteTrainer, SSHConfig
+
         config = SSHConfig.from_settings(_s.ssh)
         trainer = RemoteTrainer(config)
         result = await trainer.preflight_check()
@@ -743,10 +794,7 @@ def create_app() -> FastAPI:
     # =========================================================================
 
     @app.post("/api/tasks", response_model=TaskResponse, tags=["Tasks"])
-    async def submit_task(
-        request: TaskRequest,
-        background_tasks: BackgroundTasks
-    ):
+    async def submit_task(request: TaskRequest, background_tasks: BackgroundTasks):
         """Submit a new task for agent execution."""
         task_id = request.task_id or f"task_{uuid.uuid4().hex[:12]}"
 
@@ -755,7 +803,7 @@ def create_app() -> FastAPI:
             "task_id": task_id,
             "prompt": request.prompt,
             "status": TaskStatus.PENDING,
-            "created_at": datetime.utcnow().isoformat()
+            "created_at": datetime.utcnow().isoformat(),
         }
 
         # Run task in background
@@ -765,7 +813,7 @@ def create_app() -> FastAPI:
             task_id=task_id,
             status=TaskStatus.PENDING,
             message="Task queued for execution",
-            created_at=app.state.tasks[task_id]["created_at"]
+            created_at=app.state.tasks[task_id]["created_at"],
         )
 
     async def run_task(app, task_id: str, request: TaskRequest):
@@ -801,14 +849,11 @@ def create_app() -> FastAPI:
             status=task["status"],
             created_at=task.get("created_at"),
             completed_at=task.get("completed_at"),
-            result=task.get("result")
+            result=task.get("result"),
         )
 
     @app.get("/api/tasks", response_model=list[TaskResponse], tags=["Tasks"])
-    async def list_tasks(
-        status: TaskStatus | None = None,
-        limit: int = 50
-    ):
+    async def list_tasks(status: TaskStatus | None = None, limit: int = 50):
         """List all tasks, optionally filtered by status."""
         tasks = list(app.state.tasks.values())
 
@@ -822,7 +867,7 @@ def create_app() -> FastAPI:
                 task_id=t["task_id"],
                 status=t["status"],
                 created_at=t.get("created_at"),
-                completed_at=t.get("completed_at")
+                completed_at=t.get("completed_at"),
             )
             for t in tasks
         ]
@@ -832,10 +877,7 @@ def create_app() -> FastAPI:
     # =========================================================================
 
     @app.post("/api/training/start", response_model=TrainingResponse, tags=["Training"])
-    async def start_training(
-        request: TrainingRequest,
-        background_tasks: BackgroundTasks
-    ):
+    async def start_training(request: TrainingRequest, background_tasks: BackgroundTasks):
         """Start a new training run."""
         run_id = f"run_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
 
@@ -845,7 +887,7 @@ def create_app() -> FastAPI:
             "strategy": request.strategy,
             "status": TrainingStatus.PENDING,
             "config": request.dict(),
-            "started_at": datetime.utcnow().isoformat()
+            "started_at": datetime.utcnow().isoformat(),
         }
 
         # Start training in background
@@ -856,12 +898,13 @@ def create_app() -> FastAPI:
             status=TrainingStatus.PENDING,
             strategy=request.strategy,
             message="Training run queued",
-            started_at=app.state.training_runs[run_id]["started_at"]
+            started_at=app.state.training_runs[run_id]["started_at"],
         )
 
     async def run_training(app, run_id: str, request: TrainingRequest):
         """Execute training in the background with WebSocket updates."""
         import traceback
+
         logger.info(f"[Training] Background task started for run {run_id}")
         print(f"[Training] Background task started for run {run_id}")
         try:
@@ -893,6 +936,7 @@ def create_app() -> FastAPI:
                         IngestionConfig,
                         SecurityIngester,
                     )
+
                     sec_config = IngestionConfig(
                         dataset_type=DatasetType(request.security_dataset_type),
                         input_path=request.security_dataset_path,
@@ -905,7 +949,9 @@ def create_app() -> FastAPI:
                     sec_ingester = SecurityIngester(sec_config)
                     result = sec_ingester.ingest_direct()
                     dataset_path = Path(result.train_path)
-                    logger.info(f"Security ingestion complete: {result.examples_generated} examples -> {dataset_path}")
+                    logger.info(
+                        f"Security ingestion complete: {result.examples_generated} examples -> {dataset_path}"
+                    )
                 elif request.data_source == DataSource.DATASET_PATH or request.dataset_path:
                     dataset_path = Path(request.dataset_path)
                 else:
@@ -923,43 +969,55 @@ def create_app() -> FastAPI:
                             filtered_files = []
                             for trace_file in trace_files:
                                 try:
-                                    with open(trace_file, encoding='utf-8') as f:
+                                    with open(trace_file, encoding="utf-8") as f:
                                         trace_data = json.load(f)
                                     # Check primary_repo.name (can be dict or list)
-                                    primary_repo = trace_data.get('primary_repo', {})
+                                    primary_repo = trace_data.get("primary_repo", {})
                                     if isinstance(primary_repo, list) and len(primary_repo) > 0:
                                         primary_repo = primary_repo[0]  # Use first repo if list
-                                    repo_name = primary_repo.get('name') if isinstance(primary_repo, dict) else None
+                                    repo_name = (
+                                        primary_repo.get("name")
+                                        if isinstance(primary_repo, dict)
+                                        else None
+                                    )
                                     if repo_name and repo_name in request.selected_repos:
                                         filtered_files.append(trace_file)
                                 except Exception as e:
                                     logger.warning(f"Error reading trace {trace_file}: {e}")
 
-                            logger.info(f"Filtered to {len(filtered_files)} traces for selected repos (from {len(trace_files)} total)")
+                            logger.info(
+                                f"Filtered to {len(filtered_files)} traces for selected repos (from {len(trace_files)} total)"
+                            )
                             trace_files = filtered_files
 
                             if not trace_files:
-                                raise ValueError(f"No gold traces found for repos: {request.selected_repos}")
+                                raise ValueError(
+                                    f"No gold traces found for repos: {request.selected_repos}"
+                                )
 
                         gen_config = ExampleGeneratorConfig(output_dir=str(output_dir))
                         generator = ExampleGenerator(gen_config)
 
                         # Process only the filtered trace files
                         examples = []
-                        stats = {'sessions_processed': 0, 'examples_generated': 0}
+                        stats = {"sessions_processed": 0, "examples_generated": 0}
                         for trace_file in trace_files:
                             try:
                                 session_examples = generator.generate_examples(trace_file)
                                 examples.extend(session_examples)
-                                stats['sessions_processed'] += 1
-                                stats['examples_generated'] += len(session_examples)
+                                stats["sessions_processed"] += 1
+                                stats["examples_generated"] += len(session_examples)
                             except Exception as e:
                                 logger.warning(f"Error processing trace {trace_file}: {e}")
 
-                        logger.info(f"Generated {len(examples)} examples from {stats['sessions_processed']} gold traces")
+                        logger.info(
+                            f"Generated {len(examples)} examples from {stats['sessions_processed']} gold traces"
+                        )
 
                         if examples:
-                            result = generator.export_for_nemo(examples, output_dir, train_split=0.9)
+                            result = generator.export_for_nemo(
+                                examples, output_dir, train_split=0.9
+                            )
                             dataset_path = result["train"]
                             logger.info(f"Training data ready: {dataset_path}")
                         else:
@@ -989,7 +1047,7 @@ def create_app() -> FastAPI:
                     dpo_beta=request.dpo_beta,
                     grpo_num_generations=request.grpo_num_generations,
                     grpo_temperature=request.grpo_temperature,
-                    grpo_reward_mode=getattr(request, 'grpo_reward_mode', 'syntax'),
+                    grpo_reward_mode=getattr(request, "grpo_reward_mode", "syntax"),
                     # Knowledge Distillation
                     teacher_model=request.teacher_model or "claude-sonnet-4-20250514",
                     teacher_temperature=request.teacher_temperature,
@@ -1006,7 +1064,7 @@ def create_app() -> FastAPI:
                 # Resolve device for remote SSH training
                 if config.use_remote_ssh:
                     ssh_config = None
-                    device_id_to_use = getattr(request, 'device_id', None)
+                    device_id_to_use = getattr(request, "device_id", None)
                     try:
                         registry = get_device_registry()
                         if device_id_to_use:
@@ -1015,6 +1073,7 @@ def create_app() -> FastAPI:
                             device = await registry.get_default()
                         if device:
                             from bashgym.gym.remote_trainer import SSHConfig
+
                             ssh_config = SSHConfig(
                                 host=device.host,
                                 port=device.port,
@@ -1057,9 +1116,7 @@ def create_app() -> FastAPI:
                     )
                 elif request.strategy == TrainingStrategy.DPO:
                     run = app.state.trainer.train_dpo(
-                        dataset_path=dataset_path,
-                        run_id=run_id,
-                        callback=callback.on_progress_sync
+                        dataset_path=dataset_path, run_id=run_id, callback=callback.on_progress_sync
                     )
                 elif request.strategy == TrainingStrategy.DISTILLATION:
                     run = app.state.trainer.train_distillation(
@@ -1071,6 +1128,7 @@ def create_app() -> FastAPI:
                     )
                 elif request.strategy.value == "grpo":
                     from bashgym.gym.trainer import GRPOTrainer
+
                     grpo_trainer = GRPOTrainer(app.state.trainer.config)
                     run = grpo_trainer.train_grpo(
                         dataset_path=dataset_path,
@@ -1096,7 +1154,9 @@ def create_app() -> FastAPI:
                 app.state.training_runs[run_id]["metrics"] = run.metrics if run else {}
 
                 # Persist completed state to disk
-                update_run_state(output_dir, status="completed", completed_at=datetime.utcnow().isoformat())
+                update_run_state(
+                    output_dir, status="completed", completed_at=datetime.utcnow().isoformat()
+                )
 
                 await broadcast_training_complete(run_id, run.metrics if run else {})
 
@@ -1115,7 +1175,7 @@ def create_app() -> FastAPI:
                         progress = current_step / total_steps
 
                         # Simulate realistic loss curve (exponential decay with noise)
-                        base_loss = 2.5 * (0.6 ** progress) + 0.4
+                        base_loss = 2.5 * (0.6**progress) + 0.4
                         noise = random.uniform(-0.05, 0.05)
                         loss = max(0.3, base_loss + noise)
 
@@ -1125,26 +1185,37 @@ def create_app() -> FastAPI:
                         # Calculate ETA
                         steps_remaining = total_steps - current_step
                         eta_minutes = steps_remaining * 0.02  # 20ms per step in simulation
-                        eta = f"{int(eta_minutes)}m" if eta_minutes >= 1 else f"{int(eta_minutes * 60)}s"
+                        eta = (
+                            f"{int(eta_minutes)}m"
+                            if eta_minutes >= 1
+                            else f"{int(eta_minutes * 60)}s"
+                        )
 
-                        await callback.on_progress({
-                            "epoch": epoch + 1,
-                            "total_epochs": request.num_epochs,
-                            "step": current_step,
-                            "total_steps": total_steps,
-                            "loss": round(loss, 4),
-                            "learning_rate": request.learning_rate,
-                            "grad_norm": round(grad_norm, 3),
-                            "eta": eta,
-                            "simulation": True  # Flag to indicate simulation mode
-                        })
+                        await callback.on_progress(
+                            {
+                                "epoch": epoch + 1,
+                                "total_epochs": request.num_epochs,
+                                "step": current_step,
+                                "total_steps": total_steps,
+                                "loss": round(loss, 4),
+                                "learning_rate": request.learning_rate,
+                                "grad_norm": round(grad_norm, 3),
+                                "eta": eta,
+                                "simulation": True,  # Flag to indicate simulation mode
+                            }
+                        )
                         await asyncio.sleep(0.02)  # Fast simulation (20ms per step)
 
-                final_loss = round(2.5 * (0.6 ** 1.0) + 0.4, 4)
+                final_loss = round(2.5 * (0.6**1.0) + 0.4, 4)
                 app.state.training_runs[run_id]["status"] = TrainingStatus.COMPLETED
                 app.state.training_runs[run_id]["completed_at"] = datetime.utcnow().isoformat()
-                app.state.training_runs[run_id]["metrics"] = {"final_loss": final_loss, "simulation": True}
-                await broadcast_training_complete(run_id, {"final_loss": final_loss, "simulation": True})
+                app.state.training_runs[run_id]["metrics"] = {
+                    "final_loss": final_loss,
+                    "simulation": True,
+                }
+                await broadcast_training_complete(
+                    run_id, {"final_loss": final_loss, "simulation": True}
+                )
 
         except Exception as e:
             error_msg = f"{type(e).__name__}: {str(e)}"
@@ -1174,7 +1245,7 @@ def create_app() -> FastAPI:
                 error=run.get("error"),
                 started_at=run.get("started_at"),
                 completed_at=run.get("completed_at"),
-                metrics=run.get("metrics")
+                metrics=run.get("metrics"),
             )
 
         # Fallback: check persisted state on disk
@@ -1247,14 +1318,15 @@ def create_app() -> FastAPI:
 
         app.state.training_runs[run_id]["status"] = TrainingStatus.FAILED
         app.state.training_runs[run_id]["completed_at"] = datetime.utcnow().isoformat()
-        update_run_state(str(Path("data/models") / run_id), status="failed", completed_at=datetime.utcnow().isoformat())
+        update_run_state(
+            str(Path("data/models") / run_id),
+            status="failed",
+            completed_at=datetime.utcnow().isoformat(),
+        )
         return {"success": True, "message": "Training stopped"}
 
     @app.get("/api/training", response_model=list[TrainingResponse], tags=["Training"])
-    async def list_training_runs(
-        status: TrainingStatus | None = None,
-        limit: int = 50
-    ):
+    async def list_training_runs(status: TrainingStatus | None = None, limit: int = 50):
         """List all training runs (in-memory + persisted on disk)."""
         # Start with in-memory runs
         seen_ids = set()
@@ -1263,14 +1335,16 @@ def create_app() -> FastAPI:
             seen_ids.add(r["run_id"])
             if status and r["status"] != status:
                 continue
-            results.append(TrainingResponse(
-                run_id=r["run_id"],
-                status=r["status"],
-                strategy=r["strategy"],
-                started_at=r.get("started_at"),
-                completed_at=r.get("completed_at"),
-                metrics=r.get("metrics")
-            ))
+            results.append(
+                TrainingResponse(
+                    run_id=r["run_id"],
+                    status=r["status"],
+                    strategy=r["strategy"],
+                    started_at=r.get("started_at"),
+                    completed_at=r.get("completed_at"),
+                    metrics=r.get("metrics"),
+                )
+            )
 
         # Merge persisted runs not already in memory
         for state in list_run_states():
@@ -1278,14 +1352,16 @@ def create_app() -> FastAPI:
                 continue
             if status and state.status != status.value:
                 continue
-            results.append(TrainingResponse(
-                run_id=state.run_id,
-                status=state.status,
-                strategy=state.config.get("strategy", "sft"),
-                started_at=state.started_at,
-                completed_at=state.completed_at,
-                metrics=state.last_metrics,
-            ))
+            results.append(
+                TrainingResponse(
+                    run_id=state.run_id,
+                    status=state.status,
+                    strategy=state.config.get("strategy", "sft"),
+                    started_at=state.started_at,
+                    completed_at=state.completed_at,
+                    metrics=state.last_metrics,
+                )
+            )
 
         return results[:limit]
 
@@ -1298,16 +1374,14 @@ def create_app() -> FastAPI:
 
     @app.post("/api/models/{model_id}/export", response_model=ExportResponse, tags=["Models"])
     async def export_model(
-        model_id: str,
-        request: ExportRequest,
-        background_tasks: BackgroundTasks
+        model_id: str, request: ExportRequest, background_tasks: BackgroundTasks
     ):
         """Export a trained model to GGUF or other formats."""
         if app.state.trainer:
             export_path = app.state.trainer.export_model(
                 run_id=model_id,
                 export_format=request.format.value,
-                quantization=request.quantization
+                quantization=request.quantization,
             )
 
             return ExportResponse(
@@ -1315,14 +1389,11 @@ def create_app() -> FastAPI:
                 format=request.format,
                 status="completed" if export_path else "failed",
                 output_path=str(export_path) if export_path else None,
-                message="Export script generated" if export_path else "Export failed"
+                message="Export script generated" if export_path else "Export failed",
             )
 
         return ExportResponse(
-            model_id=model_id,
-            format=request.format,
-            status="pending",
-            message="Export queued"
+            model_id=model_id, format=request.format, status="pending", message="Export queued"
         )
 
     # =========================================================================
@@ -1335,7 +1406,7 @@ def create_app() -> FastAPI:
         repo: str | None = None,
         source_tool: str | None = None,
         limit: int = 50,
-        offset: int = 0
+        offset: int = 0,
     ):
         """List traces with pagination (served from in-memory cache)."""
         cache = app.state.trace_cache
@@ -1378,21 +1449,41 @@ def create_app() -> FastAPI:
 
         # Range configuration
         range_configs = {
-            "24h": {"window": timedelta(hours=24), "bucket_size": timedelta(hours=1), "label_fmt": "%H:%M", "count": 25},
-            "7d":  {"window": timedelta(days=7),   "bucket_size": timedelta(days=1),  "label_fmt": "%a %m/%d", "count": 8},
-            "30d": {"window": timedelta(days=30),  "bucket_size": timedelta(days=1),  "label_fmt": "%m/%d", "count": 31},
+            "24h": {
+                "window": timedelta(hours=24),
+                "bucket_size": timedelta(hours=1),
+                "label_fmt": "%H:%M",
+                "count": 25,
+            },
+            "7d": {
+                "window": timedelta(days=7),
+                "bucket_size": timedelta(days=1),
+                "label_fmt": "%a %m/%d",
+                "count": 8,
+            },
+            "30d": {
+                "window": timedelta(days=30),
+                "bucket_size": timedelta(days=1),
+                "label_fmt": "%m/%d",
+                "count": 31,
+            },
         }
 
         if time_range not in range_configs and time_range != "all":
-            raise HTTPException(status_code=400, detail="Invalid range. Must be one of: 24h, 7d, 30d, all")
+            raise HTTPException(
+                status_code=400, detail="Invalid range. Must be one of: 24h, 7d, 30d, all"
+            )
 
         if time_range == "all":
             # Find earliest trace file across all dirs
             earliest = now
             all_dirs = [
-                data_dir / "gold_traces", data_dir / "silver_traces",
-                data_dir / "bronze_traces", data_dir / "failed_traces",
-                global_dir / "traces", data_dir / "traces",
+                data_dir / "gold_traces",
+                data_dir / "silver_traces",
+                data_dir / "bronze_traces",
+                data_dir / "failed_traces",
+                global_dir / "traces",
+                data_dir / "traces",
             ]
             for d in all_dirs:
                 if d.exists():
@@ -1429,13 +1520,15 @@ def create_app() -> FastAPI:
             else:
                 bucket_start = bucket_time.replace(minute=0, second=0, microsecond=0)
             label = "Now" if i == 0 else bucket_time.strftime(label_fmt)
-            buckets.append({
-                "time": label,
-                "start": bucket_start,
-                "gold": 0,
-                "failed": 0,
-                "pending": 0,
-            })
+            buckets.append(
+                {
+                    "time": label,
+                    "start": bucket_start,
+                    "gold": 0,
+                    "failed": 0,
+                    "pending": 0,
+                }
+            )
 
         # Count traces by status and time
         def count_traces_in_dir(trace_dir: Path, status: str, pattern: str = "*.json"):
@@ -1454,7 +1547,9 @@ def create_app() -> FastAPI:
                                 try:
                                     date_str = part
                                     time_str = parts[idx + 1] if idx + 1 < len(parts) else "000000"
-                                    mtime = datetime.strptime(f"{date_str}_{time_str[:6]}", "%Y%m%d_%H%M%S")
+                                    mtime = datetime.strptime(
+                                        f"{date_str}_{time_str[:6]}", "%Y%m%d_%H%M%S"
+                                    )
                                 except (ValueError, IndexError):
                                     pass
                                 break
@@ -1462,7 +1557,11 @@ def create_app() -> FastAPI:
                     # Find matching bucket
                     for b_idx in range(len(buckets)):
                         b_start = buckets[b_idx]["start"]
-                        b_end = buckets[b_idx + 1]["start"] if b_idx + 1 < len(buckets) else now + timedelta(hours=1)
+                        b_end = (
+                            buckets[b_idx + 1]["start"]
+                            if b_idx + 1 < len(buckets)
+                            else now + timedelta(hours=1)
+                        )
                         if b_start <= mtime < b_end:
                             buckets[b_idx][status] += 1
                             break
@@ -1484,7 +1583,10 @@ def create_app() -> FastAPI:
 
         for pattern in pending_patterns:
             count_traces_in_dir(global_traces_dir, "pending", pattern)
-            if project_traces_dir.exists() and project_traces_dir.resolve() != global_traces_dir.resolve():
+            if (
+                project_traces_dir.exists()
+                and project_traces_dir.resolve() != global_traces_dir.resolve()
+            ):
                 count_traces_in_dir(project_traces_dir, "pending", pattern)
 
         # Calculate cumulative totals for area chart
@@ -1497,12 +1599,14 @@ def create_app() -> FastAPI:
             cumulative_gold += bucket["gold"]
             cumulative_failed += bucket["failed"]
             cumulative_pending += bucket["pending"]
-            timeline_data.append({
-                "time": bucket["time"],
-                "gold": cumulative_gold,
-                "failed": cumulative_failed,
-                "pending": cumulative_pending
-            })
+            timeline_data.append(
+                {
+                    "time": bucket["time"],
+                    "gold": cumulative_gold,
+                    "failed": cumulative_failed,
+                    "pending": cumulative_pending,
+                }
+            )
 
         # Get current totals
         total_gold = sum(1 for _ in gold_dir.glob("*.json")) if gold_dir.exists() else 0
@@ -1511,7 +1615,10 @@ def create_app() -> FastAPI:
         for pattern in pending_patterns:
             if global_traces_dir.exists():
                 total_pending += sum(1 for _ in global_traces_dir.glob(pattern))
-            if project_traces_dir.exists() and project_traces_dir.resolve() != global_traces_dir.resolve():
+            if (
+                project_traces_dir.exists()
+                and project_traces_dir.resolve() != global_traces_dir.resolve()
+            ):
                 total_pending += sum(1 for _ in project_traces_dir.glob(pattern))
 
         return {
@@ -1520,14 +1627,15 @@ def create_app() -> FastAPI:
                 "gold": total_gold,
                 "failed": total_failed,
                 "pending": total_pending,
-                "total": total_gold + total_failed + total_pending
-            }
+                "total": total_gold + total_failed + total_pending,
+            },
         }
 
     @app.get("/api/traces/analytics", tags=["Traces"])
     async def get_trace_analytics():
         """Aggregate analytics across all traces for training pipeline insights."""
         from bashgym.config import get_bashgym_dir, get_settings
+
         settings = get_settings()
         data_dir = Path(settings.data.data_dir)
 
@@ -1595,7 +1703,12 @@ def create_app() -> FastAPI:
                     for step in steps:
                         tool = step.get("tool_name", step.get("tool", "unknown"))
                         if tool not in tool_stats:
-                            tool_stats[tool] = {"calls": 0, "sessions": set(), "successes": 0, "total_tokens": 0}
+                            tool_stats[tool] = {
+                                "calls": 0,
+                                "sessions": set(),
+                                "successes": 0,
+                                "total_tokens": 0,
+                            }
                         tool_stats[tool]["calls"] += 1
                         tool_stats[tool]["sessions"].add(str(trace_file.stem))
 
@@ -1617,13 +1730,17 @@ def create_app() -> FastAPI:
         # Format tool stats (convert sets to counts)
         formatted_tools = []
         for tool, stats in sorted(tool_stats.items(), key=lambda x: -x[1]["calls"]):
-            formatted_tools.append({
-                "tool": tool,
-                "calls": stats["calls"],
-                "sessions": len(stats["sessions"]),
-                "success_rate": stats["successes"] / stats["calls"] if stats["calls"] > 0 else 0,
-                "total_tokens": stats["total_tokens"],
-            })
+            formatted_tools.append(
+                {
+                    "tool": tool,
+                    "calls": stats["calls"],
+                    "sessions": len(stats["sessions"]),
+                    "success_rate": (
+                        stats["successes"] / stats["calls"] if stats["calls"] > 0 else 0
+                    ),
+                    "total_tokens": stats["total_tokens"],
+                }
+            )
 
         # Training readiness
         trainable = quality_distribution["gold"] + quality_distribution["silver"]
@@ -1631,17 +1748,16 @@ def create_app() -> FastAPI:
         # Format source breakdown
         source_breakdown = []
         for src_name, src_stats in sorted(source_agg.items(), key=lambda x: -x[1]["traces"]):
-            source_breakdown.append({
-                "source": src_name,
-                "traces": src_stats["traces"],
-                "steps": src_stats["steps"],
-                "tokens": src_stats["tokens"],
-            })
+            source_breakdown.append(
+                {
+                    "source": src_name,
+                    "traces": src_stats["traces"],
+                    "steps": src_stats["steps"],
+                    "tokens": src_stats["tokens"],
+                }
+            )
 
-        avg_quality_score = (
-            sum(quality_scores) / len(quality_scores)
-            if quality_scores else 0.0
-        )
+        avg_quality_score = sum(quality_scores) / len(quality_scores) if quality_scores else 0.0
 
         return {
             "tool_stats": formatted_tools,
@@ -1653,7 +1769,9 @@ def create_app() -> FastAPI:
             },
             "training_readiness": {
                 "sft_ready": quality_distribution["gold"],
-                "dpo_pairs_possible": min(quality_distribution["silver"], quality_distribution["failed"]),
+                "dpo_pairs_possible": min(
+                    quality_distribution["silver"], quality_distribution["failed"]
+                ),
                 "total_trainable": trainable,
             },
             "source_breakdown": source_breakdown,
@@ -1668,6 +1786,7 @@ def create_app() -> FastAPI:
         Returns a list of repo info objects for filtering.
         """
         from bashgym.config import get_bashgym_dir, get_settings
+
         settings = get_settings()
         data_dir = Path(settings.data.data_dir)
 
@@ -1691,7 +1810,10 @@ def create_app() -> FastAPI:
             dirs_to_scan.append((global_traces_dir, "session_*.json"))
             dirs_to_scan.append((global_traces_dir, "session_*.jsonl"))
             dirs_to_scan.append((global_traces_dir, "imported_*.json"))
-        if project_traces_dir.exists() and project_traces_dir.resolve() != global_traces_dir.resolve():
+        if (
+            project_traces_dir.exists()
+            and project_traces_dir.resolve() != global_traces_dir.resolve()
+        ):
             dirs_to_scan.append((project_traces_dir, "session_*.json"))
             dirs_to_scan.append((project_traces_dir, "session_*.jsonl"))
             dirs_to_scan.append((project_traces_dir, "imported_*.json"))
@@ -1707,6 +1829,7 @@ def create_app() -> FastAPI:
                 seen_files.add(trace_file.name)
                 try:
                     from bashgym.trace_capture.core import load_trace_file
+
                     data = load_trace_file(trace_file)
 
                     # Handle raw trace format (array of steps)
@@ -1721,7 +1844,7 @@ def create_app() -> FastAPI:
                                         "name": repo_name,
                                         "path": step_repo.get("path", ""),
                                         "git_remote": step_repo.get("git_remote"),
-                                        "trace_count": 0
+                                        "trace_count": 0,
                                     }
                                 repos[repo_name]["trace_count"] += 1
                                 break
@@ -1735,7 +1858,7 @@ def create_app() -> FastAPI:
                                     "name": repo_name,
                                     "path": primary_repo.get("path", ""),
                                     "git_remote": primary_repo.get("git_remote"),
-                                    "trace_count": 0
+                                    "trace_count": 0,
                                 }
                             repos[repo_name]["trace_count"] += 1
                 except Exception:
@@ -1752,9 +1875,9 @@ def create_app() -> FastAPI:
 
         filter_lower = repo_filter.lower()
         return (
-            filter_lower in repo_name.lower() or
-            filter_lower in repo_path.lower() or
-            (git_remote and filter_lower in git_remote.lower())
+            filter_lower in repo_name.lower()
+            or filter_lower in repo_path.lower()
+            or (git_remote and filter_lower in git_remote.lower())
         )
 
     def _sanitize_task_description(raw: str, max_length: int = 120) -> str:
@@ -1769,33 +1892,33 @@ def create_app() -> FastAPI:
         text = raw.strip()
 
         # Strip markdown bold/italic markers
-        text = re.sub(r'\*{1,3}([^*]+)\*{1,3}', r'\1', text)
+        text = re.sub(r"\*{1,3}([^*]+)\*{1,3}", r"\1", text)
         # Strip markdown headers
-        text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
+        text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
         # Strip markdown links [text](url) -> text
-        text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+        text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
         # Strip backtick code markers
-        text = re.sub(r'`+([^`]*)`+', r'\1', text)
+        text = re.sub(r"`+([^`]*)`+", r"\1", text)
         # Strip numbered list prefixes (1. 2. etc.)
-        text = re.sub(r'^\d+\.\s+', '', text, flags=re.MULTILINE)
+        text = re.sub(r"^\d+\.\s+", "", text, flags=re.MULTILINE)
         # Strip bullet points
-        text = re.sub(r'^[-*+]\s+', '', text, flags=re.MULTILINE)
+        text = re.sub(r"^[-*+]\s+", "", text, flags=re.MULTILINE)
 
         # Collapse all whitespace (newlines, tabs, multiple spaces) to single space
-        text = re.sub(r'\s+', ' ', text).strip()
+        text = re.sub(r"\s+", " ", text).strip()
 
         # Take first sentence if it exists and is reasonable length
-        sentence_end = re.search(r'[.!?]\s', text)
+        sentence_end = re.search(r"[.!?]\s", text)
         if sentence_end and sentence_end.start() < max_length:
-            text = text[:sentence_end.start() + 1]
+            text = text[: sentence_end.start() + 1]
         elif len(text) > max_length:
             # Truncate at last word boundary before max_length
             truncated = text[:max_length]
-            last_space = truncated.rfind(' ')
+            last_space = truncated.rfind(" ")
             if last_space > max_length * 0.5:
-                text = truncated[:last_space] + '...'
+                text = truncated[:last_space] + "..."
             else:
-                text = truncated + '...'
+                text = truncated + "..."
 
         return text
 
@@ -1809,7 +1932,9 @@ def create_app() -> FastAPI:
         # Get success rate from summary or calculate
         success_rate = summary.get("success_rate", 0)
         if success_rate == 0 and total_steps > 0:
-            successful_steps = sum(1 for s in trace_steps if s.get("success") is True or s.get("exit_code") == 0)
+            successful_steps = sum(
+                1 for s in trace_steps if s.get("success") is True or s.get("exit_code") == 0
+            )
             success_rate = successful_steps / total_steps
 
         # Extract repo info
@@ -1822,7 +1947,7 @@ def create_app() -> FastAPI:
                 path=primary_repo.get("path"),
                 git_remote=primary_repo.get("git_remote"),
                 git_branch=primary_repo.get("git_branch"),
-                is_git_repo=primary_repo.get("is_git_repo", False)
+                is_git_repo=primary_repo.get("is_git_repo", False),
             )
 
         # Get source info
@@ -1839,14 +1964,16 @@ def create_app() -> FastAPI:
 
         if task_desc == "Unknown task":
             # Fallback: generate description from tool usage summary
-            tool_summary = ", ".join([f"{count} {tool}" for tool, count in sorted(tool_counts.items(), key=lambda x: -x[1])[:4]])
+            tool_summary = ", ".join(
+                [
+                    f"{count} {tool}"
+                    for tool, count in sorted(tool_counts.items(), key=lambda x: -x[1])[:4]
+                ]
+            )
             task_desc = f"Imported from {source_tool}: {tool_summary}"
 
         # Calculate quality using centralized calculator
-        quality = calculate_quality_breakdown(
-            steps=trace_steps,
-            metadata=metadata
-        )
+        quality = calculate_quality_breakdown(steps=trace_steps, metadata=metadata)
 
         return TraceInfo(
             trace_id=trace_file.stem,
@@ -1862,14 +1989,16 @@ def create_app() -> FastAPI:
                 tool_diversity=quality.tool_diversity,
                 efficiency_score=quality.efficiency_score,
                 cognitive_quality=quality.cognitive_quality,
-                total_score=quality.total_score
+                total_score=quality.total_score,
             ),
             source_tool=source_tool,
             repo=repo_info,
             repos_count=len(repos) if repos else 1,
             tool_breakdown=tool_counts,
-            created_at=data.get("timestamp", datetime.fromtimestamp(trace_file.stat().st_ctime).isoformat()),
-            promoted_at=metadata.get("promoted_at")
+            created_at=data.get(
+                "timestamp", datetime.fromtimestamp(trace_file.stat().st_ctime).isoformat()
+            ),
+            promoted_at=metadata.get("promoted_at"),
         )
 
     def _parse_raw_trace_file(trace_file: Path, data: list[dict]) -> TraceInfo:
@@ -1900,7 +2029,7 @@ def create_app() -> FastAPI:
                         path=step_repo.get("path"),
                         git_remote=step_repo.get("git_remote"),
                         git_branch=step_repo.get("git_branch"),
-                        is_git_repo=step_repo.get("is_git_repo", False)
+                        is_git_repo=step_repo.get("is_git_repo", False),
                     )
 
         # Get timestamps
@@ -1913,7 +2042,12 @@ def create_app() -> FastAPI:
             tool = step.get("tool_name", "unknown")
             tool_counts[tool] = tool_counts.get(tool, 0) + 1
 
-        tool_summary = ", ".join([f"{count} {tool}" for tool, count in sorted(tool_counts.items(), key=lambda x: -x[1])[:4]])
+        tool_summary = ", ".join(
+            [
+                f"{count} {tool}"
+                for tool, count in sorted(tool_counts.items(), key=lambda x: -x[1])[:4]
+            ]
+        )
         task_desc = f"Coding session: {tool_summary}"
 
         # Calculate quality using centralized calculator
@@ -1933,14 +2067,15 @@ def create_app() -> FastAPI:
                 tool_diversity=quality.tool_diversity,
                 efficiency_score=quality.efficiency_score,
                 cognitive_quality=quality.cognitive_quality,
-                total_score=quality.total_score
+                total_score=quality.total_score,
             ),
             source_tool="claude_code",
             repo=repo_info,
             repos_count=len(repos_seen),
             tool_breakdown=tool_counts,
-            created_at=first_timestamp or datetime.fromtimestamp(trace_file.stat().st_ctime).isoformat(),
-            promoted_at=None
+            created_at=first_timestamp
+            or datetime.fromtimestamp(trace_file.stat().st_ctime).isoformat(),
+            promoted_at=None,
         )
 
     def _parse_trace_file(trace_file: Path, data, status: TraceStatus) -> TraceInfo:
@@ -1967,7 +2102,7 @@ def create_app() -> FastAPI:
                 path=primary_repo.get("path"),
                 git_remote=primary_repo.get("git_remote"),
                 git_branch=primary_repo.get("git_branch"),
-                is_git_repo=primary_repo.get("is_git_repo", False)
+                is_git_repo=primary_repo.get("is_git_repo", False),
             )
 
         # Determine quality tier based on metrics (NVIDIA NeMo thresholds)
@@ -2003,14 +2138,18 @@ def create_app() -> FastAPI:
                 tool_diversity=quality.tool_diversity,
                 efficiency_score=quality.efficiency_score,
                 cognitive_quality=quality.cognitive_quality,
-                total_score=quality.total_score
+                total_score=quality.total_score,
             ),
-            source_tool=data.get("source_tool", "claude_code") if isinstance(data, dict) else "claude_code",
+            source_tool=(
+                data.get("source_tool", "claude_code") if isinstance(data, dict) else "claude_code"
+            ),
             repo=repo_info,
             repos_count=len(repos),
             tool_breakdown=tool_counts,
-            created_at=metadata.get("created_at", datetime.fromtimestamp(trace_file.stat().st_ctime).isoformat()),
-            promoted_at=metadata.get("promoted_at")
+            created_at=metadata.get(
+                "created_at", datetime.fromtimestamp(trace_file.stat().st_ctime).isoformat()
+            ),
+            promoted_at=metadata.get("promoted_at"),
         )
 
     @app.get("/api/traces/gold", response_model=list[TraceInfo], tags=["Traces"])
@@ -2025,6 +2164,7 @@ def create_app() -> FastAPI:
         from datetime import datetime
 
         from bashgym.config import get_bashgym_dir, get_settings
+
         settings = get_settings()
         data_dir = Path(settings.data.data_dir)
 
@@ -2054,6 +2194,7 @@ def create_app() -> FastAPI:
         for path, status in tier_checks:
             if path.exists():
                 from bashgym.trace_capture.core import load_trace_file
+
                 data = load_trace_file(path)
                 trace_path = path
                 trace_status = status
@@ -2173,13 +2314,16 @@ def create_app() -> FastAPI:
             target_tier: Target tier (gold, silver, bronze). Default is gold.
         """
         from bashgym.config import get_settings
+
         settings = get_settings()
         data_dir = Path(settings.data.data_dir)
 
         # Validate target tier
         valid_tiers = ["gold", "silver", "bronze"]
         if target_tier not in valid_tiers:
-            raise HTTPException(status_code=400, detail=f"Invalid target tier. Must be one of: {valid_tiers}")
+            raise HTTPException(
+                status_code=400, detail=f"Invalid target tier. Must be one of: {valid_tiers}"
+            )
 
         target_path = data_dir / f"{target_tier}_traces" / f"{trace_id}.json"
 
@@ -2205,9 +2349,14 @@ def create_app() -> FastAPI:
         if not source_path:
             # Also search pending directories for JSONL traces
             from bashgym.config import get_bashgym_dir
+
             pending_dirs = [get_bashgym_dir() / "traces", data_dir / "traces"]
             for dir_path in source_dirs + pending_dirs:
-                for pattern in [f"session_{trace_id}.jsonl", f"{trace_id}.jsonl", f"{trace_id}.json"]:
+                for pattern in [
+                    f"session_{trace_id}.jsonl",
+                    f"{trace_id}.jsonl",
+                    f"{trace_id}.json",
+                ]:
                     candidate = dir_path / pattern
                     if candidate.exists():
                         source_path = candidate
@@ -2222,6 +2371,7 @@ def create_app() -> FastAPI:
         target_path.parent.mkdir(parents=True, exist_ok=True)
 
         from bashgym.trace_capture.core import load_trace_file
+
         data = load_trace_file(source_path)
 
         # If raw step list (from JSONL), wrap into trace dict
@@ -2242,7 +2392,7 @@ def create_app() -> FastAPI:
         data["metadata"]["status"] = target_tier
         data["metadata"]["quality_tier"] = target_tier
 
-        with open(target_path, 'w') as f:
+        with open(target_path, "w") as f:
             json.dump(data, f, indent=2)
 
         source_path.unlink()
@@ -2264,13 +2414,16 @@ def create_app() -> FastAPI:
             target_tier: Target tier (silver, bronze, failed). Default is failed.
         """
         from bashgym.config import get_settings
+
         settings = get_settings()
         data_dir = Path(settings.data.data_dir)
 
         # Validate target tier (can't demote to gold)
         valid_targets = ["silver", "bronze", "failed"]
         if target_tier not in valid_targets:
-            raise HTTPException(status_code=400, detail=f"Invalid target tier. Must be one of: {valid_targets}")
+            raise HTTPException(
+                status_code=400, detail=f"Invalid target tier. Must be one of: {valid_targets}"
+            )
 
         target_path = data_dir / f"{target_tier}_traces" / f"{trace_id}.json"
 
@@ -2308,7 +2461,7 @@ def create_app() -> FastAPI:
         data["metadata"]["status"] = target_tier
         data["metadata"]["quality_tier"] = target_tier
 
-        with open(target_path, 'w') as f:
+        with open(target_path, "w") as f:
             json.dump(data, f, indent=2)
 
         source_path.unlink()
@@ -2325,7 +2478,11 @@ def create_app() -> FastAPI:
     # Training Examples Endpoints
     # =========================================================================
 
-    @app.post("/api/traces/{trace_id}/generate-examples", response_model=GenerateExamplesResponse, tags=["Training Examples"])
+    @app.post(
+        "/api/traces/{trace_id}/generate-examples",
+        response_model=GenerateExamplesResponse,
+        tags=["Training Examples"],
+    )
     async def generate_examples_from_trace(trace_id: str, request: GenerateExamplesRequest = None):
         """Generate training examples from a trace session.
 
@@ -2360,7 +2517,7 @@ def create_app() -> FastAPI:
         config = ExampleGeneratorConfig(
             min_success_rate=request.min_success_rate,
             max_steps_per_segment=request.max_steps_per_example,
-            output_dir=str(data_dir / "training_examples")
+            output_dir=str(data_dir / "training_examples"),
         )
 
         generator = ExampleGenerator(config)
@@ -2371,16 +2528,18 @@ def create_app() -> FastAPI:
         # Convert to response format
         example_responses = []
         for ex in examples:
-            example_responses.append(TrainingExampleResponse(
-                example_id=ex.example_id,
-                system_prompt=ex.system_prompt,
-                user_prompt=ex.user_prompt,
-                assistant_response=ex.assistant_response,
-                step_count=ex.metadata.get("step_count", 0),
-                success_rate=ex.metadata.get("success_rate", 0.0),
-                confidence=ex.metadata.get("segmentation_confidence", 0.5),
-                source_trace_id=trace_id
-            ))
+            example_responses.append(
+                TrainingExampleResponse(
+                    example_id=ex.example_id,
+                    system_prompt=ex.system_prompt,
+                    user_prompt=ex.user_prompt,
+                    assistant_response=ex.assistant_response,
+                    step_count=ex.metadata.get("step_count", 0),
+                    success_rate=ex.metadata.get("success_rate", 0.0),
+                    confidence=ex.metadata.get("segmentation_confidence", 0.5),
+                    source_trace_id=trace_id,
+                )
+            )
 
         # Calculate total steps
         total_steps = sum(ex.step_count for ex in example_responses)
@@ -2389,10 +2548,14 @@ def create_app() -> FastAPI:
             trace_id=trace_id,
             examples=example_responses,
             total_steps=total_steps,
-            examples_generated=len(example_responses)
+            examples_generated=len(example_responses),
         )
 
-    @app.get("/api/training/examples", response_model=list[TrainingExampleResponse], tags=["Training Examples"])
+    @app.get(
+        "/api/training/examples",
+        response_model=list[TrainingExampleResponse],
+        tags=["Training Examples"],
+    )
     async def list_training_examples(limit: int = 100, offset: int = 0):
         """List generated training examples.
 
@@ -2429,23 +2592,29 @@ def create_app() -> FastAPI:
                                 elif msg.get("role") == "assistant":
                                     assistant_response = msg.get("content", "")
 
-                            examples.append(TrainingExampleResponse(
-                                example_id=data.get("id", f"ex_{len(examples)}"),
-                                system_prompt=system_prompt,
-                                user_prompt=user_prompt,
-                                assistant_response=assistant_response,
-                                step_count=data.get("metadata", {}).get("step_count", 0),
-                                success_rate=data.get("metadata", {}).get("success_rate", 0.0),
-                                confidence=data.get("metadata", {}).get("segmentation_confidence", 0.5),
-                                source_trace_id=data.get("metadata", {}).get("source_trace_id")
-                            ))
+                            examples.append(
+                                TrainingExampleResponse(
+                                    example_id=data.get("id", f"ex_{len(examples)}"),
+                                    system_prompt=system_prompt,
+                                    user_prompt=user_prompt,
+                                    assistant_response=assistant_response,
+                                    step_count=data.get("metadata", {}).get("step_count", 0),
+                                    success_rate=data.get("metadata", {}).get("success_rate", 0.0),
+                                    confidence=data.get("metadata", {}).get(
+                                        "segmentation_confidence", 0.5
+                                    ),
+                                    source_trace_id=data.get("metadata", {}).get("source_trace_id"),
+                                )
+                            )
             except (OSError, json.JSONDecodeError):
                 continue
 
         # Apply pagination
-        return examples[offset:offset + limit]
+        return examples[offset : offset + limit]
 
-    @app.post("/api/training/export", response_model=ExportExamplesResponse, tags=["Training Examples"])
+    @app.post(
+        "/api/training/export", response_model=ExportExamplesResponse, tags=["Training Examples"]
+    )
     async def export_training_examples(request: ExportExamplesRequest):
         """Export training examples to JSONL files for NeMo training.
 
@@ -2459,9 +2628,7 @@ def create_app() -> FastAPI:
         data_dir = Path(settings.data.data_dir)
         global_dir = get_bashgym_dir()
 
-        config = ExampleGeneratorConfig(
-            output_dir=str(data_dir / "training_batches")
-        )
+        config = ExampleGeneratorConfig(output_dir=str(data_dir / "training_batches"))
         generator = ExampleGenerator(config)
 
         all_examples = []
@@ -2494,15 +2661,13 @@ def create_app() -> FastAPI:
         if not all_examples:
             return ExportExamplesResponse(
                 success=False,
-                message="No examples generated. Check that traces exist and meet quality thresholds."
+                message="No examples generated. Check that traces exist and meet quality thresholds.",
             )
 
         # Export with train/val split
         try:
             result = generator.export_for_nemo(
-                all_examples,
-                data_dir / "training_batches",
-                train_split=request.train_split
+                all_examples, data_dir / "training_batches", train_split=request.train_split
             )
 
             return ExportExamplesResponse(
@@ -2511,13 +2676,10 @@ def create_app() -> FastAPI:
                 val_path=str(result["validation"]),
                 train_count=result["train_count"],
                 val_count=result["val_count"],
-                message=f"Exported {len(all_examples)} examples"
+                message=f"Exported {len(all_examples)} examples",
             )
         except Exception as e:
-            return ExportExamplesResponse(
-                success=False,
-                message=f"Export failed: {str(e)}"
-            )
+            return ExportExamplesResponse(success=False, message=f"Export failed: {str(e)}")
 
     @app.get("/api/training/export/download", tags=["Training Examples"])
     async def download_training_export(split: str = "train"):
@@ -2542,8 +2704,7 @@ def create_app() -> FastAPI:
 
         if not file_path.exists():
             raise HTTPException(
-                status_code=404,
-                detail=f"No exported {split} file found. Run export first."
+                status_code=404, detail=f"No exported {split} file found. Run export first."
             )
 
         return FileResponse(
@@ -2576,13 +2737,19 @@ def create_app() -> FastAPI:
             return {
                 "synced": {"pending": 0, "gold": 0, "silver": 0, "bronze": 0, "failed": 0},
                 "project_dir": str(project_dir),
-                "message": "Global and project directories are the same, no sync needed"
+                "message": "Global and project directories are the same, no sync needed",
             }
 
         synced = {"pending": 0, "gold": 0, "silver": 0, "bronze": 0, "failed": 0}
 
         # Include all tier directories
-        for category in ["traces", "gold_traces", "silver_traces", "bronze_traces", "failed_traces"]:
+        for category in [
+            "traces",
+            "gold_traces",
+            "silver_traces",
+            "bronze_traces",
+            "failed_traces",
+        ]:
             src = global_dir / category
             dst = project_dir / category
             dst.mkdir(parents=True, exist_ok=True)
@@ -2610,6 +2777,7 @@ def create_app() -> FastAPI:
             from bashgym.trace_capture.importers.claude_history import (
                 import_recent,
             )
+
             results = import_recent(days=60, verbose=False)
         except Exception as e:
             logger.error(f"Trace import failed: {e}")
@@ -2644,9 +2812,15 @@ def create_app() -> FastAPI:
 
         return {
             "claude": lambda req: import_recent(days=req.days, verbose=False, force=req.force),
-            "gemini": lambda req: import_gemini_sessions(days=req.days, limit=req.limit, verbose=False),
-            "copilot": lambda req: import_copilot_sessions(days=req.days, limit=req.limit, verbose=False),
-            "opencode": lambda req: import_opencode_sessions(days=req.days, limit=req.limit, verbose=False),
+            "gemini": lambda req: import_gemini_sessions(
+                days=req.days, limit=req.limit, verbose=False
+            ),
+            "copilot": lambda req: import_copilot_sessions(
+                days=req.days, limit=req.limit, verbose=False
+            ),
+            "opencode": lambda req: import_opencode_sessions(
+                days=req.days, limit=req.limit, verbose=False
+            ),
             "codex": lambda req: import_codex_sessions(limit=req.limit),
             "chatgpt": lambda req: import_chatgpt_sessions(force=req.force),
             "mcp": lambda req: import_mcp_logs(force=req.force),
@@ -2661,7 +2835,14 @@ def create_app() -> FastAPI:
         - codex dicts with ``trace_file``, ``error`` keys (no ``skipped`` key)
         """
         if not results:
-            return {"source": source, "imported": 0, "skipped": 0, "errors": 0, "total": 0, "new_trace_ids": []}
+            return {
+                "source": source,
+                "imported": 0,
+                "skipped": 0,
+                "errors": 0,
+                "total": 0,
+                "new_trace_ids": [],
+            }
 
         imported = 0
         skipped = 0
@@ -2720,15 +2901,17 @@ def create_app() -> FastAPI:
                 all_results.append(_build_import_response(source, results))
             except Exception as e:
                 logger.error(f"Import from {source} failed: {e}")
-                all_results.append({
-                    "source": source,
-                    "imported": 0,
-                    "skipped": 0,
-                    "errors": 1,
-                    "total": 0,
-                    "new_trace_ids": [],
-                    "error_detail": str(e),
-                })
+                all_results.append(
+                    {
+                        "source": source,
+                        "imported": 0,
+                        "skipped": 0,
+                        "errors": 1,
+                        "total": 0,
+                        "new_trace_ids": [],
+                        "error_detail": str(e),
+                    }
+                )
 
         total_imported = sum(r["imported"] for r in all_results)
         return {"results": all_results, "total_imported": total_imported}
@@ -2800,6 +2983,7 @@ def create_app() -> FastAPI:
             for f in trace_dir.glob("*.json"):
                 try:
                     import datetime as _dt
+
                     mtime = _dt.datetime.fromtimestamp(f.stat().st_mtime, tz=_dt.timezone.utc)
                     if mtime > since_dt and f.stem not in seen_ids:
                         seen_ids.add(f.stem)
@@ -2820,7 +3004,7 @@ def create_app() -> FastAPI:
         bronze_success_rate: float = 0.60,
         bronze_quality_score: float = 0.40,
         dry_run: bool = True,
-        auto_promote: bool = False
+        auto_promote: bool = False,
     ):
         """Auto-classify pending traces into quality tiers based on NVIDIA NeMo research.
 
@@ -2858,21 +3042,16 @@ def create_app() -> FastAPI:
 
         # Tiered classifications based on NVIDIA NeMo research
         classifications = {
-            "gold": [],      # ≥90% success, ≥0.75 quality → SFT training
-            "silver": [],    # ≥75% success, ≥0.55 quality → DPO chosen
-            "bronze": [],    # ≥60% success, ≥0.40 quality → DPO rejected
+            "gold": [],  # ≥90% success, ≥0.75 quality → SFT training
+            "silver": [],  # ≥75% success, ≥0.55 quality → DPO chosen
+            "bronze": [],  # ≥60% success, ≥0.40 quality → DPO rejected
             "rejected": [],  # <60% success → Not suitable for training
-            "failed": [],    # Explicit verification failure
-            "pending": []    # Unable to process
+            "failed": [],  # Explicit verification failure
+            "pending": [],  # Unable to process
         }
 
         # Track detailed info for DPO pair generation
-        detailed_classifications = {
-            "gold": [],
-            "silver": [],
-            "bronze": [],
-            "rejected": []
-        }
+        detailed_classifications = {"gold": [], "silver": [], "bronze": [], "rejected": []}
 
         def calculate_quality(data: Any) -> dict:
             """Calculate quality metrics for both trace formats using centralized calculator."""
@@ -2892,8 +3071,14 @@ def create_app() -> FastAPI:
                     metadata["verification_passed"] = summary["verification_passed"]
 
             if len(steps) == 0:
-                return {"success_rate": 0, "quality_score": 0, "total_steps": 0,
-                        "verification_passed": False, "has_verification": False, "unique_tools": 0}
+                return {
+                    "success_rate": 0,
+                    "quality_score": 0,
+                    "total_steps": 0,
+                    "verification_passed": False,
+                    "has_verification": False,
+                    "unique_tools": 0,
+                }
 
             # Use centralized quality calculator
             quality = calculate_quality_breakdown(steps=steps, metadata=metadata)
@@ -2904,7 +3089,7 @@ def create_app() -> FastAPI:
                 "total_steps": quality.total_steps,
                 "verification_passed": quality.verification_passed_flag is True,
                 "has_verification": quality.has_verification,
-                "unique_tools": quality.unique_tools_count
+                "unique_tools": quality.unique_tools_count,
             }
 
         # Collect pending traces from both directories
@@ -2914,12 +3099,16 @@ def create_app() -> FastAPI:
 
         if global_traces_dir.exists():
             pending_dirs.append(global_traces_dir)
-        if project_traces_dir.exists() and project_traces_dir.resolve() != global_traces_dir.resolve():
+        if (
+            project_traces_dir.exists()
+            and project_traces_dir.resolve() != global_traces_dir.resolve()
+        ):
             pending_dirs.append(project_traces_dir)
 
         seen_files = set()
         for pending_dir in pending_dirs:
             from bashgym.trace_capture.core import glob_pending_traces
+
             for trace_file in glob_pending_traces(pending_dir):
                 if trace_file.name in seen_files:
                     continue
@@ -2927,6 +3116,7 @@ def create_app() -> FastAPI:
 
                 try:
                     from bashgym.trace_capture.core import load_trace_file
+
                     data = load_trace_file(trace_file)
 
                     metrics = calculate_quality(data)
@@ -2941,7 +3131,7 @@ def create_app() -> FastAPI:
                         "quality_score": quality_score,
                         "steps": metrics["total_steps"],
                         "unique_tools": metrics["unique_tools"],
-                        "file_path": str(trace_file)
+                        "file_path": str(trace_file),
                     }
 
                     # Determine tier
@@ -2957,11 +3147,20 @@ def create_app() -> FastAPI:
                         target_dir = data_dir / "failed_traces"
                     else:
                         # Determine base tier from quality metrics
-                        if success_rate >= gold_success_rate and quality_score >= gold_quality_score:
+                        if (
+                            success_rate >= gold_success_rate
+                            and quality_score >= gold_quality_score
+                        ):
                             base_tier = "gold"
-                        elif success_rate >= silver_success_rate and quality_score >= silver_quality_score:
+                        elif (
+                            success_rate >= silver_success_rate
+                            and quality_score >= silver_quality_score
+                        ):
                             base_tier = "silver"
-                        elif success_rate >= bronze_success_rate and quality_score >= bronze_quality_score:
+                        elif (
+                            success_rate >= bronze_success_rate
+                            and quality_score >= bronze_quality_score
+                        ):
                             base_tier = "bronze"
                         else:
                             base_tier = "rejected"
@@ -2969,7 +3168,11 @@ def create_app() -> FastAPI:
                         # Apply verification_passed boost: promote one tier (max gold)
                         # This rewards traces where tests passed but doesn't skip quality checks
                         if metrics["verification_passed"] and base_tier != "gold":
-                            tier_promotion = {"silver": "gold", "bronze": "silver", "rejected": "bronze"}
+                            tier_promotion = {
+                                "silver": "gold",
+                                "bronze": "silver",
+                                "rejected": "bronze",
+                            }
                             tier = tier_promotion.get(base_tier, base_tier)
                         else:
                             tier = base_tier
@@ -3011,13 +3214,17 @@ def create_app() -> FastAPI:
                 bronze_steps = bronze_trace["steps"]
                 # Pair traces with similar complexity (step count within 2x)
                 if bronze_steps > 0 and 0.5 <= gold_steps / bronze_steps <= 2.0:
-                    dpo_pairs.append({
-                        "chosen": gold_trace["id"],
-                        "chosen_success_rate": gold_trace["success_rate"],
-                        "rejected": bronze_trace["id"],
-                        "rejected_success_rate": bronze_trace["success_rate"],
-                        "quality_gap": round(gold_trace["quality_score"] - bronze_trace["quality_score"], 3)
-                    })
+                    dpo_pairs.append(
+                        {
+                            "chosen": gold_trace["id"],
+                            "chosen_success_rate": gold_trace["success_rate"],
+                            "rejected": bronze_trace["id"],
+                            "rejected_success_rate": bronze_trace["success_rate"],
+                            "quality_gap": round(
+                                gold_trace["quality_score"] - bronze_trace["quality_score"], 3
+                            ),
+                        }
+                    )
                     break  # One pair per gold trace
 
         return {
@@ -3026,8 +3233,14 @@ def create_app() -> FastAPI:
             "dry_run": dry_run,
             "thresholds": {
                 "gold": {"success_rate": gold_success_rate, "quality_score": gold_quality_score},
-                "silver": {"success_rate": silver_success_rate, "quality_score": silver_quality_score},
-                "bronze": {"success_rate": bronze_success_rate, "quality_score": bronze_quality_score}
+                "silver": {
+                    "success_rate": silver_success_rate,
+                    "quality_score": silver_quality_score,
+                },
+                "bronze": {
+                    "success_rate": bronze_success_rate,
+                    "quality_score": bronze_quality_score,
+                },
             },
             "auto_promote": auto_promote,
             "summary": {
@@ -3037,7 +3250,7 @@ def create_app() -> FastAPI:
                 "rejected": len(classifications["rejected"]),
                 "failed": len(classifications["failed"]),
                 "pending": len(classifications["pending"]),
-                "total_processed": len(seen_files)
+                "total_processed": len(seen_files),
             },
             "dpo_pairs": dpo_pairs,
             "dpo_pairs_count": len(dpo_pairs),
@@ -3045,8 +3258,8 @@ def create_app() -> FastAPI:
                 "sft_eligible": len(classifications["gold"]) + len(classifications["silver"]),
                 "dpo_chosen_pool": len(classifications["gold"]) + len(classifications["silver"]),
                 "dpo_rejected_pool": len(classifications["bronze"]),
-                "note": "Gold+Silver traces are suitable for SFT. Use Gold as DPO 'chosen', Bronze as DPO 'rejected'."
-            }
+                "note": "Gold+Silver traces are suitable for SFT. Use Gold as DPO 'chosen', Bronze as DPO 'rejected'.",
+            },
         }
 
     # =========================================================================
@@ -3071,7 +3284,7 @@ def create_app() -> FastAPI:
                 student_success_rate=student_model.success_rate if student_model else 0.92,
                 avg_teacher_latency=teacher_model.avg_latency_ms if teacher_model else 450,
                 avg_student_latency=student_model.avg_latency_ms if student_model else 120,
-                current_student_rate=stats.get("current_student_rate", 0.1)
+                current_student_rate=stats.get("current_student_rate", 0.1),
             )
 
         # Return demo stats if router not available
@@ -3083,7 +3296,7 @@ def create_app() -> FastAPI:
             student_success_rate=0.92,
             avg_teacher_latency=450,
             avg_student_latency=120,
-            current_student_rate=0.1
+            current_student_rate=0.1,
         )
 
     @app.post("/api/router/strategy", tags=["Router"])
@@ -3091,6 +3304,7 @@ def create_app() -> FastAPI:
         """Set the routing strategy."""
         if app.state.router:
             from bashgym.gym.router import RoutingStrategy
+
             app.state.router.config.strategy = RoutingStrategy(strategy.value)
 
         return {"success": True, "strategy": strategy.value}
@@ -3109,7 +3323,7 @@ def create_app() -> FastAPI:
     @app.get("/api/providers/health", tags=["Providers"])
     async def get_providers_health():
         """Get health status of all inference providers."""
-        registry = getattr(app.state, 'provider_registry', None)
+        registry = getattr(app.state, "provider_registry", None)
         if not registry:
             return {"providers": {}, "model_map": {}}
         health = await registry.check_all_health()
@@ -3121,21 +3335,26 @@ def create_app() -> FastAPI:
     @app.post("/api/router/student-provider", tags=["Router"])
     async def set_student_provider(provider_type: str, model_name: str):
         """Set which provider and model to use as the Student."""
-        registry = getattr(app.state, 'provider_registry', None)
+        registry = getattr(app.state, "provider_registry", None)
         if not registry:
             raise HTTPException(status_code=503, detail="Provider registry not initialized")
         provider = registry.get_provider(provider_type)
         if not provider:
-            raise HTTPException(status_code=404, detail=f"Provider '{provider_type}' not registered")
+            raise HTTPException(
+                status_code=404, detail=f"Provider '{provider_type}' not registered"
+            )
         registry.map_model(model_name, provider_type)
         if app.state.router:
             from bashgym.gym.router import ModelConfig as _ModelConfig
             from bashgym.gym.router import ModelType as _ModelType
-            app.state.router.register_model(_ModelConfig(
-                name=model_name,
-                model_type=_ModelType.STUDENT,
-                endpoint=f"{provider_type}://registry",
-            ))
+
+            app.state.router.register_model(
+                _ModelConfig(
+                    name=model_name,
+                    model_type=_ModelType.STUDENT,
+                    endpoint=f"{provider_type}://registry",
+                )
+            )
         return {
             "success": True,
             "provider": provider_type,
@@ -3147,7 +3366,7 @@ def create_app() -> FastAPI:
     async def get_router_config():
         """Get full router configuration including active models."""
         router = app.state.router
-        registry = getattr(app.state, 'provider_registry', None)
+        registry = getattr(app.state, "provider_registry", None)
         result = {
             "strategy": router.config.strategy.value if router else "unknown",
             "student_rate": router.current_student_rate if router else 0,
@@ -3169,7 +3388,7 @@ def create_app() -> FastAPI:
     @app.post("/api/providers/ollama/warmup", tags=["Providers"])
     async def warmup_ollama_model(model_name: str):
         """Pre-load an Ollama model into VRAM."""
-        registry = getattr(app.state, 'provider_registry', None)
+        registry = getattr(app.state, "provider_registry", None)
         if not registry:
             raise HTTPException(status_code=503, detail="Registry not initialized")
         provider = registry.get_provider("ollama")
@@ -3189,7 +3408,12 @@ def create_app() -> FastAPI:
             # TODO: Get task workspace path
             result = {"passed": True, "tests_run": 5, "tests_passed": 5}
         else:
-            result = {"passed": True, "tests_run": 0, "tests_passed": 0, "message": "Verifier not available"}
+            result = {
+                "passed": True,
+                "tests_run": 0,
+                "tests_passed": 0,
+                "message": "Verifier not available",
+            }
 
         await broadcast_verification_result(task_id, result.get("passed", False), result)
 
@@ -3207,6 +3431,7 @@ def create_app() -> FastAPI:
         extract the user's initial prompt from the original JSONL file.
         """
         from bashgym.config import get_settings
+
         settings = get_settings()
         data_dir = Path(settings.data.data_dir)
 
@@ -3222,7 +3447,7 @@ def create_app() -> FastAPI:
 
         for trace_file in gold_dir.glob("*.json"):
             try:
-                with open(trace_file, encoding='utf-8') as f:
+                with open(trace_file, encoding="utf-8") as f:
                     trace_data = json.load(f)
 
                 metadata = trace_data.get("metadata", {})
@@ -3246,7 +3471,7 @@ def create_app() -> FastAPI:
 
                 # Extract user prompt from source JSONL
                 user_prompt = None
-                with open(source_file, encoding='utf-8') as f:
+                with open(source_file, encoding="utf-8") as f:
                     for line in f:
                         line = line.strip()
                         if not line:
@@ -3275,16 +3500,25 @@ def create_app() -> FastAPI:
 
                 if not user_prompt:
                     failed += 1
-                    details.append({"file": trace_file.name, "error": "No user message found in source"})
+                    details.append(
+                        {"file": trace_file.name, "error": "No user message found in source"}
+                    )
                     continue
 
                 # Update the trace file
                 trace_data["metadata"]["user_initial_prompt"] = user_prompt
-                with open(trace_file, 'w', encoding='utf-8') as f:
+                with open(trace_file, "w", encoding="utf-8") as f:
                     json.dump(trace_data, f, indent=2, ensure_ascii=False)
 
                 repaired += 1
-                details.append({"file": trace_file.name, "prompt": user_prompt[:100] + "..." if len(user_prompt) > 100 else user_prompt})
+                details.append(
+                    {
+                        "file": trace_file.name,
+                        "prompt": (
+                            user_prompt[:100] + "..." if len(user_prompt) > 100 else user_prompt
+                        ),
+                    }
+                )
 
             except Exception as e:
                 failed += 1
@@ -3295,7 +3529,7 @@ def create_app() -> FastAPI:
             "failed": failed,
             "skipped": skipped,
             "total_scanned": repaired + failed + skipped,
-            "details": details[:20]  # Limit details to first 20
+            "details": details[:20],  # Limit details to first 20
         }
 
     # =========================================================================
@@ -3306,6 +3540,7 @@ def create_app() -> FastAPI:
     async def run_synthesis():
         """Run data synthesis from gold traces."""
         from bashgym.config import get_settings
+
         settings = get_settings()
 
         if app.state.data_factory:
@@ -3317,16 +3552,23 @@ def create_app() -> FastAPI:
                 if gold_dir.exists():
                     examples = app.state.data_factory.process_directory(gold_dir)
                     if examples:
-                        batch_path = output_dir / f"sft_batch_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.jsonl"
+                        batch_path = (
+                            output_dir
+                            / f"sft_batch_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.jsonl"
+                        )
                         app.state.data_factory.save_batch(examples, batch_path)
 
                         return {
                             "success": True,
                             "examples_created": len(examples),
-                            "output_path": str(batch_path)
+                            "output_path": str(batch_path),
                         }
 
-                return {"success": True, "examples_created": 0, "message": "No gold traces to process"}
+                return {
+                    "success": True,
+                    "examples_created": 0,
+                    "message": "No gold traces to process",
+                }
 
             except Exception as e:
                 raise HTTPException(status_code=500, detail=str(e))
@@ -3342,6 +3584,7 @@ def create_app() -> FastAPI:
         """Check status of all AI coding tool trace capture hooks."""
         try:
             from bashgym.trace_capture import get_tool_status
+
             return get_tool_status()
         except ImportError:
             # Fallback to legacy Claude Code-only check
@@ -3361,7 +3604,7 @@ def create_app() -> FastAPI:
                 "post_tool_use_installed": post_tool_use_installed,
                 "session_end_installed": session_end_installed,
                 "all_installed": post_tool_use_installed and session_end_installed,
-                "platform": platform.system()
+                "platform": platform.system(),
             }
 
     @app.post("/api/hooks/install", response_model=HooksInstallResponse, tags=["Hooks"])
@@ -3377,6 +3620,7 @@ def create_app() -> FastAPI:
 
         try:
             from bashgym.trace_capture import setup_trace_capture
+
             result = setup_trace_capture(tools=tools, verbose=False)
             return result
         except ImportError:
@@ -3422,7 +3666,9 @@ def create_app() -> FastAPI:
                 "hooks_dir": str(hooks_dir),
                 "installed": installed,
                 "errors": errors,
-                "message": f"Installed {len(installed)} hooks" if installed else "No hooks installed"
+                "message": (
+                    f"Installed {len(installed)} hooks" if installed else "No hooks installed"
+                ),
             }
 
     # =========================================================================
@@ -3433,6 +3679,7 @@ def create_app() -> FastAPI:
     async def get_factory_config():
         """Get the current factory configuration."""
         from bashgym.config import get_settings
+
         settings = get_settings()
 
         # Try to load from disk if not in memory
@@ -3455,7 +3702,7 @@ def create_app() -> FastAPI:
                 prompt_optimization=PromptOptConfig(),
                 output=OutputConfig(),
                 safety=SafetyConfig(),
-                default_model=ModelConfig()
+                default_model=ModelConfig(),
             )
         return app.state.factory_config
 
@@ -3463,6 +3710,7 @@ def create_app() -> FastAPI:
     async def update_factory_config(config: FactoryConfig):
         """Update the factory configuration."""
         from bashgym.config import get_settings
+
         settings = get_settings()
 
         # Store in memory
@@ -3472,7 +3720,7 @@ def create_app() -> FastAPI:
         config_path = Path(settings.data.data_dir) / "factory_config.json"
         config_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(config_path, 'w') as f:
+        with open(config_path, "w") as f:
             json.dump(config.dict(), f, indent=2)
 
         return {"success": True, "message": "Factory configuration updated"}
@@ -3496,14 +3744,18 @@ def create_app() -> FastAPI:
             data=seed_data.get("data", {}),
             source=SeedSource(seed_data.get("source", "manual")),
             created_at=datetime.utcnow().isoformat(),
-            trace_id=seed_data.get("trace_id")
+            trace_id=seed_data.get("trace_id"),
         )
 
         if app.state.factory_config is None:
             app.state.factory_config = FactoryConfig(
-                columns=[], seeds=[], privacy=PrivacyConfig(),
-                prompt_optimization=PromptOptConfig(), output=OutputConfig(),
-                safety=SafetyConfig(), default_model=ModelConfig()
+                columns=[],
+                seeds=[],
+                privacy=PrivacyConfig(),
+                prompt_optimization=PromptOptConfig(),
+                output=OutputConfig(),
+                safety=SafetyConfig(),
+                default_model=ModelConfig(),
             )
 
         app.state.factory_config.seeds.append(seed)
@@ -3528,6 +3780,7 @@ def create_app() -> FastAPI:
     async def import_seeds_from_traces(request: dict[str, Any]):
         """Import seeds from gold traces."""
         from bashgym.config import get_settings
+
         settings = get_settings()
 
         trace_ids = request.get("trace_ids")
@@ -3549,7 +3802,7 @@ def create_app() -> FastAPI:
                 continue
 
             try:
-                with open(trace_file, encoding='utf-8') as f:
+                with open(trace_file, encoding="utf-8") as f:
                     trace_data = json.load(f)
 
                 metadata = trace_data.get("metadata", {})
@@ -3577,7 +3830,7 @@ def create_app() -> FastAPI:
                     data=seed_data,
                     source=SeedSource.GOLD_TRACE,
                     created_at=datetime.utcnow().isoformat(),
-                    trace_id=trace_file.stem
+                    trace_id=trace_file.stem,
                 )
 
                 imported_seeds.append(seed)
@@ -3588,9 +3841,13 @@ def create_app() -> FastAPI:
         # Add to config
         if app.state.factory_config is None:
             app.state.factory_config = FactoryConfig(
-                columns=[], seeds=[], privacy=PrivacyConfig(),
-                prompt_optimization=PromptOptConfig(), output=OutputConfig(),
-                safety=SafetyConfig(), default_model=ModelConfig()
+                columns=[],
+                seeds=[],
+                privacy=PrivacyConfig(),
+                prompt_optimization=PromptOptConfig(),
+                output=OutputConfig(),
+                safety=SafetyConfig(),
+                default_model=ModelConfig(),
             )
 
         app.state.factory_config.seeds.extend(imported_seeds)
@@ -3616,7 +3873,7 @@ def create_app() -> FastAPI:
                 valid_count=0,
                 invalid_count=0,
                 validation_summary={},
-                column_coverage={}
+                column_coverage={},
             )
 
         # Generate preview rows
@@ -3648,12 +3905,14 @@ def create_app() -> FastAPI:
                 if col.risk_level.value != "normal":
                     risk_flags.append(f"{col.name}: {col.risk_level.value} risk")
 
-            preview_rows.append(PreviewRow(
-                id=f"preview_{i}",
-                data=row_data,
-                validation_errors=errors,
-                risk_flags=risk_flags
-            ))
+            preview_rows.append(
+                PreviewRow(
+                    id=f"preview_{i}",
+                    data=row_data,
+                    validation_errors=errors,
+                    risk_flags=risk_flags,
+                )
+            )
 
         # Calculate coverage
         column_coverage = {}
@@ -3669,7 +3928,7 @@ def create_app() -> FastAPI:
             valid_count=valid_count,
             invalid_count=row_count - valid_count,
             validation_summary=validation_summary,
-            column_coverage=column_coverage
+            column_coverage=column_coverage,
         )
 
     def _generate_column_value(col: ColumnConfig, seeds: list[SeedExample], index: int) -> str:
@@ -3782,7 +4041,7 @@ def create_app() -> FastAPI:
                 examples_created=j.get("examples_created"),
                 valid_examples=j.get("valid_examples"),
                 output_path=j.get("output_path"),
-                error=j.get("error")
+                error=j.get("error"),
             )
             for j in jobs[:limit]
         ]
@@ -3803,7 +4062,7 @@ def create_app() -> FastAPI:
             examples_created=j.get("examples_created"),
             valid_examples=j.get("valid_examples"),
             output_path=j.get("output_path"),
-            error=j.get("error")
+            error=j.get("error"),
         )
 
     @app.post("/api/factory/jobs/{job_id}/cancel", tags=["Factory"])
@@ -3821,10 +4080,7 @@ def create_app() -> FastAPI:
         return {"success": False, "message": "Job is not running"}
 
     @app.post("/api/factory/synthesize", response_model=SynthesisJob, tags=["Factory"])
-    async def run_factory_synthesis(
-        request: dict[str, Any],
-        background_tasks: BackgroundTasks
-    ):
+    async def run_factory_synthesis(request: dict[str, Any], background_tasks: BackgroundTasks):
         """Run data synthesis using the factory configuration."""
         is_preview = request.get("preview", False)
         row_count = request.get("row_count")
@@ -3838,7 +4094,7 @@ def create_app() -> FastAPI:
             "status": SynthesisJobStatus.PENDING,
             "job_type": job_type,
             "created_at": datetime.utcnow().isoformat(),
-            "row_count": row_count
+            "row_count": row_count,
         }
 
         # Run synthesis in background
@@ -3848,12 +4104,13 @@ def create_app() -> FastAPI:
             id=job_id,
             status=SynthesisJobStatus.PENDING,
             job_type=job_type,
-            created_at=app.state.synthesis_jobs[job_id]["created_at"]
+            created_at=app.state.synthesis_jobs[job_id]["created_at"],
         )
 
     async def run_synthesis_job(app, job_id: str, is_preview: bool = False, row_count: int = None):
         """Execute synthesis job in the background."""
         from bashgym.config import get_settings
+
         settings = get_settings()
 
         try:
@@ -3879,11 +4136,16 @@ def create_app() -> FastAPI:
                         output_format = config.output.format.value
                         task_name = config.output.task_name
 
-                        batch_path = output_dir / f"{task_name}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.{output_format}"
+                        batch_path = (
+                            output_dir
+                            / f"{task_name}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.{output_format}"
+                        )
                         app.state.data_factory.save_batch(examples, batch_path)
 
                         app.state.synthesis_jobs[job_id]["status"] = SynthesisJobStatus.COMPLETED
-                        app.state.synthesis_jobs[job_id]["completed_at"] = datetime.utcnow().isoformat()
+                        app.state.synthesis_jobs[job_id][
+                            "completed_at"
+                        ] = datetime.utcnow().isoformat()
                         app.state.synthesis_jobs[job_id]["examples_created"] = len(examples)
                         app.state.synthesis_jobs[job_id]["valid_examples"] = len(examples)
                         app.state.synthesis_jobs[job_id]["output_path"] = str(batch_path)
@@ -3903,7 +4165,9 @@ def create_app() -> FastAPI:
             if not is_preview:
                 output_dir = Path(settings.data.data_dir) / "training_batches"
                 output_dir.mkdir(parents=True, exist_ok=True)
-                output_path = output_dir / f"synthetic_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.jsonl"
+                output_path = (
+                    output_dir / f"synthetic_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.jsonl"
+                )
                 app.state.synthesis_jobs[job_id]["output_path"] = str(output_path)
 
         except Exception as e:
@@ -3942,20 +4206,18 @@ def create_app() -> FastAPI:
                     if error not in errors:
                         errors.append(error)
 
-            sample_rows.append(PreviewRow(
-                id=f"sample_{i}",
-                data={column.name: value},
-                validation_errors=row_errors,
-                risk_flags=[]
-            ))
+            sample_rows.append(
+                PreviewRow(
+                    id=f"sample_{i}",
+                    data={column.name: value},
+                    validation_errors=row_errors,
+                    risk_flags=[],
+                )
+            )
 
         valid = len(errors) == 0
 
-        return {
-            "valid": valid,
-            "errors": errors,
-            "sample": sample_rows
-        }
+        return {"valid": valid, "errors": errors, "sample": sample_rows}
 
     # -------------------------------------------------------------------------
     # Available Models
@@ -3967,16 +4229,44 @@ def create_app() -> FastAPI:
         # Return common models - in production this would query NIM or other services
         return [
             # Anthropic Claude 4.5 (recommended for high-quality augmentation)
-            AvailableModel(id="claude-opus-4-5-20251101", name="Claude Opus 4.5 (Best Quality)", provider="Anthropic"),
-            AvailableModel(id="claude-sonnet-4-5-20250929", name="Claude Sonnet 4.5 (Recommended)", provider="Anthropic"),
-            AvailableModel(id="claude-haiku-4-5-20251001", name="Claude Haiku 4.5 (Fast)", provider="Anthropic"),
+            AvailableModel(
+                id="claude-opus-4-5-20251101",
+                name="Claude Opus 4.5 (Best Quality)",
+                provider="Anthropic",
+            ),
+            AvailableModel(
+                id="claude-sonnet-4-5-20250929",
+                name="Claude Sonnet 4.5 (Recommended)",
+                provider="Anthropic",
+            ),
+            AvailableModel(
+                id="claude-haiku-4-5-20251001", name="Claude Haiku 4.5 (Fast)", provider="Anthropic"
+            ),
             # NVIDIA NIM (cost-effective, good for bulk generation)
-            AvailableModel(id="qwen/qwen2.5-coder-32b-instruct", name="Qwen 2.5 Coder 32B (Default NIM)", provider="NVIDIA NIM"),
-            AvailableModel(id="qwen/qwen2.5-coder-7b-instruct", name="Qwen 2.5 Coder 7B", provider="NVIDIA NIM"),
-            AvailableModel(id="meta/llama-3.1-8b-instruct", name="Llama 3.1 8B Instruct", provider="NVIDIA NIM"),
-            AvailableModel(id="meta/llama-3.1-70b-instruct", name="Llama 3.1 70B Instruct", provider="NVIDIA NIM"),
-            AvailableModel(id="nvidia/nemotron-4-340b-instruct", name="Nemotron 4 340B", provider="NVIDIA NIM"),
-            AvailableModel(id="mistralai/mistral-7b-instruct-v0.3", name="Mistral 7B Instruct", provider="NVIDIA NIM"),
+            AvailableModel(
+                id="qwen/qwen2.5-coder-32b-instruct",
+                name="Qwen 2.5 Coder 32B (Default NIM)",
+                provider="NVIDIA NIM",
+            ),
+            AvailableModel(
+                id="qwen/qwen2.5-coder-7b-instruct", name="Qwen 2.5 Coder 7B", provider="NVIDIA NIM"
+            ),
+            AvailableModel(
+                id="meta/llama-3.1-8b-instruct", name="Llama 3.1 8B Instruct", provider="NVIDIA NIM"
+            ),
+            AvailableModel(
+                id="meta/llama-3.1-70b-instruct",
+                name="Llama 3.1 70B Instruct",
+                provider="NVIDIA NIM",
+            ),
+            AvailableModel(
+                id="nvidia/nemotron-4-340b-instruct", name="Nemotron 4 340B", provider="NVIDIA NIM"
+            ),
+            AvailableModel(
+                id="mistralai/mistral-7b-instruct-v0.3",
+                name="Mistral 7B Instruct",
+                provider="NVIDIA NIM",
+            ),
             # OpenAI (alternative)
             AvailableModel(id="openai/gpt-4o", name="GPT-4o", provider="OpenAI"),
         ]
@@ -3988,6 +4278,7 @@ def create_app() -> FastAPI:
     def _get_evaluations_file() -> Path:
         """Get path to evaluations JSON file."""
         from bashgym.config import get_settings
+
         settings = get_settings()
         data_dir = Path(settings.data.data_dir)
         data_dir.mkdir(parents=True, exist_ok=True)
@@ -3998,7 +4289,7 @@ def create_app() -> FastAPI:
         eval_file = _get_evaluations_file()
         if eval_file.exists():
             try:
-                with open(eval_file, encoding='utf-8') as f:
+                with open(eval_file, encoding="utf-8") as f:
                     return json.load(f)
             except (OSError, json.JSONDecodeError) as e:
                 logger.warning(f"Failed to load evaluations: {e}")
@@ -4008,7 +4299,7 @@ def create_app() -> FastAPI:
         """Save evaluations to JSON file."""
         eval_file = _get_evaluations_file()
         try:
-            with open(eval_file, 'w', encoding='utf-8') as f:
+            with open(eval_file, "w", encoding="utf-8") as f:
                 json.dump(evaluations, f, indent=2)
         except OSError as e:
             logger.error(f"Failed to save evaluations: {e}")
@@ -4017,7 +4308,9 @@ def create_app() -> FastAPI:
     app.state.evaluation_jobs = _load_evaluations()
     logger.info(f"Loaded {len(app.state.evaluation_jobs)} evaluation jobs from disk")
 
-    async def run_evaluation_task(app_state, job_id: str, request: EvaluationRequest, model_path: Path):
+    async def run_evaluation_task(
+        app_state, job_id: str, request: EvaluationRequest, model_path: Path
+    ):
         """Execute evaluation in background."""
 
         from bashgym.judge.benchmarks import BenchmarkConfig, BenchmarkRunner, BenchmarkType
@@ -4028,6 +4321,7 @@ def create_app() -> FastAPI:
 
         try:
             from bashgym.inference import ModelLoader
+
             model_loader = ModelLoader(model_path)
             model_loader.load()
             use_real_inference = True
@@ -4046,7 +4340,7 @@ def create_app() -> FastAPI:
                     config = BenchmarkConfig(
                         benchmark_type=BenchmarkType(benchmark_name),
                         num_samples=request.num_samples,
-                        model_name=request.model_id
+                        model_name=request.model_id,
                     )
                     runner = BenchmarkRunner(config)
 
@@ -4069,13 +4363,17 @@ def create_app() -> FastAPI:
                         passed=result.passed_samples,
                         total=result.total_samples,
                         duration_seconds=result.total_time_seconds,
-                        errors=ErrorAnalysisSchema(
-                            wrong_answer=error_analysis.wrong_answer,
-                            syntax_error=error_analysis.syntax_error,
-                            runtime_error=error_analysis.runtime_error,
-                            timeout=error_analysis.timeout,
-                            other=error_analysis.other
-                        ) if error_analysis else None
+                        errors=(
+                            ErrorAnalysisSchema(
+                                wrong_answer=error_analysis.wrong_answer,
+                                syntax_error=error_analysis.syntax_error,
+                                runtime_error=error_analysis.runtime_error,
+                                timeout=error_analysis.timeout,
+                                other=error_analysis.other,
+                            )
+                            if error_analysis
+                            else None
+                        ),
                     )
                 except ValueError as e:
                     # Unknown benchmark type - skip it
@@ -4083,11 +4381,14 @@ def create_app() -> FastAPI:
                     continue
 
             app_state.evaluation_jobs[job_id]["status"] = "completed"
-            app_state.evaluation_jobs[job_id]["results"] = {k: v.model_dump() for k, v in results.items()}
+            app_state.evaluation_jobs[job_id]["results"] = {
+                k: v.model_dump() for k, v in results.items()
+            }
 
             # Save results to model profile if available
             try:
                 from bashgym.models import get_registry
+
                 registry = get_registry()
                 for benchmark_name, result_schema in results.items():
                     registry.add_benchmark_result(
@@ -4149,7 +4450,7 @@ def create_app() -> FastAPI:
             "status": "running",
             "results": None,
             "error": None,
-            "created_at": datetime.utcnow().isoformat()
+            "created_at": datetime.utcnow().isoformat(),
         }
         app.state.evaluation_jobs[job_id] = job
 
@@ -4180,7 +4481,7 @@ def create_app() -> FastAPI:
             status=job["status"],
             results=results,
             error=job.get("error"),
-            created_at=job.get("created_at")
+            created_at=job.get("created_at"),
         )
 
     @app.get("/api/evaluation", response_model=list[EvaluationResponse], tags=["Evaluation"])
@@ -4194,15 +4495,17 @@ def create_app() -> FastAPI:
             results = None
             if j.get("results"):
                 results = {k: BenchmarkResultSchema(**v) for k, v in j["results"].items()}
-            result.append(EvaluationResponse(
-                job_id=j["job_id"],
-                model_id=j["model_id"],
-                benchmarks=j["benchmarks"],
-                status=j["status"],
-                results=results,
-                error=j.get("error"),
-                created_at=j.get("created_at")
-            ))
+            result.append(
+                EvaluationResponse(
+                    job_id=j["job_id"],
+                    model_id=j["model_id"],
+                    benchmarks=j["benchmarks"],
+                    status=j["status"],
+                    results=results,
+                    error=j.get("error"),
+                    created_at=j.get("created_at"),
+                )
+            )
         return result
 
     @app.get("/api/benchmarks/status", tags=["Evaluation"])
@@ -4218,12 +4521,13 @@ def create_app() -> FastAPI:
                 "loaded": benchmark_id in BenchmarkLoader._cache,
                 "dataset": dataset_name,
                 "config": config,
-                "num_samples": len(BenchmarkLoader._cache.get(benchmark_id, []))
+                "num_samples": len(BenchmarkLoader._cache.get(benchmark_id, [])),
             }
         return {"benchmarks": status}
 
     # Include auth routes (GitHub OAuth)
     from bashgym.api.auth_routes import router as auth_router
+
     app.include_router(auth_router)
 
     # Include observability routes
@@ -4292,7 +4596,7 @@ def create_app() -> FastAPI:
                 # Validate it's JSON
                 json.loads(content)
                 # Sanitize filename
-                safe_name = re.sub(r'[^\w\-.]', '_', f.filename or 'trace.json')
+                safe_name = re.sub(r"[^\w\-.]", "_", f.filename or "trace.json")
                 dest = traces_dir / f"uploaded_{uuid.uuid4().hex[:8]}_{safe_name}"
                 dest.write_bytes(content)
                 saved.append(str(dest.name))
@@ -4334,6 +4638,7 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=413, detail="File exceeds 50 MB limit")
 
         import tempfile
+
         suffix = f"_{file.filename}" if file.filename else ""
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             tmp.write(content)
@@ -4342,6 +4647,7 @@ def create_app() -> FastAPI:
         try:
             if source == "chatgpt":
                 from bashgym.trace_capture.importers.chatgpt import ChatGPTImporter
+
                 importer = ChatGPTImporter()
                 if file.filename and file.filename.endswith(".zip"):
                     results = importer.import_from_zip(tmp_path, force=force)
@@ -4363,6 +4669,7 @@ def create_app() -> FastAPI:
 
             elif source == "mcp":
                 from bashgym.trace_capture.importers.mcp_logs import MCPLogImporter
+
                 importer = MCPLogImporter()
                 result = importer.import_from_file(tmp_path, force=force)
 
@@ -4386,7 +4693,9 @@ def create_app() -> FastAPI:
                     }
 
             if resp.get("imported_count", 0) > 0:
-                await broadcast_trace_event("added", {"source": source, "count": resp["imported_count"]})
+                await broadcast_trace_event(
+                    "added", {"source": source, "count": resp["imported_count"]}
+                )
 
             return resp
         finally:
@@ -4406,7 +4715,7 @@ def create_app() -> FastAPI:
 
         trace_id = payload.get("session_id", uuid.uuid4().hex[:12])
         # Sanitize trace_id for filesystem safety
-        safe_id = re.sub(r'[^\w\-]', '_', str(trace_id))
+        safe_id = re.sub(r"[^\w\-]", "_", str(trace_id))
         dest = traces_dir / f"remote_{safe_id}.json"
         dest.write_text(json.dumps(payload, indent=2))
 
@@ -4422,6 +4731,7 @@ def create_app() -> FastAPI:
         read and execute to set up trace forwarding to this server.
         """
         from bashgym.config import get_settings as _gs
+
         settings = _gs()
 
         # Build the server URL — best-effort from settings
@@ -4542,4 +4852,5 @@ app = create_app()
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)

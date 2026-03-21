@@ -8,18 +8,18 @@ Provides:
 - Filtering, sorting, comparison queries
 """
 
+import builtins
 import json
-import os
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Literal
+from typing import Any, Literal
 
 from .profile import (
-    ModelProfile,
-    ModelArtifacts,
+    BenchmarkResult,
     CheckpointInfo,
     GGUFExport,
-    BenchmarkResult,
+    ModelArtifacts,
+    ModelProfile,
 )
 
 
@@ -30,7 +30,7 @@ class ModelRegistry:
     Scans model directories, builds profiles, and provides query operations.
     """
 
-    def __init__(self, models_dir: Optional[str] = None):
+    def __init__(self, models_dir: str | None = None):
         """
         Initialize the registry.
 
@@ -56,7 +56,7 @@ class ModelRegistry:
                 break
 
         self.models_dir.mkdir(parents=True, exist_ok=True)
-        self._profiles: Dict[str, ModelProfile] = {}
+        self._profiles: dict[str, ModelProfile] = {}
         self._index_path = self.models_dir / "registry_index.json"
 
     def scan(self, force_rescan: bool = False) -> int:
@@ -97,7 +97,7 @@ class ModelRegistry:
         self._save_index()
         return len(self._profiles)
 
-    def _load_or_create_profile(self, run_dir: Path) -> Optional[ModelProfile]:
+    def _load_or_create_profile(self, run_dir: Path) -> ModelProfile | None:
         """Load existing profile or create from training artifacts."""
         profile_path = run_dir / "model_profile.json"
 
@@ -111,7 +111,7 @@ class ModelRegistry:
         # Create profile from training artifacts
         return self._create_profile_from_artifacts(run_dir)
 
-    def _create_profile_from_artifacts(self, run_dir: Path) -> Optional[ModelProfile]:
+    def _create_profile_from_artifacts(self, run_dir: Path) -> ModelProfile | None:
         """Create a ModelProfile from training artifacts in a run directory."""
         run_id = run_dir.name
 
@@ -179,12 +179,14 @@ class ModelRegistry:
         if trainer_state and "log_history" in trainer_state:
             for entry in trainer_state["log_history"]:
                 if "loss" in entry:
-                    loss_curve.append({
-                        "step": entry.get("step", 0),
-                        "loss": entry["loss"],
-                        "epoch": entry.get("epoch"),
-                        "learning_rate": entry.get("learning_rate"),
-                    })
+                    loss_curve.append(
+                        {
+                            "step": entry.get("step", 0),
+                            "loss": entry["loss"],
+                            "epoch": entry.get("epoch"),
+                            "learning_rate": entry.get("learning_rate"),
+                        }
+                    )
 
         # Determine training strategy from directory contents or config
         strategy = "sft"  # Default
@@ -255,10 +257,12 @@ class ModelRegistry:
             if item.is_dir() and item.name.startswith("checkpoint-"):
                 try:
                     step = int(item.name.split("-")[1])
-                    artifacts.checkpoints.append(CheckpointInfo(
-                        path=str(item),
-                        step=step,
-                    ))
+                    artifacts.checkpoints.append(
+                        CheckpointInfo(
+                            path=str(item),
+                            step=step,
+                        )
+                    )
                 except (IndexError, ValueError):
                     pass
 
@@ -287,12 +291,14 @@ class ModelRegistry:
                         quant = q
                         break
 
-                artifacts.gguf_exports.append(GGUFExport(
-                    path=str(gguf_file),
-                    quantization=quant,
-                    size_bytes=gguf_file.stat().st_size,
-                    created_at=datetime.fromtimestamp(gguf_file.stat().st_mtime),
-                ))
+                artifacts.gguf_exports.append(
+                    GGUFExport(
+                        path=str(gguf_file),
+                        quantization=quant,
+                        size_bytes=gguf_file.stat().st_size,
+                        created_at=datetime.fromtimestamp(gguf_file.stat().st_mtime),
+                    )
+                )
 
         return artifacts
 
@@ -320,7 +326,7 @@ class ModelRegistry:
 
         return total_size
 
-    def _extract_final_metrics(self, trainer_state: Optional[Dict]) -> Dict[str, float]:
+    def _extract_final_metrics(self, trainer_state: dict | None) -> dict[str, float]:
         """Extract final training metrics from trainer state."""
         if not trainer_state:
             return {}
@@ -362,7 +368,7 @@ class ModelRegistry:
                     "created_at": p.created_at.isoformat(),
                 }
                 for p in self._profiles.values()
-            ]
+            ],
         }
         with open(self._index_path, "w") as f:
             json.dump(index, f, indent=2)
@@ -371,16 +377,16 @@ class ModelRegistry:
 
     def list(
         self,
-        strategy: Optional[str] = None,
-        base_model: Optional[str] = None,
-        status: Optional[str] = None,
-        tags: Optional[List[str]] = None,
+        strategy: str | None = None,
+        base_model: str | None = None,
+        status: str | None = None,
+        tags: list[str] | None = None,
         starred_only: bool = False,
         sort_by: str = "created_at",
         sort_order: Literal["asc", "desc"] = "desc",
-        limit: Optional[int] = None,
+        limit: int | None = None,
         offset: int = 0,
-    ) -> List[ModelProfile]:
+    ) -> list[ModelProfile]:
         """
         List models with filtering and sorting.
 
@@ -419,15 +425,9 @@ class ModelRegistry:
         elif sort_by == "display_name":
             results.sort(key=lambda p: p.display_name.lower(), reverse=reverse)
         elif sort_by == "custom_eval":
-            results.sort(
-                key=lambda p: p.custom_eval_pass_rate or 0,
-                reverse=reverse
-            )
+            results.sort(key=lambda p: p.custom_eval_pass_rate or 0, reverse=reverse)
         elif sort_by == "benchmark_avg":
-            results.sort(
-                key=lambda p: p.benchmark_avg_score or 0,
-                reverse=reverse
-            )
+            results.sort(key=lambda p: p.benchmark_avg_score or 0, reverse=reverse)
         elif sort_by == "model_size":
             results.sort(key=lambda p: p.model_size_bytes, reverse=reverse)
 
@@ -442,11 +442,11 @@ class ModelRegistry:
 
         return results
 
-    def get(self, model_id: str) -> Optional[ModelProfile]:
+    def get(self, model_id: str) -> ModelProfile | None:
         """Get a model by ID."""
         return self._profiles.get(model_id)
 
-    def update(self, model_id: str, updates: Dict[str, Any]) -> Optional[ModelProfile]:
+    def update(self, model_id: str, updates: dict[str, Any]) -> ModelProfile | None:
         """
         Update a model's editable fields.
 
@@ -492,15 +492,15 @@ class ModelRegistry:
         self._save_index()
         return True
 
-    def star(self, model_id: str, starred: bool = True) -> Optional[ModelProfile]:
+    def star(self, model_id: str, starred: bool = True) -> ModelProfile | None:
         """Star or unstar a model."""
         return self.update(model_id, {"starred": starred})
 
     def compare(
         self,
-        model_ids: List[str],
-        metrics: Optional[List[str]] = None,
-    ) -> Dict[str, Dict[str, Any]]:
+        model_ids: builtins.list[str],
+        metrics: builtins.list[str] | None = None,
+    ) -> dict[str, dict[str, Any]]:
         """
         Compare multiple models.
 
@@ -547,7 +547,7 @@ class ModelRegistry:
         self,
         metric: str = "custom_eval_pass_rate",
         limit: int = 10,
-    ) -> List[Dict[str, Any]]:
+    ) -> builtins.list[dict[str, Any]]:
         """
         Get ranked leaderboard by metric.
 
@@ -585,7 +585,11 @@ class ModelRegistry:
                 "rank": i + 1,
                 "model_id": p.model_id,
                 "display_name": p.display_name,
-                "value": get_metric(p) if not metric == "inference_latency_ms" else (p.inference_latency_ms or 0),
+                "value": (
+                    get_metric(p)
+                    if not metric == "inference_latency_ms"
+                    else (p.inference_latency_ms or 0)
+                ),
                 "base_model": p.base_model,
                 "strategy": p.training_strategy,
             }
@@ -596,7 +600,7 @@ class ModelRegistry:
         self,
         metric: str = "benchmark_avg_score",
         days: int = 30,
-    ) -> List[Dict[str, Any]]:
+    ) -> builtins.list[dict[str, Any]]:
         """
         Get metric trends over time.
 
@@ -620,12 +624,14 @@ class ModelRegistry:
                 value = profile.final_metrics.get("final_loss")
 
             if value is not None:
-                data_points.append({
-                    "timestamp": profile.created_at.isoformat(),
-                    "model_id": profile.model_id,
-                    "display_name": profile.display_name,
-                    "value": value,
-                })
+                data_points.append(
+                    {
+                        "timestamp": profile.created_at.isoformat(),
+                        "model_id": profile.model_id,
+                        "display_name": profile.display_name,
+                        "value": value,
+                    }
+                )
 
         # Sort by timestamp
         data_points.sort(key=lambda d: d["timestamp"])
@@ -638,8 +644,8 @@ class ModelRegistry:
         score: float,
         passed: int,
         total: int,
-        metrics: Optional[Dict[str, float]] = None,
-    ) -> Optional[ModelProfile]:
+        metrics: dict[str, float] | None = None,
+    ) -> ModelProfile | None:
         """Add a benchmark result to a model."""
         profile = self._profiles.get(model_id)
         if not profile:
@@ -660,10 +666,10 @@ class ModelRegistry:
 
 
 # Singleton registry instance
-_registry: Optional[ModelRegistry] = None
+_registry: ModelRegistry | None = None
 
 
-def get_registry(models_dir: Optional[str] = None) -> ModelRegistry:
+def get_registry(models_dir: str | None = None) -> ModelRegistry:
     """Get the global ModelRegistry instance."""
     global _registry
     if _registry is None:

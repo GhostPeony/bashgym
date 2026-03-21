@@ -7,7 +7,7 @@ REST endpoints for managing SSH training devices. Backed by DeviceRegistry
 
 import logging
 from dataclasses import asdict
-from typing import Any, Dict, List
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
@@ -51,7 +51,7 @@ def _device_to_response(device) -> DeviceResponse:
 # ---------------------------------------------------------------------------
 
 
-@router.get("", response_model=List[DeviceResponse])
+@router.get("", response_model=list[DeviceResponse])
 async def list_devices():
     """Return all registered devices."""
     devices = await _registry.list_devices()
@@ -78,9 +78,7 @@ async def add_device(body: DeviceCreate):
 @router.put("/{device_id}", response_model=DeviceResponse)
 async def update_device(device_id: str, body: DeviceUpdate):
     """Partially update a device. Returns 404 if not found."""
-    updates: Dict[str, Any] = {
-        k: v for k, v in body.model_dump().items() if v is not None
-    }
+    updates: dict[str, Any] = {k: v for k, v in body.model_dump().items() if v is not None}
     try:
         device = await _registry.update_device(device_id, updates)
     except KeyError as exc:
@@ -144,7 +142,7 @@ async def preflight_device(device_id: str):
     # Persist capabilities when the check succeeded
     updated_device = device
     if result.ok:
-        capabilities: Dict[str, Any] = {}
+        capabilities: dict[str, Any] = {}
         if result.python_version is not None:
             capabilities["python_version"] = result.python_version
         if result.disk_free_gb is not None:

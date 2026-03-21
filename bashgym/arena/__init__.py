@@ -1,7 +1,7 @@
 """Arena - Sandboxed Agent Execution Layer"""
 
-from bashgym.arena.sandbox import SandboxManager, SandboxConfig, SandboxInstance
-from bashgym.arena.runner import AgentRunner, AgentConfig, TaskResult
+from bashgym.arena.runner import AgentConfig, AgentRunner, TaskResult
+from bashgym.arena.sandbox import SandboxConfig, SandboxInstance, SandboxManager
 
 __all__ = [
     "SandboxManager",

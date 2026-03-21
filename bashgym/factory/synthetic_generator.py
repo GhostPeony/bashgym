@@ -6,11 +6,12 @@ import math
 import os
 import random
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING
 
 import httpx
 
@@ -32,14 +33,15 @@ class SyntheticTask:
         repo: Repository name this task is for
         metadata: Additional task metadata
     """
+
     task_id: str
     prompt: str
-    target_files: List[str]
+    target_files: list[str]
     task_type: str
-    expected_tools: List[str]
+    expected_tools: list[str]
     source_pattern_id: str
     repo: str
-    metadata: Dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
 
 
 class GenerationStrategy(str, Enum):
@@ -49,6 +51,7 @@ class GenerationStrategy(str, Enum):
     - AUGMENTED: Use LLM to augment/vary existing trace patterns
     - SCHEMA_DRIVEN: Generate tasks from predefined schemas
     """
+
     TRACE_SEEDED = "trace_seeded"
     AUGMENTED = "augmented"
     SCHEMA_DRIVEN = "schema_driven"
@@ -64,14 +67,15 @@ class GenerationPreset:
         target_examples: Number of examples to generate (None for custom)
         multiplier: Multiplier for trace count (None means auto-calculate)
     """
+
     label: str
     description: str
-    target_examples: Optional[int]
-    multiplier: Optional[int] = None  # None means auto-calculate
+    target_examples: int | None
+    multiplier: int | None = None  # None means auto-calculate
 
 
 # Research-based presets for different training scenarios
-PRESETS: Dict[str, GenerationPreset] = {
+PRESETS: dict[str, GenerationPreset] = {
     "quick_test": GenerationPreset(
         label="Quick Test",
         description="Fast iteration, minimal generation",
@@ -133,8 +137,8 @@ class SyntheticGenerator:
         self,
         patterns: "TracePatterns",
         task_type: str,
-        seed_prompts: List[str],
-        target_files: Optional[List[str]] = None
+        seed_prompts: list[str],
+        target_files: list[str] | None = None,
     ) -> str:
         """Build prompt for LLM to generate synthetic tasks.
 
@@ -221,17 +225,14 @@ Return ONLY the task prompt, nothing else. No quotes, no explanation."""
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 f"{endpoint}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json"
-                },
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                 json={
                     "model": model,
                     "messages": [{"role": "user", "content": prompt}],
                     "max_tokens": 256,
-                    "temperature": 0.8
+                    "temperature": 0.8,
                 },
-                timeout=30.0
+                timeout=30.0,
             )
             response.raise_for_status()
             data = response.json()
@@ -249,11 +250,12 @@ Return ONLY the task prompt, nothing else. No quotes, no explanation."""
             Generated text from Claude
         """
         import anthropic
+
         client = anthropic.AsyncAnthropic()
         response = await client.messages.create(
             model="claude-sonnet-4-5-20250929",
             max_tokens=256,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
         )
         return response.content[0].text.strip()
 
@@ -261,8 +263,8 @@ Return ONLY the task prompt, nothing else. No quotes, no explanation."""
         self,
         patterns: "TracePatterns",
         task_type: str,
-        seed_prompts: List[str],
-        provider: str = "nim"
+        seed_prompts: list[str],
+        provider: str = "nim",
     ) -> SyntheticTask:
         """Generate a single synthetic task.
 
@@ -288,17 +290,17 @@ Return ONLY the task prompt, nothing else. No quotes, no explanation."""
             task_type=task_type,
             expected_tools=["Read", "Edit"],
             source_pattern_id="",
-            repo=patterns.repo_name
+            repo=patterns.repo_name,
         )
 
     async def generate_batch(
         self,
         patterns: "TracePatterns",
-        seed_prompts: List[str],
+        seed_prompts: list[str],
         count: int,
         provider: str = "nim",
-        on_progress: Optional[Callable[[int, int], None]] = None
-    ) -> List[SyntheticTask]:
+        on_progress: Callable[[int, int], None] | None = None,
+    ) -> list[SyntheticTask]:
         """Generate a batch of synthetic tasks.
 
         Generates multiple synthetic tasks by sampling task types from the
@@ -329,7 +331,7 @@ Return ONLY the task prompt, nothing else. No quotes, no explanation."""
                     patterns=patterns,
                     task_type=task_type,
                     seed_prompts=seed_prompts,
-                    provider=provider
+                    provider=provider,
                 )
                 tasks.append(task)
             except Exception as e:
@@ -342,11 +344,8 @@ Return ONLY the task prompt, nothing else. No quotes, no explanation."""
         return tasks
 
     async def generate_from_schema(
-        self,
-        repo_schema: Dict,
-        count: int = 10,
-        provider: str = "nim"
-    ) -> List[SyntheticTask]:
+        self, repo_schema: dict, count: int = 10, provider: str = "nim"
+    ) -> list[SyntheticTask]:
         """Generate tasks from repo structure schema (schema-driven strategy).
 
         This is an alternative generation strategy that creates tasks from
@@ -371,8 +370,7 @@ Return ONLY the task prompt, nothing else. No quotes, no explanation."""
 
         # Build structure description
         structure_desc = "\n".join(
-            f"- {dir}: {', '.join(files)}"
-            for dir, files in structure.items()
+            f"- {dir}: {', '.join(files)}" for dir, files in structure.items()
         )
 
         for i in range(count):
@@ -388,27 +386,26 @@ Return ONLY the task prompt, nothing else."""
 
             try:
                 task_prompt = await self._call_llm(schema_prompt, provider)
-                tasks.append(SyntheticTask(
-                    task_id=f"schema_{uuid.uuid4().hex[:8]}",
-                    prompt=task_prompt,
-                    target_files=[],
-                    task_type="feature",
-                    expected_tools=["Read", "Edit", "Bash"],
-                    source_pattern_id="schema",
-                    repo=repo_name,
-                    metadata={"strategy": "schema_driven"}
-                ))
+                tasks.append(
+                    SyntheticTask(
+                        task_id=f"schema_{uuid.uuid4().hex[:8]}",
+                        prompt=task_prompt,
+                        target_files=[],
+                        task_type="feature",
+                        expected_tools=["Read", "Edit", "Bash"],
+                        source_pattern_id="schema",
+                        repo=repo_name,
+                        metadata={"strategy": "schema_driven"},
+                    )
+                )
             except Exception as e:
                 print(f"Schema generation failed: {e}")
 
         return tasks
 
     async def generate_augmented(
-        self,
-        seed_examples: List[Dict],
-        variations_per_seed: int = 3,
-        provider: str = "nim"
-    ) -> List[SyntheticTask]:
+        self, seed_examples: list[dict], variations_per_seed: int = 3, provider: str = "nim"
+    ) -> list[SyntheticTask]:
         """Generate variations of existing prompts (augmented strategy).
 
         This strategy creates new tasks by augmenting existing seed examples.
@@ -442,16 +439,18 @@ Return ONLY the rewritten task, nothing else."""
 
                 try:
                     variation = await self._call_llm(augment_prompt, provider)
-                    tasks.append(SyntheticTask(
-                        task_id=f"aug_{uuid.uuid4().hex[:8]}",
-                        prompt=variation,
-                        target_files=[],
-                        task_type="feature",
-                        expected_tools=["Read", "Edit"],
-                        source_pattern_id=seed.get("id", ""),
-                        repo=seed.get("repo", ""),
-                        metadata={"strategy": "augmented", "seed_prompt": prompt}
-                    ))
+                    tasks.append(
+                        SyntheticTask(
+                            task_id=f"aug_{uuid.uuid4().hex[:8]}",
+                            prompt=variation,
+                            target_files=[],
+                            task_type="feature",
+                            expected_tools=["Read", "Edit"],
+                            source_pattern_id=seed.get("id", ""),
+                            repo=seed.get("repo", ""),
+                            metadata={"strategy": "augmented", "seed_prompt": prompt},
+                        )
+                    )
                 except Exception as e:
                     print(f"Augmentation failed: {e}")
 
@@ -459,11 +458,11 @@ Return ONLY the rewritten task, nothing else."""
 
     def export_to_nemo(
         self,
-        tasks: List[SyntheticTask],
+        tasks: list[SyntheticTask],
         output_dir: Path,
         train_ratio: float = 0.9,
-        system_prompt: str = "You are a skilled coding assistant."
-    ) -> Dict:
+        system_prompt: str = "You are a skilled coding assistant.",
+    ) -> dict:
         """Export synthetic tasks to NeMo-compatible JSONL format.
 
         Creates train.jsonl, val.jsonl, and metadata.json files in the
@@ -490,12 +489,12 @@ Return ONLY the rewritten task, nothing else."""
         val_tasks = shuffled[split_idx:]
 
         # Convert to NeMo format
-        def to_nemo(task: SyntheticTask) -> Dict:
+        def to_nemo(task: SyntheticTask) -> dict:
             return {
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": task.prompt},
-                    {"role": "assistant", "content": f"I'll help you {task.prompt.lower()}..."}
+                    {"role": "assistant", "content": f"I'll help you {task.prompt.lower()}..."},
                 ],
                 "metadata": {
                     "synthetic": True,
@@ -503,8 +502,8 @@ Return ONLY the rewritten task, nothing else."""
                     "task_type": task.task_type,
                     "repo": task.repo,
                     "task_id": task.task_id,
-                    "generated_at": datetime.now().isoformat()
-                }
+                    "generated_at": datetime.now().isoformat(),
+                },
             }
 
         # Write train.jsonl
@@ -524,7 +523,7 @@ Return ONLY the rewritten task, nothing else."""
             "train_examples": len(train_tasks),
             "val_examples": len(val_tasks),
             "train_ratio": train_ratio,
-            "strategy": "trace_seeded"
+            "strategy": "trace_seeded",
         }
 
         with open(output_dir / "metadata.json", "w", encoding="utf-8") as f:

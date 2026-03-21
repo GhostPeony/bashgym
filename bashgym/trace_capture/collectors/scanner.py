@@ -17,7 +17,7 @@ Usage::
 """
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .base import (
     CollectorBatchResult,
@@ -25,16 +25,15 @@ from .base import (
     get_claude_dir,
     get_collected_dir,
 )
-from .subagent import SubagentCollector
+from .debug import DebugCollector
 from .edit import EditCollector
+from .environment import EnvironmentCollector
 from .plan import PlanCollector
 from .prompt import PromptCollector
+from .subagent import SubagentCollector
 from .todo import TodoCollector
-from .environment import EnvironmentCollector
-from .debug import DebugCollector
 
-
-ALL_SOURCES: List[str] = [
+ALL_SOURCES: list[str] = [
     "subagents",
     "edits",
     "plans",
@@ -107,10 +106,10 @@ class ClaudeDataScanner:
 
     def scan_all(
         self,
-        sources: Optional[List[str]] = None,
-        since: Optional[str] = None,
-        project_filter: Optional[str] = None,
-    ) -> Dict[str, CollectorScanResult]:
+        sources: list[str] | None = None,
+        since: str | None = None,
+        project_filter: str | None = None,
+    ) -> dict[str, CollectorScanResult]:
         """Dry-run scan of all (or selected) sources.
 
         Parameters
@@ -127,7 +126,7 @@ class ClaudeDataScanner:
         dict mapping source name to CollectorScanResult
         """
         sources = sources or ALL_SOURCES
-        results: Dict[str, CollectorScanResult] = {}
+        results: dict[str, CollectorScanResult] = {}
         for source in sources:
             if source in self._collectors:
                 results[source] = self._get_collector(source).scan(
@@ -138,10 +137,10 @@ class ClaudeDataScanner:
 
     def collect_all(
         self,
-        sources: Optional[List[str]] = None,
-        since: Optional[str] = None,
-        project_filter: Optional[str] = None,
-    ) -> Dict[str, CollectorBatchResult]:
+        sources: list[str] | None = None,
+        since: str | None = None,
+        project_filter: str | None = None,
+    ) -> dict[str, CollectorBatchResult]:
         """Collect from all (or selected) sources.
 
         Parameters
@@ -158,7 +157,7 @@ class ClaudeDataScanner:
         dict mapping source name to CollectorBatchResult
         """
         sources = sources or ALL_SOURCES
-        results: Dict[str, CollectorBatchResult] = {}
+        results: dict[str, CollectorBatchResult] = {}
         for source in sources:
             if source in self._collectors:
                 results[source] = self._get_collector(source).collect_all(
@@ -170,8 +169,8 @@ class ClaudeDataScanner:
     def collect_source(
         self,
         source: str,
-        since: Optional[str] = None,
-        project_filter: Optional[str] = None,
+        since: str | None = None,
+        project_filter: str | None = None,
     ) -> CollectorBatchResult:
         """Collect a single source type.
 
@@ -198,7 +197,7 @@ class ClaudeDataScanner:
             project_filter=project_filter,
         )
 
-    def build_index(self) -> Dict[str, Any]:
+    def build_index(self) -> dict[str, Any]:
         """Build or rebuild the cross-reference index.
 
         Walks ``collected_dir`` and groups all records by ``session_id``.
@@ -209,9 +208,10 @@ class ClaudeDataScanner:
             The cross-reference index.
         """
         from .index import build_cross_reference_index
+
         return build_cross_reference_index(self.collected_dir)
 
-    def status(self) -> Dict[str, dict]:
+    def status(self) -> dict[str, dict]:
         """Get collection status for all sources.
 
         Returns
@@ -220,7 +220,7 @@ class ClaudeDataScanner:
             Mapping of source name to ``{"total": int, "collected": int,
             "available": int}``.
         """
-        status: Dict[str, dict] = {}
+        status: dict[str, dict] = {}
         for source in ALL_SOURCES:
             scan = self._get_collector(source).scan()
             status[source] = {

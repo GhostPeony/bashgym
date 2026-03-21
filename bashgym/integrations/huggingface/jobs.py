@@ -30,20 +30,19 @@ Usage:
 """
 
 import logging
-import subprocess
-import tempfile
 import re
+import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Union
+from typing import Any, Optional
 
 from .client import (
-    HuggingFaceClient,
-    HFProRequiredError,
-    HFJobFailedError,
     HF_HUB_AVAILABLE,
+    HFJobFailedError,
+    HFProRequiredError,
+    HuggingFaceClient,
 )
 
 logger = logging.getLogger(__name__)
@@ -53,8 +52,10 @@ logger = logging.getLogger(__name__)
 # Enums and Constants
 # =============================================================================
 
+
 class JobStatus(Enum):
     """Status of a HuggingFace job."""
+
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
@@ -64,20 +65,69 @@ class JobStatus(Enum):
 
 # Hardware tier pricing and specs (as of 2026)
 HARDWARE_SPECS = {
-    "cpu-basic": {"gpu": None, "vram_gb": 0, "memory_gb": 2, "cost_per_hour": 0.0, "pro_required": False},
-    "cpu-upgrade": {"gpu": None, "vram_gb": 0, "memory_gb": 8, "cost_per_hour": 0.0, "pro_required": False},
-    "t4-small": {"gpu": "T4", "vram_gb": 16, "memory_gb": 16, "cost_per_hour": 0.60, "pro_required": True},
-    "t4-medium": {"gpu": "T4", "vram_gb": 16, "memory_gb": 32, "cost_per_hour": 0.90, "pro_required": True},
-    "a10g-small": {"gpu": "A10G", "vram_gb": 24, "memory_gb": 24, "cost_per_hour": 1.05, "pro_required": True},
-    "a10g-large": {"gpu": "A10G", "vram_gb": 24, "memory_gb": 48, "cost_per_hour": 1.80, "pro_required": True},
-    "a100-large": {"gpu": "A100", "vram_gb": 80, "memory_gb": 80, "cost_per_hour": 4.50, "pro_required": True},
-    "h100": {"gpu": "H100", "vram_gb": 80, "memory_gb": 80, "cost_per_hour": 10.00, "pro_required": True},
+    "cpu-basic": {
+        "gpu": None,
+        "vram_gb": 0,
+        "memory_gb": 2,
+        "cost_per_hour": 0.0,
+        "pro_required": False,
+    },
+    "cpu-upgrade": {
+        "gpu": None,
+        "vram_gb": 0,
+        "memory_gb": 8,
+        "cost_per_hour": 0.0,
+        "pro_required": False,
+    },
+    "t4-small": {
+        "gpu": "T4",
+        "vram_gb": 16,
+        "memory_gb": 16,
+        "cost_per_hour": 0.60,
+        "pro_required": True,
+    },
+    "t4-medium": {
+        "gpu": "T4",
+        "vram_gb": 16,
+        "memory_gb": 32,
+        "cost_per_hour": 0.90,
+        "pro_required": True,
+    },
+    "a10g-small": {
+        "gpu": "A10G",
+        "vram_gb": 24,
+        "memory_gb": 24,
+        "cost_per_hour": 1.05,
+        "pro_required": True,
+    },
+    "a10g-large": {
+        "gpu": "A10G",
+        "vram_gb": 24,
+        "memory_gb": 48,
+        "cost_per_hour": 1.80,
+        "pro_required": True,
+    },
+    "a100-large": {
+        "gpu": "A100",
+        "vram_gb": 80,
+        "memory_gb": 80,
+        "cost_per_hour": 4.50,
+        "pro_required": True,
+    },
+    "h100": {
+        "gpu": "H100",
+        "vram_gb": 80,
+        "memory_gb": 80,
+        "cost_per_hour": 10.00,
+        "pro_required": True,
+    },
 }
 
 
 # =============================================================================
 # Data Classes
 # =============================================================================
+
 
 @dataclass
 class HFJobConfig:
@@ -89,25 +139,25 @@ class HFJobConfig:
     timeout_minutes: int = 30
     """Maximum job runtime in minutes."""
 
-    docker_image: Optional[str] = None
+    docker_image: str | None = None
     """Custom Docker image. If None, uses HF default training image."""
 
-    environment: Dict[str, str] = field(default_factory=dict)
+    environment: dict[str, str] = field(default_factory=dict)
     """Environment variables to set in the job."""
 
-    secrets: Dict[str, str] = field(default_factory=dict)
+    secrets: dict[str, str] = field(default_factory=dict)
     """Secret environment variables (not logged). Keys are secret names."""
 
-    requirements: Optional[str] = None
+    requirements: str | None = None
     """Path to requirements.txt or pip install string."""
 
-    dataset_repo: Optional[str] = None
+    dataset_repo: str | None = None
     """HuggingFace dataset repository to use."""
 
-    output_repo: Optional[str] = None
+    output_repo: str | None = None
     """Repository to push trained model to."""
 
-    def validate(self) -> List[str]:
+    def validate(self) -> list[str]:
         """Validate the configuration."""
         errors = []
 
@@ -140,25 +190,25 @@ class HFJobInfo:
     created_at: datetime
     """When the job was created."""
 
-    started_at: Optional[datetime] = None
+    started_at: datetime | None = None
     """When the job started running."""
 
-    completed_at: Optional[datetime] = None
+    completed_at: datetime | None = None
     """When the job finished (completed, failed, or cancelled)."""
 
-    logs_url: Optional[str] = None
+    logs_url: str | None = None
     """URL to view job logs on HuggingFace."""
 
-    error_message: Optional[str] = None
+    error_message: str | None = None
     """Error message if job failed."""
 
-    metrics: Dict[str, Any] = field(default_factory=dict)
+    metrics: dict[str, Any] = field(default_factory=dict)
     """Training metrics reported by the job."""
 
-    output_repo: Optional[str] = None
+    output_repo: str | None = None
     """Repository where output was pushed."""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "job_id": self.job_id,
@@ -174,9 +224,10 @@ class HFJobInfo:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "HFJobInfo":
+    def from_dict(cls, data: dict[str, Any]) -> "HFJobInfo":
         """Create from dictionary."""
-        def parse_datetime(val: Optional[str]) -> Optional[datetime]:
+
+        def parse_datetime(val: str | None) -> datetime | None:
             if val is None:
                 return None
             try:
@@ -203,7 +254,7 @@ class HFJobInfo:
         return self.status in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED)
 
     @property
-    def duration_seconds(self) -> Optional[float]:
+    def duration_seconds(self) -> float | None:
         """Get job duration in seconds."""
         if self.started_at and self.completed_at:
             return (self.completed_at - self.started_at).total_seconds()
@@ -215,6 +266,7 @@ class HFJobInfo:
 # =============================================================================
 # Job Runner
 # =============================================================================
+
 
 class HFJobRunner:
     """
@@ -241,8 +293,8 @@ class HFJobRunner:
 
     def __init__(
         self,
-        client: Optional[HuggingFaceClient] = None,
-        token: Optional[str] = None,
+        client: HuggingFaceClient | None = None,
+        token: str | None = None,
         pro_enabled: bool = False,
     ):
         """
@@ -259,7 +311,7 @@ class HFJobRunner:
             self._client = HuggingFaceClient(token=token)
 
         self._pro_enabled_override = pro_enabled
-        self._jobs: Dict[str, HFJobInfo] = {}
+        self._jobs: dict[str, HFJobInfo] = {}
 
     @property
     def client(self) -> HuggingFaceClient:
@@ -283,11 +335,11 @@ class HFJobRunner:
 
     def submit_training_job(
         self,
-        script_path: Union[str, Path],
-        repo_id: Optional[str] = None,
-        config: Optional[HFJobConfig] = None,
-        script_args: Optional[List[str]] = None,
-        description: Optional[str] = None,
+        script_path: str | Path,
+        repo_id: str | None = None,
+        config: HFJobConfig | None = None,
+        script_args: list[str] | None = None,
+        description: str | None = None,
     ) -> HFJobInfo:
         """
         Submit a training job to HuggingFace cloud.
@@ -378,10 +430,15 @@ class HFJobRunner:
     ) -> None:
         """Submit job via `hf jobs uv run` CLI."""
         cmd = [
-            "hf", "jobs", "uv", "run",
+            "hf",
+            "jobs",
+            "uv",
+            "run",
             str(script_path),
-            "--flavor", config.hardware,
-            "--secret", "HF_TOKEN",
+            "--flavor",
+            config.hardware,
+            "--secret",
+            "HF_TOKEN",
         ]
 
         logger.info(f"Running CLI command: {' '.join(cmd)}")
@@ -404,12 +461,12 @@ class HFJobRunner:
         logger.info(f"CLI output: {output}")
 
         # Try to extract job ID from output (format varies)
-        job_id_match = re.search(r'(?:job[_\s-]?(?:id)?[:\s]+)(\S+)', output, re.IGNORECASE)
+        job_id_match = re.search(r"(?:job[_\s-]?(?:id)?[:\s]+)(\S+)", output, re.IGNORECASE)
         if job_id_match:
             job_info.job_id = job_id_match.group(1)
 
         # Try to extract URL from output
-        url_match = re.search(r'(https://huggingface\.co/\S+)', output)
+        url_match = re.search(r"(https://huggingface\.co/\S+)", output)
         if url_match:
             job_info.logs_url = url_match.group(1)
 
@@ -497,7 +554,7 @@ class HFJobRunner:
             )
             if result.returncode == 0:
                 # Parse training metrics from log output
-                for line in result.stdout.strip().split('\n'):
+                for line in result.stdout.strip().split("\n"):
                     # Match common training log patterns like: loss=0.1234, epoch=1
                     loss_match = re.search(r"['\"]?loss['\"]?\s*[:=]\s*([\d.]+)", line)
                     epoch_match = re.search(r"['\"]?epoch['\"]?\s*[:=]\s*([\d.]+)", line)
@@ -543,8 +600,8 @@ class HFJobRunner:
     def get_job_logs(
         self,
         job_id: str,
-        tail: Optional[int] = None,
-        since: Optional[datetime] = None,
+        tail: int | None = None,
+        since: datetime | None = None,
     ) -> str:
         """
         Get logs from a job.
@@ -628,9 +685,9 @@ class HFJobRunner:
 
     def list_jobs(
         self,
-        status: Optional[JobStatus] = None,
+        status: JobStatus | None = None,
         limit: int = 100,
-    ) -> List[HFJobInfo]:
+    ) -> list[HFJobInfo]:
         """
         List jobs, optionally filtered by status.
 
@@ -660,7 +717,7 @@ class HFJobRunner:
         self,
         job_id: str,
         poll_interval: int = 30,
-        timeout: Optional[int] = None,
+        timeout: int | None = None,
     ) -> HFJobInfo:
         """
         Wait for a job to complete.
@@ -713,9 +770,10 @@ class HFJobRunner:
 # Convenience Functions
 # =============================================================================
 
+
 def create_job_runner(
     client: Optional["HuggingFaceClient"] = None,
-    token: Optional[str] = None,
+    token: str | None = None,
     pro_enabled: bool = False,
 ) -> HFJobRunner:
     """

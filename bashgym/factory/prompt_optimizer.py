@@ -7,22 +7,25 @@ Bayesian optimization techniques from NVIDIA NeMo and DSPy.
 Module 3: Data Synthesis (The "Factory") - Extended
 """
 
-import os
-import json
 import asyncio
-from pathlib import Path
-from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List, Callable, Tuple
-from datetime import datetime, timezone
-import httpx
+import json
+import os
 import random
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+import httpx
 
 
 class OptimizationIntensity:
     """Optimization intensity levels."""
-    LIGHT = "light"      # Quick optimization, fewer trials
-    MEDIUM = "medium"    # Balanced optimization
-    HEAVY = "heavy"      # Thorough optimization, more trials
+
+    LIGHT = "light"  # Quick optimization, fewer trials
+    MEDIUM = "medium"  # Balanced optimization
+    HEAVY = "heavy"  # Thorough optimization, more trials
 
 
 @dataclass
@@ -31,7 +34,7 @@ class PromptOptConfig:
 
     # NeMo/NIM settings
     endpoint: str = "http://localhost:8000"
-    api_key: Optional[str] = None
+    api_key: str | None = None
     optimizer_model: str = "meta/llama-3.1-70b-instruct"
 
     # Optimization settings
@@ -54,17 +57,17 @@ class PromptCandidate:
 
     prompt_id: str
     system_prompt: str
-    few_shot_examples: List[Dict[str, str]]
+    few_shot_examples: list[dict[str, str]]
     score: float = 0.0
-    metrics: Dict[str, float] = field(default_factory=dict)
+    metrics: dict[str, float] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "prompt_id": self.prompt_id,
             "system_prompt": self.system_prompt,
             "few_shot_examples": self.few_shot_examples,
             "score": self.score,
-            "metrics": self.metrics
+            "metrics": self.metrics,
         }
 
 
@@ -78,12 +81,12 @@ class OptimizationResult:
     original_score: float
     optimized_score: float
     improvement: float
-    few_shot_examples: List[Dict[str, str]]
+    few_shot_examples: list[dict[str, str]]
     num_trials: int
     duration_seconds: float
-    all_candidates: List[PromptCandidate] = field(default_factory=list)
+    all_candidates: list[PromptCandidate] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "run_id": self.run_id,
             "original_prompt": self.original_prompt,
@@ -94,7 +97,7 @@ class OptimizationResult:
             "improvement_percent": f"{self.improvement * 100:.1f}%",
             "few_shot_examples": self.few_shot_examples,
             "num_trials": self.num_trials,
-            "duration_seconds": self.duration_seconds
+            "duration_seconds": self.duration_seconds,
         }
 
 
@@ -145,7 +148,7 @@ OUTPUT: <expected output>
 
 Generate diverse examples covering different cases."""
 
-    def __init__(self, config: Optional[PromptOptConfig] = None):
+    def __init__(self, config: PromptOptConfig | None = None):
         """Initialize the prompt optimizer."""
         self.config = config or PromptOptConfig()
 
@@ -154,10 +157,7 @@ Generate diverse examples covering different cases."""
             self.config.api_key = os.environ.get("NVIDIA_API_KEY")
 
         # HTTP client
-        self.client = httpx.AsyncClient(
-            timeout=120.0,
-            headers=self._build_headers()
-        )
+        self.client = httpx.AsyncClient(timeout=120.0, headers=self._build_headers())
 
         # Ensure output directory exists
         Path(self.config.output_dir).mkdir(parents=True, exist_ok=True)
@@ -165,7 +165,7 @@ Generate diverse examples covering different cases."""
         # Set intensity-based parameters
         self._set_intensity_params()
 
-    def _build_headers(self) -> Dict[str, str]:
+    def _build_headers(self) -> dict[str, str]:
         """Build HTTP headers."""
         headers = {"Content-Type": "application/json"}
         if self.config.api_key:
@@ -191,9 +191,9 @@ Generate diverse examples covering different cases."""
     async def optimize_prompt(
         self,
         original_prompt: str,
-        eval_examples: List[Dict[str, str]],
-        eval_fn: Callable[[str, List[Dict[str, str]]], float],
-        optimization_goals: Optional[str] = None
+        eval_examples: list[dict[str, str]],
+        eval_fn: Callable[[str, list[dict[str, str]]], float],
+        optimization_goals: str | None = None,
     ) -> OptimizationResult:
         """
         Optimize a system prompt using Bayesian search.
@@ -211,16 +211,14 @@ Generate diverse examples covering different cases."""
         run_id = f"opt_{start_time.strftime('%Y%m%d_%H%M%S')}"
 
         # Evaluate original prompt
-        original_score = await self._evaluate_prompt(
-            original_prompt, eval_examples, eval_fn
-        )
+        original_score = await self._evaluate_prompt(original_prompt, eval_examples, eval_fn)
 
         # Generate candidate prompts
         candidates = await self._generate_candidates(
             original_prompt,
             optimization_goals or "Improve task completion accuracy",
             original_score,
-            eval_examples
+            eval_examples,
         )
 
         # Evaluate all candidates
@@ -228,30 +226,22 @@ Generate diverse examples covering different cases."""
             prompt_id="original",
             system_prompt=original_prompt,
             few_shot_examples=[],
-            score=original_score
+            score=original_score,
         )
 
         for candidate in candidates:
-            score = await self._evaluate_prompt(
-                candidate.system_prompt, eval_examples, eval_fn
-            )
+            score = await self._evaluate_prompt(candidate.system_prompt, eval_examples, eval_fn)
             candidate.score = score
 
             if score > best_candidate.score:
                 best_candidate = candidate
 
         # Bootstrap few-shot examples
-        few_shot_examples = await self._bootstrap_demos(
-            best_candidate.system_prompt,
-            eval_examples
-        )
+        few_shot_examples = await self._bootstrap_demos(best_candidate.system_prompt, eval_examples)
 
         # Final evaluation with few-shot examples
         final_score = await self._evaluate_prompt(
-            best_candidate.system_prompt,
-            eval_examples,
-            eval_fn,
-            few_shot_examples
+            best_candidate.system_prompt, eval_examples, eval_fn, few_shot_examples
         )
 
         end_time = datetime.now(timezone.utc)
@@ -267,7 +257,7 @@ Generate diverse examples covering different cases."""
             few_shot_examples=few_shot_examples,
             num_trials=len(candidates) + 1,
             duration_seconds=duration,
-            all_candidates=candidates
+            all_candidates=candidates,
         )
 
         # Save results
@@ -280,8 +270,8 @@ Generate diverse examples covering different cases."""
         original_prompt: str,
         optimization_goals: str,
         current_score: float,
-        examples: List[Dict[str, str]]
-    ) -> List[PromptCandidate]:
+        examples: list[dict[str, str]],
+    ) -> list[PromptCandidate]:
         """Generate candidate prompts using LLM."""
         candidates = []
 
@@ -290,7 +280,7 @@ Generate diverse examples covering different cases."""
         gen_prompt = self.INSTRUCTION_GEN_TEMPLATE.format(
             original_prompt=original_prompt,
             optimization_goals=optimization_goals,
-            performance_summary=performance_summary
+            performance_summary=performance_summary,
         )
 
         for i in range(self.config.num_candidates):
@@ -301,19 +291,21 @@ Generate diverse examples covering different cases."""
                         "model": self.config.optimizer_model,
                         "messages": [{"role": "user", "content": gen_prompt}],
                         "temperature": self.config.temperature + (i * 0.05),  # Vary temperature
-                        "max_tokens": 2048
-                    }
+                        "max_tokens": 2048,
+                    },
                 )
 
                 if response.status_code == 200:
                     result = response.json()
                     new_prompt = result["choices"][0]["message"]["content"].strip()
 
-                    candidates.append(PromptCandidate(
-                        prompt_id=f"candidate_{i}",
-                        system_prompt=new_prompt,
-                        few_shot_examples=[]
-                    ))
+                    candidates.append(
+                        PromptCandidate(
+                            prompt_id=f"candidate_{i}",
+                            system_prompt=new_prompt,
+                            few_shot_examples=[],
+                        )
+                    )
 
             except Exception as e:
                 print(f"Failed to generate candidate {i}: {e}")
@@ -323,9 +315,9 @@ Generate diverse examples covering different cases."""
     async def _evaluate_prompt(
         self,
         prompt: str,
-        examples: List[Dict[str, str]],
+        examples: list[dict[str, str]],
         eval_fn: Callable,
-        few_shot: Optional[List[Dict[str, str]]] = None
+        few_shot: list[dict[str, str]] | None = None,
     ) -> float:
         """Evaluate a prompt on examples."""
         try:
@@ -338,19 +330,14 @@ Generate diverse examples covering different cases."""
             return 0.0
 
     async def _bootstrap_demos(
-        self,
-        prompt: str,
-        examples: List[Dict[str, str]]
-    ) -> List[Dict[str, str]]:
+        self, prompt: str, examples: list[dict[str, str]]
+    ) -> list[dict[str, str]]:
         """Bootstrap high-quality few-shot demonstrations."""
         if not examples:
             return []
 
         # Select diverse examples based on input variety
-        selected = random.sample(
-            examples,
-            min(self.config.max_bootstrapped_demos, len(examples))
-        )
+        selected = random.sample(examples, min(self.config.max_bootstrapped_demos, len(examples)))
 
         return [
             {"input": ex.get("input", ""), "output": ex.get("expected_output", "")}
@@ -358,14 +345,11 @@ Generate diverse examples covering different cases."""
         ]
 
     async def generate_demos(
-        self,
-        task_description: str,
-        num_demos: int = 5
-    ) -> List[Dict[str, str]]:
+        self, task_description: str, num_demos: int = 5
+    ) -> list[dict[str, str]]:
         """Generate synthetic demonstrations for a task."""
         gen_prompt = self.DEMO_GEN_TEMPLATE.format(
-            task_description=task_description,
-            num_demos=num_demos
+            task_description=task_description, num_demos=num_demos
         )
 
         try:
@@ -375,8 +359,8 @@ Generate diverse examples covering different cases."""
                     "model": self.config.optimizer_model,
                     "messages": [{"role": "user", "content": gen_prompt}],
                     "temperature": 0.7,
-                    "max_tokens": 4096
-                }
+                    "max_tokens": 4096,
+                },
             )
 
             if response.status_code == 200:
@@ -391,10 +375,9 @@ Generate diverse examples covering different cases."""
                 for line in content.split("\n"):
                     if line.startswith("INPUT:"):
                         if current_input and current_output:
-                            demos.append({
-                                "input": current_input.strip(),
-                                "output": current_output.strip()
-                            })
+                            demos.append(
+                                {"input": current_input.strip(), "output": current_output.strip()}
+                            )
                         current_input = line[6:].strip()
                         current_output = ""
                     elif line.startswith("OUTPUT:"):
@@ -403,10 +386,7 @@ Generate diverse examples covering different cases."""
                         current_output += "\n" + line
 
                 if current_input and current_output:
-                    demos.append({
-                        "input": current_input.strip(),
-                        "output": current_output.strip()
-                    })
+                    demos.append({"input": current_input.strip(), "output": current_output.strip()})
 
                 return demos
 
@@ -418,8 +398,8 @@ Generate diverse examples covering different cases."""
     async def optimize_judge_prompt(
         self,
         original_rubric: str,
-        eval_pairs: List[Tuple[str, str, float]],
-        human_scores: List[float]
+        eval_pairs: list[tuple[str, str, float]],
+        human_scores: list[float],
     ) -> OptimizationResult:
         """
         Optimize a judge/scoring prompt for better alignment with human scores.
@@ -432,8 +412,9 @@ Generate diverse examples covering different cases."""
         Returns:
             OptimizationResult with optimized rubric
         """
+
         # Create evaluation function that measures correlation with human scores
-        async def judge_eval_fn(rubric: str, examples: List[Dict[str, str]]) -> float:
+        async def judge_eval_fn(rubric: str, examples: list[dict[str, str]]) -> float:
             predicted_scores = []
 
             for pair, human_score in zip(eval_pairs, human_scores):
@@ -444,13 +425,15 @@ Generate diverse examples covering different cases."""
                         f"{self.config.endpoint}/v1/chat/completions",
                         json={
                             "model": self.config.optimizer_model,
-                            "messages": [{
-                                "role": "user",
-                                "content": f"Evaluate this response:\n\nPrompt: {prompt}\n\nResponse: {response}\n\nRubric: {rubric}\n\nScore (1-5):"
-                            }],
+                            "messages": [
+                                {
+                                    "role": "user",
+                                    "content": f"Evaluate this response:\n\nPrompt: {prompt}\n\nResponse: {response}\n\nRubric: {rubric}\n\nScore (1-5):",
+                                }
+                            ],
                             "temperature": 0.0,
-                            "max_tokens": 10
-                        }
+                            "max_tokens": 10,
+                        },
                     )
 
                     if judge_response.status_code == 200:
@@ -474,8 +457,7 @@ Generate diverse examples covering different cases."""
             mean_human = sum(human_scores) / len(human_scores)
 
             numerator = sum(
-                (p - mean_pred) * (h - mean_human)
-                for p, h in zip(predicted_scores, human_scores)
+                (p - mean_pred) * (h - mean_human) for p, h in zip(predicted_scores, human_scores)
             )
             denom_pred = sum((p - mean_pred) ** 2 for p in predicted_scores) ** 0.5
             denom_human = sum((h - mean_human) ** 2 for h in human_scores) ** 0.5
@@ -491,7 +473,7 @@ Generate diverse examples covering different cases."""
             original_prompt=original_rubric,
             eval_examples=[{"input": p, "expected_output": str(s)} for p, r, s in eval_pairs],
             eval_fn=judge_eval_fn,
-            optimization_goals="Maximize correlation with human judgments"
+            optimization_goals="Maximize correlation with human judgments",
         )
 
     def _save_result(self, result: OptimizationResult) -> Path:
@@ -503,16 +485,15 @@ Generate diverse examples covering different cases."""
 
 async def main():
     """Example usage of the Prompt Optimizer."""
-    config = PromptOptConfig(
-        intensity=OptimizationIntensity.LIGHT,
-        num_candidates=3
-    )
+    config = PromptOptConfig(intensity=OptimizationIntensity.LIGHT, num_candidates=3)
 
     optimizer = PromptOptimizer(config)
 
     try:
         # Example: Optimize a code review prompt
-        original_prompt = """You are a code reviewer. Review the following code and provide feedback."""
+        original_prompt = (
+            """You are a code reviewer. Review the following code and provide feedback."""
+        )
 
         eval_examples = [
             {"input": "def add(a, b): return a + b", "expected_output": "Clean, simple function."},
@@ -520,7 +501,7 @@ async def main():
         ]
 
         # Simple evaluation function (would use actual model in production)
-        def simple_eval(prompt: str, examples: List[Dict[str, str]]) -> float:
+        def simple_eval(prompt: str, examples: list[dict[str, str]]) -> float:
             # Score based on prompt length and specificity
             score = min(len(prompt) / 500, 1.0) * 0.5
             if "specific" in prompt.lower() or "detailed" in prompt.lower():
@@ -533,7 +514,7 @@ async def main():
             original_prompt=original_prompt,
             eval_examples=eval_examples,
             eval_fn=simple_eval,
-            optimization_goals="Provide detailed, actionable code review feedback"
+            optimization_goals="Provide detailed, actionable code review feedback",
         )
 
         print(f"Original score: {result.original_score:.2f}")

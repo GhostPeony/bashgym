@@ -28,11 +28,9 @@ class SandboxConfig:
 
     # Network settings
     network_mode: str = "none"  # Network isolated by default
-    allowed_hosts: list[str] = field(default_factory=lambda: [
-        "pypi.org",
-        "files.pythonhosted.org",
-        "registry.npmjs.org"
-    ])
+    allowed_hosts: list[str] = field(
+        default_factory=lambda: ["pypi.org", "files.pythonhosted.org", "registry.npmjs.org"]
+    )
 
     # Security settings
     read_only_root: bool = False
@@ -85,7 +83,7 @@ class SandboxManager:
         self,
         task_id: str | None = None,
         repository_url: str | None = None,
-        initial_files: dict[str, str] | None = None
+        initial_files: dict[str, str] | None = None,
     ) -> SandboxInstance:
         """
         Create a new isolated sandbox for agent execution.
@@ -123,12 +121,7 @@ class SandboxManager:
 
         # Prepare container mounts
         mounts = [
-            Mount(
-                target="/workspace",
-                source=str(workspace_path),
-                type="bind",
-                read_only=False
-            )
+            Mount(target="/workspace", source=str(workspace_path), type="bind", read_only=False)
         ]
 
         # Container environment
@@ -136,7 +129,7 @@ class SandboxManager:
             "OUROBOROS_SANDBOX_ID": sandbox_id,
             "OUROBOROS_WORKSPACE": "/workspace",
             "PYTHONUNBUFFERED": "1",
-            "HOME": "/workspace"
+            "HOME": "/workspace",
         }
 
         # Create container
@@ -157,7 +150,7 @@ class SandboxManager:
                 stdin_open=True,
                 tty=True,
                 detach=True,
-                command="/bin/bash"
+                command="/bin/bash",
             )
         except ImageNotFound:
             # Pull image if not found
@@ -175,7 +168,7 @@ class SandboxManager:
                 command="/bin/bash",
                 stdin_open=True,
                 tty=True,
-                detach=True
+                detach=True,
             )
 
         # Create sandbox instance
@@ -185,7 +178,7 @@ class SandboxManager:
             workspace_path=workspace_path,
             container=container,
             config=self.config,
-            status="created"
+            status="created",
         )
 
         self.active_sandboxes[sandbox_id] = sandbox
@@ -206,11 +199,7 @@ class SandboxManager:
             return False
 
     def execute_command(
-        self,
-        sandbox_id: str,
-        command: str,
-        timeout: int = 300,
-        workdir: str | None = None
+        self, sandbox_id: str, command: str, timeout: int = 300, workdir: str | None = None
     ) -> dict[str, Any]:
         """
         Execute a command inside the sandbox.
@@ -238,15 +227,12 @@ class SandboxManager:
                 "exit_code": -1,
                 "stdout": "",
                 "stderr": "BLOCKED: Dangerous command detected",
-                "blocked": True
+                "blocked": True,
             }
 
         try:
             exec_result = sandbox.container.exec_run(
-                cmd=["bash", "-c", command],
-                workdir=workdir or "/workspace",
-                demux=True,
-                tty=False
+                cmd=["bash", "-c", command], workdir=workdir or "/workspace", demux=True, tty=False
             )
 
             stdout = exec_result.output[0].decode() if exec_result.output[0] else ""
@@ -256,22 +242,15 @@ class SandboxManager:
                 "exit_code": exec_result.exit_code,
                 "stdout": stdout,
                 "stderr": stderr,
-                "blocked": False
+                "blocked": False,
             }
         except Exception as e:
-            return {
-                "exit_code": -1,
-                "stdout": "",
-                "stderr": str(e),
-                "blocked": False
-            }
+            return {"exit_code": -1, "stdout": "", "stderr": str(e), "blocked": False}
 
     def clone_repository(self, sandbox_id: str, repo_url: str, branch: str = "main") -> bool:
         """Clone a git repository into the sandbox workspace."""
         result = self.execute_command(
-            sandbox_id,
-            f"git clone --depth 1 --branch {branch} {repo_url} .",
-            timeout=300
+            sandbox_id, f"git clone --depth 1 --branch {branch} {repo_url} .", timeout=300
         )
         return result["exit_code"] == 0
 
@@ -279,7 +258,7 @@ class SandboxManager:
         """Get the file tree of the sandbox workspace."""
         result = self.execute_command(
             sandbox_id,
-            f"find {path} -type f -name '*.py' -o -name '*.js' -o -name '*.ts' | head -100"
+            f"find {path} -type f -name '*.py' -o -name '*.js' -o -name '*.ts' | head -100",
         )
         return result["stdout"]
 

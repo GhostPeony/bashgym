@@ -1,10 +1,8 @@
 # bashgym/api/orchestrator_routes.py
 """API routes for the multi-agent orchestration system."""
 
-import asyncio
 import logging
 import uuid
-from typing import Dict, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
@@ -18,43 +16,48 @@ router = APIRouter(prefix="/api/orchestrate", tags=["orchestrator"])
 # Request/Response Models
 # =============================================================================
 
+
 class LLMConfigRequest(BaseModel):
     """LLM provider configuration for spec decomposition."""
+
     provider: str = "anthropic"  # anthropic, openai, gemini, ollama
-    model: Optional[str] = None  # Uses provider default if not set
-    api_key: Optional[str] = None  # Falls back to env vars
-    base_url: Optional[str] = None  # For Ollama or custom endpoints
+    model: str | None = None  # Uses provider default if not set
+    api_key: str | None = None  # Falls back to env vars
+    base_url: str | None = None  # For Ollama or custom endpoints
     temperature: float = 0.3
     max_tokens: int = 4096
 
 
 class SpecRequest(BaseModel):
     """Request to submit a development spec for decomposition."""
+
     title: str
     description: str
-    constraints: List[str] = []
-    acceptance_criteria: List[str] = []
-    repository: Optional[str] = None
+    constraints: list[str] = []
+    acceptance_criteria: list[str] = []
+    repository: str | None = None
     base_branch: str = "main"
     max_budget_usd: float = 10.0
     max_workers: int = 5
-    llm_config: Optional[LLMConfigRequest] = None
+    llm_config: LLMConfigRequest | None = None
 
 
 class RetryRequest(BaseModel):
     """Request to retry a failed task."""
-    modified_prompt: Optional[str] = None
+
+    modified_prompt: str | None = None
 
 
 # In-memory job storage (would be persistent in production)
-_jobs: Dict[str, dict] = {}
+_jobs: dict[str, dict] = {}
 
 
 # =============================================================================
 # Helper: build orchestrator from config
 # =============================================================================
 
-def _build_llm_config(req: Optional[LLMConfigRequest] = None):
+
+def _build_llm_config(req: LLMConfigRequest | None = None):
     """Build LLMConfig from request, with provider defaults."""
     from bashgym.orchestrator.models import LLMConfig, LLMProvider
 
@@ -70,8 +73,7 @@ def _build_llm_config(req: Optional[LLMConfigRequest] = None):
     provider = provider_map.get(req.provider.lower())
     if not provider:
         raise ValueError(
-            f"Unknown provider '{req.provider}'. "
-            f"Supported: anthropic, openai, gemini, ollama"
+            f"Unknown provider '{req.provider}'. " f"Supported: anthropic, openai, gemini, ollama"
         )
 
     config = LLMConfig(
@@ -90,6 +92,7 @@ def _build_llm_config(req: Optional[LLMConfigRequest] = None):
 # Endpoints
 # =============================================================================
 
+
 @router.post("/submit")
 async def submit_spec(request: SpecRequest, background_tasks: BackgroundTasks):
     """Submit a development spec for decomposition.
@@ -100,7 +103,6 @@ async def submit_spec(request: SpecRequest, background_tasks: BackgroundTasks):
     The decomposed TaskDAG must be approved via /approve before execution.
     """
     from bashgym.orchestrator.models import OrchestratorSpec
-    from bashgym.orchestrator.agent import OrchestrationAgent
 
     job_id = str(uuid.uuid4())[:8]
 
@@ -140,18 +142,22 @@ async def submit_spec(request: SpecRequest, background_tasks: BackgroundTasks):
         "model": llm_config.model,
     }
 
+
 async def _decompose_spec(job_id: str, spec, llm_config):
     """Background task: decompose spec into TaskDAG."""
-    from bashgym.orchestrator.agent import OrchestrationAgent
-    from bashgym.api.websocket import WSMessage, MessageType, manager
     from pathlib import Path
+
+    from bashgym.api.websocket import MessageType, WSMessage, manager
+    from bashgym.orchestrator.agent import OrchestrationAgent
 
     # Broadcast decomposition started
     try:
-        await manager.broadcast(WSMessage(
-            type=MessageType.ORCHESTRATION_DECOMPOSING,
-            payload={"job_id": job_id, "title": spec.title},
-        ))
+        await manager.broadcast(
+            WSMessage(
+                type=MessageType.ORCHESTRATION_DECOMPOSING,
+                payload={"job_id": job_id, "title": spec.title},
+            )
+        )
     except Exception:
         pass  # WebSocket not critical for decomposition
 
@@ -173,15 +179,17 @@ async def _decompose_spec(job_id: str, spec, llm_config):
 
         # Broadcast decomposition complete
         try:
-            await manager.broadcast(WSMessage(
-                type=MessageType.ORCHESTRATION_READY,
-                payload={
-                    "job_id": job_id,
-                    "title": spec.title,
-                    "task_count": len(dag.nodes),
-                    "stats": dag.stats,
-                },
-            ))
+            await manager.broadcast(
+                WSMessage(
+                    type=MessageType.ORCHESTRATION_READY,
+                    payload={
+                        "job_id": job_id,
+                        "title": spec.title,
+                        "task_count": len(dag.nodes),
+                        "stats": dag.stats,
+                    },
+                )
+            )
         except Exception:
             pass
 
@@ -195,8 +203,9 @@ async def _decompose_spec(job_id: str, spec, llm_config):
 async def approve_plan(job_id: str, background_tasks: BackgroundTasks):
     """Approve the decomposed plan. Returns task list for frontend terminal dispatch.
 
-    The frontend writes 'claude "[prompt]"' to idle terminals directly.
-    No background subprocess execution is started.
+        The frontend writes 'claude "[prompt]"
+    ' to idle terminals directly.
+        No background subprocess execution is started.
     """
     if job_id not in _jobs:
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
@@ -204,8 +213,7 @@ async def approve_plan(job_id: str, background_tasks: BackgroundTasks):
     job = _jobs[job_id]
     if job["status"] != "awaiting_approval":
         raise HTTPException(
-            status_code=400,
-            detail=f"Job status is '{job['status']}', expected 'awaiting_approval'"
+            status_code=400, detail=f"Job status is '{job['status']}', expected 'awaiting_approval'"
         )
 
     job["status"] = "dispatched"
@@ -214,13 +222,19 @@ async def approve_plan(job_id: str, background_tasks: BackgroundTasks):
     tasks = []
     if dag:
         for task_id, task in dag.nodes.items():
-            tasks.append({
-                "id": task_id,
-                "title": task.title,
-                "worker_prompt": getattr(task, 'worker_prompt', task.description),
-                "priority": task.priority.value if hasattr(task.priority, 'value') else str(task.priority),
-                "dependencies": list(getattr(task, 'dependencies', [])),
-            })
+            tasks.append(
+                {
+                    "id": task_id,
+                    "title": task.title,
+                    "worker_prompt": getattr(task, "worker_prompt", task.description),
+                    "priority": (
+                        task.priority.value
+                        if hasattr(task.priority, "value")
+                        else str(task.priority)
+                    ),
+                    "dependencies": list(getattr(task, "dependencies", [])),
+                }
+            )
 
     return {
         "status": "dispatched",
@@ -248,6 +262,7 @@ async def _execute_dag(job_id: str, base_branch: str):
         logger.error(f"Execution failed for job {job_id}: {e}")
         job["status"] = "failed"
         job["error"] = str(e)
+
 
 @router.get("/{job_id}/status")
 async def get_status(job_id: str):
@@ -312,8 +327,7 @@ async def retry_task(
     task = dag.nodes[task_id]
     if task.status != TaskStatus.FAILED:
         raise HTTPException(
-            status_code=400,
-            detail=f"Task status is '{task.status.value}', expected 'failed'"
+            status_code=400, detail=f"Task status is '{task.status.value}', expected 'failed'"
         )
 
     # Reset task for retry
@@ -325,9 +339,7 @@ async def retry_task(
     # Re-execute just this task
     if job["status"] != "executing":
         job["status"] = "executing"
-        background_tasks.add_task(
-            _execute_dag, job_id, job["spec"].base_branch
-        )
+        background_tasks.add_task(_execute_dag, job_id, job["spec"].base_branch)
 
     return {
         "status": "retrying",
@@ -364,12 +376,14 @@ async def list_providers():
     config = LLMConfig()
     providers = []
     for provider_name, defaults in config.PROVIDER_DEFAULTS.items():
-        providers.append({
-            "provider": provider_name,
-            "default_model": defaults["model"],
-            "env_key": defaults["env_key"],
-            "base_url": defaults["base_url"],
-        })
+        providers.append(
+            {
+                "provider": provider_name,
+                "default_model": defaults["model"],
+                "env_key": defaults["env_key"],
+                "base_url": defaults["base_url"],
+            }
+        )
 
     return {"providers": providers}
 

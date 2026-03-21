@@ -13,7 +13,7 @@ Features:
 
 import logging
 from dataclasses import dataclass
-from typing import Optional, Dict, Any
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -21,10 +21,11 @@ logger = logging.getLogger(__name__)
 try:
     from huggingface_hub import HfApi
     from huggingface_hub.utils import (
+        GatedRepoError,
         HfHubHTTPError,
         RepositoryNotFoundError,
-        GatedRepoError,
     )
+
     HF_HUB_AVAILABLE = True
 except ImportError:
     HF_HUB_AVAILABLE = False
@@ -38,30 +39,35 @@ except ImportError:
 # Error Classes
 # =============================================================================
 
+
 class HFError(Exception):
     """Base exception for HuggingFace integration errors."""
+
     pass
 
 
 class HFAuthError(HFError):
     """Authentication failed - invalid or missing token."""
+
     pass
 
 
 class HFProRequiredError(HFError):
     """Operation requires HuggingFace Pro subscription."""
+
     pass
 
 
 class HFQuotaExceededError(HFError):
     """HuggingFace quota exceeded (compute, storage, etc.)."""
+
     pass
 
 
 class HFJobFailedError(HFError):
     """HuggingFace job (training, inference) failed."""
 
-    def __init__(self, message: str, job_id: Optional[str] = None, logs: Optional[str] = None):
+    def __init__(self, message: str, job_id: str | None = None, logs: str | None = None):
         super().__init__(message)
         self.job_id = job_id
         self.logs = logs
@@ -71,19 +77,21 @@ class HFJobFailedError(HFError):
 # User Info Dataclass
 # =============================================================================
 
+
 @dataclass
 class HFUserInfo:
     """Information about the authenticated HuggingFace user."""
+
     username: str
-    fullname: Optional[str] = None
-    email: Optional[str] = None
-    orgs: Optional[list] = None
+    fullname: str | None = None
+    email: str | None = None
+    orgs: list | None = None
     is_pro: bool = False
     can_pay: bool = False
-    avatar_url: Optional[str] = None
+    avatar_url: str | None = None
 
     @classmethod
-    def from_whoami(cls, data: Dict[str, Any]) -> "HFUserInfo":
+    def from_whoami(cls, data: dict[str, Any]) -> "HFUserInfo":
         """Create from whoami() API response."""
         # Extract organization names
         orgs = []
@@ -92,10 +100,10 @@ class HFUserInfo:
 
         # Detect Pro status from various indicators
         is_pro = (
-            data.get("isPro", False) or
-            data.get("is_pro", False) or
-            data.get("plan", "") in ("pro", "enterprise") or
-            data.get("canPay", False)
+            data.get("isPro", False)
+            or data.get("is_pro", False)
+            or data.get("plan", "") in ("pro", "enterprise")
+            or data.get("canPay", False)
         )
 
         return cls(
@@ -112,6 +120,7 @@ class HFUserInfo:
 # =============================================================================
 # HuggingFace Client
 # =============================================================================
+
 
 class HuggingFaceClient:
     """
@@ -139,8 +148,8 @@ class HuggingFaceClient:
 
     def __init__(
         self,
-        token: Optional[str] = None,
-        default_org: Optional[str] = None,
+        token: str | None = None,
+        default_org: str | None = None,
     ):
         """
         Initialize the HuggingFace client.
@@ -151,10 +160,10 @@ class HuggingFaceClient:
         """
         self._token = token
         self._default_org = default_org
-        self._api: Optional[Any] = None
-        self._user_info: Optional[HFUserInfo] = None
+        self._api: Any | None = None
+        self._user_info: HFUserInfo | None = None
         self._initialized = False
-        self._init_error: Optional[str] = None
+        self._init_error: str | None = None
 
         # Lazy initialization - don't call API until needed
         if not HF_HUB_AVAILABLE:
@@ -168,13 +177,16 @@ class HuggingFaceClient:
         self._initialized = True
 
         if not HF_HUB_AVAILABLE:
-            logger.warning("huggingface_hub not installed. Install with: pip install huggingface_hub")
+            logger.warning(
+                "huggingface_hub not installed. Install with: pip install huggingface_hub"
+            )
             return
 
         if not self._token:
             # Try to use cached token from huggingface-cli login
             try:
                 from huggingface_hub import HfFolder
+
                 self._token = HfFolder.get_token()
             except Exception:
                 pass
@@ -198,7 +210,7 @@ class HuggingFaceClient:
             logger.error(self._init_error)
 
     @property
-    def api(self) -> Optional[Any]:
+    def api(self) -> Any | None:
         """Get the HfApi instance (None if not available)."""
         self._ensure_initialized()
         return self._api
@@ -218,7 +230,7 @@ class HuggingFaceClient:
         return False
 
     @property
-    def username(self) -> Optional[str]:
+    def username(self) -> str | None:
         """Get the authenticated username."""
         self._ensure_initialized()
         if self._user_info:
@@ -234,7 +246,7 @@ class HuggingFaceClient:
         return []
 
     @property
-    def default_org(self) -> Optional[str]:
+    def default_org(self) -> str | None:
         """Get the default organization for operations."""
         return self._default_org
 
@@ -249,12 +261,12 @@ class HuggingFaceClient:
         return ""
 
     @property
-    def token(self) -> Optional[str]:
+    def token(self) -> str | None:
         """Get the API token (if set)."""
         return self._token
 
     @property
-    def user_info(self) -> Optional[HFUserInfo]:
+    def user_info(self) -> HFUserInfo | None:
         """Get full user information."""
         self._ensure_initialized()
         return self._user_info
@@ -287,7 +299,7 @@ class HuggingFaceClient:
                 f"Upgrade at https://huggingface.co/subscribe/pro"
             )
 
-    def get_repo_id(self, name: str, namespace: Optional[str] = None) -> str:
+    def get_repo_id(self, name: str, namespace: str | None = None) -> str:
         """
         Construct a full repository ID.
 
@@ -320,12 +332,12 @@ class HuggingFaceClient:
 # Singleton Access
 # =============================================================================
 
-_hf_client: Optional[HuggingFaceClient] = None
+_hf_client: HuggingFaceClient | None = None
 
 
 def get_hf_client(
-    token: Optional[str] = None,
-    default_org: Optional[str] = None,
+    token: str | None = None,
+    default_org: str | None = None,
     force_new: bool = False,
 ) -> HuggingFaceClient:
     """
@@ -346,6 +358,7 @@ def get_hf_client(
         if token is None:
             try:
                 from bashgym.config import get_settings
+
                 settings = get_settings()
                 token = settings.huggingface.token
                 if default_org is None:

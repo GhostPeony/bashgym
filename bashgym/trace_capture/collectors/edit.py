@@ -15,7 +15,6 @@ import re
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 from .base import (
     BaseCollector,
@@ -50,8 +49,8 @@ class EditCollector(BaseCollector):
 
     def _find_edit_sessions(
         self,
-        since: Optional[str] = None,
-    ) -> List[Tuple[Path, str]]:
+        since: str | None = None,
+    ) -> list[tuple[Path, str]]:
         """Find session directories under file-history/.
 
         Parameters
@@ -69,14 +68,14 @@ class EditCollector(BaseCollector):
             return []
 
         # Parse the optional since timestamp
-        since_dt: Optional[datetime] = None
+        since_dt: datetime | None = None
         if since:
             try:
                 since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
             except ValueError:
                 since_dt = None
 
-        results: List[Tuple[Path, str]] = []
+        results: list[tuple[Path, str]] = []
 
         for session_dir in file_history_dir.iterdir():
             if not session_dir.is_dir():
@@ -100,7 +99,7 @@ class EditCollector(BaseCollector):
         self,
         session_dir: Path,
         session_id: str,
-    ) -> List[EditRecord]:
+    ) -> list[EditRecord]:
         """Parse all versioned snapshots in a session directory.
 
         Groups files by content hash, sorts by version number, reads
@@ -119,7 +118,7 @@ class EditCollector(BaseCollector):
         list of EditRecord
         """
         # Group files by content hash: {hash: {version: path}}
-        hash_versions: Dict[str, Dict[int, Path]] = defaultdict(dict)
+        hash_versions: dict[str, dict[int, Path]] = defaultdict(dict)
 
         for entry in session_dir.iterdir():
             if not entry.is_file():
@@ -133,33 +132,37 @@ class EditCollector(BaseCollector):
             version_num = int(match.group(2))
             hash_versions[content_hash][version_num] = entry
 
-        records: List[EditRecord] = []
+        records: list[EditRecord] = []
 
         for content_hash, version_map in sorted(hash_versions.items()):
             sorted_versions = sorted(version_map.keys())
-            versions_list: List[Dict] = []
+            versions_list: list[dict] = []
 
             for ver_num in sorted_versions:
                 filepath = version_map[ver_num]
                 try:
                     content = filepath.read_text(encoding="utf-8")
-                except (IOError, OSError, UnicodeDecodeError):
+                except (OSError, UnicodeDecodeError):
                     content = ""
 
-                versions_list.append({
-                    "version": ver_num,
-                    "content": content,
-                })
+                versions_list.append(
+                    {
+                        "version": ver_num,
+                        "content": content,
+                    }
+                )
 
             # Generate unified diff between first and last version
             first_content = versions_list[0]["content"]
             last_content = versions_list[-1]["content"]
-            diff_lines = list(difflib.unified_diff(
-                first_content.splitlines(keepends=True),
-                last_content.splitlines(keepends=True),
-                fromfile=f"{content_hash}@v{sorted_versions[0]}",
-                tofile=f"{content_hash}@v{sorted_versions[-1]}",
-            ))
+            diff_lines = list(
+                difflib.unified_diff(
+                    first_content.splitlines(keepends=True),
+                    last_content.splitlines(keepends=True),
+                    fromfile=f"{content_hash}@v{sorted_versions[0]}",
+                    tofile=f"{content_hash}@v{sorted_versions[-1]}",
+                )
+            )
             diff_text = "".join(diff_lines)
 
             # Build timestamp from the latest version file's mtime
@@ -170,15 +173,17 @@ class EditCollector(BaseCollector):
             except OSError:
                 timestamp = datetime.now(timezone.utc).isoformat()
 
-            records.append(EditRecord(
-                session_id=session_id,
-                timestamp=timestamp,
-                source_type=self.source_type,
-                content_hash=content_hash,
-                versions=versions_list,
-                diff=diff_text,
-                total_versions=len(sorted_versions),
-            ))
+            records.append(
+                EditRecord(
+                    session_id=session_id,
+                    timestamp=timestamp,
+                    source_type=self.source_type,
+                    content_hash=content_hash,
+                    versions=versions_list,
+                    diff=diff_text,
+                    total_versions=len(sorted_versions),
+                )
+            )
 
         return records
 
@@ -188,8 +193,8 @@ class EditCollector(BaseCollector):
 
     def scan(
         self,
-        since: Optional[str] = None,
-        project_filter: Optional[str] = None,
+        since: str | None = None,
+        project_filter: str | None = None,
     ) -> CollectorScanResult:
         """Scan for edit sessions without collecting anything."""
         sessions = self._find_edit_sessions(since=since)
@@ -217,7 +222,7 @@ class EditCollector(BaseCollector):
             estimated_size_bytes=estimated_bytes,
         )
 
-    def collect(self, session_id: str) -> List[EditRecord]:
+    def collect(self, session_id: str) -> list[EditRecord]:
         """Collect all edit records for a specific session.
 
         Parameters
@@ -230,7 +235,7 @@ class EditCollector(BaseCollector):
         list of EditRecord
         """
         sessions = self._find_edit_sessions()
-        records: List[EditRecord] = []
+        records: list[EditRecord] = []
 
         for session_dir, found_session_id in sessions:
             if found_session_id != session_id:
@@ -242,8 +247,8 @@ class EditCollector(BaseCollector):
 
     def collect_all(
         self,
-        since: Optional[str] = None,
-        project_filter: Optional[str] = None,
+        since: str | None = None,
+        project_filter: str | None = None,
     ) -> CollectorBatchResult:
         """Collect all uncollected edit records.
 
@@ -255,8 +260,8 @@ class EditCollector(BaseCollector):
 
         collected = 0
         skipped = 0
-        errors: List[str] = []
-        records: List[EditRecord] = []
+        errors: list[str] = []
+        records: list[EditRecord] = []
 
         for session_dir, session_id in sessions:
             if session_id in collected_ids:

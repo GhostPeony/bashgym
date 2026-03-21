@@ -11,15 +11,15 @@ import os
 import platform
 import re
 import uuid
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Helper functions
 # ---------------------------------------------------------------------------
+
 
 def _slugify(text: str) -> str:
     """Convert text to a URL-safe slug (lowercase, hyphens, max 50 chars)."""
@@ -54,6 +54,7 @@ def _get_devices_path() -> Path:
 # Device dataclass
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class Device:
     """Represents a remote SSH training device."""
@@ -66,11 +67,11 @@ class Device:
     key_path: str
     work_dir: str
     is_default: bool
-    added_at: str                         # ISO-8601 UTC
-    last_seen: Optional[str]              # ISO-8601 UTC or None
-    capabilities: Dict[str, Any] = field(default_factory=dict)
+    added_at: str  # ISO-8601 UTC
+    last_seen: str | None  # ISO-8601 UTC or None
+    capabilities: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise to a plain dictionary."""
         return asdict(self)
 
@@ -79,6 +80,7 @@ class Device:
 # DeviceRegistry
 # ---------------------------------------------------------------------------
 
+
 class DeviceRegistry:
     """JSON-backed registry for SSH training devices.
 
@@ -86,7 +88,7 @@ class DeviceRegistry:
     read-modify-write races in an async context.
     """
 
-    def __init__(self, path: Optional[Path] = None) -> None:
+    def __init__(self, path: Path | None = None) -> None:
         self._path: Path = path if path is not None else _get_devices_path()
         self._lock: asyncio.Lock = asyncio.Lock()
 
@@ -94,21 +96,21 @@ class DeviceRegistry:
     # Internal sync I/O (called while the lock is already held)
     # ------------------------------------------------------------------
 
-    def _load_sync(self) -> List[Device]:
+    def _load_sync(self) -> list[Device]:
         """Load devices from disk synchronously. Returns empty list if missing."""
         if not self._path.exists():
             return []
         try:
             raw = self._path.read_text(encoding="utf-8")
             data = json.loads(raw)
-            devices: List[Device] = []
+            devices: list[Device] = []
             for item in data.get("devices", []):
                 devices.append(Device(**item))
             return devices
         except (json.JSONDecodeError, TypeError, KeyError):
             return []
 
-    def _save_sync(self, devices: List[Device]) -> None:
+    def _save_sync(self, devices: list[Device]) -> None:
         """Persist devices to disk synchronously."""
         self._path.parent.mkdir(parents=True, exist_ok=True)
         payload = {"devices": [d.to_dict() for d in devices]}
@@ -118,12 +120,12 @@ class DeviceRegistry:
     # Public async I/O
     # ------------------------------------------------------------------
 
-    async def load(self) -> List[Device]:
+    async def load(self) -> list[Device]:
         """Load and return all devices from storage."""
         async with self._lock:
             return self._load_sync()
 
-    async def save(self, devices: List[Device]) -> None:
+    async def save(self, devices: list[Device]) -> None:
         """Persist the given device list to storage."""
         async with self._lock:
             self._save_sync(devices)
@@ -132,12 +134,12 @@ class DeviceRegistry:
     # Read helpers (no mutation — acquire lock for consistent reads)
     # ------------------------------------------------------------------
 
-    async def list_devices(self) -> List[Device]:
+    async def list_devices(self) -> list[Device]:
         """Return all registered devices."""
         async with self._lock:
             return self._load_sync()
 
-    async def get_device(self, device_id: str) -> Optional[Device]:
+    async def get_device(self, device_id: str) -> Device | None:
         """Return the device with the given ID, or None."""
         async with self._lock:
             for device in self._load_sync():
@@ -145,7 +147,7 @@ class DeviceRegistry:
                     return device
             return None
 
-    async def get_default(self) -> Optional[Device]:
+    async def get_default(self) -> Device | None:
         """Return the default device, or None if none is set."""
         async with self._lock:
             for device in self._load_sync():
@@ -179,8 +181,7 @@ class DeviceRegistry:
             for existing in devices:
                 if existing.host == host and existing.username == username:
                     raise ValueError(
-                        f"A device for {username}@{host} already exists "
-                        f"(id={existing.id})."
+                        f"A device for {username}@{host} already exists " f"(id={existing.id})."
                     )
 
             device_id = f"{_slugify(name)}-{uuid.uuid4().hex[:8]}"
@@ -212,7 +213,7 @@ class DeviceRegistry:
             self._save_sync(devices)
             return new_device
 
-    async def update_device(self, device_id: str, updates: Dict[str, Any]) -> Device:
+    async def update_device(self, device_id: str, updates: dict[str, Any]) -> Device:
         """Apply a partial update to a device and return the updated version.
 
         Raises ``KeyError`` if the device is not found.
@@ -250,7 +251,7 @@ class DeviceRegistry:
         """
         async with self._lock:
             devices = self._load_sync()
-            target: Optional[Device] = None
+            target: Device | None = None
             for device in devices:
                 if device.id == device_id:
                     target = device
@@ -262,9 +263,7 @@ class DeviceRegistry:
             self._save_sync(devices)
             return target
 
-    async def update_capabilities(
-        self, device_id: str, capabilities: Dict[str, Any]
-    ) -> Device:
+    async def update_capabilities(self, device_id: str, capabilities: dict[str, Any]) -> Device:
         """Update a device's capabilities and refresh last_seen timestamp.
 
         Raises ``KeyError`` if the device is not found.
@@ -283,7 +282,7 @@ class DeviceRegistry:
     # Auto-import from environment variables
     # ------------------------------------------------------------------
 
-    async def auto_import_from_env(self) -> Optional[Device]:
+    async def auto_import_from_env(self) -> Device | None:
         """If devices.json does not yet exist and SSH_REMOTE_ENABLED=true,
         import a device from the SSH_REMOTE_* environment variables.
 

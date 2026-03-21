@@ -12,16 +12,16 @@ Captures notification events during sessions:
 This helps identify issues and capture error-handling patterns.
 """
 
-import os
-import sys
 import json
+import os
 import platform
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Any
 
 # Cross-platform file locking
-if platform.system() == 'Windows':
+if platform.system() == "Windows":
     import msvcrt
 
     def lock_file(f, exclusive=False):
@@ -32,6 +32,7 @@ if platform.system() == 'Windows':
             msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
         except OSError:
             pass
+
 else:
     import fcntl
 
@@ -44,14 +45,14 @@ else:
 
 def get_bashgym_dir() -> Path:
     """Get the global Bash Gym directory (~/.bashgym/)."""
-    if platform.system() == 'Windows':
+    if platform.system() == "Windows":
         base = Path(os.environ.get("USERPROFILE", ""))
     else:
         base = Path.home()
     return base / ".bashgym"
 
 
-def get_session_id() -> Optional[str]:
+def get_session_id() -> str | None:
     """Get the current session ID."""
     session_file = get_bashgym_dir() / "current_session_id"
     if session_file.exists():
@@ -64,7 +65,7 @@ def get_traces_dir() -> Path:
     return get_bashgym_dir() / "traces"
 
 
-def classify_notification(event: Dict[str, Any]) -> str:
+def classify_notification(event: dict[str, Any]) -> str:
     """Classify the notification type based on event content."""
     message = str(event.get("message", event.get("content", ""))).lower()
     level = event.get("level", event.get("type", "info")).lower()
@@ -90,7 +91,7 @@ def classify_notification(event: Dict[str, Any]) -> str:
     return "info"
 
 
-def append_to_trace(notification_event: Dict[str, Any]) -> None:
+def append_to_trace(notification_event: dict[str, Any]) -> None:
     """Append notification event to the session trace."""
     session_id = get_session_id()
     if not session_id:
@@ -103,19 +104,19 @@ def append_to_trace(notification_event: Dict[str, Any]) -> None:
         return
 
     try:
-        with open(trace_file, 'r') as f:
+        with open(trace_file) as f:
             lock_file(f, exclusive=False)
             traces = json.load(f)
             unlock_file(f)
 
         traces.append(notification_event)
 
-        with open(trace_file, 'w') as f:
+        with open(trace_file, "w") as f:
             lock_file(f, exclusive=True)
             json.dump(traces, f, indent=2)
             unlock_file(f)
 
-    except (IOError, OSError, json.JSONDecodeError) as e:
+    except (OSError, json.JSONDecodeError) as e:
         print(f"Warning: Could not append to trace: {e}", file=sys.stderr)
 
 
@@ -135,7 +136,7 @@ def update_session_errors(notification_type: str, message: str) -> None:
         return
 
     try:
-        with open(metadata_file, 'r') as f:
+        with open(metadata_file) as f:
             lock_file(f, exclusive=False)
             metadata = json.load(f)
             unlock_file(f)
@@ -146,25 +147,27 @@ def update_session_errors(notification_type: str, message: str) -> None:
 
         # Add error summary (limit to prevent file bloat)
         if len(metadata["errors"]) < 50:
-            metadata["errors"].append({
-                "type": notification_type,
-                "message": message[:500],
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            })
+            metadata["errors"].append(
+                {
+                    "type": notification_type,
+                    "message": message[:500],
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+            )
 
         # Update error count
         metadata["error_count"] = len(metadata["errors"])
 
-        with open(metadata_file, 'w') as f:
+        with open(metadata_file, "w") as f:
             lock_file(f, exclusive=True)
             json.dump(metadata, f, indent=2)
             unlock_file(f)
 
-    except (IOError, OSError, json.JSONDecodeError) as e:
+    except (OSError, json.JSONDecodeError) as e:
         print(f"Warning: Could not update session errors: {e}", file=sys.stderr)
 
 
-def process_notification(event: Dict[str, Any]) -> Dict[str, Any]:
+def process_notification(event: dict[str, Any]) -> dict[str, Any]:
     """Process a notification event."""
 
     message = event.get("message", event.get("content", ""))
@@ -219,10 +222,7 @@ def main():
         append_to_trace(notification)
 
         # Track errors in metadata
-        update_session_errors(
-            notification["notification_type"],
-            notification.get("message", "")
-        )
+        update_session_errors(notification["notification_type"], notification.get("message", ""))
 
         # Log significant notifications
         if notification["notification_type"] in ["error", "rate_limit", "warning"]:

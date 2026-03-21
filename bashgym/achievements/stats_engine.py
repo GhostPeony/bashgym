@@ -6,13 +6,12 @@ training runs, factory jobs, and router usage. Results cached with 60s TTL.
 """
 
 import json
-import time
 import logging
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Dict, Any, Optional
+import time
 from collections import Counter
+from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any
 
 from bashgym.config import get_bashgym_dir
 
@@ -33,7 +32,7 @@ class TraceStats:
     most_used_tool: str = ""
     unique_repos: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "total": self.total,
             "gold": self.gold,
@@ -52,13 +51,13 @@ class TraceStats:
 @dataclass
 class TrainingStats:
     runs_completed: int = 0
-    runs_by_strategy: Dict[str, int] = field(default_factory=dict)
+    runs_by_strategy: dict[str, int] = field(default_factory=dict)
     lowest_loss: float = float("inf")
     models_finetuned: int = 0
     models_exported: int = 0
     total_examples_generated: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "runs_completed": self.runs_completed,
             "runs_by_strategy": self.runs_by_strategy,
@@ -75,7 +74,7 @@ class FactoryStats:
     total_generated: int = 0
     total_valid: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "jobs_completed": self.jobs_completed,
             "total_generated": self.total_generated,
@@ -89,7 +88,7 @@ class RouterStats:
     student_success_rate: float = 0.0
     teacher_success_rate: float = 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "total_routed": self.total_routed,
             "student_success_rate": round(self.student_success_rate, 3),
@@ -107,7 +106,7 @@ class LifetimeStats:
     days_active: int = 0
     achievement_points: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "traces": self.traces.to_dict(),
             "training": self.training.to_dict(),
@@ -122,8 +121,8 @@ class LifetimeStats:
 class StatsEngine:
     """Scans data directories to compute lifetime statistics."""
 
-    def __init__(self, app_state: Optional[Any] = None):
-        self._cache: Optional[LifetimeStats] = None
+    def __init__(self, app_state: Any | None = None):
+        self._cache: LifetimeStats | None = None
         self._cache_time: float = 0
         self._cache_ttl: float = 60.0  # seconds
         self._app_state = app_state
@@ -207,7 +206,11 @@ class StatsEngine:
                     # Repos
                     repo = data.get("metadata", {}).get("primary_repo", {}).get("name", "")
                     if not repo:
-                        repo = data.get("primary_repo", {}).get("name", "") if isinstance(data.get("primary_repo"), dict) else ""
+                        repo = (
+                            data.get("primary_repo", {}).get("name", "")
+                            if isinstance(data.get("primary_repo"), dict)
+                            else ""
+                        )
                     if repo:
                         repos.add(repo)
                 except Exception:
@@ -288,9 +291,7 @@ class StatsEngine:
         if batches_dir.exists():
             for jsonl_file in batches_dir.glob("*.jsonl"):
                 try:
-                    ts.total_examples_generated += sum(
-                        1 for _ in jsonl_file.open(encoding="utf-8")
-                    )
+                    ts.total_examples_generated += sum(1 for _ in jsonl_file.open(encoding="utf-8"))
                 except Exception:
                     continue
 
@@ -328,7 +329,9 @@ class StatsEngine:
                 for name, model in models.items():
                     model_type = getattr(model, "model_type", None)
                     if model_type:
-                        type_val = model_type.value if hasattr(model_type, "value") else str(model_type)
+                        type_val = (
+                            model_type.value if hasattr(model_type, "value") else str(model_type)
+                        )
                         if "student" in type_val.lower():
                             rs.student_success_rate = getattr(model, "success_rate", 0.0)
                         elif "teacher" in type_val.lower():
@@ -338,7 +341,7 @@ class StatsEngine:
 
     def _compute_activity(self) -> tuple:
         """Compute first activity timestamp and days active."""
-        first_ts: Optional[datetime] = None
+        first_ts: datetime | None = None
 
         # Check trace file modification times
         for subdir in ("gold_traces", "silver_traces", "bronze_traces", "failed_traces", "traces"):

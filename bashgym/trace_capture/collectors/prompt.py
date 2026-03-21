@@ -21,7 +21,6 @@ and any linked pasted content.
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
 
 from .base import (
     BaseCollector,
@@ -59,7 +58,7 @@ class PromptCollector(BaseCollector):
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _read_paste_cache(self, paste_ids: Dict[str, bool]) -> str:
+    def _read_paste_cache(self, paste_ids: dict[str, bool]) -> str:
         """Read paste-cache files for the given paste IDs.
 
         Parameters
@@ -77,7 +76,7 @@ class PromptCollector(BaseCollector):
         if not paste_dir.is_dir():
             return ""
 
-        parts: List[str] = []
+        parts: list[str] = []
         for paste_id in paste_ids:
             paste_file = paste_dir / f"{paste_id}.txt"
             if paste_file.is_file():
@@ -85,12 +84,12 @@ class PromptCollector(BaseCollector):
                     content = paste_file.read_text(encoding="utf-8")
                     if content:
                         parts.append(content)
-                except (IOError, OSError, UnicodeDecodeError):
+                except (OSError, UnicodeDecodeError):
                     pass
 
         return PASTE_SEPARATOR.join(parts)
 
-    def _read_history_lines(self) -> List[str]:
+    def _read_history_lines(self) -> list[str]:
         """Read all lines from history.jsonl.
 
         Returns
@@ -104,12 +103,12 @@ class PromptCollector(BaseCollector):
 
         try:
             text = history_file.read_text(encoding="utf-8")
-        except (IOError, OSError, UnicodeDecodeError):
+        except (OSError, UnicodeDecodeError):
             return []
 
         return [line.strip() for line in text.splitlines() if line.strip()]
 
-    def _parse_entry(self, line: str) -> Optional[Dict]:
+    def _parse_entry(self, line: str) -> dict | None:
         """Parse a single history.jsonl line.
 
         Returns the parsed dict or None if invalid.
@@ -121,9 +120,9 @@ class PromptCollector(BaseCollector):
 
     def _entry_matches(
         self,
-        entry: Dict,
-        since: Optional[str] = None,
-        project_filter: Optional[str] = None,
+        entry: dict,
+        since: str | None = None,
+        project_filter: str | None = None,
     ) -> bool:
         """Check whether a history entry passes the given filters.
 
@@ -163,7 +162,7 @@ class PromptCollector(BaseCollector):
 
         return True
 
-    def _dedup_key(self, entry: Dict) -> str:
+    def _dedup_key(self, entry: dict) -> str:
         """Return the deduplication key for a history entry.
 
         Uses the string representation of the millisecond timestamp.
@@ -176,8 +175,8 @@ class PromptCollector(BaseCollector):
 
     def scan(
         self,
-        since: Optional[str] = None,
-        project_filter: Optional[str] = None,
+        since: str | None = None,
+        project_filter: str | None = None,
     ) -> CollectorScanResult:
         """Scan history.jsonl for available prompts without collecting."""
         lines = self._read_history_lines()
@@ -210,7 +209,7 @@ class PromptCollector(BaseCollector):
             estimated_size_bytes=estimated_bytes,
         )
 
-    def collect(self, session_id: str) -> List[PromptRecord]:
+    def collect(self, session_id: str) -> list[PromptRecord]:
         """Collect records for a single session.
 
         Prompts are not session-scoped, so this always returns an empty list.
@@ -219,8 +218,8 @@ class PromptCollector(BaseCollector):
 
     def collect_all(
         self,
-        since: Optional[str] = None,
-        project_filter: Optional[str] = None,
+        since: str | None = None,
+        project_filter: str | None = None,
     ) -> CollectorBatchResult:
         """Collect all uncollected prompt records from history.jsonl.
 
@@ -236,8 +235,8 @@ class PromptCollector(BaseCollector):
 
         collected = 0
         skipped = 0
-        errors: List[str] = []
-        records: List[PromptRecord] = []
+        errors: list[str] = []
+        records: list[PromptRecord] = []
 
         for line in lines:
             entry = self._parse_entry(line)

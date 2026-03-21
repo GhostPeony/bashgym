@@ -1,7 +1,8 @@
 """Pydantic schemas for device management API."""
 
+from typing import Any
+
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
 
 
 class DeviceCreate(BaseModel):
@@ -14,12 +15,12 @@ class DeviceCreate(BaseModel):
 
 
 class DeviceUpdate(BaseModel):
-    name: Optional[str] = Field(None, min_length=1, max_length=100)
-    host: Optional[str] = Field(None, min_length=1)
-    port: Optional[int] = Field(None, ge=1, le=65535)
-    username: Optional[str] = Field(None, min_length=1)
-    key_path: Optional[str] = None
-    work_dir: Optional[str] = None
+    name: str | None = Field(None, min_length=1, max_length=100)
+    host: str | None = Field(None, min_length=1)
+    port: int | None = Field(None, ge=1, le=65535)
+    username: str | None = Field(None, min_length=1)
+    key_path: str | None = None
+    work_dir: str | None = None
 
 
 class DeviceResponse(BaseModel):
@@ -32,20 +33,20 @@ class DeviceResponse(BaseModel):
     work_dir: str
     is_default: bool
     added_at: str
-    last_seen: Optional[str] = None
-    capabilities: Optional[Dict[str, Any]] = None
+    last_seen: str | None = None
+    capabilities: dict[str, Any] | None = None
 
 
 class SSHCandidateResponse(BaseModel):
     ssh_alias: str
     host: str
-    username: Optional[str] = None
+    username: str | None = None
     port: int = 22
-    key_path: Optional[str] = None
+    key_path: str | None = None
     already_added: bool = False
-    existing_device_id: Optional[str] = None
+    existing_device_id: str | None = None
 
 
 class DiscoverResponse(BaseModel):
-    candidates: List[SSHCandidateResponse]
+    candidates: list[SSHCandidateResponse]
     ssh_config_path: str

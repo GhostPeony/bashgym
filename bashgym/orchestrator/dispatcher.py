@@ -12,10 +12,11 @@ import asyncio
 import json
 import logging
 import time
-from typing import AsyncIterator, Dict, List, Optional
 
 from bashgym.orchestrator.models import (
-    TaskNode, WorkerConfig, WorkerResult,
+    TaskNode,
+    WorkerConfig,
+    WorkerResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,21 +33,21 @@ class WorkerPool:
     def __init__(
         self,
         max_workers: int = 5,
-        default_config: Optional[WorkerConfig] = None,
+        default_config: WorkerConfig | None = None,
     ):
         self.max_workers = max_workers
         self.default_config = default_config or WorkerConfig()
-        self._processes: Dict[str, asyncio.subprocess.Process] = {}
-        self._tasks: Dict[str, asyncio.Task] = {}
-        self._results: Dict[str, WorkerResult] = {}
-        self._output_buffers: Dict[str, List[str]] = {}
-        self._completion_events: Dict[str, asyncio.Event] = {}
+        self._processes: dict[str, asyncio.subprocess.Process] = {}
+        self._tasks: dict[str, asyncio.Task] = {}
+        self._results: dict[str, WorkerResult] = {}
+        self._output_buffers: dict[str, list[str]] = {}
+        self._completion_events: dict[str, asyncio.Event] = {}
         self._any_complete = asyncio.Event()
 
     async def spawn_worker(
         self,
         task: TaskNode,
-        config: Optional[WorkerConfig] = None,
+        config: WorkerConfig | None = None,
     ) -> str:
         """Spawn a new Claude Code worker for a task.
 
@@ -67,8 +68,7 @@ class WorkerPool:
         """
         if len(self._processes) >= self.max_workers:
             raise RuntimeError(
-                f"Max workers ({self.max_workers}) reached. "
-                f"Wait for a worker to finish."
+                f"Max workers ({self.max_workers}) reached. " f"Wait for a worker to finish."
             )
 
         cfg = config or self.default_config
@@ -96,9 +96,7 @@ class WorkerPool:
         self._completion_events[worker_id] = asyncio.Event()
 
         # Spawn as async task for non-blocking management
-        async_task = asyncio.create_task(
-            self._run_worker(worker_id, cmd, cwd, cfg.timeout_seconds)
-        )
+        async_task = asyncio.create_task(self._run_worker(worker_id, cmd, cwd, cfg.timeout_seconds))
         self._tasks[worker_id] = async_task
 
         return worker_id
@@ -106,14 +104,14 @@ class WorkerPool:
     async def _run_worker(
         self,
         worker_id: str,
-        cmd: List[str],
-        cwd: Optional[str],
+        cmd: list[str],
+        cwd: str | None,
         timeout: float,
     ) -> WorkerResult:
         """Execute a worker subprocess and collect results."""
         start_time = time.time()
         session_id = ""
-        output_lines: List[str] = []
+        output_lines: list[str] = []
 
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -152,7 +150,7 @@ class WorkerPool:
 
             # Parse JSON output from Claude CLI
             output_text = stdout
-            files_modified: List[str] = []
+            files_modified: list[str] = []
             tokens_used = 0
             cost_usd = 0.0
 
@@ -237,7 +235,7 @@ class WorkerPool:
     async def wait_for_worker(
         self,
         worker_id: str,
-        timeout: Optional[float] = None,
+        timeout: float | None = None,
     ) -> WorkerResult:
         """Wait for a specific worker to complete.
 
@@ -330,7 +328,7 @@ class WorkerPool:
         for worker_id in worker_ids:
             await self.cancel_worker(worker_id)
 
-    def get_worker_output(self, worker_id: str) -> List[str]:
+    def get_worker_output(self, worker_id: str) -> list[str]:
         """Get buffered output lines for a worker.
 
         Args:

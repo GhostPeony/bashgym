@@ -22,19 +22,18 @@ Instrumentation:
 import json
 import os
 import platform
-import asyncio
+import re as _re
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Set, Tuple
-from dataclasses import dataclass, asdict, field
+from typing import Any, Optional
 
-import re as _re
-
-from ..core import TraceStep, TraceSession, TraceCapture, CognitiveData, estimate_cost_usd
+from ..core import CognitiveData, TraceCapture, TraceSession, TraceStep, estimate_cost_usd
 
 # Import instrumentation (optional - graceful degradation if not available)
 try:
-    from bashgym.core import get_instrumentation, Instrumentation
+    from bashgym.core import Instrumentation, get_instrumentation
+
     HAS_INSTRUMENTATION = True
 except ImportError:
     HAS_INSTRUMENTATION = False
@@ -44,17 +43,18 @@ except ImportError:
 @dataclass
 class ImportResult:
     """Result of an import operation."""
+
     session_id: str
     source_file: Path
     steps_imported: int
-    destination_file: Optional[Path] = None
-    error: Optional[str] = None
+    destination_file: Path | None = None
+    error: str | None = None
     skipped: bool = False
-    skip_reason: Optional[str] = None
+    skip_reason: str | None = None
     # Instrumentation stats
     pii_redactions: int = 0
     injection_blocked: bool = False
-    sanitized_prompt: Optional[str] = None
+    sanitized_prompt: str | None = None
 
 
 class ClaudeSessionImporter:
@@ -66,61 +66,61 @@ class ClaudeSessionImporter:
     """
 
     # Tools to exclude from trace steps (empty = capture everything)
-    EXCLUDED_TOOLS: Set[str] = set()
+    EXCLUDED_TOOLS: set[str] = set()
 
     def __init__(self):
         self.trace_capture = TraceCapture()
         self.claude_dir = self._get_claude_dir()
         self.imported_sessions_file = self.trace_capture.bashgym_dir / "imported_sessions.json"
-        self._imported_sessions: Optional[Set[str]] = None
+        self._imported_sessions: set[str] | None = None
 
     @staticmethod
     def _get_claude_dir() -> Path:
         """Get Claude Code's data directory."""
-        if platform.system() == 'Windows':
+        if platform.system() == "Windows":
             base = Path(os.environ.get("USERPROFILE", ""))
         else:
             base = Path.home()
         return base / ".claude"
 
     @property
-    def imported_sessions(self) -> Set[str]:
+    def imported_sessions(self) -> set[str]:
         """Get set of already imported session IDs."""
         if self._imported_sessions is None:
             self._imported_sessions = self._load_imported_sessions()
         return self._imported_sessions
 
-    def _load_imported_sessions(self) -> Set[str]:
+    def _load_imported_sessions(self) -> set[str]:
         """Load the list of already imported session IDs."""
         if not self.imported_sessions_file.exists():
             return set()
         try:
-            with open(self.imported_sessions_file, 'r') as f:
+            with open(self.imported_sessions_file) as f:
                 data = json.load(f)
                 return set(data.get("sessions", []))
-        except (json.JSONDecodeError, IOError):
+        except (OSError, json.JSONDecodeError):
             return set()
 
     def _save_imported_session(self, session_id: str) -> None:
         """Mark a session as imported."""
         self.imported_sessions.add(session_id)
         try:
-            with open(self.imported_sessions_file, 'w') as f:
+            with open(self.imported_sessions_file, "w") as f:
                 json.dump({"sessions": list(self.imported_sessions)}, f)
-        except IOError as e:
+        except OSError as e:
             print(f"Warning: Could not save imported sessions list: {e}")
 
-    def find_projects_dir(self) -> Optional[Path]:
+    def find_projects_dir(self) -> Path | None:
         """Find Claude Code's projects directory."""
         projects_dir = self.claude_dir / "projects"
         return projects_dir if projects_dir.exists() else None
 
     def find_session_files(
         self,
-        project_filter: Optional[str] = None,
-        since: Optional[datetime] = None,
-        until: Optional[datetime] = None
-    ) -> List[Tuple[Path, datetime]]:
+        project_filter: str | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> list[tuple[Path, datetime]]:
         """
         Find session JSONL files, optionally filtered by date and project.
 
@@ -163,7 +163,7 @@ class ClaudeSessionImporter:
         return session_files
 
     @staticmethod
-    def _extract_text_from_content(content) -> Optional[str]:
+    def _extract_text_from_content(content) -> str | None:
         """Extract text from message content (string or list of blocks)."""
         if isinstance(content, str):
             return content
@@ -179,18 +179,24 @@ class ClaudeSessionImporter:
 
     # Patterns indicating agent reflection / self-correction
     _REFLECTION_PATTERNS = [
-        _re.compile(r"(?:I notice|I see|that didn't work|that failed|let me reconsider|the error|looking at the error|the issue is|the problem is|instead,? I)", _re.IGNORECASE),
+        _re.compile(
+            r"(?:I notice|I see|that didn't work|that failed|let me reconsider|the error|looking at the error|the issue is|the problem is|instead,? I)",
+            _re.IGNORECASE,
+        ),
     ]
 
     # Patterns indicating an explicit plan
     _PLAN_PATTERNS = [
-        _re.compile(r"(?:(?:my |the )?plan is|here's (?:my |the )?plan|I'll|let me|first,? I|step \d)", _re.IGNORECASE),
+        _re.compile(
+            r"(?:(?:my |the )?plan is|here's (?:my |the )?plan|I'll|let me|first,? I|step \d)",
+            _re.IGNORECASE,
+        ),
     ]
 
     @staticmethod
     def _extract_cognitive(
-        thinking_parts: List[str],
-        text_parts: List[str],
+        thinking_parts: list[str],
+        text_parts: list[str],
         thinking_max_chars: int = 10000,
         text_max_chars: int = 5000,
     ) -> CognitiveData:
@@ -206,16 +212,18 @@ class ClaudeSessionImporter:
         thinking_raw = "\n".join(thinking_parts)[:thinking_max_chars] if thinking_parts else None
         text_raw = "\n".join(text_parts)[:text_max_chars] if text_parts else None
 
-        plan_paragraphs: List[str] = []
-        reflection_paragraphs: List[str] = []
-        remainder_paragraphs: List[str] = []
+        plan_paragraphs: list[str] = []
+        reflection_paragraphs: list[str] = []
+        remainder_paragraphs: list[str] = []
 
         if text_raw:
             paragraphs = [p.strip() for p in text_raw.split("\n\n") if p.strip()]
 
             for para in paragraphs:
                 is_plan = any(pat.search(para) for pat in ClaudeSessionImporter._PLAN_PATTERNS)
-                is_reflection = any(pat.search(para) for pat in ClaudeSessionImporter._REFLECTION_PATTERNS)
+                is_reflection = any(
+                    pat.search(para) for pat in ClaudeSessionImporter._REFLECTION_PATTERNS
+                )
 
                 if is_plan:
                     plan_paragraphs.append(para)
@@ -228,9 +236,13 @@ class ClaudeSessionImporter:
         if thinking_raw:
             thinking_paragraphs = [p.strip() for p in thinking_raw.split("\n\n") if p.strip()]
             for para in thinking_paragraphs:
-                if not plan_paragraphs and any(pat.search(para) for pat in ClaudeSessionImporter._PLAN_PATTERNS):
+                if not plan_paragraphs and any(
+                    pat.search(para) for pat in ClaudeSessionImporter._PLAN_PATTERNS
+                ):
                     plan_paragraphs.append(para)
-                if not reflection_paragraphs and any(pat.search(para) for pat in ClaudeSessionImporter._REFLECTION_PATTERNS):
+                if not reflection_paragraphs and any(
+                    pat.search(para) for pat in ClaudeSessionImporter._REFLECTION_PATTERNS
+                ):
                     reflection_paragraphs.append(para)
 
         plan = "\n\n".join(plan_paragraphs) if plan_paragraphs else None
@@ -269,7 +281,7 @@ class ClaudeSessionImporter:
         session_file: Path,
         thinking_max_chars: int = 10000,
         text_max_chars: int = 5000,
-    ) -> Tuple[List[TraceStep], Dict[str, Any]]:
+    ) -> tuple[list[TraceStep], dict[str, Any]]:
         """
         Parse a Claude Code session JSONL file and extract all available data.
 
@@ -284,14 +296,14 @@ class ClaudeSessionImporter:
         Returns:
             Tuple of (steps, session_metadata_dict)
         """
-        steps: List[TraceStep] = []
+        steps: list[TraceStep] = []
         session_id = session_file.stem
-        cwd: Optional[str] = None
+        cwd: str | None = None
 
         # Session-level accumulators
-        models_used: Set[str] = set()
-        tools_used: Set[str] = set()
-        meta: Dict[str, Any] = {
+        models_used: set[str] = set()
+        tools_used: set[str] = set()
+        meta: dict[str, Any] = {
             "user_initial_prompt": None,
             "all_user_prompts": [],
             "plan_contents": [],
@@ -315,10 +327,10 @@ class ClaudeSessionImporter:
             # Thinking/text blocks often arrive in separate assistant events
             # from the tool_use that follows. Accumulate across events until
             # a tool_use consumes them.
-            pending_thinking: List[str] = []
-            pending_text: List[str] = []
+            pending_thinking: list[str] = []
+            pending_text: list[str] = []
 
-            with open(session_file, 'r', encoding='utf-8') as f:
+            with open(session_file, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line:
@@ -357,7 +369,9 @@ class ClaudeSessionImporter:
                             models_used.add(model)
                         meta["total_input_tokens"] += usage.get("input_tokens", 0)
                         meta["total_output_tokens"] += usage.get("output_tokens", 0)
-                        meta["total_cache_creation_tokens"] += usage.get("cache_creation_input_tokens", 0)
+                        meta["total_cache_creation_tokens"] += usage.get(
+                            "cache_creation_input_tokens", 0
+                        )
                         meta["total_cache_read_tokens"] += usage.get("cache_read_input_tokens", 0)
 
                         # Walk content blocks: thinking/text precede tool_use
@@ -390,10 +404,14 @@ class ClaudeSessionImporter:
                                 if tool_name not in self.EXCLUDED_TOOLS:
                                     # Extract structured cognitive data
                                     cognitive = self._extract_cognitive(
-                                        pending_thinking, pending_text,
-                                        thinking_max_chars, text_max_chars,
+                                        pending_thinking,
+                                        pending_text,
+                                        thinking_max_chars,
+                                        text_max_chars,
                                     )
-                                    cognitive_dict = cognitive.to_dict() if not cognitive.is_empty() else None
+                                    cognitive_dict = (
+                                        cognitive.to_dict() if not cognitive.is_empty() else None
+                                    )
 
                                     step = TraceStep(
                                         step_id=f"{session_id}_{tool_id}",
@@ -404,7 +422,10 @@ class ClaudeSessionImporter:
                                         exit_code=None,
                                         success=None,
                                         cwd=cwd or "",
-                                        repo={"path": cwd, "name": Path(cwd).name if cwd else "unknown"},
+                                        repo={
+                                            "path": cwd,
+                                            "name": Path(cwd).name if cwd else "unknown",
+                                        },
                                         source_tool="claude_code",
                                         cognitive=cognitive_dict,
                                         metadata={
@@ -414,11 +435,17 @@ class ClaudeSessionImporter:
                                             "model": model,
                                             "input_tokens": usage.get("input_tokens", 0),
                                             "output_tokens": usage.get("output_tokens", 0),
-                                            "thinking_content": "\n".join(pending_thinking) if pending_thinking else None,
-                                            "assistant_text": "\n".join(pending_text) if pending_text else None,
+                                            "thinking_content": (
+                                                "\n".join(pending_thinking)
+                                                if pending_thinking
+                                                else None
+                                            ),
+                                            "assistant_text": (
+                                                "\n".join(pending_text) if pending_text else None
+                                            ),
                                             "cognitive": cognitive_dict,
                                             "stop_reason": msg.get("stop_reason"),
-                                        }
+                                        },
                                     )
                                     steps.append(step)
 
@@ -436,10 +463,12 @@ class ClaudeSessionImporter:
                         # Extract user prompt text
                         user_text = self._extract_text_from_content(content)
                         if user_text:
-                            meta["all_user_prompts"].append({
-                                "text": user_text[:2000],
-                                "timestamp": event.get("timestamp"),
-                            })
+                            meta["all_user_prompts"].append(
+                                {
+                                    "text": user_text[:2000],
+                                    "timestamp": event.get("timestamp"),
+                                }
+                            )
                             if meta["user_initial_prompt"] is None:
                                 meta["user_initial_prompt"] = user_text[:500]
                             meta["conversation_turns"] += 1
@@ -472,7 +501,9 @@ class ClaudeSessionImporter:
                     elif event_type == "progress":
                         data = event.get("data", {})
                         if data.get("type") == "agent_progress":
-                            msg_content = data.get("message", {}).get("message", {}).get("content", [])
+                            msg_content = (
+                                data.get("message", {}).get("message", {}).get("content", [])
+                            )
                             for item in msg_content if isinstance(msg_content, list) else []:
                                 if isinstance(item, dict) and item.get("type") == "tool_result":
                                     self._apply_tool_result(
@@ -482,7 +513,7 @@ class ClaudeSessionImporter:
                                         item.get("is_error", False),
                                     )
 
-        except IOError as e:
+        except OSError as e:
             print(f"Error reading session file {session_file}: {e}")
             return [], {"user_initial_prompt": None}
 
@@ -500,11 +531,7 @@ class ClaudeSessionImporter:
 
         return steps, meta
 
-    def import_session(
-        self,
-        session_file: Path,
-        force: bool = False
-    ) -> ImportResult:
+    def import_session(self, session_file: Path, force: bool = False) -> ImportResult:
         """
         Import a single session file into BashGym format.
 
@@ -524,7 +551,7 @@ class ClaudeSessionImporter:
                 source_file=session_file,
                 steps_imported=0,
                 skipped=True,
-                skip_reason="Already imported"
+                skip_reason="Already imported",
             )
 
         # Parse the session
@@ -536,7 +563,7 @@ class ClaudeSessionImporter:
                 source_file=session_file,
                 steps_imported=0,
                 skipped=True,
-                skip_reason="No relevant tool executions found"
+                skip_reason="No relevant tool executions found",
             )
 
         # Extract user prompt, spread remaining metadata into session
@@ -548,7 +575,7 @@ class ClaudeSessionImporter:
             imported=True,
             import_source=str(session_file),
             user_initial_prompt=user_initial_prompt,
-            **session_meta
+            **session_meta,
         )
 
         # Save to traces directory
@@ -558,14 +585,14 @@ class ClaudeSessionImporter:
         destination = self.trace_capture.traces_dir / filename
 
         try:
-            with open(destination, 'w', encoding='utf-8') as f:
+            with open(destination, "w", encoding="utf-8") as f:
                 json.dump(asdict(session), f, indent=2, ensure_ascii=False)
-        except IOError as e:
+        except OSError as e:
             return ImportResult(
                 session_id=session_id,
                 source_file=session_file,
                 steps_imported=0,
-                error=f"Failed to write trace: {e}"
+                error=f"Failed to write trace: {e}",
             )
 
         # Mark as imported
@@ -575,14 +602,14 @@ class ClaudeSessionImporter:
             session_id=session_id,
             source_file=session_file,
             steps_imported=len(steps),
-            destination_file=destination
+            destination_file=destination,
         )
 
     async def import_session_async(
         self,
         session_file: Path,
         force: bool = False,
-        instrumentation: Optional["Instrumentation"] = None
+        instrumentation: Optional["Instrumentation"] = None,
     ) -> ImportResult:
         """
         Import a single session file with instrumentation (async).
@@ -609,8 +636,7 @@ class ClaudeSessionImporter:
         trace_id = ""
         if inst and inst.profiler_enabled:
             trace_id = inst.start_trace(
-                f"import:{session_id[:8]}",
-                metadata={"source_file": str(session_file)}
+                f"import:{session_id[:8]}", metadata={"source_file": str(session_file)}
             )
 
         pii_redactions = 0
@@ -624,7 +650,7 @@ class ClaudeSessionImporter:
                     source_file=session_file,
                     steps_imported=0,
                     skipped=True,
-                    skip_reason="Already imported"
+                    skip_reason="Already imported",
                 )
 
             # Parse the session
@@ -636,7 +662,7 @@ class ClaudeSessionImporter:
                     source_file=session_file,
                     steps_imported=0,
                     skipped=True,
-                    skip_reason="No relevant tool executions found"
+                    skip_reason="No relevant tool executions found",
                 )
 
             # Extract user prompt for injection/PII checks
@@ -648,8 +674,7 @@ class ClaudeSessionImporter:
                 # Check user prompt for injection
                 if user_initial_prompt:
                     is_safe = await inst.check_injection(
-                        user_initial_prompt,
-                        location="import.user_prompt"
+                        user_initial_prompt, location="import.user_prompt"
                     )
                     if not is_safe:
                         injection_blocked = True
@@ -658,8 +683,7 @@ class ClaudeSessionImporter:
                     # Filter PII from user prompt
                     original_prompt = sanitized_prompt
                     sanitized_prompt = await inst.filter_pii(
-                        sanitized_prompt,
-                        location="import.user_prompt"
+                        sanitized_prompt, location="import.user_prompt"
                     )
                     if sanitized_prompt != original_prompt:
                         pii_redactions += 1
@@ -668,8 +692,7 @@ class ClaudeSessionImporter:
                 for prompt_entry in session_meta.get("all_user_prompts", []):
                     original_text = prompt_entry["text"]
                     prompt_entry["text"] = await inst.filter_pii(
-                        original_text,
-                        location="import.user_prompt"
+                        original_text, location="import.user_prompt"
                     )
                     if prompt_entry["text"] != original_text:
                         pii_redactions += 1
@@ -679,8 +702,7 @@ class ClaudeSessionImporter:
                     if step.output:
                         original_output = step.output
                         step.output = await inst.filter_pii(
-                            step.output,
-                            location="import.tool_output"
+                            step.output, location="import.tool_output"
                         )
                         if step.output != original_output:
                             pii_redactions += 1
@@ -689,8 +711,7 @@ class ClaudeSessionImporter:
                     if step.command:
                         original_command = step.command
                         step.command = await inst.filter_pii(
-                            step.command,
-                            location="import.tool_command"
+                            step.command, location="import.tool_command"
                         )
                         if step.command != original_command:
                             pii_redactions += 1
@@ -703,7 +724,7 @@ class ClaudeSessionImporter:
                 imported=True,
                 import_source=str(session_file),
                 user_initial_prompt=sanitized_prompt or "Imported session",
-                **session_meta
+                **session_meta,
             )
 
             # Add instrumentation metadata
@@ -717,16 +738,16 @@ class ClaudeSessionImporter:
             destination = self.trace_capture.traces_dir / filename
 
             try:
-                with open(destination, 'w', encoding='utf-8') as f:
+                with open(destination, "w", encoding="utf-8") as f:
                     json.dump(asdict(session), f, indent=2, ensure_ascii=False)
-            except IOError as e:
+            except OSError as e:
                 return ImportResult(
                     session_id=session_id,
                     source_file=session_file,
                     steps_imported=0,
                     error=f"Failed to write trace: {e}",
                     pii_redactions=pii_redactions,
-                    injection_blocked=injection_blocked
+                    injection_blocked=injection_blocked,
                 )
 
             # Mark as imported
@@ -739,7 +760,7 @@ class ClaudeSessionImporter:
                 destination_file=destination,
                 pii_redactions=pii_redactions,
                 injection_blocked=injection_blocked,
-                sanitized_prompt=sanitized_prompt
+                sanitized_prompt=sanitized_prompt,
             )
 
         finally:
@@ -749,9 +770,8 @@ class ClaudeSessionImporter:
 
 
 async def import_today_async(
-    project_filter: Optional[str] = None,
-    verbose: bool = True
-) -> List[ImportResult]:
+    project_filter: str | None = None, verbose: bool = True
+) -> list[ImportResult]:
     """
     Import today's Claude Code sessions with instrumentation (async).
 
@@ -768,10 +788,7 @@ async def import_today_async(
     today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     today_utc = today.astimezone(timezone.utc)
 
-    session_files = importer.find_session_files(
-        project_filter=project_filter,
-        since=today_utc
-    )
+    session_files = importer.find_session_files(project_filter=project_filter, since=today_utc)
 
     if verbose:
         print(f"[BashGym] Found {len(session_files)} session(s) from today")
@@ -795,18 +812,19 @@ async def import_today_async(
             else:
                 pii_note = f" (PII: {result.pii_redactions})" if result.pii_redactions else ""
                 inj_note = " [INJECTION]" if result.injection_blocked else ""
-                print(f"  [+] {session_file.name}: {result.steps_imported} steps{pii_note}{inj_note}")
+                print(
+                    f"  [+] {session_file.name}: {result.steps_imported} steps{pii_note}{inj_note}"
+                )
 
     if verbose and (total_pii or total_injections):
-        print(f"[BashGym] Instrumentation: {total_pii} PII redactions, {total_injections} injection flags")
+        print(
+            f"[BashGym] Instrumentation: {total_pii} PII redactions, {total_injections} injection flags"
+        )
 
     return results
 
 
-def import_today(
-    project_filter: Optional[str] = None,
-    verbose: bool = True
-) -> List[ImportResult]:
+def import_today(project_filter: str | None = None, verbose: bool = True) -> list[ImportResult]:
     """
     Import today's Claude Code sessions.
 
@@ -823,10 +841,7 @@ def import_today(
     today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     today_utc = today.astimezone(timezone.utc)
 
-    session_files = importer.find_session_files(
-        project_filter=project_filter,
-        since=today_utc
-    )
+    session_files = importer.find_session_files(project_filter=project_filter, since=today_utc)
 
     if verbose:
         print(f"[BashGym] Found {len(session_files)} session(s) from today")
@@ -848,11 +863,8 @@ def import_today(
 
 
 def import_recent(
-    days: int = 60,
-    project_filter: Optional[str] = None,
-    verbose: bool = True,
-    force: bool = False
-) -> List[ImportResult]:
+    days: int = 60, project_filter: str | None = None, verbose: bool = True, force: bool = False
+) -> list[ImportResult]:
     """
     Import recent Claude Code sessions.
 
@@ -870,10 +882,7 @@ def import_recent(
     # Calculate cutoff date
     since = datetime.now(timezone.utc) - timedelta(days=days)
 
-    session_files = importer.find_session_files(
-        project_filter=project_filter,
-        since=since
-    )
+    session_files = importer.find_session_files(project_filter=project_filter, since=since)
 
     if verbose:
         print(f"[BashGym] Found {len(session_files)} session(s) from last {days} days")
@@ -894,11 +903,7 @@ def import_recent(
     return results
 
 
-def import_session(
-    session_path: str,
-    force: bool = False,
-    verbose: bool = True
-) -> ImportResult:
+def import_session(session_path: str, force: bool = False, verbose: bool = True) -> ImportResult:
     """
     Import a specific session file.
 
@@ -918,7 +923,7 @@ def import_session(
             session_id="unknown",
             source_file=session_file,
             steps_imported=0,
-            error=f"File not found: {session_path}"
+            error=f"File not found: {session_path}",
         )
 
     result = importer.import_session(session_file, force=force)
@@ -929,6 +934,8 @@ def import_session(
         elif result.error:
             print(f"[BashGym] [!] Error: {result.error}")
         else:
-            print(f"[BashGym] [+] Imported {result.steps_imported} steps to {result.destination_file}")
+            print(
+                f"[BashGym] [+] Imported {result.steps_imported} steps to {result.destination_file}"
+            )
 
     return result

@@ -4,11 +4,12 @@ Achievement API Routes
 Endpoints for lifetime stats and achievements.
 """
 
-from fastapi import APIRouter, Request
-from typing import Dict, Any, List
+from typing import Any
 
-from bashgym.achievements.stats_engine import StatsEngine
+from fastapi import APIRouter, Request
+
 from bashgym.achievements.engine import AchievementEngine
+from bashgym.achievements.stats_engine import StatsEngine
 
 router = APIRouter(prefix="/api/achievements", tags=["achievements"])
 
@@ -28,7 +29,7 @@ def _get_engines(request: Request) -> tuple:
 
 
 @router.get("/stats")
-async def get_stats(request: Request) -> Dict[str, Any]:
+async def get_stats(request: Request) -> dict[str, Any]:
     """Get full lifetime statistics."""
     stats_engine, achievement_engine = _get_engines(request)
     stats = stats_engine.compute()
@@ -37,7 +38,7 @@ async def get_stats(request: Request) -> Dict[str, Any]:
 
 
 @router.get("")
-async def get_achievements(request: Request) -> Dict[str, Any]:
+async def get_achievements(request: Request) -> dict[str, Any]:
     """Get all achievements with earned/progress status."""
     stats_engine, achievement_engine = _get_engines(request)
     stats = stats_engine.compute()
@@ -51,7 +52,7 @@ async def get_achievements(request: Request) -> Dict[str, Any]:
 
 
 @router.get("/recent")
-async def get_recent(request: Request) -> Dict[str, Any]:
+async def get_recent(request: Request) -> dict[str, Any]:
     """Get recently earned achievements (for Home widget)."""
     stats_engine, achievement_engine = _get_engines(request)
     recent = achievement_engine.get_recent(limit=5)
@@ -64,7 +65,7 @@ async def get_recent(request: Request) -> Dict[str, Any]:
 
 
 @router.post("/refresh")
-async def refresh_achievements(request: Request) -> Dict[str, Any]:
+async def refresh_achievements(request: Request) -> dict[str, Any]:
     """Force re-evaluate achievements and return any newly earned."""
     stats_engine, achievement_engine = _get_engines(request)
     stats = stats_engine.compute(force=True)

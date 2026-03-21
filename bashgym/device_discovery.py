@@ -9,22 +9,22 @@ and one level of Include expansion.
 import glob
 import os
 import platform
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
-
 
 # Hosts to exclude from device discovery — Git forges, loopback, known CI/CD targets
-FILTERED_HOSTS: frozenset = frozenset({
-    "github.com",
-    "gitlab.com",
-    "bitbucket.org",
-    "ssh.dev.azure.com",
-    "vs-ssh.visualstudio.com",
-    "localhost",
-    "127.0.0.1",
-    "::1",
-})
+FILTERED_HOSTS: frozenset = frozenset(
+    {
+        "github.com",
+        "gitlab.com",
+        "bitbucket.org",
+        "ssh.dev.azure.com",
+        "vs-ssh.visualstudio.com",
+        "localhost",
+        "127.0.0.1",
+        "::1",
+    }
+)
 
 
 @dataclass
@@ -32,10 +32,10 @@ class SSHHostEntry:
     """A single Host block parsed from an SSH config file."""
 
     alias: str
-    hostname: Optional[str] = None   # HostName directive; falls back to alias if absent
-    user: Optional[str] = None
+    hostname: str | None = None  # HostName directive; falls back to alias if absent
+    user: str | None = None
     port: int = 22
-    identity_file: Optional[str] = None
+    identity_file: str | None = None
 
 
 @dataclass
@@ -43,17 +43,18 @@ class SSHCandidate:
     """An SSH device candidate ready for display in the UI."""
 
     ssh_alias: str
-    host: str                          # Resolved hostname (or alias if no HostName)
-    username: Optional[str] = None
+    host: str  # Resolved hostname (or alias if no HostName)
+    username: str | None = None
     port: int = 22
-    key_path: Optional[str] = None
+    key_path: str | None = None
     already_added: bool = False
-    existing_device_id: Optional[str] = None
+    existing_device_id: str | None = None
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def get_ssh_config_path() -> Path:
     """Return the platform-appropriate path to ~/.ssh/config."""
@@ -72,7 +73,7 @@ def _strip_quotes(value: str) -> str:
     return value
 
 
-def _parse_ssh_config_file(path: Path) -> List[SSHHostEntry]:
+def _parse_ssh_config_file(path: Path) -> list[SSHHostEntry]:
     """
     Parse a single SSH config file and return a list of SSHHostEntry objects.
 
@@ -86,14 +87,14 @@ def _parse_ssh_config_file(path: Path) -> List[SSHHostEntry]:
     if not path.exists():
         return []
 
-    entries: List[SSHHostEntry] = []
+    entries: list[SSHHostEntry] = []
 
     # State for the current block
-    current_alias: Optional[str] = None
-    current_hostname: Optional[str] = None
-    current_user: Optional[str] = None
+    current_alias: str | None = None
+    current_hostname: str | None = None
+    current_user: str | None = None
     current_port: int = 22
-    current_identity_file: Optional[str] = None
+    current_identity_file: str | None = None
 
     def _save_block() -> None:
         """Persist the current block if it has a valid alias."""
@@ -102,13 +103,15 @@ def _parse_ssh_config_file(path: Path) -> List[SSHHostEntry]:
         # Skip wildcards
         if "*" in current_alias or "?" in current_alias:
             return
-        entries.append(SSHHostEntry(
-            alias=current_alias,
-            hostname=current_hostname,
-            user=current_user,
-            port=current_port,
-            identity_file=current_identity_file,
-        ))
+        entries.append(
+            SSHHostEntry(
+                alias=current_alias,
+                hostname=current_hostname,
+                user=current_user,
+                port=current_port,
+                identity_file=current_identity_file,
+            )
+        )
 
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
@@ -171,7 +174,7 @@ def _parse_ssh_config_file(path: Path) -> List[SSHHostEntry]:
     return entries
 
 
-def _resolve_includes(config_path: Path) -> List[SSHHostEntry]:
+def _resolve_includes(config_path: Path) -> list[SSHHostEntry]:
     """
     Parse the main SSH config file and any files referenced by Include directives.
 
@@ -182,8 +185,8 @@ def _resolve_includes(config_path: Path) -> List[SSHHostEntry]:
     if not config_path.exists():
         return []
 
-    all_entries: List[SSHHostEntry] = []
-    include_paths: List[Path] = []
+    all_entries: list[SSHHostEntry] = []
+    include_paths: list[Path] = []
 
     try:
         text = config_path.read_text(encoding="utf-8", errors="replace")
@@ -233,7 +236,8 @@ def _is_filtered(entry: SSHHostEntry) -> bool:
 # Public API
 # ---------------------------------------------------------------------------
 
-def discover_ssh_devices(existing_devices: Optional[List[Dict]] = None) -> Dict:
+
+def discover_ssh_devices(existing_devices: list[dict] | None = None) -> dict:
     """
     Parse ~/.ssh/config and return candidate SSH devices.
 
@@ -254,7 +258,7 @@ def discover_ssh_devices(existing_devices: Optional[List[Dict]] = None) -> Dict:
     entries = _resolve_includes(config_path)
 
     # Build a lookup of existing devices keyed by host/alias for O(1) lookups
-    existing_lookup: Dict[str, str] = {}  # host_or_alias -> device_id
+    existing_lookup: dict[str, str] = {}  # host_or_alias -> device_id
     if existing_devices:
         for device in existing_devices:
             device_id = str(device.get("id", ""))
@@ -263,7 +267,7 @@ def discover_ssh_devices(existing_devices: Optional[List[Dict]] = None) -> Dict:
                 if val:
                     existing_lookup[val.lower()] = device_id
 
-    candidates: List[Dict] = []
+    candidates: list[dict] = []
 
     for entry in entries:
         if _is_filtered(entry):
@@ -272,8 +276,12 @@ def discover_ssh_devices(existing_devices: Optional[List[Dict]] = None) -> Dict:
         effective_host = entry.hostname or entry.alias
 
         # Check if this host is already in the device list
-        lookup_keys = {entry.alias.lower(), effective_host.lower()} if effective_host else {entry.alias.lower()}
-        existing_id: Optional[str] = None
+        lookup_keys = (
+            {entry.alias.lower(), effective_host.lower()}
+            if effective_host
+            else {entry.alias.lower()}
+        )
+        existing_id: str | None = None
         for key in lookup_keys:
             if key in existing_lookup:
                 existing_id = existing_lookup[key]
@@ -294,15 +302,17 @@ def discover_ssh_devices(existing_devices: Optional[List[Dict]] = None) -> Dict:
             existing_device_id=existing_id,
         )
 
-        candidates.append({
-            "ssh_alias": candidate.ssh_alias,
-            "host": candidate.host,
-            "username": candidate.username,
-            "port": candidate.port,
-            "key_path": candidate.key_path,
-            "already_added": candidate.already_added,
-            "existing_device_id": candidate.existing_device_id,
-        })
+        candidates.append(
+            {
+                "ssh_alias": candidate.ssh_alias,
+                "host": candidate.host,
+                "username": candidate.username,
+                "port": candidate.port,
+                "key_path": candidate.key_path,
+                "already_added": candidate.already_added,
+                "existing_device_id": candidate.existing_device_id,
+            }
+        )
 
     return {
         "candidates": candidates,

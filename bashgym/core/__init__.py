@@ -5,11 +5,11 @@ Provides shared infrastructure for instrumentation, guardrails, and profiling.
 """
 
 from .instrumentation import (
+    GuardrailEvent,
     Instrumentation,
     InstrumentationContext,
     get_instrumentation,
     reset_instrumentation,
-    GuardrailEvent,
 )
 
 __all__ = [

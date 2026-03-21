@@ -12,21 +12,22 @@ Module: Orchestrator
 """
 
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Optional, Dict, Any, List
-from pathlib import Path
 from datetime import datetime, timezone
+from enum import Enum
+from pathlib import Path
+from typing import Any, Optional
 
 
 class LLMProvider(Enum):
     """Supported LLM providers for the orchestrator brain."""
+
     ANTHROPIC = "anthropic"
     OPENAI = "openai"
     GEMINI = "gemini"
     OLLAMA = "ollama"
 
 
-_PROVIDER_DEFAULTS: Dict[str, Dict[str, Any]] = {
+_PROVIDER_DEFAULTS: dict[str, dict[str, Any]] = {
     "anthropic": {
         "model": "claude-opus-4-6",
         "env_key": "ANTHROPIC_API_KEY",
@@ -63,15 +64,16 @@ class LLMConfig:
     - gemini: gemini-2.5-pro
     - ollama: qwen2.5-coder:32b
     """
+
     provider: LLMProvider = LLMProvider.ANTHROPIC
     model: str = ""  # Empty = use provider default
     api_key: str = ""  # Falls back to env vars per provider
-    base_url: Optional[str] = None  # For Ollama or custom endpoints
+    base_url: str | None = None  # For Ollama or custom endpoints
     temperature: float = 0.3
     max_tokens: int = 4096
 
     # Class-level reference to provider defaults
-    PROVIDER_DEFAULTS: Dict[str, Dict[str, Any]] = field(
+    PROVIDER_DEFAULTS: dict[str, dict[str, Any]] = field(
         default_factory=lambda: _PROVIDER_DEFAULTS, repr=False
     )
 
@@ -84,6 +86,7 @@ class LLMConfig:
     def get_api_key(self) -> str:
         """Resolve API key from config or environment."""
         import os
+
         if self.api_key:
             return self.api_key
         defaults = _PROVIDER_DEFAULTS.get(self.provider.value, {})
@@ -97,7 +100,7 @@ class LLMConfig:
         defaults = _PROVIDER_DEFAULTS.get(self.provider.value, {})
         return defaults.get("base_url", "")
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "provider": self.provider.value,
             "model": self.model,
@@ -109,6 +112,7 @@ class LLMConfig:
 
 class TaskStatus(Enum):
     """Status of a task in the orchestration DAG."""
+
     PENDING = "pending"
     ASSIGNED = "assigned"
     RUNNING = "running"
@@ -120,10 +124,11 @@ class TaskStatus(Enum):
 
 class TaskPriority(Enum):
     """Priority levels for task scheduling."""
-    CRITICAL = 1    # Blocks many others
-    HIGH = 2        # Core functionality
-    NORMAL = 3      # Standard features
-    LOW = 4         # Nice-to-have
+
+    CRITICAL = 1  # Blocks many others
+    HIGH = 2  # Core functionality
+    NORMAL = 3  # Standard features
+    LOW = 4  # Nice-to-have
 
 
 @dataclass
@@ -133,16 +138,17 @@ class OrchestratorSpec:
     This is what the user provides to kick off orchestrated work.
     The orchestrator decomposes this into a TaskDAG.
     """
+
     title: str
     description: str
-    constraints: List[str] = field(default_factory=list)
-    acceptance_criteria: List[str] = field(default_factory=list)
-    repository: Optional[str] = None
+    constraints: list[str] = field(default_factory=list)
+    acceptance_criteria: list[str] = field(default_factory=list)
+    repository: str | None = None
     base_branch: str = "main"
     max_budget_usd: float = 10.0
     max_workers: int = 5
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "title": self.title,
             "description": self.description,
@@ -162,26 +168,27 @@ class TaskNode:
     Represents one unit of work that a Claude Code worker will execute.
     Tasks form a directed acyclic graph via their dependencies.
     """
+
     id: str
     title: str
     description: str
     priority: TaskPriority = TaskPriority.NORMAL
     status: TaskStatus = TaskStatus.PENDING
-    dependencies: List[str] = field(default_factory=list)  # Task IDs
-    files_touched: List[str] = field(default_factory=list)  # Expected files
-    provides: List[Dict[str, Any]] = field(default_factory=list)  # Exports for other tasks
-    consumes: List[Dict[str, Any]] = field(default_factory=list)  # Imports from dependencies
+    dependencies: list[str] = field(default_factory=list)  # Task IDs
+    files_touched: list[str] = field(default_factory=list)  # Expected files
+    provides: list[dict[str, Any]] = field(default_factory=list)  # Exports for other tasks
+    consumes: list[dict[str, Any]] = field(default_factory=list)  # Imports from dependencies
     estimated_turns: int = 20
     budget_usd: float = 2.0
     worker_prompt: str = ""
-    worker_id: Optional[str] = None
-    worktree_path: Optional[Path] = None
+    worker_id: str | None = None
+    worktree_path: Path | None = None
     result: Optional["WorkerResult"] = None
     retry_count: int = 0
     max_retries: int = 2
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         d = {
             "id": self.id,
             "title": self.title,
@@ -207,23 +214,34 @@ class TaskNode:
 @dataclass
 class WorkerConfig:
     """Configuration for a worker Claude Code session."""
+
     model: str = "sonnet"
     max_turns: int = 30
     max_budget_usd: float = 5.0
-    allowed_tools: List[str] = field(default_factory=lambda: [
-        "Read", "Edit", "Write", "Bash", "Glob", "Grep",
-    ])
-    disallowed_tools: List[str] = field(default_factory=list)
+    allowed_tools: list[str] = field(
+        default_factory=lambda: [
+            "Read",
+            "Edit",
+            "Write",
+            "Bash",
+            "Glob",
+            "Grep",
+        ]
+    )
+    disallowed_tools: list[str] = field(default_factory=list)
     system_prompt_append: str = ""
-    worktree_path: Optional[Path] = None
+    worktree_path: Path | None = None
     timeout_seconds: float = 600.0
 
-    def to_cli_args(self) -> List[str]:
+    def to_cli_args(self) -> list[str]:
         """Convert config to claude CLI arguments."""
         args = [
-            "--output-format", "json",
-            "--max-turns", str(self.max_turns),
-            "--max-budget-usd", str(self.max_budget_usd),
+            "--output-format",
+            "json",
+            "--max-turns",
+            str(self.max_turns),
+            "--max-budget-usd",
+            str(self.max_budget_usd),
             "--verbose",
         ]
         if self.allowed_tools:
@@ -238,6 +256,7 @@ class WorkerConfig:
 @dataclass
 class WorkerResult:
     """Result from a completed worker session."""
+
     task_id: str
     session_id: str
     success: bool
@@ -246,11 +265,11 @@ class WorkerResult:
     duration_seconds: float
     tokens_used: int = 0
     cost_usd: float = 0.0
-    trace_path: Optional[Path] = None
-    files_modified: List[str] = field(default_factory=list)
-    error: Optional[str] = None
+    trace_path: Path | None = None
+    files_modified: list[str] = field(default_factory=list)
+    error: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "task_id": self.task_id,
             "session_id": self.session_id,
@@ -268,9 +287,10 @@ class WorkerResult:
 @dataclass
 class MergeResult:
     """Result from merging a worktree branch."""
+
     task_id: str
     branch: str
     success: bool
-    conflicts: List[str] = field(default_factory=list)
-    files_merged: List[str] = field(default_factory=list)
-    error: Optional[str] = None
+    conflicts: list[str] = field(default_factory=list)
+    files_merged: list[str] = field(default_factory=list)
+    error: str | None = None

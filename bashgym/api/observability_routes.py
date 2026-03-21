@@ -7,15 +7,16 @@ Provides REST API endpoints for:
 - Settings management for instrumentation
 """
 
+from typing import Any
+
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
-from datetime import datetime
 
 
 # Pydantic models for API
 class TraceSpanResponse(BaseModel):
     """Response model for a trace span."""
+
     span_id: str
     name: str
     kind: str
@@ -25,34 +26,38 @@ class TraceSpanResponse(BaseModel):
     output_tokens: int = 0
     total_tokens: int = 0
     latency_ms: float = 0.0
-    attributes: Dict[str, Any] = {}
+    attributes: dict[str, Any] = {}
 
 
 class TraceSummaryResponse(BaseModel):
     """Response model for a trace summary."""
+
     trace_id: str
     name: str
     duration_ms: float
     total_spans: int
     status: str = "success"
-    llm_calls: Dict[str, Any] = {}
-    tool_calls: Dict[str, Any] = {}
-    bottlenecks: List[Dict[str, Any]] = []
+    llm_calls: dict[str, Any] = {}
+    tool_calls: dict[str, Any] = {}
+    bottlenecks: list[dict[str, Any]] = []
 
 
 class TraceDetailResponse(TraceSummaryResponse):
     """Response model for full trace detail with spans."""
-    spans: List[TraceSpanResponse] = []
+
+    spans: list[TraceSpanResponse] = []
 
 
 class TraceListResponse(BaseModel):
     """Response model for trace list."""
-    traces: List[TraceSummaryResponse]
+
+    traces: list[TraceSummaryResponse]
     total: int
 
 
 class ToolStatResponse(BaseModel):
     """Response model for per-tool performance stats."""
+
     tool: str
     calls: int
     avg_duration_ms: float
@@ -62,50 +67,56 @@ class ToolStatResponse(BaseModel):
 
 class GuardrailEventResponse(BaseModel):
     """Response model for a guardrail event."""
+
     timestamp: str
     check_type: str
     location: str
     action_taken: str
     confidence: float
-    model_source: Optional[str] = None
+    model_source: str | None = None
     original_content: str
-    modified_content: Optional[str] = None
-    details: Dict[str, Any] = {}
+    modified_content: str | None = None
+    details: dict[str, Any] = {}
 
 
 class GuardrailEventsResponse(BaseModel):
     """Response model for guardrail events list."""
-    events: List[GuardrailEventResponse]
+
+    events: list[GuardrailEventResponse]
     total: int
 
 
 class GuardrailStatsResponse(BaseModel):
     """Response model for guardrail statistics."""
+
     total_events: int
-    by_action: Dict[str, int] = {}
-    by_type: Dict[str, int] = {}
-    by_source: Dict[str, int] = {}
+    by_action: dict[str, int] = {}
+    by_type: dict[str, int] = {}
+    by_source: dict[str, int] = {}
     block_rate: float = 0.0
 
 
 class MetricsResponse(BaseModel):
     """Response model for aggregated metrics."""
-    profiler: Dict[str, Any] = {}
+
+    profiler: dict[str, Any] = {}
     guardrails: GuardrailStatsResponse
 
 
 class SettingsUpdateRequest(BaseModel):
     """Request model for updating settings."""
-    enabled: Optional[bool] = None
-    pii_filtering: Optional[bool] = None
-    injection_detection: Optional[bool] = None
-    code_safety: Optional[bool] = None
+
+    enabled: bool | None = None
+    pii_filtering: bool | None = None
+    injection_detection: bool | None = None
+    code_safety: bool | None = None
 
 
 class SettingsResponse(BaseModel):
     """Response model for current settings."""
-    guardrails: Dict[str, Any] = {}
-    profiler: Dict[str, Any] = {}
+
+    guardrails: dict[str, Any] = {}
+    profiler: dict[str, Any] = {}
 
 
 # Create router
@@ -116,16 +127,14 @@ def get_instrumentation():
     """Get the global instrumentation instance."""
     try:
         from bashgym.core import get_instrumentation as get_inst
+
         return get_inst()
     except ImportError:
         return None
 
 
 @router.get("/traces", response_model=TraceListResponse)
-async def list_traces(
-    limit: int = Query(50, ge=1, le=500),
-    offset: int = Query(0, ge=0)
-):
+async def list_traces(limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0)):
     """
     List recent profiler traces.
 
@@ -139,7 +148,7 @@ async def list_traces(
     total = len(all_traces)
 
     # Apply pagination
-    traces = all_traces[offset:offset + limit]
+    traces = all_traces[offset : offset + limit]
 
     summaries = []
     for trace in traces:
@@ -160,13 +169,10 @@ async def list_traces(
             duration_ms=trace.duration_ms,
             total_spans=len(trace.spans),
             status=status,
-            llm_calls=trace_summary.get("llm_calls", {
-                "count": trace.total_llm_calls,
-                "total_tokens": trace.total_tokens
-            }),
-            tool_calls=trace_summary.get("tool_calls", {
-                "count": trace.total_tool_calls
-            }),
+            llm_calls=trace_summary.get(
+                "llm_calls", {"count": trace.total_llm_calls, "total_tokens": trace.total_tokens}
+            ),
+            tool_calls=trace_summary.get("tool_calls", {"count": trace.total_tool_calls}),
             bottlenecks=bottlenecks,
         )
         summaries.append(summary)
@@ -226,7 +232,7 @@ async def get_trace(trace_id: str):
     )
 
 
-@router.get("/tool-stats", response_model=List[ToolStatResponse])
+@router.get("/tool-stats", response_model=list[ToolStatResponse])
 async def get_tool_stats():
     """
     Get per-tool performance breakdown.
@@ -242,10 +248,12 @@ async def get_tool_stats():
 
 @router.get("/guardrails/events", response_model=GuardrailEventsResponse)
 async def list_guardrail_events(
-    action: Optional[str] = Query(None, description="Filter by action (block, warn, modify)"),
-    check_type: Optional[str] = Query(None, description="Filter by type (injection, code_safety, pii)"),
-    model_source: Optional[str] = Query(None, description="Filter by source (student, teacher)"),
-    limit: int = Query(100, ge=1, le=1000)
+    action: str | None = Query(None, description="Filter by action (block, warn, modify)"),
+    check_type: str | None = Query(
+        None, description="Filter by type (injection, code_safety, pii)"
+    ),
+    model_source: str | None = Query(None, description="Filter by source (student, teacher)"),
+    limit: int = Query(100, ge=1, le=1000),
 ):
     """
     List recent guardrail events.
@@ -257,10 +265,7 @@ async def list_guardrail_events(
         return GuardrailEventsResponse(events=[], total=0)
 
     events = inst.get_guardrail_events(
-        action=action,
-        check_type=check_type,
-        model_source=model_source,
-        limit=limit
+        action=action, check_type=check_type, model_source=model_source, limit=limit
     )
 
     event_responses = [
@@ -273,7 +278,7 @@ async def list_guardrail_events(
             model_source=e.model_source,
             original_content=e.original_content[:500],
             modified_content=e.modified_content[:500] if e.modified_content else None,
-            details=e.details
+            details=e.details,
         )
         for e in events
     ]
@@ -299,7 +304,7 @@ async def get_guardrail_stats():
         by_action=stats.get("by_action", {}),
         by_type=stats.get("by_type", {}),
         by_source=stats.get("by_source", {}),
-        block_rate=stats.get("block_rate", 0.0)
+        block_rate=stats.get("block_rate", 0.0),
     )
 
 
@@ -337,7 +342,7 @@ async def get_metrics():
                 "total_traces": len(all_traces),
                 "avg_duration_ms": total_duration / len(all_traces),
                 "total_tokens": total_tokens,
-                "avg_tokens_per_trace": total_tokens / len(all_traces) if all_traces else 0
+                "avg_tokens_per_trace": total_tokens / len(all_traces) if all_traces else 0,
             }
 
     guardrail_stats = GuardrailStatsResponse(total_events=0)
@@ -348,13 +353,10 @@ async def get_metrics():
             by_action=stats.get("by_action", {}),
             by_type=stats.get("by_type", {}),
             by_source=stats.get("by_source", {}),
-            block_rate=stats.get("block_rate", 0.0)
+            block_rate=stats.get("block_rate", 0.0),
         )
 
-    return MetricsResponse(
-        profiler=profiler_metrics,
-        guardrails=guardrail_stats
-    )
+    return MetricsResponse(profiler=profiler_metrics, guardrails=guardrail_stats)
 
 
 @router.get("/settings", response_model=SettingsResponse)
@@ -377,7 +379,7 @@ async def get_settings():
             "enabled": inst._profiler_settings.enabled,
             "profile_tokens": inst._profiler_settings.profile_tokens,
             "profile_latency": inst._profiler_settings.profile_latency,
-        }
+        },
     )
 
 

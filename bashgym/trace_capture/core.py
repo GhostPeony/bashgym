@@ -5,19 +5,19 @@ Shared logic for processing and storing traces from any AI coding tool.
 This module provides the common interface that all adapters use.
 """
 
-import os
-import sys
 import json
-import uuid
-import subprocess
+import os
 import platform
+import subprocess
+import sys
+import uuid
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from dataclasses import dataclass, field, asdict
-from typing import Optional, Dict, Any, List
+from typing import Any
 
 # Cross-platform file locking
-if platform.system() == 'Windows':
+if platform.system() == "Windows":
     import msvcrt
 
     def lock_file(f, exclusive=False):
@@ -33,6 +33,7 @@ if platform.system() == 'Windows':
             msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
         except OSError:
             pass
+
 else:
     import fcntl
 
@@ -48,14 +49,15 @@ else:
 @dataclass
 class RepoInfo:
     """Information about a git repository."""
+
     path: str
     name: str
-    git_remote: Optional[str] = None
-    git_branch: Optional[str] = None
+    git_remote: str | None = None
+    git_branch: str | None = None
     is_git_repo: bool = False
 
     @classmethod
-    def from_path(cls, path: Optional[Path] = None) -> 'RepoInfo':
+    def from_path(cls, path: Path | None = None) -> "RepoInfo":
         """Get repository info from a path (defaults to cwd)."""
         cwd = Path(path) if path else Path.cwd()
 
@@ -67,7 +69,10 @@ class RepoInfo:
         try:
             result = subprocess.run(
                 ["git", "rev-parse", "--is-inside-work-tree"],
-                capture_output=True, text=True, cwd=cwd, timeout=5
+                capture_output=True,
+                text=True,
+                cwd=cwd,
+                timeout=5,
             )
             if result.returncode == 0:
                 info.is_git_repo = True
@@ -75,7 +80,10 @@ class RepoInfo:
                 # Get remote URL
                 result = subprocess.run(
                     ["git", "remote", "get-url", "origin"],
-                    capture_output=True, text=True, cwd=cwd, timeout=5
+                    capture_output=True,
+                    text=True,
+                    cwd=cwd,
+                    timeout=5,
                 )
                 if result.returncode == 0:
                     info.git_remote = result.stdout.strip()
@@ -83,7 +91,10 @@ class RepoInfo:
                 # Get current branch
                 result = subprocess.run(
                     ["git", "branch", "--show-current"],
-                    capture_output=True, text=True, cwd=cwd, timeout=5
+                    capture_output=True,
+                    text=True,
+                    cwd=cwd,
+                    timeout=5,
                 )
                 if result.returncode == 0:
                     info.git_branch = result.stdout.strip()
@@ -101,16 +112,17 @@ class CognitiveData:
     telemetry. Separates thinking, planning, reflection, and decision
     rationale into queryable fields rather than burying them in metadata.
     """
-    thinking: Optional[str] = None          # Raw thinking/chain-of-thought blocks
-    plan: Optional[str] = None              # Explicit plan or step outline
-    reflection: Optional[str] = None        # Error reflection / self-correction
-    decision_rationale: Optional[str] = None  # Why a specific action was chosen
-    confidence: Optional[float] = None      # Agent's expressed confidence (0-1)
+
+    thinking: str | None = None  # Raw thinking/chain-of-thought blocks
+    plan: str | None = None  # Explicit plan or step outline
+    reflection: str | None = None  # Error reflection / self-correction
+    decision_rationale: str | None = None  # Why a specific action was chosen
+    confidence: float | None = None  # Agent's expressed confidence (0-1)
 
     def is_empty(self) -> bool:
         return not any([self.thinking, self.plan, self.reflection, self.decision_rationale])
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         d = {}
         if self.thinking:
             d["thinking"] = self.thinking
@@ -128,18 +140,19 @@ class CognitiveData:
 @dataclass
 class TraceStep:
     """A single step in a trace (tool execution)."""
+
     step_id: str
     timestamp: str
     tool_name: str
     command: str
     output: str = ""
-    exit_code: Optional[int] = None
-    success: Optional[bool] = None
+    exit_code: int | None = None
+    success: bool | None = None
     cwd: str = ""
-    repo: Optional[Dict[str, Any]] = None
+    repo: dict[str, Any] | None = None
     source_tool: str = "unknown"  # claude_code, opencode, aider, etc.
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    cognitive: Optional[Dict[str, Any]] = None  # Structured cognitive data (serialized CognitiveData)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    cognitive: dict[str, Any] | None = None  # Structured cognitive data (serialized CognitiveData)
 
     @classmethod
     def create(
@@ -147,11 +160,11 @@ class TraceStep:
         tool_name: str,
         command: str,
         output: str = "",
-        exit_code: Optional[int] = None,
+        exit_code: int | None = None,
         source_tool: str = "unknown",
-        repo_info: Optional[RepoInfo] = None,
-        **metadata
-    ) -> 'TraceStep':
+        repo_info: RepoInfo | None = None,
+        **metadata,
+    ) -> "TraceStep":
         """Create a new trace step with auto-generated ID and timestamp."""
         timestamp = datetime.now(timezone.utc).isoformat()
         step_id = f"{timestamp}_{uuid.uuid4().hex[:8]}"
@@ -170,31 +183,32 @@ class TraceStep:
             cwd=os.getcwd(),
             repo=asdict(repo_info),
             source_tool=source_tool,
-            metadata=metadata
+            metadata=metadata,
         )
 
 
 @dataclass
 class TraceSession:
     """A complete trace session with metadata."""
+
     session_id: str
     timestamp: str
     source_tool: str
-    repos: List[Dict[str, Any]]
-    primary_repo: Dict[str, Any]
-    metadata: Dict[str, Any]
-    summary: Dict[str, Any]
-    trace: List[Dict[str, Any]]
+    repos: list[dict[str, Any]]
+    primary_repo: dict[str, Any]
+    metadata: dict[str, Any]
+    summary: dict[str, Any]
+    trace: list[dict[str, Any]]
     final_bash_script: str = ""
 
     @classmethod
     def from_steps(
         cls,
-        steps: List[TraceStep],
+        steps: list[TraceStep],
         source_tool: str = "unknown",
         verification_passed: bool = False,
-        **metadata
-    ) -> 'TraceSession':
+        **metadata,
+    ) -> "TraceSession":
         """Create a session from a list of steps."""
         # Extract unique repos
         repos_dict = {}
@@ -213,8 +227,7 @@ class TraceSession:
 
         # Extract bash commands
         bash_commands = [
-            s.command for s in steps
-            if s.tool_name.lower() == "bash" and s.success is True
+            s.command for s in steps if s.tool_name.lower() == "bash" and s.success is True
         ]
 
         return cls(
@@ -223,26 +236,23 @@ class TraceSession:
             source_tool=source_tool,
             repos=repos,
             primary_repo=primary_repo,
-            metadata={
-                "verification_passed": verification_passed,
-                **metadata
-            },
+            metadata={"verification_passed": verification_passed, **metadata},
             summary={
                 "total_steps": total_steps,
                 "successful_steps": successful_steps,
                 "failed_steps": failed_steps,
                 "success_rate": successful_steps / total_steps if total_steps > 0 else 0,
                 "repos_count": len(repos),
-                "tool_breakdown": _count_tools(steps)
+                "tool_breakdown": _count_tools(steps),
             },
             trace=[asdict(s) for s in steps],
-            final_bash_script="\n".join(bash_commands)
+            final_bash_script="\n".join(bash_commands),
         )
 
 
-def _count_tools(steps: list) -> Dict[str, int]:
+def _count_tools(steps: list) -> dict[str, int]:
     """Count tool usage across steps."""
-    counts: Dict[str, int] = {}
+    counts: dict[str, int] = {}
     for s in steps:
         name = s.tool_name
         counts[name] = counts.get(name, 0) + 1
@@ -258,15 +268,15 @@ def load_trace_file(filepath: Path) -> Any:
         Empty list on error
     """
     try:
-        content = filepath.read_text(encoding='utf-8')
+        content = filepath.read_text(encoding="utf-8")
         if not content.strip():
             return []
 
-        if filepath.suffix == '.jsonl':
+        if filepath.suffix == ".jsonl":
             return [json.loads(line) for line in content.splitlines() if line.strip()]
 
         return json.loads(content)
-    except (json.JSONDecodeError, IOError, OSError):
+    except (json.JSONDecodeError, OSError):
         return []
 
 
@@ -286,12 +296,22 @@ def glob_pending_traces(directory: Path) -> list:
 # ---------------------------------------------------------------------------
 
 # Pricing per million tokens: (input, output, cache_creation, cache_read)
-CLAUDE_PRICING: Dict[str, Dict[str, float]] = {
+CLAUDE_PRICING: dict[str, dict[str, float]] = {
     # Claude 4.6
-    "claude-opus-4-6": {"input": 15.0, "output": 75.0, "cache_creation": 18.75, "cache_read": 1.875},
+    "claude-opus-4-6": {
+        "input": 15.0,
+        "output": 75.0,
+        "cache_creation": 18.75,
+        "cache_read": 1.875,
+    },
     "claude-sonnet-4-6": {"input": 3.0, "output": 15.0, "cache_creation": 3.75, "cache_read": 0.30},
     # Claude 4.5
-    "claude-opus-4-5": {"input": 15.0, "output": 75.0, "cache_creation": 18.75, "cache_read": 1.875},
+    "claude-opus-4-5": {
+        "input": 15.0,
+        "output": 75.0,
+        "cache_creation": 18.75,
+        "cache_read": 1.875,
+    },
     "claude-sonnet-4-5": {"input": 3.0, "output": 15.0, "cache_creation": 3.75, "cache_read": 0.30},
     "claude-haiku-4-5": {"input": 0.80, "output": 4.0, "cache_creation": 1.0, "cache_read": 0.08},
     # Claude 4
@@ -356,7 +376,7 @@ class TraceCapture:
     @staticmethod
     def _get_bashgym_dir() -> Path:
         """Get the global Bash Gym directory (~/.bashgym/)."""
-        if platform.system() == 'Windows':
+        if platform.system() == "Windows":
             base = Path(os.environ.get("USERPROFILE", ""))
         else:
             base = Path.home()
@@ -369,7 +389,9 @@ class TraceCapture:
         if session_file.exists():
             return session_file.read_text().strip()
 
-        session_id = f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+        session_id = (
+            f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+        )
         session_file.write_text(session_id)
         return session_id
 
@@ -385,7 +407,7 @@ class TraceCapture:
             return json_path
         return jsonl_path
 
-    def load_trace(self) -> List[Dict[str, Any]]:
+    def load_trace(self) -> list[dict[str, Any]]:
         """Load the current trace from file. Supports JSON array and JSONL."""
         trace_file = self.get_trace_file()
         if not trace_file.exists():
@@ -396,15 +418,15 @@ class TraceCapture:
             return data
         return []
 
-    def save_trace(self, trace: List[Dict[str, Any]]) -> None:
+    def save_trace(self, trace: list[dict[str, Any]]) -> None:
         """Save the trace to file."""
         trace_file = self.get_trace_file()
         try:
-            with open(trace_file, 'w') as f:
+            with open(trace_file, "w") as f:
                 lock_file(f, exclusive=True)
                 json.dump(trace, f, indent=2, ensure_ascii=False)
                 unlock_file(f)
-        except (IOError, OSError) as e:
+        except OSError as e:
             print(f"Error: Could not write trace file: {e}", file=sys.stderr)
 
     def append_step(self, step: TraceStep) -> None:
@@ -420,7 +442,7 @@ class TraceCapture:
         """Check if a tool should be captured."""
         return tool_name in self.RELEVANT_TOOLS
 
-    def promote_to_gold(self, verification_passed: bool = True, **metadata) -> Optional[Path]:
+    def promote_to_gold(self, verification_passed: bool = True, **metadata) -> Path | None:
         """Promote the current trace to gold_traces."""
         trace_data = self.load_trace()
         if not trace_data:
@@ -429,7 +451,9 @@ class TraceCapture:
         # Convert to TraceStep objects
         steps = []
         for step_dict in trace_data:
-            step = TraceStep(**{k: v for k, v in step_dict.items() if k in TraceStep.__dataclass_fields__})
+            step = TraceStep(
+                **{k: v for k, v in step_dict.items() if k in TraceStep.__dataclass_fields__}
+            )
             steps.append(step)
 
         # Determine source tool from steps
@@ -438,10 +462,7 @@ class TraceCapture:
 
         # Create session
         session = TraceSession.from_steps(
-            steps,
-            source_tool=source_tool,
-            verification_passed=verification_passed,
-            **metadata
+            steps, source_tool=source_tool, verification_passed=verification_passed, **metadata
         )
 
         # Generate filename
@@ -458,11 +479,11 @@ class TraceCapture:
             status = "✗"
 
         try:
-            with open(destination, 'w') as f:
+            with open(destination, "w") as f:
                 json.dump(asdict(session), f, indent=2, ensure_ascii=False)
             print(f"[BashGym] {status} Trace saved to: {destination}")
             return destination
-        except IOError as e:
+        except OSError as e:
             print(f"Error writing trace: {e}", file=sys.stderr)
             return None
 
@@ -475,18 +496,20 @@ class TraceCapture:
             try:
                 if f.exists():
                     f.unlink()
-            except IOError:
+            except OSError:
                 pass
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get statistics about captured traces."""
         gold_count = len(list(self.gold_traces_dir.glob("*.json")))
         failed_count = len(list(self.failed_traces_dir.glob("*.json")))
-        pending_count = len(list(self.traces_dir.glob("*.json"))) + len(list(self.traces_dir.glob("*.jsonl")))
+        pending_count = len(list(self.traces_dir.glob("*.json"))) + len(
+            list(self.traces_dir.glob("*.jsonl"))
+        )
 
         return {
             "gold_traces": gold_count,
             "failed_traces": failed_count,
             "pending_traces": pending_count,
-            "total": gold_count + failed_count + pending_count
+            "total": gold_count + failed_count + pending_count,
         }

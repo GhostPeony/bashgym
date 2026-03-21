@@ -5,14 +5,11 @@ self-awareness capabilities so the agent can introspect on its
 own abilities.
 """
 
-from typing import Dict, List, Optional
-
-
 # ------------------------------------------------------------------
 # Core gym tools
 # ------------------------------------------------------------------
 
-CORE_TOOLS: List[Dict] = [
+CORE_TOOLS: list[dict] = [
     {
         "name": "import_traces",
         "description": "Import data from Claude Code sessions. Can import session traces, subagent conversations, file edits, plans, todos, prompts, environment data, and debug/API traffic metadata.",
@@ -23,7 +20,17 @@ CORE_TOOLS: List[Dict] = [
                     "type": "array",
                     "items": {
                         "type": "string",
-                        "enum": ["all", "sessions", "subagents", "edits", "plans", "prompts", "todos", "environments", "debug"],
+                        "enum": [
+                            "all",
+                            "sessions",
+                            "subagents",
+                            "edits",
+                            "plans",
+                            "prompts",
+                            "todos",
+                            "environments",
+                            "debug",
+                        ],
                     },
                     "description": "Which data sources to import. Defaults to ['all'].",
                 },
@@ -137,7 +144,7 @@ CORE_TOOLS: List[Dict] = [
 # Memory tools
 # ------------------------------------------------------------------
 
-MEMORY_TOOLS: List[Dict] = [
+MEMORY_TOOLS: list[dict] = [
     {
         "name": "remember_fact",
         "description": "Remember a fact in persistent memory, categorized for later recall.",
@@ -221,7 +228,7 @@ MEMORY_TOOLS: List[Dict] = [
 # Awareness tools
 # ------------------------------------------------------------------
 
-AWARENESS_TOOLS: List[Dict] = [
+AWARENESS_TOOLS: list[dict] = [
     {
         "name": "list_my_capabilities",
         "description": "List all available tools and skills, optionally filtered by category.",
@@ -266,16 +273,14 @@ class ToolRegistry:
     its own tool set at runtime.
     """
 
-    def build_tools(
-        self, skill_tools: Optional[List[Dict]] = None
-    ) -> List[Dict]:
+    def build_tools(self, skill_tools: list[dict] | None = None) -> list[dict]:
         """Build the unified tool list.
 
         Returns ``CORE_TOOLS`` + *skill_tools* (deduplicated) +
         ``MEMORY_TOOLS`` + ``AWARENESS_TOOLS``.  Deduplication is by
         ``name``; the first occurrence wins.
         """
-        merged: List[Dict] = []
+        merged: list[dict] = []
         seen: set[str] = set()
 
         for tool in CORE_TOOLS:
@@ -306,13 +311,13 @@ class ToolRegistry:
 
         Used to inject self-awareness into the agent's system prompt.
         """
-        lines: List[str] = ["--- YOUR CAPABILITIES ---"]
+        lines: list[str] = ["--- YOUR CAPABILITIES ---"]
         for category in _CATEGORY_MAP:
             lines.append(f"- {category}")
         lines.append("--- END CAPABILITIES ---")
         return "\n".join(lines)
 
-    def list_capabilities(self, category: Optional[str] = None) -> str:
+    def list_capabilities(self, category: str | None = None) -> str:
         """Return a formatted listing of tools.
 
         If *category* is provided, only tools whose name or description
@@ -325,14 +330,13 @@ class ToolRegistry:
             all_tools = [
                 t
                 for t in all_tools
-                if cat_lower in t["name"].lower()
-                or cat_lower in t["description"].lower()
+                if cat_lower in t["name"].lower() or cat_lower in t["description"].lower()
             ]
 
         if not all_tools:
             return "No matching capabilities found."
 
-        lines: List[str] = []
+        lines: list[str] = []
         for t in all_tools:
             lines.append(f"- **{t['name']}**: {t['description']}")
         return "\n".join(lines)

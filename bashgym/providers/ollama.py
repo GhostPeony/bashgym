@@ -8,6 +8,7 @@ Integrates with local Ollama installation for:
 """
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -168,7 +169,7 @@ class OllamaProvider(InferenceProvider):
         except Exception:
             return None
 
-    async def pull_model(self, name: str, on_progress: callable | None = None) -> bool:
+    async def pull_model(self, name: str, on_progress: Callable | None = None) -> bool:
         """
         Pull (download) a model from Ollama registry.
 

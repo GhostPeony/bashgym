@@ -25,36 +25,42 @@ Usage:
     response = client.inference.chat_completion(...)
 """
 
+import logging
 import os
-import json
-import asyncio
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List, Iterator, AsyncIterator, Union
 from datetime import datetime, timezone
 from enum import Enum
-import logging
+from typing import Any
 
 # Try to import the official NeMo Microservices SDK
 try:
-    from nemo_microservices import NeMoMicroservices, AsyncNeMoMicroservices
     from nemo_microservices import (
-        BadRequestError,
+        AsyncNeMoMicroservices,
         AuthenticationError,
-        PermissionDeniedError,
-        NotFoundError,
-        RateLimitError,
+        BadRequestError,
         InternalServerError,
+        NeMoMicroservices,
+        NotFoundError,
+        PermissionDeniedError,
+        RateLimitError,
     )
     NEMO_SDK_AVAILABLE = True
 except ImportError:
     NEMO_SDK_AVAILABLE = False
     # Define fallback exceptions
-    class BadRequestError(Exception): pass
-    class AuthenticationError(Exception): pass
-    class PermissionDeniedError(Exception): pass
-    class NotFoundError(Exception): pass
-    class RateLimitError(Exception): pass
-    class InternalServerError(Exception): pass
+    class BadRequestError(Exception):
+        pass
+    class AuthenticationError(Exception):
+        pass
+    class PermissionDeniedError(Exception):
+        pass
+    class NotFoundError(Exception):
+        pass
+    class RateLimitError(Exception):
+        pass
+    class InternalServerError(Exception):
+        pass
 
 # HTTP client for fallback mode
 try:
@@ -83,7 +89,7 @@ class NeMoClientConfig:
     inference_url: str = "https://integrate.api.nvidia.com/v1"
 
     # Authentication
-    api_key: Optional[str] = None
+    api_key: str | None = None
 
     # Client settings
     timeout: float = 60.0
@@ -107,13 +113,13 @@ class CustomizationJob:
     model: str
     strategy: str
     created_at: str
-    updated_at: Optional[str] = None
-    metrics: Dict[str, Any] = field(default_factory=dict)
-    error: Optional[str] = None
-    output_model: Optional[str] = None
+    updated_at: str | None = None
+    metrics: dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
+    output_model: str | None = None
 
     @classmethod
-    def from_api_response(cls, data: Dict[str, Any]) -> "CustomizationJob":
+    def from_api_response(cls, data: dict[str, Any]) -> "CustomizationJob":
         """Create from API response."""
         return cls(
             job_id=data.get("id", data.get("job_id", "")),
@@ -127,7 +133,7 @@ class CustomizationJob:
             output_model=data.get("output_model"),
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "job_id": self.job_id,
             "status": self.status,
@@ -149,10 +155,10 @@ class EvaluationJob:
     status: str
     benchmark: str
     created_at: str
-    metrics: Dict[str, float] = field(default_factory=dict)
+    metrics: dict[str, float] = field(default_factory=dict)
     samples_evaluated: int = 0
     samples_passed: int = 0
-    error: Optional[str] = None
+    error: str | None = None
 
     @property
     def pass_rate(self) -> float:
@@ -161,7 +167,7 @@ class EvaluationJob:
         return self.samples_passed / self.samples_evaluated
 
     @classmethod
-    def from_api_response(cls, data: Dict[str, Any]) -> "EvaluationJob":
+    def from_api_response(cls, data: dict[str, Any]) -> "EvaluationJob":
         return cls(
             job_id=data.get("id", data.get("job_id", "")),
             status=data.get("status", "unknown"),
@@ -191,9 +197,9 @@ class CustomizationClient:
         self,
         model: str,
         training_data: str,
-        strategy: Union[CustomizationStrategy, str] = CustomizationStrategy.SFT,
-        hyperparameters: Optional[Dict[str, Any]] = None,
-        output_model_name: Optional[str] = None,
+        strategy: CustomizationStrategy | str = CustomizationStrategy.SFT,
+        hyperparameters: dict[str, Any] | None = None,
+        output_model_name: str | None = None,
     ) -> CustomizationJob:
         """
         Create a new customization (fine-tuning) job.
@@ -227,8 +233,8 @@ class CustomizationClient:
         model: str,
         training_data: str,
         strategy: str,
-        hyperparameters: Dict[str, Any],
-        output_model_name: Optional[str],
+        hyperparameters: dict[str, Any],
+        output_model_name: str | None,
     ) -> CustomizationJob:
         """Create job using official SDK."""
         try:
@@ -273,8 +279,8 @@ class CustomizationClient:
         model: str,
         training_data: str,
         strategy: str,
-        hyperparameters: Dict[str, Any],
-        output_model_name: Optional[str],
+        hyperparameters: dict[str, Any],
+        output_model_name: str | None,
     ) -> CustomizationJob:
         """Create job using HTTP fallback."""
         if not self._http_client:
@@ -422,7 +428,7 @@ class EvaluationClient:
         self,
         model: str,
         benchmark: str,
-        config: Optional[Dict[str, Any]] = None,
+        config: dict[str, Any] | None = None,
     ) -> EvaluationJob:
         """
         Create an evaluation job.
@@ -516,11 +522,11 @@ class InferenceClient:
     def chat_completion(
         self,
         model: str,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         temperature: float = 0.7,
         max_tokens: int = 1024,
         **kwargs,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Create a chat completion using NIM.
 
@@ -561,7 +567,7 @@ class InferenceClient:
         temperature: float = 0.7,
         max_tokens: int = 1024,
         **kwargs,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Create a text completion using NIM."""
         if not self._http_client:
             raise RuntimeError("HTTP client required for inference. Install httpx.")
@@ -623,7 +629,7 @@ class NeMoClient:
         )
     """
 
-    def __init__(self, config: Optional[NeMoClientConfig] = None):
+    def __init__(self, config: NeMoClientConfig | None = None):
         """
         Initialize the NeMo client.
 
@@ -714,7 +720,7 @@ class AsyncNeMoClient:
             job = await client.customization.create_job(...)
     """
 
-    def __init__(self, config: Optional[NeMoClientConfig] = None):
+    def __init__(self, config: NeMoClientConfig | None = None):
         self._config = config or NeMoClientConfig()
         self._sdk_client = None
         self._http_client = None
@@ -762,11 +768,11 @@ class AsyncNeMoClient:
     async def chat_completion(
         self,
         model: str,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         temperature: float = 0.7,
         max_tokens: int = 1024,
         **kwargs,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Async chat completion."""
         if not self._http_client:
             raise RuntimeError("Async HTTP client required")
@@ -790,9 +796,9 @@ class AsyncNeMoClient:
 
 # Convenience function for quick setup
 def create_client(
-    base_url: Optional[str] = None,
-    inference_url: Optional[str] = None,
-    api_key: Optional[str] = None,
+    base_url: str | None = None,
+    inference_url: str | None = None,
+    api_key: str | None = None,
 ) -> NeMoClient:
     """
     Create a NeMo client with common defaults.

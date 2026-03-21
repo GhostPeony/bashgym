@@ -4,11 +4,11 @@ Model Provider Detector
 Auto-detects available model providers (local and cloud) and aggregates models.
 """
 
-import os
 import asyncio
+import os
 from dataclasses import dataclass
-from typing import List, Dict, Any, Optional
 from enum import Enum
+from typing import Any
 
 
 class ProviderType(str, Enum):
@@ -27,11 +27,11 @@ class ProviderStatus:
     type: ProviderType
     name: str
     available: bool
-    endpoint: Optional[str] = None
+    endpoint: str | None = None
     model_count: int = 0
-    error: Optional[str] = None
+    error: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "type": self.type.value,
             "name": self.name,
@@ -48,16 +48,16 @@ class UnifiedModel:
     id: str
     name: str
     provider: ProviderType
-    size_gb: Optional[float] = None
-    parameter_size: Optional[str] = None
+    size_gb: float | None = None
+    parameter_size: str | None = None
     is_code_model: bool = False
     is_local: bool = False
     supports_training: bool = False
     supports_inference: bool = True
-    context_length: Optional[int] = None
-    description: Optional[str] = None
+    context_length: int | None = None
+    description: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "name": self.name,
@@ -126,7 +126,7 @@ async def detect_lm_studio() -> ProviderStatus:
                     endpoint=endpoint,
                     model_count=model_count
                 )
-    except:
+    except Exception:
         pass
 
     return ProviderStatus(
@@ -211,7 +211,7 @@ async def detect_openai() -> ProviderStatus:
     )
 
 
-async def detect_providers() -> List[ProviderStatus]:
+async def detect_providers() -> list[ProviderStatus]:
     """Detect all available model providers."""
     detectors = [
         detect_ollama(),
@@ -234,7 +234,7 @@ async def detect_providers() -> List[ProviderStatus]:
     return providers
 
 
-async def get_ollama_models() -> List[UnifiedModel]:
+async def get_ollama_models() -> list[UnifiedModel]:
     """Get models from Ollama."""
     from .ollama import get_ollama_provider
 
@@ -255,13 +255,13 @@ async def get_ollama_models() -> List[UnifiedModel]:
                 supports_training=True,  # Can export GGUF for training
                 supports_inference=True
             ))
-    except:
+    except Exception:
         pass
 
     return models
 
 
-async def get_lm_studio_models() -> List[UnifiedModel]:
+async def get_lm_studio_models() -> list[UnifiedModel]:
     """Get models from LM Studio."""
     import httpx
 
@@ -280,7 +280,7 @@ async def get_lm_studio_models() -> List[UnifiedModel]:
                         is_local=True,
                         supports_inference=True
                     ))
-    except:
+    except Exception:
         pass
 
     return models
@@ -374,7 +374,7 @@ async def get_available_models(
     include_local: bool = True,
     include_cloud: bool = True,
     code_only: bool = False
-) -> Dict[str, List[UnifiedModel]]:
+) -> dict[str, list[UnifiedModel]]:
     """
     Get all available models organized by category.
 
@@ -409,11 +409,11 @@ async def get_available_models(
 
 
 # Sync wrapper
-def detect_providers_sync() -> List[ProviderStatus]:
+def detect_providers_sync() -> list[ProviderStatus]:
     """Synchronous wrapper for detect_providers."""
     return asyncio.run(detect_providers())
 
 
-def get_available_models_sync(**kwargs) -> Dict[str, List[UnifiedModel]]:
+def get_available_models_sync(**kwargs) -> dict[str, list[UnifiedModel]]:
     """Synchronous wrapper for get_available_models."""
     return asyncio.run(get_available_models(**kwargs))

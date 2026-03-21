@@ -7,16 +7,13 @@ Supports pytest, bats, and custom verification scripts.
 Extended with NeMo Evaluator integration for comprehensive model evaluation.
 """
 
-import os
 import json
 import subprocess
-import shutil
-import asyncio
-from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List, Tuple, TYPE_CHECKING
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from .evaluator import EvaluatorClient
@@ -34,27 +31,27 @@ class VerificationStatus(Enum):
 @dataclass
 class VerificationConfig:
     """Configuration for the verifier."""
-    
+
     # Test execution settings
     timeout: int = 300  # 5 minutes
     max_retries: int = 1
-    
+
     # Test discovery
-    test_patterns: List[str] = field(default_factory=lambda: [
+    test_patterns: list[str] = field(default_factory=lambda: [
         "test_*.py",
         "*_test.py",
         "tests/*.py",
         "verify.sh",
         "verify.py"
     ])
-    
+
     # Pytest settings
-    pytest_args: List[str] = field(default_factory=lambda: [
+    pytest_args: list[str] = field(default_factory=lambda: [
         "-v",
         "--tb=short",
         "-x"  # Stop on first failure
     ])
-    
+
     # Output settings
     capture_output: bool = True
     save_results: bool = True
@@ -64,7 +61,7 @@ class VerificationConfig:
 @dataclass
 class VerificationResult:
     """Result of a verification run."""
-    
+
     task_id: str
     status: VerificationStatus
     exit_code: int
@@ -74,15 +71,15 @@ class VerificationResult:
     duration_seconds: float
     stdout: str
     stderr: str
-    test_details: List[Dict[str, Any]] = field(default_factory=list)
-    error_message: Optional[str] = None
-    
+    test_details: list[dict[str, Any]] = field(default_factory=list)
+    error_message: str | None = None
+
     @property
     def success(self) -> bool:
         """Check if verification passed."""
         return self.status == VerificationStatus.PASSED
-    
-    def to_dict(self) -> Dict[str, Any]:
+
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "task_id": self.task_id,
@@ -115,7 +112,7 @@ class Verifier:
 
     def __init__(
         self,
-        config: Optional[VerificationConfig] = None,
+        config: VerificationConfig | None = None,
         evaluator_client: Optional["EvaluatorClient"] = None
     ):
         """Initialize the verifier.
@@ -126,33 +123,33 @@ class Verifier:
         """
         self.config = config or VerificationConfig()
         self.evaluator_client = evaluator_client
-    
+
     def verify(
         self,
         workspace_path: Path,
         task_id: str,
         sandbox_manager=None,
-        sandbox_id: Optional[str] = None
+        sandbox_id: str | None = None
     ) -> VerificationResult:
         """
         Run verification tests for a task.
-        
+
         Args:
             workspace_path: Path to the workspace
             task_id: Unique task identifier
             sandbox_manager: Optional sandbox manager for isolated execution
             sandbox_id: Optional sandbox ID for isolated execution
-            
+
         Returns:
             VerificationResult with test outcomes
         """
         start_time = datetime.now(timezone.utc)
         workspace = Path(workspace_path)
-        
+
         # Discover verification method
         verify_script = self._find_verify_script(workspace)
         test_files = self._find_test_files(workspace)
-        
+
         if verify_script:
             # Run custom verification script
             result = self._run_verify_script(
@@ -176,38 +173,38 @@ class Verifier:
                 stdout="No verification tests found",
                 stderr=""
             )
-        
+
         # Calculate duration
         end_time = datetime.now(timezone.utc)
         result.duration_seconds = (end_time - start_time).total_seconds()
-        
+
         # Create verification flag file
         self._create_verification_flag(workspace, result)
-        
+
         # Save results
         if self.config.save_results:
             self._save_results(workspace, result)
-        
+
         return result
-    
-    def _find_verify_script(self, workspace: Path) -> Optional[Path]:
+
+    def _find_verify_script(self, workspace: Path) -> Path | None:
         """Find a custom verification script."""
         for script_name in ["verify.sh", "verify.py", "verification.sh"]:
             script_path = workspace / script_name
             if script_path.exists():
                 return script_path
         return None
-    
-    def _find_test_files(self, workspace: Path) -> List[Path]:
+
+    def _find_test_files(self, workspace: Path) -> list[Path]:
         """Find test files in the workspace."""
         test_files = []
-        
+
         for pattern in self.config.test_patterns:
             if pattern.endswith(".sh"):
                 continue  # Skip shell scripts, handled separately
             test_files.extend(workspace.glob(pattern))
             test_files.extend(workspace.glob(f"**/{pattern}"))
-        
+
         # Deduplicate and filter
         seen = set()
         unique_files = []
@@ -215,16 +212,16 @@ class Verifier:
             if f not in seen and f.is_file():
                 seen.add(f)
                 unique_files.append(f)
-        
+
         return unique_files
-    
+
     def _run_verify_script(
         self,
         script_path: Path,
         workspace: Path,
         task_id: str,
         sandbox_manager=None,
-        sandbox_id: Optional[str] = None
+        sandbox_id: str | None = None
     ) -> VerificationResult:
         """Run a custom verification script."""
         try:
@@ -235,7 +232,7 @@ class Verifier:
                 cmd = ["python", str(script_path)]
             else:
                 cmd = [str(script_path)]
-            
+
             # Execute in sandbox if available
             if sandbox_manager and sandbox_id:
                 result = sandbox_manager.execute_command(
@@ -258,7 +255,7 @@ class Verifier:
                 exit_code = process.returncode
                 stdout = process.stdout
                 stderr = process.stderr
-            
+
             # Determine status
             if exit_code == 0:
                 status = VerificationStatus.PASSED
@@ -268,7 +265,7 @@ class Verifier:
                 status = VerificationStatus.FAILED
                 passed = 0
                 failed = 1
-            
+
             return VerificationResult(
                 task_id=task_id,
                 status=status,
@@ -280,7 +277,7 @@ class Verifier:
                 stdout=stdout,
                 stderr=stderr
             )
-            
+
         except subprocess.TimeoutExpired:
             return VerificationResult(
                 task_id=task_id,
@@ -307,14 +304,14 @@ class Verifier:
                 stderr=str(e),
                 error_message=str(e)
             )
-    
+
     def _run_pytest(
         self,
-        test_files: List[Path],
+        test_files: list[Path],
         workspace: Path,
         task_id: str,
         sandbox_manager=None,
-        sandbox_id: Optional[str] = None
+        sandbox_id: str | None = None
     ) -> VerificationResult:
         """Run pytest on test files."""
         try:
@@ -323,7 +320,7 @@ class Verifier:
             cmd.extend(self.config.pytest_args)
             cmd.extend(["--json-report", "--json-report-file=.pytest_report.json"])
             cmd.extend([str(f.relative_to(workspace)) for f in test_files[:10]])  # Limit files
-            
+
             # Execute
             if sandbox_manager and sandbox_id:
                 result = sandbox_manager.execute_command(
@@ -345,18 +342,18 @@ class Verifier:
                 exit_code = process.returncode
                 stdout = process.stdout
                 stderr = process.stderr
-            
+
             # Parse pytest output
             passed, failed, total, details = self._parse_pytest_output(
                 workspace, stdout
             )
-            
+
             # Determine status
             if exit_code == 0:
                 status = VerificationStatus.PASSED
             else:
                 status = VerificationStatus.FAILED
-            
+
             return VerificationResult(
                 task_id=task_id,
                 status=status,
@@ -369,7 +366,7 @@ class Verifier:
                 stderr=stderr,
                 test_details=details
             )
-            
+
         except subprocess.TimeoutExpired:
             return VerificationResult(
                 task_id=task_id,
@@ -396,57 +393,57 @@ class Verifier:
                 stderr=str(e),
                 error_message=str(e)
             )
-    
+
     def _parse_pytest_output(
         self,
         workspace: Path,
         stdout: str
-    ) -> Tuple[int, int, int, List[Dict[str, Any]]]:
+    ) -> tuple[int, int, int, list[dict[str, Any]]]:
         """Parse pytest output for test results."""
         passed = 0
         failed = 0
         total = 0
         details = []
-        
+
         # Try to read JSON report
         report_path = workspace / ".pytest_report.json"
         if report_path.exists():
             try:
                 with open(report_path) as f:
                     report = json.load(f)
-                
+
                 summary = report.get("summary", {})
                 passed = summary.get("passed", 0)
                 failed = summary.get("failed", 0)
                 total = summary.get("total", passed + failed)
-                
+
                 for test in report.get("tests", []):
                     details.append({
                         "name": test.get("nodeid"),
                         "outcome": test.get("outcome"),
                         "duration": test.get("duration")
                     })
-                
+
                 return passed, failed, total, details
-            except:
+            except Exception:
                 pass
-        
+
         # Fallback: parse stdout
         for line in stdout.split("\n"):
             if " passed" in line:
                 try:
                     passed = int(line.split()[0])
-                except:
+                except Exception:
                     pass
             if " failed" in line:
                 try:
                     failed = int(line.split()[0])
-                except:
+                except Exception:
                     pass
-        
+
         total = passed + failed
         return passed, failed, total, details
-    
+
     def _create_verification_flag(
         self,
         workspace: Path,
@@ -466,7 +463,7 @@ class Verifier:
             flag_path = workspace / ".verification_passed"
             if flag_path.exists():
                 flag_path.unlink()
-    
+
     def _save_results(self, workspace: Path, result: VerificationResult) -> None:
         """Save verification results to file."""
         results_dir = workspace / self.config.results_dir
@@ -479,8 +476,8 @@ class Verifier:
         self,
         task_prompt: str,
         agent_response: str,
-        metrics: Optional[List[str]] = None
-    ) -> Dict[str, Any]:
+        metrics: list[str] | None = None
+    ) -> dict[str, Any]:
         """
         Evaluate an agent response using LLM-as-Judge.
 
@@ -515,9 +512,9 @@ class Verifier:
 
     async def evaluate_agentic_trace(
         self,
-        trace: List[Dict[str, Any]],
+        trace: list[dict[str, Any]],
         task_description: str
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """
         Evaluate an agentic execution trace for quality metrics.
 
@@ -545,8 +542,8 @@ class Verifier:
     async def run_benchmark_evaluation(
         self,
         model_path: str,
-        benchmarks: Optional[List[str]] = None
-    ) -> List[Dict[str, Any]]:
+        benchmarks: list[str] | None = None
+    ) -> list[dict[str, Any]]:
         """
         Run benchmark evaluation on a model.
 

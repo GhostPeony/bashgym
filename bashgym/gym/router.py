@@ -12,20 +12,21 @@ Instrumentation:
 Module 4: Training (The "Gym")
 """
 
-import os
-import json
 import asyncio
-import httpx
-from pathlib import Path
+import json
+import os
+import random
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List, Callable, Union, TYPE_CHECKING
 from datetime import datetime, timezone
 from enum import Enum
-import random
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Optional
+
+import httpx
 
 # Import instrumentation (optional)
 try:
-    from bashgym.core import get_instrumentation, Instrumentation
+    from bashgym.core import Instrumentation, get_instrumentation
     HAS_INSTRUMENTATION = True
 except ImportError:
     HAS_INSTRUMENTATION = False
@@ -34,7 +35,6 @@ except ImportError:
 # Provider registry (optional)
 try:
     from bashgym.providers.registry import ProviderRegistry
-    from bashgym.providers.base import ProviderResponse as _ProviderResponse
     HAS_REGISTRY = True
 except ImportError:
     HAS_REGISTRY = False
@@ -64,14 +64,14 @@ class RoutingStrategy(Enum):
 @dataclass
 class ModelConfig:
     """Configuration for a model."""
-    
+
     name: str
     model_type: ModelType
     endpoint: str
-    api_key: Optional[str] = None
+    api_key: str | None = None
     max_tokens: int = 4096
     temperature: float = 0.7
-    
+
     # Performance metrics
     avg_latency_ms: float = 0.0
     success_rate: float = 1.0
@@ -109,7 +109,7 @@ class RouterConfig:
 @dataclass
 class RoutingDecision:
     """A routing decision with metadata."""
-    
+
     request_id: str
     selected_model: str
     model_type: ModelType
@@ -117,8 +117,8 @@ class RoutingDecision:
     confidence: float
     task_complexity: float
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    
-    def to_dict(self) -> Dict[str, Any]:
+
+    def to_dict(self) -> dict[str, Any]:
         return {
             "request_id": self.request_id,
             "selected_model": self.selected_model,
@@ -140,8 +140,8 @@ class ModelResponse:
     latency_ms: float
     tokens_used: int
     success: bool
-    error_message: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    error_message: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
     # Instrumentation fields
     blocked_by_guardrails: bool = False
     fell_back_to_teacher: bool = False
@@ -151,24 +151,24 @@ class ModelResponse:
 class ModelRouter:
     """
     Routes requests between Teacher and Student models.
-    
+
     Features:
     - Multiple routing strategies
     - Progressive handoff as student improves
     - Automatic fallback to teacher
     - Performance tracking
     """
-    
+
     def __init__(
         self,
-        config: Optional[RouterConfig] = None,
+        config: RouterConfig | None = None,
         instrumentation: Optional["Instrumentation"] = None,
         registry=None
     ):
         """Initialize the model router."""
         self.config = config or RouterConfig()
-        self.models: Dict[str, ModelConfig] = {}
-        self.routing_history: List[RoutingDecision] = []
+        self.models: dict[str, ModelConfig] = {}
+        self.routing_history: list[RoutingDecision] = []
         self.current_student_rate = self.config.student_sample_rate
 
         # Instrumentation (guardrails + profiling)
@@ -194,12 +194,12 @@ class ModelRouter:
         """Get the instrumentation instance."""
         return self._instrumentation
 
-    def get_guardrail_events(self) -> List[Dict[str, Any]]:
+    def get_guardrail_events(self) -> list[dict[str, Any]]:
         """Get guardrail events from routing."""
         if self._instrumentation:
             return [e.to_dict() for e in self._instrumentation.get_guardrail_events(model_source="student")]
         return []
-    
+
     def _load_default_models(self) -> None:
         """Load default model configurations from environment."""
         # Teacher model (Claude)
@@ -213,7 +213,7 @@ class ModelRouter:
                 max_tokens=8192,
                 temperature=0.7
             ))
-        
+
         # Student model (NVIDIA NIM or local)
         nvidia_key = os.environ.get("NVIDIA_API_KEY")
         if nvidia_key:
@@ -225,46 +225,46 @@ class ModelRouter:
                 max_tokens=4096,
                 temperature=0.7
             ))
-    
+
     def register_model(self, model_config: ModelConfig) -> None:
         """Register a model with the router."""
         self.models[model_config.name] = model_config
-    
-    def get_teacher_model(self) -> Optional[ModelConfig]:
+
+    def get_teacher_model(self) -> ModelConfig | None:
         """Get the primary teacher model."""
         for model in self.models.values():
             if model.model_type == ModelType.TEACHER:
                 return model
         return None
-    
-    def get_student_model(self) -> Optional[ModelConfig]:
+
+    def get_student_model(self) -> ModelConfig | None:
         """Get the primary student model."""
         for model in self.models.values():
             if model.model_type == ModelType.STUDENT:
                 return model
         return None
-    
+
     def route(
         self,
         prompt: str,
-        request_id: Optional[str] = None,
-        task_complexity: Optional[float] = None,
-        force_model: Optional[str] = None
+        request_id: str | None = None,
+        task_complexity: float | None = None,
+        force_model: str | None = None
     ) -> RoutingDecision:
         """
         Decide which model to route a request to.
-        
+
         Args:
             prompt: The input prompt
             request_id: Optional request identifier
             task_complexity: Optional pre-computed complexity (0-1)
             force_model: Force routing to a specific model
-            
+
         Returns:
             RoutingDecision with selected model
         """
         request_id = request_id or f"req_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
-        
+
         # Force specific model if requested
         if force_model and force_model in self.models:
             model = self.models[force_model]
@@ -278,11 +278,11 @@ class ModelRouter:
             )
             self._log_decision(decision)
             return decision
-        
+
         # Calculate task complexity if not provided
         if task_complexity is None:
             task_complexity = self._estimate_complexity(prompt)
-        
+
         # Route based on strategy
         if self.config.strategy == RoutingStrategy.TEACHER_ONLY:
             selected = self.get_teacher_model()
@@ -301,13 +301,13 @@ class ModelRouter:
         else:
             selected = self.get_teacher_model()
             confidence = 1.0
-        
+
         # Fallback to teacher if no model selected
         if selected is None:
             selected = self.get_teacher_model()
             if selected is None:
                 raise ValueError("No models available for routing")
-        
+
         decision = RoutingDecision(
             request_id=request_id,
             selected_model=selected.name,
@@ -316,21 +316,21 @@ class ModelRouter:
             confidence=confidence,
             task_complexity=task_complexity
         )
-        
+
         self._log_decision(decision)
         return decision
-    
+
     def _estimate_complexity(self, prompt: str) -> float:
         """
         Estimate task complexity from the prompt.
-        
+
         Simple heuristic based on:
         - Prompt length
         - Presence of technical terms
         - Multi-step indicators
         """
         score = 0.0
-        
+
         # Length factor
         word_count = len(prompt.split())
         if word_count > 200:
@@ -339,7 +339,7 @@ class ModelRouter:
             score += 0.2
         elif word_count > 50:
             score += 0.1
-        
+
         # Technical terms
         technical_terms = [
             "refactor", "optimize", "debug", "architecture",
@@ -350,80 +350,80 @@ class ModelRouter:
         prompt_lower = prompt.lower()
         tech_count = sum(1 for term in technical_terms if term in prompt_lower)
         score += min(tech_count * 0.1, 0.4)
-        
+
         # Multi-step indicators
         multi_step_terms = ["first", "then", "after", "finally", "step", "multiple"]
         if any(term in prompt_lower for term in multi_step_terms):
             score += 0.2
-        
+
         return min(score, 1.0)
-    
+
     def _route_by_confidence(
         self,
         prompt: str
-    ) -> tuple[Optional[ModelConfig], float]:
+    ) -> tuple[ModelConfig | None, float]:
         """Route based on student model confidence."""
         student = self.get_student_model()
         teacher = self.get_teacher_model()
-        
+
         if not student:
             return teacher, 1.0
-        
+
         # Estimate student confidence based on historical performance
         confidence = student.success_rate
-        
+
         if confidence >= self.config.confidence_threshold:
             return student, confidence
         else:
             return teacher, 1.0
-    
+
     def _route_by_complexity(
         self,
         complexity: float
-    ) -> tuple[Optional[ModelConfig], float]:
+    ) -> tuple[ModelConfig | None, float]:
         """Route based on task complexity."""
         student = self.get_student_model()
         teacher = self.get_teacher_model()
-        
+
         if complexity <= self.config.complexity_threshold:
             # Simple task - use student
             return student or teacher, 1.0 - complexity
         else:
             # Complex task - use teacher
             return teacher, complexity
-    
-    def _route_progressive(self) -> tuple[Optional[ModelConfig], float]:
+
+    def _route_progressive(self) -> tuple[ModelConfig | None, float]:
         """Progressive routing with increasing student usage."""
         student = self.get_student_model()
         teacher = self.get_teacher_model()
-        
+
         if not student:
             return teacher, 1.0
-        
+
         # Use current student rate for sampling
         if random.random() < self.current_student_rate:
             return student, self.current_student_rate
         else:
             return teacher, 1.0 - self.current_student_rate
-    
-    def _route_random(self) -> tuple[Optional[ModelConfig], float]:
+
+    def _route_random(self) -> tuple[ModelConfig | None, float]:
         """Random sampling between models."""
         student = self.get_student_model()
         teacher = self.get_teacher_model()
-        
+
         if not student:
             return teacher, 1.0
-        
+
         if random.random() < 0.5:
             return student, 0.5
         else:
             return teacher, 0.5
-    
+
     async def generate(
         self,
         prompt: str,
-        system_prompt: Optional[str] = None,
-        request_id: Optional[str] = None,
+        system_prompt: str | None = None,
+        request_id: str | None = None,
         **kwargs
     ) -> ModelResponse:
         """
@@ -472,8 +472,6 @@ class ModelRouter:
             model = self.models[decision.selected_model]
 
             start_time = datetime.now()
-            fell_back = False
-            blocked = False
 
             # Use provider registry if available
             if self.registry:
@@ -500,7 +498,7 @@ class ModelRouter:
                         )
                         self._update_model_metrics(model.name, response.latency_ms, response.success)
                         return response
-                    except Exception as e:
+                    except Exception:
                         # Fall through to legacy path on registry failure
                         pass
 
@@ -521,7 +519,6 @@ class ModelRouter:
                         ) as ctx:
                             if not ctx.allowed:
                                 # Student output blocked - fallback to teacher
-                                blocked = True
                                 if self.config.fallback_on_guardrail_block:
                                     teacher = self.get_teacher_model()
                                     if teacher:
@@ -531,7 +528,6 @@ class ModelRouter:
                                         teacher_response.source = "teacher"
                                         teacher_response.fell_back_to_teacher = True
                                         teacher_response.blocked_by_guardrails = True
-                                        fell_back = True
 
                                         # Record profiler metrics
                                         if self._instrumentation:
@@ -611,28 +607,28 @@ class ModelRouter:
             # End profiler trace
             if trace_id and self._instrumentation:
                 self._instrumentation.end_trace(trace_id)
-    
+
     async def _call_anthropic(
         self,
         model: ModelConfig,
         prompt: str,
-        system_prompt: Optional[str] = None,
+        system_prompt: str | None = None,
         **kwargs
     ) -> ModelResponse:
         """Call Anthropic API."""
         start_time = datetime.now()
-        
+
         messages = [{"role": "user", "content": prompt}]
-        
+
         payload = {
             "model": "claude-sonnet-4-20250514",
             "max_tokens": kwargs.get("max_tokens", model.max_tokens),
             "messages": messages
         }
-        
+
         if system_prompt:
             payload["system"] = system_prompt
-        
+
         response = await self.client.post(
             model.endpoint,
             headers={
@@ -642,14 +638,14 @@ class ModelRouter:
             },
             json=payload
         )
-        
+
         latency = (datetime.now() - start_time).total_seconds() * 1000
-        
+
         if response.status_code == 200:
             data = response.json()
             content = data["content"][0]["text"]
             tokens = data.get("usage", {}).get("output_tokens", 0)
-            
+
             return ModelResponse(
                 content=content,
                 model_name=model.name,
@@ -660,46 +656,46 @@ class ModelRouter:
             )
         else:
             raise Exception(f"API error: {response.status_code} - {response.text}")
-    
+
     async def _call_openai_compatible(
         self,
         model: ModelConfig,
         prompt: str,
-        system_prompt: Optional[str] = None,
+        system_prompt: str | None = None,
         **kwargs
     ) -> ModelResponse:
         """Call OpenAI-compatible API (NVIDIA NIM, local models)."""
         start_time = datetime.now()
-        
+
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
-        
+
         payload = {
             "model": kwargs.get("model_name", "meta/llama-3.1-8b-instruct"),
             "messages": messages,
             "max_tokens": kwargs.get("max_tokens", model.max_tokens),
             "temperature": kwargs.get("temperature", model.temperature)
         }
-        
+
         headers = {"Content-Type": "application/json"}
         if model.api_key:
             headers["Authorization"] = f"Bearer {model.api_key}"
-        
+
         response = await self.client.post(
             model.endpoint,
             headers=headers,
             json=payload
         )
-        
+
         latency = (datetime.now() - start_time).total_seconds() * 1000
-        
+
         if response.status_code == 200:
             data = response.json()
             content = data["choices"][0]["message"]["content"]
             tokens = data.get("usage", {}).get("completion_tokens", 0)
-            
+
             return ModelResponse(
                 content=content,
                 model_name=model.name,
@@ -710,7 +706,7 @@ class ModelRouter:
             )
         else:
             raise Exception(f"API error: {response.status_code} - {response.text}")
-    
+
     def _update_model_metrics(
         self,
         model_name: str,
@@ -720,16 +716,16 @@ class ModelRouter:
         """Update model performance metrics."""
         if model_name not in self.models:
             return
-        
+
         model = self.models[model_name]
         model.total_requests += 1
-        
+
         # Update rolling average latency
         model.avg_latency_ms = (
             (model.avg_latency_ms * (model.total_requests - 1) + latency_ms)
             / model.total_requests
         )
-        
+
         # Update success rate
         if success:
             model.success_rate = (
@@ -741,11 +737,11 @@ class ModelRouter:
                 (model.success_rate * (model.total_requests - 1))
                 / model.total_requests
             )
-    
+
     def update_student_performance(self, success_rate: float) -> None:
         """
         Update student model performance and adjust routing.
-        
+
         Called after verification to adjust progressive handoff.
         """
         if success_rate > 0.8:
@@ -760,30 +756,30 @@ class ModelRouter:
                 self.current_student_rate - self.config.improvement_increment,
                 self.config.student_sample_rate
             )
-    
+
     def _log_decision(self, decision: RoutingDecision) -> None:
         """Log a routing decision."""
         self.routing_history.append(decision)
-        
+
         if self.config.log_routing_decisions:
             # Append to daily log file
             date_str = datetime.now().strftime("%Y%m%d")
             log_path = Path(self.config.metrics_dir) / f"routing_{date_str}.jsonl"
-            
+
             with open(log_path, 'a') as f:
                 f.write(json.dumps(decision.to_dict()) + "\n")
-    
-    def get_routing_stats(self) -> Dict[str, Any]:
+
+    def get_routing_stats(self) -> dict[str, Any]:
         """Get routing statistics."""
         if not self.routing_history:
             return {"error": "No routing history"}
-        
+
         teacher_count = sum(
             1 for d in self.routing_history
             if d.model_type == ModelType.TEACHER
         )
         student_count = len(self.routing_history) - teacher_count
-        
+
         return {
             "total_requests": len(self.routing_history),
             "teacher_requests": teacher_count,
@@ -801,7 +797,7 @@ class ModelRouter:
                 for name, model in self.models.items()
             }
         }
-    
+
     async def close(self) -> None:
         """Close the HTTP client."""
         await self.client.aclose()
@@ -813,9 +809,9 @@ async def main():
         strategy=RoutingStrategy.PROGRESSIVE,
         student_sample_rate=0.2
     )
-    
+
     router = ModelRouter(config)
-    
+
     # Example routing decisions
     prompts = [
         "Fix the typo in README.md",
@@ -823,19 +819,19 @@ async def main():
         "Add a print statement to debug.py",
         "Implement a distributed cache with Redis cluster support"
     ]
-    
+
     for prompt in prompts:
         decision = router.route(prompt)
         print(f"Prompt: {prompt[:50]}...")
         print(f"  -> Model: {decision.selected_model} ({decision.model_type.value})")
         print(f"  -> Complexity: {decision.task_complexity:.2f}")
         print()
-    
+
     # Print stats
     stats = router.get_routing_stats()
     print("Routing Stats:")
     print(json.dumps(stats, indent=2))
-    
+
     await router.close()
 
 

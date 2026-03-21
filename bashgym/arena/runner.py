@@ -10,26 +10,26 @@ Instrumentation:
   - PII filtering on captured outputs
 """
 
-import os
 import json
+import os
 import subprocess
-import uuid
-from pathlib import Path
-from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List, Callable, TYPE_CHECKING
-from datetime import datetime, timezone
 import threading
-import queue
+import uuid
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Optional
 
 # Handle both package and standalone usage
 try:
-    from bashgym.arena.sandbox import SandboxManager, SandboxConfig, SandboxInstance
+    from bashgym.arena.sandbox import SandboxInstance, SandboxManager
 except ImportError:
-    from .sandbox import SandboxManager, SandboxConfig, SandboxInstance
+    from .sandbox import SandboxInstance, SandboxManager
 
 # Import instrumentation (optional)
 try:
-    from bashgym.core import get_instrumentation, Instrumentation
+    from bashgym.core import Instrumentation, get_instrumentation
     HAS_INSTRUMENTATION = True
 except ImportError:
     HAS_INSTRUMENTATION = False
@@ -62,7 +62,7 @@ class AgentConfig:
 
     # Safety settings
     require_approval: bool = False
-    allowed_tools: List[str] = field(default_factory=lambda: [
+    allowed_tools: list[str] = field(default_factory=lambda: [
         "Bash", "Read", "Write", "Edit", "Glob", "Grep"
     ])
 
@@ -82,9 +82,9 @@ class TaskResult:
     stdout: str
     stderr: str
     duration_seconds: float
-    trace_path: Optional[Path] = None
-    error_message: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    trace_path: Path | None = None
+    error_message: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
     # Instrumentation fields
     injection_blocked: bool = False
     pii_redactions: int = 0
@@ -105,14 +105,14 @@ class AgentRunner:
 
     def __init__(
         self,
-        config: Optional[AgentConfig] = None,
-        sandbox_manager: Optional[SandboxManager] = None,
+        config: AgentConfig | None = None,
+        sandbox_manager: SandboxManager | None = None,
         instrumentation: Optional["Instrumentation"] = None
     ):
         """Initialize the agent runner."""
         self.config = config or AgentConfig()
         self.sandbox_manager = sandbox_manager or SandboxManager()
-        self.active_tasks: Dict[str, subprocess.Popen] = {}
+        self.active_tasks: dict[str, subprocess.Popen] = {}
 
         # Instrumentation (guardrails + profiling)
         self._instrumentation = instrumentation
@@ -173,7 +173,7 @@ class AgentRunner:
         self,
         task_prompt: str,
         workspace_path: Path
-    ) -> List[str]:
+    ) -> list[str]:
         """Build the Claude CLI command."""
         cmd = [
             self.config.claude_cli_path,
@@ -193,9 +193,9 @@ class AgentRunner:
     def run_task(
         self,
         task_prompt: str,
-        task_id: Optional[str] = None,
-        repository_url: Optional[str] = None,
-        on_output: Optional[Callable[[str], None]] = None
+        task_id: str | None = None,
+        repository_url: str | None = None,
+        on_output: Callable[[str], None] | None = None
     ) -> TaskResult:
         """
         Run an agent task in a sandboxed environment.
@@ -325,9 +325,9 @@ class AgentRunner:
     async def run_task_async(
         self,
         task_prompt: str,
-        task_id: Optional[str] = None,
-        repository_url: Optional[str] = None,
-        on_output: Optional[Callable[[str], None]] = None
+        task_id: str | None = None,
+        repository_url: str | None = None,
+        on_output: Callable[[str], None] | None = None
     ) -> TaskResult:
         """
         Run an agent task with instrumentation (async).
@@ -429,7 +429,7 @@ class AgentRunner:
         self,
         sandbox: SandboxInstance,
         task_prompt: str,
-        task_id: Optional[str] = None
+        task_id: str | None = None
     ) -> TaskResult:
         """
         Run a task in an existing sandbox (for multi-step workflows).
@@ -475,6 +475,6 @@ class AgentRunner:
             return True
         return False
 
-    def get_active_tasks(self) -> List[str]:
+    def get_active_tasks(self) -> list[str]:
         """Get list of active task IDs."""
         return list(self.active_tasks.keys())

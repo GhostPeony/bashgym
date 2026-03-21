@@ -7,14 +7,15 @@ Integrates with local Ollama installation for:
 - Base models for fine-tuning (via export)
 """
 
-import httpx
 import asyncio
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Any
 from datetime import datetime
+from typing import Any
 from urllib.parse import urlparse
 
-from bashgym.providers.base import InferenceProvider, ProviderResponse, HealthStatus, ProviderModel
+import httpx
+
+from bashgym.providers.base import HealthStatus, InferenceProvider, ProviderModel, ProviderResponse
 
 
 @dataclass
@@ -24,7 +25,7 @@ class OllamaModel:
     size: int  # bytes
     modified_at: str
     digest: str
-    details: Dict[str, Any] = field(default_factory=dict)
+    details: dict[str, Any] = field(default_factory=dict)
 
     @property
     def size_gb(self) -> float:
@@ -53,7 +54,7 @@ class OllamaModel:
         name_lower = self.name.lower()
         return any(ind in name_lower for ind in code_indicators)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for API responses."""
         return {
             "name": self.name,
@@ -78,9 +79,9 @@ class OllamaProvider(InferenceProvider):
 
     DEFAULT_BASE_URL = "http://localhost:11434"
 
-    def __init__(self, base_url: Optional[str] = None):
+    def __init__(self, base_url: str | None = None):
         self.base_url = base_url or self.DEFAULT_BASE_URL
-        self._client: Optional[httpx.AsyncClient] = None
+        self._client: httpx.AsyncClient | None = None
 
     # ── InferenceProvider abstract properties ──────────────────────
 
@@ -123,7 +124,7 @@ class OllamaProvider(InferenceProvider):
         except (httpx.ConnectError, httpx.TimeoutException):
             return False
 
-    async def list_ollama_models(self) -> List[OllamaModel]:
+    async def list_ollama_models(self) -> list[OllamaModel]:
         """List all available Ollama models (returns OllamaModel objects)."""
         try:
             response = await self.client.get("/api/tags")
@@ -148,7 +149,7 @@ class OllamaProvider(InferenceProvider):
         except (httpx.ConnectError, httpx.TimeoutException, Exception):
             return []
 
-    async def get_model(self, name: str) -> Optional[OllamaModel]:
+    async def get_model(self, name: str) -> OllamaModel | None:
         """Get info about a specific model."""
         try:
             response = await self.client.post("/api/show", json={"name": name})
@@ -166,7 +167,7 @@ class OllamaProvider(InferenceProvider):
         except Exception:
             return None
 
-    async def pull_model(self, name: str, on_progress: Optional[callable] = None) -> bool:
+    async def pull_model(self, name: str, on_progress: callable | None = None) -> bool:
         """
         Pull (download) a model from Ollama registry.
 
@@ -192,7 +193,7 @@ class OllamaProvider(InferenceProvider):
                         try:
                             data = __import__('json').loads(line)
                             on_progress(data)
-                        except:
+                        except Exception:
                             pass
 
                 return True
@@ -213,11 +214,11 @@ class OllamaProvider(InferenceProvider):
         self,
         model: str,
         prompt: str,
-        system: Optional[str] = None,
+        system: str | None = None,
         temperature: float = 0.7,
         max_tokens: int = 2048,
         stream: bool = False
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Generate completion from a model (completion-style API).
 
@@ -263,7 +264,7 @@ class OllamaProvider(InferenceProvider):
         except Exception as e:
             return {"error": str(e)}
 
-    async def _stream_generate(self, payload: Dict[str, Any]):
+    async def _stream_generate(self, payload: dict[str, Any]):
         """Stream generation responses."""
         async with self.client.stream(
             "POST",
@@ -278,10 +279,10 @@ class OllamaProvider(InferenceProvider):
     async def chat(
         self,
         model: str,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         temperature: float = 0.7,
         max_tokens: int = 2048
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Chat completion with a model.
 
@@ -319,9 +320,9 @@ class OllamaProvider(InferenceProvider):
 
     async def generate(
         self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
-        system_prompt: Optional[str] = None,
+        messages: list[dict[str, str]],
+        model: str | None = None,
+        system_prompt: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
         **kwargs: Any,
@@ -392,7 +393,7 @@ class OllamaProvider(InferenceProvider):
         except Exception as e:
             return HealthStatus(available=False, error=str(e))
 
-    async def list_models(self) -> List[ProviderModel]:
+    async def list_models(self) -> list[ProviderModel]:
         """List available models as ProviderModel objects (InferenceProvider interface)."""
         ollama_models = await self.list_ollama_models()
         return [
@@ -408,7 +409,7 @@ class OllamaProvider(InferenceProvider):
             for m in ollama_models
         ]
 
-    async def warm_up(self, model: Optional[str] = None) -> bool:
+    async def warm_up(self, model: str | None = None) -> bool:
         """Warm up a model by sending a minimal chat request."""
         try:
             result = await self.chat(
@@ -421,7 +422,7 @@ class OllamaProvider(InferenceProvider):
 
 
 # Singleton instance
-_provider: Optional[OllamaProvider] = None
+_provider: OllamaProvider | None = None
 
 
 def get_ollama_provider() -> OllamaProvider:
@@ -438,6 +439,6 @@ def is_ollama_running() -> bool:
     return asyncio.run(get_ollama_provider().is_running())
 
 
-def list_ollama_models_sync() -> List[OllamaModel]:
+def list_ollama_models_sync() -> list[OllamaModel]:
     """List Ollama models (sync wrapper)."""
     return asyncio.run(get_ollama_provider().list_ollama_models())

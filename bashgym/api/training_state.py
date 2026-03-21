@@ -5,14 +5,14 @@ Saves/loads training run metadata to disk so the backend can reconnect
 to orphaned training subprocesses after a restart.
 """
 
-import os
-import json
 import ctypes
-import platform
+import json
 import logging
-from dataclasses import dataclass, field, asdict
+import os
+import platform
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -28,19 +28,19 @@ class TrainingRunState:
     run_id: str
     pid: int
     status: str  # pending/running/paused/completed/failed
-    config: Dict[str, Any]
+    config: dict[str, Any]
     started_at: str
     script_path: str
     dataset_path: str
     output_dir: str
-    completed_at: Optional[str] = None
-    last_metrics: Optional[Dict[str, Any]] = None
-    last_log_lines: List[str] = field(default_factory=list)
+    completed_at: str | None = None
+    last_metrics: dict[str, Any] | None = None
+    last_log_lines: list[str] = field(default_factory=list)
 
     def state_path(self) -> Path:
         return Path(self.output_dir) / STATE_FILENAME
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -53,7 +53,7 @@ def save_run_state(state: TrainingRunState) -> Path:
     return path
 
 
-def load_run_state(output_dir: str) -> Optional[TrainingRunState]:
+def load_run_state(output_dir: str) -> TrainingRunState | None:
     """Read run state from a model output directory."""
     path = Path(output_dir) / STATE_FILENAME
     if not path.exists():
@@ -66,7 +66,7 @@ def load_run_state(output_dir: str) -> Optional[TrainingRunState]:
         return None
 
 
-def list_run_states(models_dir: Optional[Path] = None) -> List[TrainingRunState]:
+def list_run_states(models_dir: Path | None = None) -> list[TrainingRunState]:
     """Scan data/models/run_*/run_state.json and return all persisted states."""
     models_dir = models_dir or DEFAULT_MODELS_DIR
     states = []
@@ -79,7 +79,7 @@ def list_run_states(models_dir: Optional[Path] = None) -> List[TrainingRunState]
     return states
 
 
-def update_run_state(output_dir: str, **updates) -> Optional[TrainingRunState]:
+def update_run_state(output_dir: str, **updates) -> TrainingRunState | None:
     """Load state, apply partial updates, and save."""
     state = load_run_state(output_dir)
     if state is None:
@@ -101,7 +101,7 @@ def is_process_alive(pid: int) -> bool:
         # On Windows, os.kill(pid, 0) doesn't work reliably.
         # Use OpenProcess with PROCESS_QUERY_LIMITED_INFORMATION.
         kernel32 = ctypes.windll.kernel32
-        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000  # noqa: N806
         handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
         if not handle:
             return False
@@ -122,7 +122,7 @@ def suspend_process(pid: int) -> bool:
     """Suspend a process (SIGSTOP equivalent on Windows)."""
     if platform.system() == "Windows":
         kernel32 = ctypes.windll.kernel32
-        PROCESS_SUSPEND_RESUME = 0x0800
+        PROCESS_SUSPEND_RESUME = 0x0800  # noqa: N806
         handle = kernel32.OpenProcess(PROCESS_SUSPEND_RESUME, False, pid)
         if not handle:
             logger.error(f"Failed to open process {pid} for suspension")
@@ -150,7 +150,7 @@ def resume_process(pid: int) -> bool:
     """Resume a suspended process."""
     if platform.system() == "Windows":
         kernel32 = ctypes.windll.kernel32
-        PROCESS_SUSPEND_RESUME = 0x0800
+        PROCESS_SUSPEND_RESUME = 0x0800  # noqa: N806
         handle = kernel32.OpenProcess(PROCESS_SUSPEND_RESUME, False, pid)
         if not handle:
             logger.error(f"Failed to open process {pid} for resume")
@@ -178,7 +178,7 @@ def terminate_process(pid: int, timeout: float = 5.0) -> bool:
     """Terminate a process, escalating to kill after timeout."""
     if platform.system() == "Windows":
         kernel32 = ctypes.windll.kernel32
-        PROCESS_TERMINATE = 0x0001
+        PROCESS_TERMINATE = 0x0001  # noqa: N806
         handle = kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)
         if not handle:
             logger.error(f"Failed to open process {pid} for termination")

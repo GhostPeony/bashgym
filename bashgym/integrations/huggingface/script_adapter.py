@@ -20,17 +20,16 @@ Usage:
     script = generate_cloud_script(config)
 """
 
-import re
 import logging
+import re
 from dataclasses import dataclass, field
-from typing import Optional, List
-from pathlib import Path
 from datetime import datetime, timezone
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 
-PEP_723_HEADER = '''# /// script
+PEP_723_HEADER = """# /// script
 # requires-python = ">=3.10"
 # dependencies = [
 #     "unsloth[cu124]",
@@ -41,7 +40,7 @@ PEP_723_HEADER = '''# /// script
 #     "huggingface_hub",
 # ]
 # ///
-'''
+"""
 
 
 @dataclass
@@ -82,16 +81,25 @@ class CloudScriptConfig:
     distillation_alpha: float = 0.5
     teacher_temperature: float = 0.7
 
-    lora_target_modules: List[str] = field(default_factory=lambda: [
-        "q_proj", "k_proj", "v_proj", "o_proj",
-        "gate_proj", "up_proj", "down_proj"
-    ])
+    lora_target_modules: list[str] = field(
+        default_factory=lambda: [
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "o_proj",
+            "gate_proj",
+            "up_proj",
+            "down_proj",
+        ]
+    )
 
-    def validate(self) -> List[str]:
+    def validate(self) -> list[str]:
         """Validate the configuration. Returns list of error messages."""
         errors = []
         if self.strategy not in ("sft", "dpo", "distillation"):
-            errors.append(f"Invalid strategy '{self.strategy}'. Must be 'sft', 'dpo', or 'distillation'.")
+            errors.append(
+                f"Invalid strategy '{self.strategy}'. Must be 'sft', 'dpo', or 'distillation'."
+            )
         if not self.dataset_repo:
             errors.append("dataset_repo is required.")
         if not self.output_repo:
@@ -234,34 +242,34 @@ def _adapt_for_cloud(script: str, config: CloudScriptConfig) -> str:
     # Insert after the last import block
     import_end = _find_last_import_line(adapted)
     if import_end is not None:
-        lines = adapted.split('\n')
-        lines.insert(import_end + 1, '')
+        lines = adapted.split("\n")
+        lines.insert(import_end + 1, "")
         lines.insert(import_end + 2, trackio_import.rstrip())
-        adapted = '\n'.join(lines)
+        adapted = "\n".join(lines)
 
     # 5. Add hub push after model saving
-    hub_push = f'''
+    hub_push = f"""
 # Push to HuggingFace Hub
 print("Pushing model to Hub...")
 model.push_to_hub("{config.output_repo}")
 tokenizer.push_to_hub("{config.output_repo}")
-'''
+"""
     # Insert before the final "print" (Training/Distillation complete)
     adapted = re.sub(
         r'(print\("(?:Training|DPO training|Knowledge distillation) complete!"\))',
-        hub_push.rstrip() + '\n\n\\1',
+        hub_push.rstrip() + "\n\n\\1",
         adapted,
     )
 
     # 6. Prepend PEP 723 header (before the shebang/docstring)
-    adapted = PEP_723_HEADER + '\n' + adapted
+    adapted = PEP_723_HEADER + "\n" + adapted
 
     return adapted
 
 
-def _find_last_import_line(script: str) -> Optional[int]:
+def _find_last_import_line(script: str) -> int | None:
     """Find the line index of the last top-level import statement."""
-    lines = script.split('\n')
+    lines = script.split("\n")
     last_import = None
     in_docstring = False
 
@@ -284,7 +292,7 @@ def _find_last_import_line(script: str) -> Optional[int]:
 
         # Match import lines (top-level only, not indented)
         if line and not line[0].isspace():
-            if stripped.startswith('import ') or stripped.startswith('from '):
+            if stripped.startswith("import ") or stripped.startswith("from "):
                 last_import = i
 
     return last_import

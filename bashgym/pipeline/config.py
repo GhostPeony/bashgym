@@ -1,9 +1,9 @@
 """Pipeline configuration with JSON persistence."""
 
 import json
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 @dataclass
@@ -32,11 +32,11 @@ class PipelineConfig:
     train_enabled: bool = False
     train_examples_threshold: int = 100
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "PipelineConfig":
+    def from_dict(cls, d: dict[str, Any]) -> "PipelineConfig":
         known = {f.name for f in cls.__dataclass_fields__.values()}
         return cls(**{k: v for k, v in d.items() if k in known})
 
@@ -50,7 +50,7 @@ class PipelineConfig:
         if not path.exists():
             return cls()
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 return cls.from_dict(json.load(f))
-        except (json.JSONDecodeError, IOError):
+        except (OSError, json.JSONDecodeError):
             return cls()

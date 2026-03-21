@@ -6,7 +6,7 @@
 
 ---
 
-Your AI coding history is training data. Every session from Claude Code, Gemini CLI, OpenCode, Codex, or Copilot CLI — tool calls, file edits, bash commands, multi-step reasoning — is a structured trace of expert coding behavior. Bash Gym captures those traces, curates them into training examples, and fine-tunes models that learn from how you actually work. Train locally or via the cloud.
+Every AI coding session is a chain-of-thought reasoning trace — step-by-step problem solving with verifiable outcomes. Every session from Claude Code, Gemini CLI, OpenCode, Codex, or Copilot CLI — tool calls, file edits, bash commands, multi-step reasoning — is a structured trace of expert coding behavior. Bash Gym captures these traces and uses them to train a reasoning language model with the same techniques behind frontier RLMs: GRPO for reinforcement learning, RLVR for verifiable reward signals from test results, and distillation to transfer reasoning from a large teacher into a small local model. The result is a personal RLM trained on how you actually think through code — your conventions, your repos, your patterns.
 
 ---
 
@@ -19,7 +19,7 @@ Adapters capture every session as structured traces
         ↓
 Pipeline scores, classifies, and segments traces into training examples
         ↓
-Fine-tune a model with LoRA (SFT, DPO, or GRPO)
+Fine-tune with SFT, DPO, GRPO, RLVR, or Distillation (Unsloth + QLoRA)
         ↓
 Export to LoRA adapter, merged weights, or GGUF → run via Ollama
 ```
@@ -29,7 +29,7 @@ Export to LoRA adapter, merged weights, or GGUF → run via Ollama
 | **Capture** | Adapters record every tool call, file edit, and command from your AI coding sessions (Claude Code, Gemini CLI, OpenCode, Codex, Copilot CLI) as structured JSON. Historical sessions can be bulk-imported. |
 | **Curate** | Traces are scored on 6 quality metrics. Good sessions become gold training data, bad ones become negative examples for DPO. PII is scrubbed. |
 | **Synthesize** | Gold traces are segmented into task-response pairs. Gaps are filled with synthetic augmentation via NVIDIA NeMo Data Designer or LLM-based generation. |
-| **Train** | SFT, DPO, or GRPO fine-tunes a model using Unsloth (2–5x faster, 50–80% less VRAM). Train locally or via the cloud. |
+| **Train** | SFT, DPO, GRPO, RLVR, or Distillation fine-tunes a model using Unsloth (2–5x faster, 50–80% less VRAM). Train locally, on a remote GPU over SSH, or via HuggingFace cloud. |
 | **Evaluate** | 11 benchmarks (HumanEval, MBPP, BigCodeBench, SWE-bench, GSM8K, and more) score the result. |
 | **Route** | Confidence-based routing shifts simple tasks from Claude to your trained model over time. |
 
@@ -199,7 +199,7 @@ See [Training](#training) for details.
 
 - **Strategies**: SFT, DPO, GRPO, RLVR, Distillation
 - **Acceleration**: Unsloth with QLoRA (4-bit quantization) by default
-- **Providers**: Pluggable inference via Anthropic, NVIDIA NIM, and Ollama with auto-discovery and health monitoring
+- **Providers**: Pluggable inference via Anthropic, NVIDIA NIM, and Ollama. Ollama models are auto-discovered at startup — any model you've pulled is immediately available as a Student model
 - **Compute**: Local GPU, remote SSH (e.g. DGX Spark), or HuggingFace cloud
 - **Output**: LoRA adapter, merged weights (16-bit), GGUF (for Ollama/llama.cpp/LM Studio)
 - **Training goals**: Define weighted success criteria and hard/soft constraints instead of optimizing a single loss scalar. The outcome aggregator tracks progress and recommends when to stop, adjust, or continue.
@@ -303,23 +303,27 @@ Gamified progress tracking across trace collection, quality, training, and maste
 
 | Strategy | What It Does | When To Use |
 |----------|--------------|-------------|
-| **SFT** | Trains the model to reproduce successful traces | Start here. Works with 20–30 gold traces. |
-| **DPO** | Learns from pairs of good and bad responses | When you have both gold and failed traces. |
-| **GRPO** | RL-based — model generates solutions, learns from verifiable rewards | Advanced. Needs more data. |
-| **RLVR** | Reinforcement learning with verifiable rewards | Alternative RL approach. |
-| **Distillation** | Transfers knowledge from a larger model to a smaller one | When you want a compact model that mimics a larger teacher. |
+| **SFT** | Supervised fine-tuning — trains the model to reproduce successful traces | Start here. Works with 20–30 gold traces. |
+| **DPO** | Direct Preference Optimization — learns from pairs of good and bad responses | When you have both gold and failed traces. |
+| **GRPO** | Group Relative Policy Optimization via `trl.GRPOTrainer`. Three tiered reward functions: syntax (`ast.parse`), execution (`subprocess`), and verification (`pytest`). Model generates multiple completions per prompt and learns from the reward signal. | When you want RL-based training. Needs test cases for verification mode. |
+| **RLVR** | RL with Verifiable Rewards — GRPO with verification-locked rewards. Test results from `pytest` are the reward signal: pass rate becomes the score. | When your traces include test code. The strongest signal for code correctness. |
+| **Distillation** | Knowledge distillation from a large teacher (e.g. Claude) into a small student. Combines soft labels (KL divergence) and hard labels (cross-entropy) weighted by alpha. Supports offline and on-policy modes. | When you want a compact model that reasons like a larger one. |
 
 ### Base Models
 
-Tested and supported base models:
+Any HuggingFace model compatible with Unsloth works. Set `BASE_MODEL` in the dashboard or `.env` to any model ID. Ollama models are auto-discovered for inference — train on HuggingFace weights, deploy via Ollama.
 
-| Model | Parameters | VRAM |
-|-------|------------|------|
-| `Qwen/Qwen2.5-Coder-1.5B-Instruct` | 1.5B | 8GB (default) |
-| `Qwen/Qwen2.5-Coder-7B-Instruct` | 7B | 16GB |
-| `meta-llama/Llama-3.2-3B-Instruct` | 3B | 12GB |
+**Recommended starting points:**
 
-All training uses QLoRA (4-bit quantization) by default.
+| Model | Parameters | VRAM | Notes |
+|-------|------------|------|-------|
+| `Qwen/Qwen2.5-Coder-1.5B-Instruct` | 1.5B | 8GB | Default. Fast training, good for iteration. |
+| `Qwen/Qwen2.5-Coder-7B-Instruct` | 7B | 16GB | Better quality, needs more VRAM. |
+| `meta-llama/Llama-3.2-3B-Instruct` | 3B | 12GB | Alternative architecture. |
+| `deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct` | 2.4B | 10GB | Strong code performance for size. |
+| `microsoft/Phi-3-mini-4k-instruct` | 3.8B | 12GB | Good general + code. |
+
+These are suggestions, not restrictions. Any `AutoModelForCausalLM`-compatible model from HuggingFace will work — including Mistral, StarCoder, CodeGemma, Yi, etc. All training uses QLoRA (4-bit quantization) by default, so VRAM requirements are roughly `model_params / 2` GB.
 
 ### Output Formats
 
@@ -331,7 +335,28 @@ All training uses QLoRA (4-bit quantization) by default.
 
 ### Remote SSH Training
 
-Train on a remote machine (e.g. NVIDIA DGX Spark) over SSH. The dashboard uploads the training script, streams logs in real time, and supports pause/resume/cancel. Configure via `SSH_REMOTE_*` environment variables. The dashboard shows connection status and a pre-flight check before each run.
+Train on a remote machine (e.g. NVIDIA DGX Spark) over SSH. The dashboard uploads the training script, streams logs in real time, and supports pause/resume/cancel. All five training strategies (SFT, DPO, GRPO, RLVR, Distillation) generate strategy-specific scripts that run on the remote host. The dashboard shows connection status and a pre-flight check with GPU detection before each run.
+
+### Device Management
+
+Plug-and-play SSH device registry for remote training targets. No manual `.env` editing required.
+
+- **Auto-discovery**: Parses `~/.ssh/config` to find candidate devices (filters out GitHub, GitLab, and other code forges automatically)
+- **Dashboard UI**: DeviceManager panel for adding, editing, removing, and connection-testing devices
+- **GPU detection**: Pre-flight checks report GPU model, VRAM, CUDA version, OS, and available disk space
+- **Persistent registry**: Devices are stored in `~/.bashgym/devices.json` and survive restarts
+- **Environment import**: On first startup, existing `SSH_REMOTE_*` environment variables are auto-imported as the default device
+
+### AutoResearch
+
+Automated hyperparameter and training data optimization, inspired by Karpathy's autoresearch. Two independent search loops run evolutionary experiments, keep improvements, and converge on optimal configurations.
+
+| Loop | What It Searches | Parameters |
+|------|-----------------|------------|
+| **Hyperparameter search** | Training configuration | Learning rate, LoRA rank/alpha/dropout, batch size, sequence length, quantization, warmup ratio |
+| **Trace research** | Data curation strategy | Quality thresholds, segmentation boundaries, cognitive tag inclusion, silver trace ratio, dedup threshold, per-repo caps |
+
+Both loops support start/stop/pause/resume, stream experiment results via WebSocket in real time, and display progress in the AutoResearch panel on the Training Dashboard.
 
 ### Cloud Training
 
@@ -348,7 +373,7 @@ Copy `.env.example` to `.env`:
 | `ANTHROPIC_API_KEY` | Yes | — | Claude API key |
 | `OPENAI_API_KEY` | No | — | OpenAI API key (for Codex trace capture and orchestrator routing) |
 | `GOOGLE_API_KEY` | No | — | Google/Gemini API key (for Gemini CLI trace capture and orchestrator routing) |
-| `BASE_MODEL` | No | `Qwen/Qwen2.5-Coder-1.5B-Instruct` | Fine-tuning base model |
+| `BASE_MODEL` | No | `Qwen/Qwen2.5-Coder-1.5B-Instruct` | Any HuggingFace model ID for fine-tuning |
 | `HF_TOKEN` | No | — | HuggingFace token (for cloud training and model push) |
 | `NVIDIA_API_KEY` | No | — | NVIDIA NIM API key (for synthetic data augmentation) |
 | `ROUTING_STRATEGY` | No | `confidence_based` | Model routing strategy |
@@ -373,11 +398,17 @@ bashgym/
 │   ├── events/               # Typed EventBus (bus, event types, WebSocket bridge)
 │   ├── factory/              # Data synthesis (trace processor, example generator, decision extractor)
 │   ├── gym/                  # Training (trainer, autoresearch, training goals, prompt evolver)
+│   │   ├── trainer.py        # SFT, DPO, GRPO, RLVR, Distillation
+│   │   ├── autoresearch.py   # Evolutionary hyperparameter search
+│   │   ├── trace_researcher.py # Data curation optimization
+│   │   └── remote_trainer.py # SSH-based remote training
 │   ├── judge/                # Verification (evaluator, semantic judge, guardrails, benchmarks)
 │   ├── models/               # Model registry and lifecycle
 │   ├── orchestrator/         # Multi-agent decomposition (agent, DAG, shared state, context builder)
 │   ├── pipeline/             # Automated watcher, quality gate, semantic evaluation
 │   ├── providers/            # Inference providers (Anthropic, NIM, Ollama)
+│   ├── device_registry.py    # JSON-backed SSH device storage
+│   ├── device_discovery.py   # ~/.ssh/config parser for device auto-discovery
 │   ├── trace_capture/        # Multi-agent trace capture
 │   │   ├── adapters/         # Tool-specific hooks (Claude Code, Gemini, OpenCode, Codex, Copilot)
 │   │   ├── importers/        # Historical session importers per tool
@@ -385,10 +416,14 @@ bashgym/
 │   │   └── setup.py          # CLI for hook installation and bulk import
 │   ├── achievements/         # Progress tracking and gamification
 │   ├── observability/        # Profiler, span tracing, backend integrations
+│   ├── api/                  # REST API + WebSocket
+│   │   ├── device_routes.py  # Device management endpoints
+│   │   └── autoresearch_routes.py # AutoResearch endpoints
 │   └── integrations/         # HuggingFace, NeMo, Ollama
 │
 ├── frontend/                 # Electron + React dashboard
 │   ├── src/components/       # 72+ React components
+│   │   └── training/         # DeviceManager, AutoResearchPanel, TrainingConfig, etc.
 │   ├── src/stores/           # Zustand state management
 │   └── electron/             # Main process + secure storage
 │
@@ -418,7 +453,7 @@ Only to the LLM providers you already use (Anthropic, etc.). Traces, training da
 A trace is a complete coding session from any supported tool (many tool calls, potentially 30+ minutes). A training example is a single task-response pair extracted from that trace. One trace typically produces 1–5 examples.
 
 **Can I use other base models?**
-Yes. Set `BASE_MODEL` in `.env` to a different model ID. Larger models need more VRAM (or use cloud training).
+Yes — any HuggingFace model that works with Unsloth/transformers. Qwen, Llama, Mistral, DeepSeek, Phi, StarCoder, CodeGemma, Yi, and more. Set `BASE_MODEL` in the dashboard or `.env`. Larger models need more VRAM (or use cloud training). After training, export to GGUF and run via Ollama, llama.cpp, LM Studio, or any GGUF-compatible runtime.
 
 **What about synthetic data?**
 The data factory supports NVIDIA NeMo Data Designer for structured synthetic generation, plus LLM-based augmentation using Anthropic or NVIDIA NIM models. Useful for filling gaps in your trace coverage.

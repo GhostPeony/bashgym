@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { trainingApi } from '../services/api'
 
-export type TrainingStrategy = 'sft' | 'dpo' | 'grpo' | 'kd'
+export type TrainingStrategy = 'sft' | 'dpo' | 'grpo' | 'distillation'
 export type TrainingStatus = 'idle' | 'starting' | 'running' | 'paused' | 'completed' | 'failed'
 
 export interface TrainingMetrics {
@@ -25,20 +25,29 @@ export interface TrainingConfig {
   epochs: number
   batchSize: number
   learningRate: number
+  warmupRatio: number
+  gradientAccumulationSteps: number
+  maxSeqLength: number
+  saveSteps: number
+  // LoRA settings
   loraRank?: number
   loraAlpha?: number
-  use4BitQuantization?: boolean  // Enables QLoRA (LoRA + 4-bit quantization)
-  warmupSteps: number
-  maxSeqLength: number
+  loraDropout?: number
+  load4Bit?: boolean  // QLoRA: load model in 4-bit quantization
+  // Strategy-specific
+  dpoBeta?: number
+  grpoNumGenerations?: number
+  grpoTemperature?: number
+  // Knowledge Distillation
+  teacherModel?: string
+  teacherTemperature?: number
+  distillationAlpha?: number
   // Repo selection
   selectedRepos?: string[]  // Repos to include in training (empty = all)
   // Training backend
-  useNemoGym?: boolean  // Use NVIDIA NeMo cloud training instead of local
-  useRemoteSSH?: boolean  // Execute training on remote DGX Spark via SSH
-  // Knowledge Distillation specific
-  teacherModel?: string
-  temperature?: number
-  kdAlpha?: number  // Weight for distillation loss vs task loss
+  useNemoGym?: boolean
+  useRemoteSSH?: boolean
+  deviceId?: string
   // Data source selection
   dataSource?: DataSource
   securityDatasetType?: string
@@ -125,16 +134,32 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
         strategy: config.strategy,
         base_model: config.baseModel,
         dataset_path: config.datasetPath,
-        epochs: config.epochs,
+        num_epochs: config.epochs,
         batch_size: config.batchSize,
         learning_rate: config.learningRate,
+        warmup_ratio: config.warmupRatio,
+        gradient_accumulation_steps: config.gradientAccumulationSteps,
+        max_seq_length: config.maxSeqLength,
+        save_steps: config.saveSteps,
+        // LoRA
         lora_rank: config.loraRank,
         lora_alpha: config.loraAlpha,
-        warmup_steps: config.warmupSteps,
-        max_seq_length: config.maxSeqLength,
+        lora_dropout: config.loraDropout,
+        load_in_4bit: config.load4Bit,
+        // Strategy-specific
+        dpo_beta: config.dpoBeta,
+        grpo_num_generations: config.grpoNumGenerations,
+        grpo_temperature: config.grpoTemperature,
+        // Knowledge Distillation
+        teacher_model: config.teacherModel,
+        teacher_temperature: config.teacherTemperature,
+        distillation_alpha: config.distillationAlpha,
+        // Backend & repos
         selected_repos: config.selectedRepos,
         use_nemo_gym: config.useNemoGym,
         use_remote_ssh: config.useRemoteSSH,
+        device_id: config.deviceId,
+        // Data source
         data_source: config.dataSource,
         security_dataset_type: config.securityDatasetType,
         security_dataset_path: config.securityDatasetPath,

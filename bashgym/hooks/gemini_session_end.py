@@ -8,16 +8,16 @@ so the next session gets a fresh ID.
 Must print valid JSON to stdout: {"decision": "allow"}
 """
 
-import os
-import sys
 import json
+import os
 import platform
+import sys
 from pathlib import Path
 
 
 def get_bashgym_dir() -> Path:
     """Get the global Bash Gym directory (~/.bashgym/)."""
-    if platform.system() == 'Windows':
+    if platform.system() == "Windows":
         base = Path(os.environ.get("USERPROFILE", ""))
     else:
         base = Path.home()
@@ -33,7 +33,7 @@ def clear_session() -> None:
             session_id = session_file.read_text().strip()
             session_file.unlink()
             print(f"[BashGym] Gemini session ended: {session_id}", file=sys.stderr)
-        except (IOError, OSError) as e:
+        except OSError as e:
             print(f"Warning: Could not clear session file: {e}", file=sys.stderr)
 
 

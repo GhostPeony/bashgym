@@ -5,16 +5,16 @@ Skyrim-style lifetime statistics + Xbox/Steam-style unlockable achievements,
 driven by existing trace/training/factory data.
 """
 
+from bashgym.achievements.definitions import ACHIEVEMENTS, AchievementDef
+from bashgym.achievements.engine import AchievementEngine, AchievementStatus
 from bashgym.achievements.stats_engine import (
-    StatsEngine,
+    FactoryStats,
     LifetimeStats,
+    RouterStats,
+    StatsEngine,
     TraceStats,
     TrainingStats,
-    FactoryStats,
-    RouterStats,
 )
-from bashgym.achievements.engine import AchievementEngine, AchievementStatus
-from bashgym.achievements.definitions import AchievementDef, ACHIEVEMENTS
 
 __all__ = [
     "StatsEngine",

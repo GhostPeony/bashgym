@@ -26,10 +26,11 @@ import logging
 import re
 import uuid
 from collections import Counter, defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,7 @@ class FailurePattern:
     pattern_type: str  # "wrong_tool", "missing_context", "anti_pattern", "incomplete_output"
     description: str  # Human-readable description
     frequency: int  # How many traces exhibit this
-    example_decisions: List[Dict[str, Any]]  # Sample decisions showing the pattern
+    example_decisions: list[dict[str, Any]]  # Sample decisions showing the pattern
     suggested_fix: str  # What prompt change might help
 
 
@@ -62,15 +63,15 @@ class PromptVariant:
     """
 
     variant_id: str
-    system_prompt_patches: Dict[str, str]  # section_name -> new content
-    tool_config_patches: Dict[str, Any]  # tool setting overrides
-    parent_variant: Optional[str] = None  # lineage tracking
+    system_prompt_patches: dict[str, str]  # section_name -> new content
+    tool_config_patches: dict[str, Any]  # tool setting overrides
+    parent_variant: str | None = None  # lineage tracking
     generation: int = 0
-    metrics: Dict[str, float] = field(default_factory=dict)
-    failure_patterns_addressed: List[str] = field(default_factory=list)
+    metrics: dict[str, float] = field(default_factory=dict)
+    failure_patterns_addressed: list[str] = field(default_factory=list)
     timestamp: datetime = field(default_factory=datetime.utcnow)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to a plain dict for JSON persistence."""
         return {
             "variant_id": self.variant_id,
@@ -84,7 +85,7 @@ class PromptVariant:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> PromptVariant:
+    def from_dict(cls, data: dict[str, Any]) -> PromptVariant:
         """Deserialize from a plain dict."""
         ts = data.get("timestamp")
         if isinstance(ts, str):
@@ -236,13 +237,13 @@ class PromptEvolver:
         self,
         provider: str = "anthropic",
         model: str = "claude-sonnet-4-5-20250929",
-        storage_dir: Optional[Path] = None,
+        storage_dir: Path | None = None,
     ):
         self.provider = provider
         self.model = model
         self.storage_dir = storage_dir or Path.home() / ".bashgym" / "prompt_evolution"
-        self.variants: List[PromptVariant] = []
-        self.best_variant: Optional[PromptVariant] = None
+        self.variants: list[PromptVariant] = []
+        self.best_variant: PromptVariant | None = None
         self._client = None
 
     def _get_client(self):
@@ -266,9 +267,7 @@ class PromptEvolver:
     # Analysis Phase (deterministic — no LLM calls)
     # =========================================================================
 
-    async def analyze_failures(
-        self, traces: List[Dict[str, Any]]
-    ) -> List[FailurePattern]:
+    async def analyze_failures(self, traces: list[dict[str, Any]]) -> list[FailurePattern]:
         """Extract common failure patterns from traces.
 
         Uses decision logs to identify:
@@ -285,7 +284,7 @@ class PromptEvolver:
         """
         # Accumulators keyed by (pattern_type, description_key)
         pattern_counts: Counter = Counter()
-        pattern_examples: Dict[Tuple[str, str], List[Dict[str, Any]]] = defaultdict(list)
+        pattern_examples: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
 
         for trace in traces:
             decisions = self._extract_decisions_from_trace(trace)
@@ -321,7 +320,7 @@ class PromptEvolver:
                 pattern_examples[key].extend(examples[:2])
 
         # Build FailurePattern objects, filter by minimum frequency
-        patterns: List[FailurePattern] = []
+        patterns: list[FailurePattern] = []
         for (ptype, desc), freq in pattern_counts.items():
             if freq < _MIN_PATTERN_FREQUENCY:
                 continue
@@ -339,9 +338,7 @@ class PromptEvolver:
         patterns.sort(key=lambda p: p.frequency, reverse=True)
         return patterns
 
-    async def analyze_successes(
-        self, traces: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
+    async def analyze_successes(self, traces: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Extract successful patterns to preserve.
 
         Identifies decisions that consistently lead to SUCCESS outcomes.
@@ -361,7 +358,7 @@ class PromptEvolver:
                     success_tool_intents[key] += 1
 
         # Return patterns that appear across multiple traces
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
         for pattern_key, count in success_tool_intents.most_common(15):
             if count < 2:
                 break
@@ -383,9 +380,9 @@ class PromptEvolver:
     async def evolve(
         self,
         current_prompt: str,
-        failure_patterns: List[FailurePattern],
-        success_patterns: List[Dict[str, Any]],
-        parent_variant: Optional[PromptVariant] = None,
+        failure_patterns: list[FailurePattern],
+        success_patterns: list[dict[str, Any]],
+        parent_variant: PromptVariant | None = None,
     ) -> PromptVariant:
         """Generate a prompt variant that addresses failures while preserving successes.
 
@@ -408,7 +405,7 @@ class PromptEvolver:
             return self._empty_variant(parent_variant)
 
         # Format failure patterns for the prompt
-        failure_lines: List[str] = []
+        failure_lines: list[str] = []
         for i, fp in enumerate(failure_patterns[:8]):  # Top 8
             failure_lines.append(
                 f"{i + 1}. [{fp.pattern_type}] (frequency={fp.frequency}) {fp.description}"
@@ -424,7 +421,7 @@ class PromptEvolver:
             failure_lines.append("")
 
         # Format success patterns
-        success_lines: List[str] = []
+        success_lines: list[str] = []
         for sp in success_patterns[:10]:
             success_lines.append(
                 f"- {sp.get('tool', '?')}: {sp.get('intent_summary', '')} "
@@ -450,9 +447,7 @@ class PromptEvolver:
                 if hasattr(block, "text"):
                     response_text += block.text
 
-            return self._parse_evolve_response(
-                response_text, failure_patterns, parent_variant
-            )
+            return self._parse_evolve_response(response_text, failure_patterns, parent_variant)
 
         except Exception as exc:
             logger.warning("Prompt evolution LLM call failed: %s", exc)
@@ -466,7 +461,7 @@ class PromptEvolver:
         self,
         variant: PromptVariant,
         baseline_score: float,
-        test_traces: List[Dict[str, Any]],
+        test_traces: list[dict[str, Any]],
     ) -> float:
         """Score a variant using semantic judge as proxy.
 
@@ -518,9 +513,7 @@ class PromptEvolver:
             # Gather issues from the trace
             issues = trace.get("issues", [])
             if not issues:
-                issues = [
-                    d.get("intent", "") for d in decisions if d.get("outcome") == "FAILURE"
-                ]
+                issues = [d.get("intent", "") for d in decisions if d.get("outcome") == "FAILURE"]
 
             prompt_text = _EVALUATE_USER_TEMPLATE.format(
                 prompt_patches=patches_text[:2000],
@@ -564,7 +557,7 @@ class PromptEvolver:
         self,
         trace_dir: Path,
         generations: int = 10,
-        callback: Optional[Callable] = None,
+        callback: Callable | None = None,
     ) -> PromptVariant:
         """Main evolution loop.
 
@@ -629,9 +622,7 @@ class PromptEvolver:
             variant.generation = gen + 1
 
             # Evaluate on held-out traces
-            improvement = await self.evaluate_variant(
-                variant, baseline_score, eval_traces
-            )
+            improvement = await self.evaluate_variant(variant, baseline_score, eval_traces)
             variant.metrics["improvement_delta"] = improvement
             variant.metrics["generation"] = gen + 1
 
@@ -670,9 +661,7 @@ class PromptEvolver:
                             "variant_id": variant.variant_id,
                             "kept": improvement > 0,
                             "best_variant_id": (
-                                self.best_variant.variant_id[:8]
-                                if self.best_variant
-                                else None
+                                self.best_variant.variant_id[:8] if self.best_variant else None
                             ),
                         }
                     )
@@ -715,7 +704,7 @@ class PromptEvolver:
 
         logger.debug("Saved variant %s to %s", variant.variant_id[:8], filepath)
 
-    def load_best_variant(self) -> Optional[PromptVariant]:
+    def load_best_variant(self) -> PromptVariant | None:
         """Load the best variant from storage_dir."""
         best_path = self.storage_dir / "best_variant.json"
         if not best_path.exists():
@@ -730,9 +719,9 @@ class PromptEvolver:
             logger.warning("Failed to load best variant: %s", exc)
             return None
 
-    def get_lineage(self, variant_id: str) -> List[PromptVariant]:
+    def get_lineage(self, variant_id: str) -> list[PromptVariant]:
         """Get the evolution lineage of a variant (ancestor chain)."""
-        lineage: List[PromptVariant] = []
+        lineage: list[PromptVariant] = []
 
         # Build lookup from in-memory variants
         by_id = {v.variant_id: v for v in self.variants}
@@ -751,7 +740,7 @@ class PromptEvolver:
                     continue
 
         # Walk the lineage chain
-        current_id: Optional[str] = variant_id
+        current_id: str | None = variant_id
         visited = set()
         while current_id and current_id not in visited:
             visited.add(current_id)
@@ -818,9 +807,7 @@ class PromptEvolver:
     # Internal: Failure Pattern Detection (deterministic)
     # =========================================================================
 
-    def _extract_decisions_from_trace(
-        self, trace: Dict[str, Any]
-    ) -> List[Dict[str, Any]]:
+    def _extract_decisions_from_trace(self, trace: dict[str, Any]) -> list[dict[str, Any]]:
         """Extract decision dicts from a trace.
 
         Supports both pre-extracted decisions and raw steps that need extraction.
@@ -856,18 +843,18 @@ class PromptEvolver:
             return []
 
     def _detect_wrong_tool(
-        self, decisions: List[Dict[str, Any]]
-    ) -> List[Tuple[str, List[Dict[str, Any]]]]:
+        self, decisions: list[dict[str, Any]]
+    ) -> list[tuple[str, list[dict[str, Any]]]]:
         """Detect repeated wrong tool choices.
 
         A tool is "wrong" if the same tool fails 3+ times in sequence
         or the same tool type fails frequently across the trace.
         """
-        results: List[Tuple[str, List[Dict[str, Any]]]] = []
+        results: list[tuple[str, list[dict[str, Any]]]] = []
 
         # Count consecutive failures per tool
-        tool_fail_streak: Dict[str, int] = defaultdict(int)
-        tool_fail_examples: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        tool_fail_streak: dict[str, int] = defaultdict(int)
+        tool_fail_examples: dict[str, list[dict[str, Any]]] = defaultdict(list)
 
         prev_tool = None
         streak = 0
@@ -907,14 +894,14 @@ class PromptEvolver:
 
     def _detect_missing_context(
         self,
-        decisions: List[Dict[str, Any]],
-        trace: Dict[str, Any],
-    ) -> List[Tuple[str, List[Dict[str, Any]]]]:
+        decisions: list[dict[str, Any]],
+        trace: dict[str, Any],
+    ) -> list[tuple[str, list[dict[str, Any]]]]:
         """Detect failures caused by missing context (undefined vars, wrong paths, etc.)."""
-        results: List[Tuple[str, List[Dict[str, Any]]]] = []
+        results: list[tuple[str, list[dict[str, Any]]]] = []
 
         steps = trace.get("normalized_steps", trace.get("steps", []))
-        context_failures: List[Dict[str, Any]] = []
+        context_failures: list[dict[str, Any]] = []
 
         for dec in decisions:
             if dec.get("outcome") != "FAILURE":
@@ -938,14 +925,14 @@ class PromptEvolver:
 
     def _detect_anti_patterns(
         self,
-        decisions: List[Dict[str, Any]],
-        trace: Dict[str, Any],
-    ) -> List[Tuple[str, List[Dict[str, Any]]]]:
+        decisions: list[dict[str, Any]],
+        trace: dict[str, Any],
+    ) -> list[tuple[str, list[dict[str, Any]]]]:
         """Detect anti-patterns: over-engineering, reverts, unnecessary pivots."""
-        results: List[Tuple[str, List[Dict[str, Any]]]] = []
+        results: list[tuple[str, list[dict[str, Any]]]] = []
 
-        revert_decisions: List[Dict[str, Any]] = []
-        pivot_decisions: List[Dict[str, Any]] = []
+        revert_decisions: list[dict[str, Any]] = []
+        pivot_decisions: list[dict[str, Any]] = []
 
         for dec in decisions:
             reasoning = dec.get("reasoning", "")
@@ -977,11 +964,11 @@ class PromptEvolver:
 
     def _detect_incomplete_output(
         self,
-        decisions: List[Dict[str, Any]],
-        trace: Dict[str, Any],
-    ) -> List[Tuple[str, List[Dict[str, Any]]]]:
+        decisions: list[dict[str, Any]],
+        trace: dict[str, Any],
+    ) -> list[tuple[str, list[dict[str, Any]]]]:
         """Detect traces where the task was only partially completed."""
-        results: List[Tuple[str, List[Dict[str, Any]]]] = []
+        results: list[tuple[str, list[dict[str, Any]]]] = []
 
         if not decisions:
             return results
@@ -1002,9 +989,7 @@ class PromptEvolver:
             results.append((desc, last_decisions))
 
         # Also check if there's no git commit (commit = completion signal)
-        has_commit = any(
-            "git commit" in d.get("chosen", "") for d in decisions
-        )
+        has_commit = any("git commit" in d.get("chosen", "") for d in decisions)
         if not has_commit and len(decisions) > 5:
             # Long trace with no commit — possible incompletion
             desc = "No git commit found in a long trace — task may not have finished"
@@ -1043,8 +1028,8 @@ class PromptEvolver:
     def _parse_evolve_response(
         self,
         response_text: str,
-        failure_patterns: List[FailurePattern],
-        parent_variant: Optional[PromptVariant],
+        failure_patterns: list[FailurePattern],
+        parent_variant: PromptVariant | None,
     ) -> PromptVariant:
         """Parse the LLM's evolution response into a PromptVariant."""
         text = response_text.strip()
@@ -1057,9 +1042,7 @@ class PromptEvolver:
         try:
             data = json.loads(text)
         except json.JSONDecodeError:
-            logger.warning(
-                "Failed to parse evolve response: %.200s", response_text
-            )
+            logger.warning("Failed to parse evolve response: %.200s", response_text)
             return self._empty_variant(parent_variant)
 
         prompt_patches = data.get("system_prompt_patches", {})
@@ -1075,9 +1058,7 @@ class PromptEvolver:
             system_prompt_patches=prompt_patches,
             tool_config_patches=tool_patches,
             parent_variant=parent_variant.variant_id if parent_variant else None,
-            failure_patterns_addressed=[
-                fp.description for fp in failure_patterns[:5]
-            ],
+            failure_patterns_addressed=[fp.description for fp in failure_patterns[:5]],
         )
 
     def _parse_evaluate_response(self, response_text: str) -> float:
@@ -1100,9 +1081,7 @@ class PromptEvolver:
     # Internal: Helpers
     # =========================================================================
 
-    def _empty_variant(
-        self, parent: Optional[PromptVariant] = None
-    ) -> PromptVariant:
+    def _empty_variant(self, parent: PromptVariant | None = None) -> PromptVariant:
         """Create an empty variant (no changes)."""
         return PromptVariant(
             variant_id=uuid.uuid4().hex[:12],
@@ -1114,8 +1093,7 @@ class PromptEvolver:
     def _get_baseline_prompt(self) -> str:
         """Get the baseline system prompt for evolution."""
         try:
-            from bashgym.orchestrator.context_builder import WorkerContextBuilder
-            from bashgym.orchestrator.models import TaskNode
+            from bashgym.orchestrator.context_builder import WorkerContextBuilder  # noqa: F401
 
             builder = WorkerContextBuilder(
                 dag_nodes={},
@@ -1132,9 +1110,9 @@ class PromptEvolver:
                 "- Run tests after making changes\n"
             )
 
-    def _load_traces(self, trace_dir: Path) -> List[Dict[str, Any]]:
+    def _load_traces(self, trace_dir: Path) -> list[dict[str, Any]]:
         """Load trace files from a directory (both gold and failed)."""
-        traces: List[Dict[str, Any]] = []
+        traces: list[dict[str, Any]] = []
 
         if not trace_dir.exists():
             return traces
@@ -1173,9 +1151,7 @@ class PromptEvolver:
 
         return traces
 
-    def _emit_evolved_event(
-        self, variant: PromptVariant, improvement: float
-    ) -> None:
+    def _emit_evolved_event(self, variant: PromptVariant, improvement: float) -> None:
         """Emit a PromptEvolved event via the event bus."""
         try:
             from bashgym.events.bus import event_bus

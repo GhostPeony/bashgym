@@ -5,9 +5,9 @@ Manages provider registration, model-to-provider mapping, health
 monitoring, and auto-discovery of available models.
 """
 
-import asyncio
 import logging
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
 
 from bashgym.providers.base import (
     HealthStatus,
@@ -31,11 +31,11 @@ class ProviderRegistry:
     """
 
     def __init__(self) -> None:
-        self.providers: Dict[str, InferenceProvider] = {}
-        self._model_map: Dict[str, str] = {}
-        self._discovered_models: Dict[str, ProviderModel] = {}
-        self.health_cache: Dict[str, HealthStatus] = {}
-        self._health_listeners: List[Callable] = []
+        self.providers: dict[str, InferenceProvider] = {}
+        self._model_map: dict[str, str] = {}
+        self._discovered_models: dict[str, ProviderModel] = {}
+        self.health_cache: dict[str, HealthStatus] = {}
+        self._health_listeners: list[Callable] = []
 
     # ── Registration ───────────────────────────────────────────────
 
@@ -52,10 +52,7 @@ class ProviderRegistry:
         del self.providers[provider_type]
         self.health_cache.pop(provider_type, None)
         # Remove all model mappings that point to this provider
-        to_remove = [
-            model for model, ptype in self._model_map.items()
-            if ptype == provider_type
-        ]
+        to_remove = [model for model, ptype in self._model_map.items() if ptype == provider_type]
         for model in to_remove:
             del self._model_map[model]
         logger.info("Unregistered provider: %s", provider_type)
@@ -75,18 +72,18 @@ class ProviderRegistry:
         """Remove a model mapping."""
         self._model_map.pop(model_name, None)
 
-    def get_provider_for_model(self, model_name: str) -> Optional[InferenceProvider]:
+    def get_provider_for_model(self, model_name: str) -> InferenceProvider | None:
         """Resolve a model name to its provider, or None if unmapped."""
         ptype = self._model_map.get(model_name)
         if ptype is None:
             return None
         return self.providers.get(ptype)
 
-    def get_provider(self, provider_type: str) -> Optional[InferenceProvider]:
+    def get_provider(self, provider_type: str) -> InferenceProvider | None:
         """Get a provider by its type string, or None."""
         return self.providers.get(provider_type)
 
-    def get_model_map(self) -> Dict[str, str]:
+    def get_model_map(self) -> dict[str, str]:
         """Return a copy of the model-to-provider map."""
         return dict(self._model_map)
 
@@ -95,7 +92,7 @@ class ProviderRegistry:
     async def generate(
         self,
         model: str,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         **kwargs: Any,
     ) -> ProviderResponse:
         """Generate via the provider mapped to the given model. Raises ValueError if unmapped."""
@@ -109,9 +106,9 @@ class ProviderRegistry:
 
     # ── Health monitoring ─────────────────────────────────────────
 
-    async def check_all_health(self) -> Dict[str, HealthStatus]:
+    async def check_all_health(self) -> dict[str, HealthStatus]:
         """Health-check all registered providers, update cache, notify listeners."""
-        results: Dict[str, HealthStatus] = {}
+        results: dict[str, HealthStatus] = {}
         for ptype, provider in self.providers.items():
             try:
                 status = await provider.health_check()
@@ -136,13 +133,13 @@ class ProviderRegistry:
 
     # ── Auto-discovery ────────────────────────────────────────────
 
-    async def discover_models(self) -> Dict[str, List[ProviderModel]]:
+    async def discover_models(self) -> dict[str, list[ProviderModel]]:
         """
         Ask all providers for their available models.
 
         Auto-maps discovered models unless a mapping already exists.
         """
-        discovered: Dict[str, List[ProviderModel]] = {}
+        discovered: dict[str, list[ProviderModel]] = {}
         for ptype, provider in self.providers.items():
             try:
                 models = await provider.list_models()
@@ -163,8 +160,8 @@ class ProviderRegistry:
         self,
         provider_type: str,
         prefer_code: bool = True,
-        default_model: Optional[str] = None,
-    ) -> Optional[ProviderModel]:
+        default_model: str | None = None,
+    ) -> ProviderModel | None:
         """
         Select the best model from a provider for use as Student.
 
@@ -176,7 +173,7 @@ class ProviderRegistry:
         Returns the chosen ProviderModel, or None if no models found.
         """
         # Collect models mapped to this provider
-        models: List[ProviderModel] = []
+        models: list[ProviderModel] = []
         for model_id, ptype in self._model_map.items():
             if ptype != provider_type:
                 continue
@@ -204,16 +201,16 @@ class ProviderRegistry:
 
     # ── Status ────────────────────────────────────────────────────
 
-    def get_status_summary(self) -> Dict[str, Any]:
+    def get_status_summary(self) -> dict[str, Any]:
         """Summary of registered providers, model mappings, and totals."""
-        providers_info: Dict[str, Dict[str, Any]] = {}
+        providers_info: dict[str, dict[str, Any]] = {}
         for ptype, provider in self.providers.items():
             providers_info[ptype] = {
                 "is_local": provider.is_local,
                 "requires_api_key": provider.requires_api_key,
-                "health": self.health_cache[ptype].to_dict()
-                if ptype in self.health_cache
-                else None,
+                "health": (
+                    self.health_cache[ptype].to_dict() if ptype in self.health_cache else None
+                ),
             }
         return {
             "providers": providers_info,
@@ -234,7 +231,7 @@ class ProviderRegistry:
 
 # ── Module-level singleton ────────────────────────────────────────
 
-_registry: Optional[ProviderRegistry] = None
+_registry: ProviderRegistry | None = None
 
 
 def get_registry() -> ProviderRegistry:
@@ -245,7 +242,7 @@ def get_registry() -> ProviderRegistry:
     return _registry
 
 
-def _parse_param_size(param_size: Optional[str]) -> float:
+def _parse_param_size(param_size: str | None) -> float:
     """Parse parameter size string like '35B', '7B', '1.5B' into a float for comparison."""
     if not param_size or param_size == "unknown":
         return 0.0

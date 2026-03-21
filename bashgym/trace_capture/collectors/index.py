@@ -22,10 +22,9 @@ Index format::
 
 import json
 from pathlib import Path
-from typing import Dict
 
 
-def build_cross_reference_index(collected_dir: Path) -> Dict[str, dict]:
+def build_cross_reference_index(collected_dir: Path) -> dict[str, dict]:
     """Build a cross-reference index from collected records.
 
     Walks all subdirectories of *collected_dir*, reads each JSON file's
@@ -45,13 +44,14 @@ def build_cross_reference_index(collected_dir: Path) -> Dict[str, dict]:
         empty ``session_id`` are grouped under the ``"_no_session"`` key.
     """
     collected_dir = Path(collected_dir)
-    index: Dict[str, dict] = {}
+    index: dict[str, dict] = {}
 
     if not collected_dir.exists():
         # Create the directory and write an empty index
         collected_dir.mkdir(parents=True, exist_ok=True)
         (collected_dir / "index.json").write_text(
-            json.dumps(index, indent=2), encoding="utf-8",
+            json.dumps(index, indent=2),
+            encoding="utf-8",
         )
         return index
 
@@ -93,7 +93,8 @@ def build_cross_reference_index(collected_dir: Path) -> Dict[str, dict]:
 
     # Write index.json to disk
     (collected_dir / "index.json").write_text(
-        json.dumps(index, indent=2), encoding="utf-8",
+        json.dumps(index, indent=2),
+        encoding="utf-8",
     )
 
     return index

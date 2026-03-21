@@ -7,22 +7,23 @@ Supports SFT (Supervised Fine-Tuning), DPO, and GRPO training strategies.
 Module 4: Training (The "Gym")
 """
 
-import os
-import sys
-import json
 import asyncio
+import copy
 import logging
-from pathlib import Path
+import os
+import subprocess
+import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List, Callable, Union
 from datetime import datetime, timezone
 from enum import Enum
-import subprocess
-import shutil
+from pathlib import Path
+from typing import Any
 
 # Model profile integration
 try:
     from bashgym.models import ModelProfile, get_registry
+
     MODEL_PROFILE_AVAILABLE = True
 except ImportError:
     MODEL_PROFILE_AVAILABLE = False
@@ -31,7 +32,7 @@ except ImportError:
 
 # NeMo Microservices integration
 try:
-    from bashgym.integrations import NeMoClient, NeMoClientConfig, NEMO_SDK_AVAILABLE
+    from bashgym.integrations import NEMO_SDK_AVAILABLE, NeMoClient, NeMoClientConfig
 except ImportError:
     NEMO_SDK_AVAILABLE = False
     NeMoClient = None
@@ -42,10 +43,11 @@ logger = logging.getLogger(__name__)
 
 class TrainingStrategy(Enum):
     """Training strategies available."""
-    SFT = "sft"                     # Supervised Fine-Tuning
-    DPO = "dpo"                     # Direct Preference Optimization
-    GRPO = "grpo"                   # Group Relative Policy Optimization
-    RLVR = "rlvr"                   # RL with Verifiable Rewards
+
+    SFT = "sft"  # Supervised Fine-Tuning
+    DPO = "dpo"  # Direct Preference Optimization
+    GRPO = "grpo"  # Group Relative Policy Optimization
+    RLVR = "rlvr"  # RL with Verifiable Rewards
     DISTILLATION = "distillation"  # Knowledge Distillation from larger model
 
 
@@ -71,10 +73,17 @@ class TrainerConfig:
     lora_r: int = 16
     lora_alpha: int = 32
     lora_dropout: float = 0.05
-    lora_target_modules: List[str] = field(default_factory=lambda: [
-        "q_proj", "k_proj", "v_proj", "o_proj",
-        "gate_proj", "up_proj", "down_proj"
-    ])
+    lora_target_modules: list[str] = field(
+        default_factory=lambda: [
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "o_proj",
+            "gate_proj",
+            "up_proj",
+            "down_proj",
+        ]
+    )
 
     # Quantization settings
     load_in_4bit: bool = True
@@ -87,6 +96,7 @@ class TrainerConfig:
     # GRPO settings
     grpo_num_generations: int = 4
     grpo_temperature: float = 0.7
+    grpo_reward_mode: str = "syntax"  # "syntax", "execution", "verification"
 
     # Knowledge Distillation settings
     teacher_model: str = "claude-sonnet-4-20250514"  # Teacher model for distillation
@@ -106,11 +116,14 @@ class TrainerConfig:
     # Hardware settings
     device_map: str = "auto"
     use_flash_attention: bool = True
+    # Missing fields referenced by _save_model_profile()
+    weight_decay: float = 0.01
+    use_gradient_checkpointing: bool = True
 
     # NeMo Gym settings (for cloud training)
     use_nemo_gym: bool = False
     nemo_gym_endpoint: str = "http://localhost:8080"
-    nemo_api_key: Optional[str] = None
+    nemo_api_key: str | None = None
 
     # Remote SSH settings (DGX Spark)
     use_remote_ssh: bool = False
@@ -126,15 +139,15 @@ class TrainingRun:
     dataset_path: Path
     output_path: Path
     status: str = "pending"
-    pid: Optional[int] = None  # Subprocess PID for process control
-    metrics: Dict[str, Any] = field(default_factory=dict)
-    started_at: Optional[str] = None
-    completed_at: Optional[str] = None
-    error_message: Optional[str] = None
-    loss_curve: List[Dict[str, Any]] = field(default_factory=list)
-    config_snapshot: Dict[str, Any] = field(default_factory=dict)
+    pid: int | None = None  # Subprocess PID for process control
+    metrics: dict[str, Any] = field(default_factory=dict)
+    started_at: str | None = None
+    completed_at: str | None = None
+    error_message: str | None = None
+    loss_curve: list[dict[str, Any]] = field(default_factory=list)
+    config_snapshot: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "run_id": self.run_id,
@@ -149,17 +162,16 @@ class TrainingRun:
             "completed_at": self.completed_at,
             "error_message": self.error_message,
             "loss_curve": self.loss_curve,
-            "config_snapshot": self.config_snapshot
+            "config_snapshot": self.config_snapshot,
         }
 
-    def add_loss_point(self, step: int, loss: float, epoch: Optional[int] = None, learning_rate: Optional[float] = None):
+    def add_loss_point(
+        self, step: int, loss: float, epoch: int | None = None, learning_rate: float | None = None
+    ):
         """Add a point to the loss curve."""
-        self.loss_curve.append({
-            "step": step,
-            "loss": loss,
-            "epoch": epoch,
-            "learning_rate": learning_rate
-        })
+        self.loss_curve.append(
+            {"step": step, "loss": loss, "epoch": epoch, "learning_rate": learning_rate}
+        )
 
 
 class Trainer:
@@ -172,10 +184,10 @@ class Trainer:
     - Multiple training strategies (SFT, DPO, GRPO)
     """
 
-    def __init__(self, config: Optional[TrainerConfig] = None):
+    def __init__(self, config: TrainerConfig | None = None):
         """Initialize the trainer."""
         self.config = config or TrainerConfig()
-        self.active_runs: Dict[str, TrainingRun] = {}
+        self.active_runs: dict[str, TrainingRun] = {}
 
         # Ensure output directory exists
         Path(self.config.output_dir).mkdir(parents=True, exist_ok=True)
@@ -232,7 +244,9 @@ class Trainer:
             if existing:
                 # Update existing profile
                 existing.status = "ready" if run.status == "completed" else run.status
-                existing.completed_at = datetime.fromisoformat(run.completed_at) if run.completed_at else None
+                existing.completed_at = (
+                    datetime.fromisoformat(run.completed_at) if run.completed_at else None
+                )
                 existing.duration_seconds = duration
                 existing.loss_curve = run.loss_curve
                 existing.final_metrics = run.metrics
@@ -249,12 +263,16 @@ class Trainer:
                     run_id=run.run_id,
                     display_name=display_name,
                     description=f"Trained with {run.strategy.value.upper()} strategy",
-                    created_at=datetime.fromisoformat(run.started_at) if run.started_at else datetime.now(),
+                    created_at=(
+                        datetime.fromisoformat(run.started_at) if run.started_at else datetime.now()
+                    ),
                     base_model=run.base_model,
                     training_strategy=run.strategy.value,
                     config=config_dict,
                     started_at=datetime.fromisoformat(run.started_at) if run.started_at else None,
-                    completed_at=datetime.fromisoformat(run.completed_at) if run.completed_at else None,
+                    completed_at=(
+                        datetime.fromisoformat(run.completed_at) if run.completed_at else None
+                    ),
                     duration_seconds=duration,
                     loss_curve=run.loss_curve,
                     final_metrics=run.metrics,
@@ -295,10 +313,10 @@ class Trainer:
     def train_sft(
         self,
         dataset_path: Path,
-        run_id: Optional[str] = None,
-        callback: Optional[Callable[[Dict[str, Any]], None]] = None,
-        log_callback: Optional[Callable[[str], None]] = None,
-        pid_callback: Optional[Callable[[int, "TrainingRun"], None]] = None,
+        run_id: str | None = None,
+        callback: Callable[[dict[str, Any]], None] | None = None,
+        log_callback: Callable[[str], None] | None = None,
+        pid_callback: Callable[[int, "TrainingRun"], None] | None = None,
     ) -> TrainingRun:
         """
         Run Supervised Fine-Tuning.
@@ -322,7 +340,7 @@ class Trainer:
             dataset_path=Path(dataset_path),
             output_path=output_path,
             status="running",
-            started_at=datetime.now(timezone.utc).isoformat()
+            started_at=datetime.now(timezone.utc).isoformat(),
         )
         self.active_runs[run_id] = run
 
@@ -363,6 +381,7 @@ class Trainer:
         """
         try:
             from bashgym.integrations.bashbros import get_integration
+
             integration = get_integration()
 
             # Check if integration is linked
@@ -387,7 +406,7 @@ class Trainer:
             # Calculate trace stats (if available)
             traces_used = 0
             quality_avg = 0.0
-            if hasattr(run, 'config_snapshot') and run.config_snapshot:
+            if hasattr(run, "config_snapshot") and run.config_snapshot:
                 traces_used = run.config_snapshot.get("traces_used", 0)
                 quality_avg = run.config_snapshot.get("quality_avg", 0.0)
 
@@ -402,9 +421,7 @@ class Trainer:
 
             if gguf_path:
                 integration.update_training_status(
-                    "complete",
-                    run.run_id,
-                    model=settings.ollama_model_name
+                    "complete", run.run_id, model=settings.ollama_model_name
                 )
                 logger.info(f"Model exported to bashbros: {gguf_path}")
             else:
@@ -419,8 +436,8 @@ class Trainer:
     def train_dpo(
         self,
         dataset_path: Path,
-        run_id: Optional[str] = None,
-        callback: Optional[Callable[[Dict[str, Any]], None]] = None
+        run_id: str | None = None,
+        callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> TrainingRun:
         """
         Run Direct Preference Optimization training.
@@ -443,7 +460,7 @@ class Trainer:
             dataset_path=Path(dataset_path),
             output_path=output_path,
             status="running",
-            started_at=datetime.now(timezone.utc).isoformat()
+            started_at=datetime.now(timezone.utc).isoformat(),
         )
         self.active_runs[run_id] = run
 
@@ -465,9 +482,9 @@ class Trainer:
     def _train_with_unsloth_sft(
         self,
         run: TrainingRun,
-        callback: Optional[Callable[[Dict[str, Any]], None]] = None,
-        log_callback: Optional[Callable[[str], None]] = None,
-        pid_callback: Optional[Callable[[int, "TrainingRun"], None]] = None,
+        callback: Callable[[dict[str, Any]], None] | None = None,
+        log_callback: Callable[[str], None] | None = None,
+        pid_callback: Callable[[int, "TrainingRun"], None] | None = None,
     ) -> None:
         """
         Train using Unsloth for fast LoRA fine-tuning.
@@ -479,7 +496,6 @@ class Trainer:
             callback: Optional callback for training metrics
             log_callback: Optional callback for raw log lines
         """
-        import sys
         import re
 
         # Generate training script
@@ -505,7 +521,7 @@ class Trainer:
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
-                cwd=str(Path.cwd())  # Run from project root
+                cwd=str(Path.cwd()),  # Run from project root
             )
 
             # Store PID for process control (suspend/resume/reconnect)
@@ -549,7 +565,9 @@ class Trainer:
                     epoch_match = re.search(r"'epoch':\s*([\d.]+)", line)
                     step_match = re.search(r"'step':\s*(\d+)", line)
                     grad_norm_match = re.search(r"'grad_norm':\s*([\d.]+)", line)
-                    total_steps_match = re.search(r"total[_\s]?steps[=:\s]+(\d+)", line, re.IGNORECASE)
+                    total_steps_match = re.search(
+                        r"total[_\s]?steps[=:\s]+(\d+)", line, re.IGNORECASE
+                    )
 
                     # Also parse tqdm progress bar: "8%|8 | 1/12 [00:07<01:26, 7.90s/it]"
                     progress_match = re.search(r"(\d+)%\|[^|]*\|\s*(\d+)/(\d+)", line)
@@ -588,22 +606,26 @@ class Trainer:
                             elif eta_seconds < 3600:
                                 eta = f"{int(eta_seconds / 60)}m"
                             else:
-                                eta = f"{int(eta_seconds / 3600)}h {int((eta_seconds % 3600) / 60)}m"
+                                eta = (
+                                    f"{int(eta_seconds / 3600)}h {int((eta_seconds % 3600) / 60)}m"
+                                )
 
                     # Send progress callback with all metrics
                     # Send updates on step changes OR loss updates
                     if callback and (progress_match or loss_match):
-                        callback({
-                            "epoch": last_epoch,
-                            "total_epochs": self.config.num_epochs,
-                            "step": last_step,
-                            "total_steps": estimated_total_steps,
-                            "loss": last_loss,  # May be None initially
-                            "learning_rate": self.config.learning_rate,
-                            "grad_norm": last_grad_norm,
-                            "eta": eta,
-                            "samples_processed": samples_processed
-                        })
+                        callback(
+                            {
+                                "epoch": last_epoch,
+                                "total_epochs": self.config.num_epochs,
+                                "step": last_step,
+                                "total_steps": estimated_total_steps,
+                                "loss": last_loss,  # May be None initially
+                                "learning_rate": self.config.learning_rate,
+                                "grad_norm": last_grad_norm,
+                                "eta": eta,
+                                "samples_processed": samples_processed,
+                            }
+                        )
 
                     # Track loss curve for model profile
                     if loss_match and last_loss is not None and last_step > 0:
@@ -611,7 +633,7 @@ class Trainer:
                             step=last_step,
                             loss=last_loss,
                             epoch=last_epoch,
-                            learning_rate=self.config.learning_rate
+                            learning_rate=self.config.learning_rate,
                         )
 
             # Wait for process to complete
@@ -623,7 +645,7 @@ class Trainer:
             run.metrics = {
                 "final_loss": last_loss or 0.0,
                 "epochs_completed": self.config.num_epochs,
-                "samples_processed": samples_processed
+                "samples_processed": samples_processed,
             }
 
             logger.info(f"Training completed. Model saved to: {run.output_path}")
@@ -765,12 +787,9 @@ if __name__ == "__main__":
 '''
 
     def _train_with_unsloth_dpo(
-        self,
-        run: TrainingRun,
-        callback: Optional[Callable[[Dict[str, Any]], None]] = None
+        self, run: TrainingRun, callback: Callable[[dict[str, Any]], None] | None = None
     ) -> None:
         """Train using Unsloth with DPO."""
-        import sys
         import re
 
         # Generate DPO training script
@@ -795,7 +814,7 @@ if __name__ == "__main__":
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
-                cwd=str(Path.cwd())
+                cwd=str(Path.cwd()),
             )
 
             last_loss = None
@@ -819,12 +838,14 @@ if __name__ == "__main__":
                         reward_margin = float(reward_match.group(1))
 
                     if callback and last_loss is not None:
-                        callback({
-                            "epoch": last_epoch,
-                            "total_epochs": self.config.num_epochs,
-                            "loss": last_loss,
-                            "reward_margin": reward_margin
-                        })
+                        callback(
+                            {
+                                "epoch": last_epoch,
+                                "total_epochs": self.config.num_epochs,
+                                "loss": last_loss,
+                                "reward_margin": reward_margin,
+                            }
+                        )
 
             return_code = process.wait()
             if return_code != 0:
@@ -833,7 +854,7 @@ if __name__ == "__main__":
             run.metrics = {
                 "final_loss": last_loss or 0.0,
                 "final_reward_margin": reward_margin,
-                "epochs_completed": self.config.num_epochs
+                "epochs_completed": self.config.num_epochs,
             }
 
             logger.info(f"DPO training completed. Model saved to: {run.output_path}")
@@ -845,8 +866,10 @@ if __name__ == "__main__":
     def train_distillation(
         self,
         dataset_path: Path,
-        run_id: Optional[str] = None,
-        callback: Optional[Callable[[Dict[str, Any]], None]] = None
+        run_id: str | None = None,
+        callback: Callable[[dict[str, Any]], None] | None = None,
+        log_callback: Callable[[str], None] | None = None,
+        pid_callback: Callable[[int, "TrainingRun"], None] | None = None,
     ) -> TrainingRun:
         """
         Run Knowledge Distillation training.
@@ -872,12 +895,15 @@ if __name__ == "__main__":
             dataset_path=Path(dataset_path),
             output_path=output_path,
             status="running",
-            started_at=datetime.now(timezone.utc).isoformat()
+            started_at=datetime.now(timezone.utc).isoformat(),
         )
         self.active_runs[run_id] = run
 
         try:
-            self._train_with_distillation(run, callback)
+            if self.config.use_remote_ssh:
+                self._train_with_remote_ssh(run, callback, log_callback, pid_callback)
+            else:
+                self._train_with_distillation(run, callback, log_callback, pid_callback)
             run.status = "completed"
             run.completed_at = datetime.now(timezone.utc).isoformat()
 
@@ -899,44 +925,182 @@ if __name__ == "__main__":
     def _train_with_distillation(
         self,
         run: TrainingRun,
-        callback: Optional[Callable[[Dict[str, Any]], None]] = None
+        callback: Callable[[dict[str, Any]], None] | None = None,
+        log_callback: Callable[[str], None] | None = None,
+        pid_callback: Callable[[int, "TrainingRun"], None] | None = None,
     ) -> None:
-        """Train using knowledge distillation."""
-        # Generate distillation training script
+        """Train using knowledge distillation (offline — teacher traces as training data)."""
+        import re
+
         script_content = self._generate_distillation_script(run)
         script_path = run.output_path / "train_distillation.py"
         run.output_path.mkdir(parents=True, exist_ok=True)
         script_path.write_text(script_content)
 
-        print(f"Starting Knowledge Distillation run: {run.run_id}")
-        print(f"Teacher: {self.config.teacher_model}")
-        print(f"Student: {self.config.base_model}")
-        print(f"Dataset: {run.dataset_path}")
-        print(f"Output: {run.output_path}")
+        python_exe = self._get_training_python()
+        logger.info(f"Starting Distillation run: {run.run_id}")
+        logger.info(f"Teacher: {self.config.teacher_model}")
+        logger.info(f"Student: {self.config.base_model}")
+        logger.info(f"Dataset: {run.dataset_path}")
+        logger.info(f"Output: {run.output_path}")
+        logger.info(f"Script: {script_path}")
+        logger.info(f"Python: {python_exe}")
 
-        # Simulate training
-        if callback:
-            for epoch in range(self.config.num_epochs):
-                callback({
-                    "epoch": epoch + 1,
-                    "total_epochs": self.config.num_epochs,
-                    "student_loss": 2.0 - (epoch * 0.25),
-                    "distillation_loss": 1.5 - (epoch * 0.2),
-                    "kl_divergence": 0.8 - (epoch * 0.15)
-                })
+        try:
+            process = subprocess.Popen(
+                [python_exe, str(script_path)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                cwd=str(Path.cwd()),
+            )
 
-        run.metrics = {
-            "final_student_loss": 1.25,
-            "final_distillation_loss": 0.9,
-            "final_kl_divergence": 0.35,
-            "epochs_completed": self.config.num_epochs,
-            "teacher_model": self.config.teacher_model
-        }
+            run.pid = process.pid
+            logger.info(f"Distillation subprocess started with PID {process.pid}")
 
-        print(f"Distillation completed. Model saved to: {run.output_path}")
+            if pid_callback:
+                try:
+                    pid_callback(process.pid, run)
+                except Exception as e:
+                    logger.warning(f"pid_callback error: {e}")
+
+            last_loss = None
+            last_epoch = 0
+            last_step = 0
+            last_grad_norm = None
+            samples_processed = 0
+            start_time = datetime.now(timezone.utc)
+            estimated_total_steps = 1000
+
+            for line in process.stdout:
+                line = line.strip()
+                if line:
+                    logger.info(f"[Distillation] {line}")
+
+                    if log_callback:
+                        try:
+                            log_callback(line)
+                        except Exception as e:
+                            logger.warning(f"Log callback error: {e}")
+
+                    loss_match = re.search(r"'loss':\s*([\d.]+)", line)
+                    epoch_match = re.search(r"'epoch':\s*([\d.]+)", line)
+                    step_match = re.search(r"'step':\s*(\d+)", line)
+                    grad_norm_match = re.search(r"'grad_norm':\s*([\d.]+)", line)
+                    progress_match = re.search(r"(\d+)%\|[^|]*\|\s*(\d+)/(\d+)", line)
+                    unsloth_steps_match = re.search(r"Total steps\s*=\s*(\d+)", line)
+
+                    if loss_match:
+                        last_loss = float(loss_match.group(1))
+                    if epoch_match:
+                        last_epoch = int(float(epoch_match.group(1)))
+                    if step_match:
+                        last_step = int(step_match.group(1))
+                        samples_processed = last_step * self.config.batch_size
+                    if grad_norm_match:
+                        last_grad_norm = float(grad_norm_match.group(1))
+                    if unsloth_steps_match:
+                        estimated_total_steps = int(unsloth_steps_match.group(1))
+                    if progress_match:
+                        last_step = int(progress_match.group(2))
+                        estimated_total_steps = int(progress_match.group(3))
+                        samples_processed = last_step * self.config.batch_size
+
+                    eta = None
+                    if last_step > 0 and estimated_total_steps > 0:
+                        elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
+                        steps_remaining = estimated_total_steps - last_step
+                        if steps_remaining > 0:
+                            time_per_step = elapsed / last_step
+                            eta_seconds = steps_remaining * time_per_step
+                            if eta_seconds < 60:
+                                eta = f"{int(eta_seconds)}s"
+                            elif eta_seconds < 3600:
+                                eta = f"{int(eta_seconds / 60)}m"
+                            else:
+                                eta = (
+                                    f"{int(eta_seconds / 3600)}h {int((eta_seconds % 3600) / 60)}m"
+                                )
+
+                    if callback and (progress_match or loss_match):
+                        callback(
+                            {
+                                "epoch": last_epoch,
+                                "total_epochs": self.config.num_epochs,
+                                "step": last_step,
+                                "total_steps": estimated_total_steps,
+                                "loss": last_loss,
+                                "learning_rate": self.config.learning_rate,
+                                "grad_norm": last_grad_norm,
+                                "eta": eta,
+                                "samples_processed": samples_processed,
+                            }
+                        )
+
+                    if loss_match and last_loss is not None and last_step > 0:
+                        run.add_loss_point(
+                            step=last_step,
+                            loss=last_loss,
+                            epoch=last_epoch,
+                            learning_rate=self.config.learning_rate,
+                        )
+
+            return_code = process.wait()
+
+            if return_code != 0:
+                raise RuntimeError(f"Distillation script exited with code {return_code}")
+
+            run.metrics = {
+                "final_loss": last_loss or 0.0,
+                "epochs_completed": self.config.num_epochs,
+                "samples_processed": samples_processed,
+                "teacher_model": self.config.teacher_model,
+            }
+
+            logger.info(f"Distillation completed. Model saved to: {run.output_path}")
+
+        except FileNotFoundError as e:
+            raise RuntimeError(f"Python interpreter not found: {e}")
+        except Exception as e:
+            logger.error(f"Distillation training failed: {e}")
+            raise
+
+    def train_rlvr(
+        self,
+        dataset_path: Path,
+        run_id: str | None = None,
+        callback: Callable[[dict[str, Any]], None] | None = None,
+        log_callback: Callable[[str], None] | None = None,
+        pid_callback: Callable[[int, "TrainingRun"], None] | None = None,
+    ) -> TrainingRun:
+        """
+        Run RL with Verifiable Rewards.
+
+        This is GRPO with verification-based reward signals.
+        Dataset must include 'tests' field with pytest-compatible test code.
+        """
+        grpo_config = copy.deepcopy(self.config)
+        grpo_config.grpo_reward_mode = "verification"
+
+        grpo_trainer = GRPOTrainer(grpo_config)
+        run = grpo_trainer.train_grpo(
+            dataset_path=dataset_path,
+            verifier_fn=lambda p, r: 0.0,
+            run_id=run_id,
+            callback=callback,
+            log_callback=log_callback,
+            pid_callback=pid_callback,
+        )
+        run.strategy = TrainingStrategy.RLVR
+        return run
 
     def _generate_distillation_script(self, run: TrainingRun) -> str:
         """Generate Knowledge Distillation training script."""
+        # Use forward slashes for cross-platform compatibility
+        dataset_path = str(run.dataset_path).replace("\\", "/")
+        output_path = str(run.output_path).replace("\\", "/")
+
         return f'''#!/usr/bin/env python3
 """
 Auto-generated Knowledge Distillation Script for BashGym
@@ -983,7 +1147,7 @@ student_model = FastLanguageModel.get_peft_model(
 )
 
 # Load dataset (should contain prompts and optionally teacher outputs)
-dataset = load_dataset("json", data_files="{run.dataset_path}", split="train")
+dataset = load_dataset("json", data_files="{dataset_path}", split="train")
 
 def distillation_loss(student_logits, teacher_logits, labels, alpha=ALPHA, temperature=TEMPERATURE):
     """
@@ -1004,7 +1168,7 @@ def distillation_loss(student_logits, teacher_logits, labels, alpha=ALPHA, tempe
 
 # Training arguments
 training_args = TrainingArguments(
-    output_dir="{run.output_path}",
+    output_dir="{output_path}",
     per_device_train_batch_size={self.config.batch_size},
     gradient_accumulation_steps={self.config.gradient_accumulation_steps},
     warmup_ratio={self.config.warmup_ratio},
@@ -1041,18 +1205,18 @@ trainer.train()
 
 # Save final model
 print("Saving distilled model...")
-student_model.save_pretrained("{run.output_path}/final")
-tokenizer.save_pretrained("{run.output_path}/final")
+student_model.save_pretrained("{output_path}/final")
+tokenizer.save_pretrained("{output_path}/final")
 
 # Save LoRA adapters separately
 student_model.save_pretrained_merged(
-    "{run.output_path}/merged",
+    "{output_path}/merged",
     tokenizer,
     save_method="merged_16bit",
 )
 
 print("Knowledge distillation complete!")
-print(f"Student model saved to: {run.output_path}/final")
+print(f"Student model saved to: {output_path}/final")
 '''
 
     def _generate_unsloth_dpo_script(self, run: TrainingRun) -> str:
@@ -1136,19 +1300,39 @@ print("DPO training complete!")
 '''
 
     def _train_with_remote_ssh(self, run, callback, log_callback, pid_callback):
-        """Execute training on remote machine via SSH."""
-        from bashgym.gym.remote_trainer import RemoteTrainer, SSHConfig
-        from bashgym.config import get_settings
+        """Execute training on remote machine via SSH.
 
-        settings = get_settings()
-        ssh_config = SSHConfig.from_settings(settings.ssh)
+        Strategy-aware: generates the correct script based on run.strategy.
+        """
+        from bashgym.gym.remote_trainer import RemoteTrainer, SSHConfig
+
+        # Use pre-resolved ssh_config from route handler, or fall back to env vars
+        ssh_config = getattr(self, "ssh_config", None)
+        if ssh_config is None:
+            from bashgym.config import get_settings
+
+            settings = get_settings()
+            ssh_config = SSHConfig.from_settings(settings.ssh)
 
         trainer = RemoteTrainer(ssh_config)
 
-        # Generate script locally (same as local training)
-        script_content = self._generate_unsloth_sft_script(run)
-        script_path = run.output_path / "train_sft.py"
+        # Generate the correct script based on strategy
         run.output_path.mkdir(parents=True, exist_ok=True)
+
+        if run.strategy == TrainingStrategy.DISTILLATION:
+            script_content = self._generate_distillation_script(run)
+            script_path = run.output_path / "train_distillation.py"
+        elif run.strategy == TrainingStrategy.DPO:
+            script_content = self._generate_unsloth_dpo_script(run)
+            script_path = run.output_path / "train_dpo.py"
+        elif run.strategy in (TrainingStrategy.GRPO, TrainingStrategy.RLVR):
+            grpo_trainer = GRPOTrainer(self.config)
+            script_content = grpo_trainer._generate_grpo_script(run)
+            script_path = run.output_path / "train_grpo.py"
+        else:
+            script_content = self._generate_unsloth_sft_script(run)
+            script_path = run.output_path / "train_sft.py"
+
         script_path.write_text(script_content)
 
         def _pid_cb(remote_pid):
@@ -1156,22 +1340,22 @@ print("DPO training complete!")
             if pid_callback:
                 pid_callback(remote_pid, run)
 
-        result = asyncio.run(trainer.train_remote(
-            run_id=run.run_id,
-            script_path=script_path,
-            dataset_path=Path(run.dataset_path),
-            local_output_dir=run.output_path,
-            log_callback=log_callback,
-            pid_callback=_pid_cb,
-        ))
+        result = asyncio.run(
+            trainer.train_remote(
+                run_id=run.run_id,
+                script_path=script_path,
+                dataset_path=Path(run.dataset_path),
+                local_output_dir=run.output_path,
+                log_callback=log_callback,
+                pid_callback=_pid_cb,
+            )
+        )
 
         if not result["success"]:
             raise RuntimeError(f"Remote training failed: {result.get('error')}")
 
     def _train_with_nemo_gym(
-        self,
-        run: TrainingRun,
-        callback: Optional[Callable[[Dict[str, Any]], None]] = None
+        self, run: TrainingRun, callback: Callable[[dict[str, Any]], None] | None = None
     ) -> None:
         """
         Train using NVIDIA NeMo Customizer (cloud-based).
@@ -1181,8 +1365,7 @@ print("DPO training complete!")
         """
         if NeMoClient is None:
             raise RuntimeError(
-                "NeMo client not available. Install with:\n"
-                "  pip install nemo-microservices"
+                "NeMo client not available. Install with:\n" "  pip install nemo-microservices"
             )
 
         logger.info(f"Submitting training job to NeMo Customizer: {run.run_id}")
@@ -1232,23 +1415,27 @@ print("DPO training complete!")
 
                 # Report progress
                 if callback and job.metrics:
-                    callback({
-                        "job_id": job.job_id,
-                        "status": job.status,
-                        "epoch": job.metrics.get("epoch", 0),
-                        "loss": job.metrics.get("loss", 0),
-                        "learning_rate": job.metrics.get("learning_rate", 0),
-                    })
+                    callback(
+                        {
+                            "job_id": job.job_id,
+                            "status": job.status,
+                            "epoch": job.metrics.get("epoch", 0),
+                            "loss": job.metrics.get("loss", 0),
+                            "learning_rate": job.metrics.get("learning_rate", 0),
+                        }
+                    )
 
                 # Check completion
                 if job.status in ("completed", "succeeded"):
                     logger.info(f"NeMo job completed: {job.job_id}")
-                    run.metrics.update({
-                        "nemo_job_id": job.job_id,
-                        "status": job.status,
-                        "final_loss": job.metrics.get("final_loss", 0),
-                        "output_model": job.output_model,
-                    })
+                    run.metrics.update(
+                        {
+                            "nemo_job_id": job.job_id,
+                            "status": job.status,
+                            "final_loss": job.metrics.get("final_loss", 0),
+                            "output_model": job.output_model,
+                        }
+                    )
                     break
 
                 elif job.status in ("failed", "cancelled", "error"):
@@ -1264,13 +1451,14 @@ print("DPO training complete!")
                     raise TimeoutError(f"Training job timed out after {timeout}s")
 
                 import time
+
                 time.sleep(poll_interval)
 
-    def get_run_status(self, run_id: str) -> Optional[TrainingRun]:
+    def get_run_status(self, run_id: str) -> TrainingRun | None:
         """Get the status of a training run."""
         return self.active_runs.get(run_id)
 
-    def list_runs(self) -> List[TrainingRun]:
+    def list_runs(self) -> list[TrainingRun]:
         """List all training runs."""
         return list(self.active_runs.values())
 
@@ -1279,8 +1467,8 @@ print("DPO training complete!")
         run_id: str,
         export_format: str = "gguf",
         quantization: str = "q4_k_m",
-        save_lora_separately: bool = True
-    ) -> Optional[Path]:
+        save_lora_separately: bool = True,
+    ) -> Path | None:
         """
         Export a trained model to a specific format.
 
@@ -1400,7 +1588,7 @@ if __name__ == "__main__":
             script_path.write_text(script)
 
             # Also create a simple batch script
-            batch_script = f'''#!/bin/bash
+            batch_script = f"""#!/bin/bash
 # Quick GGUF export for {run.run_id}
 # Requires: llama-cpp-python or llama.cpp
 
@@ -1408,7 +1596,7 @@ python export_gguf.py
 
 echo "GGUF export complete!"
 echo "Output: {export_path}/model-{quantization}.gguf"
-'''
+"""
             (export_path / "export.sh").write_text(batch_script)
 
             print(f"GGUF export scripts generated in: {export_path}")
@@ -1422,7 +1610,7 @@ echo "Output: {export_path}/model-{quantization}.gguf"
 
         elif export_format == "safetensors":
             # Export as safetensors (faster loading)
-            script = f'''#!/usr/bin/env python3
+            script = f"""#!/usr/bin/env python3
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 model = AutoModelForCausalLM.from_pretrained("{run.output_path}/merged")
@@ -1431,7 +1619,7 @@ tokenizer = AutoTokenizer.from_pretrained("{run.output_path}/merged")
 model.save_pretrained("{export_path}", safe_serialization=True)
 tokenizer.save_pretrained("{export_path}")
 print("Exported to safetensors format")
-'''
+"""
             script_path = export_path / "export_safetensors.py"
             script_path.write_text(script)
             print(f"Safetensors export script generated: {script_path}")
@@ -1447,7 +1635,7 @@ class GRPOTrainer(Trainer):
     for policy optimization - ideal for agentic tasks.
     """
 
-    def __init__(self, config: Optional[TrainerConfig] = None):
+    def __init__(self, config: TrainerConfig | None = None):
         """Initialize GRPO trainer."""
         super().__init__(config)
         if self.config.strategy != TrainingStrategy.GRPO:
@@ -1457,8 +1645,10 @@ class GRPOTrainer(Trainer):
         self,
         dataset_path: Path,
         verifier_fn: Callable[[str, str], float],
-        run_id: Optional[str] = None,
-        callback: Optional[Callable[[Dict[str, Any]], None]] = None
+        run_id: str | None = None,
+        callback: Callable[[dict[str, Any]], None] | None = None,
+        log_callback: Callable[[str], None] | None = None,
+        pid_callback: Callable[[int, "TrainingRun"], None] | None = None,
     ) -> TrainingRun:
         """
         Run GRPO training with verifiable rewards.
@@ -1482,12 +1672,15 @@ class GRPOTrainer(Trainer):
             dataset_path=Path(dataset_path),
             output_path=output_path,
             status="running",
-            started_at=datetime.now(timezone.utc).isoformat()
+            started_at=datetime.now(timezone.utc).isoformat(),
         )
         self.active_runs[run_id] = run
 
         try:
-            self._run_grpo_loop(run, verifier_fn, callback)
+            if self.config.use_remote_ssh:
+                self._train_with_remote_ssh(run, callback, log_callback, pid_callback)
+            else:
+                self._run_grpo_loop(run, verifier_fn, callback, log_callback, pid_callback)
             run.status = "completed"
             run.completed_at = datetime.now(timezone.utc).isoformat()
 
@@ -1505,7 +1698,9 @@ class GRPOTrainer(Trainer):
         self,
         run: TrainingRun,
         verifier_fn: Callable[[str, str], float],
-        callback: Optional[Callable[[Dict[str, Any]], None]] = None
+        callback: Callable[[dict[str, Any]], None] | None = None,
+        log_callback: Callable[[str], None] | None = None,
+        pid_callback: Callable[[int, "TrainingRun"], None] | None = None,
     ) -> None:
         """
         Execute the GRPO training loop.
@@ -1516,6 +1711,8 @@ class GRPOTrainer(Trainer):
         3. Compute relative advantages
         4. Update policy
         """
+        import re
+
         print(f"Starting GRPO training: {run.run_id}")
         print(f"Generations per prompt: {self.config.grpo_num_generations}")
 
@@ -1525,122 +1722,331 @@ class GRPOTrainer(Trainer):
         run.output_path.mkdir(parents=True, exist_ok=True)
         script_path.write_text(script_content)
 
-        # Simulate GRPO training
-        if callback:
-            for epoch in range(self.config.num_epochs):
-                callback({
-                    "epoch": epoch + 1,
-                    "total_epochs": self.config.num_epochs,
-                    "avg_reward": 0.3 + (epoch * 0.15),
-                    "policy_loss": 0.5 - (epoch * 0.1)
-                })
+        python_exe = self._get_training_python()
+        logger.info(f"Starting GRPO training run: {run.run_id}")
+        logger.info(f"Dataset: {run.dataset_path}")
+        logger.info(f"Output: {run.output_path}")
+        logger.info(f"Script: {script_path}")
+        logger.info(f"Python: {python_exe}")
 
-        run.metrics = {
-            "final_avg_reward": 0.75,
-            "final_policy_loss": 0.2,
-            "epochs_completed": self.config.num_epochs
-        }
+        try:
+            process = subprocess.Popen(
+                [python_exe, str(script_path)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                cwd=str(Path.cwd()),
+            )
 
-        print(f"GRPO training completed. Model saved to: {run.output_path}")
+            run.pid = process.pid
+            logger.info(f"GRPO subprocess started with PID {process.pid}")
+
+            if pid_callback:
+                try:
+                    pid_callback(process.pid, run)
+                except Exception as e:
+                    logger.warning(f"pid_callback error: {e}")
+
+            last_loss = None
+            last_epoch = 0
+            last_step = 0
+            samples_processed = 0
+            last_avg_reward = None
+            last_kl_divergence = None
+            last_policy_loss = None
+            start_time = datetime.now(timezone.utc)
+            estimated_total_steps = 1000
+
+            for line in process.stdout:
+                line = line.strip()
+                if line:
+                    logger.info(f"[GRPO Training] {line}")
+
+                    if log_callback:
+                        try:
+                            log_callback(line)
+                        except Exception as e:
+                            logger.warning(f"Log callback error: {e}")
+
+                    # Standard HuggingFace metrics
+                    loss_match = re.search(r"'loss':\s*([\d.-]+)", line)
+                    epoch_match = re.search(r"'epoch':\s*([\d.]+)", line)
+                    step_match = re.search(r"'step':\s*(\d+)", line)
+                    progress_match = re.search(r"(\d+)%\|[^|]*\|\s*(\d+)/(\d+)", line)
+                    unsloth_steps_match = re.search(r"Total steps\s*=\s*(\d+)", line)
+
+                    # GRPO-specific trl metrics
+                    reward_match = re.search(r"'reward':\s*([\d.-]+)", line)
+                    mean_reward_match = re.search(r"'mean_reward':\s*([\d.-]+)", line)
+                    kl_match = re.search(r"'kl':\s*([\d.-]+)", line)
+                    policy_loss_match = re.search(r"'policy_loss':\s*([\d.-]+)", line)
+
+                    if loss_match:
+                        last_loss = float(loss_match.group(1))
+                    if epoch_match:
+                        last_epoch = int(float(epoch_match.group(1)))
+                    if step_match:
+                        last_step = int(step_match.group(1))
+                        samples_processed = last_step * self.config.batch_size
+                    if unsloth_steps_match:
+                        estimated_total_steps = int(unsloth_steps_match.group(1))
+                    if progress_match:
+                        last_step = int(progress_match.group(2))
+                        estimated_total_steps = int(progress_match.group(3))
+                        samples_processed = last_step * self.config.batch_size
+                    if reward_match:
+                        last_avg_reward = float(reward_match.group(1))
+                    if mean_reward_match:
+                        last_avg_reward = float(mean_reward_match.group(1))
+                    if kl_match:
+                        last_kl_divergence = float(kl_match.group(1))
+                    if policy_loss_match:
+                        last_policy_loss = float(policy_loss_match.group(1))
+
+                    eta = None
+                    if last_step > 0 and estimated_total_steps > 0:
+                        elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
+                        steps_remaining = estimated_total_steps - last_step
+                        if steps_remaining > 0:
+                            time_per_step = elapsed / last_step
+                            eta_seconds = steps_remaining * time_per_step
+                            if eta_seconds < 60:
+                                eta = f"{int(eta_seconds)}s"
+                            elif eta_seconds < 3600:
+                                eta = f"{int(eta_seconds / 60)}m"
+                            else:
+                                eta = (
+                                    f"{int(eta_seconds / 3600)}h {int((eta_seconds % 3600) / 60)}m"
+                                )
+
+                    if callback and (
+                        progress_match or loss_match or reward_match or mean_reward_match
+                    ):
+                        callback(
+                            {
+                                "epoch": last_epoch,
+                                "total_epochs": self.config.num_epochs,
+                                "step": last_step,
+                                "total_steps": estimated_total_steps,
+                                "loss": last_loss,
+                                "learning_rate": self.config.learning_rate,
+                                "eta": eta,
+                                "samples_processed": samples_processed,
+                                "avg_reward": last_avg_reward,
+                                "kl_divergence": last_kl_divergence,
+                                "policy_loss": last_policy_loss,
+                            }
+                        )
+
+            return_code = process.wait()
+
+            if return_code != 0:
+                raise RuntimeError(f"GRPO training script exited with code {return_code}")
+
+            run.metrics = {
+                "final_loss": last_loss or 0.0,
+                "epochs_completed": self.config.num_epochs,
+                "samples_processed": samples_processed,
+                "final_avg_reward": last_avg_reward,
+                "final_kl_divergence": last_kl_divergence,
+                "final_policy_loss": last_policy_loss,
+            }
+
+            logger.info(f"GRPO training completed. Model saved to: {run.output_path}")
+
+        except FileNotFoundError as e:
+            raise RuntimeError(f"Python interpreter not found: {e}")
+        except Exception as e:
+            logger.error(f"GRPO training failed: {e}")
+            raise
 
     def _generate_grpo_script(self, run: TrainingRun) -> str:
-        """Generate GRPO training script."""
+        """Generate GRPO training script using trl.GRPOTrainer with tiered reward functions."""
+        dataset_path = str(run.dataset_path).replace("\\", "/")
+        output_path = str(run.output_path).replace("\\", "/")
+
         return f'''#!/usr/bin/env python3
 """
 Auto-generated GRPO Training Script for BashGym
 Run ID: {run.run_id}
 Generated: {datetime.now(timezone.utc).isoformat()}
 
-GRPO: Group Relative Policy Optimization
-- Generate multiple responses per prompt
-- Score with verifier (execution success)
-- Compute advantages relative to group mean
-- Update policy with PPO-style objective
+GRPO: Group Relative Policy Optimization with tiered rewards
+- Reward mode: {self.config.grpo_reward_mode}
+- Generations per prompt: {self.config.grpo_num_generations}
 """
 
 from unsloth import FastLanguageModel
 from datasets import load_dataset
-from trl import PPOTrainer, PPOConfig
-import torch
-import numpy as np
+from trl import GRPOTrainer as TRLGRPOTrainer, GRPOConfig
+import torch, ast, subprocess, tempfile, os, sys, re
 
 # Configuration
+REWARD_MODE = "{self.config.grpo_reward_mode}"
 NUM_GENERATIONS = {self.config.grpo_num_generations}
-TEMPERATURE = {self.config.grpo_temperature}
 
-# Load model
-model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name="{self.config.base_model}",
-    max_seq_length={self.config.max_seq_length},
-    load_in_4bit={self.config.load_in_4bit},
-)
 
-# Add LoRA
-model = FastLanguageModel.get_peft_model(
-    model,
-    r={self.config.lora_r},
-    lora_alpha={self.config.lora_alpha},
-    target_modules={self.config.lora_target_modules},
-)
+# --- Reward helpers ---
 
-# Load prompts
-dataset = load_dataset("json", data_files="{run.dataset_path}", split="train")
+def extract_code(text):
+    """Extract code from ```python fences, ``` fences, or raw text."""
+    match = re.search(r"```python\\s*\\n(.*?)```", text, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    match = re.search(r"```\\s*\\n(.*?)```", text, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    return text.strip()
 
-def generate_responses(prompt: str, n: int = NUM_GENERATIONS) -> list:
-    """Generate N responses for a prompt."""
-    inputs = tokenizer(prompt, return_tensors="pt")
-    responses = []
 
-    for _ in range(n):
-        outputs = model.generate(
-            **inputs,
-            max_new_tokens=1024,
-            temperature=TEMPERATURE,
-            do_sample=True,
-        )
-        response = tokenizer.decode(outputs[0], skip_special_tokens=True)
-        responses.append(response)
+def run_verification(code, test_code):
+    """Write code + tests to a temp dir and run pytest. Returns (passed, total)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        solution_path = os.path.join(tmpdir, "solution.py")
+        test_path = os.path.join(tmpdir, "test_solution.py")
+        with open(solution_path, "w") as f:
+            f.write(code)
+        with open(test_path, "w") as f:
+            f.write(test_code)
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "pytest", test_path, "-v", "--tb=no", "-q"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                cwd=tmpdir,
+            )
+            output = result.stdout + result.stderr
+            passed = len(re.findall(r" PASSED", output))
+            failed = len(re.findall(r" FAILED", output))
+            total = passed + failed
+            return passed, total
+        except Exception:
+            return 0, 1
 
-    return responses
 
-def compute_grpo_advantages(rewards: list) -> list:
-    """Compute advantages relative to group mean."""
-    mean_reward = np.mean(rewards)
-    std_reward = np.std(rewards) + 1e-8
-    advantages = [(r - mean_reward) / std_reward for r in rewards]
-    return advantages
+# --- Reward functions ---
 
-# GRPO training loop
-print("Starting GRPO training loop...")
+def syntax_reward(completions, **kwargs):
+    """Return 1.0 if code parses without SyntaxError, else 0.0."""
+    rewards = []
+    for completion in completions:
+        code = extract_code(completion if isinstance(completion, str) else completion[0]["content"])
+        try:
+            ast.parse(code)
+            rewards.append(1.0)
+        except SyntaxError:
+            rewards.append(0.0)
+    return rewards
 
-for epoch in range({self.config.num_epochs}):
-    epoch_rewards = []
 
-    for example in dataset:
-        prompt = example.get("prompt", "")
+def execution_reward(completions, **kwargs):
+    """Return 1.0 if code executes with exit code 0, else 0.0."""
+    rewards = []
+    for completion in completions:
+        code = extract_code(completion if isinstance(completion, str) else completion[0]["content"])
+        try:
+            result = subprocess.run(
+                [sys.executable, "-c", code],
+                capture_output=True,
+                timeout=10,
+            )
+            rewards.append(1.0 if result.returncode == 0 else 0.0)
+        except Exception:
+            rewards.append(0.0)
+    return rewards
 
-        # Generate multiple responses
-        responses = generate_responses(prompt)
 
-        # Score each response (placeholder - use actual verifier)
-        rewards = [0.5 for _ in responses]  # Replace with verifier
+def verification_reward(completions, prompts, tests=None, **kwargs):
+    """Run pytest on extracted code. Returns passed/total for each completion."""
+    rewards = []
+    for i, completion in enumerate(completions):
+        code = extract_code(completion if isinstance(completion, str) else completion[0]["content"])
+        test_code = ""
+        if tests is not None and i < len(tests):
+            test_code = tests[i]
+        if not test_code:
+            # Fall back to syntax check if no test code
+            try:
+                ast.parse(code)
+                rewards.append(0.5)
+            except SyntaxError:
+                rewards.append(0.0)
+            continue
+        passed, total = run_verification(code, test_code)
+        rewards.append(passed / total if total > 0 else 0.0)
+    return rewards
 
-        # Compute relative advantages
-        advantages = compute_grpo_advantages(rewards)
 
-        # Update policy (simplified - actual implementation uses PPO)
-        # trainer.step(prompt, responses, advantages)
+# Reward function selection
+REWARD_FN = {{"syntax": syntax_reward, "execution": execution_reward, "verification": verification_reward}}[REWARD_MODE]
 
-        epoch_rewards.extend(rewards)
 
-    avg_reward = np.mean(epoch_rewards)
-    print(f"Epoch {{epoch+1}}: Avg Reward = {{avg_reward:.4f}}")
+if __name__ == "__main__":
+    import gc
 
-# Save model
-model.save_pretrained("{run.output_path}/final")
-tokenizer.save_pretrained("{run.output_path}/final")
+    # GPU memory cleanup
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
-print("GRPO training complete!")
+    # Load model and tokenizer
+    model, tokenizer = FastLanguageModel.from_pretrained(
+        model_name="{self.config.base_model}",
+        max_seq_length={self.config.max_seq_length},
+        load_in_4bit={self.config.load_in_4bit},
+    )
+
+    # Add LoRA adapters
+    model = FastLanguageModel.get_peft_model(
+        model,
+        r={self.config.lora_r},
+        lora_alpha={self.config.lora_alpha},
+        lora_dropout={self.config.lora_dropout},
+        target_modules={self.config.lora_target_modules},
+        bias="none",
+        use_gradient_checkpointing="unsloth",
+        random_state=42,
+    )
+
+    # Load dataset
+    dataset = load_dataset("json", data_files="{dataset_path}", split="train")
+
+    # GRPO training configuration
+    grpo_config = GRPOConfig(
+        output_dir="{output_path}",
+        num_generations=NUM_GENERATIONS,
+        per_device_train_batch_size={self.config.batch_size},
+        gradient_accumulation_steps={self.config.gradient_accumulation_steps},
+        num_train_epochs={self.config.num_epochs},
+        learning_rate={self.config.learning_rate},
+        logging_steps={self.config.logging_steps},
+        save_steps={self.config.save_steps},
+        max_completion_length={self.config.max_seq_length},
+        report_to="none",
+    )
+
+    # Initialize TRL GRPOTrainer
+    trainer = TRLGRPOTrainer(
+        model=model,
+        processing_class=tokenizer,
+        reward_funcs=[REWARD_FN],
+        train_dataset=dataset,
+        args=grpo_config,
+    )
+
+    print(f"Starting GRPO training with reward_mode={{REWARD_MODE}}...")
+    trainer.train()
+
+    # Save final model and merged weights
+    model.save_pretrained("{output_path}/final")
+    tokenizer.save_pretrained("{output_path}/final")
+    model.save_pretrained_merged("{output_path}/merged", tokenizer, save_method="merged_16bit")
+
+    print("GRPO training complete!")
+    print(f"Final model saved to: {output_path}/final")
+    print(f"Merged model saved to: {output_path}/merged")
 '''
 
 
@@ -1651,7 +2057,7 @@ def main():
         base_model="Qwen/Qwen2.5-Coder-1.5B-Instruct",
         strategy=TrainingStrategy.SFT,
         num_epochs=3,
-        use_lora=True
+        use_lora=True,
     )
 
     trainer = Trainer(config)
@@ -1662,8 +2068,7 @@ def main():
         batch_files = list(sft_data.glob("sft_*.jsonl"))
         if batch_files:
             run = trainer.train_sft(
-                dataset_path=batch_files[0],
-                callback=lambda m: print(f"Progress: {m}")
+                dataset_path=batch_files[0], callback=lambda m: print(f"Progress: {m}")
             )
             print(f"Training run: {run.to_dict()}")
     else:

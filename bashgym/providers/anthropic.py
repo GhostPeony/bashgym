@@ -6,7 +6,7 @@ InferenceProvider interface.
 """
 
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import httpx
 
@@ -19,7 +19,7 @@ from bashgym.providers.base import (
 
 # ── Static model catalogue ─────────────────────────────────────────
 
-ANTHROPIC_MODELS: List[ProviderModel] = [
+ANTHROPIC_MODELS: list[ProviderModel] = [
     ProviderModel(
         id="claude-opus-4-6",
         name="Claude Opus 4.6",
@@ -93,9 +93,9 @@ class AnthropicProvider(InferenceProvider):
 
     async def generate(
         self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
-        system_prompt: Optional[str] = None,
+        messages: list[dict[str, str]],
+        model: str | None = None,
+        system_prompt: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
         **kwargs: Any,
@@ -106,8 +106,8 @@ class AnthropicProvider(InferenceProvider):
 
         try:
             # Separate system messages from the conversation
-            system_parts: List[str] = []
-            non_system_messages: List[Dict[str, str]] = []
+            system_parts: list[str] = []
+            non_system_messages: list[dict[str, str]] = []
 
             for msg in messages:
                 if msg.get("role") == "system":
@@ -119,7 +119,7 @@ class AnthropicProvider(InferenceProvider):
             if system_prompt:
                 system_parts.insert(0, system_prompt)
 
-            payload: Dict[str, Any] = {
+            payload: dict[str, Any] = {
                 "model": resolved_model,
                 "max_tokens": max_tokens,
                 "temperature": temperature,
@@ -192,7 +192,7 @@ class AnthropicProvider(InferenceProvider):
             error="API key not configured",
         )
 
-    async def list_models(self) -> List[ProviderModel]:
+    async def list_models(self) -> list[ProviderModel]:
         """Return the static catalogue of Claude models."""
         return list(ANTHROPIC_MODELS)
 

@@ -20,11 +20,8 @@ frontend.env.local
 # Internal config
 cleancontrol.json
 
-# Internal docs (not for public repo)
-docs/PRODUCT.md
-docs/plans/
-docs/research/
-docs/bashgym-screenshot.png
+# Docs (internal reference, not for public repo)
+docs/
 
 # IDE
 .vscode/
@@ -44,9 +41,13 @@ result.json
 # Node
 node_modules/
 
-# Misc
+# Worktrees
+.worktrees/
+
+# Misc / stray artifacts
 nul
-=2.14.0
+=*
+output/
 
 # Assistant secrets
 assistant/config/config.json

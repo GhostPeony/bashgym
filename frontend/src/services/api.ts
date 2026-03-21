@@ -25,22 +25,40 @@ export interface TaskResponse {
 }
 
 export interface TrainingRequest {
-  strategy?: 'sft' | 'dpo' | 'grpo'
+  strategy?: 'sft' | 'dpo' | 'grpo' | 'distillation'
   dataset_path?: string
   base_model?: string
+  model_type?: string
   num_epochs?: number
   batch_size?: number
   learning_rate?: number
+  warmup_ratio?: number
+  gradient_accumulation_steps?: number
+  max_seq_length?: number
+  save_steps?: number
+  // LoRA
   use_lora?: boolean
   lora_rank?: number
   lora_alpha?: number
-  warmup_steps?: number
-  max_seq_length?: number
+  lora_dropout?: number
+  load_in_4bit?: boolean
+  // Strategy-specific
+  dpo_beta?: number
+  grpo_num_generations?: number
+  grpo_temperature?: number
+  // Knowledge Distillation
+  teacher_model?: string
+  teacher_temperature?: number
+  distillation_alpha?: number
+  // Export
   auto_export_gguf?: boolean
   gguf_quantization?: string
-  use_nemo_gym?: boolean  // Use NVIDIA NeMo cloud training
-  use_remote_ssh?: boolean  // Execute training on remote DGX Spark via SSH
-  // Data source selection
+  // Backend
+  use_nemo_gym?: boolean
+  use_remote_ssh?: boolean
+  device_id?: string
+  selected_repos?: string[]
+  // Data source
   data_source?: 'traces' | 'dataset_path' | 'security_dataset'
   security_dataset_type?: string
   security_dataset_path?: string
@@ -223,6 +241,66 @@ export interface HealthCheck {
   status: string
   timestamp: string
   version: string
+}
+
+// Device management types
+export interface DeviceCapabilities {
+  python_version?: string
+  cuda_version?: string
+  gpus?: Array<{ name: string; vram_total_gb: number; vram_free_gb: number }>
+  disk_free_gb?: number
+  hostname?: string
+  os?: string
+}
+
+export interface Device {
+  id: string
+  name: string
+  host: string
+  port: number
+  username: string
+  key_path: string
+  work_dir: string
+  is_default: boolean
+  added_at: string
+  last_seen?: string
+  capabilities?: DeviceCapabilities
+}
+
+export interface NewDevice {
+  name: string
+  host: string
+  port?: number
+  username: string
+  key_path?: string
+  work_dir?: string
+}
+
+export interface SSHCandidate {
+  ssh_alias: string
+  host: string
+  username?: string
+  port: number
+  key_path?: string
+  already_added: boolean
+  existing_device_id?: string
+}
+
+export interface DiscoverResult {
+  candidates: SSHCandidate[]
+  ssh_config_path: string
+}
+
+export interface PreflightResult {
+  ok: boolean
+  python_version?: string
+  disk_free_gb?: number
+  hostname?: string
+  os_info?: string
+  cuda_version?: string
+  gpus?: Array<{ name: string; vram_total_gb: number; vram_free_gb: number }>
+  error?: string
+  device?: Device
 }
 
 interface ApiResponse<T> {
@@ -759,6 +837,16 @@ export const systemInfoApi = {
 export const sshApi = {
   preflight: () =>
     request<{ ok: boolean; python_version?: string; disk_free_gb?: number; error?: string; host?: string; username?: string }>('/ssh/preflight'),
+}
+
+export const deviceApi = {
+  list: () => request<Device[]>('/devices'),
+  add: (device: NewDevice) => request<Device>('/devices', { method: 'POST', body: JSON.stringify(device), headers: { 'Content-Type': 'application/json' } }),
+  update: (id: string, device: Partial<NewDevice>) => request<Device>(`/devices/${id}`, { method: 'PUT', body: JSON.stringify(device), headers: { 'Content-Type': 'application/json' } }),
+  remove: (id: string) => request<{ ok: boolean }>(`/devices/${id}`, { method: 'DELETE' }),
+  preflight: (id: string) => request<PreflightResult>(`/devices/${id}/preflight`, { method: 'POST' }),
+  setDefault: (id: string) => request<Device>(`/devices/${id}/set-default`, { method: 'POST' }),
+  discover: () => request<DiscoverResult>('/devices/discover', { method: 'POST' }),
 }
 
 // Model Providers API
@@ -2295,4 +2383,85 @@ export const settingsApi = {
       method: 'POST',
       body: JSON.stringify({ key, value }),
     }),
+}
+
+// AutoResearch API
+export interface AutoResearchStartConfig {
+  searchParams: string[]
+  maxExperiments: number
+  trainSteps: number
+  mutationRate: number
+  mutationScale: number
+  baseModel: string
+  learningRate: number
+  loraRank: number
+  loraAlpha: number
+  loraDropout: number
+  warmupRatio: number
+  gradientAccumulationSteps: number
+  batchSize: number
+  maxSeqLength: number
+  load4Bit: boolean
+}
+
+export const autoresearchApi = {
+  start: (config: AutoResearchStartConfig) =>
+    request<{ status: string; message: string }>('/autoresearch/start', {
+      method: 'POST',
+      body: JSON.stringify({
+        search_params: config.searchParams,
+        max_experiments: config.maxExperiments,
+        train_steps: config.trainSteps,
+        mutation_rate: config.mutationRate,
+        mutation_scale: config.mutationScale,
+        base_config: {
+          base_model: config.baseModel,
+          learning_rate: config.learningRate,
+          lora_r: config.loraRank,
+          lora_alpha: config.loraAlpha,
+          lora_dropout: config.loraDropout,
+          warmup_ratio: config.warmupRatio,
+          gradient_accumulation_steps: config.gradientAccumulationSteps,
+          batch_size: config.batchSize,
+          max_seq_length: config.maxSeqLength,
+          load_in_4bit: config.load4Bit,
+        }
+      })
+    }),
+
+  stop: () =>
+    request<{ status: string }>('/autoresearch/stop', { method: 'POST' }),
+
+  pause: () =>
+    request<{ status: string }>('/autoresearch/pause', { method: 'POST' }),
+
+  resume: () =>
+    request<{ status: string }>('/autoresearch/resume', { method: 'POST' }),
+
+  status: () =>
+    request<any>('/autoresearch/status'),
+
+  // Trace research
+  startTraceResearch: (config: { searchParams: string[]; maxExperiments: number; mutationRate: number; mutationScale: number }) =>
+    request<{ status: string; message: string }>('/autoresearch/trace-research/start', {
+      method: 'POST',
+      body: JSON.stringify({
+        search_params: config.searchParams,
+        max_experiments: config.maxExperiments,
+        mutation_rate: config.mutationRate,
+        mutation_scale: config.mutationScale,
+      })
+    }),
+
+  stopTraceResearch: () =>
+    request<{ status: string }>('/autoresearch/trace-research/stop', { method: 'POST' }),
+
+  pauseTraceResearch: () =>
+    request<{ status: string }>('/autoresearch/trace-research/pause', { method: 'POST' }),
+
+  resumeTraceResearch: () =>
+    request<{ status: string }>('/autoresearch/trace-research/resume', { method: 'POST' }),
+
+  traceResearchStatus: () =>
+    request<any>('/autoresearch/trace-research/status'),
 }

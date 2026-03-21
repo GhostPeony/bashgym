@@ -8,12 +8,11 @@ Uses OpenCode's plugin system (tool.execute.after hook).
 import os
 import platform
 from pathlib import Path
-from typing import Tuple
 
 
 def _get_plugins_dir() -> Path:
     """Get the OpenCode plugins directory."""
-    if platform.system() == 'Windows':
+    if platform.system() == "Windows":
         home = Path(os.environ.get("USERPROFILE", ""))
     else:
         home = Path.home()
@@ -22,14 +21,14 @@ def _get_plugins_dir() -> Path:
 
 def _get_bashgym_dir() -> str:
     """Get the Bash Gym directory path for the plugin."""
-    if platform.system() == 'Windows':
-        return '${process.env.USERPROFILE}/.bashgym'
+    if platform.system() == "Windows":
+        return "${process.env.USERPROFILE}/.bashgym"
     else:
-        return '${process.env.HOME}/.bashgym'
+        return "${process.env.HOME}/.bashgym"
 
 
 # The OpenCode plugin source code
-OPENCODE_PLUGIN_SOURCE = '''/**
+OPENCODE_PLUGIN_SOURCE = """/**
  * Bash Gym Trace Capture Plugin for OpenCode
  *
  * Automatically captures tool executions for training data collection.
@@ -225,10 +224,10 @@ export const BashGymTracePlugin = async (ctx: any) => {
 
 // Export as default for OpenCode to pick up
 export default BashGymTracePlugin;
-'''
+"""
 
 
-def install_opencode_plugin() -> Tuple[bool, str]:
+def install_opencode_plugin() -> tuple[bool, str]:
     """
     Install Bash Gym trace capture plugin for OpenCode.
 
@@ -245,11 +244,11 @@ def install_opencode_plugin() -> Tuple[bool, str]:
     try:
         plugin_path.write_text(OPENCODE_PLUGIN_SOURCE)
         return True, f"Installed OpenCode plugin at {plugin_path}"
-    except (IOError, OSError) as e:
+    except OSError as e:
         return False, f"Failed to install OpenCode plugin: {e}"
 
 
-def uninstall_opencode_plugin() -> Tuple[bool, str]:
+def uninstall_opencode_plugin() -> tuple[bool, str]:
     """
     Uninstall Bash Gym plugin from OpenCode.
 
@@ -265,7 +264,7 @@ def uninstall_opencode_plugin() -> Tuple[bool, str]:
     try:
         plugin_path.unlink()
         return True, f"Removed OpenCode plugin from {plugin_path}"
-    except (IOError, OSError) as e:
+    except OSError as e:
         return False, f"Failed to remove OpenCode plugin: {e}"
 
 

@@ -24,25 +24,25 @@ import os
 import platform
 import shutil
 import subprocess
-import uuid
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Set, Tuple
-from dataclasses import dataclass, asdict
+from typing import Any
 
-from ..core import TraceStep, TraceSession, TraceCapture
+from ..core import TraceCapture, TraceSession, TraceStep
 
 
 @dataclass
 class OpenCodeImportResult:
     """Result of an OpenCode session import operation."""
+
     session_id: str
-    source_file: Optional[Path] = None
+    source_file: Path | None = None
     steps_imported: int = 0
-    destination_file: Optional[Path] = None
-    error: Optional[str] = None
+    destination_file: Path | None = None
+    error: str | None = None
     skipped: bool = False
-    skip_reason: Optional[str] = None
+    skip_reason: str | None = None
     import_method: str = "file"  # "file" or "cli"
 
 
@@ -60,17 +60,17 @@ class OpenCodeSessionImporter:
         self.imported_sessions_file = (
             self.trace_capture.bashgym_dir / "imported_opencode_sessions.json"
         )
-        self._imported_sessions: Optional[Set[str]] = None
-        self._opencode_available: Optional[bool] = None
+        self._imported_sessions: set[str] | None = None
+        self._opencode_available: bool | None = None
 
     @staticmethod
-    def _get_storage_dirs() -> List[Path]:
+    def _get_storage_dirs() -> list[Path]:
         """
         Get all possible OpenCode storage directories.
 
         Returns directories in priority order (most likely first).
         """
-        dirs: List[Path] = []
+        dirs: list[Path] = []
 
         if platform.system() == "Windows":
             base = Path(os.environ.get("USERPROFILE", ""))
@@ -84,11 +84,13 @@ class OpenCodeSessionImporter:
             dirs.append(base / ".opencode" / "storage")
         else:
             home = Path.home()
-            dirs.extend([
-                home / ".local" / "share" / "opencode" / "storage",
-                home / ".config" / "opencode" / "storage",
-                home / ".opencode" / "storage",
-            ])
+            dirs.extend(
+                [
+                    home / ".local" / "share" / "opencode" / "storage",
+                    home / ".config" / "opencode" / "storage",
+                    home / ".opencode" / "storage",
+                ]
+            )
 
         # Also check XDG_DATA_HOME if set
         xdg_data = os.environ.get("XDG_DATA_HOME")
@@ -97,7 +99,7 @@ class OpenCodeSessionImporter:
 
         return dirs
 
-    def _find_active_storage_dir(self) -> Optional[Path]:
+    def _find_active_storage_dir(self) -> Path | None:
         """Find the first existing storage directory."""
         for d in self.storage_dirs:
             if d.exists() and d.is_dir():
@@ -112,21 +114,21 @@ class OpenCodeSessionImporter:
         return self._opencode_available
 
     @property
-    def imported_sessions(self) -> Set[str]:
+    def imported_sessions(self) -> set[str]:
         """Get set of already imported session IDs."""
         if self._imported_sessions is None:
             self._imported_sessions = self._load_imported_sessions()
         return self._imported_sessions
 
-    def _load_imported_sessions(self) -> Set[str]:
+    def _load_imported_sessions(self) -> set[str]:
         """Load the list of already imported session IDs."""
         if not self.imported_sessions_file.exists():
             return set()
         try:
-            with open(self.imported_sessions_file, "r") as f:
+            with open(self.imported_sessions_file) as f:
                 data = json.load(f)
                 return set(data.get("sessions", []))
-        except (json.JSONDecodeError, IOError):
+        except (OSError, json.JSONDecodeError):
             return set()
 
     def _save_imported_session(self, session_id: str) -> None:
@@ -136,14 +138,14 @@ class OpenCodeSessionImporter:
             self.imported_sessions_file.parent.mkdir(parents=True, exist_ok=True)
             with open(self.imported_sessions_file, "w") as f:
                 json.dump({"sessions": list(self.imported_sessions)}, f)
-        except IOError as e:
+        except OSError as e:
             print(f"Warning: Could not save imported OpenCode sessions list: {e}")
 
     # ------------------------------------------------------------------
     # CLI-based import
     # ------------------------------------------------------------------
 
-    def _export_session_via_cli(self, session_id: str) -> Optional[Dict[str, Any]]:
+    def _export_session_via_cli(self, session_id: str) -> dict[str, Any] | None:
         """
         Export a session using the opencode CLI.
 
@@ -183,7 +185,7 @@ class OpenCodeSessionImporter:
 
         return None
 
-    def _list_sessions_via_cli(self) -> List[Dict[str, Any]]:
+    def _list_sessions_via_cli(self) -> list[dict[str, Any]]:
         """
         List available sessions using the opencode CLI.
 
@@ -217,9 +219,9 @@ class OpenCodeSessionImporter:
 
     def find_session_files(
         self,
-        since: Optional[datetime] = None,
-        until: Optional[datetime] = None,
-    ) -> List[Tuple[Path, datetime]]:
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> list[tuple[Path, datetime]]:
         """
         Find OpenCode session JSON files by scanning storage directories.
 
@@ -234,7 +236,7 @@ class OpenCodeSessionImporter:
         if not storage_dir:
             return []
 
-        session_files: List[Tuple[Path, datetime]] = []
+        session_files: list[tuple[Path, datetime]] = []
         session_dir = storage_dir / "session"
 
         if not session_dir.exists():
@@ -248,9 +250,7 @@ class OpenCodeSessionImporter:
 
                 for json_file in project_dir.glob("*.json"):
                     try:
-                        mtime = datetime.fromtimestamp(
-                            json_file.stat().st_mtime, tz=timezone.utc
-                        )
+                        mtime = datetime.fromtimestamp(json_file.stat().st_mtime, tz=timezone.utc)
                     except OSError:
                         continue
 
@@ -268,7 +268,7 @@ class OpenCodeSessionImporter:
 
     def _load_messages_for_session(
         self, session_id: str, storage_dir: Path
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Load all message files for a given session.
 
@@ -286,12 +286,12 @@ class OpenCodeSessionImporter:
             if not messages_dir.exists():
                 return []
 
-        messages: List[Dict[str, Any]] = []
+        messages: list[dict[str, Any]] = []
 
         try:
             for msg_file in messages_dir.glob("*.json"):
                 try:
-                    with open(msg_file, "r", encoding="utf-8") as f:
+                    with open(msg_file, encoding="utf-8") as f:
                         msg = json.load(f)
                     if isinstance(msg, dict):
                         msg["_source_file"] = str(msg_file)
@@ -301,21 +301,19 @@ class OpenCodeSessionImporter:
                             if isinstance(m, dict):
                                 m["_source_file"] = str(msg_file)
                                 messages.append(m)
-                except (json.JSONDecodeError, IOError):
+                except (OSError, json.JSONDecodeError):
                     continue
         except (PermissionError, OSError):
             pass
 
         # Sort by timestamp if available
-        def sort_key(m: Dict) -> str:
+        def sort_key(m: dict) -> str:
             return m.get("timestamp", m.get("created_at", ""))
 
         messages.sort(key=sort_key)
         return messages
 
-    def _load_parts_for_message(
-        self, message_id: str, storage_dir: Path
-    ) -> List[Dict[str, Any]]:
+    def _load_parts_for_message(self, message_id: str, storage_dir: Path) -> list[dict[str, Any]]:
         """
         Load all part files for a given message.
 
@@ -330,18 +328,18 @@ class OpenCodeSessionImporter:
         if not parts_dir.exists():
             return []
 
-        parts: List[Dict[str, Any]] = []
+        parts: list[dict[str, Any]] = []
 
         try:
             for part_file in parts_dir.glob("*.json"):
                 try:
-                    with open(part_file, "r", encoding="utf-8") as f:
+                    with open(part_file, encoding="utf-8") as f:
                         part = json.load(f)
                     if isinstance(part, dict):
                         parts.append(part)
                     elif isinstance(part, list):
                         parts.extend(p for p in part if isinstance(p, dict))
-                except (json.JSONDecodeError, IOError):
+                except (OSError, json.JSONDecodeError):
                     continue
         except (PermissionError, OSError):
             pass
@@ -350,11 +348,11 @@ class OpenCodeSessionImporter:
 
     def _extract_steps_from_parts(
         self,
-        parts: List[Dict[str, Any]],
+        parts: list[dict[str, Any]],
         session_id: str,
         session_file: Path,
         msg_idx: int,
-    ) -> List[TraceStep]:
+    ) -> list[TraceStep]:
         """
         Extract TraceStep objects from message parts.
 
@@ -363,7 +361,7 @@ class OpenCodeSessionImporter:
           - tool_result: {"type": "tool-result", "name": "...", "output": "..."}
           - text: {"type": "text", "content": "..."}
         """
-        steps: List[TraceStep] = []
+        steps: list[TraceStep] = []
 
         for part_idx, part in enumerate(parts):
             part_type = part.get("type", "")
@@ -372,9 +370,7 @@ class OpenCodeSessionImporter:
                 part.get("created_at", datetime.now(timezone.utc).isoformat()),
             )
             if isinstance(timestamp, (int, float)):
-                timestamp = datetime.fromtimestamp(
-                    timestamp, tz=timezone.utc
-                ).isoformat()
+                timestamp = datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()
 
             # Tool call part
             if part_type in ("tool-call", "tool_call", "toolCall"):
@@ -382,9 +378,7 @@ class OpenCodeSessionImporter:
                 tool_input = part.get("input", part.get("args", part.get("arguments", {})))
 
                 command = (
-                    json.dumps(tool_input)
-                    if isinstance(tool_input, dict)
-                    else str(tool_input)
+                    json.dumps(tool_input) if isinstance(tool_input, dict) else str(tool_input)
                 )
 
                 step = TraceStep(
@@ -413,9 +407,9 @@ class OpenCodeSessionImporter:
                 output = part.get("output", part.get("result", part.get("content", "")))
                 is_error = part.get("is_error", part.get("isError", False))
 
-                output_str = (
-                    json.dumps(output) if isinstance(output, dict) else str(output)
-                )[:10000]
+                output_str = (json.dumps(output) if isinstance(output, dict) else str(output))[
+                    :10000
+                ]
 
                 # Try to match to a preceding tool-call step
                 tool_call_id = part.get("tool_call_id", part.get("id", ""))
@@ -436,10 +430,7 @@ class OpenCodeSessionImporter:
                 if not matched:
                     # Match by name if no ID match
                     for existing_step in reversed(steps):
-                        if (
-                            existing_step.tool_name == tool_name
-                            and not existing_step.output
-                        ):
+                        if existing_step.tool_name == tool_name and not existing_step.output:
                             existing_step.output = output_str
                             existing_step.success = not is_error
                             existing_step.exit_code = 1 if is_error else 0
@@ -471,12 +462,12 @@ class OpenCodeSessionImporter:
 
     def _extract_steps_from_message(
         self,
-        msg: Dict[str, Any],
+        msg: dict[str, Any],
         session_id: str,
         session_file: Path,
         msg_idx: int,
-        storage_dir: Optional[Path] = None,
-    ) -> Tuple[List[TraceStep], Optional[str], Optional[str]]:
+        storage_dir: Path | None = None,
+    ) -> tuple[list[TraceStep], str | None, str | None]:
         """
         Extract TraceStep objects from a message dict.
 
@@ -485,18 +476,16 @@ class OpenCodeSessionImporter:
         Returns:
             Tuple of (steps, user_text_or_None, model_or_None)
         """
-        steps: List[TraceStep] = []
-        user_text: Optional[str] = None
-        model: Optional[str] = msg.get("model")
+        steps: list[TraceStep] = []
+        user_text: str | None = None
+        model: str | None = msg.get("model")
         role = msg.get("role", "")
         timestamp = msg.get(
             "timestamp",
             msg.get("created_at", datetime.now(timezone.utc).isoformat()),
         )
         if isinstance(timestamp, (int, float)):
-            timestamp = datetime.fromtimestamp(
-                timestamp, tz=timezone.utc
-            ).isoformat()
+            timestamp = datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()
 
         # Capture user text
         if role == "user":
@@ -524,9 +513,7 @@ class OpenCodeSessionImporter:
                 tool_output = tc.get("output", tc.get("result", ""))
 
                 command = (
-                    json.dumps(tool_input)
-                    if isinstance(tool_input, dict)
-                    else str(tool_input)
+                    json.dumps(tool_input) if isinstance(tool_input, dict) else str(tool_input)
                 )
 
                 step = TraceStep(
@@ -569,9 +556,7 @@ class OpenCodeSessionImporter:
                     tool_name = block.get("name", "unknown")
                     tool_input = block.get("input", {})
                     command = (
-                        json.dumps(tool_input)
-                        if isinstance(tool_input, dict)
-                        else str(tool_input)
+                        json.dumps(tool_input) if isinstance(tool_input, dict) else str(tool_input)
                     )
 
                     step = TraceStep(
@@ -627,7 +612,7 @@ class OpenCodeSessionImporter:
 
     def parse_session_from_files(
         self, session_file: Path
-    ) -> Tuple[List[TraceStep], Dict[str, Any]]:
+    ) -> tuple[list[TraceStep], dict[str, Any]]:
         """
         Parse an OpenCode session by reading session, message, and part files.
 
@@ -640,19 +625,19 @@ class OpenCodeSessionImporter:
         session_id = session_file.stem
         storage_dir = session_file.parent.parent.parent  # session/<projId>/<file>.json -> storage/
 
-        meta: Dict[str, Any] = {
+        meta: dict[str, Any] = {
             "user_initial_prompt": None,
             "all_user_prompts": [],
             "conversation_turns": 0,
             "models_used": [],
         }
-        models_used: Set[str] = set()
+        models_used: set[str] = set()
 
         # Load session metadata
         try:
-            with open(session_file, "r", encoding="utf-8") as f:
+            with open(session_file, encoding="utf-8") as f:
                 session_data = json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
+        except (OSError, json.JSONDecodeError) as e:
             print(f"Error reading OpenCode session file {session_file}: {e}")
             return [], {"user_initial_prompt": None}
 
@@ -668,7 +653,7 @@ class OpenCodeSessionImporter:
         if session_model:
             models_used.add(session_model)
 
-        steps: List[TraceStep] = []
+        steps: list[TraceStep] = []
 
         # Try loading messages from the message directory
         messages = self._load_messages_for_session(session_id, storage_dir)
@@ -686,19 +671,19 @@ class OpenCodeSessionImporter:
 
                     if user_text:
                         meta["conversation_turns"] += 1
-                        meta["all_user_prompts"].append({
-                            "text": user_text,
-                            "timestamp": msg.get("timestamp"),
-                        })
+                        meta["all_user_prompts"].append(
+                            {
+                                "text": user_text,
+                                "timestamp": msg.get("timestamp"),
+                            }
+                        )
                         if meta["user_initial_prompt"] is None:
                             meta["user_initial_prompt"] = user_text[:500]
                 except Exception:
                     continue
         else:
             # Fall back to inline messages in session data
-            inline_messages = session_data.get(
-                "messages", session_data.get("conversation", [])
-            )
+            inline_messages = session_data.get("messages", session_data.get("conversation", []))
             if isinstance(inline_messages, list):
                 for msg_idx, msg in enumerate(inline_messages):
                     if not isinstance(msg, dict):
@@ -714,10 +699,12 @@ class OpenCodeSessionImporter:
 
                         if user_text:
                             meta["conversation_turns"] += 1
-                            meta["all_user_prompts"].append({
-                                "text": user_text,
-                                "timestamp": msg.get("timestamp"),
-                            })
+                            meta["all_user_prompts"].append(
+                                {
+                                    "text": user_text,
+                                    "timestamp": msg.get("timestamp"),
+                                }
+                            )
                             if meta["user_initial_prompt"] is None:
                                 meta["user_initial_prompt"] = user_text[:500]
                     except Exception:
@@ -727,8 +714,8 @@ class OpenCodeSessionImporter:
         return steps, meta
 
     def parse_session_from_cli(
-        self, session_data: Dict[str, Any], session_id: str
-    ) -> Tuple[List[TraceStep], Dict[str, Any]]:
+        self, session_data: dict[str, Any], session_id: str
+    ) -> tuple[list[TraceStep], dict[str, Any]]:
         """
         Parse an OpenCode session from CLI export output.
 
@@ -739,21 +726,21 @@ class OpenCodeSessionImporter:
         Returns:
             Tuple of (steps, session_metadata)
         """
-        meta: Dict[str, Any] = {
+        meta: dict[str, Any] = {
             "user_initial_prompt": None,
             "all_user_prompts": [],
             "conversation_turns": 0,
             "models_used": [],
             "opencode_session_title": session_data.get("title", ""),
         }
-        models_used: Set[str] = set()
+        models_used: set[str] = set()
 
         # Session-level model field
         session_model = session_data.get("model", "")
         if session_model:
             models_used.add(session_model)
 
-        steps: List[TraceStep] = []
+        steps: list[TraceStep] = []
         messages = session_data.get("messages", session_data.get("conversation", []))
 
         if not isinstance(messages, list):
@@ -776,10 +763,12 @@ class OpenCodeSessionImporter:
 
                 if user_text:
                     meta["conversation_turns"] += 1
-                    meta["all_user_prompts"].append({
-                        "text": user_text,
-                        "timestamp": msg.get("timestamp"),
-                    })
+                    meta["all_user_prompts"].append(
+                        {
+                            "text": user_text,
+                            "timestamp": msg.get("timestamp"),
+                        }
+                    )
                     if meta["user_initial_prompt"] is None:
                         meta["user_initial_prompt"] = user_text[:500]
             except Exception:
@@ -788,9 +777,7 @@ class OpenCodeSessionImporter:
         meta["models_used"] = sorted(models_used)
         return steps, meta
 
-    def import_session(
-        self, session_file: Path, force: bool = False
-    ) -> OpenCodeImportResult:
+    def import_session(self, session_file: Path, force: bool = False) -> OpenCodeImportResult:
         """
         Import a single OpenCode session file into BashGym format.
 
@@ -827,8 +814,7 @@ class OpenCodeSessionImporter:
 
         # Create trace session
         user_initial_prompt = (
-            session_meta.pop("user_initial_prompt", None)
-            or "Imported OpenCode session"
+            session_meta.pop("user_initial_prompt", None) or "Imported OpenCode session"
         )
         session = TraceSession.from_steps(
             steps,
@@ -852,7 +838,7 @@ class OpenCodeSessionImporter:
         try:
             with open(destination, "w", encoding="utf-8") as f:
                 json.dump(asdict(session), f, indent=2, ensure_ascii=False)
-        except IOError as e:
+        except OSError as e:
             return OpenCodeImportResult(
                 session_id=session_id,
                 source_file=session_file,
@@ -871,9 +857,7 @@ class OpenCodeSessionImporter:
             import_method="file",
         )
 
-    def import_session_from_cli(
-        self, session_id: str, force: bool = False
-    ) -> OpenCodeImportResult:
+    def import_session_from_cli(self, session_id: str, force: bool = False) -> OpenCodeImportResult:
         """
         Import a session using the opencode CLI export.
 
@@ -916,8 +900,7 @@ class OpenCodeSessionImporter:
 
         # Create trace session
         user_initial_prompt = (
-            session_meta.pop("user_initial_prompt", None)
-            or "Imported OpenCode session"
+            session_meta.pop("user_initial_prompt", None) or "Imported OpenCode session"
         )
         session = TraceSession.from_steps(
             steps,
@@ -937,7 +920,7 @@ class OpenCodeSessionImporter:
         try:
             with open(destination, "w", encoding="utf-8") as f:
                 json.dump(asdict(session), f, indent=2, ensure_ascii=False)
-        except IOError as e:
+        except OSError as e:
             return OpenCodeImportResult(
                 session_id=session_id,
                 steps_imported=0,
@@ -960,7 +943,7 @@ def import_opencode_sessions(
     days: int = 60,
     limit: int = 100,
     verbose: bool = True,
-) -> List[Dict]:
+) -> list[dict]:
     """
     Import recent OpenCode sessions.
 
@@ -976,9 +959,9 @@ def import_opencode_sessions(
         List of import result dicts
     """
     importer = OpenCodeSessionImporter()
-    results: List[Dict] = []
+    results: list[dict] = []
     imported_count = 0
-    imported_ids: Set[str] = set()
+    imported_ids: set[str] = set()
 
     # ------------------------------------------------------------------
     # Strategy 1: Try CLI-based import first
@@ -1005,9 +988,7 @@ def import_opencode_sessions(
                     if isinstance(created, (int, float)):
                         created_dt = datetime.fromtimestamp(created, tz=timezone.utc)
                     else:
-                        created_dt = datetime.fromisoformat(
-                            str(created).replace("Z", "+00:00")
-                        )
+                        created_dt = datetime.fromisoformat(str(created).replace("Z", "+00:00"))
                     if created_dt < cutoff:
                         continue
                 except (ValueError, TypeError, OSError):
@@ -1019,7 +1000,9 @@ def import_opencode_sessions(
                 "session_id": result.session_id,
                 "source_file": str(result.source_file) if result.source_file else None,
                 "steps_imported": result.steps_imported,
-                "destination_file": str(result.destination_file) if result.destination_file else None,
+                "destination_file": (
+                    str(result.destination_file) if result.destination_file else None
+                ),
                 "error": result.error,
                 "skipped": result.skipped,
                 "skip_reason": result.skip_reason,
@@ -1038,10 +1021,7 @@ def import_opencode_sessions(
                 elif result.error:
                     print(f"  [!] {sid[:12]}: {result.error}")
                 else:
-                    print(
-                        f"  [+] {sid[:12]}: "
-                        f"{result.steps_imported} steps imported (CLI)"
-                    )
+                    print(f"  [+] {sid[:12]}: " f"{result.steps_imported} steps imported (CLI)")
 
     # ------------------------------------------------------------------
     # Strategy 2: File-based import (fallback or supplement)
@@ -1074,7 +1054,9 @@ def import_opencode_sessions(
                 "session_id": result.session_id,
                 "source_file": str(result.source_file) if result.source_file else None,
                 "steps_imported": result.steps_imported,
-                "destination_file": str(result.destination_file) if result.destination_file else None,
+                "destination_file": (
+                    str(result.destination_file) if result.destination_file else None
+                ),
                 "error": result.error,
                 "skipped": result.skipped,
                 "skip_reason": result.skip_reason,
@@ -1099,9 +1081,6 @@ def import_opencode_sessions(
 
     if not has_storage and not importer.opencode_available:
         if verbose:
-            print(
-                "[BashGym] OpenCode not found - "
-                "neither CLI nor storage directory detected"
-            )
+            print("[BashGym] OpenCode not found - " "neither CLI nor storage directory detected")
 
     return results

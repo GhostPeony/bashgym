@@ -8,14 +8,16 @@ model artifacts on completion.
 
 import asyncio
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Dict, List, Optional
+from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 try:
     import asyncssh
+
     HAS_ASYNCSSH = True
 except ImportError:
     HAS_ASYNCSSH = False
@@ -25,6 +27,7 @@ except ImportError:
 @dataclass
 class SSHConfig:
     """SSH connection configuration."""
+
     host: str
     username: str
     port: int = 22
@@ -45,10 +48,16 @@ class SSHConfig:
 @dataclass
 class PreflightResult:
     """Result of pre-flight checks on the remote machine."""
+
     ok: bool
-    python_version: Optional[str] = None
-    disk_free_gb: Optional[float] = None
-    error: Optional[str] = None
+    python_version: str | None = None
+    disk_free_gb: float | None = None
+    error: str | None = None
+    # Enhanced device info
+    hostname: str | None = None
+    os_info: str | None = None
+    cuda_version: str | None = None
+    gpus: list[dict[str, Any]] | None = None
 
 
 class RemoteTrainer:
@@ -66,6 +75,7 @@ class RemoteTrainer:
             username=self.config.username,
             client_keys=[str(key_path)],
             known_hosts=None,
+            connect_timeout=10,
         )
 
     async def preflight_check(self) -> PreflightResult:
@@ -77,13 +87,13 @@ class RemoteTrainer:
 
         async with conn:
             # Check Python
-            result = await conn.run("python3 --version", check=False)
+            result = await conn.run(self._venv_cmd("python3 --version"), check=False)
             if result.exit_status != 0:
                 return PreflightResult(ok=False, error="python3 not found on remote")
             python_version = result.stdout.strip()
 
             # Check Unsloth
-            result = await conn.run('python3 -c "import unsloth"', check=False)
+            result = await conn.run(self._venv_cmd('python3 -c "import unsloth"'), check=False)
             if result.exit_status != 0:
                 return PreflightResult(
                     ok=False,
@@ -103,11 +113,66 @@ class RemoteTrainer:
                 except (ValueError, AttributeError):
                     pass
 
-            return PreflightResult(
+            result = PreflightResult(
                 ok=True,
                 python_version=python_version,
                 disk_free_gb=disk_free_gb,
             )
+
+            # Hostname
+            try:
+                r = await conn.run("hostname", timeout=5)
+                result.hostname = r.stdout.strip()
+            except Exception:
+                pass
+
+            # OS info
+            try:
+                r = await conn.run("uname -sr", timeout=5)
+                result.os_info = r.stdout.strip()
+            except Exception:
+                pass
+
+            # GPU info
+            try:
+                r = await conn.run(
+                    "nvidia-smi --query-gpu=name,memory.total,memory.free"
+                    " --format=csv,noheader,nounits",
+                    timeout=10,
+                )
+                gpus = []
+                for row in r.stdout.strip().splitlines():
+                    parts = [p.strip() for p in row.split(",")]
+                    if len(parts) == 3:
+                        gpus.append(
+                            {
+                                "name": parts[0],
+                                "vram_total_gb": round(float(parts[1]) / 1024, 1),
+                                "vram_free_gb": round(float(parts[2]) / 1024, 1),
+                            }
+                        )
+                if gpus:
+                    result.gpus = gpus
+            except Exception:
+                pass
+
+            # CUDA version
+            try:
+                import re
+
+                r = await conn.run("nvidia-smi | head -3", timeout=10)
+                m = re.search(r"CUDA Version:\s*([\d.]+)", r.stdout)
+                if m:
+                    result.cuda_version = m.group(1)
+            except Exception:
+                pass
+
+            return result
+
+    def _venv_cmd(self, cmd: str) -> str:
+        """Wrap a command with venv activation."""
+        venv = f"{self.config.remote_work_dir}/venv"
+        return f"source {venv}/bin/activate 2>/dev/null; {cmd}"
 
     def _remote_run_dir(self, run_id: str) -> str:
         """Get the remote directory for a training run."""
@@ -133,7 +198,7 @@ class RemoteTrainer:
         remote_dir = self._remote_run_dir(run_id)
         cmd = (
             f"cd {remote_dir} && "
-            f"nohup python3 train_sft.py > training.log 2>&1 & echo $!"
+            f"nohup bash -c '{self._venv_cmd('python3 train_sft.py')}' > training.log 2>&1 & echo $!"
         )
         result = await conn.run(cmd, check=False)
         pid = int(result.stdout.strip())
@@ -145,7 +210,7 @@ class RemoteTrainer:
         conn,
         run_id: str,
         remote_pid: int,
-        log_callback: Optional[Callable[[str], None]] = None,
+        log_callback: Callable[[str], None] | None = None,
         poll_interval: float = 2.0,
     ) -> None:
         """Stream training logs from remote machine until process exits."""
@@ -245,9 +310,9 @@ class RemoteTrainer:
         script_path: Path,
         dataset_path: Path,
         local_output_dir: Path,
-        log_callback: Optional[Callable[[str], None]] = None,
-        pid_callback: Optional[Callable[[int], None]] = None,
-    ) -> Dict[str, Any]:
+        log_callback: Callable[[str], None] | None = None,
+        pid_callback: Callable[[int], None] | None = None,
+    ) -> dict[str, Any]:
         """Full remote training orchestration.
 
         Runs the complete flow: preflight check -> upload files -> start
@@ -286,7 +351,9 @@ class RemoteTrainer:
 
             # Stream logs until done
             await self._stream_logs(
-                conn, run_id, remote_pid,
+                conn,
+                run_id,
+                remote_pid,
                 log_callback=log_callback,
                 poll_interval=2.0,
             )

@@ -7,14 +7,13 @@ and persists to ~/.bashgym/achievements.json.
 
 import json
 import logging
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Dict, List, Optional, Any
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Any
 
-from bashgym.config import get_bashgym_dir
+from bashgym.achievements.definitions import ACHIEVEMENTS
 from bashgym.achievements.stats_engine import LifetimeStats
-from bashgym.achievements.definitions import ACHIEVEMENTS, AchievementDef
+from bashgym.config import get_bashgym_dir
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +21,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class AchievementStatus:
     """Status of a single achievement."""
+
     id: str
     name: str
     description: str
@@ -30,10 +30,10 @@ class AchievementStatus:
     icon: str
     points: int
     earned: bool
-    earned_at: Optional[str] = None
+    earned_at: str | None = None
     progress: float = 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "name": self.name,
@@ -53,7 +53,7 @@ class AchievementEngine:
 
     def __init__(self):
         self._persistence_path = get_bashgym_dir() / "achievements.json"
-        self._earned: Dict[str, str] = {}  # id -> ISO timestamp
+        self._earned: dict[str, str] = {}  # id -> ISO timestamp
         self._total_points: int = 0
         self._load()
 
@@ -76,13 +76,11 @@ class AchievementEngine:
             "earned": self._earned,
             "total_points": self._total_points,
         }
-        self._persistence_path.write_text(
-            json.dumps(data, indent=2), encoding="utf-8"
-        )
+        self._persistence_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
-    def evaluate(self, stats: LifetimeStats) -> List[AchievementStatus]:
+    def evaluate(self, stats: LifetimeStats) -> list[AchievementStatus]:
         """Check all achievements against current stats."""
-        results: List[AchievementStatus] = []
+        results: list[AchievementStatus] = []
 
         for defn in ACHIEVEMENTS:
             try:
@@ -92,38 +90,42 @@ class AchievementEngine:
 
             # If already earned previously, keep that timestamp
             if defn.id in self._earned:
-                results.append(AchievementStatus(
-                    id=defn.id,
-                    name=defn.name,
-                    description=defn.description,
-                    category=defn.category,
-                    rarity=defn.rarity,
-                    icon=defn.icon,
-                    points=defn.points,
-                    earned=True,
-                    earned_at=self._earned[defn.id],
-                    progress=1.0,
-                ))
+                results.append(
+                    AchievementStatus(
+                        id=defn.id,
+                        name=defn.name,
+                        description=defn.description,
+                        category=defn.category,
+                        rarity=defn.rarity,
+                        icon=defn.icon,
+                        points=defn.points,
+                        earned=True,
+                        earned_at=self._earned[defn.id],
+                        progress=1.0,
+                    )
+                )
             else:
-                results.append(AchievementStatus(
-                    id=defn.id,
-                    name=defn.name,
-                    description=defn.description,
-                    category=defn.category,
-                    rarity=defn.rarity,
-                    icon=defn.icon,
-                    points=defn.points,
-                    earned=earned_now,
-                    earned_at=None,
-                    progress=min(max(progress, 0.0), 1.0),
-                ))
+                results.append(
+                    AchievementStatus(
+                        id=defn.id,
+                        name=defn.name,
+                        description=defn.description,
+                        category=defn.category,
+                        rarity=defn.rarity,
+                        icon=defn.icon,
+                        points=defn.points,
+                        earned=earned_now,
+                        earned_at=None,
+                        progress=min(max(progress, 0.0), 1.0),
+                    )
+                )
 
         return results
 
-    def get_newly_earned(self, stats: LifetimeStats) -> List[AchievementStatus]:
+    def get_newly_earned(self, stats: LifetimeStats) -> list[AchievementStatus]:
         """Evaluate and persist any newly earned achievements. Returns new unlocks."""
         results = self.evaluate(stats)
-        newly_earned: List[AchievementStatus] = []
+        newly_earned: list[AchievementStatus] = []
         now = datetime.now(timezone.utc).isoformat()
 
         for status in results:
@@ -141,7 +143,7 @@ class AchievementEngine:
 
         return newly_earned
 
-    def get_recent(self, limit: int = 5) -> List[AchievementStatus]:
+    def get_recent(self, limit: int = 5) -> list[AchievementStatus]:
         """Get the most recently earned achievements."""
         if not self._earned:
             return []
@@ -155,21 +157,24 @@ class AchievementEngine:
 
         results = []
         from bashgym.achievements.definitions import ACHIEVEMENTS_BY_ID
+
         for aid in sorted_ids:
             defn = ACHIEVEMENTS_BY_ID.get(aid)
             if defn:
-                results.append(AchievementStatus(
-                    id=defn.id,
-                    name=defn.name,
-                    description=defn.description,
-                    category=defn.category,
-                    rarity=defn.rarity,
-                    icon=defn.icon,
-                    points=defn.points,
-                    earned=True,
-                    earned_at=self._earned[aid],
-                    progress=1.0,
-                ))
+                results.append(
+                    AchievementStatus(
+                        id=defn.id,
+                        name=defn.name,
+                        description=defn.description,
+                        category=defn.category,
+                        rarity=defn.rarity,
+                        icon=defn.icon,
+                        points=defn.points,
+                        earned=True,
+                        earned_at=self._earned[aid],
+                        progress=1.0,
+                    )
+                )
 
         return results
 

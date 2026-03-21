@@ -13,28 +13,22 @@ Supports multiple LLM providers for spec decomposition:
 Workers always execute via Claude Code CLI regardless of planning provider.
 """
 
+from bashgym.orchestrator.agent import OrchestrationAgent
+from bashgym.orchestrator.dispatcher import WorkerPool
 from bashgym.orchestrator.models import (
-    LLMProvider,
     LLMConfig,
-    TaskStatus,
-    TaskPriority,
+    LLMProvider,
+    MergeResult,
     OrchestratorSpec,
     TaskNode,
+    TaskPriority,
+    TaskStatus,
     WorkerConfig,
     WorkerResult,
-    MergeResult,
 )
-from bashgym.orchestrator.task_dag import TaskDAG, CyclicDependencyError
-from bashgym.orchestrator.dispatcher import WorkerPool
-from bashgym.orchestrator.worktree import WorktreeManager
-from bashgym.orchestrator.agent import OrchestrationAgent
 from bashgym.orchestrator.synthesizer import ResultSynthesizer, SynthesisReport
-from bashgym.orchestrator.shared_state import (
-    SharedState,
-    ScopedView,
-    StateChange,
-    ConflictInfo,
-)
+from bashgym.orchestrator.task_dag import CyclicDependencyError, TaskDAG
+from bashgym.orchestrator.worktree import WorktreeManager
 
 __all__ = [
     # Provider config
@@ -56,9 +50,4 @@ __all__ = [
     "OrchestrationAgent",
     "ResultSynthesizer",
     "SynthesisReport",
-    # Shared state
-    "SharedState",
-    "ScopedView",
-    "StateChange",
-    "ConflictInfo",
 ]

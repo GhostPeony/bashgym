@@ -17,36 +17,39 @@ import json
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional, Dict, Any, List, Union
+from typing import Any
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class SurfaceType(str, Enum):
     """The three telemetry surfaces from AgentTrace."""
+
     OPERATIONAL = "operational"  # Tool calls, method executions
-    COGNITIVE = "cognitive"      # Thinking, planning, reflection
-    CONTEXTUAL = "contextual"    # File I/O, git, HTTP, DB
+    COGNITIVE = "cognitive"  # Thinking, planning, reflection
+    CONTEXTUAL = "contextual"  # File I/O, git, HTTP, DB
 
 
 class CognitiveSchema(BaseModel):
     """Structured cognitive data from LLM reasoning."""
-    thinking: Optional[str] = None
-    plan: Optional[str] = None
-    reflection: Optional[str] = None
-    decision_rationale: Optional[str] = None
-    confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
+
+    thinking: str | None = None
+    plan: str | None = None
+    reflection: str | None = None
+    decision_rationale: str | None = None
+    confidence: float | None = Field(None, ge=0.0, le=1.0)
 
 
 class OperationalBody(BaseModel):
     """Body schema for operational (tool call) events."""
+
     tool_name: str
     command: str  # Normalized to string (handles JSON-stringified objects)
     output: str = ""
-    exit_code: Optional[int] = None
-    success: Optional[bool] = None
+    exit_code: int | None = None
+    success: bool | None = None
     cwd: str = ""
-    duration_ms: Optional[float] = None
+    duration_ms: float | None = None
 
     @field_validator("command", mode="before")
     @classmethod
@@ -62,17 +65,19 @@ class OperationalBody(BaseModel):
 
 class CognitiveBody(BaseModel):
     """Body schema for cognitive (reasoning) events."""
+
     cognitive: CognitiveSchema
-    model: Optional[str] = None
-    input_tokens: Optional[int] = None
-    output_tokens: Optional[int] = None
+    model: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
 
 
 class ContextualBody(BaseModel):
     """Body schema for contextual (external I/O) events."""
+
     operation_type: str  # "file_read", "file_write", "git", "http", etc.
-    target: str = ""     # File path, URL, etc.
-    details: Dict[str, Any] = Field(default_factory=dict)
+    target: str = ""  # File path, URL, etc.
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class TraceEvent(BaseModel):
@@ -82,14 +87,15 @@ class TraceEvent(BaseModel):
     a UTC timestamp, and a structured body. This mirrors AgentTrace's
     L(S:E:C) → R schema with consistency, causality, and fidelity guarantees.
     """
+
     id: str = Field(default_factory=lambda: uuid.uuid4().hex)
     surface_type: SurfaceType
-    trace_id: str         # Groups related events in a session
-    span_id: str          # Groups causally linked events (reasoning → action)
-    parent_span_id: Optional[str] = None  # Hierarchical nesting
-    timestamp: str        # UTC ISO-8601
+    trace_id: str  # Groups related events in a session
+    span_id: str  # Groups causally linked events (reasoning → action)
+    parent_span_id: str | None = None  # Hierarchical nesting
+    timestamp: str  # UTC ISO-8601
     source_tool: str = "unknown"  # claude_code, opencode, aider, etc.
-    body: Dict[str, Any]  # Validated per surface_type
+    body: dict[str, Any]  # Validated per surface_type
 
     @field_validator("timestamp", mode="before")
     @classmethod
@@ -143,10 +149,10 @@ def validate_event(event: TraceEvent) -> TraceEvent:
 
 
 def trace_step_to_events(
-    step_dict: Dict[str, Any],
+    step_dict: dict[str, Any],
     trace_id: str,
-    span_id: Optional[str] = None,
-) -> List[TraceEvent]:
+    span_id: str | None = None,
+) -> list[TraceEvent]:
     """Convert a legacy TraceStep dict into validated TraceEvent(s).
 
     Produces an operational event for the tool call, and optionally a
@@ -220,7 +226,7 @@ def trace_step_to_events(
     return events
 
 
-def validate_session(session_dict: Dict[str, Any]) -> List[str]:
+def validate_session(session_dict: dict[str, Any]) -> list[str]:
     """Validate a complete trace session dict and return a list of errors.
 
     Non-destructive: does not modify the input. Returns empty list if valid.
@@ -240,7 +246,7 @@ def validate_session(session_dict: Dict[str, Any]) -> List[str]:
         errors.append("'trace' must be a list")
         return errors
 
-    trace_id = session_dict.get("session_id", "unknown")
+    session_dict.get("session_id", "unknown")
 
     for i, step in enumerate(trace):
         if not isinstance(step, dict):

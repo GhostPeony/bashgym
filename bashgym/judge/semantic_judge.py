@@ -17,7 +17,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from bashgym.factory.trace_processor import ProcessedTrace
@@ -29,19 +29,20 @@ logger = logging.getLogger(__name__)
 # Data structures
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class SemanticVerdict:
     """Result of a semantic quality evaluation."""
 
     trace_id: str
-    score: float              # 0.0-1.0 overall quality
-    confidence: float         # 0.0-1.0 how sure the judge is
-    quality_flags: List[str]  # e.g. "clean", "over-engineered", "hacky", "elegant", "idiomatic"
-    issues: List[str]         # specific problems found
-    reasoning: str            # judge's explanation
+    score: float  # 0.0-1.0 overall quality
+    confidence: float  # 0.0-1.0 how sure the judge is
+    quality_flags: list[str]  # e.g. "clean", "over-engineered", "hacky", "elegant", "idiomatic"
+    issues: list[str]  # specific problems found
+    reasoning: str  # judge's explanation
     timestamp: datetime = field(default_factory=datetime.utcnow)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "trace_id": self.trace_id,
             "score": self.score,
@@ -93,6 +94,7 @@ Rate the quality of this agent's work."""
 # SemanticJudge
 # ---------------------------------------------------------------------------
 
+
 class SemanticJudge:
     """LLM-based quality evaluation for traces.
 
@@ -122,6 +124,7 @@ class SemanticJudge:
         if self._client is None:
             try:
                 import anthropic
+
                 self._client = anthropic.AsyncAnthropic()
             except ImportError:
                 logger.warning("anthropic package not installed — semantic judge disabled")
@@ -168,21 +171,18 @@ class SemanticJudge:
             return self._parse_response(trace.trace_id, response_text)
 
         except Exception as exc:
-            logger.warning(
-                "Semantic judge failed for trace %s: %s", trace.trace_id, exc
-            )
+            logger.warning("Semantic judge failed for trace %s: %s", trace.trace_id, exc)
             return self._neutral_verdict(trace.trace_id, f"API error: {exc}")
 
     async def evaluate_batch(
         self,
-        traces: List["ProcessedTrace"],
+        traces: list["ProcessedTrace"],
         concurrency: int = 5,
-    ) -> List[SemanticVerdict]:
+    ) -> list[SemanticVerdict]:
         """Batch evaluate with rate limiting via asyncio.Semaphore."""
         if not self.enabled or not traces:
             return [
-                self._neutral_verdict(t.trace_id, "Judge disabled or empty batch")
-                for t in traces
+                self._neutral_verdict(t.trace_id, "Judge disabled or empty batch") for t in traces
             ]
 
         semaphore = asyncio.Semaphore(concurrency)
@@ -205,9 +205,7 @@ class SemanticJudge:
             task_description = task_description[:2000] + "... [truncated]"
 
         # Last N significant steps (skip trivial reads, keep tool calls with substance)
-        significant_steps = self._select_significant_steps(
-            trace.normalized_steps, max_steps=10
-        )
+        significant_steps = self._select_significant_steps(trace.normalized_steps, max_steps=10)
         steps_text = self._format_steps(significant_steps)
 
         # Decision log
@@ -231,9 +229,9 @@ class SemanticJudge:
 
     def _select_significant_steps(
         self,
-        steps: List[Dict[str, Any]],
+        steps: list[dict[str, Any]],
         max_steps: int = 10,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Select the most significant steps for evaluation.
 
         Prioritizes:
@@ -249,7 +247,7 @@ class SemanticJudge:
         if len(steps) <= max_steps:
             return steps
 
-        scored: List[tuple] = []
+        scored: list[tuple] = []
         for i, step in enumerate(steps):
             tool = str(step.get("tool", step.get("tool_name", ""))).lower()
             has_error = step.get("success") is False or step.get("exit_code", 0) != 0
@@ -282,7 +280,7 @@ class SemanticJudge:
         selected.sort(key=lambda x: x[1])
         return [s[2] for s in selected]
 
-    def _format_steps(self, steps: List[Dict[str, Any]]) -> str:
+    def _format_steps(self, steps: list[dict[str, Any]]) -> str:
         """Format steps into a readable text block for the prompt."""
         if not steps:
             return "No steps available."
@@ -338,9 +336,7 @@ class SemanticJudge:
                 trace_id,
                 response_text,
             )
-            return self._neutral_verdict(
-                trace_id, f"Malformed response: {response_text[:200]}"
-            )
+            return self._neutral_verdict(trace_id, f"Malformed response: {response_text[:200]}")
 
         # Extract fields with validation
         score = self._clamp(float(data.get("score", 0.5)), 0.0, 1.0)

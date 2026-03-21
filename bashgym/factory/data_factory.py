@@ -10,16 +10,17 @@ Extended with Schema Builder integration for rich synthetic data generation.
 Module 3: Data Synthesis (The "Factory")
 """
 
-import os
-import json
-import httpx
 import asyncio
-from pathlib import Path
+import hashlib
+import json
+import os
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List, Tuple, TYPE_CHECKING
 from datetime import datetime, timezone
 from enum import Enum
-import hashlib
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Optional
+
+import httpx
 
 from .decision_extractor import Decision
 
@@ -42,9 +43,9 @@ TOOL_SCHEMAS = [
                 "properties": {
                     "command": {"type": "string", "description": "The shell command to execute"}
                 },
-                "required": ["command"]
-            }
-        }
+                "required": ["command"],
+            },
+        },
     },
     {
         "type": "function",
@@ -55,12 +56,15 @@ TOOL_SCHEMAS = [
                 "type": "object",
                 "properties": {
                     "file_path": {"type": "string", "description": "The file path to read"},
-                    "offset": {"type": "integer", "description": "Line offset to start reading from"},
-                    "limit": {"type": "integer", "description": "Maximum number of lines to read"}
+                    "offset": {
+                        "type": "integer",
+                        "description": "Line offset to start reading from",
+                    },
+                    "limit": {"type": "integer", "description": "Maximum number of lines to read"},
                 },
-                "required": ["file_path"]
-            }
-        }
+                "required": ["file_path"],
+            },
+        },
     },
     {
         "type": "function",
@@ -71,11 +75,11 @@ TOOL_SCHEMAS = [
                 "type": "object",
                 "properties": {
                     "file_path": {"type": "string", "description": "The file path to write to"},
-                    "content": {"type": "string", "description": "The content to write"}
+                    "content": {"type": "string", "description": "The content to write"},
                 },
-                "required": ["file_path", "content"]
-            }
-        }
+                "required": ["file_path", "content"],
+            },
+        },
     },
     {
         "type": "function",
@@ -87,11 +91,11 @@ TOOL_SCHEMAS = [
                 "properties": {
                     "file_path": {"type": "string", "description": "The file path to edit"},
                     "old_string": {"type": "string", "description": "The text to find and replace"},
-                    "new_string": {"type": "string", "description": "The replacement text"}
+                    "new_string": {"type": "string", "description": "The replacement text"},
                 },
-                "required": ["file_path", "old_string", "new_string"]
-            }
-        }
+                "required": ["file_path", "old_string", "new_string"],
+            },
+        },
     },
     {
         "type": "function",
@@ -103,11 +107,11 @@ TOOL_SCHEMAS = [
                 "properties": {
                     "pattern": {"type": "string", "description": "The regex pattern to search for"},
                     "path": {"type": "string", "description": "Directory or file to search in"},
-                    "glob": {"type": "string", "description": "Glob pattern to filter files"}
+                    "glob": {"type": "string", "description": "Glob pattern to filter files"},
                 },
-                "required": ["pattern"]
-            }
-        }
+                "required": ["pattern"],
+            },
+        },
     },
     {
         "type": "function",
@@ -117,12 +121,15 @@ TOOL_SCHEMAS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "pattern": {"type": "string", "description": "The glob pattern to match files against"},
-                    "path": {"type": "string", "description": "The directory to search in"}
+                    "pattern": {
+                        "type": "string",
+                        "description": "The glob pattern to match files against",
+                    },
+                    "path": {"type": "string", "description": "The directory to search in"},
                 },
-                "required": ["pattern"]
-            }
-        }
+                "required": ["pattern"],
+            },
+        },
     },
 ]
 
@@ -132,15 +139,17 @@ TOOL_OUTPUT_MAX_CHARS = 2000
 
 class SynthesisStrategy(Enum):
     """Data synthesis strategies."""
-    DIRECT = "direct"           # Direct trace to training example
-    AUGMENTED = "augmented"     # Augment with variations
-    DISTILLED = "distilled"     # Distill to minimal steps
-    CONTRASTIVE = "contrastive" # Generate positive/negative pairs (DPO)
+
+    DIRECT = "direct"  # Direct trace to training example
+    AUGMENTED = "augmented"  # Augment with variations
+    DISTILLED = "distilled"  # Distill to minimal steps
+    CONTRASTIVE = "contrastive"  # Generate positive/negative pairs (DPO)
 
 
 class AugmentationProvider(Enum):
     """LLM provider for data augmentation."""
-    NIM = "nim"           # NVIDIA NIM (qwen/qwen2.5-coder-32b-instruct)
+
+    NIM = "nim"  # NVIDIA NIM (qwen/qwen2.5-coder-32b-instruct)
     ANTHROPIC = "anthropic"  # Anthropic Claude (higher quality, higher cost)
 
 
@@ -150,16 +159,18 @@ class DataFactoryConfig:
 
     # NeMo Data Designer settings
     nemo_endpoint: str = "http://localhost:8000"
-    nemo_api_key: Optional[str] = None
+    nemo_api_key: str | None = None
 
     # NVIDIA NIM settings (for LLM-based synthesis)
     nim_endpoint: str = "https://integrate.api.nvidia.com/v1"
-    nim_api_key: Optional[str] = None
+    nim_api_key: str | None = None
     nim_model: str = "qwen/qwen2.5-coder-32b-instruct"
 
     # Anthropic settings (for higher quality augmentation)
-    anthropic_api_key: Optional[str] = None
-    anthropic_model: str = "claude-sonnet-4-5-20250929"  # Claude Sonnet 4.5 - best balance of quality/cost
+    anthropic_api_key: str | None = None
+    anthropic_model: str = (
+        "claude-sonnet-4-5-20250929"  # Claude Sonnet 4.5 - best balance of quality/cost
+    )
 
     # Augmentation provider choice
     augmentation_provider: AugmentationProvider = AugmentationProvider.ANTHROPIC
@@ -187,11 +198,11 @@ class TrainingExample:
     system_prompt: str
     user_prompt: str
     assistant_response: str
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    messages: List[Dict[str, Any]] = field(default_factory=list)  # Structured multi-turn messages
-    tools: List[Dict[str, Any]] = field(default_factory=list)      # Tool schemas used
+    metadata: dict[str, Any] = field(default_factory=dict)
+    messages: list[dict[str, Any]] = field(default_factory=list)  # Structured multi-turn messages
+    tools: list[dict[str, Any]] = field(default_factory=list)  # Tool schemas used
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary format.
 
         Prefers structured multi-turn messages (with tool_calls/tool roles)
@@ -208,9 +219,9 @@ class TrainingExample:
             "messages": [
                 {"role": "system", "content": self.system_prompt},
                 {"role": "user", "content": self.user_prompt},
-                {"role": "assistant", "content": self.assistant_response}
+                {"role": "assistant", "content": self.assistant_response},
             ],
-            "metadata": self.metadata
+            "metadata": self.metadata,
         }
 
     def to_chatml(self) -> str:
@@ -229,11 +240,11 @@ class DPOExample:
 
     example_id: str
     prompt: str
-    chosen: str      # Preferred response (from gold trace)
-    rejected: str    # Rejected response (from failed trace)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    chosen: str  # Preferred response (from gold trace)
+    rejected: str  # Rejected response (from failed trace)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to DPO format (NVIDIA-compatible).
 
         Uses chosen_response/rejected_response field names as required by
@@ -244,7 +255,7 @@ class DPOExample:
             "prompt": self.prompt,
             "chosen_response": self.chosen,
             "rejected_response": self.rejected,
-            "metadata": self.metadata
+            "metadata": self.metadata,
         }
 
 
@@ -255,17 +266,28 @@ def _normalize_tool_name(raw: str) -> str:
     "shell"). This maps them to the canonical names used in TOOL_SCHEMAS.
     """
     mapping = {
-        "bash": "Bash", "execute": "Bash", "shell": "Bash",
-        "read": "Read", "cat": "Read", "view": "Read",
-        "write": "Write", "create": "Write",
-        "edit": "Edit", "replace": "Edit", "patch": "Edit",
-        "grep": "Grep", "search": "Grep", "rg": "Grep",
-        "glob": "Glob", "find": "Glob", "ls": "Glob",
+        "bash": "Bash",
+        "execute": "Bash",
+        "shell": "Bash",
+        "read": "Read",
+        "cat": "Read",
+        "view": "Read",
+        "write": "Write",
+        "create": "Write",
+        "edit": "Edit",
+        "replace": "Edit",
+        "patch": "Edit",
+        "grep": "Grep",
+        "search": "Grep",
+        "rg": "Grep",
+        "glob": "Glob",
+        "find": "Glob",
+        "ls": "Glob",
     }
     return mapping.get(raw.lower().strip(), raw.title())
 
 
-def _parse_command_to_arguments(tool_name: str, command: str) -> Dict[str, Any]:
+def _parse_command_to_arguments(tool_name: str, command: str) -> dict[str, Any]:
     """Parse a command string into structured tool arguments.
 
     Each tool has its own argument schema. This does a best-effort parse
@@ -288,11 +310,11 @@ def _parse_command_to_arguments(tool_name: str, command: str) -> Dict[str, Any]:
 
 
 def build_tool_call_messages(
-    steps: List[Dict[str, Any]],
+    steps: list[dict[str, Any]],
     system_prompt: str,
     user_prompt: str,
-    include_cognitive: bool = False
-) -> List[Dict[str, Any]]:
+    include_cognitive: bool = False,
+) -> list[dict[str, Any]]:
     """Convert trace steps into structured multi-turn messages with tool_calls.
 
     Produces a message list compatible with OpenAI/NeMo/TRL tool-calling format:
@@ -315,7 +337,7 @@ def build_tool_call_messages(
     """
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt}
+        {"role": "user", "content": user_prompt},
     ]
 
     for step in steps:
@@ -366,25 +388,28 @@ def build_tool_call_messages(
                 assistant_content = "\n\n".join(parts)
 
         # Assistant message with tool_call
-        messages.append({
-            "role": "assistant",
-            "content": assistant_content,
-            "tool_calls": [{
-                "id": call_id,
-                "type": "function",
-                "function": {
-                    "name": tool_name,
-                    "arguments": json.dumps(arguments)
-                }
-            }]
-        })
+        messages.append(
+            {
+                "role": "assistant",
+                "content": assistant_content,
+                "tool_calls": [
+                    {
+                        "id": call_id,
+                        "type": "function",
+                        "function": {"name": tool_name, "arguments": json.dumps(arguments)},
+                    }
+                ],
+            }
+        )
 
         # Tool response message
-        messages.append({
-            "role": "tool",
-            "tool_call_id": call_id,
-            "content": output if output else "(no output)"
-        })
+        messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": call_id,
+                "content": output if output else "(no output)",
+            }
+        )
 
     return messages
 
@@ -418,8 +443,8 @@ Always explain your reasoning before executing commands."""
 
     def __init__(
         self,
-        config: Optional[DataFactoryConfig] = None,
-        data_designer_client: Optional["DataDesignerClient"] = None
+        config: DataFactoryConfig | None = None,
+        data_designer_client: Optional["DataDesignerClient"] = None,
     ):
         """Initialize the Data Factory.
 
@@ -468,7 +493,7 @@ Always explain your reasoning before executing commands."""
         """Close HTTP client."""
         await self.client.aclose()
 
-    def process_gold_trace(self, trace_path: Path) -> Optional[TrainingExample]:
+    def process_gold_trace(self, trace_path: Path) -> TrainingExample | None:
         """
         Convert a gold trace to a training example.
 
@@ -479,9 +504,9 @@ Always explain your reasoning before executing commands."""
             TrainingExample or None if trace is invalid
         """
         try:
-            with open(trace_path, 'r', encoding='utf-8', errors='replace') as f:
+            with open(trace_path, encoding="utf-8", errors="replace") as f:
                 trace_data = json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
+        except (OSError, json.JSONDecodeError) as e:
             print(f"Error loading trace {trace_path}: {e}")
             return None
 
@@ -508,8 +533,7 @@ Always explain your reasoning before executing commands."""
         # Build structured multi-turn messages with tool_calls
         # Include cognitive data (thinking/reasoning) when available
         structured_messages = build_tool_call_messages(
-            trace_steps, self.SYSTEM_PROMPT_TEMPLATE, user_prompt,
-            include_cognitive=True
+            trace_steps, self.SYSTEM_PROMPT_TEMPLATE, user_prompt, include_cognitive=True
         )
 
         # Build per-step success metadata
@@ -519,9 +543,7 @@ Always explain your reasoning before executing commands."""
             per_step_success.append(bool(s) if s is not None else True)
 
         # Generate example ID
-        example_id = hashlib.sha256(
-            f"{user_prompt}{assistant_response}".encode()
-        ).hexdigest()[:16]
+        example_id = hashlib.sha256(f"{user_prompt}{assistant_response}".encode()).hexdigest()[:16]
 
         # Extract repo context
         primary_repo = metadata.get("primary_repo", {})
@@ -543,10 +565,10 @@ Always explain your reasoning before executing commands."""
                 "per_step_success": per_step_success,
                 "repo_name": primary_repo.get("name"),
                 "repo_path": primary_repo.get("path"),
-            }
+            },
         )
 
-    def _validate_trace(self, trace_data: Dict[str, Any]) -> bool:
+    def _validate_trace(self, trace_data: dict[str, Any]) -> bool:
         """Validate a trace meets quality requirements."""
         # Check verification status
         if self.config.require_successful_verification:
@@ -568,7 +590,7 @@ Always explain your reasoning before executing commands."""
 
         return True
 
-    def _trace_to_response(self, trace_steps: List[Dict[str, Any]]) -> str:
+    def _trace_to_response(self, trace_steps: list[dict[str, Any]]) -> str:
         """
         Convert trace steps to an assistant response.
 
@@ -580,7 +602,7 @@ Always explain your reasoning before executing commands."""
             tool_name = step.get("tool_name", "unknown")
             command = step.get("command", "")
             output = step.get("output", "")[:500]  # Truncate long outputs
-            success = step.get("success")
+            step.get("success")
 
             # Format based on tool type
             if tool_name.lower() == "bash":
@@ -597,10 +619,8 @@ Always explain your reasoning before executing commands."""
         return "\n".join(response_parts)
 
     async def augment_example(
-        self,
-        example: TrainingExample,
-        num_variations: int = 3
-    ) -> List[TrainingExample]:
+        self, example: TrainingExample, num_variations: int = 3
+    ) -> list[TrainingExample]:
         """
         Generate variations of a training example using configured provider.
 
@@ -617,6 +637,7 @@ Always explain your reasoning before executing commands."""
         - NIM: Cost-effective, good for code
         """
         import warnings
+
         warnings.warn(
             "augment_example() is deprecated. Use DataDesignerPipeline for "
             "synthetic data generation with LLM-as-Judge quality validation. "
@@ -631,10 +652,8 @@ Always explain your reasoning before executing commands."""
             return await self._augment_with_nim(example, num_variations)
 
     async def _augment_with_anthropic(
-        self,
-        example: TrainingExample,
-        num_variations: int = 3
-    ) -> List[TrainingExample]:
+        self, example: TrainingExample, num_variations: int = 3
+    ) -> list[TrainingExample]:
         """Generate variations using Anthropic Claude.
 
         .. deprecated::
@@ -669,15 +688,13 @@ Output ONLY a JSON array with {num_variations} objects, each having "task" and "
                 headers={
                     "x-api-key": self.config.anthropic_api_key,
                     "anthropic-version": "2023-06-01",
-                    "Content-Type": "application/json"
+                    "Content-Type": "application/json",
                 },
                 json={
                     "model": self.config.anthropic_model,
                     "max_tokens": 4096,
-                    "messages": [
-                        {"role": "user", "content": augmentation_prompt}
-                    ]
-                }
+                    "messages": [{"role": "user", "content": augmentation_prompt}],
+                },
             )
 
             if response.status_code == 200:
@@ -701,8 +718,8 @@ Output ONLY a JSON array with {num_variations} objects, each having "task" and "
                                     **example.metadata,
                                     "augmented": True,
                                     "augmentation_provider": "anthropic",
-                                    "variation_index": i + 1
-                                }
+                                    "variation_index": i + 1,
+                                },
                             )
                             variations.append(var_example)
                 except json.JSONDecodeError:
@@ -716,10 +733,8 @@ Output ONLY a JSON array with {num_variations} objects, each having "task" and "
         return variations
 
     async def _augment_with_nim(
-        self,
-        example: TrainingExample,
-        num_variations: int = 3
-    ) -> List[TrainingExample]:
+        self, example: TrainingExample, num_variations: int = 3
+    ) -> list[TrainingExample]:
         """Generate variations using NVIDIA NIM.
 
         .. deprecated::
@@ -751,16 +766,14 @@ Generate {num_variations} variations in JSON format:
                 f"{self.config.nim_endpoint}/chat/completions",
                 headers={
                     "Authorization": f"Bearer {self.config.nim_api_key}",
-                    "Content-Type": "application/json"
+                    "Content-Type": "application/json",
                 },
                 json={
                     "model": self.config.nim_model,
-                    "messages": [
-                        {"role": "user", "content": augmentation_prompt}
-                    ],
+                    "messages": [{"role": "user", "content": augmentation_prompt}],
                     "temperature": 0.7,
-                    "max_tokens": 4096
-                }
+                    "max_tokens": 4096,
+                },
             )
 
             if response.status_code == 200:
@@ -784,8 +797,8 @@ Generate {num_variations} variations in JSON format:
                                     **example.metadata,
                                     "augmented": True,
                                     "augmentation_provider": "nim",
-                                    "variation_index": i + 1
-                                }
+                                    "variation_index": i + 1,
+                                },
                             )
                             variations.append(var_example)
                 except json.JSONDecodeError:
@@ -797,10 +810,8 @@ Generate {num_variations} variations in JSON format:
         return variations
 
     async def generate_dpo_pairs(
-        self,
-        gold_trace_path: Path,
-        failed_trace_path: Path
-    ) -> Optional[DPOExample]:
+        self, gold_trace_path: Path, failed_trace_path: Path
+    ) -> DPOExample | None:
         """
         Generate a DPO training pair from gold and failed traces.
 
@@ -813,11 +824,11 @@ Generate {num_variations} variations in JSON format:
         """
         # Load both traces
         try:
-            with open(gold_trace_path, 'r') as f:
+            with open(gold_trace_path) as f:
                 gold_trace = json.load(f)
-            with open(failed_trace_path, 'r') as f:
+            with open(failed_trace_path) as f:
                 failed_trace = json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
+        except (OSError, json.JSONDecodeError) as e:
             print(f"Error loading traces: {e}")
             return None
 
@@ -835,25 +846,20 @@ Generate {num_variations} variations in JSON format:
         rejected = self._trace_to_response(failed_trace.get("trace", []))
 
         # Generate example ID
-        example_id = hashlib.sha256(
-            f"{prompt}{chosen}{rejected}".encode()
-        ).hexdigest()[:16]
+        example_id = hashlib.sha256(f"{prompt}{chosen}{rejected}".encode()).hexdigest()[:16]
 
         return DPOExample(
             example_id=example_id,
             prompt=f"{self.SYSTEM_PROMPT_TEMPLATE}\n\nUser: {prompt}",
             chosen=chosen,
             rejected=rejected,
-            metadata={
-                "gold_trace": str(gold_trace_path),
-                "failed_trace": str(failed_trace_path)
-            }
+            metadata={"gold_trace": str(gold_trace_path), "failed_trace": str(failed_trace_path)},
         )
 
     def generate_decision_level_dpo_pairs(
         self,
         trace: "ProcessedTrace",
-    ) -> List[DPOExample]:
+    ) -> list[DPOExample]:
         """Generate step-level DPO pairs from structured decisions in a trace.
 
         For each Decision where outcome == "FAILURE" followed by a later
@@ -873,14 +879,14 @@ Generate {num_variations} variations in JSON format:
         if not trace.decisions:
             return []
 
-        dpo_pairs: List[DPOExample] = []
+        dpo_pairs: list[DPOExample] = []
 
         for i, decision in enumerate(trace.decisions):
             if decision.outcome != "FAILURE":
                 continue
 
             # Search forward for the next successful decision
-            successor: Optional[Decision] = None
+            successor: Decision | None = None
             for j in range(i + 1, len(trace.decisions)):
                 if trace.decisions[j].outcome == "SUCCESS":
                     successor = trace.decisions[j]
@@ -890,7 +896,7 @@ Generate {num_variations} variations in JSON format:
                 continue
 
             # Build a contextual prompt from the task + the state at this step
-            context_steps = trace.normalized_steps[:decision.step_index]
+            context_steps = trace.normalized_steps[: decision.step_index]
             context_summary = ""
             if context_steps:
                 # Show the last 3 steps for context
@@ -917,20 +923,22 @@ Generate {num_variations} variations in JSON format:
                 f"dpo_decision_{trace.trace_id}_{decision.step_index}_{successor.step_index}".encode()
             ).hexdigest()[:16]
 
-            dpo_pairs.append(DPOExample(
-                example_id=example_id,
-                prompt=prompt,
-                chosen=chosen,
-                rejected=rejected,
-                metadata={
-                    "source_trace": trace.trace_id,
-                    "failed_step_index": decision.step_index,
-                    "success_step_index": successor.step_index,
-                    "failed_intent": decision.intent,
-                    "success_intent": successor.intent,
-                    "decision_level": True,
-                }
-            ))
+            dpo_pairs.append(
+                DPOExample(
+                    example_id=example_id,
+                    prompt=prompt,
+                    chosen=chosen,
+                    rejected=rejected,
+                    metadata={
+                        "source_trace": trace.trace_id,
+                        "failed_step_index": decision.step_index,
+                        "success_step_index": successor.step_index,
+                        "failed_intent": decision.intent,
+                        "success_intent": successor.intent,
+                        "decision_level": True,
+                    },
+                )
+            )
 
         return dpo_pairs
 
@@ -944,10 +952,8 @@ Generate {num_variations} variations in JSON format:
         return "\n".join(parts)
 
     async def process_trace_directory(
-        self,
-        gold_dir: Path,
-        failed_dir: Optional[Path] = None
-    ) -> Tuple[List[TrainingExample], List[DPOExample]]:
+        self, gold_dir: Path, failed_dir: Path | None = None
+    ) -> tuple[list[TrainingExample], list[DPOExample]]:
         """
         Process all traces in a directory.
 
@@ -970,10 +976,7 @@ Generate {num_variations} variations in JSON format:
             if example:
                 # Augment if configured
                 if self.config.strategy == SynthesisStrategy.AUGMENTED:
-                    augmented = await self.augment_example(
-                        example,
-                        self.config.augmentation_factor
-                    )
+                    augmented = await self.augment_example(example, self.config.augmentation_factor)
                     training_examples.extend(augmented)
                 else:
                     training_examples.append(example)
@@ -995,9 +998,7 @@ Generate {num_variations} variations in JSON format:
         return training_examples, dpo_examples
 
     def save_training_batch(
-        self,
-        examples: List[TrainingExample],
-        batch_name: str = "batch"
+        self, examples: list[TrainingExample], batch_name: str = "batch"
     ) -> Path:
         """
         Save training examples to a JSONL file.
@@ -1013,18 +1014,14 @@ Generate {num_variations} variations in JSON format:
         filename = f"{batch_name}_{timestamp}.jsonl"
         output_path = Path(self.config.output_dir) / filename
 
-        with open(output_path, 'w') as f:
+        with open(output_path, "w") as f:
             for example in examples:
                 f.write(json.dumps(example.to_dict()) + "\n")
 
         print(f"Saved {len(examples)} examples to {output_path}")
         return output_path
 
-    def save_dpo_batch(
-        self,
-        examples: List[DPOExample],
-        batch_name: str = "dpo_batch"
-    ) -> Path:
+    def save_dpo_batch(self, examples: list[DPOExample], batch_name: str = "dpo_batch") -> Path:
         """
         Save DPO examples to a JSONL file.
 
@@ -1039,7 +1036,7 @@ Generate {num_variations} variations in JSON format:
         filename = f"{batch_name}_{timestamp}.jsonl"
         output_path = Path(self.config.output_dir) / filename
 
-        with open(output_path, 'w') as f:
+        with open(output_path, "w") as f:
             for example in examples:
                 f.write(json.dumps(example.to_dict()) + "\n")
 
@@ -1047,10 +1044,8 @@ Generate {num_variations} variations in JSON format:
         return output_path
 
     async def generate_synthetic_data(
-        self,
-        schema: "DataSchema",
-        output_path: Optional[Path] = None
-    ) -> List[Dict[str, Any]]:
+        self, schema: "DataSchema", output_path: Path | None = None
+    ) -> list[dict[str, Any]]:
         """
         Generate synthetic training data using Data Designer schema.
 
@@ -1066,10 +1061,7 @@ Generate {num_variations} variations in JSON format:
             return []
 
         try:
-            records = await self.data_designer_client.generate(
-                schema,
-                output_path=output_path
-            )
+            records = await self.data_designer_client.generate(schema, output_path=output_path)
             print(f"Generated {len(records)} synthetic records")
             return records
         except Exception as e:
@@ -1079,9 +1071,9 @@ Generate {num_variations} variations in JSON format:
     async def generate_coding_tasks(
         self,
         num_tasks: int = 100,
-        languages: Optional[List[str]] = None,
-        difficulties: Optional[List[str]] = None
-    ) -> List[TrainingExample]:
+        languages: list[str] | None = None,
+        difficulties: list[str] | None = None,
+    ) -> list[TrainingExample]:
         """
         Generate synthetic coding task training data.
 
@@ -1099,9 +1091,7 @@ Generate {num_variations} variations in JSON format:
         from .schema_builder import coding_task_schema
 
         schema = coding_task_schema(
-            languages=languages,
-            difficulties=difficulties,
-            num_rows=num_tasks
+            languages=languages, difficulties=difficulties, num_rows=num_tasks
         )
 
         records = await self.generate_synthetic_data(schema)
@@ -1122,8 +1112,8 @@ Generate {num_variations} variations in JSON format:
                         "synthetic": True,
                         "language": record.get("language"),
                         "difficulty": record.get("difficulty"),
-                        "task_type": record.get("task_type")
-                    }
+                        "task_type": record.get("task_type"),
+                    },
                 )
                 examples.append(example)
 
@@ -1132,9 +1122,9 @@ Generate {num_variations} variations in JSON format:
     async def generate_conversation_data(
         self,
         num_conversations: int = 100,
-        personas: Optional[List[str]] = None,
-        topics: Optional[List[str]] = None
-    ) -> List[TrainingExample]:
+        personas: list[str] | None = None,
+        topics: list[str] | None = None,
+    ) -> list[TrainingExample]:
         """
         Generate synthetic conversation training data.
 
@@ -1149,11 +1139,7 @@ Generate {num_variations} variations in JSON format:
         # Import here to avoid circular dependency
         from .schema_builder import conversation_schema
 
-        schema = conversation_schema(
-            personas=personas,
-            topics=topics,
-            num_rows=num_conversations
-        )
+        schema = conversation_schema(personas=personas, topics=topics, num_rows=num_conversations)
 
         records = await self.generate_synthetic_data(schema)
 
@@ -1171,8 +1157,8 @@ Generate {num_variations} variations in JSON format:
                     metadata={
                         "synthetic": True,
                         "persona": record.get("persona"),
-                        "topic": record.get("topic")
-                    }
+                        "topic": record.get("topic"),
+                    },
                 )
                 examples.append(example)
 
@@ -1181,10 +1167,7 @@ Generate {num_variations} variations in JSON format:
 
 async def main():
     """Example usage of the Data Factory."""
-    config = DataFactoryConfig(
-        strategy=SynthesisStrategy.AUGMENTED,
-        augmentation_factor=2
-    )
+    config = DataFactoryConfig(strategy=SynthesisStrategy.AUGMENTED, augmentation_factor=2)
 
     factory = DataFactory(config)
 
@@ -1194,9 +1177,7 @@ async def main():
         failed_dir = Path("data/failed_traces")
 
         if gold_dir.exists():
-            examples, dpo_examples = await factory.process_trace_directory(
-                gold_dir, failed_dir
-            )
+            examples, dpo_examples = await factory.process_trace_directory(gold_dir, failed_dir)
 
             if examples:
                 factory.save_training_batch(examples, "sft_batch")

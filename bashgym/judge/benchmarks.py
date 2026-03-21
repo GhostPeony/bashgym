@@ -7,21 +7,23 @@ BigCodeBench, BFCL, and SWE-bench for comprehensive model assessment.
 Module 2: Verification (The "Judge") - Benchmarks Extension
 """
 
-import os
-import json
 import asyncio
+import json
 import subprocess
 import tempfile
-from pathlib import Path
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List, Callable, Tuple
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
+from typing import Any
+
 import httpx
 
 
 class BenchmarkType(Enum):
     """Available benchmark types."""
+
     # Code generation
     HUMANEVAL = "humaneval"
     MBPP = "mbpp"
@@ -50,7 +52,7 @@ class BenchmarkConfig:
     # Benchmark settings
     benchmark_type: BenchmarkType = BenchmarkType.HUMANEVAL
     num_samples: int = 100
-    pass_k: List[int] = field(default_factory=lambda: [1, 5, 10])
+    pass_k: list[int] = field(default_factory=lambda: [1, 5, 10])
     timeout_per_sample: int = 30
 
     # Model settings
@@ -73,14 +75,15 @@ class BenchmarkSample:
 
     task_id: str
     prompt: str
-    canonical_solution: Optional[str] = None
-    test_code: Optional[str] = None
-    entry_point: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    canonical_solution: str | None = None
+    test_code: str | None = None
+    entry_point: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class ErrorType(Enum):
     """Types of errors that can occur during evaluation."""
+
     NONE = "none"
     WRONG_ANSWER = "wrong_answer"
     SYNTAX_ERROR = "syntax_error"
@@ -92,19 +95,20 @@ class ErrorType(Enum):
 @dataclass
 class ErrorAnalysis:
     """Breakdown of error types in a benchmark run."""
+
     wrong_answer: int = 0
     syntax_error: int = 0
     runtime_error: int = 0
     timeout: int = 0
     other: int = 0
 
-    def to_dict(self) -> Dict[str, int]:
+    def to_dict(self) -> dict[str, int]:
         return {
             "wrong_answer": self.wrong_answer,
             "syntax_error": self.syntax_error,
             "runtime_error": self.runtime_error,
             "timeout": self.timeout,
-            "other": self.other
+            "other": self.other,
         }
 
 
@@ -116,11 +120,11 @@ class SampleResult:
     passed: bool
     generated_code: str
     execution_output: str
-    error_message: Optional[str] = None
+    error_message: str | None = None
     error_type: ErrorType = ErrorType.NONE
     latency_ms: float = 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "task_id": self.task_id,
             "passed": self.passed,
@@ -128,7 +132,7 @@ class SampleResult:
             "execution_output": self.execution_output[:500],  # Truncate
             "error_message": self.error_message,
             "error_type": self.error_type.value,
-            "latency_ms": self.latency_ms
+            "latency_ms": self.latency_ms,
         }
 
 
@@ -139,15 +143,15 @@ class BenchmarkResult:
     benchmark: BenchmarkType
     model_name: str
     timestamp: str
-    pass_at_k: Dict[int, float]
+    pass_at_k: dict[int, float]
     total_samples: int
     passed_samples: int
     failed_samples: int
     error_samples: int
     avg_latency_ms: float
-    sample_results: List[SampleResult] = field(default_factory=list)
+    sample_results: list[SampleResult] = field(default_factory=list)
     total_time_seconds: float = 0.0
-    error_analysis: Optional[ErrorAnalysis] = None
+    error_analysis: ErrorAnalysis | None = None
 
     @property
     def pass_rate(self) -> float:
@@ -173,7 +177,7 @@ class BenchmarkResult:
                 analysis.other += 1
         return analysis
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         # Compute error analysis if not already done
         if self.error_analysis is None:
             self.error_analysis = self.compute_error_analysis()
@@ -190,7 +194,7 @@ class BenchmarkResult:
             "error_samples": self.error_samples,
             "avg_latency_ms": self.avg_latency_ms,
             "total_time_seconds": self.total_time_seconds,
-            "error_analysis": self.error_analysis.to_dict() if self.error_analysis else None
+            "error_analysis": self.error_analysis.to_dict() if self.error_analysis else None,
         }
 
 
@@ -222,23 +226,23 @@ def has_close_elements(numbers: List[float], threshold: float) -> bool:
     True
     """
 ''',
-            "canonical_solution": '''    for idx, elem in enumerate(numbers):
+            "canonical_solution": """    for idx, elem in enumerate(numbers):
         for idx2, elem2 in enumerate(numbers):
             if idx != idx2:
                 distance = abs(elem - elem2)
                 if distance < threshold:
                     return True
     return False
-''',
-            "test": '''
+""",
+            "test": """
 def check(candidate):
     assert candidate([1.0, 2.0, 3.9, 4.0, 5.0, 2.2], 0.3) == True
     assert candidate([1.0, 2.0, 3.9, 4.0, 5.0, 2.2], 0.05) == False
     assert candidate([1.0, 2.0, 5.9, 4.0, 5.0], 0.95) == True
     assert candidate([1.0, 2.0, 5.9, 4.0, 5.0], 0.8) == False
     assert candidate([1.0, 2.0, 3.0, 4.0, 5.0, 2.0], 0.1) == True
-''',
-            "entry_point": "has_close_elements"
+""",
+            "entry_point": "has_close_elements",
         },
         {
             "task_id": "HumanEval/1",
@@ -254,7 +258,7 @@ def separate_paren_groups(paren_string: str) -> List[str]:
     ['()', '(())', '(()())']
     """
 ''',
-            "canonical_solution": '''    result = []
+            "canonical_solution": """    result = []
     current_string = []
     current_depth = 0
 
@@ -271,14 +275,14 @@ def separate_paren_groups(paren_string: str) -> List[str]:
                 current_string.clear()
 
     return result
-''',
-            "test": '''
+""",
+            "test": """
 def check(candidate):
     assert candidate('(()()) ((())) () ((())()())') == ['(()())', '((()))', '()', '((())()())']
     assert candidate('() (()) ((())) (((())))') == ['()', '(())', '((()))', '(((())))']
     assert candidate('(()(()))') == ['(()(()))']
-''',
-            "entry_point": "separate_paren_groups"
+""",
+            "entry_point": "separate_paren_groups",
         },
     ]
 
@@ -289,21 +293,21 @@ def check(candidate):
             "prompt": 'def add(a: int, b: int) -> int:\n    """Return the sum of a and b."""\n',
             "canonical_solution": "    return a + b",
             "test": "def check(candidate):\n    assert candidate(1, 2) == 3\n    assert candidate(0, 0) == 0\n",
-            "entry_point": "add"
+            "entry_point": "add",
         },
         {
             "task_id": "SimpleTest/1",
             "prompt": 'def double(x: int) -> int:\n    """Return x multiplied by 2."""\n',
             "canonical_solution": "    return x * 2",
             "test": "def check(candidate):\n    assert candidate(5) == 10\n    assert candidate(0) == 0\n",
-            "entry_point": "double"
+            "entry_point": "double",
         },
         {
             "task_id": "SimpleTest/2",
             "prompt": 'def is_even(n: int) -> bool:\n    """Return True if n is even, False otherwise."""\n',
             "canonical_solution": "    return n % 2 == 0",
             "test": "def check(candidate):\n    assert candidate(4) == True\n    assert candidate(3) == False\n",
-            "entry_point": "is_even"
+            "entry_point": "is_even",
         },
     ]
 
@@ -312,24 +316,24 @@ def check(candidate):
         {
             "task_id": "MBPP/1",
             "prompt": "Write a function to find the minimum cost path to reach (m, n) from (0, 0) for the given cost matrix cost[][] and target position (m, n).",
-            "test": '''
+            "test": """
 assert min_cost([[1, 2, 3], [4, 8, 2], [1, 5, 3]], 2, 2) == 8
 assert min_cost([[2, 3, 4], [5, 9, 3], [2, 6, 4]], 2, 2) == 12
-''',
-            "entry_point": "min_cost"
+""",
+            "entry_point": "min_cost",
         },
         {
             "task_id": "MBPP/2",
             "prompt": "Write a function to find the similar elements from the given two tuple lists.",
-            "test": '''
+            "test": """
 assert similar_elements((3, 4, 5, 6), (5, 7, 4, 10)) == (4, 5)
 assert similar_elements((1, 2, 3, 4), (5, 4, 3, 7)) == (3, 4)
-''',
-            "entry_point": "similar_elements"
+""",
+            "entry_point": "similar_elements",
         },
     ]
 
-    def __init__(self, config: Optional[BenchmarkConfig] = None):
+    def __init__(self, config: BenchmarkConfig | None = None):
         """Initialize the benchmark runner."""
         self.config = config or BenchmarkConfig()
 
@@ -343,7 +347,7 @@ assert similar_elements((1, 2, 3, 4), (5, 4, 3, 7)) == (3, 4)
         """Close HTTP client."""
         await self.client.aclose()
 
-    def load_benchmark(self, benchmark_type: BenchmarkType) -> List[BenchmarkSample]:
+    def load_benchmark(self, benchmark_type: BenchmarkType) -> list[BenchmarkSample]:
         """
         Load benchmark samples from HuggingFace datasets.
 
@@ -381,31 +385,37 @@ assert similar_elements((1, 2, 3, 4), (5, 4, 3, 7)) == (3, 4)
         # Convert raw HuggingFace data to BenchmarkSample objects
         return self._convert_to_samples(benchmark_type, raw_data)
 
-    def _convert_to_samples(self, benchmark_type: BenchmarkType, raw_data: List[Dict]) -> List[BenchmarkSample]:
+    def _convert_to_samples(
+        self, benchmark_type: BenchmarkType, raw_data: list[dict]
+    ) -> list[BenchmarkSample]:
         """Convert raw HuggingFace data to BenchmarkSample objects."""
         samples = []
 
         if benchmark_type == BenchmarkType.HUMANEVAL:
             for item in raw_data:
-                samples.append(BenchmarkSample(
-                    task_id=item.get("task_id", ""),
-                    prompt=item.get("prompt", ""),
-                    canonical_solution=item.get("canonical_solution"),
-                    test_code=item.get("test"),
-                    entry_point=item.get("entry_point")
-                ))
+                samples.append(
+                    BenchmarkSample(
+                        task_id=item.get("task_id", ""),
+                        prompt=item.get("prompt", ""),
+                        canonical_solution=item.get("canonical_solution"),
+                        test_code=item.get("test"),
+                        entry_point=item.get("entry_point"),
+                    )
+                )
 
         elif benchmark_type == BenchmarkType.MBPP:
             for item in raw_data:
                 test_list = item.get("test_list", [])
                 test_code = "\n".join(test_list) if test_list else item.get("test", "")
-                samples.append(BenchmarkSample(
-                    task_id=str(item.get("task_id", "")),
-                    prompt=item.get("text", item.get("prompt", "")),
-                    canonical_solution=item.get("code"),
-                    test_code=test_code,
-                    entry_point=item.get("entry_point")
-                ))
+                samples.append(
+                    BenchmarkSample(
+                        task_id=str(item.get("task_id", "")),
+                        prompt=item.get("text", item.get("prompt", "")),
+                        canonical_solution=item.get("code"),
+                        test_code=test_code,
+                        entry_point=item.get("entry_point"),
+                    )
+                )
 
         elif benchmark_type == BenchmarkType.GSM8K:
             for i, item in enumerate(raw_data):
@@ -415,13 +425,15 @@ assert similar_elements((1, 2, 3, 4), (5, 4, 3, 7)) == (3, 4)
                     answer = answer_text.split("####")[-1].strip()
                 else:
                     answer = answer_text.strip()
-                samples.append(BenchmarkSample(
-                    task_id=f"gsm8k_{i}",
-                    prompt=item.get("question", ""),
-                    canonical_solution=answer_text,
-                    test_code=f"assert str(answer).strip() == '{answer}'",
-                    metadata={"answer": answer, "full_solution": answer_text}
-                ))
+                samples.append(
+                    BenchmarkSample(
+                        task_id=f"gsm8k_{i}",
+                        prompt=item.get("question", ""),
+                        canonical_solution=answer_text,
+                        test_code=f"assert str(answer).strip() == '{answer}'",
+                        metadata={"answer": answer, "full_solution": answer_text},
+                    )
+                )
 
         elif benchmark_type == BenchmarkType.HELLASWAG:
             for i, item in enumerate(raw_data):
@@ -429,18 +441,20 @@ assert similar_elements((1, 2, 3, 4), (5, 4, 3, 7)) == (3, 4)
                 correct_idx = int(label) if label.isdigit() else 0
                 endings = item.get("endings", [])
                 correct_ending = endings[correct_idx] if correct_idx < len(endings) else ""
-                samples.append(BenchmarkSample(
-                    task_id=item.get("ind", f"hellaswag_{i}"),
-                    prompt=item.get("ctx", item.get("context", "")),
-                    canonical_solution=correct_ending,
-                    metadata={
-                        "activity_label": item.get("activity_label", ""),
-                        "endings": endings,
-                        "label": correct_idx,
-                        "ctx_a": item.get("ctx_a", ""),
-                        "ctx_b": item.get("ctx_b", ""),
-                    }
-                ))
+                samples.append(
+                    BenchmarkSample(
+                        task_id=item.get("ind", f"hellaswag_{i}"),
+                        prompt=item.get("ctx", item.get("context", "")),
+                        canonical_solution=correct_ending,
+                        metadata={
+                            "activity_label": item.get("activity_label", ""),
+                            "endings": endings,
+                            "label": correct_idx,
+                            "ctx_a": item.get("ctx_a", ""),
+                            "ctx_b": item.get("ctx_b", ""),
+                        },
+                    )
+                )
 
         elif benchmark_type == BenchmarkType.ARC:
             for i, item in enumerate(raw_data):
@@ -455,15 +469,17 @@ assert similar_elements((1, 2, 3, 4), (5, 4, 3, 7)) == (3, 4)
                         correct_answer = texts[idx]
                     except ValueError:
                         pass
-                samples.append(BenchmarkSample(
-                    task_id=item.get("id", f"arc_{i}"),
-                    prompt=item.get("question", ""),
-                    canonical_solution=correct_answer,
-                    metadata={
-                        "choices": dict(zip(labels, texts)) if labels and texts else {},
-                        "answer_key": answer_key
-                    }
-                ))
+                samples.append(
+                    BenchmarkSample(
+                        task_id=item.get("id", f"arc_{i}"),
+                        prompt=item.get("question", ""),
+                        canonical_solution=correct_answer,
+                        metadata={
+                            "choices": dict(zip(labels, texts)) if labels and texts else {},
+                            "answer_key": answer_key,
+                        },
+                    )
+                )
 
         elif benchmark_type == BenchmarkType.BFCL:
             for i, item in enumerate(raw_data):
@@ -471,40 +487,48 @@ assert similar_elements((1, 2, 3, 4), (5, 4, 3, 7)) == (3, 4)
                 question = item.get("question", "")
                 if isinstance(question, list):
                     question = question[0] if question else ""
-                samples.append(BenchmarkSample(
-                    task_id=item.get("id", f"bfcl_{i}"),
-                    prompt=str(question),
-                    canonical_solution=json.dumps(item.get("ground_truth", [])),
-                    metadata={
-                        "functions": item.get("function", []),
-                        "ground_truth": item.get("ground_truth", []),
-                        "category": item.get("category", "")
-                    }
-                ))
+                samples.append(
+                    BenchmarkSample(
+                        task_id=item.get("id", f"bfcl_{i}"),
+                        prompt=str(question),
+                        canonical_solution=json.dumps(item.get("ground_truth", [])),
+                        metadata={
+                            "functions": item.get("function", []),
+                            "ground_truth": item.get("ground_truth", []),
+                            "category": item.get("category", ""),
+                        },
+                    )
+                )
 
         elif benchmark_type == BenchmarkType.BIGCODEBENCH:
             for item in raw_data:
-                samples.append(BenchmarkSample(
-                    task_id=item.get("task_id", ""),
-                    prompt=item.get("instruct_prompt", item.get("complete_prompt", "")),
-                    canonical_solution=item.get("canonical_solution", ""),
-                    test_code=item.get("test", ""),
-                    entry_point=item.get("entry_point"),
-                    metadata={"libs": item.get("libs", [])}
-                ))
+                samples.append(
+                    BenchmarkSample(
+                        task_id=item.get("task_id", ""),
+                        prompt=item.get("instruct_prompt", item.get("complete_prompt", "")),
+                        canonical_solution=item.get("canonical_solution", ""),
+                        test_code=item.get("test", ""),
+                        entry_point=item.get("entry_point"),
+                        metadata={"libs": item.get("libs", [])},
+                    )
+                )
 
         elif benchmark_type == BenchmarkType.DS1000:
             for i, item in enumerate(raw_data):
-                samples.append(BenchmarkSample(
-                    task_id=item.get("metadata", {}).get("problem_id", f"ds1000_{i}"),
-                    prompt=item.get("prompt", ""),
-                    canonical_solution=item.get("reference_code", ""),
-                    test_code=item.get("test_code", ""),
-                    metadata={
-                        "lib": item.get("metadata", {}).get("library", ""),
-                        "perturbation_type": item.get("metadata", {}).get("perturbation_type", "")
-                    }
-                ))
+                samples.append(
+                    BenchmarkSample(
+                        task_id=item.get("metadata", {}).get("problem_id", f"ds1000_{i}"),
+                        prompt=item.get("prompt", ""),
+                        canonical_solution=item.get("reference_code", ""),
+                        test_code=item.get("test_code", ""),
+                        metadata={
+                            "lib": item.get("metadata", {}).get("library", ""),
+                            "perturbation_type": item.get("metadata", {}).get(
+                                "perturbation_type", ""
+                            ),
+                        },
+                    )
+                )
 
         elif benchmark_type == BenchmarkType.TOXIGEN:
             for i, item in enumerate(raw_data):
@@ -515,17 +539,19 @@ assert similar_elements((1, 2, 3, 4), (5, 4, 3, 7)) == (3, 4)
                     is_toxic = toxicity_score > 2.5
                 else:
                     is_toxic = False
-                samples.append(BenchmarkSample(
-                    task_id=f"toxigen_{i}",
-                    prompt=item.get("text", item.get("generation", "")),
-                    canonical_solution="toxic" if is_toxic else "safe",
-                    metadata={
-                        "target_group": item.get("target_group", item.get("group", "")),
-                        "toxicity_score": toxicity_score,
-                        "intent": item.get("intent", ""),
-                        "is_toxic": is_toxic
-                    }
-                ))
+                samples.append(
+                    BenchmarkSample(
+                        task_id=f"toxigen_{i}",
+                        prompt=item.get("text", item.get("generation", "")),
+                        canonical_solution="toxic" if is_toxic else "safe",
+                        metadata={
+                            "target_group": item.get("target_group", item.get("group", "")),
+                            "toxicity_score": toxicity_score,
+                            "intent": item.get("intent", ""),
+                            "is_toxic": is_toxic,
+                        },
+                    )
+                )
 
         elif benchmark_type == BenchmarkType.BBQ:
             for i, item in enumerate(raw_data):
@@ -550,18 +576,20 @@ assert similar_elements((1, 2, 3, 4), (5, 4, 3, 7)) == (3, 4)
                 question = item.get("question", "")
                 choice_text = "\n".join([f"{j}. {c}" for j, c in enumerate(choices)])
 
-                samples.append(BenchmarkSample(
-                    task_id=f"bbq_{i}",
-                    prompt=f"{context}\n\n{question}\n\nChoices:\n{choice_text}",
-                    canonical_solution=correct_answer,
-                    metadata={
-                        "category": item.get("category", ""),
-                        "choices": choices,
-                        "answer_index": answer_idx,
-                        "question_polarity": item.get("question_polarity", ""),
-                        "context_condition": item.get("context_condition", "")
-                    }
-                ))
+                samples.append(
+                    BenchmarkSample(
+                        task_id=f"bbq_{i}",
+                        prompt=f"{context}\n\n{question}\n\nChoices:\n{choice_text}",
+                        canonical_solution=correct_answer,
+                        metadata={
+                            "category": item.get("category", ""),
+                            "choices": choices,
+                            "answer_index": answer_idx,
+                            "question_polarity": item.get("question_polarity", ""),
+                            "context_condition": item.get("context_condition", ""),
+                        },
+                    )
+                )
 
         elif benchmark_type == BenchmarkType.SWE_BENCH:
             for item in raw_data:
@@ -576,34 +604,38 @@ assert similar_elements((1, 2, 3, 4), (5, 4, 3, 7)) == (3, 4)
                 if hints:
                     prompt += f"\n\nHints:\n{hints}"
 
-                samples.append(BenchmarkSample(
-                    task_id=instance_id,
-                    prompt=prompt,
-                    canonical_solution=patch,
-                    metadata={
-                        "repo": repo,
-                        "base_commit": item.get("base_commit", ""),
-                        "hints": hints,
-                        "created_at": item.get("created_at", ""),
-                        "version": item.get("version", ""),
-                        "fail_to_pass": item.get("FAIL_TO_PASS", []),
-                        "pass_to_pass": item.get("PASS_TO_PASS", [])
-                    }
-                ))
+                samples.append(
+                    BenchmarkSample(
+                        task_id=instance_id,
+                        prompt=prompt,
+                        canonical_solution=patch,
+                        metadata={
+                            "repo": repo,
+                            "base_commit": item.get("base_commit", ""),
+                            "hints": hints,
+                            "created_at": item.get("created_at", ""),
+                            "version": item.get("version", ""),
+                            "fail_to_pass": item.get("FAIL_TO_PASS", []),
+                            "pass_to_pass": item.get("PASS_TO_PASS", []),
+                        },
+                    )
+                )
 
         return samples
 
-    def _load_simple_test(self) -> List[BenchmarkSample]:
+    def _load_simple_test(self) -> list[BenchmarkSample]:
         """Load Simple Test benchmark samples (for E2E testing)."""
         samples = []
-        for item in self.SIMPLE_TEST_SAMPLES[:self.config.num_samples]:
-            samples.append(BenchmarkSample(
-                task_id=item["task_id"],
-                prompt=item["prompt"],
-                canonical_solution=item.get("canonical_solution"),
-                test_code=item.get("test"),
-                entry_point=item.get("entry_point")
-            ))
+        for item in self.SIMPLE_TEST_SAMPLES[: self.config.num_samples]:
+            samples.append(
+                BenchmarkSample(
+                    task_id=item["task_id"],
+                    prompt=item["prompt"],
+                    canonical_solution=item.get("canonical_solution"),
+                    test_code=item.get("test"),
+                    entry_point=item.get("entry_point"),
+                )
+            )
         return samples
 
     def run_benchmark_simulated(self) -> "BenchmarkResult":
@@ -614,6 +646,7 @@ assert similar_elements((1, 2, 3, 4), (5, 4, 3, 7)) == (3, 4)
         Returns a BenchmarkResult with the simulated pass rate.
         """
         import time
+
         start_time = time.time()
 
         samples = self.load_benchmark(self.config.benchmark_type)
@@ -628,7 +661,7 @@ assert similar_elements((1, 2, 3, 4), (5, 4, 3, 7)) == (3, 4)
                 passed_samples=0,
                 failed_samples=0,
                 error_samples=0,
-                avg_latency_ms=0.0
+                avg_latency_ms=0.0,
             )
 
         passed = 0
@@ -639,25 +672,29 @@ assert similar_elements((1, 2, 3, 4), (5, 4, 3, 7)) == (3, 4)
             # Use canonical solution if available
             if sample.canonical_solution:
                 # Simulate execution - canonical solutions should pass
-                sample_results.append(SampleResult(
-                    task_id=sample.task_id,
-                    passed=True,
-                    generated_code=sample.canonical_solution,
-                    execution_output="Tests passed",
-                    error_type=ErrorType.NONE,
-                    latency_ms=10.0
-                ))
+                sample_results.append(
+                    SampleResult(
+                        task_id=sample.task_id,
+                        passed=True,
+                        generated_code=sample.canonical_solution,
+                        execution_output="Tests passed",
+                        error_type=ErrorType.NONE,
+                        latency_ms=10.0,
+                    )
+                )
                 passed += 1
             else:
-                sample_results.append(SampleResult(
-                    task_id=sample.task_id,
-                    passed=False,
-                    generated_code="",
-                    execution_output="No canonical solution",
-                    error_message="No canonical solution available",
-                    error_type=ErrorType.OTHER,
-                    latency_ms=10.0
-                ))
+                sample_results.append(
+                    SampleResult(
+                        task_id=sample.task_id,
+                        passed=False,
+                        generated_code="",
+                        execution_output="No canonical solution",
+                        error_message="No canonical solution available",
+                        error_type=ErrorType.OTHER,
+                        latency_ms=10.0,
+                    )
+                )
                 failed += 1
 
         total_time = time.time() - start_time
@@ -676,38 +713,40 @@ assert similar_elements((1, 2, 3, 4), (5, 4, 3, 7)) == (3, 4)
             error_samples=0,
             avg_latency_ms=10.0,
             total_time_seconds=total_time,
-            sample_results=sample_results
+            sample_results=sample_results,
         )
 
-    def _load_humaneval(self) -> List[BenchmarkSample]:
+    def _load_humaneval(self) -> list[BenchmarkSample]:
         """Load HumanEval benchmark samples."""
         samples = []
-        for item in self.HUMANEVAL_SAMPLES[:self.config.num_samples]:
-            samples.append(BenchmarkSample(
-                task_id=item["task_id"],
-                prompt=item["prompt"],
-                canonical_solution=item.get("canonical_solution"),
-                test_code=item.get("test"),
-                entry_point=item.get("entry_point")
-            ))
+        for item in self.HUMANEVAL_SAMPLES[: self.config.num_samples]:
+            samples.append(
+                BenchmarkSample(
+                    task_id=item["task_id"],
+                    prompt=item["prompt"],
+                    canonical_solution=item.get("canonical_solution"),
+                    test_code=item.get("test"),
+                    entry_point=item.get("entry_point"),
+                )
+            )
         return samples
 
-    def _load_mbpp(self) -> List[BenchmarkSample]:
+    def _load_mbpp(self) -> list[BenchmarkSample]:
         """Load MBPP benchmark samples."""
         samples = []
-        for item in self.MBPP_SAMPLES[:self.config.num_samples]:
-            samples.append(BenchmarkSample(
-                task_id=item["task_id"],
-                prompt=item["prompt"],
-                test_code=item.get("test"),
-                entry_point=item.get("entry_point")
-            ))
+        for item in self.MBPP_SAMPLES[: self.config.num_samples]:
+            samples.append(
+                BenchmarkSample(
+                    task_id=item["task_id"],
+                    prompt=item["prompt"],
+                    test_code=item.get("test"),
+                    entry_point=item.get("entry_point"),
+                )
+            )
         return samples
 
     async def run_benchmark(
-        self,
-        generate_fn: Callable[[str], str],
-        benchmark_type: Optional[BenchmarkType] = None
+        self, generate_fn: Callable[[str], str], benchmark_type: BenchmarkType | None = None
     ) -> BenchmarkResult:
         """
         Run a benchmark evaluation.
@@ -732,7 +771,7 @@ assert similar_elements((1, 2, 3, 4), (5, 4, 3, 7)) == (3, 4)
                 passed_samples=0,
                 failed_samples=0,
                 error_samples=0,
-                avg_latency_ms=0.0
+                avg_latency_ms=0.0,
             )
 
         sample_results = []
@@ -756,13 +795,15 @@ assert similar_elements((1, 2, 3, 4), (5, 4, 3, 7)) == (3, 4)
                 total_latency += result.latency_ms
 
             except Exception as e:
-                sample_results.append(SampleResult(
-                    task_id=sample.task_id,
-                    passed=False,
-                    generated_code="",
-                    execution_output="",
-                    error_message=str(e)
-                ))
+                sample_results.append(
+                    SampleResult(
+                        task_id=sample.task_id,
+                        passed=False,
+                        generated_code="",
+                        execution_output="",
+                        error_message=str(e),
+                    )
+                )
                 errors += 1
 
         # Calculate pass@k
@@ -778,13 +819,11 @@ assert similar_elements((1, 2, 3, 4), (5, 4, 3, 7)) == (3, 4)
             failed_samples=failed,
             error_samples=errors,
             avg_latency_ms=total_latency / max(len(samples), 1),
-            sample_results=sample_results
+            sample_results=sample_results,
         )
 
     async def _evaluate_sample(
-        self,
-        sample: BenchmarkSample,
-        generate_fn: Callable[[str], str]
+        self, sample: BenchmarkSample, generate_fn: Callable[[str], str]
     ) -> SampleResult:
         """Evaluate a single benchmark sample."""
         import time
@@ -800,9 +839,7 @@ assert similar_elements((1, 2, 3, 4), (5, 4, 3, 7)) == (3, 4)
         latency_ms = (time.time() - start_time) * 1000
 
         # Execute and test
-        passed, output, error, error_type = await self._execute_and_test(
-            sample, generated_code
-        )
+        passed, output, error, error_type = await self._execute_and_test(sample, generated_code)
 
         return SampleResult(
             task_id=sample.task_id,
@@ -811,14 +848,12 @@ assert similar_elements((1, 2, 3, 4), (5, 4, 3, 7)) == (3, 4)
             execution_output=output,
             error_message=error,
             error_type=error_type,
-            latency_ms=latency_ms
+            latency_ms=latency_ms,
         )
 
     async def _execute_and_test(
-        self,
-        sample: BenchmarkSample,
-        generated_code: str
-    ) -> Tuple[bool, str, Optional[str], ErrorType]:
+        self, sample: BenchmarkSample, generated_code: str
+    ) -> tuple[bool, str, str | None, ErrorType]:
         """Execute generated code and run tests. Returns (passed, output, error, error_type)."""
         if not sample.test_code:
             return True, "No tests provided", None, ErrorType.NONE
@@ -831,9 +866,7 @@ assert similar_elements((1, 2, 3, 4), (5, 4, 3, 7)) == (3, 4)
 
         # Execute in subprocess with timeout
         try:
-            with tempfile.NamedTemporaryFile(
-                mode='w', suffix='.py', delete=False
-            ) as f:
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
                 f.write(full_code)
                 temp_path = f.name
 
@@ -842,7 +875,7 @@ assert similar_elements((1, 2, 3, 4), (5, 4, 3, 7)) == (3, 4)
                     ["python", temp_path],
                     capture_output=True,
                     text=True,
-                    timeout=self.config.timeout_per_sample
+                    timeout=self.config.timeout_per_sample,
                 )
 
                 if result.returncode == 0:
@@ -873,11 +906,22 @@ assert similar_elements((1, 2, 3, 4), (5, 4, 3, 7)) == (3, 4)
             return ErrorType.WRONG_ANSWER
 
         # Runtime errors
-        if any(err in stderr_lower for err in [
-            "typeerror", "valueerror", "nameerror", "attributeerror",
-            "indexerror", "keyerror", "zerodivisionerror", "runtimeerror",
-            "importerror", "modulenotfounderror", "filenotfounderror"
-        ]):
+        if any(
+            err in stderr_lower
+            for err in [
+                "typeerror",
+                "valueerror",
+                "nameerror",
+                "attributeerror",
+                "indexerror",
+                "keyerror",
+                "zerodivisionerror",
+                "runtimeerror",
+                "importerror",
+                "modulenotfounderror",
+                "filenotfounderror",
+            ]
+        ):
             return ErrorType.RUNTIME_ERROR
 
         # If we got here with a non-empty stderr, it's likely a wrong answer
@@ -887,10 +931,8 @@ assert similar_elements((1, 2, 3, 4), (5, 4, 3, 7)) == (3, 4)
         return ErrorType.OTHER
 
     def _calculate_pass_at_k(
-        self,
-        results: List[SampleResult],
-        k_values: List[int]
-    ) -> Dict[int, float]:
+        self, results: list[SampleResult], k_values: list[int]
+    ) -> dict[int, float]:
         """
         Calculate pass@k metrics.
 
@@ -909,7 +951,7 @@ assert similar_elements((1, 2, 3, 4), (5, 4, 3, 7)) == (3, 4)
                 pass_at_k[k] = 1.0
             else:
                 # Estimate pass@k
-                pass_at_k[k] = 1.0 - (1.0 - c/n) ** k
+                pass_at_k[k] = 1.0 - (1.0 - c / n) ** k
 
         return pass_at_k
 
@@ -919,19 +961,14 @@ assert similar_elements((1, 2, 3, 4), (5, 4, 3, 7)) == (3, 4)
         filename = f"{result.benchmark.value}_{timestamp}.json"
         output_path = Path(self.config.output_dir) / filename
 
-        data = {
-            **result.to_dict(),
-            "sample_results": [r.to_dict() for r in result.sample_results]
-        }
+        data = {**result.to_dict(), "sample_results": [r.to_dict() for r in result.sample_results]}
 
         output_path.write_text(json.dumps(data, indent=2))
         return output_path
 
     async def compare_models(
-        self,
-        models: Dict[str, Callable[[str], str]],
-        benchmark_type: Optional[BenchmarkType] = None
-    ) -> Dict[str, BenchmarkResult]:
+        self, models: dict[str, Callable[[str], str]], benchmark_type: BenchmarkType | None = None
+    ) -> dict[str, BenchmarkResult]:
         """
         Compare multiple models on a benchmark.
 
@@ -958,7 +995,7 @@ async def main():
     config = BenchmarkConfig(
         benchmark_type=BenchmarkType.HUMANEVAL,
         num_samples=2,  # Demo with 2 samples
-        model_name="demo_model"
+        model_name="demo_model",
     )
 
     runner = BenchmarkRunner(config)
@@ -969,16 +1006,16 @@ async def main():
             # In production, this would call the actual model
             # For demo, return a simple implementation
             if "has_close_elements" in prompt:
-                return '''    for idx, elem in enumerate(numbers):
+                return """    for idx, elem in enumerate(numbers):
         for idx2, elem2 in enumerate(numbers):
             if idx != idx2:
                 distance = abs(elem - elem2)
                 if distance < threshold:
                     return True
     return False
-'''
+"""
             elif "separate_paren_groups" in prompt:
-                return '''    result = []
+                return """    result = []
     current_string = []
     current_depth = 0
     for c in paren_string:
@@ -992,7 +1029,7 @@ async def main():
                 result.append(''.join(current_string))
                 current_string.clear()
     return result
-'''
+"""
             return "pass"
 
         result = await runner.run_benchmark(demo_generate)

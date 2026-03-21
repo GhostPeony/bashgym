@@ -55,3 +55,4 @@ asyncssh>=2.14.0               # Async SSH/SFTP for remote training
 # - peft
 # - bitsandbytes
 # - unsloth
+python-multipart>=0.0.7

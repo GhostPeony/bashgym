@@ -16,27 +16,27 @@ Each proposed command may be accepted, rejected, or corrected by the user.
 import json
 import os
 import platform
-import uuid
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Set, Tuple
-from dataclasses import dataclass, asdict
+from typing import Any
 
-from ..core import TraceStep, TraceSession, TraceCapture
+from ..core import TraceCapture, TraceSession, TraceStep
 
 
 @dataclass
 class CopilotImportResult:
     """Result of a Copilot session import operation."""
+
     session_id: str
     source_file: Path
     steps_imported: int
     accepted_commands: int = 0
     rejected_commands: int = 0
-    destination_file: Optional[Path] = None
-    error: Optional[str] = None
+    destination_file: Path | None = None
+    error: str | None = None
     skipped: bool = False
-    skip_reason: Optional[str] = None
+    skip_reason: str | None = None
 
 
 class CopilotSessionImporter:
@@ -54,7 +54,7 @@ class CopilotSessionImporter:
         self.imported_sessions_file = (
             self.trace_capture.bashgym_dir / "imported_copilot_sessions.json"
         )
-        self._imported_sessions: Optional[Set[str]] = None
+        self._imported_sessions: set[str] | None = None
 
     @staticmethod
     def _get_copilot_dir() -> Path:
@@ -66,21 +66,21 @@ class CopilotSessionImporter:
         return base / ".copilot"
 
     @property
-    def imported_sessions(self) -> Set[str]:
+    def imported_sessions(self) -> set[str]:
         """Get set of already imported session IDs."""
         if self._imported_sessions is None:
             self._imported_sessions = self._load_imported_sessions()
         return self._imported_sessions
 
-    def _load_imported_sessions(self) -> Set[str]:
+    def _load_imported_sessions(self) -> set[str]:
         """Load the list of already imported session IDs."""
         if not self.imported_sessions_file.exists():
             return set()
         try:
-            with open(self.imported_sessions_file, "r") as f:
+            with open(self.imported_sessions_file) as f:
                 data = json.load(f)
                 return set(data.get("sessions", []))
-        except (json.JSONDecodeError, IOError):
+        except (OSError, json.JSONDecodeError):
             return set()
 
     def _save_imported_session(self, session_id: str) -> None:
@@ -90,10 +90,10 @@ class CopilotSessionImporter:
             self.imported_sessions_file.parent.mkdir(parents=True, exist_ok=True)
             with open(self.imported_sessions_file, "w") as f:
                 json.dump({"sessions": list(self.imported_sessions)}, f)
-        except IOError as e:
+        except OSError as e:
             print(f"Warning: Could not save imported Copilot sessions list: {e}")
 
-    def _get_session_dirs(self) -> List[Path]:
+    def _get_session_dirs(self) -> list[Path]:
         """Get all directories that may contain Copilot session files."""
         dirs = []
         for subdir in ("session-state", "history-session-state"):
@@ -104,9 +104,9 @@ class CopilotSessionImporter:
 
     def find_session_files(
         self,
-        since: Optional[datetime] = None,
-        until: Optional[datetime] = None,
-    ) -> List[Tuple[Path, datetime]]:
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> list[tuple[Path, datetime]]:
         """
         Find Copilot CLI session JSON files, optionally filtered by date.
 
@@ -117,15 +117,13 @@ class CopilotSessionImporter:
         Returns:
             List of (file_path, modified_time) tuples sorted newest first
         """
-        session_files: List[Tuple[Path, datetime]] = []
+        session_files: list[tuple[Path, datetime]] = []
 
         for session_dir in self._get_session_dirs():
             try:
                 for json_file in session_dir.glob("*.json"):
                     try:
-                        mtime = datetime.fromtimestamp(
-                            json_file.stat().st_mtime, tz=timezone.utc
-                        )
+                        mtime = datetime.fromtimestamp(json_file.stat().st_mtime, tz=timezone.utc)
                     except OSError:
                         continue
 
@@ -143,10 +141,10 @@ class CopilotSessionImporter:
 
     @staticmethod
     def _extract_steps_from_session(
-        data: Dict[str, Any],
+        data: dict[str, Any],
         session_id: str,
         session_file: Path,
-    ) -> Tuple[List[TraceStep], Dict[str, Any]]:
+    ) -> tuple[list[TraceStep], dict[str, Any]]:
         """
         Extract TraceStep objects and metadata from a Copilot session dict.
 
@@ -163,9 +161,9 @@ class CopilotSessionImporter:
 
         In all patterns, we look for accept/reject metadata for DPO training.
         """
-        steps: List[TraceStep] = []
-        models_seen: Set[str] = set()
-        meta: Dict[str, Any] = {
+        steps: list[TraceStep] = []
+        models_seen: set[str] = set()
+        meta: dict[str, Any] = {
             "user_initial_prompt": None,
             "all_user_prompts": [],
             "conversation_turns": 0,
@@ -184,9 +182,7 @@ class CopilotSessionImporter:
             data.get("created_at", datetime.now(timezone.utc).isoformat()),
         )
         if isinstance(timestamp_base, (int, float)):
-            timestamp_base = datetime.fromtimestamp(
-                timestamp_base, tz=timezone.utc
-            ).isoformat()
+            timestamp_base = datetime.fromtimestamp(timestamp_base, tz=timezone.utc).isoformat()
 
         # --- Pattern A: messages + suggestions ---
         messages = data.get("messages", [])
@@ -207,14 +203,14 @@ class CopilotSessionImporter:
                     models_seen.add(msg_model)
 
                 if role == "user" and content:
-                    content_str = (
-                        content if isinstance(content, str) else str(content)
-                    )
+                    content_str = content if isinstance(content, str) else str(content)
                     meta["conversation_turns"] += 1
-                    meta["all_user_prompts"].append({
-                        "text": content_str[:2000],
-                        "timestamp": ts,
-                    })
+                    meta["all_user_prompts"].append(
+                        {
+                            "text": content_str[:2000],
+                            "timestamp": ts,
+                        }
+                    )
                     if meta["user_initial_prompt"] is None:
                         meta["user_initial_prompt"] = content_str[:500]
 
@@ -236,9 +232,7 @@ class CopilotSessionImporter:
                         tool_output = tc.get("output", tc.get("result", ""))
 
                         command = (
-                            json.dumps(tool_args)
-                            if isinstance(tool_args, dict)
-                            else str(tool_args)
+                            json.dumps(tool_args) if isinstance(tool_args, dict) else str(tool_args)
                         )
                         output = str(tool_output)[:10000] if tool_output else ""
 
@@ -267,9 +261,7 @@ class CopilotSessionImporter:
                 if not isinstance(suggestion, dict):
                     continue
 
-                proposed = suggestion.get(
-                    "command", suggestion.get("proposed", "")
-                )
+                proposed = suggestion.get("command", suggestion.get("proposed", ""))
                 sug_model = suggestion.get("model", suggestion.get("model_name", ""))
                 if sug_model and isinstance(sug_model, str):
                     models_seen.add(sug_model)
@@ -330,14 +322,14 @@ class CopilotSessionImporter:
                     models_seen.add(turn_model)
 
                 if role == "user" and content:
-                    content_str = (
-                        content if isinstance(content, str) else str(content)
-                    )
+                    content_str = content if isinstance(content, str) else str(content)
                     meta["conversation_turns"] += 1
-                    meta["all_user_prompts"].append({
-                        "text": content_str[:2000],
-                        "timestamp": ts,
-                    })
+                    meta["all_user_prompts"].append(
+                        {
+                            "text": content_str[:2000],
+                            "timestamp": ts,
+                        }
+                    )
                     if meta["user_initial_prompt"] is None:
                         meta["user_initial_prompt"] = content_str[:500]
 
@@ -430,9 +422,7 @@ class CopilotSessionImporter:
 
         return steps, meta
 
-    def parse_session_file(
-        self, session_file: Path
-    ) -> Tuple[List[TraceStep], Dict[str, Any]]:
+    def parse_session_file(self, session_file: Path) -> tuple[list[TraceStep], dict[str, Any]]:
         """
         Parse a Copilot CLI session JSON file and extract tool steps.
 
@@ -445,17 +435,17 @@ class CopilotSessionImporter:
         session_id = session_file.stem
 
         try:
-            with open(session_file, "r", encoding="utf-8") as f:
+            with open(session_file, encoding="utf-8") as f:
                 data = json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
+        except (OSError, json.JSONDecodeError) as e:
             print(f"Error reading Copilot session file {session_file}: {e}")
             return [], {"user_initial_prompt": None}
 
         if not isinstance(data, dict):
             # Try to handle if it is a list (array of sessions)
             if isinstance(data, list) and data:
-                all_steps: List[TraceStep] = []
-                combined_meta: Dict[str, Any] = {
+                all_steps: list[TraceStep] = []
+                combined_meta: dict[str, Any] = {
                     "user_initial_prompt": None,
                     "all_user_prompts": [],
                     "conversation_turns": 0,
@@ -463,14 +453,15 @@ class CopilotSessionImporter:
                     "rejected_commands": 0,
                     "models_used": [],
                 }
-                all_models: Set[str] = set()
+                all_models: set[str] = set()
                 for entry in data:
                     if isinstance(entry, dict):
-                        s, m = self._extract_steps_from_session(
-                            entry, session_id, session_file
-                        )
+                        s, m = self._extract_steps_from_session(entry, session_id, session_file)
                         all_steps.extend(s)
-                        if m.get("user_initial_prompt") and not combined_meta["user_initial_prompt"]:
+                        if (
+                            m.get("user_initial_prompt")
+                            and not combined_meta["user_initial_prompt"]
+                        ):
                             combined_meta["user_initial_prompt"] = m["user_initial_prompt"]
                         combined_meta["all_user_prompts"].extend(m.get("all_user_prompts", []))
                         combined_meta["conversation_turns"] += m.get("conversation_turns", 0)
@@ -483,9 +474,7 @@ class CopilotSessionImporter:
 
         return self._extract_steps_from_session(data, session_id, session_file)
 
-    def import_session(
-        self, session_file: Path, force: bool = False
-    ) -> CopilotImportResult:
+    def import_session(self, session_file: Path, force: bool = False) -> CopilotImportResult:
         """
         Import a single Copilot session file into BashGym format.
 
@@ -551,7 +540,7 @@ class CopilotSessionImporter:
         try:
             with open(destination, "w", encoding="utf-8") as f:
                 json.dump(asdict(session), f, indent=2, ensure_ascii=False)
-        except IOError as e:
+        except OSError as e:
             return CopilotImportResult(
                 session_id=session_id,
                 source_file=session_file,
@@ -576,7 +565,7 @@ def import_copilot_sessions(
     days: int = 60,
     limit: int = 100,
     verbose: bool = True,
-) -> List[Dict]:
+) -> list[dict]:
     """
     Import recent Copilot CLI sessions.
 
@@ -599,12 +588,9 @@ def import_copilot_sessions(
     session_files = importer.find_session_files(since=since)
 
     if verbose:
-        print(
-            f"[BashGym] Found {len(session_files)} Copilot session(s) "
-            f"from last {days} days"
-        )
+        print(f"[BashGym] Found {len(session_files)} Copilot session(s) " f"from last {days} days")
 
-    results: List[Dict] = []
+    results: list[dict] = []
     imported_count = 0
 
     for session_file, mtime in session_files:

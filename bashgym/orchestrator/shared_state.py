@@ -25,7 +25,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -37,12 +37,13 @@ STATE_OUTBOX_FILE = "shared_state.jsonl"
 @dataclass
 class StateChange:
     """Record of a single state mutation."""
+
     key: str
     value: Any
     writer_id: str
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "key": self.key,
             "value": self.value,
@@ -54,11 +55,12 @@ class StateChange:
 @dataclass
 class ConflictInfo:
     """Describes a write-key overlap between parallel tasks."""
+
     key: str
-    writers: List[str]
+    writers: list[str]
     description: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "key": self.key,
             "writers": self.writers,
@@ -76,14 +78,14 @@ class ScopedView:
     def __init__(
         self,
         state: "SharedState",
-        read_keys: Set[str],
-        write_keys: Set[str],
+        read_keys: set[str],
+        write_keys: set[str],
     ):
         self._state = state
         self._read_keys = read_keys
         self._write_keys = write_keys
 
-    async def read(self, key: str) -> Optional[Any]:
+    async def read(self, key: str) -> Any | None:
         """Read a single key, enforcing read permission."""
         if key not in self._read_keys and "*" not in self._read_keys:
             raise PermissionError(f"No read access to key: {key}")
@@ -95,7 +97,7 @@ class ScopedView:
             raise PermissionError(f"No write access to key: {key}")
         await self._state.write(key, value, writer_id)
 
-    async def read_all(self) -> Dict[str, Any]:
+    async def read_all(self) -> dict[str, Any]:
         """Read all keys this view has access to."""
         snapshot = self._state.snapshot()
         if "*" in self._read_keys:
@@ -136,13 +138,13 @@ class SharedState:
     """
 
     def __init__(self, max_history: int = 1000):
-        self._data: Dict[str, Any] = {}
-        self._key_locks: Dict[str, asyncio.Lock] = {}
+        self._data: dict[str, Any] = {}
+        self._key_locks: dict[str, asyncio.Lock] = {}
         self._lock_guard = asyncio.Lock()  # Protects _key_locks dict creation
-        self._history: List[StateChange] = []
+        self._history: list[StateChange] = []
         self._max_history = max_history
         # Track which lines have been read per worktree to avoid re-processing
-        self._poll_offsets: Dict[str, int] = {}
+        self._poll_offsets: dict[str, int] = {}
 
     # =========================================================================
     # Per-Key Locking
@@ -162,7 +164,7 @@ class SharedState:
     # Read / Write
     # =========================================================================
 
-    async def read(self, key: str) -> Optional[Any]:
+    async def read(self, key: str) -> Any | None:
         """Read a value. No lock needed (eventual consistency is acceptable)."""
         return deepcopy(self._data.get(key))
 
@@ -176,14 +178,14 @@ class SharedState:
 
             # Trim history if over limit
             if len(self._history) > self._max_history:
-                self._history = self._history[-self._max_history:]
+                self._history = self._history[-self._max_history :]
 
         # Emit event (non-blocking, outside the lock)
         self._emit_state_changed(change)
 
     async def write_batch(
         self,
-        updates: Dict[str, Any],
+        updates: dict[str, Any],
         writer_id: str,
     ) -> None:
         """Write multiple keys atomically.
@@ -214,7 +216,7 @@ class SharedState:
 
             # Trim history if over limit
             if len(self._history) > self._max_history:
-                self._history = self._history[-self._max_history:]
+                self._history = self._history[-self._max_history :]
         finally:
             # Release all locks in reverse order
             for lock in reversed(locks):
@@ -230,8 +232,8 @@ class SharedState:
 
     def scoped_view(
         self,
-        read_keys: Set[str],
-        write_keys: Set[str],
+        read_keys: set[str],
+        write_keys: set[str],
     ) -> ScopedView:
         """Create a permission-restricted view for a worker."""
         return ScopedView(self, read_keys=read_keys, write_keys=write_keys)
@@ -242,8 +244,8 @@ class SharedState:
 
     def detect_conflicts(
         self,
-        task_write_keys: Dict[str, Set[str]],
-    ) -> List[ConflictInfo]:
+        task_write_keys: dict[str, set[str]],
+    ) -> list[ConflictInfo]:
         """Detect overlapping write keys between parallel tasks.
 
         Args:
@@ -253,7 +255,7 @@ class SharedState:
             List of ConflictInfo for keys written by multiple tasks.
         """
         # Invert: key -> list of writers
-        key_writers: Dict[str, List[str]] = {}
+        key_writers: dict[str, list[str]] = {}
         for task_id, keys in task_write_keys.items():
             for key in keys:
                 key_writers.setdefault(key, []).append(task_id)
@@ -261,14 +263,16 @@ class SharedState:
         conflicts = []
         for key, writers in sorted(key_writers.items()):
             if len(writers) > 1:
-                conflicts.append(ConflictInfo(
-                    key=key,
-                    writers=sorted(writers),
-                    description=(
-                        f"Key '{key}' is written by {len(writers)} tasks: "
-                        f"{', '.join(sorted(writers))}"
-                    ),
-                ))
+                conflicts.append(
+                    ConflictInfo(
+                        key=key,
+                        writers=sorted(writers),
+                        description=(
+                            f"Key '{key}' is written by {len(writers)} tasks: "
+                            f"{', '.join(sorted(writers))}"
+                        ),
+                    )
+                )
 
         return conflicts
 
@@ -278,10 +282,10 @@ class SharedState:
 
     def get_history(
         self,
-        key: Optional[str] = None,
-        writer_id: Optional[str] = None,
+        key: str | None = None,
+        writer_id: str | None = None,
         limit: int = 50,
-    ) -> List[StateChange]:
+    ) -> list[StateChange]:
         """Query change history with optional filters."""
         results = self._history
 
@@ -294,19 +298,17 @@ class SharedState:
         # Return most recent entries up to limit
         return list(results[-limit:])
 
-    def snapshot(self) -> Dict[str, Any]:
+    def snapshot(self) -> dict[str, Any]:
         """Return a frozen (deep-copied) snapshot of all state."""
         return deepcopy(self._data)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize for API/WebSocket."""
         return {
             "data": self.snapshot(),
             "key_count": len(self._data),
             "history_length": len(self._history),
-            "recent_changes": [
-                c.to_dict() for c in self._history[-10:]
-            ],
+            "recent_changes": [c.to_dict() for c in self._history[-10:]],
         }
 
     # =========================================================================
@@ -341,7 +343,7 @@ class SharedState:
         merged = 0
 
         try:
-            with open(outbox, "r", encoding="utf-8") as f:
+            with open(outbox, encoding="utf-8") as f:
                 lines = f.readlines()
 
             # Process only lines we haven't seen
@@ -359,8 +361,7 @@ class SharedState:
                         merged += 1
                 except json.JSONDecodeError:
                     logger.warning(
-                        f"Invalid JSON in {outbox} line {offset + merged}: "
-                        f"{line[:100]}"
+                        f"Invalid JSON in {outbox} line {offset + merged}: " f"{line[:100]}"
                     )
 
             self._poll_offsets[worktree_path] = len(lines)
@@ -369,10 +370,7 @@ class SharedState:
             logger.warning(f"Failed to read state outbox at {outbox}: {e}")
 
         if merged > 0:
-            logger.debug(
-                f"Merged {merged} state entries from {task_id} "
-                f"({worktree_path})"
-            )
+            logger.debug(f"Merged {merged} state entries from {task_id} " f"({worktree_path})")
 
         return merged
 
@@ -388,10 +386,7 @@ class SharedState:
         try:
             content = json.dumps(snapshot, indent=2, default=str)
             snapshot_path.write_text(content, encoding="utf-8")
-            logger.debug(
-                f"Wrote state snapshot ({len(snapshot)} keys) "
-                f"to {snapshot_path}"
-            )
+            logger.debug(f"Wrote state snapshot ({len(snapshot)} keys) " f"to {snapshot_path}")
         except OSError as e:
             logger.warning(f"Failed to write state snapshot to {snapshot_path}: {e}")
 
@@ -404,11 +399,14 @@ class SharedState:
         try:
             from bashgym.events.bus import event_bus
             from bashgym.events.types import SharedStateChanged
-            event_bus.emit(SharedStateChanged(
-                key=change.key,
-                writer_id=change.writer_id,
-                value_preview=self._preview_value(change.value),
-            ))
+
+            event_bus.emit(
+                SharedStateChanged(
+                    key=change.key,
+                    writer_id=change.writer_id,
+                    value_preview=self._preview_value(change.value),
+                )
+            )
         except ImportError:
             pass  # Events module not available
         except Exception:
@@ -422,5 +420,5 @@ class SharedState:
         except (TypeError, ValueError):
             s = repr(value)
         if len(s) > max_len:
-            return s[:max_len - 3] + "..."
+            return s[: max_len - 3] + "..."
         return s

@@ -7,22 +7,23 @@ using Differential Privacy and comprehensive PII detection/replacement.
 Module 3: Data Synthesis (The "Factory") - Privacy Extension
 """
 
-import os
-import json
-import re
 import asyncio
+import hashlib
+import json
 import logging
-from pathlib import Path
+import os
+import re
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List, Set, Tuple
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
+from typing import Any
+
 import httpx
-import hashlib
 
 # NeMo Microservices integration
 try:
-    from bashgym.integrations import AsyncNeMoClient, NeMoClientConfig, NEMO_SDK_AVAILABLE
+    from bashgym.integrations import NEMO_SDK_AVAILABLE, AsyncNeMoClient, NeMoClientConfig
 except ImportError:
     NEMO_SDK_AVAILABLE = False
     AsyncNeMoClient = None
@@ -33,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 class PIIType(Enum):
     """Types of PII that can be detected and replaced."""
+
     # Personal identifiers
     PERSON = "person"
     EMAIL = "email"
@@ -72,11 +74,12 @@ class PIIType(Enum):
 
 class ReplacementStrategy(Enum):
     """Strategies for replacing detected PII."""
-    REDACT = "redact"          # Replace with [REDACTED]
-    MASK = "mask"              # Replace with ***
-    SYNTHETIC = "synthetic"     # Replace with synthetic data
-    HASH = "hash"              # Replace with hashed value
-    CATEGORY = "category"       # Replace with category label
+
+    REDACT = "redact"  # Replace with [REDACTED]
+    MASK = "mask"  # Replace with ***
+    SYNTHETIC = "synthetic"  # Replace with synthetic data
+    HASH = "hash"  # Replace with hashed value
+    CATEGORY = "category"  # Replace with category label
 
 
 @dataclass
@@ -85,17 +88,25 @@ class SafeSynthesizerConfig:
 
     # NeMo Safe Synthesizer endpoint
     endpoint: str = "http://localhost:8000"
-    api_key: Optional[str] = None
+    api_key: str | None = None
 
     # Privacy settings
     epsilon: float = 8.0  # DP privacy budget (lower = more private)
-    delta: float = 1e-5   # DP delta parameter
+    delta: float = 1e-5  # DP delta parameter
     use_dp_sgd: bool = False  # Use DP-SGD during training
 
     # PII detection settings
-    pii_types: List[str] = field(default_factory=lambda: [
-        "person", "email", "ssn", "phone", "address", "credit_card", "api_key"
-    ])
+    pii_types: list[str] = field(
+        default_factory=lambda: [
+            "person",
+            "email",
+            "ssn",
+            "phone",
+            "address",
+            "credit_card",
+            "api_key",
+        ]
+    )
     confidence_threshold: float = 0.8
     use_llm_classification: bool = True
 
@@ -117,13 +128,13 @@ class PIIDetection:
     confidence: float
     context: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "text": self.text,
             "type": self.pii_type.value,
             "start": self.start,
             "end": self.end,
-            "confidence": self.confidence
+            "confidence": self.confidence,
         }
 
 
@@ -134,14 +145,14 @@ class PrivacyReport:
     dataset_id: str
     total_records: int
     records_with_pii: int
-    pii_counts: Dict[str, int]
-    replacement_stats: Dict[str, int]
+    pii_counts: dict[str, int]
+    replacement_stats: dict[str, int]
     privacy_budget_used: float
     disclosure_risk: float
     utility_score: float
     processing_time: float
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "dataset_id": self.dataset_id,
             "total_records": self.total_records,
@@ -152,7 +163,7 @@ class PrivacyReport:
             "privacy_budget_used": self.privacy_budget_used,
             "disclosure_risk": self.disclosure_risk,
             "utility_score": self.utility_score,
-            "processing_time": self.processing_time
+            "processing_time": self.processing_time,
         }
 
 
@@ -170,15 +181,15 @@ class SafeSynthesizer:
 
     # Regex patterns for common PII types
     PII_PATTERNS = {
-        PIIType.EMAIL: r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b',
-        PIIType.PHONE: r'\b(?:\+?1[-.\s]?)?\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4}\b',
-        PIIType.SSN: r'\b(?!000|666|9\d{2})\d{3}[-\s]?(?!00)\d{2}[-\s]?(?!0000)\d{4}\b',
-        PIIType.CREDIT_CARD: r'\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13})\b',
-        PIIType.IP_ADDRESS: r'\b(?:\d{1,3}\.){3}\d{1,3}\b',
-        PIIType.API_KEY: r'\b(?:sk-[a-zA-Z0-9]{32,}|nvapi-[a-zA-Z0-9-]{32,}|ghp_[a-zA-Z0-9]{36})\b',
-        PIIType.AUTH_TOKEN: r'\b(?:Bearer\s+)?[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b',
-        PIIType.DATE_OF_BIRTH: r'\b(?:0[1-9]|1[0-2])[/\-](?:0[1-9]|[12]\d|3[01])[/\-](?:19|20)\d{2}\b',
-        PIIType.ZIP_CODE: r'\b\d{5}(?:-\d{4})?\b',
+        PIIType.EMAIL: r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
+        PIIType.PHONE: r"\b(?:\+?1[-.\s]?)?\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4}\b",
+        PIIType.SSN: r"\b(?!000|666|9\d{2})\d{3}[-\s]?(?!00)\d{2}[-\s]?(?!0000)\d{4}\b",
+        PIIType.CREDIT_CARD: r"\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13})\b",
+        PIIType.IP_ADDRESS: r"\b(?:\d{1,3}\.){3}\d{1,3}\b",
+        PIIType.API_KEY: r"\b(?:sk-[a-zA-Z0-9]{32,}|nvapi-[a-zA-Z0-9-]{32,}|ghp_[a-zA-Z0-9]{36})\b",
+        PIIType.AUTH_TOKEN: r"\b(?:Bearer\s+)?[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b",
+        PIIType.DATE_OF_BIRTH: r"\b(?:0[1-9]|1[0-2])[/\-](?:0[1-9]|[12]\d|3[01])[/\-](?:19|20)\d{2}\b",
+        PIIType.ZIP_CODE: r"\b\d{5}(?:-\d{4})?\b",
     }
 
     # Synthetic data generators
@@ -193,7 +204,7 @@ class SafeSynthesizer:
         PIIType.ADDRESS: lambda i: f"{i} Example Street, City, ST 00000",
     }
 
-    def __init__(self, config: Optional[SafeSynthesizerConfig] = None):
+    def __init__(self, config: SafeSynthesizerConfig | None = None):
         """Initialize the Safe Synthesizer."""
         self.config = config or SafeSynthesizerConfig()
 
@@ -202,7 +213,7 @@ class SafeSynthesizer:
             self.config.api_key = os.environ.get("NVIDIA_API_KEY")
 
         # Initialize NeMo client if available (for LLM-based PII detection)
-        self._nemo_client: Optional[AsyncNeMoClient] = None
+        self._nemo_client: AsyncNeMoClient | None = None
         if NEMO_SDK_AVAILABLE and AsyncNeMoClient is not None:
             try:
                 nemo_config = NeMoClientConfig(
@@ -216,19 +227,16 @@ class SafeSynthesizer:
                 logger.warning(f"Failed to initialize NeMo SDK client: {e}")
 
         # HTTP client (fallback)
-        self.client = httpx.AsyncClient(
-            timeout=120.0,
-            headers=self._build_headers()
-        )
+        self.client = httpx.AsyncClient(timeout=120.0, headers=self._build_headers())
 
         # Tracking
-        self.synthetic_counter: Dict[PIIType, int] = {}
-        self.replacement_map: Dict[str, str] = {}  # For consistent replacements
+        self.synthetic_counter: dict[PIIType, int] = {}
+        self.replacement_map: dict[str, str] = {}  # For consistent replacements
 
         # Ensure output directory exists
         Path(self.config.output_dir).mkdir(parents=True, exist_ok=True)
 
-    def _build_headers(self) -> Dict[str, str]:
+    def _build_headers(self) -> dict[str, str]:
         """Build HTTP headers."""
         headers = {"Content-Type": "application/json"}
         if self.config.api_key:
@@ -241,11 +249,7 @@ class SafeSynthesizer:
         if self._nemo_client:
             await self._nemo_client.close()
 
-    def detect_pii(
-        self,
-        text: str,
-        pii_types: Optional[List[str]] = None
-    ) -> List[PIIDetection]:
+    def detect_pii(self, text: str, pii_types: list[str] | None = None) -> list[PIIDetection]:
         """
         Detect PII in text using regex and optional LLM classification.
 
@@ -265,14 +269,16 @@ class SafeSynthesizer:
                 continue
 
             for match in re.finditer(pattern, text):
-                detections.append(PIIDetection(
-                    text=match.group(),
-                    pii_type=pii_type,
-                    start=match.start(),
-                    end=match.end(),
-                    confidence=0.9,
-                    context=text[max(0, match.start()-20):min(len(text), match.end()+20)]
-                ))
+                detections.append(
+                    PIIDetection(
+                        text=match.group(),
+                        pii_type=pii_type,
+                        start=match.start(),
+                        end=match.end(),
+                        confidence=0.9,
+                        context=text[max(0, match.start() - 20) : min(len(text), match.end() + 20)],
+                    )
+                )
 
         # Sort by position
         detections.sort(key=lambda d: d.start)
@@ -280,10 +286,8 @@ class SafeSynthesizer:
         return detections
 
     async def detect_pii_with_llm(
-        self,
-        text: str,
-        pii_types: Optional[List[str]] = None
-    ) -> List[PIIDetection]:
+        self, text: str, pii_types: list[str] | None = None
+    ) -> list[PIIDetection]:
         """
         Detect PII using LLM classification for higher accuracy.
 
@@ -321,7 +325,7 @@ If no PII found, output: []
                 result = await self._nemo_client.chat_completion(
                     model="meta/llama-3.1-70b-instruct",
                     messages=[{"role": "user", "content": llm_prompt}],
-                    temperature=0.0
+                    temperature=0.0,
                 )
                 content = result["choices"][0]["message"]["content"]
             else:
@@ -330,8 +334,8 @@ If no PII found, output: []
                     json={
                         "model": "meta/llama-3.1-70b-instruct",
                         "messages": [{"role": "user", "content": llm_prompt}],
-                        "temperature": 0.0
-                    }
+                        "temperature": 0.0,
+                    },
                 )
 
                 if response.status_code != 200:
@@ -361,13 +365,15 @@ If no PII found, output: []
 
                                 # Check if already detected
                                 if not any(d.start == start for d in detections):
-                                    detections.append(PIIDetection(
-                                        text=found_text,
-                                        pii_type=pii_type,
-                                        start=start,
-                                        end=start + len(found_text),
-                                        confidence=det.get("confidence", 0.8)
-                                    ))
+                                    detections.append(
+                                        PIIDetection(
+                                            text=found_text,
+                                            pii_type=pii_type,
+                                            start=start,
+                                            end=start + len(found_text),
+                                            confidence=det.get("confidence", 0.8),
+                                        )
+                                    )
                 except json.JSONDecodeError:
                     pass
 
@@ -379,11 +385,8 @@ If no PII found, output: []
         return detections
 
     def replace_pii(
-        self,
-        text: str,
-        detections: List[PIIDetection],
-        strategy: Optional[ReplacementStrategy] = None
-    ) -> Tuple[str, Dict[str, str]]:
+        self, text: str, detections: list[PIIDetection], strategy: ReplacementStrategy | None = None
+    ) -> tuple[str, dict[str, str]]:
         """
         Replace detected PII with appropriate substitutes.
 
@@ -407,21 +410,16 @@ If no PII found, output: []
             if original in self.replacement_map:
                 replacement = self.replacement_map[original]
             else:
-                replacement = self._generate_replacement(
-                    detection.pii_type, strategy, original
-                )
+                replacement = self._generate_replacement(detection.pii_type, strategy, original)
                 self.replacement_map[original] = replacement
 
-            result = result[:detection.start] + replacement + result[detection.end:]
+            result = result[: detection.start] + replacement + result[detection.end :]
             replacements[original] = replacement
 
         return result, replacements
 
     def _generate_replacement(
-        self,
-        pii_type: PIIType,
-        strategy: ReplacementStrategy,
-        original: str
+        self, pii_type: PIIType, strategy: ReplacementStrategy, original: str
     ) -> str:
         """Generate a replacement for a PII value."""
         if strategy == ReplacementStrategy.REDACT:
@@ -451,11 +449,8 @@ If no PII found, output: []
         return f"[REPLACED_{pii_type.value}]"
 
     async def process_dataset(
-        self,
-        data: List[Dict[str, Any]],
-        text_fields: List[str],
-        dataset_id: Optional[str] = None
-    ) -> Tuple[List[Dict[str, Any]], PrivacyReport]:
+        self, data: list[dict[str, Any]], text_fields: list[str], dataset_id: str | None = None
+    ) -> tuple[list[dict[str, Any]], PrivacyReport]:
         """
         Process a dataset to remove/replace PII.
 
@@ -471,19 +466,19 @@ If no PII found, output: []
         dataset_id = dataset_id or f"dataset_{start_time.strftime('%Y%m%d_%H%M%S')}"
 
         processed_data = []
-        pii_counts: Dict[str, int] = {}
-        replacement_stats: Dict[str, int] = {}
+        pii_counts: dict[str, int] = {}
+        replacement_stats: dict[str, int] = {}
         records_with_pii = 0
 
         for record in data:
             processed_record = record.copy()
             record_has_pii = False
 
-            for field in text_fields:
-                if field not in record or not isinstance(record[field], str):
+            for field_name in text_fields:
+                if field_name not in record or not isinstance(record[field_name], str):
                     continue
 
-                text = record[field]
+                text = record[field_name]
 
                 # Detect PII
                 if self.config.use_llm_classification:
@@ -501,11 +496,13 @@ If no PII found, output: []
 
                     # Replace PII
                     processed_text, replacements = self.replace_pii(text, detections)
-                    processed_record[field] = processed_text
+                    processed_record[field_name] = processed_text
 
                     # Track replacement stats
                     strategy_name = self.config.default_strategy.value
-                    replacement_stats[strategy_name] = replacement_stats.get(strategy_name, 0) + len(replacements)
+                    replacement_stats[strategy_name] = replacement_stats.get(
+                        strategy_name, 0
+                    ) + len(replacements)
 
             if record_has_pii:
                 records_with_pii += 1
@@ -529,7 +526,7 @@ If no PII found, output: []
             privacy_budget_used=self.config.epsilon,
             disclosure_risk=disclosure_risk,
             utility_score=utility_score,
-            processing_time=processing_time
+            processing_time=processing_time,
         )
 
         # Save report
@@ -537,11 +534,7 @@ If no PII found, output: []
 
         return processed_data, report
 
-    def _estimate_disclosure_risk(
-        self,
-        pii_counts: Dict[str, int],
-        total_records: int
-    ) -> float:
+    def _estimate_disclosure_risk(self, pii_counts: dict[str, int], total_records: int) -> float:
         """Estimate disclosure risk based on PII density."""
         if total_records == 0:
             return 0.0
@@ -559,9 +552,9 @@ If no PII found, output: []
 
     def _estimate_utility(
         self,
-        original: List[Dict[str, Any]],
-        processed: List[Dict[str, Any]],
-        text_fields: List[str]
+        original: list[dict[str, Any]],
+        processed: list[dict[str, Any]],
+        text_fields: list[str],
     ) -> float:
         """Estimate data utility preservation."""
         if not original:
@@ -571,9 +564,9 @@ If no PII found, output: []
         total_chars_preserved = 0
 
         for orig, proc in zip(original, processed):
-            for field in text_fields:
-                orig_text = str(orig.get(field, ""))
-                proc_text = str(proc.get(field, ""))
+            for field_name in text_fields:
+                orig_text = str(orig.get(field_name, ""))
+                proc_text = str(proc.get(field_name, ""))
 
                 total_chars_original += len(orig_text)
                 # Count non-replaced characters
@@ -594,10 +587,8 @@ If no PII found, output: []
         return output_path
 
     async def apply_differential_privacy(
-        self,
-        data: List[Dict[str, Any]],
-        numeric_fields: List[str]
-    ) -> List[Dict[str, Any]]:
+        self, data: list[dict[str, Any]], numeric_fields: list[str]
+    ) -> list[dict[str, Any]]:
         """
         Apply differential privacy to numeric fields.
 
@@ -618,16 +609,16 @@ If no PII found, output: []
         for record in data:
             processed_record = record.copy()
 
-            for field in numeric_fields:
-                if field in record and isinstance(record[field], (int, float)):
-                    original = record[field]
+            for field_name in numeric_fields:
+                if field_name in record and isinstance(record[field_name], (int, float)):
+                    original = record[field_name]
 
                     # Laplace noise
                     scale = sensitivity / self.config.epsilon
                     noise = random.random() - 0.5
                     noise = -scale * (1 if noise >= 0 else -1) * abs(noise).real
 
-                    processed_record[field] = original + noise
+                    processed_record[field_name] = original + noise
 
             processed.append(processed_record)
 
@@ -644,7 +635,7 @@ async def main():
     config = SafeSynthesizerConfig(
         epsilon=8.0,
         pii_types=["email", "phone", "ssn", "api_key"],
-        default_strategy=ReplacementStrategy.SYNTHETIC
+        default_strategy=ReplacementStrategy.SYNTHETIC,
     )
 
     synthesizer = SafeSynthesizer(config)
@@ -655,19 +646,18 @@ async def main():
             {
                 "id": 1,
                 "message": "Contact John Doe at john.doe@email.com or 555-123-4567",
-                "notes": "SSN: 123-45-6789, API key: sk-abcdef1234567890"
+                "notes": "SSN: 123-45-6789, API key: sk-abcdef1234567890",
             },
             {
                 "id": 2,
                 "message": "Email jane@company.org for support",
-                "notes": "No sensitive data here"
-            }
+                "notes": "No sensitive data here",
+            },
         ]
 
         # Process dataset
         processed_data, report = await synthesizer.process_dataset(
-            data=sample_data,
-            text_fields=["message", "notes"]
+            data=sample_data, text_fields=["message", "notes"]
         )
 
         print("Privacy Report:")

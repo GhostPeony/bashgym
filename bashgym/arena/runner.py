@@ -10,26 +10,27 @@ Instrumentation:
   - PII filtering on captured outputs
 """
 
-import os
 import json
+import os
 import subprocess
-import uuid
-from pathlib import Path
-from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List, Callable, TYPE_CHECKING
-from datetime import datetime, timezone
 import threading
-import queue
+import uuid
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Optional
 
 # Handle both package and standalone usage
 try:
-    from bashgym.arena.sandbox import SandboxManager, SandboxConfig, SandboxInstance
+    from bashgym.arena.sandbox import SandboxInstance, SandboxManager
 except ImportError:
-    from .sandbox import SandboxManager, SandboxConfig, SandboxInstance
+    from .sandbox import SandboxInstance, SandboxManager
 
 # Import instrumentation (optional)
 try:
-    from bashgym.core import get_instrumentation, Instrumentation
+    from bashgym.core import Instrumentation, get_instrumentation
+
     HAS_INSTRUMENTATION = True
 except ImportError:
     HAS_INSTRUMENTATION = False
@@ -62,9 +63,9 @@ class AgentConfig:
 
     # Safety settings
     require_approval: bool = False
-    allowed_tools: List[str] = field(default_factory=lambda: [
-        "Bash", "Read", "Write", "Edit", "Glob", "Grep"
-    ])
+    allowed_tools: list[str] = field(
+        default_factory=lambda: ["Bash", "Read", "Write", "Edit", "Glob", "Grep"]
+    )
 
     # Instrumentation
     enable_guardrails: bool = True
@@ -82,9 +83,9 @@ class TaskResult:
     stdout: str
     stderr: str
     duration_seconds: float
-    trace_path: Optional[Path] = None
-    error_message: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    trace_path: Path | None = None
+    error_message: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
     # Instrumentation fields
     injection_blocked: bool = False
     pii_redactions: int = 0
@@ -105,14 +106,14 @@ class AgentRunner:
 
     def __init__(
         self,
-        config: Optional[AgentConfig] = None,
-        sandbox_manager: Optional[SandboxManager] = None,
-        instrumentation: Optional["Instrumentation"] = None
+        config: AgentConfig | None = None,
+        sandbox_manager: SandboxManager | None = None,
+        instrumentation: Optional["Instrumentation"] = None,
     ):
         """Initialize the agent runner."""
         self.config = config or AgentConfig()
         self.sandbox_manager = sandbox_manager or SandboxManager()
-        self.active_tasks: Dict[str, subprocess.Popen] = {}
+        self.active_tasks: dict[str, subprocess.Popen] = {}
 
         # Instrumentation (guardrails + profiling)
         self._instrumentation = instrumentation
@@ -125,12 +126,7 @@ class AgentRunner:
         """Get the instrumentation instance."""
         return self._instrumentation
 
-    def prepare_workspace(
-        self,
-        sandbox: SandboxInstance,
-        task_prompt: str,
-        task_id: str
-    ) -> None:
+    def prepare_workspace(self, sandbox: SandboxInstance, task_prompt: str, task_id: str) -> None:
         """
         Prepare the workspace for agent execution.
 
@@ -156,10 +152,7 @@ class AgentRunner:
             "initial_prompt": task_prompt,
             "workspace_id": sandbox.sandbox_id,
             "started_at": datetime.now(timezone.utc).isoformat(),
-            "config": {
-                "model": self.config.model,
-                "timeout": self.config.timeout
-            }
+            "config": {"model": self.config.model, "timeout": self.config.timeout},
         }
 
         metadata_path = workspace / ".session_metadata.json"
@@ -169,11 +162,7 @@ class AgentRunner:
         (workspace / "data" / "gold_traces").mkdir(parents=True, exist_ok=True)
         (workspace / "data" / "failed_traces").mkdir(parents=True, exist_ok=True)
 
-    def build_claude_command(
-        self,
-        task_prompt: str,
-        workspace_path: Path
-    ) -> List[str]:
+    def build_claude_command(self, task_prompt: str, workspace_path: Path) -> list[str]:
         """Build the Claude CLI command."""
         cmd = [
             self.config.claude_cli_path,
@@ -193,9 +182,9 @@ class AgentRunner:
     def run_task(
         self,
         task_prompt: str,
-        task_id: Optional[str] = None,
-        repository_url: Optional[str] = None,
-        on_output: Optional[Callable[[str], None]] = None
+        task_id: str | None = None,
+        repository_url: str | None = None,
+        on_output: Callable[[str], None] | None = None,
     ) -> TaskResult:
         """
         Run an agent task in a sandboxed environment.
@@ -214,8 +203,7 @@ class AgentRunner:
 
         # Create sandbox
         sandbox = self.sandbox_manager.create_sandbox(
-            task_id=task_id,
-            repository_url=repository_url
+            task_id=task_id, repository_url=repository_url
         )
 
         try:
@@ -248,14 +236,14 @@ class AgentRunner:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                bufsize=1
+                bufsize=1,
             )
 
             self.active_tasks[task_id] = process
 
             # Stream output
             def read_output(pipe, lines_list, callback):
-                for line in iter(pipe.readline, ''):
+                for line in iter(pipe.readline, ""):
                     lines_list.append(line)
                     if callback:
                         callback(line)
@@ -263,11 +251,14 @@ class AgentRunner:
 
             stdout_thread = threading.Thread(
                 target=read_output,
-                args=(process.stdout, stdout_lines, on_output if self.config.stream_output else None)
+                args=(
+                    process.stdout,
+                    stdout_lines,
+                    on_output if self.config.stream_output else None,
+                ),
             )
             stderr_thread = threading.Thread(
-                target=read_output,
-                args=(process.stderr, stderr_lines, None)
+                target=read_output, args=(process.stderr, stderr_lines, None)
             )
 
             stdout_thread.start()
@@ -300,8 +291,8 @@ class AgentRunner:
                 trace_path=trace_path if trace_path.exists() else None,
                 metadata={
                     "sandbox_id": sandbox.sandbox_id,
-                    "workspace_path": str(sandbox.workspace_path)
-                }
+                    "workspace_path": str(sandbox.workspace_path),
+                },
             )
 
         except Exception as e:
@@ -315,7 +306,7 @@ class AgentRunner:
                 stdout="",
                 stderr=str(e),
                 duration_seconds=duration,
-                error_message=str(e)
+                error_message=str(e),
             )
         finally:
             # Cleanup
@@ -325,9 +316,9 @@ class AgentRunner:
     async def run_task_async(
         self,
         task_prompt: str,
-        task_id: Optional[str] = None,
-        repository_url: Optional[str] = None,
-        on_output: Optional[Callable[[str], None]] = None
+        task_id: str | None = None,
+        repository_url: str | None = None,
+        on_output: Callable[[str], None] | None = None,
     ) -> TaskResult:
         """
         Run an agent task with instrumentation (async).
@@ -354,16 +345,14 @@ class AgentRunner:
         trace_id = ""
         if self._instrumentation and self.config.enable_profiling:
             trace_id = self._instrumentation.start_trace(
-                f"task:{task_id}",
-                metadata={"prompt_preview": task_prompt[:200]}
+                f"task:{task_id}", metadata={"prompt_preview": task_prompt[:200]}
             )
 
         try:
             # Check task prompt for injection
             if self._instrumentation and self.config.enable_guardrails:
                 is_safe = await self._instrumentation.check_injection(
-                    task_prompt,
-                    location="runner.task_prompt"
+                    task_prompt, location="runner.task_prompt"
                 )
                 if not is_safe:
                     injection_blocked = True
@@ -375,14 +364,13 @@ class AgentRunner:
                         stderr="Task prompt blocked: potential injection detected",
                         duration_seconds=0.0,
                         error_message="Injection detected in task prompt",
-                        injection_blocked=True
+                        injection_blocked=True,
                     )
 
                 # Filter PII from task prompt
                 original_prompt = task_prompt
                 task_prompt = await self._instrumentation.filter_pii(
-                    task_prompt,
-                    location="runner.task_prompt"
+                    task_prompt, location="runner.task_prompt"
                 )
                 if task_prompt != original_prompt:
                     pii_redactions += 1
@@ -390,8 +378,7 @@ class AgentRunner:
             # Run the sync task in thread pool
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(
-                None,
-                lambda: self.run_task(task_prompt, task_id, repository_url, on_output)
+                None, lambda: self.run_task(task_prompt, task_id, repository_url, on_output)
             )
 
             # Filter PII from output
@@ -399,8 +386,7 @@ class AgentRunner:
                 if result.stdout:
                     original_stdout = result.stdout
                     result.stdout = await self._instrumentation.filter_pii(
-                        result.stdout,
-                        location="runner.stdout"
+                        result.stdout, location="runner.stdout"
                     )
                     if result.stdout != original_stdout:
                         pii_redactions += 1
@@ -408,8 +394,7 @@ class AgentRunner:
                 if result.stderr:
                     original_stderr = result.stderr
                     result.stderr = await self._instrumentation.filter_pii(
-                        result.stderr,
-                        location="runner.stderr"
+                        result.stderr, location="runner.stderr"
                     )
                     if result.stderr != original_stderr:
                         pii_redactions += 1
@@ -426,10 +411,7 @@ class AgentRunner:
                 self._instrumentation.end_trace(trace_id)
 
     def run_task_in_existing_sandbox(
-        self,
-        sandbox: SandboxInstance,
-        task_prompt: str,
-        task_id: Optional[str] = None
+        self, sandbox: SandboxInstance, task_prompt: str, task_id: str | None = None
     ) -> TaskResult:
         """
         Run a task in an existing sandbox (for multi-step workflows).
@@ -444,9 +426,7 @@ class AgentRunner:
         cmd_str = f"{self.config.claude_cli_path} --print --prompt '{task_prompt}'"
 
         result = self.sandbox_manager.execute_command(
-            sandbox.sandbox_id,
-            cmd_str,
-            timeout=self.config.timeout
+            sandbox.sandbox_id, cmd_str, timeout=self.config.timeout
         )
 
         end_time = datetime.now(timezone.utc)
@@ -459,7 +439,7 @@ class AgentRunner:
             stdout=result["stdout"],
             stderr=result["stderr"],
             duration_seconds=duration,
-            metadata={"sandbox_id": sandbox.sandbox_id}
+            metadata={"sandbox_id": sandbox.sandbox_id},
         )
 
     def cancel_task(self, task_id: str) -> bool:
@@ -475,6 +455,6 @@ class AgentRunner:
             return True
         return False
 
-    def get_active_tasks(self) -> List[str]:
+    def get_active_tasks(self) -> list[str]:
         """Get list of active task IDs."""
         return list(self.active_tasks.keys())

@@ -10,14 +10,14 @@ Module: Orchestrator
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Dict, List, Optional
 
 from bashgym.orchestrator.models import (
-    MergeResult, WorkerResult, LLMConfig, TaskNode,
+    LLMConfig,
+    MergeResult,
+    WorkerResult,
 )
-from bashgym.orchestrator.worktree import WorktreeManager
 from bashgym.orchestrator.task_dag import TaskDAG, _call_llm
+from bashgym.orchestrator.worktree import WorktreeManager
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +46,7 @@ and add a TODO comment noting what was lost from Task B."""
 @dataclass
 class SynthesisReport:
     """Summary of the synthesis (merge) phase."""
+
     total_tasks: int = 0
     completed_tasks: int = 0
     failed_tasks: int = 0
@@ -55,10 +56,10 @@ class SynthesisReport:
     conflicts_unresolved: int = 0
     total_cost_usd: float = 0.0
     total_duration_seconds: float = 0.0
-    merge_results: List[MergeResult] = field(default_factory=list)
-    files_modified: List[str] = field(default_factory=list)
+    merge_results: list[MergeResult] = field(default_factory=list)
+    files_modified: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
             "total_tasks": self.total_tasks,
             "completed_tasks": self.completed_tasks,
@@ -84,8 +85,8 @@ class ResultSynthesizer:
 
     def __init__(
         self,
-        worktrees: Optional[WorktreeManager] = None,
-        llm_config: Optional[LLMConfig] = None,
+        worktrees: WorktreeManager | None = None,
+        llm_config: LLMConfig | None = None,
         auto_resolve_conflicts: bool = True,
     ):
         """Initialize the synthesizer.
@@ -103,7 +104,7 @@ class ResultSynthesizer:
     async def synthesize(
         self,
         dag: TaskDAG,
-        results: List[WorkerResult],
+        results: list[WorkerResult],
         target_branch: str = "main",
     ) -> SynthesisReport:
         """Merge all completed task branches and produce a report.
@@ -154,9 +155,7 @@ class ResultSynthesizer:
                 logger.info(f"Merged task {task_id} successfully")
             elif merge_result.conflicts and self.auto_resolve and self.llm_config:
                 # Attempt LLM-assisted conflict resolution
-                resolved = await self._resolve_conflicts(
-                    dag, task_id, merge_result, target_branch
-                )
+                resolved = await self._resolve_conflicts(dag, task_id, merge_result, target_branch)
                 report.merge_results.append(resolved)
                 if resolved.success:
                     report.conflicts_resolved += len(merge_result.conflicts)
@@ -168,9 +167,7 @@ class ResultSynthesizer:
                 else:
                     report.conflicts_unresolved += len(merge_result.conflicts)
                     report.merge_failures += 1
-                    logger.warning(
-                        f"Could not resolve conflicts for task {task_id}"
-                    )
+                    logger.warning(f"Could not resolve conflicts for task {task_id}")
             else:
                 report.merge_failures += 1
                 report.merge_results.append(merge_result)
@@ -228,8 +225,12 @@ class ResultSynthesizer:
 
         # Re-attempt the merge to get conflict markers
         proc = await asyncio.create_subprocess_exec(
-            "git", "merge", branch, "--no-ff",
-            "-m", f"Merge task/{task_id}: {branch}",
+            "git",
+            "merge",
+            branch,
+            "--no-ff",
+            "-m",
+            f"Merge task/{task_id}: {branch}",
             cwd=str(repo_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -286,22 +287,24 @@ class ResultSynthesizer:
 
                 # Stage the resolved file
                 await asyncio.create_subprocess_exec(
-                    "git", "add", conflict_file,
+                    "git",
+                    "add",
+                    conflict_file,
                     cwd=str(repo_path),
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
 
             except Exception as e:
-                logger.warning(
-                    f"LLM conflict resolution failed for {conflict_file}: {e}"
-                )
+                logger.warning(f"LLM conflict resolution failed for {conflict_file}: {e}")
                 all_resolved = False
 
         if all_resolved:
             # Complete the merge commit
             proc = await asyncio.create_subprocess_exec(
-                "git", "commit", "--no-edit",
+                "git",
+                "commit",
+                "--no-edit",
                 cwd=str(repo_path),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -319,7 +322,9 @@ class ResultSynthesizer:
 
         # Abort if we couldn't resolve everything
         await asyncio.create_subprocess_exec(
-            "git", "merge", "--abort",
+            "git",
+            "merge",
+            "--abort",
             cwd=str(repo_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

@@ -6,25 +6,26 @@ Supports two formats:
 2. Simple (pre-paired): objects with tool, arguments, result fields
 """
 
-import json
 import hashlib
+import json
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
-from dataclasses import dataclass, asdict
+from typing import Any
 
-from ..core import TraceStep, TraceSession, TraceCapture, RepoInfo
+from ..core import RepoInfo, TraceCapture, TraceSession, TraceStep
 
 
 @dataclass
 class MCPImportResult:
     """Result of importing MCP tool logs."""
+
     session_id: str
     steps_imported: int
-    destination_file: Optional[Path] = None
-    error: Optional[str] = None
+    destination_file: Path | None = None
+    error: str | None = None
     skipped: bool = False
-    skip_reason: Optional[str] = None
+    skip_reason: str | None = None
 
 
 class MCPLogImporter:
@@ -33,7 +34,7 @@ class MCPLogImporter:
     def __init__(self):
         self.trace_capture = TraceCapture()
         self.imported_file = self.trace_capture.bashgym_dir / "imported_mcp.json"
-        self._imported: Optional[set] = None
+        self._imported: set | None = None
         self._dummy_repo = RepoInfo(path="", name="mcp", is_git_repo=False)
 
     def _load_imported(self) -> set:
@@ -51,11 +52,11 @@ class MCPLogImporter:
         self.imported_file.parent.mkdir(parents=True, exist_ok=True)
         self.imported_file.write_text(json.dumps({"imported_ids": list(imported)}))
 
-    def _is_jsonrpc(self, entries: List[Dict]) -> bool:
+    def _is_jsonrpc(self, entries: list[dict]) -> bool:
         """Detect if log entries are JSON-RPC format."""
         return any(e.get("jsonrpc") == "2.0" for e in entries if isinstance(e, dict))
 
-    def _parse_jsonrpc(self, entries: List[Dict]) -> List[TraceStep]:
+    def _parse_jsonrpc(self, entries: list[dict]) -> list[TraceStep]:
         """Parse JSON-RPC request/response pairs into steps."""
         requests = {}
         responses = {}
@@ -84,8 +85,7 @@ class MCPLogImporter:
                 content_parts = result_content.get("content", [])
                 if isinstance(content_parts, list):
                     output = "\n".join(
-                        p.get("text", str(p)) for p in content_parts
-                        if isinstance(p, dict)
+                        p.get("text", str(p)) for p in content_parts if isinstance(p, dict)
                     )
                 else:
                     output = str(result_content)
@@ -110,7 +110,7 @@ class MCPLogImporter:
 
         return steps
 
-    def _parse_simple(self, entries: List[Dict]) -> List[TraceStep]:
+    def _parse_simple(self, entries: list[dict]) -> list[TraceStep]:
         """Parse simple pre-paired log entries into steps."""
         steps = []
         for entry in entries:
@@ -137,7 +137,7 @@ class MCPLogImporter:
 
         return steps
 
-    def parse_log(self, entries: List[Dict]) -> Tuple[List[TraceStep], Dict[str, Any]]:
+    def parse_log(self, entries: list[dict]) -> tuple[list[TraceStep], dict[str, Any]]:
         """Parse MCP log entries into TraceSteps + metadata."""
         if not entries:
             return [], {"source": "mcp"}

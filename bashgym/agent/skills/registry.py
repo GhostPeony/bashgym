@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Optional
 
 
 class SkillRegistry:
@@ -16,7 +15,7 @@ class SkillRegistry:
     then provides keyword-overlap matching against user messages.
     """
 
-    def __init__(self, skills_base_dir: Optional[Path] = None) -> None:
+    def __init__(self, skills_base_dir: Path | None = None) -> None:
         if skills_base_dir is None:
             skills_base_dir = Path(__file__).parent
         self.skills_base_dir = skills_base_dir

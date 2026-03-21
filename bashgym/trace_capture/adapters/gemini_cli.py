@@ -5,13 +5,11 @@ Installs hooks for Gemini CLI trace capture.
 Uses Gemini CLI's hook system (AfterTool, SessionEnd events).
 """
 
-import os
 import json
-import shutil
+import os
 import platform
+import shutil
 from pathlib import Path
-from typing import Tuple
-
 
 # Map of hook files to their Gemini CLI settings key (PascalCase)
 HOOK_CONFIG = {
@@ -22,7 +20,7 @@ HOOK_CONFIG = {
 
 def _get_gemini_dir() -> Path:
     """Get the Gemini CLI config directory."""
-    if platform.system() == 'Windows':
+    if platform.system() == "Windows":
         home = Path(os.environ.get("USERPROFILE", ""))
     else:
         home = Path.home()
@@ -46,7 +44,7 @@ def _get_source_hooks_dir() -> Path:
     return current_dir / "hooks"
 
 
-def _update_settings(hooks_dir: Path) -> Tuple[bool, str]:
+def _update_settings(hooks_dir: Path) -> tuple[bool, str]:
     """
     Update Gemini CLI settings.json with hook configuration.
 
@@ -61,9 +59,9 @@ def _update_settings(hooks_dir: Path) -> Tuple[bool, str]:
     # Load existing settings or create new
     if settings_path.exists():
         try:
-            with open(settings_path, 'r') as f:
+            with open(settings_path) as f:
                 settings = json.load(f)
-        except (json.JSONDecodeError, IOError):
+        except (OSError, json.JSONDecodeError):
             settings = {}
     else:
         settings = {}
@@ -82,27 +80,22 @@ def _update_settings(hooks_dir: Path) -> Tuple[bool, str]:
                 {
                     "name": "bashgym",
                     "matcher": "",  # Empty string matcher = match all
-                    "hooks": [
-                        {
-                            "type": "command",
-                            "command": f"python {path_str}"
-                        }
-                    ],
-                    "timeout": 5000
+                    "hooks": [{"type": "command", "command": f"python {path_str}"}],
+                    "timeout": 5000,
                 }
             ]
 
     # Write updated settings
     try:
         settings_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(settings_path, 'w') as f:
+        with open(settings_path, "w") as f:
             json.dump(settings, f, indent=2)
         return True, "Updated settings.json"
-    except (IOError, OSError) as e:
+    except OSError as e:
         return False, f"Failed to update settings.json: {e}"
 
 
-def install_gemini_cli_hooks() -> Tuple[bool, str]:
+def install_gemini_cli_hooks() -> tuple[bool, str]:
     """
     Install Bash Gym hooks for Gemini CLI.
 
@@ -134,10 +127,10 @@ def install_gemini_cli_hooks() -> Tuple[bool, str]:
         try:
             shutil.copy2(source, dest)
             # Make executable on Unix
-            if platform.system() != 'Windows':
+            if platform.system() != "Windows":
                 os.chmod(dest, 0o755)
             installed.append(hook_file)
-        except (IOError, OSError) as e:
+        except OSError as e:
             return False, f"Failed to install {hook_file}: {e}"
 
     if not installed:
@@ -151,7 +144,7 @@ def install_gemini_cli_hooks() -> Tuple[bool, str]:
     return True, f"Installed Gemini CLI hooks: {', '.join(installed)}"
 
 
-def uninstall_gemini_cli_hooks() -> Tuple[bool, str]:
+def uninstall_gemini_cli_hooks() -> tuple[bool, str]:
     """
     Uninstall Bash Gym hooks from Gemini CLI.
 
@@ -171,13 +164,13 @@ def uninstall_gemini_cli_hooks() -> Tuple[bool, str]:
                 try:
                     hook_path.unlink()
                     removed.append(hook_file)
-                except (IOError, OSError) as e:
+                except OSError as e:
                     return False, f"Failed to remove {hook_file}: {e}"
 
     # Remove hook configuration from settings.json
     if settings_path.exists():
         try:
-            with open(settings_path, 'r') as f:
+            with open(settings_path) as f:
                 settings = json.load(f)
 
             if "hooks" in settings:
@@ -185,7 +178,8 @@ def uninstall_gemini_cli_hooks() -> Tuple[bool, str]:
                     if settings_key in settings["hooks"]:
                         # Remove only bashgym entries (filter by name)
                         settings["hooks"][settings_key] = [
-                            entry for entry in settings["hooks"][settings_key]
+                            entry
+                            for entry in settings["hooks"][settings_key]
                             if entry.get("name") != "bashgym"
                         ]
                         # Remove the key if no entries remain
@@ -196,10 +190,10 @@ def uninstall_gemini_cli_hooks() -> Tuple[bool, str]:
                 if not settings["hooks"]:
                     del settings["hooks"]
 
-                with open(settings_path, 'w') as f:
+                with open(settings_path, "w") as f:
                     json.dump(settings, f, indent=2)
 
-        except (json.JSONDecodeError, IOError) as e:
+        except (OSError, json.JSONDecodeError) as e:
             return False, f"Failed to update settings.json: {e}"
 
     if removed:
@@ -209,7 +203,7 @@ def uninstall_gemini_cli_hooks() -> Tuple[bool, str]:
 
 def get_install_command() -> str:
     """Get the manual install command for Gemini CLI hooks."""
-    if platform.system() == 'Windows':
-        return 'xcopy /E /I bashgym\\hooks\\gemini_* %USERPROFILE%\\.gemini\\hooks'
+    if platform.system() == "Windows":
+        return "xcopy /E /I bashgym\\hooks\\gemini_* %USERPROFILE%\\.gemini\\hooks"
     else:
-        return 'cp bashgym/hooks/gemini_* ~/.gemini/hooks/'
+        return "cp bashgym/hooks/gemini_* ~/.gemini/hooks/"

@@ -12,38 +12,39 @@ Two conversion modes:
 - enriched — LLM generates detailed reasoning per sample (async, batched)
 """
 
+import asyncio
 import bz2
 import csv
-import json
 import hashlib
+import json
 import random
-import asyncio
 from abc import ABC, abstractmethod
+from collections.abc import Generator
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Generator, List, Optional
+from typing import Any
 
 import httpx
 
 from bashgym.factory.data_factory import TrainingExample
 from bashgym.factory.security_prompts import (
-    PHISHING_SYSTEM_PROMPT,
     MALWARE_SYSTEM_PROMPT,
     NETWORK_SYSTEM_PROMPT,
-    phishing_user_prompt,
+    PHISHING_SYSTEM_PROMPT,
+    build_enrichment_prompt,
+    malware_assistant_response_direct,
     malware_user_prompt,
+    network_assistant_response_direct,
     network_user_prompt,
     phishing_assistant_response_direct,
-    malware_assistant_response_direct,
-    network_assistant_response_direct,
-    build_enrichment_prompt,
+    phishing_user_prompt,
 )
-
 
 # =============================================================================
 # Enums & Config
 # =============================================================================
+
 
 class SecurityDomain(str, Enum):
     PHISHING = "phishing"
@@ -65,7 +66,7 @@ class ConversionMode(str, Enum):
 
 
 # Map dataset types to their security domain
-DATASET_DOMAINS: Dict[DatasetType, SecurityDomain] = {
+DATASET_DOMAINS: dict[DatasetType, SecurityDomain] = {
     DatasetType.EMBER: SecurityDomain.MALWARE,
     DatasetType.PHISHTANK: SecurityDomain.PHISHING,
     DatasetType.URLHAUS: SecurityDomain.PHISHING,
@@ -77,10 +78,11 @@ DATASET_DOMAINS: Dict[DatasetType, SecurityDomain] = {
 @dataclass
 class IngestionConfig:
     """Configuration for a security dataset ingestion run."""
+
     dataset_type: DatasetType
     input_path: str
     mode: ConversionMode = ConversionMode.DIRECT
-    max_samples: Optional[int] = None
+    max_samples: int | None = None
     balance_classes: bool = True
     benign_ratio: float = 0.3  # Target ratio of benign samples
     output_dir: str = "data/security_training"
@@ -89,7 +91,7 @@ class IngestionConfig:
     # Enrichment settings (only used in enriched mode)
     enrichment_provider: str = "anthropic"  # anthropic | nim
     enrichment_model: str = "claude-sonnet-4-5-20250929"
-    enrichment_api_key: Optional[str] = None
+    enrichment_api_key: str | None = None
     enrichment_batch_size: int = 10
     enrichment_max_concurrent: int = 5
 
@@ -97,20 +99,22 @@ class IngestionConfig:
 @dataclass
 class IngestionResult:
     """Result of a completed ingestion run."""
+
     dataset_type: str
     mode: str
     total_samples_read: int
     examples_generated: int
-    train_path: Optional[str] = None
-    val_path: Optional[str] = None
+    train_path: str | None = None
+    val_path: str | None = None
     train_count: int = 0
     val_count: int = 0
-    class_distribution: Dict[str, int] = field(default_factory=dict)
+    class_distribution: dict[str, int] = field(default_factory=dict)
 
 
 # =============================================================================
 # Base Adapter
 # =============================================================================
+
 
 class SecurityDatasetAdapter(ABC):
     """Abstract base class for security dataset adapters."""
@@ -125,10 +129,12 @@ class SecurityDatasetAdapter(ABC):
             raise FileNotFoundError(f"Dataset not found: {self.input_path}")
 
     @abstractmethod
-    def iterate_samples(self) -> Generator[Dict[str, Any], None, None]:
+    def iterate_samples(self) -> Generator[dict[str, Any], None, None]:
         """Yield raw samples from the dataset file."""
 
-    def to_training_example(self, sample: Dict[str, Any], mode: ConversionMode) -> Optional[TrainingExample]:
+    def to_training_example(
+        self, sample: dict[str, Any], mode: ConversionMode
+    ) -> TrainingExample | None:
         """Convert a raw sample to a TrainingExample."""
         user_prompt = self._build_user_prompt(sample)
         if not user_prompt or len(user_prompt.strip()) < 10:
@@ -160,24 +166,22 @@ class SecurityDatasetAdapter(ABC):
             },
         )
 
-    def build_enrichment_prompt(self, sample: Dict[str, Any]) -> str:
+    def build_enrichment_prompt(self, sample: dict[str, Any]) -> str:
         """Build an enrichment prompt for LLM-based detailed analysis."""
         user_prompt = self._build_user_prompt(sample)
         direct_response = self._build_direct_response(sample)
-        return build_enrichment_prompt(
-            self.domain.value, sample, user_prompt, direct_response
-        )
+        return build_enrichment_prompt(self.domain.value, sample, user_prompt, direct_response)
 
     @abstractmethod
-    def _build_user_prompt(self, sample: Dict[str, Any]) -> str:
+    def _build_user_prompt(self, sample: dict[str, Any]) -> str:
         """Build the user prompt from a sample."""
 
     @abstractmethod
-    def _build_direct_response(self, sample: Dict[str, Any]) -> str:
+    def _build_direct_response(self, sample: dict[str, Any]) -> str:
         """Build the direct-mode assistant response."""
 
     @abstractmethod
-    def _get_label(self, sample: Dict[str, Any]) -> str:
+    def _get_label(self, sample: dict[str, Any]) -> str:
         """Return 'malicious' or 'benign' for class balancing."""
 
 
@@ -185,14 +189,15 @@ class SecurityDatasetAdapter(ABC):
 # Concrete Adapters
 # =============================================================================
 
+
 class EMBERAdapter(SecurityDatasetAdapter):
     """EMBER dataset adapter. Input: JSONL (one JSON object per line)."""
 
     domain = SecurityDomain.MALWARE
     system_prompt = MALWARE_SYSTEM_PROMPT
 
-    def iterate_samples(self) -> Generator[Dict[str, Any], None, None]:
-        with open(self.input_path, "r", encoding="utf-8", errors="replace") as f:
+    def iterate_samples(self) -> Generator[dict[str, Any], None, None]:
+        with open(self.input_path, encoding="utf-8", errors="replace") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -202,13 +207,13 @@ class EMBERAdapter(SecurityDatasetAdapter):
                 except json.JSONDecodeError:
                     continue
 
-    def _build_user_prompt(self, sample: Dict[str, Any]) -> str:
+    def _build_user_prompt(self, sample: dict[str, Any]) -> str:
         return malware_user_prompt(sample)
 
-    def _build_direct_response(self, sample: Dict[str, Any]) -> str:
+    def _build_direct_response(self, sample: dict[str, Any]) -> str:
         return malware_assistant_response_direct(sample)
 
-    def _get_label(self, sample: Dict[str, Any]) -> str:
+    def _get_label(self, sample: dict[str, Any]) -> str:
         label = sample.get("label", 1)
         return "benign" if int(label) == 0 else "malicious"
 
@@ -219,13 +224,13 @@ class PhishTankAdapter(SecurityDatasetAdapter):
     domain = SecurityDomain.PHISHING
     system_prompt = PHISHING_SYSTEM_PROMPT
 
-    def iterate_samples(self) -> Generator[Dict[str, Any], None, None]:
+    def iterate_samples(self) -> Generator[dict[str, Any], None, None]:
         path = self.input_path
         if path.suffix == ".bz2":
             with bz2.open(path, "rt", encoding="utf-8") as f:
                 data = json.load(f)
         else:
-            with open(path, "r", encoding="utf-8", errors="replace") as f:
+            with open(path, encoding="utf-8", errors="replace") as f:
                 data = json.load(f)
 
         if isinstance(data, list):
@@ -238,13 +243,13 @@ class PhishTankAdapter(SecurityDatasetAdapter):
                     return
             yield data
 
-    def _build_user_prompt(self, sample: Dict[str, Any]) -> str:
+    def _build_user_prompt(self, sample: dict[str, Any]) -> str:
         return phishing_user_prompt(sample)
 
-    def _build_direct_response(self, sample: Dict[str, Any]) -> str:
+    def _build_direct_response(self, sample: dict[str, Any]) -> str:
         return phishing_assistant_response_direct(sample)
 
-    def _get_label(self, sample: Dict[str, Any]) -> str:
+    def _get_label(self, sample: dict[str, Any]) -> str:
         # PhishTank entries are all phishing
         return "malicious"
 
@@ -255,11 +260,11 @@ class URLhausAdapter(SecurityDatasetAdapter):
     domain = SecurityDomain.PHISHING
     system_prompt = PHISHING_SYSTEM_PROMPT
 
-    def iterate_samples(self) -> Generator[Dict[str, Any], None, None]:
+    def iterate_samples(self) -> Generator[dict[str, Any], None, None]:
         path = self.input_path
 
         if path.suffix == ".json":
-            with open(path, "r", encoding="utf-8", errors="replace") as f:
+            with open(path, encoding="utf-8", errors="replace") as f:
                 data = json.load(f)
             if isinstance(data, list):
                 yield from data
@@ -271,7 +276,7 @@ class URLhausAdapter(SecurityDatasetAdapter):
             return
 
         # CSV with comment lines starting with #
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
+        with open(path, encoding="utf-8", errors="replace") as f:
             # Skip comment lines
             lines = []
             for raw_line in f:
@@ -286,13 +291,13 @@ class URLhausAdapter(SecurityDatasetAdapter):
         for row in reader:
             yield dict(row)
 
-    def _build_user_prompt(self, sample: Dict[str, Any]) -> str:
+    def _build_user_prompt(self, sample: dict[str, Any]) -> str:
         return phishing_user_prompt(sample)
 
-    def _build_direct_response(self, sample: Dict[str, Any]) -> str:
+    def _build_direct_response(self, sample: dict[str, Any]) -> str:
         return phishing_assistant_response_direct(sample)
 
-    def _get_label(self, sample: Dict[str, Any]) -> str:
+    def _get_label(self, sample: dict[str, Any]) -> str:
         # URLhaus entries are all malicious
         return "malicious"
 
@@ -303,12 +308,12 @@ class MalwareBazaarAdapter(SecurityDatasetAdapter):
     domain = SecurityDomain.MALWARE
     system_prompt = MALWARE_SYSTEM_PROMPT
 
-    def iterate_samples(self) -> Generator[Dict[str, Any], None, None]:
+    def iterate_samples(self) -> Generator[dict[str, Any], None, None]:
         path = self.input_path
 
         # Try JSON array first
         try:
-            with open(path, "r", encoding="utf-8", errors="replace") as f:
+            with open(path, encoding="utf-8", errors="replace") as f:
                 data = json.load(f)
             if isinstance(data, list):
                 yield from data
@@ -324,7 +329,7 @@ class MalwareBazaarAdapter(SecurityDatasetAdapter):
             pass
 
         # Fall back to JSONL
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
+        with open(path, encoding="utf-8", errors="replace") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -334,13 +339,13 @@ class MalwareBazaarAdapter(SecurityDatasetAdapter):
                 except json.JSONDecodeError:
                     continue
 
-    def _build_user_prompt(self, sample: Dict[str, Any]) -> str:
+    def _build_user_prompt(self, sample: dict[str, Any]) -> str:
         return malware_user_prompt(sample)
 
-    def _build_direct_response(self, sample: Dict[str, Any]) -> str:
+    def _build_direct_response(self, sample: dict[str, Any]) -> str:
         return malware_assistant_response_direct(sample)
 
-    def _get_label(self, sample: Dict[str, Any]) -> str:
+    def _get_label(self, sample: dict[str, Any]) -> str:
         # MalwareBazaar entries are all malware
         return "malicious"
 
@@ -351,10 +356,8 @@ class CICIDSAdapter(SecurityDatasetAdapter):
     domain = SecurityDomain.NETWORK
     system_prompt = NETWORK_SYSTEM_PROMPT
 
-    def iterate_samples(self) -> Generator[Dict[str, Any], None, None]:
-        with open(
-            self.input_path, "r", encoding="utf-8", errors="replace"
-        ) as f:
+    def iterate_samples(self) -> Generator[dict[str, Any], None, None]:
+        with open(self.input_path, encoding="utf-8", errors="replace") as f:
             # Strip whitespace from header names (CIC-IDS quirk)
             reader = csv.DictReader(f)
             if reader.fieldnames:
@@ -363,13 +366,13 @@ class CICIDSAdapter(SecurityDatasetAdapter):
                 # Strip whitespace from keys and values
                 yield {k.strip(): v.strip() if isinstance(v, str) else v for k, v in row.items()}
 
-    def _build_user_prompt(self, sample: Dict[str, Any]) -> str:
+    def _build_user_prompt(self, sample: dict[str, Any]) -> str:
         return network_user_prompt(sample)
 
-    def _build_direct_response(self, sample: Dict[str, Any]) -> str:
+    def _build_direct_response(self, sample: dict[str, Any]) -> str:
         return network_assistant_response_direct(sample)
 
-    def _get_label(self, sample: Dict[str, Any]) -> str:
+    def _get_label(self, sample: dict[str, Any]) -> str:
         label = sample.get("Label", sample.get("label", "BENIGN"))
         return "benign" if str(label).strip().upper() == "BENIGN" else "malicious"
 
@@ -378,7 +381,7 @@ class CICIDSAdapter(SecurityDatasetAdapter):
 # Adapter Registry
 # =============================================================================
 
-ADAPTER_REGISTRY: Dict[DatasetType, type] = {
+ADAPTER_REGISTRY: dict[DatasetType, type] = {
     DatasetType.EMBER: EMBERAdapter,
     DatasetType.PHISHTANK: PhishTankAdapter,
     DatasetType.URLHAUS: URLhausAdapter,
@@ -401,6 +404,7 @@ def get_adapter(
 # Orchestrator
 # =============================================================================
 
+
 class SecurityIngester:
     """Orchestrates ingestion of security datasets into training examples."""
 
@@ -410,9 +414,9 @@ class SecurityIngester:
 
     def ingest_direct(self) -> IngestionResult:
         """Synchronous direct-mode ingestion. No API calls."""
-        examples: List[TrainingExample] = []
-        malicious_examples: List[TrainingExample] = []
-        benign_examples: List[TrainingExample] = []
+        examples: list[TrainingExample] = []
+        malicious_examples: list[TrainingExample] = []
+        benign_examples: list[TrainingExample] = []
         total_read = 0
 
         for sample in self.adapter.iterate_samples():
@@ -430,8 +434,7 @@ class SecurityIngester:
 
             # Early exit if we have enough samples
             if self.config.max_samples and (
-                len(malicious_examples) + len(benign_examples)
-                >= self.config.max_samples * 2
+                len(malicious_examples) + len(benign_examples) >= self.config.max_samples * 2
             ):
                 break
 
@@ -455,7 +458,7 @@ class SecurityIngester:
     async def ingest_enriched(self) -> IngestionResult:
         """Async enriched-mode ingestion with LLM reasoning chains."""
         # First collect samples and direct examples
-        samples_and_examples: List[tuple] = []
+        samples_and_examples: list[tuple] = []
         total_read = 0
 
         for sample in self.adapter.iterate_samples():
@@ -476,9 +479,7 @@ class SecurityIngester:
         random.shuffle(enriched_examples)
         return self._save_split(enriched_examples, total_read)
 
-    async def _enrich_batch(
-        self, items: List[tuple]
-    ) -> List[TrainingExample]:
+    async def _enrich_batch(self, items: list[tuple]) -> list[TrainingExample]:
         """Call LLM to enrich examples with detailed reasoning."""
         import os
 
@@ -488,14 +489,12 @@ class SecurityIngester:
             return [ex for _, ex in items]
 
         semaphore = asyncio.Semaphore(self.config.enrichment_max_concurrent)
-        results: List[TrainingExample] = []
+        results: list[TrainingExample] = []
 
         async with httpx.AsyncClient(timeout=120.0) as client:
             tasks = []
             for sample, example in items:
-                tasks.append(
-                    self._enrich_single(client, semaphore, api_key, sample, example)
-                )
+                tasks.append(self._enrich_single(client, semaphore, api_key, sample, example))
 
             completed = await asyncio.gather(*tasks, return_exceptions=True)
             for result in completed:
@@ -512,7 +511,7 @@ class SecurityIngester:
         client: httpx.AsyncClient,
         semaphore: asyncio.Semaphore,
         api_key: str,
-        sample: Dict[str, Any],
+        sample: dict[str, Any],
         example: TrainingExample,
     ) -> TrainingExample:
         """Enrich a single example via LLM."""
@@ -556,9 +555,9 @@ class SecurityIngester:
 
     def _balance_classes(
         self,
-        malicious: List[TrainingExample],
-        benign: List[TrainingExample],
-    ) -> List[TrainingExample]:
+        malicious: list[TrainingExample],
+        benign: list[TrainingExample],
+    ) -> list[TrainingExample]:
         """Balance classes according to benign_ratio."""
         total_target = len(malicious) + len(benign)
         if self.config.max_samples:
@@ -577,9 +576,7 @@ class SecurityIngester:
 
         return malicious + benign
 
-    def _save_split(
-        self, examples: List[TrainingExample], total_read: int
-    ) -> IngestionResult:
+    def _save_split(self, examples: list[TrainingExample], total_read: int) -> IngestionResult:
         """Split examples into train/val and write JSONL files."""
         output_dir = Path(self.config.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -595,7 +592,7 @@ class SecurityIngester:
         self._write_jsonl(val_path, val_examples)
 
         # Compute class distribution
-        class_dist: Dict[str, int] = {}
+        class_dist: dict[str, int] = {}
         for ex in examples:
             domain = ex.metadata.get("domain", "unknown")
             class_dist[domain] = class_dist.get(domain, 0) + 1
@@ -613,7 +610,7 @@ class SecurityIngester:
         )
 
     @staticmethod
-    def _write_jsonl(path: Path, examples: List[TrainingExample]) -> None:
+    def _write_jsonl(path: Path, examples: list[TrainingExample]) -> None:
         """Write examples to a JSONL file in NeMo format."""
         with open(path, "w", encoding="utf-8") as f:
             for ex in examples:

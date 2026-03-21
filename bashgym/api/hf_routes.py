@@ -9,12 +9,12 @@ Provides REST endpoints for HuggingFace Pro features:
 - Dataset management
 """
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
-from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field
-from datetime import datetime
-from pathlib import Path
 import logging
+from pathlib import Path
+from typing import Any
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -25,23 +25,29 @@ router = APIRouter(prefix="/api/hf", tags=["huggingface"])
 # Schemas
 # =============================================================================
 
+
 class HFStatusResponse(BaseModel):
     """HuggingFace integration status."""
+
     enabled: bool = Field(description="Whether HF integration is enabled")
     pro_enabled: bool = Field(description="Whether user has Pro subscription")
     username: str = Field(default="", description="HF username")
     namespace: str = Field(default="", description="Default namespace (org or username)")
     token_configured: bool = Field(default=False, description="Whether a token is configured")
-    token_source: str = Field(default="", description="Where token comes from: 'env', 'stored', or ''")
+    token_source: str = Field(
+        default="", description="Where token comes from: 'env', 'stored', or ''"
+    )
 
 
 class HFConfigureRequest(BaseModel):
     """Request to configure HuggingFace token."""
+
     token: str = Field(description="HuggingFace API token")
 
 
 class JobSubmitRequest(BaseModel):
     """Request to submit a training job."""
+
     dataset_repo: str = Field(description="HF repo containing training data")
     output_repo: str = Field(description="HF repo to push trained model")
     hardware: str = Field(default="a10g-small", description="Hardware tier")
@@ -57,16 +63,18 @@ class JobSubmitRequest(BaseModel):
 
 class JobResponse(BaseModel):
     """Response for job operations."""
+
     job_id: str
     status: str
     hardware: str
     created_at: str
-    logs_url: Optional[str] = None
-    error_message: Optional[str] = None
+    logs_url: str | None = None
+    error_message: str | None = None
 
 
 class SpaceCreateRequest(BaseModel):
     """Request to create a Space."""
+
     model_repo: str = Field(description="HF repo containing the model")
     space_name: str = Field(description="Name for the Space")
     private: bool = Field(default=True)
@@ -75,6 +83,7 @@ class SpaceCreateRequest(BaseModel):
 
 class SpaceResponse(BaseModel):
     """Response for Space operations."""
+
     space_name: str
     url: str
     status: str
@@ -82,14 +91,16 @@ class SpaceResponse(BaseModel):
 
 class DatasetUploadRequest(BaseModel):
     """Request to upload dataset."""
+
     local_path: str = Field(description="Local path to dataset directory")
     repo_name: str = Field(description="Name for the dataset repo")
     private: bool = Field(default=True)
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: dict[str, Any] | None = None
 
 
 class DatasetResponse(BaseModel):
     """Response for dataset operations."""
+
     repo_id: str
     url: str
     train_count: int = 0
@@ -98,6 +109,7 @@ class DatasetResponse(BaseModel):
 
 class InferenceGenerateRequest(BaseModel):
     """Request for text generation."""
+
     model: str = Field(description="Model ID (e.g., meta-llama/Llama-3.3-70B-Instruct)")
     prompt: str = Field(description="Input prompt")
     max_tokens: int = Field(default=512, ge=1, le=4096)
@@ -106,21 +118,24 @@ class InferenceGenerateRequest(BaseModel):
 
 class InferenceGenerateResponse(BaseModel):
     """Response for text generation."""
+
     text: str
     finish_reason: str = "unknown"
     model: str
-    provider: Optional[str] = None
+    provider: str | None = None
 
 
 class InferenceEmbedRequest(BaseModel):
     """Request for embeddings."""
+
     model: str = Field(description="Embedding model ID")
-    texts: List[str] = Field(description="Texts to embed")
+    texts: list[str] = Field(description="Texts to embed")
 
 
 class InferenceEmbedResponse(BaseModel):
     """Response for embeddings."""
-    embeddings: List[List[float]]
+
+    embeddings: list[list[float]]
     model: str
     dimension: int
 
@@ -129,10 +144,12 @@ class InferenceEmbedResponse(BaseModel):
 # Status Endpoints
 # =============================================================================
 
+
 @router.get("/status", response_model=HFStatusResponse)
 async def get_hf_status():
     """Get HuggingFace integration status."""
     import os
+
     from bashgym.integrations.huggingface import get_hf_client
     from bashgym.secrets import get_secret
 
@@ -160,15 +177,17 @@ async def get_hf_status():
 @router.post("/configure")
 async def configure_hf_token(request: HFConfigureRequest):
     """Configure HuggingFace token."""
-    from bashgym.secrets import set_secret
-    from bashgym.integrations.huggingface import reset_hf_client, get_hf_client
     from bashgym.config import reload_settings
+    from bashgym.integrations.huggingface import get_hf_client, reset_hf_client
+    from bashgym.secrets import set_secret
 
     if not request.token:
         raise HTTPException(status_code=400, detail="Token is required")
 
     if not request.token.startswith("hf_"):
-        raise HTTPException(status_code=400, detail="Invalid token format. HuggingFace tokens start with 'hf_'")
+        raise HTTPException(
+            status_code=400, detail="Invalid token format. HuggingFace tokens start with 'hf_'"
+        )
 
     # Save the token
     set_secret("HF_TOKEN", request.token)
@@ -185,9 +204,12 @@ async def configure_hf_token(request: HFConfigureRequest):
     if not client.is_enabled:
         # Token is invalid - remove it
         from bashgym.secrets import delete_secret
+
         delete_secret("HF_TOKEN")
         reset_hf_client()
-        raise HTTPException(status_code=401, detail="Invalid token. Please check your token and try again.")
+        raise HTTPException(
+            status_code=401, detail="Invalid token. Please check your token and try again."
+        )
 
     return {
         "success": True,
@@ -200,14 +222,15 @@ async def configure_hf_token(request: HFConfigureRequest):
 async def remove_hf_token():
     """Remove stored HuggingFace token."""
     import os
-    from bashgym.secrets import delete_secret, get_secret
+
     from bashgym.integrations.huggingface import reset_hf_client
+    from bashgym.secrets import delete_secret
 
     # Check if there's an env var (can't remove that)
     if os.environ.get("HF_TOKEN"):
         raise HTTPException(
             status_code=400,
-            detail="Token is set via HF_TOKEN environment variable. Remove it from your environment to disable."
+            detail="Token is set via HF_TOKEN environment variable. Remove it from your environment to disable.",
         )
 
     # Delete stored secret
@@ -223,10 +246,11 @@ async def remove_hf_token():
 # Jobs Endpoints
 # =============================================================================
 
-@router.get("/jobs", response_model=List[JobResponse])
+
+@router.get("/jobs", response_model=list[JobResponse])
 async def list_jobs():
     """List all HF training jobs."""
-    from bashgym.integrations.huggingface import get_hf_client, HFProRequiredError
+    from bashgym.integrations.huggingface import HFProRequiredError, get_hf_client
     from bashgym.integrations.huggingface.jobs import create_job_runner
 
     client = get_hf_client()
@@ -254,10 +278,11 @@ async def list_jobs():
 @router.post("/jobs", response_model=JobResponse)
 async def submit_job(request: JobSubmitRequest, background_tasks: BackgroundTasks):
     """Submit a new training job to HuggingFace."""
-    from bashgym.integrations.huggingface import get_hf_client, HFProRequiredError
-    from bashgym.integrations.huggingface.jobs import create_job_runner, HFJobConfig
+    from bashgym.integrations.huggingface import HFProRequiredError, get_hf_client
+    from bashgym.integrations.huggingface.jobs import HFJobConfig, create_job_runner
     from bashgym.integrations.huggingface.script_adapter import (
-        CloudScriptConfig, generate_cloud_script,
+        CloudScriptConfig,
+        generate_cloud_script,
     )
 
     client = get_hf_client()
@@ -289,6 +314,7 @@ async def submit_job(request: JobSubmitRequest, background_tasks: BackgroundTask
         raise HTTPException(status_code=400, detail=str(e))
 
     import tempfile
+
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
         f.write(script_content)
         script_path = f.name
@@ -316,13 +342,14 @@ async def submit_job(request: JobSubmitRequest, background_tasks: BackgroundTask
         raise HTTPException(status_code=500, detail=f"Failed to submit job: {e}")
     finally:
         import os
+
         os.unlink(script_path)
 
 
 @router.get("/jobs/{job_id}", response_model=JobResponse)
 async def get_job(job_id: str):
     """Get job status."""
-    from bashgym.integrations.huggingface import get_hf_client, HFProRequiredError
+    from bashgym.integrations.huggingface import HFProRequiredError, get_hf_client
     from bashgym.integrations.huggingface.jobs import create_job_runner
 
     client = get_hf_client()
@@ -351,7 +378,7 @@ async def get_job(job_id: str):
 @router.get("/jobs/{job_id}/logs")
 async def get_job_logs(job_id: str):
     """Get job logs."""
-    from bashgym.integrations.huggingface import get_hf_client, HFProRequiredError
+    from bashgym.integrations.huggingface import HFProRequiredError, get_hf_client
     from bashgym.integrations.huggingface.jobs import create_job_runner
 
     client = get_hf_client()
@@ -373,7 +400,7 @@ async def get_job_logs(job_id: str):
 @router.delete("/jobs/{job_id}")
 async def cancel_job(job_id: str):
     """Cancel a running job."""
-    from bashgym.integrations.huggingface import get_hf_client, HFProRequiredError
+    from bashgym.integrations.huggingface import HFProRequiredError, get_hf_client
     from bashgym.integrations.huggingface.jobs import create_job_runner
 
     client = get_hf_client()
@@ -390,7 +417,9 @@ async def cancel_job(job_id: str):
         if success:
             return {"status": "cancelled", "job_id": job_id}
         else:
-            raise HTTPException(status_code=400, detail="Job cannot be cancelled (may already be completed)")
+            raise HTTPException(
+                status_code=400, detail="Job cannot be cancelled (may already be completed)"
+            )
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
 
@@ -404,12 +433,14 @@ async def get_hardware_tiers():
     for tier_id, specs in HARDWARE_SPECS.items():
         if not specs.get("pro_required", True):
             continue  # Only return GPU tiers
-        tiers.append({
-            "id": tier_id,
-            "gpu": specs.get("gpu"),
-            "vram_gb": specs.get("vram_gb", 0),
-            "cost_per_hour": specs.get("cost_per_hour", 0),
-        })
+        tiers.append(
+            {
+                "id": tier_id,
+                "gpu": specs.get("gpu"),
+                "vram_gb": specs.get("vram_gb", 0),
+                "cost_per_hour": specs.get("cost_per_hour", 0),
+            }
+        )
     return tiers
 
 
@@ -417,15 +448,23 @@ async def get_hardware_tiers():
 # Inference Endpoints
 # =============================================================================
 
+
 @router.post("/inference/generate", response_model=InferenceGenerateResponse)
 async def generate_text(request: InferenceGenerateRequest):
     """Generate text via HF Inference Providers."""
-    from bashgym.integrations.huggingface import get_hf_client, HFError, HFAuthError, HFQuotaExceededError
+    from bashgym.integrations.huggingface import (
+        HFAuthError,
+        HFError,
+        HFQuotaExceededError,
+        get_hf_client,
+    )
     from bashgym.integrations.huggingface.inference import get_inference_client
 
     client = get_hf_client()
     if not client.is_enabled:
-        raise HTTPException(status_code=403, detail="HuggingFace integration not configured. Set HF_TOKEN.")
+        raise HTTPException(
+            status_code=403, detail="HuggingFace integration not configured. Set HF_TOKEN."
+        )
 
     inference = get_inference_client()
 
@@ -454,12 +493,19 @@ async def generate_text(request: InferenceGenerateRequest):
 @router.post("/inference/embed", response_model=InferenceEmbedResponse)
 async def embed_texts(request: InferenceEmbedRequest):
     """Generate embeddings via HF Inference Providers."""
-    from bashgym.integrations.huggingface import get_hf_client, HFError, HFAuthError, HFQuotaExceededError
+    from bashgym.integrations.huggingface import (
+        HFAuthError,
+        HFError,
+        HFQuotaExceededError,
+        get_hf_client,
+    )
     from bashgym.integrations.huggingface.inference import get_inference_client
 
     client = get_hf_client()
     if not client.is_enabled:
-        raise HTTPException(status_code=403, detail="HuggingFace integration not configured. Set HF_TOKEN.")
+        raise HTTPException(
+            status_code=403, detail="HuggingFace integration not configured. Set HF_TOKEN."
+        )
 
     inference = get_inference_client()
 
@@ -486,7 +532,8 @@ async def embed_texts(request: InferenceEmbedRequest):
 # Spaces Endpoints
 # =============================================================================
 
-@router.get("/spaces", response_model=List[SpaceResponse])
+
+@router.get("/spaces", response_model=list[SpaceResponse])
 async def list_spaces():
     """List all Bash Gym Spaces."""
     # TODO: Implement space listing when HF API supports it
@@ -496,7 +543,7 @@ async def list_spaces():
 @router.post("/spaces", response_model=SpaceResponse)
 async def create_space(request: SpaceCreateRequest):
     """Create a new inference Space."""
-    from bashgym.integrations.huggingface import get_hf_client, HFProRequiredError, HFError
+    from bashgym.integrations.huggingface import HFError, HFProRequiredError, get_hf_client
     from bashgym.integrations.huggingface.spaces import HFSpaceManager, SpaceConfig
 
     client = get_hf_client()
@@ -533,7 +580,7 @@ async def create_space(request: SpaceCreateRequest):
 @router.get("/spaces/{space_name}/status", response_model=SpaceResponse)
 async def get_space_status(space_name: str):
     """Get Space status."""
-    from bashgym.integrations.huggingface import get_hf_client, HFProRequiredError, HFError
+    from bashgym.integrations.huggingface import HFError, HFProRequiredError, get_hf_client
     from bashgym.integrations.huggingface.spaces import HFSpaceManager
 
     client = get_hf_client()
@@ -559,7 +606,7 @@ async def get_space_status(space_name: str):
 @router.delete("/spaces/{space_name}")
 async def delete_space(space_name: str):
     """Delete a Space."""
-    from bashgym.integrations.huggingface import get_hf_client, HFProRequiredError, HFError
+    from bashgym.integrations.huggingface import HFError, HFProRequiredError, get_hf_client
     from bashgym.integrations.huggingface.spaces import HFSpaceManager
 
     client = get_hf_client()
@@ -582,10 +629,11 @@ async def delete_space(space_name: str):
 # Datasets Endpoints
 # =============================================================================
 
-@router.get("/datasets", response_model=List[str])
+
+@router.get("/datasets", response_model=list[str])
 async def list_datasets(prefix: str = "bashgym"):
     """List Bash Gym datasets."""
-    from bashgym.integrations.huggingface import get_hf_client, HFError
+    from bashgym.integrations.huggingface import HFError, get_hf_client
     from bashgym.integrations.huggingface.datasets import HFDatasetManager
 
     client = get_hf_client()
@@ -604,12 +652,14 @@ async def list_datasets(prefix: str = "bashgym"):
 @router.post("/datasets", response_model=DatasetResponse)
 async def upload_dataset(request: DatasetUploadRequest):
     """Upload a dataset to HuggingFace Hub."""
-    from bashgym.integrations.huggingface import get_hf_client, HFError
-    from bashgym.integrations.huggingface.datasets import HFDatasetManager, DatasetConfig
+    from bashgym.integrations.huggingface import HFError, get_hf_client
+    from bashgym.integrations.huggingface.datasets import DatasetConfig, HFDatasetManager
 
     client = get_hf_client()
     if not client.is_enabled:
-        raise HTTPException(status_code=403, detail="HuggingFace integration not configured. Set HF_TOKEN.")
+        raise HTTPException(
+            status_code=403, detail="HuggingFace integration not configured. Set HF_TOKEN."
+        )
 
     manager = HFDatasetManager(client=client)
 
@@ -618,7 +668,8 @@ async def upload_dataset(request: DatasetUploadRequest):
         raise HTTPException(status_code=400, detail="Path does not exist")
 
     # Validate path containment
-    from bashgym.config import get_settings, get_bashgym_dir
+    from bashgym.config import get_bashgym_dir, get_settings
+
     resolved = local_path.resolve()
     allowed_bases = [
         Path(get_settings().data.data_dir).resolve(),
@@ -656,7 +707,9 @@ async def upload_dataset(request: DatasetUploadRequest):
             val_count=val_count,
         )
     except FileNotFoundError:
-        raise HTTPException(status_code=400, detail="Dataset files not found in the specified directory")
+        raise HTTPException(
+            status_code=400, detail="Dataset files not found in the specified directory"
+        )
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid dataset configuration")
     except HFError:
@@ -665,10 +718,10 @@ async def upload_dataset(request: DatasetUploadRequest):
 
 @router.get("/models/search")
 async def search_models(
-    task: Optional[str] = None,
+    task: str | None = None,
     sort: str = "downloads",
     limit: int = 10,
-    framework: Optional[str] = None,
+    framework: str | None = None,
 ):
     """Search HuggingFace Hub for models.
 
@@ -681,7 +734,9 @@ async def search_models(
     from bashgym.integrations.huggingface.model_hub import get_model_hub
 
     if sort not in ("downloads", "likes", "lastModified"):
-        raise HTTPException(status_code=400, detail="sort must be 'downloads', 'likes', or 'lastModified'")
+        raise HTTPException(
+            status_code=400, detail="sort must be 'downloads', 'likes', or 'lastModified'"
+        )
 
     hub = get_model_hub()
     try:
@@ -706,20 +761,23 @@ async def search_models(
 
 class EvaluateRequest(BaseModel):
     """Request to evaluate a model with a HF metric."""
+
     model_id: str = Field(description="HuggingFace model ID")
     metric: str = Field(default="accuracy", description="Metric to use: accuracy, f1, bleu, rouge")
-    validation_data_path: Optional[str] = Field(default=None, description="Path to validation JSONL file")
+    validation_data_path: str | None = Field(
+        default=None, description="Path to validation JSONL file"
+    )
 
 
 @router.post("/evaluate")
 async def evaluate_model(request: EvaluateRequest):
     """Evaluate a model using HuggingFace evaluate library on local validation data."""
-    from bashgym.integrations.huggingface.evaluate import get_evaluator, SUPPORTED_METRICS
+    from bashgym.integrations.huggingface.evaluate import SUPPORTED_METRICS, get_evaluator
 
     if request.metric not in SUPPORTED_METRICS:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported metric '{request.metric}'. Choose from: {', '.join(SUPPORTED_METRICS)}"
+            detail=f"Unsupported metric '{request.metric}'. Choose from: {', '.join(SUPPORTED_METRICS)}",
         )
 
     evaluator = get_evaluator()
@@ -739,12 +797,14 @@ async def evaluate_model(request: EvaluateRequest):
 @router.delete("/datasets/{repo_name}")
 async def delete_dataset(repo_name: str):
     """Delete a dataset."""
-    from bashgym.integrations.huggingface import get_hf_client, HFError
+    from bashgym.integrations.huggingface import HFError, get_hf_client
     from bashgym.integrations.huggingface.datasets import HFDatasetManager
 
     client = get_hf_client()
     if not client.is_enabled:
-        raise HTTPException(status_code=403, detail="HuggingFace integration not configured. Set HF_TOKEN.")
+        raise HTTPException(
+            status_code=403, detail="HuggingFace integration not configured. Set HF_TOKEN."
+        )
 
     manager = HFDatasetManager(client=client)
 

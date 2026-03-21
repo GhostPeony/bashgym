@@ -7,26 +7,26 @@ with integration support for Phoenix, Langfuse, and OpenTelemetry.
 Module: Observability - Agent Performance Tracking
 """
 
-import os
 import json
+import threading
 import time
-import asyncio
-from pathlib import Path
+from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List, Callable, Union
 from datetime import datetime, timezone
 from enum import Enum
-from contextlib import contextmanager, asynccontextmanager
-import threading
+from pathlib import Path
+from typing import Any
 
 
 class ObservabilityBackend(Enum):
     """Supported observability backends."""
+
     LOCAL = "local"  # Local file storage only
 
 
 class SpanKind(Enum):
     """Types of trace spans."""
+
     AGENT = "agent"
     LLM_CALL = "llm_call"
     TOOL_CALL = "tool_call"
@@ -59,14 +59,14 @@ class TraceSpan:
 
     span_id: str
     trace_id: str
-    parent_id: Optional[str]
+    parent_id: str | None
     name: str
     kind: SpanKind
     start_time: float
-    end_time: Optional[float] = None
+    end_time: float | None = None
     status: str = "in_progress"
-    attributes: Dict[str, Any] = field(default_factory=dict)
-    events: List[Dict[str, Any]] = field(default_factory=list)
+    attributes: dict[str, Any] = field(default_factory=dict)
+    events: list[dict[str, Any]] = field(default_factory=list)
 
     # Metrics
     input_tokens: int = 0
@@ -81,13 +81,9 @@ class TraceSpan:
             return (time.time() - self.start_time) * 1000
         return (self.end_time - self.start_time) * 1000
 
-    def add_event(self, name: str, attributes: Optional[Dict[str, Any]] = None):
+    def add_event(self, name: str, attributes: dict[str, Any] | None = None):
         """Add an event to the span."""
-        self.events.append({
-            "name": name,
-            "timestamp": time.time(),
-            "attributes": attributes or {}
-        })
+        self.events.append({"name": name, "timestamp": time.time(), "attributes": attributes or {}})
 
     def set_attribute(self, key: str, value: Any):
         """Set a span attribute."""
@@ -105,7 +101,7 @@ class TraceSpan:
         self.status = status
         self.latency_ms = self.duration_ms
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "span_id": self.span_id,
             "trace_id": self.trace_id,
@@ -122,8 +118,8 @@ class TraceSpan:
                 "input_tokens": self.input_tokens,
                 "output_tokens": self.output_tokens,
                 "total_tokens": self.total_tokens,
-                "latency_ms": self.latency_ms
-            }
+                "latency_ms": self.latency_ms,
+            },
         }
 
 
@@ -134,9 +130,9 @@ class Trace:
     trace_id: str
     name: str
     start_time: float
-    end_time: Optional[float] = None
-    spans: List[TraceSpan] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    end_time: float | None = None
+    spans: list[TraceSpan] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def duration_ms(self) -> float:
@@ -168,7 +164,7 @@ class Trace:
         """Finish the trace."""
         self.end_time = time.time()
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "trace_id": self.trace_id,
             "name": self.name,
@@ -181,8 +177,8 @@ class Trace:
                 "total_spans": len(self.spans),
                 "total_tokens": self.total_tokens,
                 "llm_calls": self.total_llm_calls,
-                "tool_calls": self.total_tool_calls
-            }
+                "tool_calls": self.total_tool_calls,
+            },
         }
 
 
@@ -197,14 +193,14 @@ class AgentProfiler:
     - Performance analysis and bottleneck identification
     """
 
-    def __init__(self, config: Optional[ProfilerConfig] = None):
+    def __init__(self, config: ProfilerConfig | None = None):
         """Initialize the profiler."""
         self.config = config or ProfilerConfig()
 
         # Trace storage
-        self.traces: Dict[str, Trace] = {}
-        self.current_trace_id: Optional[str] = None
-        self.current_span_id: Optional[str] = None
+        self.traces: dict[str, Trace] = {}
+        self.current_trace_id: str | None = None
+        self.current_span_id: str | None = None
 
         # Thread safety
         self._lock = threading.Lock()
@@ -239,11 +235,7 @@ class AgentProfiler:
             self._span_counter += 1
             return f"span_{self._span_counter:08d}"
 
-    def start_trace(
-        self,
-        name: str,
-        metadata: Optional[Dict[str, Any]] = None
-    ) -> str:
+    def start_trace(self, name: str, metadata: dict[str, Any] | None = None) -> str:
         """
         Start a new trace.
 
@@ -259,12 +251,7 @@ class AgentProfiler:
 
         trace_id = self._generate_trace_id()
 
-        trace = Trace(
-            trace_id=trace_id,
-            name=name,
-            start_time=time.time(),
-            metadata=metadata or {}
-        )
+        trace = Trace(trace_id=trace_id, name=name, start_time=time.time(), metadata=metadata or {})
 
         with self._lock:
             self.traces[trace_id] = trace
@@ -277,7 +264,7 @@ class AgentProfiler:
 
         return trace_id
 
-    def end_trace(self, trace_id: Optional[str] = None) -> Optional[Trace]:
+    def end_trace(self, trace_id: str | None = None) -> Trace | None:
         """
         End a trace.
 
@@ -311,9 +298,9 @@ class AgentProfiler:
         self,
         name: str,
         kind: SpanKind = SpanKind.CUSTOM,
-        trace_id: Optional[str] = None,
-        parent_id: Optional[str] = None,
-        attributes: Optional[Dict[str, Any]] = None
+        trace_id: str | None = None,
+        parent_id: str | None = None,
+        attributes: dict[str, Any] | None = None,
     ) -> TraceSpan:
         """
         Start a new span.
@@ -330,8 +317,12 @@ class AgentProfiler:
         """
         if not self.config.enabled:
             return TraceSpan(
-                span_id="", trace_id="", parent_id=None,
-                name=name, kind=kind, start_time=time.time()
+                span_id="",
+                trace_id="",
+                parent_id=None,
+                name=name,
+                kind=kind,
+                start_time=time.time(),
             )
 
         trace_id = trace_id or self.current_trace_id
@@ -348,7 +339,7 @@ class AgentProfiler:
             name=name,
             kind=kind,
             start_time=time.time(),
-            attributes=attributes or {}
+            attributes=attributes or {},
         )
 
         with self._lock:
@@ -363,7 +354,7 @@ class AgentProfiler:
         span: TraceSpan,
         status: str = "success",
         input_tokens: int = 0,
-        output_tokens: int = 0
+        output_tokens: int = 0,
     ):
         """
         End a span.
@@ -387,12 +378,7 @@ class AgentProfiler:
                 self.current_span_id = None
 
     @contextmanager
-    def span(
-        self,
-        name: str,
-        kind: SpanKind = SpanKind.CUSTOM,
-        **attributes
-    ):
+    def span(self, name: str, kind: SpanKind = SpanKind.CUSTOM, **attributes):
         """
         Context manager for spans.
 
@@ -410,12 +396,7 @@ class AgentProfiler:
             raise
 
     @asynccontextmanager
-    async def async_span(
-        self,
-        name: str,
-        kind: SpanKind = SpanKind.CUSTOM,
-        **attributes
-    ):
+    async def async_span(self, name: str, kind: SpanKind = SpanKind.CUSTOM, **attributes):
         """Async context manager for spans."""
         span = self.start_span(name, kind, attributes=attributes)
         try:
@@ -434,7 +415,7 @@ class AgentProfiler:
         input_tokens: int,
         output_tokens: int,
         latency_ms: float,
-        **kwargs
+        **kwargs,
     ) -> TraceSpan:
         """
         Record an LLM API call.
@@ -458,8 +439,8 @@ class AgentProfiler:
                 "model": model,
                 "prompt_preview": prompt[:100] + "..." if len(prompt) > 100 else prompt,
                 "response_preview": response[:100] + "..." if len(response) > 100 else response,
-                **kwargs
-            }
+                **kwargs,
+            },
         )
 
         span.set_tokens(input_tokens, output_tokens)
@@ -475,7 +456,7 @@ class AgentProfiler:
         tool_output: str,
         success: bool,
         latency_ms: float,
-        **kwargs
+        **kwargs,
     ) -> TraceSpan:
         """
         Record a tool/function call.
@@ -499,8 +480,8 @@ class AgentProfiler:
                 "input_preview": str(tool_input)[:100],
                 "output_preview": str(tool_output)[:100],
                 "success": success,
-                **kwargs
-            }
+                **kwargs,
+            },
         )
 
         span.latency_ms = latency_ms
@@ -508,7 +489,7 @@ class AgentProfiler:
 
         return span
 
-    def get_trace_summary(self, trace_id: Optional[str] = None) -> Dict[str, Any]:
+    def get_trace_summary(self, trace_id: str | None = None) -> dict[str, Any]:
         """
         Get a summary of a trace.
 
@@ -537,38 +518,43 @@ class AgentProfiler:
                 "count": len(llm_spans),
                 "total_tokens": sum(s.total_tokens for s in llm_spans),
                 "total_latency_ms": sum(s.latency_ms for s in llm_spans),
-                "avg_latency_ms": sum(s.latency_ms for s in llm_spans) / max(len(llm_spans), 1)
+                "avg_latency_ms": sum(s.latency_ms for s in llm_spans) / max(len(llm_spans), 1),
             },
             "tool_calls": {
                 "count": len(tool_spans),
-                "success_rate": sum(1 for s in tool_spans if s.status == "success") / max(len(tool_spans), 1),
-                "total_latency_ms": sum(s.latency_ms for s in tool_spans)
+                "success_rate": sum(1 for s in tool_spans if s.status == "success")
+                / max(len(tool_spans), 1),
+                "total_latency_ms": sum(s.latency_ms for s in tool_spans),
             },
-            "bottlenecks": self._identify_bottlenecks(trace)
+            "bottlenecks": self._identify_bottlenecks(trace),
         }
 
-    def _identify_bottlenecks(self, trace: Trace) -> List[Dict[str, Any]]:
+    def _identify_bottlenecks(self, trace: Trace) -> list[dict[str, Any]]:
         """Identify performance bottlenecks in a trace."""
         bottlenecks = []
 
         for span in trace.spans:
             # Flag slow LLM calls (>5s)
             if span.kind == SpanKind.LLM_CALL and span.latency_ms > 5000:
-                bottlenecks.append({
-                    "span_id": span.span_id,
-                    "type": "slow_llm_call",
-                    "latency_ms": span.latency_ms,
-                    "suggestion": "Consider using a faster model or caching"
-                })
+                bottlenecks.append(
+                    {
+                        "span_id": span.span_id,
+                        "type": "slow_llm_call",
+                        "latency_ms": span.latency_ms,
+                        "suggestion": "Consider using a faster model or caching",
+                    }
+                )
 
             # Flag high token usage (>4K)
             if span.total_tokens > 4000:
-                bottlenecks.append({
-                    "span_id": span.span_id,
-                    "type": "high_token_usage",
-                    "tokens": span.total_tokens,
-                    "suggestion": "Consider prompt optimization or context trimming"
-                })
+                bottlenecks.append(
+                    {
+                        "span_id": span.span_id,
+                        "type": "high_token_usage",
+                        "tokens": span.total_tokens,
+                        "suggestion": "Consider prompt optimization or context trimming",
+                    }
+                )
 
         return bottlenecks
 
@@ -578,9 +564,9 @@ class AgentProfiler:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(json.dumps(trace.to_dict(), indent=2))
 
-    def get_tool_stats(self) -> List[Dict[str, Any]]:
+    def get_tool_stats(self) -> list[dict[str, Any]]:
         """Get per-tool performance breakdown across all traces."""
-        tool_data: Dict[str, Dict[str, Any]] = {}
+        tool_data: dict[str, dict[str, Any]] = {}
 
         for trace in self.traces.values():
             for span in trace.spans:
@@ -605,22 +591,24 @@ class AgentProfiler:
         result = []
         for entry in tool_data.values():
             calls = entry["calls"]
-            result.append({
-                "tool": entry["tool"],
-                "calls": calls,
-                "avg_duration_ms": round(entry["total_duration_ms"] / max(calls, 1), 1),
-                "success_rate": round(entry["successes"] / max(calls, 1) * 100, 1),
-                "total_tokens": entry["total_tokens"],
-            })
+            result.append(
+                {
+                    "tool": entry["tool"],
+                    "calls": calls,
+                    "avg_duration_ms": round(entry["total_duration_ms"] / max(calls, 1), 1),
+                    "success_rate": round(entry["successes"] / max(calls, 1) * 100, 1),
+                    "total_tokens": entry["total_tokens"],
+                }
+            )
         return sorted(result, key=lambda x: x["calls"], reverse=True)
 
-    def get_all_traces(self) -> List[Trace]:
+    def get_all_traces(self) -> list[Trace]:
         """Get all traces in memory."""
         return list(self.traces.values())
 
 
 # Global profiler instance
-_profiler: Optional[AgentProfiler] = None
+_profiler: AgentProfiler | None = None
 
 
 def get_profiler() -> AgentProfiler:
@@ -633,17 +621,13 @@ def get_profiler() -> AgentProfiler:
 
 def main():
     """Example usage of the Agent Profiler."""
-    config = ProfilerConfig(
-        backend=ObservabilityBackend.LOCAL,
-        profile_tokens=True
-    )
+    config = ProfilerConfig(backend=ObservabilityBackend.LOCAL, profile_tokens=True)
 
     profiler = AgentProfiler(config)
 
     # Start a trace for an agent task
     trace_id = profiler.start_trace(
-        "Debug Python script",
-        metadata={"user": "test", "priority": "high"}
+        "Debug Python script", metadata={"user": "test", "priority": "high"}
     )
 
     # Simulate some agent work
@@ -656,7 +640,7 @@ def main():
         tool_input="script.py",
         tool_output="def main(): ...",
         success=True,
-        latency_ms=50
+        latency_ms=50,
     )
 
     profiler.record_llm_call(
@@ -665,11 +649,11 @@ def main():
         response="Here's the fix...",
         input_tokens=1000,
         output_tokens=500,
-        latency_ms=2500
+        latency_ms=2500,
     )
 
     # End trace and get summary
-    trace = profiler.end_trace()
+    profiler.end_trace()
     summary = profiler.get_trace_summary(trace_id)
 
     print("Trace Summary:")

@@ -9,28 +9,28 @@ Each collector inherits from BaseCollector and produces typed records.
 
 from .base import (
     BaseCollector,
-    CollectorRecord,
-    SubagentRecord,
-    EditRecord,
-    PlanRecord,
-    TodoRecord,
-    PromptRecord,
-    DebugRecord,
-    EnvironmentRecord,
-    CollectorScanResult,
     CollectorBatchResult,
+    CollectorRecord,
+    CollectorScanResult,
+    DebugRecord,
+    EditRecord,
+    EnvironmentRecord,
+    PlanRecord,
+    PromptRecord,
+    SubagentRecord,
+    TodoRecord,
     get_claude_dir,
     get_collected_dir,
 )
-from .subagent import SubagentCollector
-from .edit import EditCollector
-from .plan import PlanCollector
-from .todo import TodoCollector
-from .prompt import PromptCollector
-from .environment import EnvironmentCollector
 from .debug import DebugCollector
-from .scanner import ClaudeDataScanner, ALL_SOURCES
+from .edit import EditCollector
+from .environment import EnvironmentCollector
 from .index import build_cross_reference_index
+from .plan import PlanCollector
+from .prompt import PromptCollector
+from .scanner import ALL_SOURCES, ClaudeDataScanner
+from .subagent import SubagentCollector
+from .todo import TodoCollector
 
 __all__ = [
     "BaseCollector",

@@ -10,27 +10,28 @@ ChatGPT export format:
 - Each conversation has a tree-structured `mapping` of messages
 """
 
+import hashlib
 import json
 import zipfile
-import hashlib
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
-from dataclasses import dataclass, asdict
+from typing import Any
 
-from ..core import TraceStep, TraceSession, TraceCapture, RepoInfo
+from ..core import RepoInfo, TraceCapture, TraceSession, TraceStep
 
 
 @dataclass
 class ChatGPTImportResult:
     """Result of importing a single ChatGPT conversation."""
+
     session_id: str
     title: str
     steps_imported: int
-    destination_file: Optional[Path] = None
-    error: Optional[str] = None
+    destination_file: Path | None = None
+    error: str | None = None
     skipped: bool = False
-    skip_reason: Optional[str] = None
+    skip_reason: str | None = None
 
 
 class ChatGPTImporter:
@@ -39,7 +40,7 @@ class ChatGPTImporter:
     def __init__(self):
         self.trace_capture = TraceCapture()
         self.imported_file = self.trace_capture.bashgym_dir / "imported_chatgpt.json"
-        self._imported: Optional[set] = None
+        self._imported: set | None = None
         self._dummy_repo = RepoInfo(path="", name="chatgpt", is_git_repo=False)
 
     def _load_imported(self) -> set:
@@ -57,7 +58,7 @@ class ChatGPTImporter:
         self.imported_file.parent.mkdir(parents=True, exist_ok=True)
         self.imported_file.write_text(json.dumps({"imported_ids": list(imported)}))
 
-    def _walk_conversation_path(self, mapping: Dict[str, Any], current_node: str) -> List[Dict]:
+    def _walk_conversation_path(self, mapping: dict[str, Any], current_node: str) -> list[dict]:
         """Walk from current_node back to root, returning messages in chronological order."""
         path = []
         node_id = current_node
@@ -70,7 +71,7 @@ class ChatGPTImporter:
         path.reverse()
         return path
 
-    def parse_conversation(self, convo: Dict[str, Any]) -> Tuple[List[TraceStep], Dict[str, Any]]:
+    def parse_conversation(self, convo: dict[str, Any]) -> tuple[list[TraceStep], dict[str, Any]]:
         """Parse a single ChatGPT conversation into TraceSteps + metadata."""
         mapping = convo.get("mapping", {})
         current_node = convo.get("current_node", "")
@@ -179,7 +180,9 @@ class ChatGPTImporter:
 
         return steps, session_metadata
 
-    def import_conversation(self, convo: Dict[str, Any], force: bool = False) -> ChatGPTImportResult:
+    def import_conversation(
+        self, convo: dict[str, Any], force: bool = False
+    ) -> ChatGPTImportResult:
         """Import a single conversation into the trace store."""
         title = convo.get("title", "Untitled")
         convo_hash = hashlib.sha256(json.dumps(convo, sort_keys=True).encode()).hexdigest()[:16]
@@ -224,19 +227,21 @@ class ChatGPTImporter:
             destination_file=dest,
         )
 
-    def import_from_zip(self, zip_path: Path, force: bool = False) -> List[ChatGPTImportResult]:
+    def import_from_zip(self, zip_path: Path, force: bool = False) -> list[ChatGPTImportResult]:
         """Import all conversations from a ChatGPT export zip."""
         results = []
 
         with zipfile.ZipFile(zip_path, "r") as zf:
             convo_files = [n for n in zf.namelist() if n.endswith("conversations.json")]
             if not convo_files:
-                return [ChatGPTImportResult(
-                    session_id="",
-                    title="",
-                    steps_imported=0,
-                    error="No conversations.json found in zip",
-                )]
+                return [
+                    ChatGPTImportResult(
+                        session_id="",
+                        title="",
+                        steps_imported=0,
+                        error="No conversations.json found in zip",
+                    )
+                ]
 
             for convo_file in convo_files:
                 data = json.loads(zf.read(convo_file))
@@ -249,7 +254,7 @@ class ChatGPTImporter:
 
         return results
 
-    def import_from_json(self, json_path: Path, force: bool = False) -> List[ChatGPTImportResult]:
+    def import_from_json(self, json_path: Path, force: bool = False) -> list[ChatGPTImportResult]:
         """Import from a raw conversations.json file."""
         data = json.loads(json_path.read_text())
         if not isinstance(data, list):

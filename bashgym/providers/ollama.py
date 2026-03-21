@@ -7,29 +7,32 @@ Integrates with local Ollama installation for:
 - Base models for fine-tuning (via export)
 """
 
-import httpx
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Any
 from datetime import datetime
+from typing import Any
 from urllib.parse import urlparse
 
-from bashgym.providers.base import InferenceProvider, ProviderResponse, HealthStatus, ProviderModel
+import httpx
+
+from bashgym.providers.base import HealthStatus, InferenceProvider, ProviderModel, ProviderResponse
 
 
 @dataclass
 class OllamaModel:
     """Information about an Ollama model."""
+
     name: str
     size: int  # bytes
     modified_at: str
     digest: str
-    details: Dict[str, Any] = field(default_factory=dict)
+    details: dict[str, Any] = field(default_factory=dict)
 
     @property
     def size_gb(self) -> float:
         """Size in gigabytes."""
-        return self.size / (1024 ** 3)
+        return self.size / (1024**3)
 
     @property
     def family(self) -> str:
@@ -49,11 +52,11 @@ class OllamaModel:
     @property
     def is_code_model(self) -> bool:
         """Check if this is a coding-focused model."""
-        code_indicators = ['coder', 'code', 'codellama', 'starcoder', 'deepseek-coder']
+        code_indicators = ["coder", "code", "codellama", "starcoder", "deepseek-coder"]
         name_lower = self.name.lower()
         return any(ind in name_lower for ind in code_indicators)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for API responses."""
         return {
             "name": self.name,
@@ -64,7 +67,7 @@ class OllamaModel:
             "parameter_size": self.parameter_size,
             "quantization": self.quantization,
             "is_code_model": self.is_code_model,
-            "provider": "ollama"
+            "provider": "ollama",
         }
 
 
@@ -78,9 +81,9 @@ class OllamaProvider(InferenceProvider):
 
     DEFAULT_BASE_URL = "http://localhost:11434"
 
-    def __init__(self, base_url: Optional[str] = None):
+    def __init__(self, base_url: str | None = None):
         self.base_url = base_url or self.DEFAULT_BASE_URL
-        self._client: Optional[httpx.AsyncClient] = None
+        self._client: httpx.AsyncClient | None = None
 
     # ── InferenceProvider abstract properties ──────────────────────
 
@@ -123,7 +126,7 @@ class OllamaProvider(InferenceProvider):
         except (httpx.ConnectError, httpx.TimeoutException):
             return False
 
-    async def list_ollama_models(self) -> List[OllamaModel]:
+    async def list_ollama_models(self) -> list[OllamaModel]:
         """List all available Ollama models (returns OllamaModel objects)."""
         try:
             response = await self.client.get("/api/tags")
@@ -139,7 +142,7 @@ class OllamaProvider(InferenceProvider):
                     size=model_data.get("size", 0),
                     modified_at=model_data.get("modified_at", ""),
                     digest=model_data.get("digest", ""),
-                    details=model_data.get("details", {})
+                    details=model_data.get("details", {}),
                 )
                 models.append(model)
 
@@ -148,7 +151,7 @@ class OllamaProvider(InferenceProvider):
         except (httpx.ConnectError, httpx.TimeoutException, Exception):
             return []
 
-    async def get_model(self, name: str) -> Optional[OllamaModel]:
+    async def get_model(self, name: str) -> OllamaModel | None:
         """Get info about a specific model."""
         try:
             response = await self.client.post("/api/show", json={"name": name})
@@ -161,12 +164,12 @@ class OllamaProvider(InferenceProvider):
                 size=data.get("size", 0),
                 modified_at=data.get("modified_at", ""),
                 digest=data.get("digest", ""),
-                details=data.get("details", {})
+                details=data.get("details", {}),
             )
         except Exception:
             return None
 
-    async def pull_model(self, name: str, on_progress: Optional[callable] = None) -> bool:
+    async def pull_model(self, name: str, on_progress: Callable | None = None) -> bool:
         """
         Pull (download) a model from Ollama registry.
 
@@ -182,7 +185,7 @@ class OllamaProvider(InferenceProvider):
                 "POST",
                 "/api/pull",
                 json={"name": name, "stream": True},
-                timeout=None  # No timeout for large downloads
+                timeout=None,  # No timeout for large downloads
             ) as response:
                 if response.status_code != 200:
                     return False
@@ -190,9 +193,9 @@ class OllamaProvider(InferenceProvider):
                 async for line in response.aiter_lines():
                     if line and on_progress:
                         try:
-                            data = __import__('json').loads(line)
+                            data = __import__("json").loads(line)
                             on_progress(data)
-                        except:
+                        except Exception:
                             pass
 
                 return True
@@ -213,11 +216,11 @@ class OllamaProvider(InferenceProvider):
         self,
         model: str,
         prompt: str,
-        system: Optional[str] = None,
+        system: str | None = None,
         temperature: float = 0.7,
         max_tokens: int = 2048,
-        stream: bool = False
-    ) -> Dict[str, Any]:
+        stream: bool = False,
+    ) -> dict[str, Any]:
         """
         Generate completion from a model (completion-style API).
 
@@ -239,10 +242,7 @@ class OllamaProvider(InferenceProvider):
             "model": model,
             "prompt": prompt,
             "stream": stream,
-            "options": {
-                "temperature": temperature,
-                "num_predict": max_tokens
-            }
+            "options": {"temperature": temperature, "num_predict": max_tokens},
         }
 
         if system:
@@ -253,35 +253,28 @@ class OllamaProvider(InferenceProvider):
                 # Return async generator for streaming
                 return self._stream_generate(payload)
             else:
-                response = await self.client.post(
-                    "/api/generate",
-                    json=payload,
-                    timeout=120.0
-                )
+                response = await self.client.post("/api/generate", json=payload, timeout=120.0)
                 return response.json()
 
         except Exception as e:
             return {"error": str(e)}
 
-    async def _stream_generate(self, payload: Dict[str, Any]):
+    async def _stream_generate(self, payload: dict[str, Any]):
         """Stream generation responses."""
         async with self.client.stream(
-            "POST",
-            "/api/generate",
-            json=payload,
-            timeout=None
+            "POST", "/api/generate", json=payload, timeout=None
         ) as response:
             async for line in response.aiter_lines():
                 if line:
-                    yield __import__('json').loads(line)
+                    yield __import__("json").loads(line)
 
     async def chat(
         self,
         model: str,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         temperature: float = 0.7,
-        max_tokens: int = 2048
-    ) -> Dict[str, Any]:
+        max_tokens: int = 2048,
+    ) -> dict[str, Any]:
         """
         Chat completion with a model.
 
@@ -298,18 +291,11 @@ class OllamaProvider(InferenceProvider):
             "model": model,
             "messages": messages,
             "stream": False,
-            "options": {
-                "temperature": temperature,
-                "num_predict": max_tokens
-            }
+            "options": {"temperature": temperature, "num_predict": max_tokens},
         }
 
         try:
-            response = await self.client.post(
-                "/api/chat",
-                json=payload,
-                timeout=120.0
-            )
+            response = await self.client.post("/api/chat", json=payload, timeout=120.0)
             return response.json()
 
         except Exception as e:
@@ -319,9 +305,9 @@ class OllamaProvider(InferenceProvider):
 
     async def generate(
         self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
-        system_prompt: Optional[str] = None,
+        messages: list[dict[str, str]],
+        model: str | None = None,
+        system_prompt: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
         **kwargs: Any,
@@ -334,30 +320,44 @@ class OllamaProvider(InferenceProvider):
                 chat_messages.insert(0, {"role": "system", "content": system_prompt})
 
             result = await self.chat(
-                model, chat_messages,
-                temperature=temperature, max_tokens=max_tokens,
+                model,
+                chat_messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
             )
             latency = (datetime.now() - start).total_seconds() * 1000
 
             if "error" in result:
                 return ProviderResponse(
-                    content="", model_name=model, provider_type="ollama",
-                    latency_ms=latency, tokens_used=0,
-                    success=False, error=result["error"],
+                    content="",
+                    model_name=model,
+                    provider_type="ollama",
+                    latency_ms=latency,
+                    tokens_used=0,
+                    success=False,
+                    error=result["error"],
                 )
 
             content = result.get("message", {}).get("content", "")
             tokens = result.get("eval_count", 0)
             return ProviderResponse(
-                content=content, model_name=model, provider_type="ollama",
-                latency_ms=latency, tokens_used=tokens, success=True,
+                content=content,
+                model_name=model,
+                provider_type="ollama",
+                latency_ms=latency,
+                tokens_used=tokens,
+                success=True,
             )
         except Exception as e:
             latency = (datetime.now() - start).total_seconds() * 1000
             return ProviderResponse(
-                content="", model_name=model, provider_type="ollama",
-                latency_ms=latency, tokens_used=0,
-                success=False, error=str(e),
+                content="",
+                model_name=model,
+                provider_type="ollama",
+                latency_ms=latency,
+                tokens_used=0,
+                success=False,
+                error=str(e),
             )
 
     async def health_check(self) -> HealthStatus:
@@ -369,7 +369,8 @@ class OllamaProvider(InferenceProvider):
 
             if not running:
                 return HealthStatus(
-                    available=False, latency_ms=latency,
+                    available=False,
+                    latency_ms=latency,
                     error="Ollama not running",
                 )
 
@@ -379,20 +380,19 @@ class OllamaProvider(InferenceProvider):
                 response = await self.client.get("/api/ps")
                 if response.status_code == 200:
                     data = response.json()
-                    models_loaded = [
-                        m.get("name", "") for m in data.get("models", [])
-                    ]
+                    models_loaded = [m.get("name", "") for m in data.get("models", [])]
             except Exception:
                 pass
 
             return HealthStatus(
-                available=True, latency_ms=latency,
+                available=True,
+                latency_ms=latency,
                 models_loaded=models_loaded,
             )
         except Exception as e:
             return HealthStatus(available=False, error=str(e))
 
-    async def list_models(self) -> List[ProviderModel]:
+    async def list_models(self) -> list[ProviderModel]:
         """List available models as ProviderModel objects (InferenceProvider interface)."""
         ollama_models = await self.list_ollama_models()
         return [
@@ -408,12 +408,14 @@ class OllamaProvider(InferenceProvider):
             for m in ollama_models
         ]
 
-    async def warm_up(self, model: Optional[str] = None) -> bool:
+    async def warm_up(self, model: str | None = None) -> bool:
         """Warm up a model by sending a minimal chat request."""
         try:
             result = await self.chat(
-                model, [{"role": "user", "content": "hi"}],
-                temperature=0, max_tokens=1,
+                model,
+                [{"role": "user", "content": "hi"}],
+                temperature=0,
+                max_tokens=1,
             )
             return "error" not in result
         except Exception:
@@ -421,7 +423,7 @@ class OllamaProvider(InferenceProvider):
 
 
 # Singleton instance
-_provider: Optional[OllamaProvider] = None
+_provider: OllamaProvider | None = None
 
 
 def get_ollama_provider() -> OllamaProvider:
@@ -438,6 +440,6 @@ def is_ollama_running() -> bool:
     return asyncio.run(get_ollama_provider().is_running())
 
 
-def list_ollama_models_sync() -> List[OllamaModel]:
+def list_ollama_models_sync() -> list[OllamaModel]:
     """List Ollama models (sync wrapper)."""
     return asyncio.run(get_ollama_provider().list_ollama_models())

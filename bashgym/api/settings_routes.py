@@ -7,13 +7,12 @@ Provides REST endpoints for managing environment variables / API keys:
 - POST /api/settings/env/test - Test an API key against its provider
 """
 
+import logging
 import os
 from pathlib import Path
-from typing import Dict, Optional, List
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +33,7 @@ ALLOWED_ENV_KEYS = {
 }
 
 # Display metadata per provider key
-PROVIDER_META: Dict[str, Dict[str, str]] = {
+PROVIDER_META: dict[str, dict[str, str]] = {
     "ANTHROPIC_API_KEY": {"display_name": "Anthropic", "env_key": "ANTHROPIC_API_KEY"},
     "OPENAI_API_KEY": {"display_name": "OpenAI", "env_key": "OPENAI_API_KEY"},
     "GOOGLE_API_KEY": {"display_name": "Google (Gemini)", "env_key": "GOOGLE_API_KEY"},
@@ -43,7 +42,7 @@ PROVIDER_META: Dict[str, Dict[str, str]] = {
 }
 
 # Test URLs per provider
-PROVIDER_TEST_URLS: Dict[str, Dict[str, str]] = {
+PROVIDER_TEST_URLS: dict[str, dict[str, str]] = {
     "ANTHROPIC_API_KEY": {
         "url": "https://api.anthropic.com/v1/models",
         "auth_type": "x-api-key",
@@ -71,42 +70,53 @@ PROVIDER_TEST_URLS: Dict[str, Dict[str, str]] = {
 # Schemas
 # =============================================================================
 
+
 class EnvKeyStatus(BaseModel):
     """Status of a single environment variable / API key."""
+
     key: str = Field(description="Environment variable name")
     display_name: str = Field(description="Human-readable provider name")
     is_set: bool = Field(description="Whether a non-placeholder value is present")
     masked_value: str = Field(default="", description="Last 4 chars of value, or empty")
-    source: str = Field(default="", description="Where the value comes from: 'env_file', 'environment', or ''")
+    source: str = Field(
+        default="", description="Where the value comes from: 'env_file', 'environment', or ''"
+    )
 
 
 class EnvKeysResponse(BaseModel):
     """Response for GET /api/settings/env."""
-    keys: List[EnvKeyStatus] = Field(description="Status of all managed API keys")
+
+    keys: list[EnvKeyStatus] = Field(description="Status of all managed API keys")
 
 
 class EnvUpdateRequest(BaseModel):
     """Request for PUT /api/settings/env."""
-    values: Dict[str, str] = Field(description="Map of env var name -> new value")
+
+    values: dict[str, str] = Field(description="Map of env var name -> new value")
 
 
 class EnvTestRequest(BaseModel):
     """Request for POST /api/settings/env/test."""
+
     key: str = Field(description="Environment variable name to test (e.g. ANTHROPIC_API_KEY)")
-    value: Optional[str] = Field(default=None, description="Value to test. If omitted, uses current env value.")
+    value: str | None = Field(
+        default=None, description="Value to test. If omitted, uses current env value."
+    )
 
 
 class EnvTestResponse(BaseModel):
     """Response for POST /api/settings/env/test."""
+
     key: str
     valid: bool
     message: str = ""
-    status_code: Optional[int] = None
+    status_code: int | None = None
 
 
 # =============================================================================
 # Helpers
 # =============================================================================
+
 
 def _get_project_env_path() -> Path:
     """Return the path to the project .env file."""
@@ -137,10 +147,10 @@ def _mask_value(value: str) -> str:
     return "****" + value[-4:]
 
 
-def _read_env_file() -> Dict[str, str]:
+def _read_env_file() -> dict[str, str]:
     """Read key=value pairs from the .env file (ignoring comments/blanks)."""
     env_path = _get_project_env_path()
-    result: Dict[str, str] = {}
+    result: dict[str, str] = {}
     if not env_path.exists():
         return result
     for line in env_path.read_text(encoding="utf-8").splitlines():
@@ -156,7 +166,7 @@ def _read_env_file() -> Dict[str, str]:
     return result
 
 
-def _write_env_values(updates: Dict[str, str]) -> None:
+def _write_env_values(updates: dict[str, str]) -> None:
     """Update values in the .env file, preserving comments and ordering.
 
     If a key already exists in the file its line is replaced in-place.
@@ -170,7 +180,7 @@ def _write_env_values(updates: Dict[str, str]) -> None:
         lines = []
 
     remaining = dict(updates)  # keys we still need to write
-    new_lines: List[str] = []
+    new_lines: list[str] = []
 
     for line in lines:
         stripped = line.strip()
@@ -193,6 +203,7 @@ def _write_env_values(updates: Dict[str, str]) -> None:
 # Endpoints
 # =============================================================================
 
+
 @router.get("/env", response_model=EnvKeysResponse)
 async def get_env_keys():
     """Return masked API key status for all managed providers.
@@ -201,7 +212,7 @@ async def get_env_keys():
     Placeholder values (e.g. ``your-xxx-here``) are treated as unset.
     """
     env_file_values = _read_env_file()
-    statuses: List[EnvKeyStatus] = []
+    statuses: list[EnvKeyStatus] = []
 
     for env_key in ALLOWED_ENV_KEYS:
         meta = PROVIDER_META[env_key]
@@ -221,13 +232,15 @@ async def get_env_keys():
             effective = ""
             source = ""
 
-        statuses.append(EnvKeyStatus(
-            key=env_key,
-            display_name=meta["display_name"],
-            is_set=bool(effective),
-            masked_value=_mask_value(effective),
-            source=source,
-        ))
+        statuses.append(
+            EnvKeyStatus(
+                key=env_key,
+                display_name=meta["display_name"],
+                is_set=bool(effective),
+                masked_value=_mask_value(effective),
+                source=source,
+            )
+        )
 
     return EnvKeysResponse(keys=statuses)
 
@@ -249,7 +262,7 @@ async def update_env_keys(request: EnvUpdateRequest):
     # Write to .env file (preserves comments/ordering)
     try:
         _write_env_values(request.values)
-    except (IOError, OSError) as e:
+    except OSError as e:
         raise HTTPException(status_code=500, detail=f"Failed to write .env file: {e}")
 
     # Also update os.environ for the running process
@@ -303,8 +316,8 @@ async def test_env_key(request: EnvTestRequest):
     url = test_info["url"]
     auth_type = test_info["auth_type"]
 
-    headers: Dict[str, str] = {}
-    params: Dict[str, str] = {}
+    headers: dict[str, str] = {}
+    params: dict[str, str] = {}
 
     if auth_type == "x-api-key":
         headers["x-api-key"] = value

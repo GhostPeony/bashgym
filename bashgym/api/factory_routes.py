@@ -4,7 +4,6 @@
 import logging
 import uuid
 from pathlib import Path
-from typing import Dict, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
@@ -18,32 +17,36 @@ router = APIRouter(prefix="/api/factory", tags=["factory"])
 # Request/Response Models
 # =============================================================================
 
+
 class SyntheticGenerateRequest(BaseModel):
     """Request to start synthetic data generation."""
+
     strategy: str = "trace_seeded"
     repo_filter: str = "all"
-    selected_repos: List[str] = []
+    selected_repos: list[str] = []
     preset: str = "balanced"
-    target_examples: Optional[int] = None
-    multiplier: Optional[int] = None
+    target_examples: int | None = None
+    multiplier: int | None = None
     provider: str = "nim"
     merge_mode: str = "mixed"
 
 
 class SyntheticGenerateResponse(BaseModel):
     """Response from starting synthetic generation."""
+
     job_id: str
     status: str
 
 
 class JobStatusResponse(BaseModel):
     """Response with job status and progress."""
+
     job_id: str
     status: str
-    progress: Dict[str, int]
-    config: Optional[Dict] = None
-    output_dir: Optional[str] = None
-    error: Optional[str] = None
+    progress: dict[str, int]
+    config: dict | None = None
+    output_dir: str | None = None
+    error: str | None = None
 
 
 # =============================================================================
@@ -51,17 +54,17 @@ class JobStatusResponse(BaseModel):
 # =============================================================================
 
 # Job tracking (would use Redis/DB in production)
-generation_jobs: Dict[str, Dict] = {}
+generation_jobs: dict[str, dict] = {}
 
 
 # =============================================================================
 # API Endpoints
 # =============================================================================
 
+
 @router.post("/synthetic/generate", response_model=SyntheticGenerateResponse)
 async def start_synthetic_generation(
-    request: SyntheticGenerateRequest,
-    background_tasks: BackgroundTasks
+    request: SyntheticGenerateRequest, background_tasks: BackgroundTasks
 ):
     """Start a synthetic data generation job.
 
@@ -73,7 +76,7 @@ async def start_synthetic_generation(
     generation_jobs[job_id] = {
         "status": "queued",
         "progress": {"current": 0, "total": 0},
-        "config": request.model_dump()
+        "config": request.model_dump(),
     }
 
     # Add background task for async generation
@@ -95,11 +98,11 @@ async def get_job_status(job_id: str):
         progress=job["progress"],
         config=job.get("config"),
         output_dir=job.get("output_dir"),
-        error=job.get("error")
+        error=job.get("error"),
     )
 
 
-@router.get("/synthetic/jobs", response_model=List[JobStatusResponse])
+@router.get("/synthetic/jobs", response_model=list[JobStatusResponse])
 async def list_jobs():
     """List all synthetic generation jobs."""
     return [
@@ -109,7 +112,7 @@ async def list_jobs():
             progress=job["progress"],
             config=job.get("config"),
             output_dir=job.get("output_dir"),
-            error=job.get("error")
+            error=job.get("error"),
         )
         for job_id, job in generation_jobs.items()
     ]
@@ -134,18 +137,18 @@ async def get_presets():
 # Background Task
 # =============================================================================
 
+
 async def run_generation_job(job_id: str, request: SyntheticGenerateRequest):
     """Background task to run synthetic data generation."""
-    from bashgym.factory.synthetic_generator import SyntheticGenerator, PRESETS
     from bashgym.factory.pattern_extractor import PatternExtractor
+    from bashgym.factory.synthetic_generator import PRESETS, SyntheticGenerator
 
     try:
         generation_jobs[job_id]["status"] = "running"
 
         # Load traces based on repo filter
         traces = await load_traces_for_generation(
-            repo_filter=request.repo_filter,
-            selected_repos=request.selected_repos
+            repo_filter=request.repo_filter, selected_repos=request.selected_repos
         )
 
         if not traces:
@@ -180,32 +183,31 @@ async def run_generation_job(job_id: str, request: SyntheticGenerateRequest):
                 seed_prompts=seed_prompts,
                 count=target,
                 provider=request.provider,
-                on_progress=on_progress
+                on_progress=on_progress,
             )
         elif request.strategy == "augmented":
             seed_examples = [{"prompt": p, "repo": repo_name} for p in seed_prompts]
             tasks = await generator.generate_augmented(
                 seed_examples=seed_examples,
                 variations_per_seed=request.multiplier or 3,
-                provider=request.provider
+                provider=request.provider,
             )
         elif request.strategy == "schema_driven":
             # Build schema from trace data
             repo_schema = {
                 "name": repo_name,
                 "structure": {},
-                "frameworks": list(patterns.framework_hints)
+                "frameworks": list(patterns.framework_hints),
             }
             tasks = await generator.generate_from_schema(
-                repo_schema=repo_schema,
-                count=target,
-                provider=request.provider
+                repo_schema=repo_schema, count=target, provider=request.provider
             )
         else:
             raise ValueError(f"Unknown strategy: {request.strategy}")
 
         # Export to NeMo format
         from bashgym.config import get_bashgym_dir
+
         output_dir = get_bashgym_dir() / "synthetic" / job_id
         generator.export_to_nemo(tasks, output_dir)
 
@@ -221,13 +223,11 @@ async def run_generation_job(job_id: str, request: SyntheticGenerateRequest):
         generation_jobs[job_id]["error"] = str(e)
 
 
-async def load_traces_for_generation(
-    repo_filter: str,
-    selected_repos: List[str]
-) -> List[Dict]:
+async def load_traces_for_generation(repo_filter: str, selected_repos: list[str]) -> list[dict]:
     """Load traces from gold_traces directory based on filter."""
     import json
     from pathlib import Path
+
     from bashgym.config import get_settings
 
     traces = []
@@ -240,7 +240,7 @@ async def load_traces_for_generation(
 
     for trace_file in traces_dir.glob("*.json"):
         try:
-            with open(trace_file, "r", encoding="utf-8") as f:
+            with open(trace_file, encoding="utf-8") as f:
                 trace = json.load(f)
 
             # Filter by repo if needed
@@ -261,7 +261,7 @@ async def load_traces_for_generation(
     return traces
 
 
-def extract_seed_prompts(traces: List[Dict]) -> List[str]:
+def extract_seed_prompts(traces: list[dict]) -> list[str]:
     """Extract prompts from traces to use as seeds."""
     prompts = []
     for trace in traces:
@@ -286,78 +286,86 @@ def extract_seed_prompts(traces: List[Dict]) -> List[str]:
 # DataDesigner Integration Endpoints
 # =============================================================================
 
+
 class DesignerPreviewRequest(BaseModel):
     """Request to preview DataDesigner pipeline output."""
+
     pipeline: str = "coding_agent_sft"
     num_records: int = 5
     provider: str = "nvidia"
     provider_endpoint: str = "https://integrate.api.nvidia.com/v1"
-    text_model: Optional[str] = None
-    code_model: Optional[str] = None
-    judge_model: Optional[str] = None
+    text_model: str | None = None
+    code_model: str | None = None
+    judge_model: str | None = None
 
 
 class DesignerCreateRequest(BaseModel):
     """Request to start full DataDesigner generation."""
+
     pipeline: str = "coding_agent_sft"
     num_records: int = 100
-    seed_source: Optional[str] = None
+    seed_source: str | None = None
     seed_type: str = "traces"  # traces, huggingface, file, unstructured
-    column_mapping: Optional[Dict[str, str]] = None
+    column_mapping: dict[str, str] | None = None
     provider: str = "nvidia"
     provider_endpoint: str = "https://integrate.api.nvidia.com/v1"
-    text_model: Optional[str] = None
-    code_model: Optional[str] = None
-    judge_model: Optional[str] = None
-    output_dir: Optional[str] = None
+    text_model: str | None = None
+    code_model: str | None = None
+    judge_model: str | None = None
+    output_dir: str | None = None
     export_nemo: bool = True
     train_val_split: float = 0.9
 
 
 class DesignerValidateRequest(BaseModel):
     """Request to validate a DataDesigner pipeline config."""
+
     pipeline: str = "coding_agent_sft"
 
 
 class DesignerJobResponse(BaseModel):
     """Response from a DataDesigner job."""
+
     job_id: str
     status: str
     pipeline: str
     num_records: int
-    progress: Optional[Dict[str, int]] = None
-    output_dir: Optional[str] = None
-    export_result: Optional[Dict] = None
-    error: Optional[str] = None
+    progress: dict[str, int] | None = None
+    output_dir: str | None = None
+    export_result: dict | None = None
+    error: str | None = None
 
 
 class DesignerPipelineInfo(BaseModel):
     """Info about an available DataDesigner pipeline."""
+
     name: str
     description: str
-    columns: List[str]
+    columns: list[str]
 
 
 class DesignerHuggingFaceRequest(BaseModel):
     """Request to generate from a HuggingFace dataset."""
+
     dataset: str
-    subset: Optional[str] = None
+    subset: str | None = None
     split: str = "train"
     num_records: int = 100
     pipeline: str = "coding_agent_sft"
-    column_mapping: Optional[Dict[str, str]] = None
+    column_mapping: dict[str, str] | None = None
     provider: str = "nvidia"
 
 
 class DesignerPushToHubRequest(BaseModel):
     """Request to publish dataset to HuggingFace Hub."""
+
     job_id: str
     repo_id: str
     private: bool = True
 
 
 # DataDesigner job tracking
-designer_jobs: Dict[str, Dict] = {}
+designer_jobs: dict[str, dict] = {}
 
 
 @router.post("/designer/preview")
@@ -458,11 +466,13 @@ async def list_designer_pipelines():
     for name, builder_fn in PIPELINES.items():
         doc = builder_fn.__doc__ or ""
         first_line = doc.strip().split("\n")[0] if doc.strip() else name
-        pipelines.append(DesignerPipelineInfo(
-            name=name,
-            description=first_line,
-            columns=[],  # Would need to introspect builder
-        ))
+        pipelines.append(
+            DesignerPipelineInfo(
+                name=name,
+                description=first_line,
+                columns=[],  # Would need to introspect builder
+            )
+        )
 
     return {"pipelines": [p.model_dump() for p in pipelines], "available": True}
 
@@ -525,6 +535,7 @@ async def designer_push_to_hub(request: DesignerPushToHubRequest):
 
     try:
         import pandas as pd
+
         from bashgym.factory.data_designer import DataDesignerPipeline, PipelineConfig
 
         output_dir = job.get("output_dir")
@@ -552,6 +563,7 @@ async def designer_push_to_hub(request: DesignerPushToHubRequest):
 # DataDesigner Background Tasks
 # =============================================================================
 
+
 async def run_designer_job(job_id: str, request: DesignerCreateRequest):
     """Background task for DataDesigner generation."""
     try:
@@ -578,6 +590,7 @@ async def run_designer_job(job_id: str, request: DesignerCreateRequest):
 
         # Route to appropriate entry point
         from bashgym.config import get_settings as _get_settings
+
         _settings = _get_settings()
         seed = request.seed_source or _settings.data.gold_traces_dir
 
@@ -585,7 +598,8 @@ async def run_designer_job(job_id: str, request: DesignerCreateRequest):
             df = pipeline.from_traces(Path(seed), request.num_records)
         elif request.seed_type == "huggingface":
             df = pipeline.from_dataset(
-                seed, request.num_records,
+                seed,
+                request.num_records,
                 column_mapping=request.column_mapping,
             )
         elif request.seed_type == "file":

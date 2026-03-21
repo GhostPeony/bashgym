@@ -8,15 +8,15 @@ Config Module
 """
 
 import os
-from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any
 from enum import Enum
-
+from pathlib import Path
+from typing import Any
 
 # Try to load .env file if python-dotenv is available
 try:
     from dotenv import load_dotenv
+
     load_dotenv()
 except ImportError:
     pass
@@ -24,6 +24,7 @@ except ImportError:
 
 class Environment(Enum):
     """Deployment environments."""
+
     DEVELOPMENT = "development"
     STAGING = "staging"
     PRODUCTION = "production"
@@ -52,7 +53,8 @@ def get_env_int(key: str, default: int = 0) -> int:
 def get_bashgym_dir() -> Path:
     """Get the global Bash Gym directory (~/.bashgym/)."""
     import platform
-    if platform.system() == 'Windows':
+
+    if platform.system() == "Windows":
         base = Path(os.environ.get("USERPROFILE", ""))
     else:
         base = Path.home()
@@ -72,7 +74,7 @@ def get_env_float(key: str, default: float = 0.0) -> float:
         return default
 
 
-def get_env_list(key: str, default: List[str] = None, separator: str = ",") -> List[str]:
+def get_env_list(key: str, default: list[str] = None, separator: str = ",") -> list[str]:
     """Get list environment variable."""
     value = os.environ.get(key)
     if value:
@@ -86,7 +88,9 @@ class APISettings:
 
     # Anthropic (Claude)
     anthropic_api_key: str = field(default_factory=lambda: get_env("ANTHROPIC_API_KEY"))
-    anthropic_model: str = field(default_factory=lambda: get_env("ANTHROPIC_MODEL", "claude-sonnet-4-20250514"))
+    anthropic_model: str = field(
+        default_factory=lambda: get_env("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
+    )
 
     # OpenAI
     openai_api_key: str = field(default_factory=lambda: get_env("OPENAI_API_KEY"))
@@ -96,11 +100,17 @@ class APISettings:
 
     # NVIDIA
     nvidia_api_key: str = field(default_factory=lambda: get_env("NVIDIA_API_KEY"))
-    nemo_endpoint: str = field(default_factory=lambda: get_env("NEMO_ENDPOINT", "http://localhost:8000"))
-    nim_endpoint: str = field(default_factory=lambda: get_env("NIM_ENDPOINT", "https://integrate.api.nvidia.com/v1"))
-    nim_model: str = field(default_factory=lambda: get_env("NIM_MODEL", "qwen/qwen2.5-coder-72b-instruct"))
+    nemo_endpoint: str = field(
+        default_factory=lambda: get_env("NEMO_ENDPOINT", "http://localhost:8000")
+    )
+    nim_endpoint: str = field(
+        default_factory=lambda: get_env("NIM_ENDPOINT", "https://integrate.api.nvidia.com/v1")
+    )
+    nim_model: str = field(
+        default_factory=lambda: get_env("NIM_MODEL", "qwen/qwen2.5-coder-72b-instruct")
+    )
 
-    def validate(self) -> List[str]:
+    def validate(self) -> list[str]:
         """Validate required API keys are present."""
         errors = []
         if not self.anthropic_api_key:
@@ -110,13 +120,15 @@ class APISettings:
 
 class InferenceProvider(Enum):
     """HuggingFace inference providers."""
+
     HUGGINGFACE = "huggingface"  # HF Inference API
-    SERVERLESS = "serverless"   # HF Serverless Inference
-    DEDICATED = "dedicated"     # HF Dedicated Inference Endpoints
+    SERVERLESS = "serverless"  # HF Serverless Inference
+    DEDICATED = "dedicated"  # HF Dedicated Inference Endpoints
 
 
 class InferenceRouting(Enum):
     """Inference routing strategies."""
+
     CHEAPEST = "cheapest"
     FASTEST = "fastest"
     QUALITY = "quality"
@@ -124,6 +136,7 @@ class InferenceRouting(Enum):
 
 class HFHardware(Enum):
     """HuggingFace Spaces/Jobs hardware tiers."""
+
     CPU_BASIC = "cpu-basic"
     CPU_UPGRADE = "cpu-upgrade"
     T4_SMALL = "t4-small"
@@ -147,6 +160,7 @@ def get_hf_token() -> str:
     # Check stored secrets
     try:
         from bashgym.secrets import get_secret
+
         stored = get_secret("HF_TOKEN")
         return stored or ""
     except ImportError:
@@ -177,20 +191,20 @@ class HuggingFaceSettings:
     models_repo: str = field(default_factory=lambda: get_env("HF_MODELS_REPO"))
 
     # Inference settings
-    inference_provider: str = field(default_factory=lambda: get_env(
-        "HF_INFERENCE_PROVIDER", InferenceProvider.SERVERLESS.value
-    ))
-    inference_routing: str = field(default_factory=lambda: get_env(
-        "HF_INFERENCE_ROUTING", InferenceRouting.CHEAPEST.value
-    ))
+    inference_provider: str = field(
+        default_factory=lambda: get_env("HF_INFERENCE_PROVIDER", InferenceProvider.SERVERLESS.value)
+    )
+    inference_routing: str = field(
+        default_factory=lambda: get_env("HF_INFERENCE_ROUTING", InferenceRouting.CHEAPEST.value)
+    )
 
     # Hardware defaults for Jobs/Spaces
-    default_hardware: str = field(default_factory=lambda: get_env(
-        "HF_DEFAULT_HARDWARE", HFHardware.T4_SMALL.value
-    ))
-    job_timeout_minutes: int = field(default_factory=lambda: get_env_int(
-        "HF_JOB_TIMEOUT_MINUTES", 60
-    ))
+    default_hardware: str = field(
+        default_factory=lambda: get_env("HF_DEFAULT_HARDWARE", HFHardware.T4_SMALL.value)
+    )
+    job_timeout_minutes: int = field(
+        default_factory=lambda: get_env_int("HF_JOB_TIMEOUT_MINUTES", 60)
+    )
 
     @property
     def enabled(self) -> bool:
@@ -202,7 +216,7 @@ class HuggingFaceSettings:
         """Get the default namespace (org or username)."""
         return self.default_org or self.username or ""
 
-    def validate(self) -> List[str]:
+    def validate(self) -> list[str]:
         """Validate HuggingFace settings."""
         errors = []
         if self.token and not self.username and not self.default_org:
@@ -216,12 +230,16 @@ class OllamaSettings:
     """Ollama local inference settings."""
 
     enabled: bool = field(default_factory=lambda: get_env_bool("OLLAMA_ENABLED", True))
-    base_url: str = field(default_factory=lambda: get_env("OLLAMA_BASE_URL", "http://localhost:11434"))
+    base_url: str = field(
+        default_factory=lambda: get_env("OLLAMA_BASE_URL", "http://localhost:11434")
+    )
     default_model: str = field(default_factory=lambda: get_env("OLLAMA_MODEL", ""))
     auto_register: bool = field(default_factory=lambda: get_env_bool("OLLAMA_AUTO_REGISTER", True))
     health_interval: int = field(default_factory=lambda: get_env_int("OLLAMA_HEALTH_INTERVAL", 30))
     request_timeout: int = field(default_factory=lambda: get_env_int("OLLAMA_TIMEOUT", 120))
-    prefer_code_models: bool = field(default_factory=lambda: get_env_bool("OLLAMA_PREFER_CODE", True))
+    prefer_code_models: bool = field(
+        default_factory=lambda: get_env_bool("OLLAMA_PREFER_CODE", True)
+    )
 
 
 @dataclass
@@ -233,20 +251,26 @@ class SSHSettings:
     port: int = field(default_factory=lambda: get_env_int("SSH_REMOTE_PORT", 22))
     username: str = field(default_factory=lambda: get_env("SSH_REMOTE_USER", ""))
     key_path: str = field(default_factory=lambda: get_env("SSH_REMOTE_KEY_PATH", "~/.ssh/id_rsa"))
-    remote_work_dir: str = field(default_factory=lambda: get_env("SSH_REMOTE_WORK_DIR", "~/bashgym-training"))
+    remote_work_dir: str = field(
+        default_factory=lambda: get_env("SSH_REMOTE_WORK_DIR", "~/bashgym-training")
+    )
 
 
 @dataclass
 class DockerSettings:
     """Docker and sandbox settings."""
 
-    docker_host: str = field(default_factory=lambda: get_env("DOCKER_HOST", "unix:///var/run/docker.sock"))
+    docker_host: str = field(
+        default_factory=lambda: get_env("DOCKER_HOST", "unix:///var/run/docker.sock")
+    )
     sandbox_image: str = field(default_factory=lambda: get_env("SANDBOX_IMAGE", "python:3.10-slim"))
     sandbox_memory_limit: str = field(default_factory=lambda: get_env("SANDBOX_MEMORY", "2g"))
     sandbox_cpu_limit: float = field(default_factory=lambda: get_env_float("SANDBOX_CPU", 2.0))
     sandbox_timeout: int = field(default_factory=lambda: get_env_int("SANDBOX_TIMEOUT", 3600))
     sandbox_network_mode: str = field(default_factory=lambda: get_env("SANDBOX_NETWORK", "none"))
-    workspace_base: str = field(default_factory=lambda: get_env("WORKSPACE_BASE", "/tmp/bashgym_workspaces"))
+    workspace_base: str = field(
+        default_factory=lambda: get_env("WORKSPACE_BASE", "/tmp/bashgym_workspaces")
+    )
 
 
 @dataclass
@@ -254,13 +278,17 @@ class TrainingSettings:
     """Training and model settings."""
 
     # Base model
-    base_model: str = field(default_factory=lambda: get_env("BASE_MODEL", "Qwen/Qwen2.5-Coder-1.5B-Instruct"))
+    base_model: str = field(
+        default_factory=lambda: get_env("BASE_MODEL", "Qwen/Qwen2.5-Coder-1.5B-Instruct")
+    )
     model_type: str = field(default_factory=lambda: get_env("MODEL_TYPE", "qwen"))
 
     # Training hyperparameters
     learning_rate: float = field(default_factory=lambda: get_env_float("LEARNING_RATE", 2e-5))
     batch_size: int = field(default_factory=lambda: get_env_int("BATCH_SIZE", 4))
-    gradient_accumulation_steps: int = field(default_factory=lambda: get_env_int("GRAD_ACCUM_STEPS", 4))
+    gradient_accumulation_steps: int = field(
+        default_factory=lambda: get_env_int("GRAD_ACCUM_STEPS", 4)
+    )
     num_epochs: int = field(default_factory=lambda: get_env_int("NUM_EPOCHS", 3))
     max_seq_length: int = field(default_factory=lambda: get_env_int("MAX_SEQ_LENGTH", 4096))
     warmup_ratio: float = field(default_factory=lambda: get_env_float("WARMUP_RATIO", 0.1))
@@ -278,12 +306,16 @@ class TrainingSettings:
     dpo_beta: float = field(default_factory=lambda: get_env_float("DPO_BETA", 0.1))
 
     # GRPO settings
-    grpo_num_generations: int = field(default_factory=lambda: get_env_int("GRPO_NUM_GENERATIONS", 4))
+    grpo_num_generations: int = field(
+        default_factory=lambda: get_env_int("GRPO_NUM_GENERATIONS", 4)
+    )
     grpo_temperature: float = field(default_factory=lambda: get_env_float("GRPO_TEMPERATURE", 0.7))
 
     # Hardware
     device_map: str = field(default_factory=lambda: get_env("DEVICE_MAP", "auto"))
-    use_flash_attention: bool = field(default_factory=lambda: get_env_bool("USE_FLASH_ATTENTION", True))
+    use_flash_attention: bool = field(
+        default_factory=lambda: get_env_bool("USE_FLASH_ATTENTION", True)
+    )
 
     # Cloud training
     use_nemo_gym: bool = field(default_factory=lambda: get_env_bool("USE_NEMO_GYM", False))
@@ -299,19 +331,29 @@ class DataSettings:
 
     # Directories - default to global ~/.bashgym/ for hybrid storage approach
     data_dir: str = field(default_factory=lambda: get_env("DATA_DIR", get_default_data_dir()))
-    gold_traces_dir: str = field(default_factory=lambda: get_env(
-        "GOLD_TRACES_DIR", str(get_bashgym_dir() / "gold_traces")))
-    failed_traces_dir: str = field(default_factory=lambda: get_env(
-        "FAILED_TRACES_DIR", str(get_bashgym_dir() / "failed_traces")))
-    training_batches_dir: str = field(default_factory=lambda: get_env(
-        "TRAINING_BATCHES_DIR", str(get_bashgym_dir() / "training_batches")))
-    models_dir: str = field(default_factory=lambda: get_env(
-        "MODELS_DIR", str(get_bashgym_dir() / "models")))
+    gold_traces_dir: str = field(
+        default_factory=lambda: get_env("GOLD_TRACES_DIR", str(get_bashgym_dir() / "gold_traces"))
+    )
+    failed_traces_dir: str = field(
+        default_factory=lambda: get_env(
+            "FAILED_TRACES_DIR", str(get_bashgym_dir() / "failed_traces")
+        )
+    )
+    training_batches_dir: str = field(
+        default_factory=lambda: get_env(
+            "TRAINING_BATCHES_DIR", str(get_bashgym_dir() / "training_batches")
+        )
+    )
+    models_dir: str = field(
+        default_factory=lambda: get_env("MODELS_DIR", str(get_bashgym_dir() / "models"))
+    )
 
     # Processing settings
     min_trace_steps: int = field(default_factory=lambda: get_env_int("MIN_TRACE_STEPS", 2))
     max_trace_steps: int = field(default_factory=lambda: get_env_int("MAX_TRACE_STEPS", 50))
-    min_quality_score: float = field(default_factory=lambda: get_env_float("MIN_QUALITY_SCORE", 0.3))
+    min_quality_score: float = field(
+        default_factory=lambda: get_env_float("MIN_QUALITY_SCORE", 0.3)
+    )
     augmentation_factor: int = field(default_factory=lambda: get_env_int("AUGMENTATION_FACTOR", 3))
 
     # Batch settings
@@ -319,8 +361,13 @@ class DataSettings:
 
     def ensure_directories(self) -> None:
         """Create all data directories."""
-        for attr in ["data_dir", "gold_traces_dir", "failed_traces_dir",
-                     "training_batches_dir", "models_dir"]:
+        for attr in [
+            "data_dir",
+            "gold_traces_dir",
+            "failed_traces_dir",
+            "training_batches_dir",
+            "models_dir",
+        ]:
             Path(getattr(self, attr)).mkdir(parents=True, exist_ok=True)
 
 
@@ -330,14 +377,14 @@ class VerificationSettings:
 
     timeout: int = field(default_factory=lambda: get_env_int("VERIFY_TIMEOUT", 300))
     max_retries: int = field(default_factory=lambda: get_env_int("VERIFY_MAX_RETRIES", 1))
-    test_patterns: List[str] = field(default_factory=lambda: get_env_list(
-        "TEST_PATTERNS",
-        ["test_*.py", "*_test.py", "tests/*.py", "verify.sh", "verify.py"]
-    ))
-    pytest_args: List[str] = field(default_factory=lambda: get_env_list(
-        "PYTEST_ARGS",
-        ["-v", "--tb=short", "-x"]
-    ))
+    test_patterns: list[str] = field(
+        default_factory=lambda: get_env_list(
+            "TEST_PATTERNS", ["test_*.py", "*_test.py", "tests/*.py", "verify.sh", "verify.py"]
+        )
+    )
+    pytest_args: list[str] = field(
+        default_factory=lambda: get_env_list("PYTEST_ARGS", ["-v", "--tb=short", "-x"])
+    )
 
 
 @dataclass
@@ -345,11 +392,19 @@ class RouterSettings:
     """Model routing settings."""
 
     strategy: str = field(default_factory=lambda: get_env("ROUTING_STRATEGY", "confidence_based"))
-    confidence_threshold: float = field(default_factory=lambda: get_env_float("CONFIDENCE_THRESHOLD", 0.7))
-    complexity_threshold: float = field(default_factory=lambda: get_env_float("COMPLEXITY_THRESHOLD", 0.5))
-    student_sample_rate: float = field(default_factory=lambda: get_env_float("STUDENT_SAMPLE_RATE", 0.1))
+    confidence_threshold: float = field(
+        default_factory=lambda: get_env_float("CONFIDENCE_THRESHOLD", 0.7)
+    )
+    complexity_threshold: float = field(
+        default_factory=lambda: get_env_float("COMPLEXITY_THRESHOLD", 0.5)
+    )
+    student_sample_rate: float = field(
+        default_factory=lambda: get_env_float("STUDENT_SAMPLE_RATE", 0.1)
+    )
     max_student_rate: float = field(default_factory=lambda: get_env_float("MAX_STUDENT_RATE", 0.9))
-    fallback_to_teacher: bool = field(default_factory=lambda: get_env_bool("FALLBACK_TO_TEACHER", True))
+    fallback_to_teacher: bool = field(
+        default_factory=lambda: get_env_bool("FALLBACK_TO_TEACHER", True)
+    )
 
 
 @dataclass
@@ -357,13 +412,17 @@ class EvaluatorSettings:
     """NeMo Evaluator settings for comprehensive model evaluation."""
 
     enabled: bool = field(default_factory=lambda: get_env_bool("EVALUATOR_ENABLED", True))
-    endpoint: str = field(default_factory=lambda: get_env("EVALUATOR_ENDPOINT", "http://localhost:8000"))
-    benchmarks: List[str] = field(default_factory=lambda: get_env_list(
-        "EVALUATOR_BENCHMARKS", ["humaneval", "mbpp", "bigcodebench"]
-    ))
-    judge_model: str = field(default_factory=lambda: get_env(
-        "EVALUATOR_JUDGE_MODEL", "meta/llama-3.1-70b-instruct"
-    ))
+    endpoint: str = field(
+        default_factory=lambda: get_env("EVALUATOR_ENDPOINT", "http://localhost:8000")
+    )
+    benchmarks: list[str] = field(
+        default_factory=lambda: get_env_list(
+            "EVALUATOR_BENCHMARKS", ["humaneval", "mbpp", "bigcodebench"]
+        )
+    )
+    judge_model: str = field(
+        default_factory=lambda: get_env("EVALUATOR_JUDGE_MODEL", "meta/llama-3.1-70b-instruct")
+    )
     timeout: int = field(default_factory=lambda: get_env_int("EVALUATOR_TIMEOUT", 3600))
     max_concurrent_jobs: int = field(default_factory=lambda: get_env_int("EVALUATOR_MAX_JOBS", 4))
 
@@ -374,13 +433,15 @@ class PrivacySettings:
 
     enabled: bool = field(default_factory=lambda: get_env_bool("PRIVACY_ENABLED", False))
     epsilon: float = field(default_factory=lambda: get_env_float("PRIVACY_EPSILON", 8.0))
-    pii_types: List[str] = field(default_factory=lambda: get_env_list(
-        "PRIVACY_PII_TYPES", ["person", "email", "ssn", "phone", "address", "credit_card"]
-    ))
+    pii_types: list[str] = field(
+        default_factory=lambda: get_env_list(
+            "PRIVACY_PII_TYPES", ["person", "email", "ssn", "phone", "address", "credit_card"]
+        )
+    )
     use_dp_sgd: bool = field(default_factory=lambda: get_env_bool("PRIVACY_USE_DP_SGD", False))
-    safe_synthesizer_endpoint: str = field(default_factory=lambda: get_env(
-        "SAFE_SYNTHESIZER_ENDPOINT", "http://localhost:8000"
-    ))
+    safe_synthesizer_endpoint: str = field(
+        default_factory=lambda: get_env("SAFE_SYNTHESIZER_ENDPOINT", "http://localhost:8000")
+    )
 
 
 @dataclass
@@ -390,27 +451,37 @@ class GuardrailsSettings:
     enabled: bool = field(default_factory=lambda: get_env_bool("GUARDRAILS_ENABLED", True))
 
     # Check toggles
-    injection_detection: bool = field(default_factory=lambda: get_env_bool("GUARDRAILS_INJECTION_DETECTION", True))
+    injection_detection: bool = field(
+        default_factory=lambda: get_env_bool("GUARDRAILS_INJECTION_DETECTION", True)
+    )
     code_safety: bool = field(default_factory=lambda: get_env_bool("GUARDRAILS_CODE_SAFETY", True))
-    pii_filtering: bool = field(default_factory=lambda: get_env_bool("GUARDRAILS_PII_FILTERING", True))
-    content_moderation: bool = field(default_factory=lambda: get_env_bool("GUARDRAILS_CONTENT_MODERATION", False))
+    pii_filtering: bool = field(
+        default_factory=lambda: get_env_bool("GUARDRAILS_PII_FILTERING", True)
+    )
+    content_moderation: bool = field(
+        default_factory=lambda: get_env_bool("GUARDRAILS_CONTENT_MODERATION", False)
+    )
 
     # Thresholds
-    injection_threshold: float = field(default_factory=lambda: get_env_float("GUARDRAILS_INJECTION_THRESHOLD", 0.8))
+    injection_threshold: float = field(
+        default_factory=lambda: get_env_float("GUARDRAILS_INJECTION_THRESHOLD", 0.8)
+    )
 
     # Code safety - dangerous commands to block
-    blocked_commands: List[str] = field(default_factory=lambda: get_env_list(
-        "GUARDRAILS_BLOCKED_COMMANDS",
-        ["rm -rf /", "rm -rf /*", ":(){:|:&};:", "dd if=/dev/zero", "mkfs.", "> /dev/sda"]
-    ))
+    blocked_commands: list[str] = field(
+        default_factory=lambda: get_env_list(
+            "GUARDRAILS_BLOCKED_COMMANDS",
+            ["rm -rf /", "rm -rf /*", ":(){:|:&};:", "dd if=/dev/zero", "mkfs.", "> /dev/sda"],
+        )
+    )
 
     # Topic control
-    topic_control: List[str] = field(default_factory=lambda: get_env_list("GUARDRAILS_TOPICS", []))
+    topic_control: list[str] = field(default_factory=lambda: get_env_list("GUARDRAILS_TOPICS", []))
 
     # NeMo endpoint (optional, for advanced checks)
-    nemoguard_endpoint: str = field(default_factory=lambda: get_env(
-        "NEMOGUARD_ENDPOINT", "http://localhost:8000"
-    ))
+    nemoguard_endpoint: str = field(
+        default_factory=lambda: get_env("NEMOGUARD_ENDPOINT", "http://localhost:8000")
+    )
     colang_config_path: str = field(default_factory=lambda: get_env("COLANG_CONFIG_PATH", ""))
 
 
@@ -420,12 +491,16 @@ class PromptOptSettings:
 
     enabled: bool = field(default_factory=lambda: get_env_bool("PROMPT_OPT_ENABLED", False))
     intensity: str = field(default_factory=lambda: get_env("PROMPT_OPT_INTENSITY", "medium"))
-    max_bootstrapped_demos: int = field(default_factory=lambda: get_env_int("PROMPT_OPT_MAX_DEMOS", 4))
-    metric_threshold: float = field(default_factory=lambda: get_env_float("PROMPT_OPT_THRESHOLD", 0.8))
+    max_bootstrapped_demos: int = field(
+        default_factory=lambda: get_env_int("PROMPT_OPT_MAX_DEMOS", 4)
+    )
+    metric_threshold: float = field(
+        default_factory=lambda: get_env_float("PROMPT_OPT_THRESHOLD", 0.8)
+    )
     num_trials: int = field(default_factory=lambda: get_env_int("PROMPT_OPT_TRIALS", 20))
-    optimizer_model: str = field(default_factory=lambda: get_env(
-        "PROMPT_OPT_MODEL", "meta/llama-3.1-70b-instruct"
-    ))
+    optimizer_model: str = field(
+        default_factory=lambda: get_env("PROMPT_OPT_MODEL", "meta/llama-3.1-70b-instruct")
+    )
 
 
 @dataclass
@@ -437,16 +512,24 @@ class ObservabilitySettings:
     # What to profile
     profile_tokens: bool = field(default_factory=lambda: get_env_bool("PROFILER_TOKENS", True))
     profile_latency: bool = field(default_factory=lambda: get_env_bool("PROFILER_LATENCY", True))
-    profile_guardrails: bool = field(default_factory=lambda: get_env_bool("PROFILER_GUARDRAILS", True))
+    profile_guardrails: bool = field(
+        default_factory=lambda: get_env_bool("PROFILER_GUARDRAILS", True)
+    )
 
     # Storage
-    output_dir: str = field(default_factory=lambda: get_env(
-        "PROFILER_OUTPUT_DIR", str(get_bashgym_dir() / "profiler_traces")
-    ))
-    max_traces_in_memory: int = field(default_factory=lambda: get_env_int("PROFILER_MAX_TRACES", 1000))
+    output_dir: str = field(
+        default_factory=lambda: get_env(
+            "PROFILER_OUTPUT_DIR", str(get_bashgym_dir() / "profiler_traces")
+        )
+    )
+    max_traces_in_memory: int = field(
+        default_factory=lambda: get_env_int("PROFILER_MAX_TRACES", 1000)
+    )
 
     # Sampling
-    trace_sampling_rate: float = field(default_factory=lambda: get_env_float("PROFILER_SAMPLING_RATE", 1.0))
+    trace_sampling_rate: float = field(
+        default_factory=lambda: get_env_float("PROFILER_SAMPLING_RATE", 1.0)
+    )
 
 
 @dataclass
@@ -454,10 +537,11 @@ class LoggingSettings:
     """Logging and monitoring settings."""
 
     log_level: str = field(default_factory=lambda: get_env("LOG_LEVEL", "INFO"))
-    log_format: str = field(default_factory=lambda: get_env(
-        "LOG_FORMAT",
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    ))
+    log_format: str = field(
+        default_factory=lambda: get_env(
+            "LOG_FORMAT", "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )
+    )
     log_file: str = field(default_factory=lambda: get_env("LOG_FILE", ""))
     enable_metrics: bool = field(default_factory=lambda: get_env_bool("ENABLE_METRICS", True))
     metrics_port: int = field(default_factory=lambda: get_env_int("METRICS_PORT", 9090))
@@ -475,9 +559,9 @@ class Settings:
     """
 
     # Environment
-    environment: Environment = field(default_factory=lambda: Environment(
-        get_env("ENVIRONMENT", "development")
-    ))
+    environment: Environment = field(
+        default_factory=lambda: Environment(get_env("ENVIRONMENT", "development"))
+    )
     debug: bool = field(default_factory=lambda: get_env_bool("DEBUG", False))
 
     # Component settings
@@ -511,34 +595,39 @@ class Settings:
     )
 
     # Web hosting
-    mode: str = field(default_factory=lambda: get_env("BASHGYM_MODE", "desktop"))  # "web" or "desktop"
+    mode: str = field(
+        default_factory=lambda: get_env("BASHGYM_MODE", "desktop")
+    )  # "web" or "desktop"
     host: str = field(default_factory=lambda: get_env("HOST", "127.0.0.1"))
-    cors_origins: List[str] = field(default_factory=lambda: get_env_list(
-        "CORS_ORIGINS", ["http://localhost:5173", "http://localhost:8003"]
-    ))
+    cors_origins: list[str] = field(
+        default_factory=lambda: get_env_list(
+            "CORS_ORIGINS", ["http://localhost:5173", "http://localhost:8003"]
+        )
+    )
 
     @property
     def is_web_mode(self) -> bool:
         """Check if running in web-hosted mode (hides experimental features)."""
         return self.mode == "web"
 
-    def validate(self) -> List[str]:
+    def validate(self) -> list[str]:
         """Validate all settings."""
         errors = []
         errors.extend(self.api.validate())
         return errors
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert settings to dictionary (hiding sensitive values)."""
+
         def sanitize(obj):
             if isinstance(obj, dict):
                 return {k: sanitize(v) for k, v in obj.items()}
-            elif hasattr(obj, '__dataclass_fields__'):
+            elif hasattr(obj, "__dataclass_fields__"):
                 result = {}
                 for k in obj.__dataclass_fields__:
                     v = getattr(obj, k)
                     # Hide sensitive values
-                    if any(s in k.lower() for s in ['key', 'token', 'secret', 'password']):
+                    if any(s in k.lower() for s in ["key", "token", "secret", "password"]):
                         result[k] = "***" if v else ""
                     else:
                         result[k] = sanitize(v)
@@ -567,15 +656,11 @@ class Settings:
         if self.logging.log_file:
             handlers.append(logging.FileHandler(self.logging.log_file))
 
-        logging.basicConfig(
-            level=level,
-            format=self.logging.log_format,
-            handlers=handlers
-        )
+        logging.basicConfig(level=level, format=self.logging.log_format, handlers=handlers)
 
 
 # Global settings instance
-_settings: Optional[Settings] = None
+_settings: Settings | None = None
 
 
 def get_settings() -> Settings:

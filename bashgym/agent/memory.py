@@ -12,13 +12,12 @@ import json
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-
+from typing import Any
 
 MAX_FACTS = 50
 
 # Profile fields and their defaults
-_PROFILE_DEFAULTS: Dict[str, Any] = {
+_PROFILE_DEFAULTS: dict[str, Any] = {
     "hf_username": None,
     "preferred_base_model": None,
     "preferred_strategy": None,
@@ -36,9 +35,10 @@ class PeonyMemory:
       - episodes/      — one JSON file per session episode
     """
 
-    def __init__(self, memory_dir: Optional[Path] = None) -> None:
+    def __init__(self, memory_dir: Path | None = None) -> None:
         if memory_dir is None:
             from bashgym.config import get_bashgym_dir
+
             memory_dir = get_bashgym_dir() / "peony_memory"
         self._dir = Path(memory_dir)
         self._dir.mkdir(parents=True, exist_ok=True)
@@ -53,7 +53,7 @@ class PeonyMemory:
     def _profile_path(self) -> Path:
         return self._dir / "profile.json"
 
-    def load_profile(self) -> Dict[str, Any]:
+    def load_profile(self) -> dict[str, Any]:
         """Load the user profile from disk, or return defaults."""
         if self._profile_path.exists():
             try:
@@ -73,9 +73,7 @@ class PeonyMemory:
             raise ValueError(f"Unknown profile field: {field}")
         profile = self.load_profile()
         profile[field] = value
-        self._profile_path.write_text(
-            json.dumps(profile, indent=2, default=str), encoding="utf-8"
-        )
+        self._profile_path.write_text(json.dumps(profile, indent=2, default=str), encoding="utf-8")
 
     # ------------------------------------------------------------------
     # Facts layer
@@ -85,7 +83,7 @@ class PeonyMemory:
     def _facts_path(self) -> Path:
         return self._dir / "facts.json"
 
-    def _load_all_facts(self) -> List[Dict[str, Any]]:
+    def _load_all_facts(self) -> list[dict[str, Any]]:
         """Load the raw facts list from disk."""
         if self._facts_path.exists():
             try:
@@ -95,7 +93,7 @@ class PeonyMemory:
                 pass
         return []
 
-    def _save_all_facts(self, facts: List[Dict[str, Any]]) -> None:
+    def _save_all_facts(self, facts: list[dict[str, Any]]) -> None:
         """Persist the full facts list to disk, enforcing the cap."""
         # Sort by created_at descending, keep most recent MAX_FACTS
         facts = sorted(facts, key=lambda f: f.get("created_at", ""), reverse=True)
@@ -105,9 +103,9 @@ class PeonyMemory:
             encoding="utf-8",
         )
 
-    def remember_fact(self, category: str, content: str) -> Dict[str, Any]:
+    def remember_fact(self, category: str, content: str) -> dict[str, Any]:
         """Create and persist a new fact. Returns the fact dict."""
-        fact: Dict[str, Any] = {
+        fact: dict[str, Any] = {
             "id": uuid.uuid4().hex[:12],
             "category": category,
             "content": content,
@@ -120,9 +118,9 @@ class PeonyMemory:
 
     def recall_facts(
         self,
-        category: Optional[str] = None,
-        keyword: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        category: str | None = None,
+        keyword: str | None = None,
+    ) -> list[dict[str, Any]]:
         """Filter facts by category and/or keyword (case-insensitive)."""
         facts = self._load_all_facts()
         if category is not None:
@@ -132,7 +130,7 @@ class PeonyMemory:
             facts = [f for f in facts if kw_lower in f["content"].lower()]
         return facts
 
-    def load_facts(self, limit: int = 20) -> List[Dict[str, Any]]:
+    def load_facts(self, limit: int = 20) -> list[dict[str, Any]]:
         """Return the most recent facts, capped at *limit*."""
         facts = self._load_all_facts()
         # Already sorted descending by _save_all_facts
@@ -150,10 +148,10 @@ class PeonyMemory:
     # Episodes layer
     # ------------------------------------------------------------------
 
-    def save_episode(self, session_id: str, summary: str) -> Dict[str, Any]:
+    def save_episode(self, session_id: str, summary: str) -> dict[str, Any]:
         """Save an episode summary for a session. Returns the episode dict."""
         now = datetime.now(timezone.utc)
-        episode: Dict[str, Any] = {
+        episode: dict[str, Any] = {
             "session_id": session_id,
             "summary": summary,
             "created_at": now.isoformat(),
@@ -161,14 +159,12 @@ class PeonyMemory:
         date_str = now.strftime("%Y%m%d%H%M%S%f")
         filename = f"{date_str}_{session_id}.json"
         path = self._episodes_dir / filename
-        path.write_text(
-            json.dumps(episode, indent=2, default=str), encoding="utf-8"
-        )
+        path.write_text(json.dumps(episode, indent=2, default=str), encoding="utf-8")
         return episode
 
-    def load_recent_episodes(self, limit: int = 5) -> List[Dict[str, Any]]:
+    def load_recent_episodes(self, limit: int = 5) -> list[dict[str, Any]]:
         """Load all episodes, sorted by recency, return top *limit*."""
-        episodes: List[Dict[str, Any]] = []
+        episodes: list[dict[str, Any]] = []
         for path in self._episodes_dir.glob("*.json"):
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
@@ -184,7 +180,7 @@ class PeonyMemory:
 
     def build_memory_prompt(self) -> str:
         """Assemble all memory layers into a formatted prompt string."""
-        parts: List[str] = []
+        parts: list[str] = []
 
         # --- Profile ---
         profile = self.load_profile()

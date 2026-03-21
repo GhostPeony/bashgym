@@ -12,17 +12,13 @@ import logging
 import math
 import random
 import time
-from dataclasses import dataclass, field, asdict
+from collections.abc import Callable, Coroutine
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Coroutine, Dict, List, Optional
+from typing import Any
 
 from bashgym.gym.trainer import TrainerConfig
-from bashgym.gym.training_goal import (
-    GoalProgress,
-    OutcomeAggregator,
-    TrainingGoal,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +27,7 @@ logger = logging.getLogger(__name__)
 # Search Space Definition
 # =============================================================================
 
-SEARCH_SPACE: Dict[str, Dict[str, Any]] = {
+SEARCH_SPACE: dict[str, dict[str, Any]] = {
     "learning_rate": {
         "type": "float",
         "min": 1e-6,
@@ -87,19 +83,25 @@ SEARCH_SPACE: Dict[str, Dict[str, Any]] = {
 # Data Classes
 # =============================================================================
 
+
 @dataclass
 class AutoResearchConfig:
     """Configuration for autoresearch hyperparameter search."""
 
     # Which TrainerConfig fields to mutate
-    search_params: List[str] = field(default_factory=lambda: [
-        "learning_rate", "lora_r", "lora_alpha", "warmup_ratio",
-    ])
+    search_params: list[str] = field(
+        default_factory=lambda: [
+            "learning_rate",
+            "lora_r",
+            "lora_alpha",
+            "warmup_ratio",
+        ]
+    )
 
     # Budget
     max_experiments: int = 50
-    train_minutes: float = 5.0   # Minutes per experiment (for real training)
-    train_steps: int = 100       # Fixed steps instead of time
+    train_minutes: float = 5.0  # Minutes per experiment (for real training)
+    train_steps: int = 100  # Fixed steps instead of time
 
     # Data
     dataset_subset_ratio: float = 0.1  # Use 10% of training data for fast iteration
@@ -108,7 +110,7 @@ class AutoResearchConfig:
     eval_metric: str = "val_loss"  # What to optimize (lower is better for loss)
 
     # Mutation
-    mutation_rate: float = 0.3   # Probability of mutating each param
+    mutation_rate: float = 0.3  # Probability of mutating each param
     mutation_scale: float = 0.2  # Scale of mutations (20% change)
 
 
@@ -117,16 +119,16 @@ class ExperimentResult:
     """Result of a single autoresearch experiment."""
 
     experiment_id: int
-    config_snapshot: Dict[str, Any]
+    config_snapshot: dict[str, Any]
     metric_value: float
     improved: bool
     duration_seconds: float
     timestamp: str
-    goal_progress: Optional[Dict[str, Any]] = None
 
 
 class AutoResearchStatus:
     """Possible states for the autoresearch loop."""
+
     IDLE = "idle"
     RUNNING = "running"
     PAUSED = "paused"
@@ -138,6 +140,7 @@ class AutoResearchStatus:
 # =============================================================================
 # Simulation Helpers
 # =============================================================================
+
 
 def _simulate_loss(config: TrainerConfig, experiment_number: int, total_experiments: int) -> float:
     """Simulate a realistic validation loss for a given config.
@@ -217,39 +220,29 @@ def _simulate_loss(config: TrainerConfig, experiment_number: int, total_experime
 # AutoResearcher
 # =============================================================================
 
+
 class AutoResearcher:
     """Automated hyperparameter search via iterative experimentation.
 
     Uses a simple evolutionary strategy: start from the user's config,
     mutate parameters, keep improvements, iterate.
-
-    Optionally accepts a TrainingGoal for multi-criteria optimization
-    with constraint enforcement and stall detection. When no goal is
-    provided, behavior is identical to the original single-metric approach.
     """
 
     def __init__(
         self,
         config: AutoResearchConfig,
         base_trainer_config: TrainerConfig,
-        goal: Optional[TrainingGoal] = None,
     ):
         self.config = config
         self.best_config = copy.deepcopy(base_trainer_config)
         self.best_metric: float = float("inf")  # Lower is better for loss
-        self.experiments: List[ExperimentResult] = []
+        self.experiments: list[ExperimentResult] = []
         self.status: str = AutoResearchStatus.IDLE
         self._running = False
         self._paused = False
-        self._error: Optional[str] = None
-        self._started_at: Optional[str] = None
-        self._completed_at: Optional[str] = None
-
-        # Goal-based optimization (optional)
-        self.goal = goal
-        self.aggregator: Optional[OutcomeAggregator] = None
-        if goal is not None:
-            self.aggregator = OutcomeAggregator(goal)
+        self._error: str | None = None
+        self._started_at: str | None = None
+        self._completed_at: str | None = None
 
     # -----------------------------------------------------------------
     # Mutation
@@ -281,7 +274,7 @@ class AutoResearcher:
 
         return mutated
 
-    def _mutate_value(self, current: Any, spec: Dict[str, Any]) -> Any:
+    def _mutate_value(self, current: Any, spec: dict[str, Any]) -> Any:
         """Mutate a single value according to its search space spec."""
         param_type = spec["type"]
 
@@ -298,7 +291,11 @@ class AutoResearcher:
             else:
                 # Linear mutation
                 delta = current * self.config.mutation_scale
-                new_val = current + random.gauss(0, delta) if delta > 0 else random.uniform(spec["min"], spec["max"])
+                new_val = (
+                    current + random.gauss(0, delta)
+                    if delta > 0
+                    else random.uniform(spec["min"], spec["max"])
+                )
             return max(spec["min"], min(spec["max"], new_val))
 
         if param_type == "int":
@@ -357,7 +354,7 @@ class AutoResearcher:
     async def run_loop(
         self,
         dataset_path: Path,
-        callback: Optional[Callable[..., Coroutine]] = None,
+        callback: Callable[..., Coroutine] | None = None,
     ):
         """Main autoresearch loop.
 
@@ -373,18 +370,9 @@ class AutoResearcher:
         self._error = None
         self._completed_at = None
 
-        # Import event bus lazily to avoid circular imports
-        try:
-            from bashgym.events import event_bus
-            from bashgym.events.types import GoalProgressed
-            _has_events = True
-        except ImportError:
-            _has_events = False
-
         logger.info(
             f"[AutoResearch] Starting loop: {self.config.max_experiments} experiments, "
             f"params={self.config.search_params}"
-            + (f", goal={len(self.goal.criteria)} criteria" if self.goal else "")
         )
 
         try:
@@ -430,75 +418,6 @@ class AutoResearcher:
                         f"(was {prev_best:.4f})"
                     )
 
-                # Goal-based progress tracking
-                goal_progress_data: Optional[Dict[str, Any]] = None
-                if self.aggregator is not None:
-                    # Build metrics dict for the aggregator
-                    experiment_metrics = {
-                        self.config.eval_metric: metric,
-                        "experiment_number": i + 1,
-                        "duration_seconds": round(duration, 2),
-                    }
-                    progress = self.aggregator.record(experiment_metrics)
-                    goal_progress_data = {
-                        "criteria_scores": progress.criteria_scores,
-                        "weighted_score": progress.weighted_score,
-                        "constraints_status": progress.constraints_status,
-                        "recommendation": progress.recommendation,
-                        "reasoning": progress.reasoning,
-                    }
-
-                    # Emit goal progress event
-                    if _has_events:
-                        event_bus.emit(GoalProgressed(
-                            experiment_id=str(i + 1),
-                            weighted_score=progress.weighted_score,
-                            recommendation=progress.recommendation,
-                            criteria_scores=progress.criteria_scores,
-                            constraints_status=progress.constraints_status,
-                            reasoning=progress.reasoning,
-                        ))
-
-                    # Act on recommendation
-                    if progress.recommendation == "complete":
-                        logger.info(
-                            f"[AutoResearch] Goal recommends COMPLETE at experiment {i+1}: "
-                            f"{progress.reasoning}"
-                        )
-                        self.status = AutoResearchStatus.COMPLETED
-                        # Build result before breaking
-                        result = ExperimentResult(
-                            experiment_id=i + 1,
-                            config_snapshot={
-                                param: getattr(candidate, param)
-                                for param in self.config.search_params
-                                if hasattr(candidate, param)
-                            },
-                            metric_value=round(metric, 6),
-                            improved=improved,
-                            duration_seconds=round(duration, 2),
-                            timestamp=datetime.now(timezone.utc).isoformat(),
-                            goal_progress=goal_progress_data,
-                        )
-                        self.experiments.append(result)
-                        if callback:
-                            try:
-                                await callback(result, self.best_config, self.best_metric)
-                            except Exception as cb_err:
-                                logger.warning(f"[AutoResearch] Callback error: {cb_err}")
-                        break
-
-                    elif progress.recommendation == "adjust":
-                        # Increase mutation rate to explore more
-                        old_rate = self.config.mutation_rate
-                        self.config.mutation_rate = min(
-                            1.0, self.config.mutation_rate * 1.5
-                        )
-                        logger.info(
-                            f"[AutoResearch] Goal recommends ADJUST: mutation_rate "
-                            f"{old_rate:.2f} -> {self.config.mutation_rate:.2f}"
-                        )
-
                 result = ExperimentResult(
                     experiment_id=i + 1,
                     config_snapshot={
@@ -510,7 +429,6 @@ class AutoResearcher:
                     improved=improved,
                     duration_seconds=round(duration, 2),
                     timestamp=datetime.now(timezone.utc).isoformat(),
-                    goal_progress=goal_progress_data,
                 )
                 self.experiments.append(result)
 
@@ -562,9 +480,9 @@ class AutoResearcher:
     # Status
     # -----------------------------------------------------------------
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Return a serializable status dict."""
-        status = {
+        return {
             "status": self.status,
             "total_experiments": self.config.max_experiments,
             "completed_experiments": len(self.experiments),
@@ -583,15 +501,3 @@ class AutoResearcher:
             "completed_at": self._completed_at,
             "error": self._error,
         }
-
-        # Include goal status if present
-        if self.aggregator is not None and self.aggregator.history:
-            latest = self.aggregator.history[-1][1]
-            status["goal_progress"] = {
-                "weighted_score": latest.weighted_score,
-                "criteria_scores": latest.criteria_scores,
-                "constraints_status": latest.constraints_status,
-                "recommendation": latest.recommendation,
-            }
-
-        return status

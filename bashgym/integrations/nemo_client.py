@@ -25,40 +25,55 @@ Usage:
     response = client.inference.chat_completion(...)
 """
 
+import logging
 import os
-import json
-import asyncio
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List, Iterator, AsyncIterator, Union
 from datetime import datetime, timezone
 from enum import Enum
-import logging
+from typing import Any
 
 # Try to import the official NeMo Microservices SDK
 try:
-    from nemo_microservices import NeMoMicroservices, AsyncNeMoMicroservices
     from nemo_microservices import (
-        BadRequestError,
+        AsyncNeMoMicroservices,
         AuthenticationError,
-        PermissionDeniedError,
-        NotFoundError,
-        RateLimitError,
+        BadRequestError,
         InternalServerError,
+        NeMoMicroservices,
+        NotFoundError,
+        PermissionDeniedError,
+        RateLimitError,
     )
+
     NEMO_SDK_AVAILABLE = True
 except ImportError:
     NEMO_SDK_AVAILABLE = False
+
     # Define fallback exceptions
-    class BadRequestError(Exception): pass
-    class AuthenticationError(Exception): pass
-    class PermissionDeniedError(Exception): pass
-    class NotFoundError(Exception): pass
-    class RateLimitError(Exception): pass
-    class InternalServerError(Exception): pass
+    class BadRequestError(Exception):
+        pass
+
+    class AuthenticationError(Exception):
+        pass
+
+    class PermissionDeniedError(Exception):
+        pass
+
+    class NotFoundError(Exception):
+        pass
+
+    class RateLimitError(Exception):
+        pass
+
+    class InternalServerError(Exception):
+        pass
+
 
 # HTTP client for fallback mode
 try:
     import httpx
+
     HTTPX_AVAILABLE = True
 except ImportError:
     HTTPX_AVAILABLE = False
@@ -68,6 +83,7 @@ logger = logging.getLogger(__name__)
 
 class CustomizationStrategy(Enum):
     """Training strategies supported by NeMo Customizer."""
+
     SFT = "sft"
     LORA = "lora"
     P_TUNING = "p_tuning"
@@ -83,7 +99,7 @@ class NeMoClientConfig:
     inference_url: str = "https://integrate.api.nvidia.com/v1"
 
     # Authentication
-    api_key: Optional[str] = None
+    api_key: str | None = None
 
     # Client settings
     timeout: float = 60.0
@@ -107,13 +123,13 @@ class CustomizationJob:
     model: str
     strategy: str
     created_at: str
-    updated_at: Optional[str] = None
-    metrics: Dict[str, Any] = field(default_factory=dict)
-    error: Optional[str] = None
-    output_model: Optional[str] = None
+    updated_at: str | None = None
+    metrics: dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
+    output_model: str | None = None
 
     @classmethod
-    def from_api_response(cls, data: Dict[str, Any]) -> "CustomizationJob":
+    def from_api_response(cls, data: dict[str, Any]) -> "CustomizationJob":
         """Create from API response."""
         return cls(
             job_id=data.get("id", data.get("job_id", "")),
@@ -127,7 +143,7 @@ class CustomizationJob:
             output_model=data.get("output_model"),
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "job_id": self.job_id,
             "status": self.status,
@@ -149,10 +165,10 @@ class EvaluationJob:
     status: str
     benchmark: str
     created_at: str
-    metrics: Dict[str, float] = field(default_factory=dict)
+    metrics: dict[str, float] = field(default_factory=dict)
     samples_evaluated: int = 0
     samples_passed: int = 0
-    error: Optional[str] = None
+    error: str | None = None
 
     @property
     def pass_rate(self) -> float:
@@ -161,7 +177,7 @@ class EvaluationJob:
         return self.samples_passed / self.samples_evaluated
 
     @classmethod
-    def from_api_response(cls, data: Dict[str, Any]) -> "EvaluationJob":
+    def from_api_response(cls, data: dict[str, Any]) -> "EvaluationJob":
         return cls(
             job_id=data.get("id", data.get("job_id", "")),
             status=data.get("status", "unknown"),
@@ -191,9 +207,9 @@ class CustomizationClient:
         self,
         model: str,
         training_data: str,
-        strategy: Union[CustomizationStrategy, str] = CustomizationStrategy.SFT,
-        hyperparameters: Optional[Dict[str, Any]] = None,
-        output_model_name: Optional[str] = None,
+        strategy: CustomizationStrategy | str = CustomizationStrategy.SFT,
+        hyperparameters: dict[str, Any] | None = None,
+        output_model_name: str | None = None,
     ) -> CustomizationJob:
         """
         Create a new customization (fine-tuning) job.
@@ -227,22 +243,24 @@ class CustomizationClient:
         model: str,
         training_data: str,
         strategy: str,
-        hyperparameters: Dict[str, Any],
-        output_model_name: Optional[str],
+        hyperparameters: dict[str, Any],
+        output_model_name: str | None,
     ) -> CustomizationJob:
         """Create job using official SDK."""
         try:
             # Create customization config
             config = self._sdk_client.customization.configs.create(
                 max_seq_length=hyperparameters.get("max_seq_length", 4096),
-                training_options=[{
-                    "training_type": strategy,
-                    "epochs": hyperparameters.get("num_epochs", 3),
-                    "learning_rate": hyperparameters.get("learning_rate", 2e-5),
-                    "batch_size": hyperparameters.get("batch_size", 4),
-                    "lora_r": hyperparameters.get("lora_r", 16),
-                    "lora_alpha": hyperparameters.get("lora_alpha", 32),
-                }],
+                training_options=[
+                    {
+                        "training_type": strategy,
+                        "epochs": hyperparameters.get("num_epochs", 3),
+                        "learning_rate": hyperparameters.get("learning_rate", 2e-5),
+                        "batch_size": hyperparameters.get("batch_size", 4),
+                        "lora_r": hyperparameters.get("lora_r", 16),
+                        "lora_alpha": hyperparameters.get("lora_alpha", 32),
+                    }
+                ],
             )
 
             # Create the job
@@ -253,13 +271,15 @@ class CustomizationClient:
                 output_model=output_model_name,
             )
 
-            return CustomizationJob.from_api_response({
-                "job_id": job.id,
-                "status": job.status,
-                "model": model,
-                "strategy": strategy,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            })
+            return CustomizationJob.from_api_response(
+                {
+                    "job_id": job.id,
+                    "status": job.status,
+                    "model": model,
+                    "strategy": strategy,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
 
         except (BadRequestError, AuthenticationError, NotFoundError) as e:
             logger.error(f"SDK error creating customization job: {e}")
@@ -273,8 +293,8 @@ class CustomizationClient:
         model: str,
         training_data: str,
         strategy: str,
-        hyperparameters: Dict[str, Any],
-        output_model_name: Optional[str],
+        hyperparameters: dict[str, Any],
+        output_model_name: str | None,
     ) -> CustomizationJob:
         """Create job using HTTP fallback."""
         if not self._http_client:
@@ -301,16 +321,18 @@ class CustomizationClient:
         """Get the status of a customization job."""
         if self._sdk_client and NEMO_SDK_AVAILABLE:
             job = self._sdk_client.customization.jobs.retrieve(job_id)
-            return CustomizationJob.from_api_response({
-                "job_id": job.id,
-                "status": job.status,
-                "model": getattr(job, "model", ""),
-                "strategy": getattr(job, "strategy", ""),
-                "created_at": getattr(job, "created_at", ""),
-                "metrics": getattr(job, "metrics", {}),
-                "error": getattr(job, "error", None),
-                "output_model": getattr(job, "output_model", None),
-            })
+            return CustomizationJob.from_api_response(
+                {
+                    "job_id": job.id,
+                    "status": job.status,
+                    "model": getattr(job, "model", ""),
+                    "strategy": getattr(job, "strategy", ""),
+                    "created_at": getattr(job, "created_at", ""),
+                    "metrics": getattr(job, "metrics", {}),
+                    "error": getattr(job, "error", None),
+                    "output_model": getattr(job, "output_model", None),
+                }
+            )
         else:
             response = self._http_client.get(
                 f"{self._config.base_url}/v1/customization/jobs/{job_id}"
@@ -323,20 +345,22 @@ class CustomizationClient:
         if self._sdk_client and NEMO_SDK_AVAILABLE:
             # SDK handles pagination automatically
             for job in self._sdk_client.customization.jobs.list():
-                yield CustomizationJob.from_api_response({
-                    "job_id": job.id,
-                    "status": job.status,
-                    "model": getattr(job, "model", ""),
-                    "strategy": getattr(job, "strategy", ""),
-                    "created_at": getattr(job, "created_at", ""),
-                })
+                yield CustomizationJob.from_api_response(
+                    {
+                        "job_id": job.id,
+                        "status": job.status,
+                        "model": getattr(job, "model", ""),
+                        "strategy": getattr(job, "strategy", ""),
+                        "created_at": getattr(job, "created_at", ""),
+                    }
+                )
         else:
             # Manual pagination for HTTP fallback
             offset = 0
             while True:
                 response = self._http_client.get(
                     f"{self._config.base_url}/v1/customization/jobs",
-                    params={"limit": min(limit, 100), "offset": offset}
+                    params={"limit": min(limit, 100), "offset": offset},
                 )
                 self._check_http_response(response)
                 data = response.json()
@@ -372,6 +396,7 @@ class CustomizationClient:
     ) -> CustomizationJob:
         """Wait for a job to complete."""
         import time
+
         start_time = time.time()
 
         while True:
@@ -422,7 +447,7 @@ class EvaluationClient:
         self,
         model: str,
         benchmark: str,
-        config: Optional[Dict[str, Any]] = None,
+        config: dict[str, Any] | None = None,
     ) -> EvaluationJob:
         """
         Create an evaluation job.
@@ -444,12 +469,14 @@ class EvaluationClient:
                     benchmark=benchmark,
                     config=config,
                 )
-                return EvaluationJob.from_api_response({
-                    "job_id": job.id,
-                    "status": job.status,
-                    "benchmark": benchmark,
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                })
+                return EvaluationJob.from_api_response(
+                    {
+                        "job_id": job.id,
+                        "status": job.status,
+                        "benchmark": benchmark,
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
             except Exception as e:
                 logger.warning(f"SDK evaluation failed, falling back to HTTP: {e}")
 
@@ -461,7 +488,7 @@ class EvaluationClient:
                     "model": model,
                     "benchmark": benchmark,
                     "config": config,
-                }
+                },
             )
             if response.status_code == 200:
                 return EvaluationJob.from_api_response(response.json())
@@ -479,22 +506,22 @@ class EvaluationClient:
         if self._sdk_client and NEMO_SDK_AVAILABLE:
             try:
                 job = self._sdk_client.evaluation.jobs.retrieve(job_id)
-                return EvaluationJob.from_api_response({
-                    "job_id": job.id,
-                    "status": job.status,
-                    "benchmark": getattr(job, "benchmark", ""),
-                    "created_at": getattr(job, "created_at", ""),
-                    "metrics": getattr(job, "metrics", {}),
-                    "samples_evaluated": getattr(job, "samples_evaluated", 0),
-                    "samples_passed": getattr(job, "samples_passed", 0),
-                })
+                return EvaluationJob.from_api_response(
+                    {
+                        "job_id": job.id,
+                        "status": job.status,
+                        "benchmark": getattr(job, "benchmark", ""),
+                        "created_at": getattr(job, "created_at", ""),
+                        "metrics": getattr(job, "metrics", {}),
+                        "samples_evaluated": getattr(job, "samples_evaluated", 0),
+                        "samples_passed": getattr(job, "samples_passed", 0),
+                    }
+                )
             except Exception:
                 pass
 
         if self._http_client:
-            response = self._http_client.get(
-                f"{self._config.base_url}/v1/evaluation/jobs/{job_id}"
-            )
+            response = self._http_client.get(f"{self._config.base_url}/v1/evaluation/jobs/{job_id}")
             if response.status_code == 200:
                 return EvaluationJob.from_api_response(response.json())
 
@@ -516,11 +543,11 @@ class InferenceClient:
     def chat_completion(
         self,
         model: str,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         temperature: float = 0.7,
         max_tokens: int = 1024,
         **kwargs,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Create a chat completion using NIM.
 
@@ -561,7 +588,7 @@ class InferenceClient:
         temperature: float = 0.7,
         max_tokens: int = 1024,
         **kwargs,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Create a text completion using NIM."""
         if not self._http_client:
             raise RuntimeError("HTTP client required for inference. Install httpx.")
@@ -623,7 +650,7 @@ class NeMoClient:
         )
     """
 
-    def __init__(self, config: Optional[NeMoClientConfig] = None):
+    def __init__(self, config: NeMoClientConfig | None = None):
         """
         Initialize the NeMo client.
 
@@ -714,7 +741,7 @@ class AsyncNeMoClient:
             job = await client.customization.create_job(...)
     """
 
-    def __init__(self, config: Optional[NeMoClientConfig] = None):
+    def __init__(self, config: NeMoClientConfig | None = None):
         self._config = config or NeMoClientConfig()
         self._sdk_client = None
         self._http_client = None
@@ -762,11 +789,11 @@ class AsyncNeMoClient:
     async def chat_completion(
         self,
         model: str,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         temperature: float = 0.7,
         max_tokens: int = 1024,
         **kwargs,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Async chat completion."""
         if not self._http_client:
             raise RuntimeError("Async HTTP client required")
@@ -779,7 +806,7 @@ class AsyncNeMoClient:
                 "temperature": temperature,
                 "max_tokens": max_tokens,
                 **kwargs,
-            }
+            },
         )
 
         if response.status_code != 200:
@@ -790,9 +817,9 @@ class AsyncNeMoClient:
 
 # Convenience function for quick setup
 def create_client(
-    base_url: Optional[str] = None,
-    inference_url: Optional[str] = None,
-    api_key: Optional[str] = None,
+    base_url: str | None = None,
+    inference_url: str | None = None,
+    api_key: str | None = None,
 ) -> NeMoClient:
     """
     Create a NeMo client with common defaults.
@@ -807,7 +834,8 @@ def create_client(
     """
     config = NeMoClientConfig(
         base_url=base_url or os.environ.get("NEMO_ENDPOINT", "http://localhost:8000"),
-        inference_url=inference_url or os.environ.get("NIM_ENDPOINT", "https://integrate.api.nvidia.com/v1"),
+        inference_url=inference_url
+        or os.environ.get("NIM_ENDPOINT", "https://integrate.api.nvidia.com/v1"),
         api_key=api_key,
     )
     return NeMoClient(config)

@@ -14,7 +14,6 @@ The collector deduplicates by plan_name (the file stem).
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
 
 from .base import (
     BaseCollector,
@@ -45,8 +44,8 @@ class PlanCollector(BaseCollector):
 
     def _find_plan_files(
         self,
-        since: Optional[str] = None,
-    ) -> List[Path]:
+        since: str | None = None,
+    ) -> list[Path]:
         """Find all plan markdown files in the plans directory.
 
         Parameters
@@ -64,14 +63,14 @@ class PlanCollector(BaseCollector):
             return []
 
         # Parse the optional since timestamp
-        since_dt: Optional[datetime] = None
+        since_dt: datetime | None = None
         if since:
             try:
                 since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
             except ValueError:
                 since_dt = None
 
-        results: List[Path] = []
+        results: list[Path] = []
 
         for plan_file in plans_dir.glob("*.md"):
             if not plan_file.is_file():
@@ -90,7 +89,7 @@ class PlanCollector(BaseCollector):
 
         return results
 
-    def _parse_plan(self, filepath: Path) -> Optional[PlanRecord]:
+    def _parse_plan(self, filepath: Path) -> PlanRecord | None:
         """Parse a single plan markdown file into a PlanRecord.
 
         Parameters
@@ -104,7 +103,7 @@ class PlanCollector(BaseCollector):
         """
         try:
             content = filepath.read_text(encoding="utf-8")
-        except (IOError, OSError, UnicodeDecodeError):
+        except (OSError, UnicodeDecodeError):
             return None
 
         plan_name = filepath.stem
@@ -132,8 +131,8 @@ class PlanCollector(BaseCollector):
 
     def scan(
         self,
-        since: Optional[str] = None,
-        project_filter: Optional[str] = None,
+        since: str | None = None,
+        project_filter: str | None = None,
     ) -> CollectorScanResult:
         """Scan for plan files without collecting anything."""
         files = self._find_plan_files(since=since)
@@ -160,7 +159,7 @@ class PlanCollector(BaseCollector):
             estimated_size_bytes=estimated_bytes,
         )
 
-    def collect(self, session_id: str) -> List[PlanRecord]:
+    def collect(self, session_id: str) -> list[PlanRecord]:
         """Collect plan records for a specific session.
 
         Plans are not session-scoped, so this always returns an empty list.
@@ -178,8 +177,8 @@ class PlanCollector(BaseCollector):
 
     def collect_all(
         self,
-        since: Optional[str] = None,
-        project_filter: Optional[str] = None,
+        since: str | None = None,
+        project_filter: str | None = None,
     ) -> CollectorBatchResult:
         """Collect all uncollected plan records.
 
@@ -190,8 +189,8 @@ class PlanCollector(BaseCollector):
 
         collected = 0
         skipped = 0
-        errors: List[str] = []
-        records: List[PlanRecord] = []
+        errors: list[str] = []
+        records: list[PlanRecord] = []
 
         for filepath in files:
             plan_name = filepath.stem

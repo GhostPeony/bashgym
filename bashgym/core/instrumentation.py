@@ -26,20 +26,19 @@ Usage:
 
 import asyncio
 import inspect
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List, Callable
-from pathlib import Path
-import json
+from typing import Any, Optional
 
-from ..config import get_settings, GuardrailsSettings, ObservabilitySettings
+from ..config import GuardrailsSettings, ObservabilitySettings, get_settings
 from ..judge.guardrails import (
-    NemoGuard,
-    GuardrailsConfig,
-    GuardrailAction,
-    GuardrailType,
     CheckResult,
+    GuardrailAction,
+    GuardrailsConfig,
+    GuardrailType,
+    NemoGuard,
 )
 from ..observability.profiler import (
     AgentProfiler,
@@ -58,13 +57,13 @@ class GuardrailEvent:
     location: str  # e.g., "gym.execute_bash", "import.user_prompt"
     action_taken: GuardrailAction
     original_content: str  # Truncated for storage
-    modified_content: Optional[str] = None  # If PII was redacted
+    modified_content: str | None = None  # If PII was redacted
     confidence: float = 1.0
-    model_source: Optional[str] = None  # "teacher" or "student"
-    trace_id: Optional[str] = None
-    details: Dict[str, Any] = field(default_factory=dict)
+    model_source: str | None = None  # "teacher" or "student"
+    trace_id: str | None = None
+    details: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "timestamp": self.timestamp.isoformat(),
             "check_type": self.check_type.value,
@@ -86,18 +85,12 @@ class InstrumentationContext:
     allowed: bool
     content: str  # Original or modified content
     action: GuardrailAction
-    span: Optional[TraceSpan] = None
-    check_result: Optional[CheckResult] = None
+    span: TraceSpan | None = None
+    check_result: CheckResult | None = None
     _instrumentation: Optional["Instrumentation"] = None
     _location: str = ""
 
-    def set_result(
-        self,
-        success: bool,
-        output: str = "",
-        tokens: int = 0,
-        **attributes
-    ):
+    def set_result(self, success: bool, output: str = "", tokens: int = 0, **attributes):
         """Set the result of the operation for profiling."""
         if self.span:
             self.span.set_attribute("success", success)
@@ -121,8 +114,8 @@ class Instrumentation:
 
     def __init__(
         self,
-        guardrails_settings: Optional[GuardrailsSettings] = None,
-        profiler_settings: Optional[ObservabilitySettings] = None,
+        guardrails_settings: GuardrailsSettings | None = None,
+        profiler_settings: ObservabilitySettings | None = None,
     ):
         settings = get_settings()
         self._guardrails_settings = guardrails_settings or settings.guardrails
@@ -158,12 +151,12 @@ class Instrumentation:
             self._profiler = None
 
         # Event storage
-        self._events: List[GuardrailEvent] = []
+        self._events: list[GuardrailEvent] = []
         self._max_events = 10000
 
         # Callbacks for real-time notifications (supports both sync and async)
-        self._event_callbacks: List[Callable[[GuardrailEvent], None]] = []
-        self._async_event_callbacks: List[Callable] = []
+        self._event_callbacks: list[Callable[[GuardrailEvent], None]] = []
+        self._async_event_callbacks: list[Callable] = []
 
     @property
     def guardrails_enabled(self) -> bool:
@@ -190,10 +183,10 @@ class Instrumentation:
         location: str,
         action: GuardrailAction,
         original_content: str,
-        modified_content: Optional[str] = None,
+        modified_content: str | None = None,
         confidence: float = 1.0,
-        model_source: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
+        model_source: str | None = None,
+        details: dict[str, Any] | None = None,
     ) -> GuardrailEvent:
         """Record a guardrail event."""
         event = GuardrailEvent(
@@ -212,7 +205,7 @@ class Instrumentation:
         # Store event
         self._events.append(event)
         if len(self._events) > self._max_events:
-            self._events = self._events[-self._max_events:]
+            self._events = self._events[-self._max_events :]
 
         # Notify sync callbacks
         for callback in self._event_callbacks:
@@ -239,19 +232,19 @@ class Instrumentation:
     # Trace Management
     # =========================================================================
 
-    def start_trace(self, name: str, metadata: Optional[Dict[str, Any]] = None) -> str:
+    def start_trace(self, name: str, metadata: dict[str, Any] | None = None) -> str:
         """Start a new trace (e.g., for an episode or task)."""
         if self._profiler:
             return self._profiler.start_trace(name, metadata)
         return ""
 
-    def end_trace(self, trace_id: Optional[str] = None):
+    def end_trace(self, trace_id: str | None = None):
         """End a trace."""
         if self._profiler:
             return self._profiler.end_trace(trace_id)
         return None
 
-    def get_trace_summary(self, trace_id: Optional[str] = None) -> Dict[str, Any]:
+    def get_trace_summary(self, trace_id: str | None = None) -> dict[str, Any]:
         """Get summary of a trace."""
         if self._profiler:
             return self._profiler.get_trace_summary(trace_id)
@@ -266,7 +259,7 @@ class Instrumentation:
         self,
         command: str,
         location: str = "unknown",
-        model_source: Optional[str] = None,
+        model_source: str | None = None,
     ):
         """
         Instrument a command execution with guardrails + profiling.
@@ -288,7 +281,7 @@ class Instrumentation:
             span = self._profiler.start_span(
                 name=f"command:{location}",
                 kind=SpanKind.TOOL_CALL,
-                attributes={"command_preview": command[:100], "location": location}
+                attributes={"command_preview": command[:100], "location": location},
             )
 
         # Run guardrails check
@@ -305,7 +298,7 @@ class Instrumentation:
                     attributes={
                         "action": action.value,
                         "passed": allowed,
-                    }
+                    },
                 )
                 self._profiler.end_span(gr_span, status="success")
 
@@ -368,7 +361,7 @@ class Instrumentation:
             span = self._profiler.start_span(
                 name=f"input:{location}",
                 kind=SpanKind.CUSTOM,
-                attributes={"content_preview": content[:100], "location": location}
+                attributes={"content_preview": content[:100], "location": location},
             )
 
         # Run guardrails check
@@ -411,7 +404,7 @@ class Instrumentation:
         self,
         content: str,
         location: str = "unknown",
-        model_source: Optional[str] = None,
+        model_source: str | None = None,
         filter_pii: bool = True,
     ):
         """
@@ -434,7 +427,7 @@ class Instrumentation:
             span = self._profiler.start_span(
                 name=f"output:{location}",
                 kind=SpanKind.CUSTOM,
-                attributes={"content_preview": content[:100], "location": location}
+                attributes={"content_preview": content[:100], "location": location},
             )
 
         # Run guardrails check
@@ -549,8 +542,8 @@ class Instrumentation:
         input_tokens: int,
         output_tokens: int,
         latency_ms: float,
-        model_source: Optional[str] = None,
-        **kwargs
+        model_source: str | None = None,
+        **kwargs,
     ):
         """Record an LLM API call for profiling."""
         if self._profiler:
@@ -562,7 +555,7 @@ class Instrumentation:
                 output_tokens=output_tokens,
                 latency_ms=latency_ms,
                 model_source=model_source or "unknown",
-                **kwargs
+                **kwargs,
             )
             return span
         return None
@@ -573,11 +566,11 @@ class Instrumentation:
 
     def get_guardrail_events(
         self,
-        action: Optional[str] = None,
-        check_type: Optional[str] = None,
-        model_source: Optional[str] = None,
+        action: str | None = None,
+        check_type: str | None = None,
+        model_source: str | None = None,
         limit: int = 100,
-    ) -> List[GuardrailEvent]:
+    ) -> list[GuardrailEvent]:
         """
         Get recent guardrail events, optionally filtered.
 
@@ -605,7 +598,7 @@ class Instrumentation:
 
         return events[-limit:]
 
-    def get_blocked_events_for_dpo(self, limit: int = 100) -> List[Dict[str, Any]]:
+    def get_blocked_events_for_dpo(self, limit: int = 100) -> list[dict[str, Any]]:
         """
         Get blocked events formatted for DPO negative examples.
 
@@ -613,7 +606,8 @@ class Instrumentation:
         creating DPO training pairs (blocked response = rejected).
         """
         events = [
-            e for e in self._events
+            e
+            for e in self._events
             if e.action_taken == GuardrailAction.BLOCK and e.model_source == "student"
         ]
 
@@ -627,7 +621,7 @@ class Instrumentation:
             for e in events[-limit:]
         ]
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get aggregated guardrail statistics."""
         if not self._events:
             return {"total_events": 0}
@@ -651,7 +645,9 @@ class Instrumentation:
 
             # By source
             if event.model_source:
-                stats["by_source"][event.model_source] = stats["by_source"].get(event.model_source, 0) + 1
+                stats["by_source"][event.model_source] = (
+                    stats["by_source"].get(event.model_source, 0) + 1
+                )
 
         # Calculate block rate
         blocks = stats["by_action"].get("block", 0)
@@ -665,8 +661,8 @@ class Instrumentation:
 
     def update_settings(
         self,
-        guardrails: Optional[Dict[str, Any]] = None,
-        profiler: Optional[Dict[str, Any]] = None,
+        guardrails: dict[str, Any] | None = None,
+        profiler: dict[str, Any] | None = None,
     ):
         """Update settings at runtime."""
         if guardrails:
@@ -700,7 +696,7 @@ class Instrumentation:
 
 
 # Global instance
-_instrumentation: Optional[Instrumentation] = None
+_instrumentation: Instrumentation | None = None
 
 
 def get_instrumentation() -> Instrumentation:

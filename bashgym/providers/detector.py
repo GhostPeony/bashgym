@@ -4,15 +4,16 @@ Model Provider Detector
 Auto-detects available model providers (local and cloud) and aggregates models.
 """
 
-import os
 import asyncio
+import os
 from dataclasses import dataclass
-from typing import List, Dict, Any, Optional
 from enum import Enum
+from typing import Any
 
 
 class ProviderType(str, Enum):
     """Types of model providers."""
+
     OLLAMA = "ollama"
     LM_STUDIO = "lm_studio"
     HUGGINGFACE = "huggingface"
@@ -24,40 +25,42 @@ class ProviderType(str, Enum):
 @dataclass
 class ProviderStatus:
     """Status of a model provider."""
+
     type: ProviderType
     name: str
     available: bool
-    endpoint: Optional[str] = None
+    endpoint: str | None = None
     model_count: int = 0
-    error: Optional[str] = None
+    error: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "type": self.type.value,
             "name": self.name,
             "available": self.available,
             "endpoint": self.endpoint,
             "model_count": self.model_count,
-            "error": self.error
+            "error": self.error,
         }
 
 
 @dataclass
 class UnifiedModel:
     """Unified model representation across providers."""
+
     id: str
     name: str
     provider: ProviderType
-    size_gb: Optional[float] = None
-    parameter_size: Optional[str] = None
+    size_gb: float | None = None
+    parameter_size: str | None = None
     is_code_model: bool = False
     is_local: bool = False
     supports_training: bool = False
     supports_inference: bool = True
-    context_length: Optional[int] = None
-    description: Optional[str] = None
+    context_length: int | None = None
+    description: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "name": self.name,
@@ -69,7 +72,7 @@ class UnifiedModel:
             "supports_training": self.supports_training,
             "supports_inference": self.supports_inference,
             "context_length": self.context_length,
-            "description": self.description
+            "description": self.description,
         }
 
 
@@ -88,21 +91,18 @@ async def detect_ollama() -> ProviderStatus:
                 name="Ollama",
                 available=True,
                 endpoint=provider.base_url,
-                model_count=len(models)
+                model_count=len(models),
             )
         else:
             return ProviderStatus(
                 type=ProviderType.OLLAMA,
                 name="Ollama",
                 available=False,
-                error="Ollama server not running. Start with: ollama serve"
+                error="Ollama server not running. Start with: ollama serve",
             )
     except Exception as e:
         return ProviderStatus(
-            type=ProviderType.OLLAMA,
-            name="Ollama",
-            available=False,
-            error=str(e)
+            type=ProviderType.OLLAMA, name="Ollama", available=False, error=str(e)
         )
 
 
@@ -124,16 +124,16 @@ async def detect_lm_studio() -> ProviderStatus:
                     name="LM Studio",
                     available=True,
                     endpoint=endpoint,
-                    model_count=model_count
+                    model_count=model_count,
                 )
-    except:
+    except Exception:
         pass
 
     return ProviderStatus(
         type=ProviderType.LM_STUDIO,
         name="LM Studio",
         available=False,
-        error="LM Studio not running"
+        error="LM Studio not running",
     )
 
 
@@ -146,14 +146,14 @@ async def detect_nvidia_nim() -> ProviderStatus:
             type=ProviderType.NVIDIA_NIM,
             name="NVIDIA NIM",
             available=True,
-            endpoint="https://integrate.api.nvidia.com/v1"
+            endpoint="https://integrate.api.nvidia.com/v1",
         )
 
     return ProviderStatus(
         type=ProviderType.NVIDIA_NIM,
         name="NVIDIA NIM",
         available=False,
-        error="NVIDIA_API_KEY not set"
+        error="NVIDIA_API_KEY not set",
     )
 
 
@@ -167,7 +167,7 @@ async def detect_huggingface() -> ProviderStatus:
         name="HuggingFace",
         available=True,
         endpoint="https://huggingface.co",
-        error=None if hf_token else "HF_TOKEN not set (some models may be inaccessible)"
+        error=None if hf_token else "HF_TOKEN not set (some models may be inaccessible)",
     )
 
 
@@ -180,14 +180,14 @@ async def detect_anthropic() -> ProviderStatus:
             type=ProviderType.ANTHROPIC,
             name="Anthropic",
             available=True,
-            endpoint="https://api.anthropic.com"
+            endpoint="https://api.anthropic.com",
         )
 
     return ProviderStatus(
         type=ProviderType.ANTHROPIC,
         name="Anthropic",
         available=False,
-        error="ANTHROPIC_API_KEY not set"
+        error="ANTHROPIC_API_KEY not set",
     )
 
 
@@ -200,18 +200,15 @@ async def detect_openai() -> ProviderStatus:
             type=ProviderType.OPENAI,
             name="OpenAI",
             available=True,
-            endpoint="https://api.openai.com/v1"
+            endpoint="https://api.openai.com/v1",
         )
 
     return ProviderStatus(
-        type=ProviderType.OPENAI,
-        name="OpenAI",
-        available=False,
-        error="OPENAI_API_KEY not set"
+        type=ProviderType.OPENAI, name="OpenAI", available=False, error="OPENAI_API_KEY not set"
     )
 
 
-async def detect_providers() -> List[ProviderStatus]:
+async def detect_providers() -> list[ProviderStatus]:
     """Detect all available model providers."""
     detectors = [
         detect_ollama(),
@@ -234,7 +231,7 @@ async def detect_providers() -> List[ProviderStatus]:
     return providers
 
 
-async def get_ollama_models() -> List[UnifiedModel]:
+async def get_ollama_models() -> list[UnifiedModel]:
     """Get models from Ollama."""
     from .ollama import get_ollama_provider
 
@@ -244,24 +241,26 @@ async def get_ollama_models() -> List[UnifiedModel]:
     try:
         ollama_models = await provider.list_ollama_models()
         for m in ollama_models:
-            models.append(UnifiedModel(
-                id=f"ollama/{m.name}",
-                name=m.name,
-                provider=ProviderType.OLLAMA,
-                size_gb=round(m.size_gb, 2),
-                parameter_size=m.parameter_size,
-                is_code_model=m.is_code_model,
-                is_local=True,
-                supports_training=True,  # Can export GGUF for training
-                supports_inference=True
-            ))
-    except:
+            models.append(
+                UnifiedModel(
+                    id=f"ollama/{m.name}",
+                    name=m.name,
+                    provider=ProviderType.OLLAMA,
+                    size_gb=round(m.size_gb, 2),
+                    parameter_size=m.parameter_size,
+                    is_code_model=m.is_code_model,
+                    is_local=True,
+                    supports_training=True,  # Can export GGUF for training
+                    supports_inference=True,
+                )
+            )
+    except Exception:
         pass
 
     return models
 
 
-async def get_lm_studio_models() -> List[UnifiedModel]:
+async def get_lm_studio_models() -> list[UnifiedModel]:
     """Get models from LM Studio."""
     import httpx
 
@@ -273,14 +272,16 @@ async def get_lm_studio_models() -> List[UnifiedModel]:
                 data = response.json()
                 for m in data.get("data", []):
                     model_id = m.get("id", "")
-                    models.append(UnifiedModel(
-                        id=f"lm_studio/{model_id}",
-                        name=model_id,
-                        provider=ProviderType.LM_STUDIO,
-                        is_local=True,
-                        supports_inference=True
-                    ))
-    except:
+                    models.append(
+                        UnifiedModel(
+                            id=f"lm_studio/{model_id}",
+                            name=model_id,
+                            provider=ProviderType.LM_STUDIO,
+                            is_local=True,
+                            supports_inference=True,
+                        )
+                    )
+    except Exception:
         pass
 
     return models
@@ -296,7 +297,7 @@ RECOMMENDED_TRAINING_MODELS = [
         is_code_model=True,
         supports_training=True,
         context_length=32768,
-        description="Fast, efficient coder. Great for fine-tuning on consumer GPUs."
+        description="Fast, efficient coder. Great for fine-tuning on consumer GPUs.",
     ),
     UnifiedModel(
         id="hf/Qwen/Qwen2.5-Coder-7B-Instruct",
@@ -306,7 +307,7 @@ RECOMMENDED_TRAINING_MODELS = [
         is_code_model=True,
         supports_training=True,
         context_length=32768,
-        description="Excellent balance of quality and efficiency."
+        description="Excellent balance of quality and efficiency.",
     ),
     UnifiedModel(
         id="hf/deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct",
@@ -316,7 +317,7 @@ RECOMMENDED_TRAINING_MODELS = [
         is_code_model=True,
         supports_training=True,
         context_length=128000,
-        description="State-of-the-art code model with huge context."
+        description="State-of-the-art code model with huge context.",
     ),
     UnifiedModel(
         id="hf/codellama/CodeLlama-7b-Instruct-hf",
@@ -326,7 +327,7 @@ RECOMMENDED_TRAINING_MODELS = [
         is_code_model=True,
         supports_training=True,
         context_length=16384,
-        description="Meta's code-specialized Llama model."
+        description="Meta's code-specialized Llama model.",
     ),
     UnifiedModel(
         id="hf/microsoft/phi-4",
@@ -336,7 +337,7 @@ RECOMMENDED_TRAINING_MODELS = [
         is_code_model=True,
         supports_training=True,
         context_length=16384,
-        description="Microsoft's efficient reasoning model."
+        description="Microsoft's efficient reasoning model.",
     ),
 ]
 
@@ -348,7 +349,7 @@ TEACHER_MODELS = [
         provider=ProviderType.ANTHROPIC,
         is_code_model=True,
         supports_inference=True,
-        description="Excellent for code generation and reasoning."
+        description="Excellent for code generation and reasoning.",
     ),
     UnifiedModel(
         id="openai/gpt-4-turbo",
@@ -356,7 +357,7 @@ TEACHER_MODELS = [
         provider=ProviderType.OPENAI,
         is_code_model=True,
         supports_inference=True,
-        description="Strong general-purpose model."
+        description="Strong general-purpose model.",
     ),
     UnifiedModel(
         id="hf/Qwen/Qwen2.5-Coder-32B-Instruct",
@@ -365,16 +366,14 @@ TEACHER_MODELS = [
         parameter_size="32B",
         is_code_model=True,
         supports_inference=True,
-        description="Top-tier open-source code model."
+        description="Top-tier open-source code model.",
     ),
 ]
 
 
 async def get_available_models(
-    include_local: bool = True,
-    include_cloud: bool = True,
-    code_only: bool = False
-) -> Dict[str, List[UnifiedModel]]:
+    include_local: bool = True, include_cloud: bool = True, code_only: bool = False
+) -> dict[str, list[UnifiedModel]]:
     """
     Get all available models organized by category.
 
@@ -385,7 +384,7 @@ async def get_available_models(
         "local": [],
         "training": RECOMMENDED_TRAINING_MODELS.copy(),
         "teacher": TEACHER_MODELS.copy(),
-        "inference": []
+        "inference": [],
     }
 
     if include_local:
@@ -409,11 +408,11 @@ async def get_available_models(
 
 
 # Sync wrapper
-def detect_providers_sync() -> List[ProviderStatus]:
+def detect_providers_sync() -> list[ProviderStatus]:
     """Synchronous wrapper for detect_providers."""
     return asyncio.run(detect_providers())
 
 
-def get_available_models_sync(**kwargs) -> Dict[str, List[UnifiedModel]]:
+def get_available_models_sync(**kwargs) -> dict[str, list[UnifiedModel]]:
     """Synchronous wrapper for get_available_models."""
     return asyncio.run(get_available_models(**kwargs))

@@ -17,7 +17,7 @@ import platform
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from .base import (
     BaseCollector,
@@ -59,8 +59,8 @@ class EnvironmentCollector(BaseCollector):
 
     def _find_session_env_dirs(
         self,
-        since: Optional[str] = None,
-    ) -> List[Tuple[Path, str]]:
+        since: str | None = None,
+    ) -> list[tuple[Path, str]]:
         """Find session directories under session-env/.
 
         Parameters
@@ -77,14 +77,14 @@ class EnvironmentCollector(BaseCollector):
         if not session_env_dir.exists():
             return []
 
-        since_dt: Optional[datetime] = None
+        since_dt: datetime | None = None
         if since:
             try:
                 since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
             except ValueError:
                 since_dt = None
 
-        results: List[Tuple[Path, str]] = []
+        results: list[tuple[Path, str]] = []
 
         for entry in session_env_dir.iterdir():
             if not entry.is_dir():
@@ -104,8 +104,8 @@ class EnvironmentCollector(BaseCollector):
 
     def _find_shell_snapshots(
         self,
-        since: Optional[str] = None,
-    ) -> List[Tuple[Path, str]]:
+        since: str | None = None,
+    ) -> list[tuple[Path, str]]:
         """Find snapshot-bash-*.sh files under shell-snapshots/.
 
         Parameters
@@ -122,14 +122,14 @@ class EnvironmentCollector(BaseCollector):
         if not snapshots_dir.exists():
             return []
 
-        since_dt: Optional[datetime] = None
+        since_dt: datetime | None = None
         if since:
             try:
                 since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
             except ValueError:
                 since_dt = None
 
-        results: List[Tuple[Path, str]] = []
+        results: list[tuple[Path, str]] = []
 
         for entry in snapshots_dir.glob("snapshot-bash-*.sh"):
             if not entry.is_file():
@@ -169,7 +169,7 @@ class EnvironmentCollector(BaseCollector):
         EnvironmentRecord
         """
         # List contents of the session env directory
-        contents: List[str] = []
+        contents: list[str] = []
         try:
             for entry in session_dir.iterdir():
                 contents.append(entry.name)
@@ -209,13 +209,13 @@ class EnvironmentCollector(BaseCollector):
         -------
         EnvironmentRecord
         """
-        exports: Dict[str, str] = {}
-        aliases: Dict[str, str] = {}
+        exports: dict[str, str] = {}
+        aliases: dict[str, str] = {}
         raw_content = ""
 
         try:
             raw_content = filepath.read_text(encoding="utf-8")
-        except (IOError, OSError, UnicodeDecodeError):
+        except (OSError, UnicodeDecodeError):
             pass
 
         for line in raw_content.splitlines():
@@ -248,7 +248,7 @@ class EnvironmentCollector(BaseCollector):
         except OSError:
             timestamp = datetime.now(timezone.utc).isoformat()
 
-        shell_snapshot: Dict[str, Any] = {}
+        shell_snapshot: dict[str, Any] = {}
         if exports:
             shell_snapshot["exports"] = exports
         if aliases:
@@ -269,8 +269,8 @@ class EnvironmentCollector(BaseCollector):
 
     def scan(
         self,
-        since: Optional[str] = None,
-        project_filter: Optional[str] = None,
+        since: str | None = None,
+        project_filter: str | None = None,
     ) -> CollectorScanResult:
         """Scan for session-env dirs and shell snapshots without collecting."""
         env_dirs = self._find_session_env_dirs(since=since)
@@ -287,7 +287,9 @@ class EnvironmentCollector(BaseCollector):
 
         for filepath, filename in snapshots:
             snapshot_match = SNAPSHOT_PATTERN.match(filename)
-            snap_id = f"snapshot/{snapshot_match.group(2)}" if snapshot_match else f"snapshot/{filename}"
+            snap_id = (
+                f"snapshot/{snapshot_match.group(2)}" if snapshot_match else f"snapshot/{filename}"
+            )
             if snap_id in collected_ids:
                 already_collected += 1
             try:
@@ -303,7 +305,7 @@ class EnvironmentCollector(BaseCollector):
             estimated_size_bytes=estimated_bytes,
         )
 
-    def collect(self, session_id: str) -> List[EnvironmentRecord]:
+    def collect(self, session_id: str) -> list[EnvironmentRecord]:
         """Collect environment data for a specific session.
 
         Parameters
@@ -324,8 +326,8 @@ class EnvironmentCollector(BaseCollector):
 
     def collect_all(
         self,
-        since: Optional[str] = None,
-        project_filter: Optional[str] = None,
+        since: str | None = None,
+        project_filter: str | None = None,
     ) -> CollectorBatchResult:
         """Collect all uncollected environment records.
 
@@ -337,8 +339,8 @@ class EnvironmentCollector(BaseCollector):
 
         collected = 0
         skipped = 0
-        errors: List[str] = []
-        records: List[EnvironmentRecord] = []
+        errors: list[str] = []
+        records: list[EnvironmentRecord] = []
 
         # Process session-env directories
         for session_dir, session_id in env_dirs:
@@ -357,7 +359,9 @@ class EnvironmentCollector(BaseCollector):
         # Process shell snapshots
         for filepath, filename in snapshots:
             snapshot_match = SNAPSHOT_PATTERN.match(filename)
-            snap_id = f"snapshot/{snapshot_match.group(2)}" if snapshot_match else f"snapshot/{filename}"
+            snap_id = (
+                f"snapshot/{snapshot_match.group(2)}" if snapshot_match else f"snapshot/{filename}"
+            )
 
             if snap_id in collected_ids:
                 skipped += 1

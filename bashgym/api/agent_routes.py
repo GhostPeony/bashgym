@@ -7,9 +7,8 @@ import os
 import re
 import secrets
 import subprocess
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -34,7 +33,7 @@ _memory = PeonyMemory()
 # Input validation helpers
 # ---------------------------------------------------------------------------
 
-_SAFE_ID = re.compile(r'^[a-zA-Z0-9_-]{1,64}$')
+_SAFE_ID = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 
 
 def _validate_session_id(session_id: str) -> str:
@@ -42,16 +41,20 @@ def _validate_session_id(session_id: str) -> str:
         raise HTTPException(status_code=400, detail="Invalid session ID")
     return session_id
 
+
 # ---------------------------------------------------------------------------
 # In-memory pending actions (shell confirmation gate)
 # ---------------------------------------------------------------------------
 
-PENDING_ACTIONS: dict[str, dict] = {}  # token → {cmd, reason, messages, tool_use_id, expires_at, tools}
+PENDING_ACTIONS: dict[str, dict] = (
+    {}
+)  # token → {cmd, reason, messages, tool_use_id, expires_at, tools}
 
 
 # ---------------------------------------------------------------------------
 # Chat models
 # ---------------------------------------------------------------------------
+
 
 class ChatMessage(BaseModel):
     role: str  # "user" | "assistant" | "system"
@@ -60,7 +63,7 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
-    history: Optional[List[ChatMessage]] = None
+    history: list[ChatMessage] | None = None
 
 
 class PendingAction(BaseModel):
@@ -72,19 +75,20 @@ class PendingAction(BaseModel):
 
 class ChatResponse(BaseModel):
     response: str
-    context_used: List[str] = []
-    pending_action: Optional[PendingAction] = None
+    context_used: list[str] = []
+    pending_action: PendingAction | None = None
 
 
 class ConfirmActionRequest(BaseModel):
     token: str
     approved: bool
-    session_id: Optional[str] = None
+    session_id: str | None = None
 
 
 # ---------------------------------------------------------------------------
 # Session models
 # ---------------------------------------------------------------------------
+
 
 class SessionMeta(BaseModel):
     session_id: str
@@ -112,8 +116,10 @@ class SaveSessionRequest(BaseModel):
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _get_peony_logs_dir() -> Path:
     from bashgym.config import get_bashgym_dir
+
     d = get_bashgym_dir() / "peony_logs"
     d.mkdir(parents=True, exist_ok=True)
     return d
@@ -142,19 +148,37 @@ def _write_sessions_index(index: list[dict]) -> None:
 # System context gathering
 # ---------------------------------------------------------------------------
 
+
 async def _gather_system_context() -> str:
     """Gather current system state to give Peony full awareness."""
     sections = []
 
     # 1. System stats (traces, models, training)
     try:
-        from bashgym.config import get_settings, get_bashgym_dir
+        from bashgym.config import get_bashgym_dir, get_settings
+
         settings = get_settings()
         data_dir = Path(settings.data.data_dir)
-        gold = len(list((data_dir / "gold_traces").glob("*.json"))) if (data_dir / "gold_traces").exists() else 0
-        silver = len(list((data_dir / "silver_traces").glob("*.json"))) if (data_dir / "silver_traces").exists() else 0
-        bronze = len(list((data_dir / "bronze_traces").glob("*.json"))) if (data_dir / "bronze_traces").exists() else 0
-        failed = len(list((data_dir / "failed_traces").glob("*.json"))) if (data_dir / "failed_traces").exists() else 0
+        gold = (
+            len(list((data_dir / "gold_traces").glob("*.json")))
+            if (data_dir / "gold_traces").exists()
+            else 0
+        )
+        silver = (
+            len(list((data_dir / "silver_traces").glob("*.json")))
+            if (data_dir / "silver_traces").exists()
+            else 0
+        )
+        bronze = (
+            len(list((data_dir / "bronze_traces").glob("*.json")))
+            if (data_dir / "bronze_traces").exists()
+            else 0
+        )
+        failed = (
+            len(list((data_dir / "failed_traces").glob("*.json")))
+            if (data_dir / "failed_traces").exists()
+            else 0
+        )
         models = len(list((data_dir / "models").iterdir())) if (data_dir / "models").exists() else 0
         pending = 0
         for trace_dir in [get_bashgym_dir() / "traces", data_dir / "traces"]:
@@ -178,6 +202,7 @@ async def _gather_system_context() -> str:
     # 2. GPU / hardware info
     try:
         from bashgym.api.system_info import get_system_info_service
+
         sysinfo = get_system_info_service().get_system_info()
         gpu_lines = []
         for gpu in sysinfo.gpus:
@@ -190,7 +215,7 @@ async def _gather_system_context() -> str:
             f"- Platform: {sysinfo.platform_name} ({sysinfo.arch})\n"
             f"- RAM: {sysinfo.available_ram:.1f}/{sysinfo.total_ram:.1f} GB available\n"
             f"- CUDA: {'Yes (' + sysinfo.cuda_version + ')' if sysinfo.cuda_available else 'No'}\n"
-            f"- GPUs:\n" + ('\n'.join(gpu_lines) if gpu_lines else '  - None detected')
+            f"- GPUs:\n" + ("\n".join(gpu_lines) if gpu_lines else "  - None detected")
         )
     except Exception as e:
         logger.debug(f"Could not gather hardware info: {e}")
@@ -198,6 +223,7 @@ async def _gather_system_context() -> str:
     # 3. Trace repos
     try:
         from bashgym.trace_capture.importers.claude_history import ClaudeSessionImporter
+
         importer = ClaudeSessionImporter()
         projects_dir = importer.find_projects_dir()
         if projects_dir and projects_dir.exists():
@@ -208,9 +234,11 @@ async def _gather_system_context() -> str:
             ]
             repos.sort(key=lambda r: r["trace_count"], reverse=True)
             if repos:
-                repo_lines = [f"  - {r['name']}: {r.get('trace_count', '?')} sessions" for r in repos[:10]]
+                repo_lines = [
+                    f"  - {r['name']}: {r.get('trace_count', '?')} sessions" for r in repos[:10]
+                ]
                 sections.append(
-                    f"**Trace Repositories ({len(repos)} total):**\n" + '\n'.join(repo_lines)
+                    f"**Trace Repositories ({len(repos)} total):**\n" + "\n".join(repo_lines)
                 )
     except Exception as e:
         logger.debug(f"Could not gather trace repos: {e}")
@@ -218,6 +246,7 @@ async def _gather_system_context() -> str:
     # 4. Training configuration
     try:
         from bashgym.config import get_settings
+
         settings = get_settings()
         sections.append(
             f"**Training Config:**\n"
@@ -232,16 +261,20 @@ async def _gather_system_context() -> str:
     # 5. Active orchestration jobs
     try:
         from bashgym.api.orchestrator_routes import _jobs
+
         active = [j for j in _jobs.values() if j["status"] in ("decomposing", "executing")]
         if active:
-            job_lines = [f"  - {j['id']}: {j['status']} ({j.get('spec', {}).title if j.get('spec') else 'untitled'})" for j in active]
+            job_lines = [
+                f"  - {j['id']}: {j['status']} ({j.get('spec', {}).title if j.get('spec') else 'untitled'})"
+                for j in active
+            ]
             sections.append(
-                f"**Active Orchestration Jobs ({len(active)}):**\n" + '\n'.join(job_lines)
+                f"**Active Orchestration Jobs ({len(active)}):**\n" + "\n".join(job_lines)
             )
     except Exception as e:
         logger.debug(f"Could not gather orchestration status: {e}")
 
-    return '\n\n'.join(sections) if sections else 'System context unavailable.'
+    return "\n\n".join(sections) if sections else "System context unavailable."
 
 
 def _build_system_prompt(context: str, memory_prompt: str = "", skill_knowledge: str = "") -> str:
@@ -250,7 +283,6 @@ def _build_system_prompt(context: str, memory_prompt: str = "", skill_knowledge:
         "You are Peony — the botanical assistant for Bash Gym, a self-improving "
         "agentic development gym that captures coding sessions, transforms them into training "
         "data, and fine-tunes models.",
-
         # 2. Tool usage instructions
         "You have access to tools that let you take real actions in the system. Use them "
         "when the user asks you to do something actionable (import traces, search models, "
@@ -259,7 +291,6 @@ def _build_system_prompt(context: str, memory_prompt: str = "", skill_knowledge:
         "Summarize tool results in natural language — don't dump raw JSON.\n\n"
         "For run_shell_command: only use this as a last resort when no structured tool covers "
         "the need. Always provide a clear reason.",
-
         # 3. Capabilities summary (always present)
         _tool_registry.capabilities_summary(),
     ]
@@ -273,7 +304,9 @@ def _build_system_prompt(context: str, memory_prompt: str = "", skill_knowledge:
 
     # 6. Skill knowledge (if non-empty)
     if skill_knowledge:
-        sections.append(f"--- RELEVANT SKILL KNOWLEDGE ---\n{skill_knowledge}\n--- END SKILL KNOWLEDGE ---")
+        sections.append(
+            f"--- RELEVANT SKILL KNOWLEDGE ---\n{skill_knowledge}\n--- END SKILL KNOWLEDGE ---"
+        )
 
     return "\n\n".join(sections)
 
@@ -281,6 +314,7 @@ def _build_system_prompt(context: str, memory_prompt: str = "", skill_knowledge:
 # ---------------------------------------------------------------------------
 # Tool executor
 # ---------------------------------------------------------------------------
+
 
 async def _execute_tool(name: str, tool_input: dict) -> str:
     """Execute a Peony tool and return a string result for the tool_result block."""
@@ -320,6 +354,7 @@ async def _execute_tool(name: str, tool_input: dict) -> str:
     # ----- Data collection tools (local, no HTTP needed) -----
     if name == "import_traces":
         from bashgym.trace_capture.collectors.scanner import ClaudeDataScanner
+
         scanner = ClaudeDataScanner()
         sources = tool_input.get("sources", ["all"])
         dry_run = tool_input.get("dry_run", False)
@@ -342,6 +377,7 @@ async def _execute_tool(name: str, tool_input: dict) -> str:
         if source_list is None or "sessions" in sources:
             try:
                 import httpx
+
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     resp = await client.post("http://localhost:8003/api/traces/import")
                     resp.raise_for_status()
@@ -350,7 +386,9 @@ async def _execute_tool(name: str, tool_input: dict) -> str:
                 results["sessions"] = {"error": str(e)}
 
         if dry_run:
-            scan_results = scanner.scan_all(sources=source_list, since=since, project_filter=project_filter)
+            scan_results = scanner.scan_all(
+                sources=source_list, since=since, project_filter=project_filter
+            )
             for src, scan_result in scan_results.items():
                 results[src] = {
                     "total_found": scan_result.total_found,
@@ -358,7 +396,9 @@ async def _execute_tool(name: str, tool_input: dict) -> str:
                     "new_available": scan_result.new_available,
                 }
         else:
-            collect_results = scanner.collect_all(sources=source_list, since=since, project_filter=project_filter)
+            collect_results = scanner.collect_all(
+                sources=source_list, since=since, project_filter=project_filter
+            )
             for src, batch_result in collect_results.items():
                 results[src] = {
                     "collected": batch_result.collected_count,
@@ -370,6 +410,7 @@ async def _execute_tool(name: str, tool_input: dict) -> str:
 
     if name == "scan_claude_data":
         from bashgym.trace_capture.collectors.scanner import ClaudeDataScanner
+
         scanner = ClaudeDataScanner()
         scan_results = scanner.scan_all()
         results = {}
@@ -383,6 +424,7 @@ async def _execute_tool(name: str, tool_input: dict) -> str:
 
     if name == "get_collection_status":
         from bashgym.trace_capture.collectors.scanner import ClaudeDataScanner
+
         scanner = ClaudeDataScanner()
         status = scanner.status()
         return json.dumps(status)
@@ -404,7 +446,10 @@ async def _execute_tool(name: str, tool_input: dict) -> str:
                 dry_run = tool_input.get("dry_run", True)
                 resp = await client.post(
                     f"{base_url}/api/traces/auto-classify",
-                    params={"dry_run": str(dry_run).lower(), "auto_promote": str(not dry_run).lower()},
+                    params={
+                        "dry_run": str(dry_run).lower(),
+                        "auto_promote": str(not dry_run).lower(),
+                    },
                 )
                 resp.raise_for_status()
                 data = resp.json()
@@ -480,6 +525,7 @@ async def _execute_tool(name: str, tool_input: dict) -> str:
 # Chat endpoint
 # ---------------------------------------------------------------------------
 
+
 @router.post("/chat")
 async def chat(request: ChatRequest):
     """Send a message to Peony, the botanical assistant."""
@@ -488,8 +534,7 @@ async def chat(request: ChatRequest):
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:
         raise HTTPException(
-            status_code=503,
-            detail="ANTHROPIC_API_KEY not configured. Peony requires an API key."
+            status_code=503, detail="ANTHROPIC_API_KEY not configured. Peony requires an API key."
         )
 
     # Load memory
@@ -505,7 +550,9 @@ async def chat(request: ChatRequest):
 
     # Gather live system context
     context = await _gather_system_context()
-    context_used = [s.split(':**')[0].replace('**', '') for s in context.split('\n\n') if ':**' in s]
+    context_used = [
+        s.split(":**")[0].replace("**", "") for s in context.split("\n\n") if ":**" in s
+    ]
 
     # Build system prompt with all sections
     system_prompt = _build_system_prompt(context, memory_prompt, skill_knowledge)
@@ -514,7 +561,7 @@ async def chat(request: ChatRequest):
     messages = []
     if request.history:
         for msg in request.history:
-            if msg.role in ('user', 'assistant'):
+            if msg.role in ("user", "assistant"):
                 messages.append({"role": msg.role, "content": msg.content})
     else:
         messages.append({"role": "user", "content": request.message})
@@ -557,7 +604,7 @@ async def chat(request: ChatRequest):
     if stop_reason == "tool_use":
         tool_use_blocks = [b for b in data.get("content", []) if b.get("type") == "tool_use"]
         tool_results = []
-        pending_shell: Optional[dict] = None
+        pending_shell: dict | None = None
 
         for block in tool_use_blocks:
             tool_name = block["name"]
@@ -595,11 +642,13 @@ async def chat(request: ChatRequest):
             else:
                 # Execute structured tools immediately
                 result_str = await _execute_tool(tool_name, tool_input)
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": tool_id,
-                    "content": result_str,
-                })
+                tool_results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tool_id,
+                        "content": result_str,
+                    }
+                )
 
         if not tool_results:
             # Only shell command was requested; already returned above
@@ -656,6 +705,7 @@ async def chat(request: ChatRequest):
 # Confirm action endpoint
 # ---------------------------------------------------------------------------
 
+
 @router.post("/confirm-action")
 async def confirm_action(request: ConfirmActionRequest):
     """Approve or deny a pending shell command and resume the Claude conversation."""
@@ -674,7 +724,7 @@ async def confirm_action(request: ConfirmActionRequest):
     messages = action["messages"]
     system_prompt = action["system_prompt"]
     context_used = action["context_used"]
-    headers = action["headers"]
+    action["headers"]
     action_tools = action.get("tools", _tool_registry.build_tools())
 
     if request.approved:
@@ -702,11 +752,13 @@ async def confirm_action(request: ConfirmActionRequest):
     follow_up_messages = messages + [
         {
             "role": "user",
-            "content": [{
-                "type": "tool_result",
-                "tool_use_id": tool_use_id,
-                "content": tool_result_content,
-            }],
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tool_use_id,
+                    "content": tool_result_content,
+                }
+            ],
         }
     ]
 
@@ -750,6 +802,7 @@ async def confirm_action(request: ConfirmActionRequest):
 # Session CRUD endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.get("/sessions")
 async def list_sessions():
     """List all Peony chat sessions."""
@@ -769,13 +822,15 @@ async def load_session(session_id: str):
         for line in log_path.read_text(encoding="utf-8").strip().splitlines():
             record = json.loads(line)
             if record.get("type") == "message":
-                messages.append(SessionMessage(
-                    id=record["id"],
-                    role=record["role"],
-                    content=record["content"],
-                    timestamp=record["timestamp"],
-                    context_used=record.get("context_used", []),
-                ))
+                messages.append(
+                    SessionMessage(
+                        id=record["id"],
+                        role=record["role"],
+                        content=record["content"],
+                        timestamp=record["timestamp"],
+                        context_used=record.get("context_used", []),
+                    )
+                )
     except Exception as e:
         logger.error(f"Error reading session {session_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to read session")
@@ -795,23 +850,31 @@ async def save_session(req: SaveSessionRequest):
 
     lines = []
     # Meta line
-    lines.append(json.dumps({
-        "type": "meta",
-        "session_id": req.session_id,
-        "name": req.name,
-        "created_at": now,
-        "updated_at": now,
-    }))
+    lines.append(
+        json.dumps(
+            {
+                "type": "meta",
+                "session_id": req.session_id,
+                "name": req.name,
+                "created_at": now,
+                "updated_at": now,
+            }
+        )
+    )
     # Message lines
     for msg in req.messages:
-        lines.append(json.dumps({
-            "type": "message",
-            "id": msg.id,
-            "role": msg.role,
-            "content": msg.content,
-            "timestamp": msg.timestamp,
-            "context_used": msg.context_used,
-        }))
+        lines.append(
+            json.dumps(
+                {
+                    "type": "message",
+                    "id": msg.id,
+                    "role": msg.role,
+                    "content": msg.content,
+                    "timestamp": msg.timestamp,
+                    "context_used": msg.context_used,
+                }
+            )
+        )
 
     log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -819,13 +882,15 @@ async def save_session(req: SaveSessionRequest):
     index = _read_sessions_index()
     # Remove existing entry for this session
     index = [s for s in index if s.get("session_id") != req.session_id]
-    index.append({
-        "session_id": req.session_id,
-        "name": req.name,
-        "created_at": now,
-        "updated_at": now,
-        "message_count": len(req.messages),
-    })
+    index.append(
+        {
+            "session_id": req.session_id,
+            "name": req.name,
+            "created_at": now,
+            "updated_at": now,
+            "message_count": len(req.messages),
+        }
+    )
     _write_sessions_index(index)
 
     return {"status": "ok", "session_id": req.session_id}
@@ -849,6 +914,7 @@ async def delete_session(session_id: str):
 # ---------------------------------------------------------------------------
 # Session summarization
 # ---------------------------------------------------------------------------
+
 
 @router.post("/summarize-session/{session_id}")
 async def summarize_session(session_id: str):
@@ -891,14 +957,16 @@ async def summarize_session(session_id: str):
                 json={
                     "model": "claude-haiku-4-5-20251001",
                     "max_tokens": 200,
-                    "messages": [{
-                        "role": "user",
-                        "content": (
-                            "Summarize this conversation in 2-3 sentences. "
-                            "Focus on what the user wanted, what was accomplished, "
-                            "and any decisions made.\n\n" + transcript
-                        ),
-                    }],
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": (
+                                "Summarize this conversation in 2-3 sentences. "
+                                "Focus on what the user wanted, what was accomplished, "
+                                "and any decisions made.\n\n" + transcript
+                            ),
+                        }
+                    ],
                 },
             )
             resp.raise_for_status()

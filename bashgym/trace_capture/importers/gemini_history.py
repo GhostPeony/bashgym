@@ -16,25 +16,25 @@ as the assistant's reasoning and text responses.
 import json
 import os
 import platform
-import uuid
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Set, Tuple
-from dataclasses import dataclass, asdict
+from typing import Any
 
-from ..core import TraceStep, TraceSession, TraceCapture
+from ..core import TraceCapture, TraceSession, TraceStep
 
 
 @dataclass
 class GeminiImportResult:
     """Result of a Gemini session import operation."""
+
     session_id: str
     source_file: Path
     steps_imported: int
-    destination_file: Optional[Path] = None
-    error: Optional[str] = None
+    destination_file: Path | None = None
+    error: str | None = None
     skipped: bool = False
-    skip_reason: Optional[str] = None
+    skip_reason: str | None = None
 
 
 class GeminiSessionImporter:
@@ -51,7 +51,7 @@ class GeminiSessionImporter:
         self.imported_sessions_file = (
             self.trace_capture.bashgym_dir / "imported_gemini_sessions.json"
         )
-        self._imported_sessions: Optional[Set[str]] = None
+        self._imported_sessions: set[str] | None = None
 
     @staticmethod
     def _get_gemini_dir() -> Path:
@@ -63,21 +63,21 @@ class GeminiSessionImporter:
         return base / ".gemini"
 
     @property
-    def imported_sessions(self) -> Set[str]:
+    def imported_sessions(self) -> set[str]:
         """Get set of already imported session IDs."""
         if self._imported_sessions is None:
             self._imported_sessions = self._load_imported_sessions()
         return self._imported_sessions
 
-    def _load_imported_sessions(self) -> Set[str]:
+    def _load_imported_sessions(self) -> set[str]:
         """Load the list of already imported session IDs."""
         if not self.imported_sessions_file.exists():
             return set()
         try:
-            with open(self.imported_sessions_file, "r") as f:
+            with open(self.imported_sessions_file) as f:
                 data = json.load(f)
                 return set(data.get("sessions", []))
-        except (json.JSONDecodeError, IOError):
+        except (OSError, json.JSONDecodeError):
             return set()
 
     def _save_imported_session(self, session_id: str) -> None:
@@ -87,14 +87,14 @@ class GeminiSessionImporter:
             self.imported_sessions_file.parent.mkdir(parents=True, exist_ok=True)
             with open(self.imported_sessions_file, "w") as f:
                 json.dump({"sessions": list(self.imported_sessions)}, f)
-        except IOError as e:
+        except OSError as e:
             print(f"Warning: Could not save imported Gemini sessions list: {e}")
 
     def find_session_files(
         self,
-        since: Optional[datetime] = None,
-        until: Optional[datetime] = None,
-    ) -> List[Tuple[Path, datetime]]:
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> list[tuple[Path, datetime]]:
         """
         Find Gemini CLI session JSON files, optionally filtered by date.
 
@@ -112,7 +112,7 @@ class GeminiSessionImporter:
         if not tmp_dir.exists():
             return []
 
-        session_files: List[Tuple[Path, datetime]] = []
+        session_files: list[tuple[Path, datetime]] = []
 
         try:
             for project_dir in tmp_dir.iterdir():
@@ -145,11 +145,11 @@ class GeminiSessionImporter:
 
     @staticmethod
     def _extract_tool_steps_from_entry(
-        entry: Dict[str, Any],
+        entry: dict[str, Any],
         session_id: str,
         session_file: Path,
         step_index: int,
-    ) -> List[TraceStep]:
+    ) -> list[TraceStep]:
         """
         Extract TraceStep objects from a single conversation entry.
 
@@ -167,7 +167,7 @@ class GeminiSessionImporter:
         Format C (inline tool metadata):
           {"tool_name": "...", "tool_input": {...}, "tool_output": "..."}
         """
-        steps: List[TraceStep] = []
+        steps: list[TraceStep] = []
         timestamp = entry.get(
             "timestamp",
             entry.get("createTime", datetime.now(timezone.utc).isoformat()),
@@ -182,11 +182,7 @@ class GeminiSessionImporter:
         if tool_name:
             tool_input = entry.get("tool_input", {})
             tool_output = entry.get("tool_output", "")
-            command = (
-                json.dumps(tool_input)
-                if isinstance(tool_input, dict)
-                else str(tool_input)
-            )
+            command = json.dumps(tool_input) if isinstance(tool_input, dict) else str(tool_input)
             output = str(tool_output)[:10000] if tool_output else ""
 
             step = TraceStep(
@@ -249,19 +245,14 @@ class GeminiSessionImporter:
                 fname = func_resp.get("name", "unknown_function")
                 response = func_resp.get("response", {})
                 output_str = (
-                    json.dumps(response)
-                    if isinstance(response, dict)
-                    else str(response)
+                    json.dumps(response) if isinstance(response, dict) else str(response)
                 )[:10000]
 
                 # Try to match to an existing step with the same function name
                 # that doesn't have output yet
                 matched = False
                 for existing_step in reversed(steps):
-                    if (
-                        existing_step.tool_name == fname
-                        and not existing_step.output
-                    ):
+                    if existing_step.tool_name == fname and not existing_step.output:
                         existing_step.output = output_str
                         existing_step.success = True
                         existing_step.exit_code = 0
@@ -324,10 +315,7 @@ class GeminiSessionImporter:
 
                 # Match to the most recent code_execution step without output
                 for existing_step in reversed(steps):
-                    if (
-                        existing_step.tool_name == "code_execution"
-                        and not existing_step.output
-                    ):
+                    if existing_step.tool_name == "code_execution" and not existing_step.output:
                         existing_step.output = output_text
                         existing_step.success = is_success
                         existing_step.exit_code = 0 if is_success else 1
@@ -335,9 +323,7 @@ class GeminiSessionImporter:
 
         return steps
 
-    def parse_session_file(
-        self, session_file: Path
-    ) -> Tuple[List[TraceStep], Dict[str, Any]]:
+    def parse_session_file(self, session_file: Path) -> tuple[list[TraceStep], dict[str, Any]]:
         """
         Parse a Gemini CLI session JSON file and extract tool steps.
 
@@ -347,24 +333,24 @@ class GeminiSessionImporter:
         Returns:
             Tuple of (steps, session_metadata)
         """
-        steps: List[TraceStep] = []
+        steps: list[TraceStep] = []
         session_id = session_file.stem
-        models_used: Set[str] = set()
-        meta: Dict[str, Any] = {
+        models_used: set[str] = set()
+        meta: dict[str, Any] = {
             "user_initial_prompt": None,
             "all_user_prompts": [],
             "conversation_turns": 0,
         }
 
         try:
-            with open(session_file, "r", encoding="utf-8") as f:
+            with open(session_file, encoding="utf-8") as f:
                 data = json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
+        except (OSError, json.JSONDecodeError) as e:
             print(f"Error reading Gemini session file {session_file}: {e}")
             return [], {"user_initial_prompt": None}
 
         # Session data may be a list of entries or a dict with a conversation key
-        entries: List[Dict[str, Any]] = []
+        entries: list[dict[str, Any]] = []
         if isinstance(data, list):
             entries = data
         elif isinstance(data, dict):
@@ -404,15 +390,15 @@ class GeminiSessionImporter:
                     if not user_text:
                         user_text = entry.get("content", entry.get("text", ""))
                         if isinstance(user_text, list):
-                            user_text = " ".join(
-                                str(x) for x in user_text if x
-                            )
+                            user_text = " ".join(str(x) for x in user_text if x)
 
                     if user_text:
-                        meta["all_user_prompts"].append({
-                            "text": str(user_text)[:2000],
-                            "timestamp": entry.get("timestamp"),
-                        })
+                        meta["all_user_prompts"].append(
+                            {
+                                "text": str(user_text)[:2000],
+                                "timestamp": entry.get("timestamp"),
+                            }
+                        )
                         if meta["user_initial_prompt"] is None:
                             meta["user_initial_prompt"] = str(user_text)[:500]
 
@@ -436,9 +422,7 @@ class GeminiSessionImporter:
 
         return steps, meta
 
-    def import_session(
-        self, session_file: Path, force: bool = False
-    ) -> GeminiImportResult:
+    def import_session(self, session_file: Path, force: bool = False) -> GeminiImportResult:
         """
         Import a single Gemini session file into BashGym format.
 
@@ -499,7 +483,7 @@ class GeminiSessionImporter:
         try:
             with open(destination, "w", encoding="utf-8") as f:
                 json.dump(asdict(session), f, indent=2, ensure_ascii=False)
-        except IOError as e:
+        except OSError as e:
             return GeminiImportResult(
                 session_id=session_id,
                 source_file=session_file,
@@ -522,7 +506,7 @@ def import_gemini_sessions(
     days: int = 60,
     limit: int = 100,
     verbose: bool = True,
-) -> List[Dict]:
+) -> list[dict]:
     """
     Import recent Gemini CLI sessions.
 
@@ -545,12 +529,9 @@ def import_gemini_sessions(
     session_files = importer.find_session_files(since=since)
 
     if verbose:
-        print(
-            f"[BashGym] Found {len(session_files)} Gemini session(s) "
-            f"from last {days} days"
-        )
+        print(f"[BashGym] Found {len(session_files)} Gemini session(s) " f"from last {days} days")
 
-    results: List[Dict] = []
+    results: list[dict] = []
     imported_count = 0
 
     for session_file, mtime in session_files:
@@ -580,9 +561,6 @@ def import_gemini_sessions(
             elif result.error:
                 print(f"  [!] {session_file.name}: {result.error}")
             else:
-                print(
-                    f"  [+] {session_file.name}: "
-                    f"{result.steps_imported} steps imported"
-                )
+                print(f"  [+] {session_file.name}: " f"{result.steps_imported} steps imported")
 
     return results

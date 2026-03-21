@@ -18,15 +18,14 @@ import json
 import os
 import platform
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, timezone
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
-
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Helper functions
 # ---------------------------------------------------------------------------
+
 
 def get_claude_dir() -> Path:
     """Return the Claude Code configuration directory (~/.claude/)."""
@@ -50,6 +49,7 @@ def get_collected_dir() -> Path:
 # Record dataclasses
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class CollectorRecord:
     """Base record produced by any collector.
@@ -61,9 +61,9 @@ class CollectorRecord:
     session_id: str
     timestamp: str
     source_type: str
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_json(self) -> Dict[str, Any]:
+    def to_json(self) -> dict[str, Any]:
         """Return a JSON-serializable dict of all fields."""
         return asdict(self)
 
@@ -90,9 +90,9 @@ class SubagentRecord(CollectorRecord):
     agent_id: str = ""
     slug: str = ""
     parent_session_id: str = ""
-    steps: List[Dict[str, Any]] = field(default_factory=list)
-    models_used: List[str] = field(default_factory=list)
-    tools_used: List[str] = field(default_factory=list)
+    steps: list[dict[str, Any]] = field(default_factory=list)
+    models_used: list[str] = field(default_factory=list)
+    tools_used: list[str] = field(default_factory=list)
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     total_tool_calls: int = 0
@@ -105,7 +105,7 @@ class EditRecord(CollectorRecord):
 
     file_path: str = ""
     content_hash: str = ""
-    versions: List[Dict[str, Any]] = field(default_factory=list)
+    versions: list[dict[str, Any]] = field(default_factory=list)
     diff: str = ""
     total_versions: int = 0
 
@@ -124,7 +124,7 @@ class TodoRecord(CollectorRecord):
     """Record for a todo/task list snapshot."""
 
     agent_id: str = ""
-    tasks: List[Dict[str, Any]] = field(default_factory=list)
+    tasks: list[dict[str, Any]] = field(default_factory=list)
     total_tasks: int = 0
     completed_tasks: int = 0
     pending_tasks: int = 0
@@ -143,11 +143,11 @@ class PromptRecord(CollectorRecord):
 class DebugRecord(CollectorRecord):
     """Record for debug/observability data from a session."""
 
-    system_prompts: List[str] = field(default_factory=list)
-    full_thinking_blocks: List[str] = field(default_factory=list)
+    system_prompts: list[str] = field(default_factory=list)
+    full_thinking_blocks: list[str] = field(default_factory=list)
     api_call_count: int = 0
     total_latency_ms: int = 0
-    errors: List[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -158,13 +158,14 @@ class EnvironmentRecord(CollectorRecord):
     shell: str = ""
     cwd: str = ""
     git_branch: str = ""
-    env_vars: Dict[str, str] = field(default_factory=dict)
-    shell_snapshot: Dict[str, Any] = field(default_factory=dict)
+    env_vars: dict[str, str] = field(default_factory=dict)
+    shell_snapshot: dict[str, Any] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
 # Result types
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class CollectorScanResult:
@@ -184,13 +185,14 @@ class CollectorBatchResult:
     source_type: str
     collected: int
     skipped: int
-    errors: List[str] = field(default_factory=list)
-    records: List[CollectorRecord] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    records: list[CollectorRecord] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
 # BaseCollector abstract class
 # ---------------------------------------------------------------------------
+
 
 class BaseCollector(ABC):
     """Abstract base for all data collectors.
@@ -222,22 +224,22 @@ class BaseCollector(ABC):
     @abstractmethod
     def scan(
         self,
-        since: Optional[str] = None,
-        project_filter: Optional[str] = None,
+        since: str | None = None,
+        project_filter: str | None = None,
     ) -> CollectorScanResult:
         """Scan for available data without collecting anything."""
         ...
 
     @abstractmethod
-    def collect(self, session_id: str) -> List[CollectorRecord]:
+    def collect(self, session_id: str) -> list[CollectorRecord]:
         """Collect records for a single session."""
         ...
 
     @abstractmethod
     def collect_all(
         self,
-        since: Optional[str] = None,
-        project_filter: Optional[str] = None,
+        since: str | None = None,
+        project_filter: str | None = None,
     ) -> CollectorBatchResult:
         """Collect records for all available sessions."""
         ...
@@ -253,7 +255,7 @@ class BaseCollector(ABC):
         """Path to the scan_state.json deduplication file."""
         return self.output_dir / "scan_state.json"
 
-    def _load_collected_ids(self) -> Set[str]:
+    def _load_collected_ids(self) -> set[str]:
         """Load the set of already-collected session IDs from disk."""
         state_file = self._state_file()
         if not state_file.exists():
@@ -261,7 +263,7 @@ class BaseCollector(ABC):
         try:
             data = json.loads(state_file.read_text(encoding="utf-8"))
             return set(data.get("collected_ids", []))
-        except (json.JSONDecodeError, IOError, OSError):
+        except (json.JSONDecodeError, OSError):
             return set()
 
     def _save_collected_id(self, session_id: str) -> None:

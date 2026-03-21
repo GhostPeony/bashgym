@@ -4,45 +4,50 @@
 import json
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Dict, List, ClassVar
+from typing import ClassVar
 
 
 @dataclass
 class FileCluster:
     """Files that are frequently modified together."""
-    patterns: List[str] = field(default_factory=list)  # Glob patterns like ["src/*.py", "tests/*.py"]
+
+    patterns: list[str] = field(
+        default_factory=list
+    )  # Glob patterns like ["src/*.py", "tests/*.py"]
     frequency: float = 0.0  # How often this cluster appears (0-1)
 
 
 @dataclass
 class ToolSequence:
     """Common tool call sequences."""
-    tools: List[str] = field(default_factory=list)  # ["Read", "Edit", "Bash"]
+
+    tools: list[str] = field(default_factory=list)  # ["Read", "Edit", "Bash"]
     frequency: float = 0.0  # How often this sequence appears (0-1)
 
 
 @dataclass
 class TracePatterns:
     """Extracted patterns from a set of traces."""
+
     # Task classification
-    task_types: Dict[str, float] = field(default_factory=dict)
+    task_types: dict[str, float] = field(default_factory=dict)
 
     # File patterns
-    file_clusters: List[FileCluster] = field(default_factory=list)
-    common_paths: List[str] = field(default_factory=list)
-    languages: Dict[str, float] = field(default_factory=dict)
+    file_clusters: list[FileCluster] = field(default_factory=list)
+    common_paths: list[str] = field(default_factory=list)
+    languages: dict[str, float] = field(default_factory=dict)
 
     # Tool sequences
-    tool_patterns: List[ToolSequence] = field(default_factory=list)
+    tool_patterns: list[ToolSequence] = field(default_factory=list)
     avg_tool_calls: int = 0
 
     # Prompt patterns
-    prompt_templates: List[str] = field(default_factory=list)
-    prompt_keywords: List[str] = field(default_factory=list)
+    prompt_templates: list[str] = field(default_factory=list)
+    prompt_keywords: list[str] = field(default_factory=list)
 
     # Repo context
     repo_name: str = ""
-    framework_hints: List[str] = field(default_factory=list)
+    framework_hints: list[str] = field(default_factory=list)
 
 
 class PatternExtractor:
@@ -56,7 +61,7 @@ class PatternExtractor:
     """
 
     # File extension to language mapping
-    EXTENSION_LANGUAGES: ClassVar[Dict[str, str]] = {
+    EXTENSION_LANGUAGES: ClassVar[dict[str, str]] = {
         ".py": "python",
         ".ts": "typescript",
         ".tsx": "typescript",
@@ -72,7 +77,7 @@ class PatternExtractor:
     }
 
     # Keywords for task classification
-    TASK_KEYWORDS: ClassVar[Dict[str, List[str]]] = {
+    TASK_KEYWORDS: ClassVar[dict[str, list[str]]] = {
         "feature": ["add", "implement", "create", "build", "new", "introduce"],
         "bugfix": ["fix", "bug", "error", "debug", "resolve", "crash", "issue", "broken"],
         "refactor": ["refactor", "clean", "improve", "reorganize", "restructure", "simplify"],
@@ -80,7 +85,7 @@ class PatternExtractor:
     }
 
     # Priority order for tie-breaking (higher = more specific)
-    TASK_PRIORITY: ClassVar[Dict[str, int]] = {
+    TASK_PRIORITY: ClassVar[dict[str, int]] = {
         "feature": 0,  # Most general, lowest priority
         "bugfix": 1,
         "refactor": 2,
@@ -100,7 +105,7 @@ class PatternExtractor:
         prompt_lower = prompt.lower()
 
         # Count keyword matches for each type
-        scores: Dict[str, int] = {}
+        scores: dict[str, int] = {}
         for task_type, keywords in self.TASK_KEYWORDS.items():
             score = sum(1 for kw in keywords if kw in prompt_lower)
             if score > 0:
@@ -113,7 +118,7 @@ class PatternExtractor:
         # Sort by (score, priority) descending
         return max(scores.keys(), key=lambda t: (scores[t], self.TASK_PRIORITY[t]))
 
-    def _detect_languages(self, file_paths: List[str]) -> Dict[str, float]:
+    def _detect_languages(self, file_paths: list[str]) -> dict[str, float]:
         """Detect language distribution from file paths.
 
         Args:
@@ -128,7 +133,7 @@ class PatternExtractor:
         if not file_paths:
             return {}
 
-        lang_counts: Dict[str, int] = {}
+        lang_counts: dict[str, int] = {}
 
         for path in file_paths:
             ext = Path(path).suffix.lower()
@@ -140,11 +145,8 @@ class PatternExtractor:
         return {lang: count / total for lang, count in lang_counts.items()}
 
     def _extract_tool_sequences(
-        self,
-        tool_lists: List[List[str]],
-        n: int = 3,
-        min_frequency: float = 0.2
-    ) -> List[ToolSequence]:
+        self, tool_lists: list[list[str]], n: int = 3, min_frequency: float = 0.2
+    ) -> list[ToolSequence]:
         """Extract common N-gram tool sequences.
 
         Args:
@@ -163,7 +165,7 @@ class PatternExtractor:
 
         for tools in tool_lists:
             for i in range(len(tools) - n + 1):
-                ngram = tuple(tools[i:i + n])
+                ngram = tuple(tools[i : i + n])
                 ngram_counts[ngram] += 1
 
         # Convert to frequencies
@@ -173,14 +175,11 @@ class PatternExtractor:
         for ngram, count in ngram_counts.most_common():
             frequency = count / total_sequences
             if frequency >= min_frequency:
-                patterns.append(ToolSequence(
-                    tools=list(ngram),
-                    frequency=frequency
-                ))
+                patterns.append(ToolSequence(tools=list(ngram), frequency=frequency))
 
         return patterns
 
-    def _extract_common_paths(self, file_paths: List[str]) -> List[str]:
+    def _extract_common_paths(self, file_paths: list[str]) -> list[str]:
         """Extract common directory prefixes from file paths.
 
         Args:
@@ -205,7 +204,7 @@ class PatternExtractor:
         threshold = len(file_paths) * 0.2
         return [d for d, c in dir_counts.most_common(10) if c > threshold]
 
-    def _extract_keywords(self, prompts: List[str]) -> List[str]:
+    def _extract_keywords(self, prompts: list[str]) -> list[str]:
         """Extract common action keywords from prompts.
 
         Args:
@@ -232,7 +231,7 @@ class PatternExtractor:
 
         return list(found)
 
-    def extract_patterns(self, traces: List[Dict], repo_name: str = "") -> TracePatterns:
+    def extract_patterns(self, traces: list[dict], repo_name: str = "") -> TracePatterns:
         """Extract patterns from a list of trace dictionaries.
 
         This is the main orchestration method that combines all extraction methods
@@ -249,10 +248,10 @@ class PatternExtractor:
             return TracePatterns(repo_name=repo_name)
 
         # Collect data from all traces
-        task_type_counts: Dict[str, int] = {}
-        all_files: List[str] = []
-        all_tool_sequences: List[List[str]] = []
-        all_prompts: List[str] = []
+        task_type_counts: dict[str, int] = {}
+        all_files: list[str] = []
+        all_tool_sequences: list[list[str]] = []
+        all_prompts: list[str] = []
         total_tool_calls = 0
 
         for trace in traces:
@@ -316,5 +315,5 @@ class PatternExtractor:
             prompt_templates=[],
             prompt_keywords=prompt_keywords,
             repo_name=repo_name,
-            framework_hints=[]
+            framework_hints=[],
         )

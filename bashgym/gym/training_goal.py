@@ -12,9 +12,8 @@ TraceResearcher behave exactly as before (single metric optimization).
 from __future__ import annotations
 
 import logging
-import math
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -65,15 +64,15 @@ class GoalConstraint:
 class TrainingGoal:
     """A structured training objective with weighted criteria and constraints."""
 
-    criteria: List[SuccessCriterion] = field(default_factory=list)
-    constraints: List[GoalConstraint] = field(default_factory=list)
+    criteria: list[SuccessCriterion] = field(default_factory=list)
+    constraints: list[GoalConstraint] = field(default_factory=list)
 
-    def validate(self) -> List[str]:
+    def validate(self) -> list[str]:
         """Validate this goal definition.
 
         Returns a list of error strings. Empty list means valid.
         """
-        errors: List[str] = []
+        errors: list[str] = []
 
         if not self.criteria:
             errors.append("At least one success criterion is required")
@@ -81,9 +80,7 @@ class TrainingGoal:
         # Check weights sum to approximately 1.0
         total_weight = sum(c.weight for c in self.criteria)
         if self.criteria and not (0.95 <= total_weight <= 1.05):
-            errors.append(
-                f"Criterion weights must sum to ~1.0 (got {total_weight:.3f})"
-            )
+            errors.append(f"Criterion weights must sum to ~1.0 (got {total_weight:.3f})")
 
         # Check individual criteria
         for i, criterion in enumerate(self.criteria):
@@ -93,9 +90,7 @@ class TrainingGoal:
                     f"(valid: {VALID_COMPARATORS})"
                 )
             if not (0.0 <= criterion.weight <= 1.0):
-                errors.append(
-                    f"Criterion[{i}] weight {criterion.weight} not in [0, 1]"
-                )
+                errors.append(f"Criterion[{i}] weight {criterion.weight} not in [0, 1]")
             if not criterion.metric_key:
                 errors.append(f"Criterion[{i}] has empty metric_key")
 
@@ -129,9 +124,9 @@ class TrainingGoal:
 class GoalProgress:
     """Snapshot of goal progress after an experiment."""
 
-    criteria_scores: Dict[str, float]  # metric_key -> normalized score (0-1)
+    criteria_scores: dict[str, float]  # metric_key -> normalized score (0-1)
     weighted_score: float  # combined weighted score (0-1, higher = better)
-    constraints_status: Dict[str, str]  # metric_key -> "ok" | "warning" | "violated"
+    constraints_status: dict[str, str]  # metric_key -> "ok" | "warning" | "violated"
     recommendation: str  # "continue" | "adjust" | "complete"
     reasoning: str  # human-readable explanation
 
@@ -159,16 +154,14 @@ class OutcomeAggregator:
     def __init__(self, goal: TrainingGoal):
         errors = goal.validate()
         if errors:
-            raise ValueError(
-                f"Invalid TrainingGoal: {'; '.join(errors)}"
-            )
+            raise ValueError(f"Invalid TrainingGoal: {'; '.join(errors)}")
 
         self.goal = goal
-        self.history: List[tuple[Dict[str, Any], GoalProgress]] = []
+        self.history: list[tuple[dict[str, Any], GoalProgress]] = []
 
-    def record(self, metrics: Dict[str, Any]) -> GoalProgress:
+    def record(self, metrics: dict[str, Any]) -> GoalProgress:
         """Record experiment metrics and return a progress assessment."""
-        criteria_scores: Dict[str, float] = {}
+        criteria_scores: dict[str, float] = {}
         for criterion in self.goal.criteria:
             value = metrics.get(criterion.metric_key)
             if value is not None:
@@ -179,7 +172,7 @@ class OutcomeAggregator:
 
         w_score = self.weighted_score(metrics)
 
-        constraints_status: Dict[str, str] = {}
+        constraints_status: dict[str, str] = {}
         for constraint in self.goal.constraints:
             value = metrics.get(constraint.metric_key)
             if value is not None:
@@ -188,9 +181,7 @@ class OutcomeAggregator:
                 status = "ok"  # missing constraint metric = assume ok
             constraints_status[constraint.metric_key] = status
 
-        recommendation = self._compute_recommendation(
-            criteria_scores, w_score, constraints_status
-        )
+        recommendation = self._compute_recommendation(criteria_scores, w_score, constraints_status)
 
         reasoning = self._build_reasoning(
             criteria_scores, w_score, constraints_status, recommendation, metrics
@@ -216,7 +207,7 @@ class OutcomeAggregator:
             return "continue"
         return self.history[-1][1].recommendation
 
-    def weighted_score(self, metrics: Dict[str, Any]) -> float:
+    def weighted_score(self, metrics: dict[str, Any]) -> float:
         """Compute multi-criteria weighted score (0.0 to 1.0).
 
         Higher is better: 1.0 means all criteria fully met.
@@ -311,9 +302,9 @@ class OutcomeAggregator:
 
     def _compute_recommendation(
         self,
-        criteria_scores: Dict[str, float],
+        criteria_scores: dict[str, float],
         w_score: float,
-        constraints_status: Dict[str, str],
+        constraints_status: dict[str, str],
     ) -> str:
         """Determine recommendation based on current state and history."""
         # Hard constraint violated -> stop
@@ -328,9 +319,7 @@ class OutcomeAggregator:
 
         # Check for stalling: no meaningful improvement in last N experiments
         if len(self.history) >= self.STALL_WINDOW:
-            recent_scores = [
-                h[1].weighted_score for h in self.history[-self.STALL_WINDOW:]
-            ]
+            recent_scores = [h[1].weighted_score for h in self.history[-self.STALL_WINDOW :]]
             best_recent = max(recent_scores)
             worst_recent = min(recent_scores)
             if (best_recent - worst_recent) < self.STALL_THRESHOLD:
@@ -340,14 +329,14 @@ class OutcomeAggregator:
 
     def _build_reasoning(
         self,
-        criteria_scores: Dict[str, float],
+        criteria_scores: dict[str, float],
         w_score: float,
-        constraints_status: Dict[str, str],
+        constraints_status: dict[str, str],
         recommendation: str,
-        metrics: Dict[str, Any],
+        metrics: dict[str, Any],
     ) -> str:
         """Build a human-readable explanation of the progress assessment."""
-        parts: List[str] = []
+        parts: list[str] = []
 
         parts.append(f"Weighted score: {w_score:.3f}")
 

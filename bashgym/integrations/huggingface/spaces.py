@@ -31,14 +31,13 @@ Usage:
 """
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Optional, List, Dict, Any
 
 from .client import (
-    HuggingFaceClient,
-    HFProRequiredError,
     HF_HUB_AVAILABLE,
+    HFProRequiredError,
+    HuggingFaceClient,
 )
 
 logger = logging.getLogger(__name__)
@@ -48,8 +47,10 @@ logger = logging.getLogger(__name__)
 # Enums
 # =============================================================================
 
+
 class SpaceStatus(Enum):
     """Status of a HuggingFace Space."""
+
     BUILDING = "building"
     RUNNING = "running"
     STOPPED = "stopped"
@@ -59,6 +60,7 @@ class SpaceStatus(Enum):
 # =============================================================================
 # Data Classes
 # =============================================================================
+
 
 @dataclass
 class SpaceConfig:
@@ -82,7 +84,7 @@ class SpaceConfig:
     dev_mode: bool = False
     """Enable development mode with SSH access."""
 
-    def validate(self) -> List[str]:
+    def validate(self) -> list[str]:
         """Validate the configuration."""
         errors = []
 
@@ -193,6 +195,7 @@ if __name__ == "__main__":
 # Space Manager
 # =============================================================================
 
+
 class HFSpaceManager:
     """
     Manages HuggingFace Spaces for model deployment.
@@ -223,8 +226,8 @@ class HFSpaceManager:
 
     def __init__(
         self,
-        client: Optional[HuggingFaceClient] = None,
-        token: Optional[str] = None,
+        client: HuggingFaceClient | None = None,
+        token: str | None = None,
         pro_enabled: bool = False,
     ):
         """
@@ -266,7 +269,7 @@ class HFSpaceManager:
         self,
         model_repo: str,
         space_name: str,
-        config: Optional[SpaceConfig] = None,
+        config: SpaceConfig | None = None,
         gpu_duration: int = 60,
     ) -> str:
         """

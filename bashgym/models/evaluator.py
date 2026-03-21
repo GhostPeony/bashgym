@@ -6,14 +6,14 @@ Generates evaluation sets from gold traces in two modes:
 2. Variation: Test if model generalizes with modified task descriptions
 """
 
+import hashlib
 import json
 import logging
-import hashlib
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Callable
-import asyncio
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -21,17 +21,18 @@ logger = logging.getLogger(__name__)
 @dataclass
 class EvalCase:
     """A single evaluation case."""
+
     case_id: str
-    source_trace_id: Optional[str]
+    source_trace_id: str | None
     eval_type: str  # "replay" or "variation"
     prompt: str  # Alias for user_prompt
     expected_behavior: str  # Description of expected outcome
     verification: "EvalVerification"
     difficulty: str = "same"  # "same", "easier", "harder"
-    variation_type: Optional[str] = None  # "paraphrase", "parameter_tweak", "complexity_shift"
+    variation_type: str | None = None  # "paraphrase", "parameter_tweak", "complexity_shift"
     name: str = ""  # Human-readable name
     description: str = ""  # Detailed description
-    system_prompt: Optional[str] = None  # System prompt for the model
+    system_prompt: str | None = None  # System prompt for the model
     created_at: datetime = field(default_factory=datetime.now)
 
     @property
@@ -39,7 +40,7 @@ class EvalCase:
         """Alias for prompt field to match API expectations."""
         return self.prompt
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "case_id": self.case_id,
             "source_trace_id": self.source_trace_id,
@@ -53,11 +54,11 @@ class EvalCase:
             "name": self.name,
             "description": self.description,
             "system_prompt": self.system_prompt,
-            "created_at": self.created_at.isoformat()
+            "created_at": self.created_at.isoformat(),
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "EvalCase":
+    def from_dict(cls, data: dict[str, Any]) -> "EvalCase":
         return cls(
             case_id=data["case_id"],
             source_trace_id=data.get("source_trace_id"),
@@ -70,24 +71,29 @@ class EvalCase:
             name=data.get("name", ""),
             description=data.get("description", ""),
             system_prompt=data.get("system_prompt"),
-            created_at=datetime.fromisoformat(data["created_at"]) if data.get("created_at") else datetime.now()
+            created_at=(
+                datetime.fromisoformat(data["created_at"])
+                if data.get("created_at")
+                else datetime.now()
+            ),
         )
 
 
 @dataclass
 class EvalVerification:
     """How to verify an eval case passed."""
-    method: str  # "test_file", "output_match", "llm_judge", "file_exists", "code_runs"
-    test_commands: List[str] = field(default_factory=list)  # Commands to run
-    expected_patterns: List[str] = field(default_factory=list)  # Patterns to match in output
-    expected_files: List[str] = field(default_factory=list)  # Files that should exist
-    judge_criteria: Optional[str] = None  # Criteria for LLM judge
-    expected_output: Optional[str] = None  # Expected output content
-    test_command: Optional[str] = None  # Single test command (alias)
-    check_files: List[str] = field(default_factory=list)  # Alias for expected_files
-    llm_criteria: Optional[str] = None  # Alias for judge_criteria
 
-    def to_dict(self) -> Dict[str, Any]:
+    method: str  # "test_file", "output_match", "llm_judge", "file_exists", "code_runs"
+    test_commands: list[str] = field(default_factory=list)  # Commands to run
+    expected_patterns: list[str] = field(default_factory=list)  # Patterns to match in output
+    expected_files: list[str] = field(default_factory=list)  # Files that should exist
+    judge_criteria: str | None = None  # Criteria for LLM judge
+    expected_output: str | None = None  # Expected output content
+    test_command: str | None = None  # Single test command (alias)
+    check_files: list[str] = field(default_factory=list)  # Alias for expected_files
+    llm_criteria: str | None = None  # Alias for judge_criteria
+
+    def to_dict(self) -> dict[str, Any]:
         return {
             "method": self.method,
             "test_commands": self.test_commands,
@@ -95,13 +101,14 @@ class EvalVerification:
             "expected_files": self.expected_files or self.check_files,
             "judge_criteria": self.judge_criteria or self.llm_criteria,
             "expected_output": self.expected_output,
-            "test_command": self.test_command or (self.test_commands[0] if self.test_commands else None),
+            "test_command": self.test_command
+            or (self.test_commands[0] if self.test_commands else None),
             "check_files": self.check_files or self.expected_files,
             "llm_criteria": self.llm_criteria or self.judge_criteria,
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "EvalVerification":
+    def from_dict(cls, data: dict[str, Any]) -> "EvalVerification":
         return cls(
             method=data["method"],
             test_commands=data.get("test_commands", []),
@@ -118,16 +125,17 @@ class EvalVerification:
 @dataclass
 class CustomEvalSet:
     """A collection of evaluation cases from source traces."""
+
     eval_set_id: str
     name: str
     description: str
-    cases: List[EvalCase] = field(default_factory=list)
+    cases: list[EvalCase] = field(default_factory=list)
     generation_mode: str = "manual"  # "replay", "variation", "both", or "manual"
-    source_traces: List[str] = field(default_factory=list)  # List of trace IDs
-    source_trace_id: Optional[str] = None  # Legacy single trace ID
+    source_traces: list[str] = field(default_factory=list)  # List of trace IDs
+    source_trace_id: str | None = None  # Legacy single trace ID
     created_at: datetime = field(default_factory=datetime.now)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "eval_set_id": self.eval_set_id,
             "source_trace_id": self.source_trace_id,
@@ -136,11 +144,11 @@ class CustomEvalSet:
             "description": self.description,
             "generation_mode": self.generation_mode,
             "cases": [c.to_dict() for c in self.cases],
-            "created_at": self.created_at.isoformat()
+            "created_at": self.created_at.isoformat(),
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "CustomEvalSet":
+    def from_dict(cls, data: dict[str, Any]) -> "CustomEvalSet":
         # Handle legacy source_trace_id field
         source_traces = data.get("source_traces", [])
         if not source_traces and data.get("source_trace_id"):
@@ -154,7 +162,11 @@ class CustomEvalSet:
             generation_mode=data.get("generation_mode", "manual"),
             source_traces=source_traces,
             source_trace_id=data.get("source_trace_id"),
-            created_at=datetime.fromisoformat(data["created_at"]) if data.get("created_at") else datetime.now()
+            created_at=(
+                datetime.fromisoformat(data["created_at"])
+                if data.get("created_at")
+                else datetime.now()
+            ),
         )
 
     def save(self, path: Path) -> Path:
@@ -174,21 +186,22 @@ class CustomEvalSet:
 @dataclass
 class EvalCaseResult:
     """Result from running a single eval case."""
+
     case_id: str
     passed: bool
     output: str
-    error: Optional[str] = None
+    error: str | None = None
     duration_ms: float = 0.0
-    details: Dict[str, Any] = field(default_factory=dict)
+    details: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "case_id": self.case_id,
             "passed": self.passed,
             "output": self.output[:1000],  # Truncate for storage
             "error": self.error,
             "duration_ms": self.duration_ms,
-            "details": self.details
+            "details": self.details,
         }
 
 
@@ -203,8 +216,8 @@ class CustomEvalGenerator:
 
     def __init__(
         self,
-        eval_sets_dir: Optional[Path] = None,
-        variation_generator: Optional[Callable[[str], List[str]]] = None
+        eval_sets_dir: Path | None = None,
+        variation_generator: Callable[[str], list[str]] | None = None,
     ):
         """
         Initialize the generator.
@@ -216,7 +229,7 @@ class CustomEvalGenerator:
         self.eval_sets_dir = eval_sets_dir or Path("data/eval_sets")
         self.eval_sets_dir.mkdir(parents=True, exist_ok=True)
         self.variation_generator = variation_generator
-        self._eval_sets: Dict[str, CustomEvalSet] = {}
+        self._eval_sets: dict[str, CustomEvalSet] = {}
         self._load_existing()
 
     def _load_existing(self):
@@ -234,10 +247,7 @@ class CustomEvalGenerator:
         return hashlib.sha256(content.encode()).hexdigest()[:12]
 
     def generate_from_trace(
-        self,
-        trace_data: Dict[str, Any],
-        include_variations: bool = True,
-        max_variations: int = 3
+        self, trace_data: dict[str, Any], include_variations: bool = True, max_variations: int = 3
     ) -> CustomEvalSet:
         """
         Generate an eval set from a gold trace.
@@ -270,7 +280,7 @@ class CustomEvalGenerator:
             prompt=user_prompt,
             expected_behavior=self._summarize_expected_behavior(trace_data),
             verification=verification,
-            difficulty="same"
+            difficulty="same",
         )
         cases.append(replay_case)
 
@@ -286,7 +296,7 @@ class CustomEvalGenerator:
                     expected_behavior=self._adapt_expected_behavior(trace_data, var_type),
                     verification=verification,  # Same verification approach
                     difficulty=difficulty,
-                    variation_type=var_type
+                    variation_type=var_type,
                 )
                 cases.append(var_case)
 
@@ -295,7 +305,7 @@ class CustomEvalGenerator:
             source_trace_id=trace_id,
             name=f"Eval: {user_prompt[:50]}...",
             description=f"Generated from gold trace {trace_id}",
-            cases=cases
+            cases=cases,
         )
 
         # Save and cache
@@ -304,7 +314,7 @@ class CustomEvalGenerator:
 
         return eval_set
 
-    def _infer_verification(self, trace_data: Dict, tool_calls: List[Dict]) -> EvalVerification:
+    def _infer_verification(self, trace_data: dict, tool_calls: list[dict]) -> EvalVerification:
         """Infer verification method from trace contents."""
         # Look for test files or verification patterns
         test_commands = []
@@ -333,23 +343,17 @@ class CustomEvalGenerator:
         # Determine method based on what we found
         if test_commands:
             return EvalVerification(
-                method="test_file",
-                test_commands=test_commands,
-                expected_patterns=expected_patterns
+                method="test_file", test_commands=test_commands, expected_patterns=expected_patterns
             )
         elif expected_files:
-            return EvalVerification(
-                method="file_exists",
-                expected_files=expected_files
-            )
+            return EvalVerification(method="file_exists", expected_files=expected_files)
         else:
             # Fall back to LLM judge
             return EvalVerification(
-                method="llm_judge",
-                judge_criteria="Task completed successfully with working code"
+                method="llm_judge", judge_criteria="Task completed successfully with working code"
             )
 
-    def _summarize_expected_behavior(self, trace_data: Dict) -> str:
+    def _summarize_expected_behavior(self, trace_data: dict) -> str:
         """Summarize what the model should do based on trace."""
         prompt = trace_data.get("user_initial_prompt", "")
         tool_calls = trace_data.get("tool_calls", [])
@@ -367,7 +371,7 @@ class CustomEvalGenerator:
 
         return " | ".join(summary_parts)
 
-    def _adapt_expected_behavior(self, trace_data: Dict, variation_type: str) -> str:
+    def _adapt_expected_behavior(self, trace_data: dict, variation_type: str) -> str:
         """Adapt expected behavior description for a variation."""
         base = self._summarize_expected_behavior(trace_data)
         if variation_type == "paraphrase":
@@ -378,11 +382,7 @@ class CustomEvalGenerator:
             return f"[Adjusted complexity] {base}"
         return base
 
-    def _generate_variations(
-        self,
-        original_prompt: str,
-        max_variations: int
-    ) -> List[tuple]:
+    def _generate_variations(self, original_prompt: str, max_variations: int) -> list[tuple]:
         """
         Generate task variations.
 
@@ -417,8 +417,8 @@ class CustomEvalGenerator:
     def generate_from_traces(
         self,
         name: str,
-        description: Optional[str] = None,
-        trace_ids: Optional[List[str]] = None,
+        description: str | None = None,
+        trace_ids: list[str] | None = None,
         mode: str = "both",  # "replay", "variation", or "both"
         max_cases: int = 50,
         include_failed_traces: bool = False,
@@ -524,24 +524,27 @@ class CustomEvalGenerator:
         eval_set = CustomEvalSet(
             eval_set_id=eval_set_id,
             name=name,
-            description=description or f"Auto-generated eval set ({mode} mode) from {len(source_trace_ids)} traces",
+            description=description
+            or f"Auto-generated eval set ({mode} mode) from {len(source_trace_ids)} traces",
             cases=cases,
             generation_mode=mode,
-            source_traces=source_trace_ids[:len(cases)],  # Track which traces were used
+            source_traces=source_trace_ids[: len(cases)],  # Track which traces were used
         )
 
         # Save and cache
         self._eval_sets[eval_set_id] = eval_set
         eval_set.save(self.eval_sets_dir / f"{eval_set_id}.json")
 
-        logger.info(f"Generated eval set {eval_set_id} with {len(cases)} cases from {len(source_trace_ids)} traces")
+        logger.info(
+            f"Generated eval set {eval_set_id} with {len(cases)} cases from {len(source_trace_ids)} traces"
+        )
         return eval_set
 
-    def list_eval_sets(self) -> List[CustomEvalSet]:
+    def list_eval_sets(self) -> list[CustomEvalSet]:
         """List all eval sets."""
         return list(self._eval_sets.values())
 
-    def get_eval_set(self, eval_set_id: str) -> Optional[CustomEvalSet]:
+    def get_eval_set(self, eval_set_id: str) -> CustomEvalSet | None:
         """Get an eval set by ID."""
         return self._eval_sets.get(eval_set_id)
 
@@ -566,9 +569,9 @@ class CustomEvalRunner:
 
     def __init__(
         self,
-        model_path: Optional[str] = None,
-        model_runner: Optional[Callable[[str], str]] = None,
-        sandbox_executor: Optional[Callable[[str], tuple]] = None
+        model_path: str | None = None,
+        model_runner: Callable[[str], str] | None = None,
+        sandbox_executor: Callable[[str], tuple] | None = None,
     ):
         """
         Initialize the runner.
@@ -587,8 +590,8 @@ class CustomEvalRunner:
         eval_set: CustomEvalSet,
         max_tokens: int = 4096,
         temperature: float = 0.0,
-        progress_callback: Optional[Callable[[int, int, EvalCaseResult], None]] = None
-    ) -> List[EvalCaseResult]:
+        progress_callback: Callable[[int, int, EvalCaseResult], None] | None = None,
+    ) -> list[EvalCaseResult]:
         """
         Run all cases in an eval set (sync version for API).
 
@@ -615,8 +618,8 @@ class CustomEvalRunner:
     async def run_eval_set_async(
         self,
         eval_set: CustomEvalSet,
-        progress_callback: Optional[Callable[[int, int, EvalCaseResult], None]] = None
-    ) -> Dict[str, Any]:
+        progress_callback: Callable[[int, int, EvalCaseResult], None] | None = None,
+    ) -> dict[str, Any]:
         """
         Run all cases in an eval set (async version).
 
@@ -645,7 +648,7 @@ class CustomEvalRunner:
             "total": len(eval_set.cases),
             "pass_rate": (passed / len(eval_set.cases) * 100) if eval_set.cases else 0,
             "results": [r.to_dict() for r in results],
-            "evaluated_at": datetime.now().isoformat()
+            "evaluated_at": datetime.now().isoformat(),
         }
 
     def _run_case_sync(self, case: EvalCase) -> EvalCaseResult:
@@ -663,7 +666,7 @@ class CustomEvalRunner:
                     output="[Model evaluation placeholder - model runner not configured]",
                     error=None,
                     duration_ms=(datetime.now() - start_time).total_seconds() * 1000,
-                    details={"note": "Model runner not configured, returning placeholder pass"}
+                    details={"note": "Model runner not configured, returning placeholder pass"},
                 )
 
             model_output = self.model_runner(case.prompt)
@@ -678,17 +681,13 @@ class CustomEvalRunner:
                 passed=passed,
                 output=model_output,
                 duration_ms=duration,
-                details=details
+                details=details,
             )
 
         except Exception as e:
             duration = (datetime.now() - start_time).total_seconds() * 1000
             return EvalCaseResult(
-                case_id=case.case_id,
-                passed=False,
-                output="",
-                error=str(e),
-                duration_ms=duration
+                case_id=case.case_id, passed=False, output="", error=str(e), duration_ms=duration
             )
 
     def _verify_result_sync(self, case: EvalCase, model_output: str) -> tuple:
@@ -741,7 +740,7 @@ class CustomEvalRunner:
                     case_id=case.case_id,
                     passed=False,
                     output="",
-                    error="No model runner configured"
+                    error="No model runner configured",
                 )
 
             model_output = self.model_runner(case.prompt)
@@ -756,17 +755,13 @@ class CustomEvalRunner:
                 passed=passed,
                 output=model_output,
                 duration_ms=duration,
-                details=details
+                details=details,
             )
 
         except Exception as e:
             duration = (datetime.now() - start_time).total_seconds() * 1000
             return EvalCaseResult(
-                case_id=case.case_id,
-                passed=False,
-                output="",
-                error=str(e),
-                duration_ms=duration
+                case_id=case.case_id, passed=False, output="", error=str(e), duration_ms=duration
             )
 
     async def _verify_result(self, case: EvalCase, model_output: str) -> tuple:
@@ -842,10 +837,10 @@ class CustomEvalRunner:
 
 
 # Singleton generator instance
-_generator: Optional[CustomEvalGenerator] = None
+_generator: CustomEvalGenerator | None = None
 
 
-def get_eval_generator(eval_sets_dir: Optional[Path] = None) -> CustomEvalGenerator:
+def get_eval_generator(eval_sets_dir: Path | None = None) -> CustomEvalGenerator:
     """Get the global CustomEvalGenerator instance."""
     global _generator
     if _generator is None:

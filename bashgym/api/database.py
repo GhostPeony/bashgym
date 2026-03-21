@@ -10,7 +10,6 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
 
 # Default: data/bashgym.db (inside Fly persistent volume mount)
 _DB_PATH: Path = Path("data/bashgym.db")
@@ -73,9 +72,9 @@ def get_conn():
 def upsert_user(
     github_id: int,
     username: str,
-    display_name: Optional[str] = None,
-    avatar_url: Optional[str] = None,
-    email: Optional[str] = None,
+    display_name: str | None = None,
+    avatar_url: str | None = None,
+    email: str | None = None,
 ) -> int:
     """Insert or update a GitHub user, return the user ID."""
     with get_conn() as conn:
@@ -92,9 +91,7 @@ def upsert_user(
             """,
             (github_id, username, display_name, avatar_url, email),
         )
-        row = conn.execute(
-            "SELECT id FROM users WHERE github_id = ?", (github_id,)
-        ).fetchone()
+        row = conn.execute("SELECT id FROM users WHERE github_id = ?", (github_id,)).fetchone()
         return row["id"]
 
 
@@ -103,7 +100,7 @@ def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-def create_session(user_id: int, user_agent: Optional[str] = None) -> str:
+def create_session(user_id: int, user_agent: str | None = None) -> str:
     """Create a new session, return the raw token (caller sets cookie)."""
     raw_token = secrets.token_urlsafe(32)
     token_hash = _hash_token(raw_token)
@@ -120,7 +117,7 @@ def create_session(user_id: int, user_agent: Optional[str] = None) -> str:
     return raw_token
 
 
-def get_session_user(token: str) -> Optional[dict]:
+def get_session_user(token: str) -> dict | None:
     """Look up a session token and return the user dict, or None if invalid/expired."""
     token_hash = _hash_token(token)
     now = datetime.now(timezone.utc).isoformat()
@@ -153,7 +150,5 @@ def cleanup_expired_sessions() -> int:
     """Delete expired sessions, return count removed."""
     now = datetime.now(timezone.utc).isoformat()
     with get_conn() as conn:
-        cursor = conn.execute(
-            "DELETE FROM sessions WHERE expires_at <= ?", (now,)
-        )
+        cursor = conn.execute("DELETE FROM sessions WHERE expires_at <= ?", (now,))
         return cursor.rowcount

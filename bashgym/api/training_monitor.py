@@ -7,14 +7,16 @@ output directory for checkpoint progress and reads HuggingFace's
 trainer_state.json to extract metrics.
 """
 
-import json
 import asyncio
+import json
 import logging
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any
 
 from bashgym.api.training_state import (
-    TrainingRunState, is_process_alive, update_run_state, MAX_LOG_LINES,
+    TrainingRunState,
+    is_process_alive,
+    update_run_state,
 )
 
 logger = logging.getLogger(__name__)
@@ -26,7 +28,7 @@ class OrphanedTrainingMonitor:
     """Monitors an orphaned training process by watching its output directory."""
 
     def __init__(self):
-        self._tasks: Dict[str, asyncio.Task] = {}
+        self._tasks: dict[str, asyncio.Task] = {}
 
     def start_monitoring(
         self,
@@ -73,7 +75,7 @@ class OrphanedTrainingMonitor:
         output_dir = Path(state.output_dir)
         seen_checkpoints: set = set()
         last_step = 0
-        last_loss: Optional[float] = None
+        last_loss: float | None = None
 
         # Seed seen checkpoints from what already exists
         for cp in output_dir.glob("checkpoint-*"):
@@ -119,7 +121,9 @@ class OrphanedTrainingMonitor:
                 if final_metrics and progress_callback:
                     await progress_callback(final_metrics)
             else:
-                logger.warning(f"Training {state.run_id} process exited without final/ dir — marking failed")
+                logger.warning(
+                    f"Training {state.run_id} process exited without final/ dir — marking failed"
+                )
                 update_run_state(state.output_dir, status="failed")
 
         except asyncio.CancelledError:
@@ -129,9 +133,7 @@ class OrphanedTrainingMonitor:
         finally:
             self._tasks.pop(state.run_id, None)
 
-    def _scrape_metrics(
-        self, output_dir: Path, seen_checkpoints: set
-    ) -> Optional[Dict[str, Any]]:
+    def _scrape_metrics(self, output_dir: Path, seen_checkpoints: set) -> dict[str, Any] | None:
         """Extract metrics from the latest checkpoint's trainer_state.json."""
         # Find all checkpoints
         checkpoints = sorted(

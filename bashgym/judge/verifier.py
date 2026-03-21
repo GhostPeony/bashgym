@@ -7,16 +7,13 @@ Supports pytest, bats, and custom verification scripts.
 Extended with NeMo Evaluator integration for comprehensive model evaluation.
 """
 
-import os
 import json
 import subprocess
-import shutil
-import asyncio
-from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List, Tuple, TYPE_CHECKING
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from .evaluator import EvaluatorClient
@@ -24,6 +21,7 @@ if TYPE_CHECKING:
 
 class VerificationStatus(Enum):
     """Status of a verification run."""
+
     PASSED = "passed"
     FAILED = "failed"
     ERROR = "error"
@@ -34,27 +32,21 @@ class VerificationStatus(Enum):
 @dataclass
 class VerificationConfig:
     """Configuration for the verifier."""
-    
+
     # Test execution settings
     timeout: int = 300  # 5 minutes
     max_retries: int = 1
-    
+
     # Test discovery
-    test_patterns: List[str] = field(default_factory=lambda: [
-        "test_*.py",
-        "*_test.py",
-        "tests/*.py",
-        "verify.sh",
-        "verify.py"
-    ])
-    
+    test_patterns: list[str] = field(
+        default_factory=lambda: ["test_*.py", "*_test.py", "tests/*.py", "verify.sh", "verify.py"]
+    )
+
     # Pytest settings
-    pytest_args: List[str] = field(default_factory=lambda: [
-        "-v",
-        "--tb=short",
-        "-x"  # Stop on first failure
-    ])
-    
+    pytest_args: list[str] = field(
+        default_factory=lambda: ["-v", "--tb=short", "-x"]  # Stop on first failure
+    )
+
     # Output settings
     capture_output: bool = True
     save_results: bool = True
@@ -64,7 +56,7 @@ class VerificationConfig:
 @dataclass
 class VerificationResult:
     """Result of a verification run."""
-    
+
     task_id: str
     status: VerificationStatus
     exit_code: int
@@ -74,15 +66,15 @@ class VerificationResult:
     duration_seconds: float
     stdout: str
     stderr: str
-    test_details: List[Dict[str, Any]] = field(default_factory=list)
-    error_message: Optional[str] = None
-    
+    test_details: list[dict[str, Any]] = field(default_factory=list)
+    error_message: str | None = None
+
     @property
     def success(self) -> bool:
         """Check if verification passed."""
         return self.status == VerificationStatus.PASSED
-    
-    def to_dict(self) -> Dict[str, Any]:
+
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "task_id": self.task_id,
@@ -95,7 +87,7 @@ class VerificationResult:
             "stdout": self.stdout,
             "stderr": self.stderr,
             "test_details": self.test_details,
-            "error_message": self.error_message
+            "error_message": self.error_message,
         }
 
 
@@ -115,8 +107,8 @@ class Verifier:
 
     def __init__(
         self,
-        config: Optional[VerificationConfig] = None,
-        evaluator_client: Optional["EvaluatorClient"] = None
+        config: VerificationConfig | None = None,
+        evaluator_client: Optional["EvaluatorClient"] = None,
     ):
         """Initialize the verifier.
 
@@ -126,33 +118,33 @@ class Verifier:
         """
         self.config = config or VerificationConfig()
         self.evaluator_client = evaluator_client
-    
+
     def verify(
         self,
         workspace_path: Path,
         task_id: str,
         sandbox_manager=None,
-        sandbox_id: Optional[str] = None
+        sandbox_id: str | None = None,
     ) -> VerificationResult:
         """
         Run verification tests for a task.
-        
+
         Args:
             workspace_path: Path to the workspace
             task_id: Unique task identifier
             sandbox_manager: Optional sandbox manager for isolated execution
             sandbox_id: Optional sandbox ID for isolated execution
-            
+
         Returns:
             VerificationResult with test outcomes
         """
         start_time = datetime.now(timezone.utc)
         workspace = Path(workspace_path)
-        
+
         # Discover verification method
         verify_script = self._find_verify_script(workspace)
         test_files = self._find_test_files(workspace)
-        
+
         if verify_script:
             # Run custom verification script
             result = self._run_verify_script(
@@ -160,9 +152,7 @@ class Verifier:
             )
         elif test_files:
             # Run pytest
-            result = self._run_pytest(
-                test_files, workspace, task_id, sandbox_manager, sandbox_id
-            )
+            result = self._run_pytest(test_files, workspace, task_id, sandbox_manager, sandbox_id)
         else:
             # No tests found - skip verification
             result = VerificationResult(
@@ -174,40 +164,40 @@ class Verifier:
                 total_tests=0,
                 duration_seconds=0,
                 stdout="No verification tests found",
-                stderr=""
+                stderr="",
             )
-        
+
         # Calculate duration
         end_time = datetime.now(timezone.utc)
         result.duration_seconds = (end_time - start_time).total_seconds()
-        
+
         # Create verification flag file
         self._create_verification_flag(workspace, result)
-        
+
         # Save results
         if self.config.save_results:
             self._save_results(workspace, result)
-        
+
         return result
-    
-    def _find_verify_script(self, workspace: Path) -> Optional[Path]:
+
+    def _find_verify_script(self, workspace: Path) -> Path | None:
         """Find a custom verification script."""
         for script_name in ["verify.sh", "verify.py", "verification.sh"]:
             script_path = workspace / script_name
             if script_path.exists():
                 return script_path
         return None
-    
-    def _find_test_files(self, workspace: Path) -> List[Path]:
+
+    def _find_test_files(self, workspace: Path) -> list[Path]:
         """Find test files in the workspace."""
         test_files = []
-        
+
         for pattern in self.config.test_patterns:
             if pattern.endswith(".sh"):
                 continue  # Skip shell scripts, handled separately
             test_files.extend(workspace.glob(pattern))
             test_files.extend(workspace.glob(f"**/{pattern}"))
-        
+
         # Deduplicate and filter
         seen = set()
         unique_files = []
@@ -215,16 +205,16 @@ class Verifier:
             if f not in seen and f.is_file():
                 seen.add(f)
                 unique_files.append(f)
-        
+
         return unique_files
-    
+
     def _run_verify_script(
         self,
         script_path: Path,
         workspace: Path,
         task_id: str,
         sandbox_manager=None,
-        sandbox_id: Optional[str] = None
+        sandbox_id: str | None = None,
     ) -> VerificationResult:
         """Run a custom verification script."""
         try:
@@ -235,13 +225,11 @@ class Verifier:
                 cmd = ["python", str(script_path)]
             else:
                 cmd = [str(script_path)]
-            
+
             # Execute in sandbox if available
             if sandbox_manager and sandbox_id:
                 result = sandbox_manager.execute_command(
-                    sandbox_id,
-                    " ".join(cmd),
-                    timeout=self.config.timeout
+                    sandbox_id, " ".join(cmd), timeout=self.config.timeout
                 )
                 exit_code = result["exit_code"]
                 stdout = result["stdout"]
@@ -253,12 +241,12 @@ class Verifier:
                     cwd=str(workspace),
                     capture_output=True,
                     text=True,
-                    timeout=self.config.timeout
+                    timeout=self.config.timeout,
                 )
                 exit_code = process.returncode
                 stdout = process.stdout
                 stderr = process.stderr
-            
+
             # Determine status
             if exit_code == 0:
                 status = VerificationStatus.PASSED
@@ -268,7 +256,7 @@ class Verifier:
                 status = VerificationStatus.FAILED
                 passed = 0
                 failed = 1
-            
+
             return VerificationResult(
                 task_id=task_id,
                 status=status,
@@ -278,9 +266,9 @@ class Verifier:
                 total_tests=1,
                 duration_seconds=0,
                 stdout=stdout,
-                stderr=stderr
+                stderr=stderr,
             )
-            
+
         except subprocess.TimeoutExpired:
             return VerificationResult(
                 task_id=task_id,
@@ -292,7 +280,7 @@ class Verifier:
                 duration_seconds=self.config.timeout,
                 stdout="",
                 stderr="Verification timed out",
-                error_message="Timeout"
+                error_message="Timeout",
             )
         except Exception as e:
             return VerificationResult(
@@ -305,16 +293,16 @@ class Verifier:
                 duration_seconds=0,
                 stdout="",
                 stderr=str(e),
-                error_message=str(e)
+                error_message=str(e),
             )
-    
+
     def _run_pytest(
         self,
-        test_files: List[Path],
+        test_files: list[Path],
         workspace: Path,
         task_id: str,
         sandbox_manager=None,
-        sandbox_id: Optional[str] = None
+        sandbox_id: str | None = None,
     ) -> VerificationResult:
         """Run pytest on test files."""
         try:
@@ -323,13 +311,11 @@ class Verifier:
             cmd.extend(self.config.pytest_args)
             cmd.extend(["--json-report", "--json-report-file=.pytest_report.json"])
             cmd.extend([str(f.relative_to(workspace)) for f in test_files[:10]])  # Limit files
-            
+
             # Execute
             if sandbox_manager and sandbox_id:
                 result = sandbox_manager.execute_command(
-                    sandbox_id,
-                    " ".join(cmd),
-                    timeout=self.config.timeout
+                    sandbox_id, " ".join(cmd), timeout=self.config.timeout
                 )
                 exit_code = result["exit_code"]
                 stdout = result["stdout"]
@@ -340,23 +326,21 @@ class Verifier:
                     cwd=str(workspace),
                     capture_output=True,
                     text=True,
-                    timeout=self.config.timeout
+                    timeout=self.config.timeout,
                 )
                 exit_code = process.returncode
                 stdout = process.stdout
                 stderr = process.stderr
-            
+
             # Parse pytest output
-            passed, failed, total, details = self._parse_pytest_output(
-                workspace, stdout
-            )
-            
+            passed, failed, total, details = self._parse_pytest_output(workspace, stdout)
+
             # Determine status
             if exit_code == 0:
                 status = VerificationStatus.PASSED
             else:
                 status = VerificationStatus.FAILED
-            
+
             return VerificationResult(
                 task_id=task_id,
                 status=status,
@@ -367,9 +351,9 @@ class Verifier:
                 duration_seconds=0,
                 stdout=stdout,
                 stderr=stderr,
-                test_details=details
+                test_details=details,
             )
-            
+
         except subprocess.TimeoutExpired:
             return VerificationResult(
                 task_id=task_id,
@@ -381,7 +365,7 @@ class Verifier:
                 duration_seconds=self.config.timeout,
                 stdout="",
                 stderr="Pytest timed out",
-                error_message="Timeout"
+                error_message="Timeout",
             )
         except Exception as e:
             return VerificationResult(
@@ -394,79 +378,79 @@ class Verifier:
                 duration_seconds=0,
                 stdout="",
                 stderr=str(e),
-                error_message=str(e)
+                error_message=str(e),
             )
-    
+
     def _parse_pytest_output(
-        self,
-        workspace: Path,
-        stdout: str
-    ) -> Tuple[int, int, int, List[Dict[str, Any]]]:
+        self, workspace: Path, stdout: str
+    ) -> tuple[int, int, int, list[dict[str, Any]]]:
         """Parse pytest output for test results."""
         passed = 0
         failed = 0
         total = 0
         details = []
-        
+
         # Try to read JSON report
         report_path = workspace / ".pytest_report.json"
         if report_path.exists():
             try:
                 with open(report_path) as f:
                     report = json.load(f)
-                
+
                 summary = report.get("summary", {})
                 passed = summary.get("passed", 0)
                 failed = summary.get("failed", 0)
                 total = summary.get("total", passed + failed)
-                
+
                 for test in report.get("tests", []):
-                    details.append({
-                        "name": test.get("nodeid"),
-                        "outcome": test.get("outcome"),
-                        "duration": test.get("duration")
-                    })
-                
+                    details.append(
+                        {
+                            "name": test.get("nodeid"),
+                            "outcome": test.get("outcome"),
+                            "duration": test.get("duration"),
+                        }
+                    )
+
                 return passed, failed, total, details
-            except:
+            except Exception:
                 pass
-        
+
         # Fallback: parse stdout
         for line in stdout.split("\n"):
             if " passed" in line:
                 try:
                     passed = int(line.split()[0])
-                except:
+                except Exception:
                     pass
             if " failed" in line:
                 try:
                     failed = int(line.split()[0])
-                except:
+                except Exception:
                     pass
-        
+
         total = passed + failed
         return passed, failed, total, details
-    
-    def _create_verification_flag(
-        self,
-        workspace: Path,
-        result: VerificationResult
-    ) -> None:
+
+    def _create_verification_flag(self, workspace: Path, result: VerificationResult) -> None:
         """Create verification flag file based on result."""
         if result.success:
             flag_path = workspace / ".verification_passed"
-            flag_path.write_text(json.dumps({
-                "task_id": result.task_id,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "passed_tests": result.passed_tests,
-                "total_tests": result.total_tests
-            }))
+            flag_path.write_text(
+                json.dumps(
+                    {
+                        "task_id": result.task_id,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "passed_tests": result.passed_tests,
+                        "total_tests": result.total_tests,
+                    }
+                )
+            )
         else:
             # Remove any existing flag
             flag_path = workspace / ".verification_passed"
             if flag_path.exists():
                 flag_path.unlink()
-    
+
     def _save_results(self, workspace: Path, result: VerificationResult) -> None:
         """Save verification results to file."""
         results_dir = workspace / self.config.results_dir
@@ -476,11 +460,8 @@ class Verifier:
         result_file.write_text(json.dumps(result.to_dict(), indent=2))
 
     async def evaluate_with_llm_judge(
-        self,
-        task_prompt: str,
-        agent_response: str,
-        metrics: Optional[List[str]] = None
-    ) -> Dict[str, Any]:
+        self, task_prompt: str, agent_response: str, metrics: list[str] | None = None
+    ) -> dict[str, Any]:
         """
         Evaluate an agent response using LLM-as-Judge.
 
@@ -499,25 +480,21 @@ class Verifier:
 
         try:
             scores = await self.evaluator_client.judge_response(
-                prompt=task_prompt,
-                response=agent_response,
-                metrics=metrics
+                prompt=task_prompt, response=agent_response, metrics=metrics
             )
 
             return {
                 "scores": {s.metric: s.score for s in scores},
                 "details": [s.to_dict() for s in scores],
-                "average_score": sum(s.score for s in scores) / max(len(scores), 1)
+                "average_score": sum(s.score for s in scores) / max(len(scores), 1),
             }
 
         except Exception as e:
             return {"error": str(e)}
 
     async def evaluate_agentic_trace(
-        self,
-        trace: List[Dict[str, Any]],
-        task_description: str
-    ) -> Dict[str, float]:
+        self, trace: list[dict[str, Any]], task_description: str
+    ) -> dict[str, float]:
         """
         Evaluate an agentic execution trace for quality metrics.
 
@@ -535,18 +512,15 @@ class Verifier:
 
         try:
             return await self.evaluator_client.evaluate_agentic_trace(
-                trace=trace,
-                task_description=task_description
+                trace=trace, task_description=task_description
             )
 
         except Exception as e:
             return {"error": -1.0, "message": str(e)}
 
     async def run_benchmark_evaluation(
-        self,
-        model_path: str,
-        benchmarks: Optional[List[str]] = None
-    ) -> List[Dict[str, Any]]:
+        self, model_path: str, benchmarks: list[str] | None = None
+    ) -> list[dict[str, Any]]:
         """
         Run benchmark evaluation on a model.
 
@@ -564,8 +538,7 @@ class Verifier:
 
         try:
             results = await self.evaluator_client.evaluate_model(
-                model_path=model_path,
-                benchmarks=benchmarks
+                model_path=model_path, benchmarks=benchmarks
             )
             return [r.to_dict() for r in results]
 

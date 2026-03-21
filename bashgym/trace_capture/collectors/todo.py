@@ -17,7 +17,6 @@ import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
 
 from .base import (
     BaseCollector,
@@ -58,7 +57,7 @@ class TodoCollector(BaseCollector):
     def _parse_filename(
         self,
         filename: str,
-    ) -> Tuple[Optional[str], Optional[str]]:
+    ) -> tuple[str | None, str | None]:
         """Extract session_id and agent_id from a todo filename.
 
         Parameters
@@ -79,8 +78,8 @@ class TodoCollector(BaseCollector):
 
     def _find_todo_files(
         self,
-        since: Optional[str] = None,
-    ) -> List[Tuple[Path, str, str]]:
+        since: str | None = None,
+    ) -> list[tuple[Path, str, str]]:
         """Find all non-empty todo JSON files in the todos directory.
 
         Parameters
@@ -99,14 +98,14 @@ class TodoCollector(BaseCollector):
             return []
 
         # Parse the optional since timestamp
-        since_dt: Optional[datetime] = None
+        since_dt: datetime | None = None
         if since:
             try:
                 since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
             except ValueError:
                 since_dt = None
 
-        results: List[Tuple[Path, str, str]] = []
+        results: list[tuple[Path, str, str]] = []
 
         for todo_file in todos_dir.glob("*.json"):
             if not todo_file.is_file():
@@ -137,7 +136,7 @@ class TodoCollector(BaseCollector):
                 data = json.loads(content)
                 if not isinstance(data, list) or len(data) == 0:
                     continue
-            except (json.JSONDecodeError, IOError, OSError, UnicodeDecodeError):
+            except (json.JSONDecodeError, OSError, UnicodeDecodeError):
                 continue
 
             results.append((todo_file, session_id, agent_id))
@@ -149,7 +148,7 @@ class TodoCollector(BaseCollector):
         filepath: Path,
         session_id: str,
         agent_id: str,
-    ) -> Optional[TodoRecord]:
+    ) -> TodoRecord | None:
         """Parse a single todo JSON file into a TodoRecord.
 
         Parameters
@@ -169,7 +168,7 @@ class TodoCollector(BaseCollector):
         try:
             content = filepath.read_text(encoding="utf-8")
             data = json.loads(content)
-        except (json.JSONDecodeError, IOError, OSError, UnicodeDecodeError):
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError):
             return None
 
         if not isinstance(data, list) or len(data) == 0:
@@ -178,12 +177,10 @@ class TodoCollector(BaseCollector):
         # Count statuses
         total_tasks = len(data)
         completed_tasks = sum(
-            1 for task in data
-            if isinstance(task, dict) and task.get("status") == "completed"
+            1 for task in data if isinstance(task, dict) and task.get("status") == "completed"
         )
         pending_tasks = sum(
-            1 for task in data
-            if isinstance(task, dict) and task.get("status") == "pending"
+            1 for task in data if isinstance(task, dict) and task.get("status") == "pending"
         )
 
         # Build timestamp from file modification time
@@ -210,8 +207,8 @@ class TodoCollector(BaseCollector):
 
     def scan(
         self,
-        since: Optional[str] = None,
-        project_filter: Optional[str] = None,
+        since: str | None = None,
+        project_filter: str | None = None,
     ) -> CollectorScanResult:
         """Scan for non-empty todo files without collecting anything."""
         files = self._find_todo_files(since=since)
@@ -238,7 +235,7 @@ class TodoCollector(BaseCollector):
             estimated_size_bytes=estimated_bytes,
         )
 
-    def collect(self, session_id: str) -> List[TodoRecord]:
+    def collect(self, session_id: str) -> list[TodoRecord]:
         """Collect todo records matching a specific session_id.
 
         Parameters
@@ -251,7 +248,7 @@ class TodoCollector(BaseCollector):
         list of TodoRecord
         """
         files = self._find_todo_files()
-        records: List[TodoRecord] = []
+        records: list[TodoRecord] = []
 
         for filepath, file_session_id, agent_id in files:
             if file_session_id != session_id:
@@ -265,8 +262,8 @@ class TodoCollector(BaseCollector):
 
     def collect_all(
         self,
-        since: Optional[str] = None,
-        project_filter: Optional[str] = None,
+        since: str | None = None,
+        project_filter: str | None = None,
     ) -> CollectorBatchResult:
         """Collect all uncollected, non-empty todo records.
 
@@ -278,8 +275,8 @@ class TodoCollector(BaseCollector):
 
         collected = 0
         skipped = 0
-        errors: List[str] = []
-        records: List[TodoRecord] = []
+        errors: list[str] = []
+        records: list[TodoRecord] = []
 
         for filepath, session_id, agent_id in files:
             dedup_key = filepath.stem

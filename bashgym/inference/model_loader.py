@@ -5,10 +5,9 @@ Loads models from ~/.bashgym/models/{run_id}/ for inference.
 Supports merged models, LoRA adapters, and GGUF exports.
 """
 
-from pathlib import Path
-from dataclasses import dataclass
-from typing import Optional, Union
 import logging
+from dataclasses import dataclass
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +15,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class InferenceConfig:
     """Configuration for model inference."""
+
     max_new_tokens: int = 512
     temperature: float = 0.2
     top_p: float = 0.95
@@ -33,7 +33,7 @@ class ModelLoader:
     - GGUF exports (quantized models in exported_gguf/)
     """
 
-    def __init__(self, model_path: Union[str, Path], config: Optional[InferenceConfig] = None):
+    def __init__(self, model_path: str | Path, config: InferenceConfig | None = None):
         """
         Initialize the model loader.
 
@@ -47,7 +47,7 @@ class ModelLoader:
         self.tokenizer = None
         self._loaded = False
 
-    def _find_model_dir(self) -> Optional[Path]:
+    def _find_model_dir(self) -> Path | None:
         """Find the model directory to load from."""
         # Priority order: merged > final > lora_adapters
         candidates = [
@@ -65,14 +65,14 @@ class ModelLoader:
 
         return None
 
-    def _find_lora_dir(self) -> Optional[Path]:
+    def _find_lora_dir(self) -> Path | None:
         """Find LoRA adapter directory if available."""
         lora_dir = self.model_path / "lora_adapters"
         if lora_dir.exists() and (lora_dir / "adapter_config.json").exists():
             return lora_dir
         return None
 
-    def load(self, device: Optional[str] = None) -> "ModelLoader":
+    def load(self, device: str | None = None) -> "ModelLoader":
         """
         Load the model for inference.
 
@@ -119,12 +119,12 @@ class ModelLoader:
                 from peft import PeftModel
             except ImportError:
                 raise ImportError(
-                    "peft required for LoRA adapter loading. "
-                    "Install with: pip install peft"
+                    "peft required for LoRA adapter loading. " "Install with: pip install peft"
                 )
 
             # Need base model path from adapter config
             import json
+
             adapter_config = json.loads((lora_dir / "adapter_config.json").read_text())
             base_model_name = adapter_config.get("base_model_name_or_path", "")
 
@@ -134,7 +134,7 @@ class ModelLoader:
             base_model = AutoModelForCausalLM.from_pretrained(
                 base_model_name,
                 torch_dtype=torch.float16 if device != "cpu" else torch.float32,
-                device_map=device
+                device_map=device,
             )
             self.model = PeftModel.from_pretrained(base_model, lora_dir)
         else:
@@ -143,7 +143,7 @@ class ModelLoader:
                 model_dir,
                 torch_dtype=torch.float16 if device != "cpu" else torch.float32,
                 device_map=device,
-                trust_remote_code=True
+                trust_remote_code=True,
             )
 
         self.model.eval()
@@ -155,9 +155,9 @@ class ModelLoader:
     def generate(
         self,
         prompt: str,
-        max_new_tokens: Optional[int] = None,
-        temperature: Optional[float] = None,
-        stop_sequences: Optional[list] = None
+        max_new_tokens: int | None = None,
+        temperature: float | None = None,
+        stop_sequences: list | None = None,
     ) -> str:
         """
         Generate text from a prompt.
@@ -181,11 +181,7 @@ class ModelLoader:
 
         # Tokenize input
         inputs = self.tokenizer(
-            prompt,
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-            max_length=4096
+            prompt, return_tensors="pt", padding=True, truncation=True, max_length=4096
         ).to(self.model.device)
 
         # Generate
@@ -217,9 +213,9 @@ class ModelLoader:
     def batch_generate(
         self,
         prompts: list,
-        max_new_tokens: Optional[int] = None,
-        temperature: Optional[float] = None,
-        batch_size: int = 4
+        max_new_tokens: int | None = None,
+        temperature: float | None = None,
+        batch_size: int = 4,
     ) -> list:
         """
         Generate text for multiple prompts.
@@ -235,11 +231,8 @@ class ModelLoader:
         """
         results = []
         for i in range(0, len(prompts), batch_size):
-            batch = prompts[i:i + batch_size]
-            batch_results = [
-                self.generate(p, max_new_tokens, temperature)
-                for p in batch
-            ]
+            batch = prompts[i : i + batch_size]
+            batch_results = [self.generate(p, max_new_tokens, temperature) for p in batch]
             results.extend(batch_results)
         return results
 
@@ -256,6 +249,7 @@ class ModelLoader:
         # Clear GPU cache if using CUDA
         try:
             import torch
+
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
         except ImportError:

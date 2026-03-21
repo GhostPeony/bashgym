@@ -5,7 +5,6 @@ import logging
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field
@@ -14,10 +13,7 @@ from bashgym.factory.security_ingester import (
     ConversionMode,
     DatasetType,
     IngestionConfig,
-    IngestionResult,
-    SecurityDomain,
     SecurityIngester,
-    DATASET_DOMAINS,
 )
 
 logger = logging.getLogger(__name__)
@@ -29,15 +25,19 @@ router = APIRouter(prefix="/api/security", tags=["security"])
 # Request/Response Models
 # =============================================================================
 
+
 class SecurityIngestRequest(BaseModel):
     """Request to start a security dataset ingestion job."""
-    dataset_type: str = Field(..., description="Dataset type: ember, phishtank, urlhaus, malwarebazaar, cic_ids")
+
+    dataset_type: str = Field(
+        ..., description="Dataset type: ember, phishtank, urlhaus, malwarebazaar, cic_ids"
+    )
     input_path: str = Field(..., description="Path to the dataset file")
     mode: str = Field("direct", description="Conversion mode: direct or enriched")
-    max_samples: Optional[int] = Field(None, description="Maximum samples to process")
+    max_samples: int | None = Field(None, description="Maximum samples to process")
     balance_classes: bool = Field(True, description="Balance malicious/benign classes")
     benign_ratio: float = Field(0.3, ge=0.0, le=1.0, description="Target ratio of benign samples")
-    output_dir: Optional[str] = Field(None, description="Output directory for JSONL files")
+    output_dir: str | None = Field(None, description="Output directory for JSONL files")
     train_split: float = Field(0.9, ge=0.5, le=1.0, description="Training set proportion")
     # Enrichment settings
     enrichment_provider: str = Field("anthropic", description="LLM provider for enriched mode")
@@ -50,13 +50,14 @@ class SecurityIngestRequest(BaseModel):
                 "input_path": "/data/phishtank/online-valid.json",
                 "mode": "direct",
                 "max_samples": 1000,
-                "balance_classes": True
+                "balance_classes": True,
             }
         }
 
 
 class SecurityIngestResponse(BaseModel):
     """Response from starting an ingestion job."""
+
     job_id: str
     status: str
     message: str
@@ -64,44 +65,47 @@ class SecurityIngestResponse(BaseModel):
 
 class SecurityJobStatus(BaseModel):
     """Status of an ingestion job."""
+
     job_id: str
     status: str  # queued, running, completed, failed
     dataset_type: str
     mode: str
     created_at: str
-    completed_at: Optional[str] = None
+    completed_at: str | None = None
     # Result fields (populated on completion)
     total_samples_read: int = 0
     examples_generated: int = 0
-    train_path: Optional[str] = None
-    val_path: Optional[str] = None
+    train_path: str | None = None
+    val_path: str | None = None
     train_count: int = 0
     val_count: int = 0
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class DatasetInfo(BaseModel):
     """Metadata about a supported dataset."""
+
     dataset_type: str
     name: str
     domain: str
     description: str
-    input_formats: List[str]
-    example_sources: List[str]
+    input_formats: list[str]
+    example_sources: list[str]
 
 
 # =============================================================================
 # In-Memory Job Storage
 # =============================================================================
 
-ingestion_jobs: Dict[str, Dict] = {}
+ingestion_jobs: dict[str, dict] = {}
 
 
 # =============================================================================
 # API Endpoints
 # =============================================================================
 
-@router.get("/datasets", response_model=List[DatasetInfo])
+
+@router.get("/datasets", response_model=list[DatasetInfo])
 async def list_datasets():
     """List all supported security datasets with metadata."""
     return [
@@ -172,7 +176,8 @@ async def start_ingestion(
             detail="Dataset file not found",
         )
 
-    from bashgym.config import get_settings, get_bashgym_dir
+    from bashgym.config import get_bashgym_dir, get_settings
+
     resolved = input_path.resolve()
     data_dir = Path(get_settings().data.data_dir).resolve()
     bashgym_dir = get_bashgym_dir().resolve()
@@ -239,7 +244,7 @@ async def get_job_status(job_id: str):
     return SecurityJobStatus(**ingestion_jobs[job_id])
 
 
-@router.get("/jobs", response_model=List[SecurityJobStatus])
+@router.get("/jobs", response_model=list[SecurityJobStatus])
 async def list_jobs():
     """List all ingestion jobs."""
     return [SecurityJobStatus(**job) for job in ingestion_jobs.values()]
@@ -248,6 +253,7 @@ async def list_jobs():
 # =============================================================================
 # Background Task
 # =============================================================================
+
 
 async def _run_ingestion(job_id: str, config: IngestionConfig):
     """Execute ingestion in the background."""
@@ -264,16 +270,18 @@ async def _run_ingestion(job_id: str, config: IngestionConfig):
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(None, ingester.ingest_direct)
 
-        ingestion_jobs[job_id].update({
-            "status": "completed",
-            "completed_at": datetime.now(timezone.utc).isoformat(),
-            "total_samples_read": result.total_samples_read,
-            "examples_generated": result.examples_generated,
-            "train_path": result.train_path,
-            "val_path": result.val_path,
-            "train_count": result.train_count,
-            "val_count": result.val_count,
-        })
+        ingestion_jobs[job_id].update(
+            {
+                "status": "completed",
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+                "total_samples_read": result.total_samples_read,
+                "examples_generated": result.examples_generated,
+                "train_path": result.train_path,
+                "val_path": result.val_path,
+                "train_count": result.train_count,
+                "val_count": result.val_count,
+            }
+        )
 
         logger.info(
             f"[Security Ingestion] Job {job_id} completed: "
@@ -282,8 +290,10 @@ async def _run_ingestion(job_id: str, config: IngestionConfig):
 
     except Exception as e:
         logger.error(f"[Security Ingestion] Job {job_id} failed: {e}")
-        ingestion_jobs[job_id].update({
-            "status": "failed",
-            "completed_at": datetime.now(timezone.utc).isoformat(),
-            "error": str(e),
-        })
+        ingestion_jobs[job_id].update(
+            {
+                "status": "failed",
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+                "error": str(e),
+            }
+        )

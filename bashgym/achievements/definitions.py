@@ -4,8 +4,8 @@ Achievement Definitions
 All achievements with their check functions, organized by category.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Tuple, List
 
 from bashgym.achievements.stats_engine import LifetimeStats
 
@@ -15,14 +15,14 @@ class AchievementDef:
     id: str
     name: str
     description: str
-    category: str       # collection, quality, training, factory, mastery
-    rarity: str         # common, uncommon, rare, epic, legendary
-    icon: str           # Lucide icon name
-    points: int         # 10/25/50/100/250 by rarity
-    check: Callable[[LifetimeStats], Tuple[bool, float]]  # (earned, progress 0-1)
+    category: str  # collection, quality, training, factory, mastery
+    rarity: str  # common, uncommon, rare, epic, legendary
+    icon: str  # Lucide icon name
+    points: int  # 10/25/50/100/250 by rarity
+    check: Callable[[LifetimeStats], tuple[bool, float]]  # (earned, progress 0-1)
 
 
-def _threshold(value: float, target: float) -> Tuple[bool, float]:
+def _threshold(value: float, target: float) -> tuple[bool, float]:
     """Helper: check if value >= target, return (earned, progress)."""
     if target <= 0:
         return (True, 1.0)
@@ -31,7 +31,7 @@ def _threshold(value: float, target: float) -> Tuple[bool, float]:
 
 # ── Collection (trace milestones) ────────────────────────────────────
 
-_collection: List[AchievementDef] = [
+_collection: list[AchievementDef] = [
     AchievementDef(
         id="first_steps",
         name="First Steps",
@@ -96,7 +96,7 @@ _collection: List[AchievementDef] = [
 
 # ── Quality (trace quality) ──────────────────────────────────────────
 
-_quality: List[AchievementDef] = [
+_quality: list[AchievementDef] = [
     AchievementDef(
         id="gold_standard",
         name="Gold Standard",
@@ -151,7 +151,7 @@ _quality: List[AchievementDef] = [
 
 # ── Training (model training) ────────────────────────────────────────
 
-_training: List[AchievementDef] = [
+_training: list[AchievementDef] = [
     AchievementDef(
         id="first_training",
         name="First Training",
@@ -170,8 +170,10 @@ _training: List[AchievementDef] = [
         rarity="common",
         icon="GraduationCap",
         points=10,
-        check=lambda s: (s.training.runs_by_strategy.get("sft", 0) >= 1,
-                         min(s.training.runs_by_strategy.get("sft", 0), 1.0)),
+        check=lambda s: (
+            s.training.runs_by_strategy.get("sft", 0) >= 1,
+            min(s.training.runs_by_strategy.get("sft", 0), 1.0),
+        ),
     ),
     AchievementDef(
         id="dpo_practitioner",
@@ -181,8 +183,10 @@ _training: List[AchievementDef] = [
         rarity="uncommon",
         icon="GitCompare",
         points=25,
-        check=lambda s: (s.training.runs_by_strategy.get("dpo", 0) >= 1,
-                         min(s.training.runs_by_strategy.get("dpo", 0), 1.0)),
+        check=lambda s: (
+            s.training.runs_by_strategy.get("dpo", 0) >= 1,
+            min(s.training.runs_by_strategy.get("dpo", 0), 1.0),
+        ),
     ),
     AchievementDef(
         id="grpo_explorer",
@@ -192,8 +196,10 @@ _training: List[AchievementDef] = [
         rarity="uncommon",
         icon="Compass",
         points=25,
-        check=lambda s: (s.training.runs_by_strategy.get("grpo", 0) >= 1,
-                         min(s.training.runs_by_strategy.get("grpo", 0), 1.0)),
+        check=lambda s: (
+            s.training.runs_by_strategy.get("grpo", 0) >= 1,
+            min(s.training.runs_by_strategy.get("grpo", 0), 1.0),
+        ),
     ),
     AchievementDef(
         id="multi_strategist",
@@ -205,7 +211,8 @@ _training: List[AchievementDef] = [
         points=50,
         check=lambda s: (
             all(s.training.runs_by_strategy.get(k, 0) >= 1 for k in ("sft", "dpo", "grpo")),
-            sum(1 for k in ("sft", "dpo", "grpo") if s.training.runs_by_strategy.get(k, 0) >= 1) / 3.0,
+            sum(1 for k in ("sft", "dpo", "grpo") if s.training.runs_by_strategy.get(k, 0) >= 1)
+            / 3.0,
         ),
     ),
     AchievementDef(
@@ -218,7 +225,11 @@ _training: List[AchievementDef] = [
         points=50,
         check=lambda s: (
             s.training.lowest_loss < 1.0 if s.training.lowest_loss != float("inf") else False,
-            min(1.0 / max(s.training.lowest_loss, 0.001), 1.0) if s.training.lowest_loss != float("inf") else 0.0,
+            (
+                min(1.0 / max(s.training.lowest_loss, 0.001), 1.0)
+                if s.training.lowest_loss != float("inf")
+                else 0.0
+            ),
         ),
     ),
     AchievementDef(
@@ -231,14 +242,18 @@ _training: List[AchievementDef] = [
         points=100,
         check=lambda s: (
             s.training.lowest_loss < 0.5 if s.training.lowest_loss != float("inf") else False,
-            min(0.5 / max(s.training.lowest_loss, 0.001), 1.0) if s.training.lowest_loss != float("inf") else 0.0,
+            (
+                min(0.5 / max(s.training.lowest_loss, 0.001), 1.0)
+                if s.training.lowest_loss != float("inf")
+                else 0.0
+            ),
         ),
     ),
 ]
 
 # ── Factory (synthetic data) ─────────────────────────────────────────
 
-_factory: List[AchievementDef] = [
+_factory: list[AchievementDef] = [
     AchievementDef(
         id="first_synthesis",
         name="First Synthesis",
@@ -283,7 +298,7 @@ _factory: List[AchievementDef] = [
 
 # ── Mastery (compound) ───────────────────────────────────────────────
 
-_mastery: List[AchievementDef] = [
+_mastery: list[AchievementDef] = [
     AchievementDef(
         id="full_pipeline",
         name="Full Pipeline",
@@ -293,12 +308,17 @@ _mastery: List[AchievementDef] = [
         icon="Workflow",
         points=50,
         check=lambda s: (
-            s.traces.total >= 1 and s.training.runs_completed >= 1 and s.training.models_exported >= 1,
-            sum([
-                1.0 if s.traces.total >= 1 else 0.0,
-                1.0 if s.training.runs_completed >= 1 else 0.0,
-                1.0 if s.training.models_exported >= 1 else 0.0,
-            ]) / 3.0,
+            s.traces.total >= 1
+            and s.training.runs_completed >= 1
+            and s.training.models_exported >= 1,
+            sum(
+                [
+                    1.0 if s.traces.total >= 1 else 0.0,
+                    1.0 if s.training.runs_completed >= 1 else 0.0,
+                    1.0 if s.training.models_exported >= 1 else 0.0,
+                ]
+            )
+            / 3.0,
         ),
     ),
     AchievementDef(
@@ -323,28 +343,31 @@ _mastery: List[AchievementDef] = [
         icon="RefreshCcw",
         points=250,
         check=lambda s: (
-            (s.traces.gold >= 1 and
-             s.training.total_examples_generated >= 1 and
-             s.training.runs_completed >= 1 and
-             s.training.models_exported >= 1 and
-             s.router.total_routed >= 1 and
-             s.router.student_success_rate > 0.5),
-            sum([
-                1.0 if s.traces.gold >= 1 else 0.0,
-                1.0 if s.training.total_examples_generated >= 1 else 0.0,
-                1.0 if s.training.runs_completed >= 1 else 0.0,
-                1.0 if s.training.models_exported >= 1 else 0.0,
-                1.0 if s.router.total_routed >= 1 else 0.0,
-                1.0 if s.router.student_success_rate > 0.5 else 0.0,
-            ]) / 6.0,
+            (
+                s.traces.gold >= 1
+                and s.training.total_examples_generated >= 1
+                and s.training.runs_completed >= 1
+                and s.training.models_exported >= 1
+                and s.router.total_routed >= 1
+                and s.router.student_success_rate > 0.5
+            ),
+            sum(
+                [
+                    1.0 if s.traces.gold >= 1 else 0.0,
+                    1.0 if s.training.total_examples_generated >= 1 else 0.0,
+                    1.0 if s.training.runs_completed >= 1 else 0.0,
+                    1.0 if s.training.models_exported >= 1 else 0.0,
+                    1.0 if s.router.total_routed >= 1 else 0.0,
+                    1.0 if s.router.student_success_rate > 0.5 else 0.0,
+                ]
+            )
+            / 6.0,
         ),
     ),
 ]
 
 # ── All achievements ─────────────────────────────────────────────────
 
-ACHIEVEMENTS: List[AchievementDef] = (
-    _collection + _quality + _training + _factory + _mastery
-)
+ACHIEVEMENTS: list[AchievementDef] = _collection + _quality + _training + _factory + _mastery
 
 ACHIEVEMENTS_BY_ID = {a.id: a for a in ACHIEVEMENTS}

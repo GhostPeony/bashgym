@@ -199,7 +199,7 @@ See [Training](#training) for details.
 
 - **Strategies**: SFT, DPO, GRPO, RLVR, Distillation
 - **Acceleration**: Unsloth with QLoRA (4-bit quantization) by default
-- **Providers**: Pluggable inference via Anthropic, NVIDIA NIM, and Ollama with auto-discovery and health monitoring
+- **Providers**: Pluggable inference via Anthropic, NVIDIA NIM, and Ollama. Ollama models are auto-discovered at startup — any model you've pulled is immediately available as a Student model
 - **Compute**: Local GPU, remote SSH (e.g. DGX Spark), or HuggingFace cloud
 - **Output**: LoRA adapter, merged weights (16-bit), GGUF (for Ollama/llama.cpp/LM Studio)
 - **Training goals**: Define weighted success criteria and hard/soft constraints instead of optimizing a single loss scalar. The outcome aggregator tracks progress and recommends when to stop, adjust, or continue.

@@ -46,14 +46,17 @@ That's the only required key. NVIDIA and HuggingFace keys are optional.
 
 ## Step 2: Install Trace Capture Hooks (2 minutes)
 
-These hooks silently capture your Claude Code sessions as training data:
+These hooks silently capture sessions from all your AI coding tools as training data:
 
 ```bash
-# Copy hooks to Claude's hooks directory
-cp bashgym/hooks/*.py ~/.claude/hooks/
+# Auto-detect installed tools and install hooks for all of them
+python -m bashgym.trace_capture.setup
+
+# Or bulk-import historical sessions (last 60 days)
+python -m bashgym.trace_capture.setup import-all --days 60
 ```
 
-Verify installation by starting the app and checking the sidebar **Status** section — "Hooks" should show "Installed".
+Or use the dashboard **Settings > Agents** tab for one-click installation. Verify by checking that each configured tool shows "Installed."
 
 ---
 
@@ -121,7 +124,7 @@ The factory segments multi-task sessions into individual training examples, scru
 Open the **Training** dashboard:
 
 1. Select **SFT** (Supervised Fine-Tuning) as the strategy
-2. Choose a base model — `Qwen/Qwen2.5-Coder-1.5B-Instruct` is the default and trains fast
+2. Choose a base model — any HuggingFace model works. `Qwen/Qwen2.5-Coder-1.5B-Instruct` is the default and trains fast
 3. Select which repos to train on (or use all gold traces)
 4. Click **Start Training**
 5. Watch the live loss curve and training logs
@@ -176,8 +179,8 @@ Every week, retrain with your accumulated traces. Each cycle produces a better s
 
 **Port 8003 is already in use:**
 ```bash
-# Windows
-.\kill_api.ps1
+# Windows (PowerShell)
+Get-Process -Name "python" | Where-Object { $_.CommandLine -like "*uvicorn*" } | Stop-Process
 
 # macOS/Linux
 lsof -i :8003 | grep LISTEN
@@ -193,9 +196,9 @@ VITE_WS_URL=ws://localhost:YOUR_PORT/ws
 
 **Hooks show "Not installed":**
 ```bash
-cp bashgym/hooks/*.py ~/.claude/hooks/
+python -m bashgym.trace_capture.setup
 ```
-Or use **Settings > Trace Capture** in the app to install hooks from the UI.
+Or use **Settings > Agents** in the app to install hooks from the UI.
 
 **`npm install` fails:**
 The frontend uses `node-pty` which requires native compilation. Ensure you have:

@@ -24,6 +24,7 @@
 import { useEffect } from 'react'
 import { useTrainingStore, useRouterStore, useTracesStore } from '../stores'
 import { useOrchestratorStore } from '../stores/orchestratorStore'
+import { useAutoResearchStore } from '../stores/autoresearchStore'
 
 type MessageHandler = (data: any) => void
 
@@ -83,6 +84,11 @@ export const MessageTypes = {
   ORCHESTRATION_CANCELLED: 'orchestration:cancelled',
   ORCHESTRATION_TASK_RETRYING: 'orchestration:task:retrying',
   ORCHESTRATION_MERGE_RESULT: 'orchestration:merge:result',
+  // AutoResearch events
+  AUTORESEARCH_EXPERIMENT: 'autoresearch:experiment',
+  AUTORESEARCH_STATUS: 'autoresearch:status',
+  AUTORESEARCH_TRACE_EXPERIMENT: 'autoresearch:trace-experiment',
+  AUTORESEARCH_TRACE_COMPLETE: 'autoresearch:trace-research-complete',
 } as const
 
 class WebSocketService {
@@ -293,6 +299,42 @@ class WebSocketService {
 
       case MessageTypes.ORCHESTRATION_MERGE_RESULT:
         useOrchestratorStore.getState().handleMergeResult(payload)
+        break
+
+      // AutoResearch events
+      case MessageTypes.AUTORESEARCH_EXPERIMENT:
+        useAutoResearchStore.getState().addExperiment({
+          experimentId: payload.experiment_id,
+          totalExperiments: payload.total_experiments,
+          configSnapshot: payload.config_snapshot,
+          metricValue: payload.metric_value,
+          bestMetric: payload.best_metric,
+          improved: payload.improved,
+          durationSeconds: payload.duration_seconds,
+        })
+        break
+
+      case MessageTypes.AUTORESEARCH_STATUS:
+        useAutoResearchStore.getState().setStatus(payload.status)
+        break
+
+      case MessageTypes.AUTORESEARCH_TRACE_EXPERIMENT:
+        useAutoResearchStore.getState().addTraceExperiment({
+          experimentId: payload.experiment_id,
+          totalExperiments: payload.total_experiments,
+          configSnapshot: payload.config_snapshot,
+          examplesGenerated: payload.examples_generated,
+          uniqueRepos: payload.unique_repos,
+          avgExampleLength: payload.avg_example_length,
+          metricValue: payload.metric_value,
+          bestMetric: payload.best_metric,
+          improved: payload.improved,
+          durationSeconds: payload.duration_seconds,
+        })
+        break
+
+      case MessageTypes.AUTORESEARCH_TRACE_COMPLETE:
+        useAutoResearchStore.getState().setTraceStatus(payload.status)
         break
 
       // Connection events

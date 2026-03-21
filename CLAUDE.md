@@ -46,12 +46,11 @@ pytest tests/ -v
 | Layer | Files | Purpose |
 |-------|-------|---------|
 | **Arena** | `sandbox.py`, `agent_runner.py` | Docker sandbox execution, Claude CLI wrapper |
-| **Judge** | `verifier.py`, `semantic_judge.py` | Test execution, LLM-based quality evaluation |
-| **Factory** | `data_factory.py`, `trace_processor.py`, `decision_extractor.py`, `example_generator.py` | Training data synthesis, decision logging |
-| **Gym** | `trainer.py`, `gym_env.py`, `model_router.py`, `training_goal.py`, `prompt_evolver.py` | Training, goal tracking, prompt evolution |
-| **Events** | `events/bus.py`, `events/types.py` | Typed EventBus with WebSocket bridge |
-| **Orchestrator** | `agent.py`, `shared_state.py`, `context_builder.py` | Multi-agent decomposition, shared memory |
+| **Judge** | `verifier.py`, `verify.sh` | Test execution, solution validation |
+| **Factory** | `data_factory.py`, `trace_processor.py`, `example_generator.py` | Training data synthesis from traces |
+| **Gym** | `trainer.py`, `gym_env.py`, `model_router.py` | SFT/DPO/GRPO training, RL environment |
 | **Config** | `settings.py` | Centralized configuration |
+| **Hooks** | `post_tool_use.py`, `session_end.py` | Claude Code instrumentation |
 
 ---
 
@@ -353,13 +352,12 @@ python -c "from settings import get_settings; get_settings().api.validate()"
 bashgym/                 # Core Python package
 ├── api/                 # FastAPI routes, schemas, WebSocket
 ├── arena/               # Docker sandbox, Claude CLI wrapper
-├── events/              # Typed EventBus (bus, types, WebSocket bridge)
-├── judge/               # Verification, semantic judge, evaluator
-├── factory/             # Training data synthesis, decision extractor
-├── gym/                 # Training loop, autoresearch, training goals, prompt evolver
+├── judge/               # Verification and evaluation
+├── factory/             # Training data synthesis
+├── gym/                 # Training loop, autoresearch, model router
 ├── providers/           # Inference providers (Anthropic, NIM, Ollama)
 ├── trace_capture/       # Import traces from Claude, Gemini, Copilot
-├── orchestrator/        # Task decomposition, shared state, context builder
+├── orchestrator/        # Task decomposition and multi-agent dispatch
 ├── pipeline/            # Pipeline config and threshold monitoring
 ├── integrations/        # HuggingFace, NeMo
 ├── agent/               # Memory, tools, skills
@@ -374,9 +372,6 @@ requirements-training.txt # ML dependencies
 Dockerfile.api           # API container
 Dockerfile.web           # Full-stack container
 docker-compose.yml       # Production stack
-    ├── Dockerfile.arena
-    ├── Dockerfile.sandbox
-    └── docker-compose.yml
 ```
 
 ---

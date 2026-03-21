@@ -24,6 +24,7 @@ import { MetricsGrid } from './MetricsGrid'
 import { TrainingConfig } from './TrainingConfig'
 import { SystemInfoPanel } from './SystemInfoPanel'
 import { TrainingLogs } from './TrainingLogs'
+import { AutoResearchPanel } from './AutoResearchPanel'
 import { clsx } from 'clsx'
 
 export function TrainingDashboard() {
@@ -47,13 +48,17 @@ export function TrainingDashboard() {
   const isPaused = currentRun?.status === 'paused'
   const metrics = currentRun?.currentMetrics
 
-  // Fetch repos and trace count on mount
+  // Fetch repos and gold trace count on mount
   useEffect(() => {
     tracesApi.listRepos().then((result) => {
       if (result.ok && result.data) {
         setAvailableRepos(result.data)
-        const totalTraces = result.data.reduce((sum, r) => sum + (r.trace_count || 0), 0)
-        setGoldTraceCount(totalTraces)
+      }
+    })
+    // Get accurate gold count from the trace cache (not repos endpoint)
+    tracesApi.list({ status: 'gold', limit: 1 }).then((result) => {
+      if (result.ok && result.data && !Array.isArray(result.data) && result.data.counts) {
+        setGoldTraceCount(result.data.counts.gold)
       }
     })
   }, [])
@@ -535,6 +540,10 @@ export function TrainingDashboard() {
             )}
           </div>
         )}
+        {/* AutoResearch Panel */}
+        <div className="col-span-12">
+          <AutoResearchPanel />
+        </div>
       </div>
 
       </div>

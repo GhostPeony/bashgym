@@ -1473,7 +1473,7 @@ def create_app() -> FastAPI:
 
         # Aggregate stats
         tool_stats: Dict[str, Dict[str, Any]] = {}  # tool -> {calls, sessions, successes}
-        quality_distribution = {"gold": 0, "silver": 0, "bronze": 0, "rejected": 0}
+        quality_distribution = {"gold": 0, "silver": 0, "bronze": 0, "failed": 0, "pending": 0}
         total_steps = 0
         total_sessions = 0
         total_tokens = 0
@@ -1481,12 +1481,14 @@ def create_app() -> FastAPI:
         quality_scores = []  # for computing avg_quality_score
         source_agg: Dict[str, Dict[str, Any]] = {}  # source_tool -> {traces, steps, tokens}
 
-        # Scan all trace directories
+        # Scan all trace directories (including pending)
+        from bashgym.config import get_bashgym_dir
         dirs_to_scan = [
             (data_dir / "gold_traces", "gold"),
             (data_dir / "silver_traces", "silver"),
             (data_dir / "bronze_traces", "bronze"),
-            (data_dir / "failed_traces", "rejected"),
+            (data_dir / "failed_traces", "failed"),
+            (get_bashgym_dir() / "traces", "pending"),
         ]
 
         for trace_dir, tier in dirs_to_scan:
@@ -1592,7 +1594,7 @@ def create_app() -> FastAPI:
             },
             "training_readiness": {
                 "sft_ready": quality_distribution["gold"],
-                "dpo_pairs_possible": min(quality_distribution["silver"], quality_distribution["rejected"]),
+                "dpo_pairs_possible": min(quality_distribution["silver"], quality_distribution["failed"]),
                 "total_trainable": trainable,
             },
             "source_breakdown": source_breakdown,

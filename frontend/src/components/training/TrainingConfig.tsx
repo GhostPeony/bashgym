@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'react'
 import { X, FolderGit2, Database, Sparkles, Info, Cloud, Monitor, Shield, FileText, Server } from 'lucide-react'
-import type { TrainingConfig as TrainingConfigType, TrainingStrategy, DataSource } from '../../stores'
+import type { TrainingConfig as TrainingConfigType, DataSource } from '../../stores'
+import type { TrainingStrategy } from '../../stores'
 import { tracesApi, securityApi, providersApi, RepoInfo, SecurityDatasetInfo, OllamaModel } from '../../services/api'
 import { useTutorialComplete } from '../../hooks'
 import { clsx } from 'clsx'
+import { DeviceManager } from './DeviceManager'
+import { useDeviceStore } from '../../stores/deviceStore'
 
 type TrainingScope = 'all' | 'selected' | 'single'
 type TrainingBackend = 'local' | 'remote_ssh' | 'nemo'
@@ -24,6 +27,7 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
   const [customModelInput, setCustomModelInput] = useState('')
   const [showCustomModel, setShowCustomModel] = useState(false)
   const { complete: completeTutorialStep } = useTutorialComplete()
+  const { defaultDeviceId, fetchDevices } = useDeviceStore()
 
   const [config, setConfig] = useState<TrainingConfigType>({
     strategy: 'sft',
@@ -32,15 +36,24 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
     epochs: 3,
     batchSize: 1,  // Reduced for 12GB VRAM (uses gradient accumulation)
     learningRate: 2e-5,
+    warmupRatio: 0.1,
+    gradientAccumulationSteps: 8,
+    maxSeqLength: 2048,
+    saveSteps: 100,
+    // LoRA defaults
     loraRank: 16,
     loraAlpha: 32,
-    use4BitQuantization: true,  // QLoRA enabled by default
-    warmupSteps: 100,
-    maxSeqLength: 2048,
+    loraDropout: 0.05,
+    load4Bit: true,  // QLoRA enabled by default
+    // DPO defaults
+    dpoBeta: 0.1,
+    // GRPO defaults
+    grpoNumGenerations: 4,
+    grpoTemperature: 0.7,
     // KD defaults
     teacherModel: 'meta-llama/Llama-3.1-70B-Instruct',
-    temperature: 2.0,
-    kdAlpha: 0.5,
+    teacherTemperature: 2.0,
+    distillationAlpha: 0.5,
     // Security dataset defaults
     securityDatasetType: '',
     securityDatasetPath: '',
@@ -49,7 +62,7 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
     securityBalanceClasses: true
   })
 
-  // Fetch available repos, security datasets, and Ollama models on mount
+  // Fetch available repos, security datasets, Ollama models, and devices on mount
   useEffect(() => {
     tracesApi.listRepos().then((result) => {
       if (result.ok && result.data) {
@@ -66,13 +79,21 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
         setOllamaModels(result.data.models)
       }
     })
-  }, [])
+    fetchDevices()
+  }, [fetchDevices])
+
+  // Sync deviceId when defaultDeviceId changes or backend switches to remote
+  useEffect(() => {
+    if (trainingBackend === 'remote_ssh' && defaultDeviceId) {
+      setConfig(prev => ({ ...prev, deviceId: defaultDeviceId }))
+    }
+  }, [defaultDeviceId, trainingBackend])
 
   const strategies: { value: TrainingStrategy; label: string; description: string }[] = [
     { value: 'sft', label: 'SFT', description: 'Supervised Fine-Tuning' },
     { value: 'dpo', label: 'DPO', description: 'Direct Preference Optimization' },
     { value: 'grpo', label: 'GRPO', description: 'Group Relative Policy Optimization' },
-    { value: 'kd', label: 'KD', description: 'Knowledge Distillation' }
+    { value: 'distillation', label: 'KD', description: 'Knowledge Distillation' },
   ]
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -357,7 +378,7 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
                 type="button"
                 onClick={() => {
                   setTrainingBackend('remote_ssh')
-                  setConfig({ ...config, useNemoGym: false, useRemoteSSH: true })
+                  setConfig({ ...config, useNemoGym: false, useRemoteSSH: true, deviceId: defaultDeviceId || undefined })
                 }}
                 className={clsx(
                   'card p-3 text-center transition-press',
@@ -367,8 +388,8 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
                 )}
               >
                 <Server className="w-5 h-5 mx-auto mb-1" />
-                <span className="block font-mono text-xs font-bold uppercase">DGX Spark</span>
-                <span className="block font-mono text-xs mt-1 text-text-muted">Remote SSH</span>
+                <span className="block font-mono text-xs font-bold uppercase">Remote Device</span>
+                <span className="block font-mono text-xs mt-1 text-text-muted">SSH Training</span>
               </button>
               <button
                 type="button"
@@ -389,6 +410,12 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
               </button>
             </div>
 
+            {trainingBackend === 'remote_ssh' && (
+              <div className="mt-4">
+                <DeviceManager />
+              </div>
+            )}
+
             {/* Backend info */}
             <div className="card p-3 mt-3 flex items-start gap-2 border-l-4 border-l-accent">
               <Info className="w-4 h-4 text-accent flex-shrink-0 mt-0.5" />
@@ -396,7 +423,7 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
                 {trainingBackend === 'local'
                   ? 'Train locally using your GPU with Unsloth. Requires CUDA-capable GPU.'
                   : trainingBackend === 'remote_ssh'
-                    ? 'Train on your DGX Spark via SSH. Requires SSH_REMOTE_* configured in .env.'
+                    ? 'Select or add a remote SSH device for training.'
                     : 'Train using NVIDIA NeMo Microservices for scalable cloud training.'}
               </p>
             </div>
@@ -407,7 +434,7 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
             <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-3">
               Training Strategy
             </label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-4 gap-2">
               {strategies.map((s) => (
                 <button
                   key={s.value}
@@ -527,7 +554,7 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
                   onChange={(e) => setConfig({ ...config, epochs: parseInt(e.target.value) })}
                   className="input w-full"
                   min={1}
-                  max={10}
+                  max={100}
                 />
               </div>
               <div>
@@ -538,7 +565,7 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
                   onChange={(e) => setConfig({ ...config, batchSize: parseInt(e.target.value) })}
                   className="input w-full"
                   min={1}
-                  max={32}
+                  max={64}
                 />
               </div>
               <div>
@@ -554,13 +581,51 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
                 />
               </div>
               <div>
-                <label className="block font-mono text-xs text-text-muted mb-2">Warmup Steps</label>
+                <label className="block font-mono text-xs text-text-muted mb-2">Warmup Ratio</label>
                 <input
                   type="number"
-                  value={config.warmupSteps}
-                  onChange={(e) => setConfig({ ...config, warmupSteps: parseInt(e.target.value) })}
+                  value={config.warmupRatio}
+                  onChange={(e) => setConfig({ ...config, warmupRatio: parseFloat(e.target.value) })}
                   className="input w-full"
                   min={0}
+                  max={1}
+                  step={0.05}
+                />
+                <p className="font-mono text-xs text-text-muted mt-1">Fraction of total steps for warmup (0-1)</p>
+              </div>
+              <div>
+                <label className="block font-mono text-xs text-text-muted mb-2">Gradient Accumulation</label>
+                <input
+                  type="number"
+                  value={config.gradientAccumulationSteps}
+                  onChange={(e) => setConfig({ ...config, gradientAccumulationSteps: parseInt(e.target.value) })}
+                  className="input w-full"
+                  min={1}
+                  max={128}
+                />
+                <p className="font-mono text-xs text-text-muted mt-1">Effective batch = batch_size x this</p>
+              </div>
+              <div>
+                <label className="block font-mono text-xs text-text-muted mb-2">Save Steps</label>
+                <input
+                  type="number"
+                  value={config.saveSteps}
+                  onChange={(e) => setConfig({ ...config, saveSteps: parseInt(e.target.value) })}
+                  className="input w-full"
+                  min={10}
+                />
+                <p className="font-mono text-xs text-text-muted mt-1">Checkpoint every N steps</p>
+              </div>
+              <div className="col-span-2">
+                <label className="block font-mono text-xs text-text-muted mb-2">Max Sequence Length</label>
+                <input
+                  type="number"
+                  value={config.maxSeqLength}
+                  onChange={(e) => setConfig({ ...config, maxSeqLength: parseInt(e.target.value) })}
+                  className="input w-full"
+                  min={512}
+                  max={8192}
+                  step={256}
                 />
               </div>
             </div>
@@ -571,7 +636,7 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
             <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-3">
               LoRA Configuration
             </label>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-4">
               <div>
                 <label className="block font-mono text-xs text-text-muted mb-2">LoRA Rank</label>
                 <input
@@ -594,12 +659,24 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
                   max={256}
                 />
               </div>
+              <div>
+                <label className="block font-mono text-xs text-text-muted mb-2">LoRA Dropout</label>
+                <input
+                  type="number"
+                  value={config.loraDropout}
+                  onChange={(e) => setConfig({ ...config, loraDropout: parseFloat(e.target.value) })}
+                  className="input w-full"
+                  min={0}
+                  max={0.5}
+                  step={0.01}
+                />
+              </div>
             </div>
             <label className="flex items-center gap-2 mt-3">
               <input
                 type="checkbox"
-                checked={config.use4BitQuantization ?? true}
-                onChange={(e) => setConfig({ ...config, use4BitQuantization: e.target.checked })}
+                checked={config.load4Bit ?? true}
+                onChange={(e) => setConfig({ ...config, load4Bit: e.target.checked })}
                 className="accent-primary"
               />
               <span className="text-sm text-text-secondary">
@@ -608,24 +685,69 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
             </label>
           </div>
 
-          {/* Max Sequence Length */}
-          <div>
-            <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-3">
-              Max Sequence Length
-            </label>
-            <input
-              type="number"
-              value={config.maxSeqLength}
-              onChange={(e) => setConfig({ ...config, maxSeqLength: parseInt(e.target.value) })}
-              className="input w-full"
-              min={512}
-              max={8192}
-              step={256}
-            />
-          </div>
+          {/* DPO Settings */}
+          {config.strategy === 'dpo' && (
+            <div className="card p-4 border-l-4 border-l-accent">
+              <h3 className="font-mono text-xs uppercase tracking-widest text-text-secondary mb-3">
+                DPO Settings
+              </h3>
+              <div>
+                <label className="block font-mono text-xs text-text-muted mb-2">Beta (Divergence Penalty)</label>
+                <input
+                  type="number"
+                  value={config.dpoBeta}
+                  onChange={(e) => setConfig({ ...config, dpoBeta: parseFloat(e.target.value) })}
+                  className="input w-full"
+                  min={0.01}
+                  max={1}
+                  step={0.05}
+                />
+                <p className="font-mono text-xs text-text-muted mt-1">
+                  Controls how much the model can diverge from the reference. Lower = more conservative.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* GRPO Settings */}
+          {config.strategy === 'grpo' && (
+            <div className="card p-4 border-l-4 border-l-accent">
+              <h3 className="font-mono text-xs uppercase tracking-widest text-text-secondary mb-3">
+                GRPO Settings
+              </h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block font-mono text-xs text-text-muted mb-2">Generations per Prompt</label>
+                  <input
+                    type="number"
+                    value={config.grpoNumGenerations}
+                    onChange={(e) => setConfig({ ...config, grpoNumGenerations: parseInt(e.target.value) })}
+                    className="input w-full"
+                    min={2}
+                    max={16}
+                  />
+                  <p className="font-mono text-xs text-text-muted mt-1">
+                    Number of completions sampled per prompt for reward comparison
+                  </p>
+                </div>
+                <div>
+                  <label className="block font-mono text-xs text-text-muted mb-2">Sampling Temperature</label>
+                  <input
+                    type="number"
+                    value={config.grpoTemperature}
+                    onChange={(e) => setConfig({ ...config, grpoTemperature: parseFloat(e.target.value) })}
+                    className="input w-full"
+                    min={0.1}
+                    max={2}
+                    step={0.1}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Knowledge Distillation Config */}
-          {config.strategy === 'kd' && (
+          {config.strategy === 'distillation' && (
             <div className="card p-4 border-l-4 border-l-accent">
               <h3 className="font-mono text-xs uppercase tracking-widest text-text-secondary mb-3 flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-accent" />
@@ -657,10 +779,6 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
                       <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
                       <option value="claude-opus-4-20250514">Claude Opus 4</option>
                     </optgroup>
-                    <optgroup label="OpenAI (requires OPENAI_API_KEY)">
-                      <option value="gpt-4o">GPT-4o</option>
-                      <option value="gpt-4-turbo">GPT-4 Turbo</option>
-                    </optgroup>
                   </select>
                   <p className="font-mono text-xs text-text-muted mt-1">
                     The larger model to distill knowledge from
@@ -672,8 +790,8 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
                     <label className="block font-mono text-xs text-text-muted mb-2">Temperature</label>
                     <input
                       type="number"
-                      value={config.temperature}
-                      onChange={(e) => setConfig({ ...config, temperature: parseFloat(e.target.value) })}
+                      value={config.teacherTemperature}
+                      onChange={(e) => setConfig({ ...config, teacherTemperature: parseFloat(e.target.value) })}
                       className="input w-full"
                       min={0.5}
                       max={10}
@@ -684,18 +802,18 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
                     </p>
                   </div>
                   <div>
-                    <label className="block font-mono text-xs text-text-muted mb-2">KD Alpha</label>
+                    <label className="block font-mono text-xs text-text-muted mb-2">Distillation Alpha</label>
                     <input
                       type="number"
-                      value={config.kdAlpha}
-                      onChange={(e) => setConfig({ ...config, kdAlpha: parseFloat(e.target.value) })}
+                      value={config.distillationAlpha}
+                      onChange={(e) => setConfig({ ...config, distillationAlpha: parseFloat(e.target.value) })}
                       className="input w-full"
                       min={0}
                       max={1}
                       step={0.1}
                     />
                     <p className="font-mono text-xs text-text-muted mt-1">
-                      Weight for distillation loss (0 = task only, 1 = KD only)
+                      Weight for soft labels (0 = task loss only, 1 = distillation only)
                     </p>
                   </div>
                 </div>

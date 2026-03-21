@@ -859,7 +859,7 @@ Generate {num_variations} variations in JSON format:
     def generate_decision_level_dpo_pairs(
         self,
         trace: "ProcessedTrace",
-    ) -> List[DPOExample]:
+    ) -> list[DPOExample]:
         """Generate step-level DPO pairs from structured decisions in a trace.
 
         For each Decision where outcome == "FAILURE" followed by a later
@@ -879,14 +879,14 @@ Generate {num_variations} variations in JSON format:
         if not trace.decisions:
             return []
 
-        dpo_pairs: List[DPOExample] = []
+        dpo_pairs: list[DPOExample] = []
 
         for i, decision in enumerate(trace.decisions):
             if decision.outcome != "FAILURE":
                 continue
 
             # Search forward for the next successful decision
-            successor: Optional[Decision] = None
+            successor: Decision | None = None
             for j in range(i + 1, len(trace.decisions)):
                 if trace.decisions[j].outcome == "SUCCESS":
                     successor = trace.decisions[j]
@@ -896,7 +896,7 @@ Generate {num_variations} variations in JSON format:
                 continue
 
             # Build a contextual prompt from the task + the state at this step
-            context_steps = trace.normalized_steps[:decision.step_index]
+            context_steps = trace.normalized_steps[: decision.step_index]
             context_summary = ""
             if context_steps:
                 # Show the last 3 steps for context
@@ -923,20 +923,22 @@ Generate {num_variations} variations in JSON format:
                 f"dpo_decision_{trace.trace_id}_{decision.step_index}_{successor.step_index}".encode()
             ).hexdigest()[:16]
 
-            dpo_pairs.append(DPOExample(
-                example_id=example_id,
-                prompt=prompt,
-                chosen=chosen,
-                rejected=rejected,
-                metadata={
-                    "source_trace": trace.trace_id,
-                    "failed_step_index": decision.step_index,
-                    "success_step_index": successor.step_index,
-                    "failed_intent": decision.intent,
-                    "success_intent": successor.intent,
-                    "decision_level": True,
-                }
-            ))
+            dpo_pairs.append(
+                DPOExample(
+                    example_id=example_id,
+                    prompt=prompt,
+                    chosen=chosen,
+                    rejected=rejected,
+                    metadata={
+                        "source_trace": trace.trace_id,
+                        "failed_step_index": decision.step_index,
+                        "success_step_index": successor.step_index,
+                        "failed_intent": decision.intent,
+                        "success_intent": successor.intent,
+                        "decision_level": True,
+                    },
+                )
+            )
 
         return dpo_pairs
 

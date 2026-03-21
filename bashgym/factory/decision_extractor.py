@@ -9,9 +9,9 @@ Module 3: Data Synthesis (The "Factory")
 """
 
 import re
-from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any, Tuple
+from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 
 @dataclass
@@ -24,17 +24,17 @@ class Decision:
     """
 
     step_index: int
-    intent: str                          # What the agent was trying to do
-    options_considered: List[str]         # Alternative approaches mentioned in thinking
-    chosen: str                          # What was actually done
-    reasoning: str                       # Why this option (from <thinking> blocks)
-    outcome: str                         # SUCCESS, FAILURE, PARTIAL
-    tool_used: str                       # Which tool was called
-    timestamp: Optional[datetime] = None
+    intent: str  # What the agent was trying to do
+    options_considered: list[str]  # Alternative approaches mentioned in thinking
+    chosen: str  # What was actually done
+    reasoning: str  # Why this option (from <thinking> blocks)
+    outcome: str  # SUCCESS, FAILURE, PARTIAL
+    tool_used: str  # Which tool was called
+    timestamp: datetime | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to a plain dict for JSON output."""
-        d: Dict[str, Any] = {
+        d: dict[str, Any] = {
             "step_index": self.step_index,
             "intent": self.intent,
             "options_considered": self.options_considered,
@@ -107,9 +107,9 @@ class DecisionExtractor:
 
     def extract(
         self,
-        steps: List[Dict[str, Any]],
-        cognitive_data: Optional[Dict[str, Any]] = None,
-    ) -> List[Decision]:
+        steps: list[dict[str, Any]],
+        cognitive_data: dict[str, Any] | None = None,
+    ) -> list[Decision]:
         """Main extraction method.
 
         Args:
@@ -123,7 +123,7 @@ class DecisionExtractor:
         if not steps:
             return []
 
-        decisions: List[Decision] = []
+        decisions: list[Decision] = []
 
         for i, step in enumerate(steps):
             # Gather cognitive text for this step
@@ -163,16 +163,18 @@ class DecisionExtractor:
             # Parse timestamp if available
             ts = self._parse_timestamp(step)
 
-            decisions.append(Decision(
-                step_index=i,
-                intent=intent,
-                options_considered=options,
-                chosen=command[:500],  # Keep manageable size
-                reasoning=reasoning,
-                outcome=outcome,
-                tool_used=tool_used,
-                timestamp=ts,
-            ))
+            decisions.append(
+                Decision(
+                    step_index=i,
+                    intent=intent,
+                    options_considered=options,
+                    chosen=command[:500],  # Keep manageable size
+                    reasoning=reasoning,
+                    outcome=outcome,
+                    tool_used=tool_used,
+                    timestamp=ts,
+                )
+            )
 
         return decisions
 
@@ -182,11 +184,11 @@ class DecisionExtractor:
 
     def _gather_thinking(
         self,
-        step: Dict[str, Any],
-        session_cognitive: Optional[Dict[str, Any]] = None,
+        step: dict[str, Any],
+        session_cognitive: dict[str, Any] | None = None,
     ) -> str:
         """Combine all available cognitive text for a step into one string."""
-        parts: List[str] = []
+        parts: list[str] = []
 
         # Step-level cognitive data (set by _normalize_steps)
         cognitive = step.get("cognitive") or {}
@@ -214,7 +216,7 @@ class DecisionExtractor:
 
         return "\n\n".join(parts)
 
-    def _extract_from_thinking(self, thinking_text: str) -> Tuple[str, List[str], str]:
+    def _extract_from_thinking(self, thinking_text: str) -> tuple[str, list[str], str]:
         """Parse thinking text to extract intent, options considered, and reasoning.
 
         Returns:
@@ -224,7 +226,7 @@ class DecisionExtractor:
             return ("", [], "")
 
         intent = ""
-        options: List[str] = []
+        options: list[str] = []
         reasoning = ""
 
         # --- Intent ---
@@ -241,19 +243,19 @@ class DecisionExtractor:
 
         # If no explicit intent, use the first sentence as a proxy
         if not intent:
-            first_sentence = re.split(r'[.\n]', thinking_text.strip())[0].strip()
+            first_sentence = re.split(r"[.\n]", thinking_text.strip())[0].strip()
             if first_sentence:
                 intent = first_sentence[:200]
 
         # --- Options considered ---
         # Extract sentences that mention alternatives
-        sentences = re.split(r'(?<=[.!?])\s+', thinking_text)
+        sentences = re.split(r"(?<=[.!?])\s+", thinking_text)
         for sentence in sentences:
             if _ALTERNATIVES_RE.search(sentence):
                 options.append(sentence.strip()[:300])
 
         # Also look for numbered options
-        numbered = re.findall(r'(?:^|\n)\s*(?:\d+[\.\)]\s*|[-*]\s+)(.+)', thinking_text)
+        numbered = re.findall(r"(?:^|\n)\s*(?:\d+[\.\)]\s*|[-*]\s+)(.+)", thinking_text)
         if len(numbered) >= 2:
             # Looks like a list of options
             for item in numbered:
@@ -283,7 +285,7 @@ class DecisionExtractor:
     # Outcome determination
     # ------------------------------------------------------------------
 
-    def _determine_outcome(self, step_index: int, steps: List[Dict[str, Any]]) -> str:
+    def _determine_outcome(self, step_index: int, steps: list[dict[str, Any]]) -> str:
         """Look at the current and subsequent steps to determine if this decision succeeded.
 
         - If this step itself failed (success=False or error in output) -> FAILURE
@@ -333,7 +335,7 @@ class DecisionExtractor:
     # Pivot and recovery detection
     # ------------------------------------------------------------------
 
-    def _is_approach_pivot(self, prev_step: Dict[str, Any], curr_step: Dict[str, Any]) -> bool:
+    def _is_approach_pivot(self, prev_step: dict[str, Any], curr_step: dict[str, Any]) -> bool:
         """Detect strategy changes between consecutive steps.
 
         Signals:
@@ -365,7 +367,7 @@ class DecisionExtractor:
 
         return False
 
-    def _is_error_recovery(self, prev_step: Dict[str, Any], curr_step: Dict[str, Any]) -> bool:
+    def _is_error_recovery(self, prev_step: dict[str, Any], curr_step: dict[str, Any]) -> bool:
         """Detect when previous step failed and current step adapts.
 
         True when:
@@ -394,7 +396,7 @@ class DecisionExtractor:
 
         return True
 
-    def _is_commit_point(self, step: Dict[str, Any]) -> bool:
+    def _is_commit_point(self, step: dict[str, Any]) -> bool:
         """Detect git commit steps -- these represent task-completion decisions."""
         cmd = str(step.get("command", ""))
         tool = str(step.get("tool", step.get("tool_name", "")))
@@ -406,7 +408,7 @@ class DecisionExtractor:
 
     def _infer_intent(
         self,
-        step: Dict[str, Any],
+        step: dict[str, Any],
         is_pivot: bool,
         is_recovery: bool,
         is_commit: bool,
@@ -429,7 +431,7 @@ class DecisionExtractor:
         if not command:
             return ""
         # Match paths that look like /foo/bar.py or foo/bar.py or C:\foo\bar
-        m = re.search(r'(?:[A-Za-z]:\\|/)?[\w./\\-]+\.[\w]+', command)
+        m = re.search(r"(?:[A-Za-z]:\\|/)?[\w./\\-]+\.[\w]+", command)
         return m.group(0) if m else ""
 
     @staticmethod
@@ -445,7 +447,7 @@ class DecisionExtractor:
         return ""
 
     @staticmethod
-    def _parse_timestamp(step: Dict[str, Any]) -> Optional[datetime]:
+    def _parse_timestamp(step: dict[str, Any]) -> datetime | None:
         """Try to parse a timestamp from step metadata."""
         raw = step.get("timestamp") or (step.get("metadata", {}) or {}).get("timestamp")
         if not raw:

@@ -9,13 +9,13 @@ import logging
 import shutil
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from .config import PipelineConfig
 
 if TYPE_CHECKING:
-    from bashgym.judge.semantic_judge import SemanticJudge, SemanticVerdict
     from bashgym.factory.trace_processor import ProcessedTrace
+    from bashgym.judge.semantic_judge import SemanticJudge, SemanticVerdict
 
 logger = logging.getLogger(__name__)
 

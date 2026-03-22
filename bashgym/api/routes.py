@@ -1412,7 +1412,13 @@ def create_app() -> FastAPI:
         cache = app.state.trace_cache
 
         if not cache.initialized:
-            return {"traces": [], "total": 0, "offset": 0, "limit": limit, "counts": {"gold": 0, "silver": 0, "bronze": 0, "failed": 0, "pending": 0}}
+            return {
+                "traces": [],
+                "total": 0,
+                "offset": 0,
+                "limit": limit,
+                "counts": {"gold": 0, "silver": 0, "bronze": 0, "failed": 0, "pending": 0},
+            }
 
         # Incremental refresh picks up new/deleted files
         cache.refresh(

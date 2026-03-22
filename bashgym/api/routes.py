@@ -1412,7 +1412,7 @@ def create_app() -> FastAPI:
         cache = app.state.trace_cache
 
         if not cache.initialized:
-            raise HTTPException(status_code=503, detail="Trace index still building")
+            return {"traces": [], "total": 0, "offset": 0, "limit": limit, "counts": {"gold": 0, "silver": 0, "bronze": 0, "failed": 0, "pending": 0}}
 
         # Incremental refresh picks up new/deleted files
         cache.refresh(

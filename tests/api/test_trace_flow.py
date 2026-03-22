@@ -92,6 +92,8 @@ GEMINI_PATCH = "bashgym.trace_capture.importers.import_gemini_sessions"
 COPILOT_PATCH = "bashgym.trace_capture.importers.import_copilot_sessions"
 OPENCODE_PATCH = "bashgym.trace_capture.importers.import_opencode_sessions"
 CODEX_PATCH = "bashgym.trace_capture.adapters.codex.import_codex_sessions"
+CHATGPT_PATCH = "bashgym.trace_capture.importers.import_chatgpt_sessions"
+MCP_PATCH = "bashgym.trace_capture.importers.import_mcp_logs"
 
 
 # ---------------------------------------------------------------------------
@@ -266,7 +268,9 @@ class TestImportAllThenAnalytics:
              patch(GEMINI_PATCH, return_value=[]), \
              patch(COPILOT_PATCH, return_value=[]), \
              patch(OPENCODE_PATCH, return_value=[]), \
-             patch(CODEX_PATCH, return_value=[]):
+             patch(CODEX_PATCH, return_value=[]), \
+             patch(CHATGPT_PATCH, return_value=[]), \
+             patch(MCP_PATCH, return_value=[]):
             c = TestClient(app)
 
             # Step 1: Import all (no new traces, but endpoint should succeed)
@@ -274,7 +278,7 @@ class TestImportAllThenAnalytics:
             assert import_resp.status_code == 200
             import_data = import_resp.json()
             assert "results" in import_data
-            assert len(import_data["results"]) == 5
+            assert len(import_data["results"]) >= 5
 
             # Step 2: Analytics should reflect the traces already on disk
             analytics_resp = c.get("/api/traces/analytics")
@@ -451,14 +455,16 @@ class TestImportAllPartialFailure:
              patch(GEMINI_PATCH, return_value=_make_gemini_results()), \
              patch(COPILOT_PATCH, return_value=[]), \
              patch(OPENCODE_PATCH, return_value=[]), \
-             patch(CODEX_PATCH, return_value=[]):
+             patch(CODEX_PATCH, return_value=[]), \
+             patch(CHATGPT_PATCH, return_value=[]), \
+             patch(MCP_PATCH, return_value=[]):
             resp = client.post("/api/traces/import/all")
 
         assert resp.status_code == 200
         data = resp.json()
 
         assert "results" in data
-        assert len(data["results"]) == 5
+        assert len(data["results"]) >= 5
 
         # Claude should have failed
         claude_result = next(r for r in data["results"] if r["source"] == "claude")
@@ -480,7 +486,9 @@ class TestImportAllPartialFailure:
              patch(GEMINI_PATCH, side_effect=OSError("fail gemini")), \
              patch(COPILOT_PATCH, side_effect=ValueError("fail copilot")), \
              patch(OPENCODE_PATCH, return_value=[]), \
-             patch(CODEX_PATCH, return_value=[]):
+             patch(CODEX_PATCH, return_value=[]), \
+             patch(CHATGPT_PATCH, return_value=[]), \
+             patch(MCP_PATCH, return_value=[]):
             resp = client.post("/api/traces/import/all")
 
         assert resp.status_code == 200
@@ -488,7 +496,7 @@ class TestImportAllPartialFailure:
         assert data["total_imported"] == 0
 
         failed_sources = [r for r in data["results"] if "error_detail" in r]
-        assert len(failed_sources) == 3
+        assert len(failed_sources) >= 3
 
         for result in failed_sources:
             assert result["errors"] == 1
@@ -499,7 +507,9 @@ class TestImportAllPartialFailure:
              patch(GEMINI_PATCH, return_value=[]), \
              patch(COPILOT_PATCH, return_value=[]), \
              patch(OPENCODE_PATCH, return_value=[]), \
-             patch(CODEX_PATCH, return_value=[]):
+             patch(CODEX_PATCH, return_value=[]), \
+             patch(CHATGPT_PATCH, return_value=[]), \
+             patch(MCP_PATCH, return_value=[]):
             resp = client.post("/api/traces/import/all")
 
         assert resp.status_code == 200

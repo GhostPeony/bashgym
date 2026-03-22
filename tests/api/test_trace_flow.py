@@ -168,14 +168,26 @@ def trace_dirs(tmp_path):
 
 @pytest.fixture
 def patched_client(trace_dirs):
-    """TestClient with settings/bashgym_dir mocked to use trace_dirs."""
-    data_dir, bashgym_dir = trace_dirs
-    fake = _FakeSettings()
-    fake.data.data_dir = str(data_dir)
+    """TestClient with data_dir/bashgym_dir pointed at temp dirs.
 
-    with patch("bashgym.config.get_settings", return_value=fake), \
-         patch("bashgym.config.get_bashgym_dir", return_value=bashgym_dir):
-        yield TestClient(app)
+    Uses create_app() with real settings (overriding data paths) so
+    startup events fire and the trace cache indexes the temp files.
+    """
+    data_dir, bashgym_dir = trace_dirs
+
+    from bashgym.config import get_settings
+    real_settings = get_settings()
+    original_data_dir = real_settings.data.data_dir
+
+    real_settings.data.data_dir = str(data_dir)
+
+    with patch("bashgym.config.get_bashgym_dir", return_value=bashgym_dir):
+        from bashgym.api.routes import create_app
+        test_app = create_app()
+        with TestClient(test_app, raise_server_exceptions=False) as client:
+            yield client
+
+    real_settings.data.data_dir = original_data_dir
 
 
 @pytest.fixture
@@ -195,8 +207,6 @@ class TestImportThenListBySource:
         """Import via /import/claude, then list with ?source_tool=claude_code
         and verify the imported traces appear."""
         data_dir, bashgym_dir = trace_dirs
-        fake = _FakeSettings()
-        fake.data.data_dir = str(data_dir)
 
         # The import endpoint calls import_recent() which writes files.
         # We mock import_recent to write a real trace file into the pending dir
@@ -219,33 +229,45 @@ class TestImportThenListBySource:
                 ),
             ]
 
-        with patch("bashgym.config.get_settings", return_value=fake), \
-             patch("bashgym.config.get_bashgym_dir", return_value=bashgym_dir), \
+        from bashgym.config import get_settings as _gs
+        _orig = _gs().data.data_dir
+        _gs().data.data_dir = str(data_dir)
+
+        with patch("bashgym.config.get_bashgym_dir", return_value=bashgym_dir), \
              patch(CLAUDE_PATCH, side_effect=fake_import):
-            c = TestClient(app)
+            from bashgym.api.routes import create_app
+            test_app = create_app()
+            with TestClient(test_app, raise_server_exceptions=False) as c:
 
-            # Step 1: Import
-            import_resp = c.post("/api/traces/import/claude", json={"days": 30})
-            assert import_resp.status_code == 200
-            import_data = import_resp.json()
-            assert import_data["imported"] == 1
+                # Step 1: Import
+                import_resp = c.post("/api/traces/import/claude", json={"days": 30})
+                assert import_resp.status_code == 200
+                import_data = import_resp.json()
+                assert import_data["imported"] == 1
 
-            # Step 2: List filtered by source_tool=claude_code
-            list_resp = c.get("/api/traces?source_tool=claude_code")
-            assert list_resp.status_code == 200
-            list_data = list_resp.json()
+                # Force cache refresh by resetting scan interval guard
+                # (import writes new files but doesn't invalidate the cache;
+                # the refresh() guard prevents re-scan within 2s of startup)
+                test_app.state.trace_cache._last_scan_time = 0.0
 
-            # Should include the newly imported trace + existing claude traces
-            assert list_data["total"] >= 1
-            source_tools = {t["source_tool"] for t in list_data["traces"]}
-            assert source_tools == {"claude_code"}, f"Expected only claude_code, got {source_tools}"
+                # Step 2: List filtered by source_tool=claude_code
+                list_resp = c.get("/api/traces?source_tool=claude_code")
+                assert list_resp.status_code == 200
+                list_data = list_resp.json()
 
-            # Verify the newly imported trace is present (by checking trace count increased)
-            # We had gold_claude_001 + session_raw_001 + imported_claude_new = at least 3
-            claude_ids = [t["trace_id"] for t in list_data["traces"]]
-            # The new trace file stem should appear
-            assert any("claude_new" in tid for tid in claude_ids), \
-                f"New import not found in traces: {claude_ids}"
+                # Should include the newly imported trace + existing claude traces
+                assert list_data["total"] >= 1
+                source_tools = {t["source_tool"] for t in list_data["traces"]}
+                assert source_tools == {"claude_code"}, f"Expected only claude_code, got {source_tools}"
+
+                # Verify the newly imported trace is present (by checking trace count increased)
+                # We had gold_claude_001 + session_raw_001 + imported_claude_new = at least 3
+                claude_ids = [t["trace_id"] for t in list_data["traces"]]
+                # The new trace file stem should appear
+                assert any("claude_new" in tid for tid in claude_ids), \
+                    f"New import not found in traces: {claude_ids}"
+
+        _gs().data.data_dir = _orig
 
 
 # ---------------------------------------------------------------------------
@@ -258,12 +280,13 @@ class TestImportAllThenAnalytics:
     def test_import_all_then_analytics(self, trace_dirs):
         """Import via /import/all, then check analytics source_breakdown has entries."""
         data_dir, bashgym_dir = trace_dirs
-        fake = _FakeSettings()
-        fake.data.data_dir = str(data_dir)
+
+        from bashgym.config import get_settings as _gs
+        _orig = _gs().data.data_dir
+        _gs().data.data_dir = str(data_dir)
 
         # Mock all importers to return empty (we already have traces on disk)
-        with patch("bashgym.config.get_settings", return_value=fake), \
-             patch("bashgym.config.get_bashgym_dir", return_value=bashgym_dir), \
+        with patch("bashgym.config.get_bashgym_dir", return_value=bashgym_dir), \
              patch(CLAUDE_PATCH, return_value=[]), \
              patch(GEMINI_PATCH, return_value=[]), \
              patch(COPILOT_PATCH, return_value=[]), \
@@ -271,27 +294,31 @@ class TestImportAllThenAnalytics:
              patch(CODEX_PATCH, return_value=[]), \
              patch(CHATGPT_PATCH, return_value=[]), \
              patch(MCP_PATCH, return_value=[]):
-            c = TestClient(app)
+            from bashgym.api.routes import create_app
+            test_app = create_app()
+            with TestClient(test_app, raise_server_exceptions=False) as c:
 
-            # Step 1: Import all (no new traces, but endpoint should succeed)
-            import_resp = c.post("/api/traces/import/all")
-            assert import_resp.status_code == 200
-            import_data = import_resp.json()
-            assert "results" in import_data
-            assert len(import_data["results"]) >= 5
+                # Step 1: Import all (no new traces, but endpoint should succeed)
+                import_resp = c.post("/api/traces/import/all")
+                assert import_resp.status_code == 200
+                import_data = import_resp.json()
+                assert "results" in import_data
+                assert len(import_data["results"]) >= 5
 
-            # Step 2: Analytics should reflect the traces already on disk
-            analytics_resp = c.get("/api/traces/analytics")
-            assert analytics_resp.status_code == 200
-            analytics = analytics_resp.json()
+                # Step 2: Analytics should reflect the traces already on disk
+                analytics_resp = c.get("/api/traces/analytics")
+                assert analytics_resp.status_code == 200
+                analytics = analytics_resp.json()
 
-            assert "source_breakdown" in analytics
-            assert isinstance(analytics["source_breakdown"], list)
-            # We have traces from claude_code, gemini_cli, copilot_cli on disk
-            sources = {e["source"] for e in analytics["source_breakdown"]}
-            assert len(sources) >= 2, f"Expected at least 2 sources, got: {sources}"
-            assert "claude_code" in sources
-            assert "gemini_cli" in sources
+                assert "source_breakdown" in analytics
+                assert isinstance(analytics["source_breakdown"], list)
+                # We have traces from claude_code, gemini_cli, copilot_cli on disk
+                sources = {e["source"] for e in analytics["source_breakdown"]}
+                assert len(sources) >= 2, f"Expected at least 2 sources, got: {sources}"
+                assert "claude_code" in sources
+                assert "gemini_cli" in sources
+
+        _gs().data.data_dir = _orig
 
 
 # ---------------------------------------------------------------------------

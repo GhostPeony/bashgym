@@ -309,21 +309,19 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
 
   // WebSocket handlers
   handleDecomposing: (payload) => {
-    set((state) => ({
-      currentJob: state.currentJob?.jobId === payload.job_id
-        ? { ...state.currentJob, status: 'decomposing' }
-        : state.currentJob,
-    }))
+    set((state) => {
+      if (!state.currentJob || state.currentJob.jobId !== payload.job_id) return state
+      return { currentJob: { ...state.currentJob, status: 'decomposing' } }
+    })
   },
 
   handleReady: (payload) => {
     const { job_id } = payload
     get().fetchStatus(job_id).then(() => {
-      set((state) => ({
-        currentJob: state.currentJob?.jobId === job_id
-          ? { ...state.currentJob, status: 'awaiting_approval' }
-          : state.currentJob,
-      }))
+      set((state) => {
+        if (!state.currentJob || state.currentJob.jobId !== job_id) return state
+        return { currentJob: { ...state.currentJob, status: 'awaiting_approval' } }
+      })
     })
   },
 
@@ -433,46 +431,44 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
   },
 
   handleCancelled: (payload) => {
-    set((state) => ({
-      currentJob: state.currentJob?.jobId === payload.job_id
-        ? { ...state.currentJob, status: 'cancelled' }
-        : state.currentJob,
-    }))
+    set((state) => {
+      if (!state.currentJob || state.currentJob.jobId !== payload.job_id) return state
+      return { currentJob: { ...state.currentJob, status: 'cancelled' } }
+    })
   },
 
   handleTaskRetrying: (payload) => {
     set((state) => {
-      if (state.currentJob?.jobId === payload.job_id && state.currentJob.tasks[payload.task_id]) {
-        return {
-          currentJob: {
-            ...state.currentJob,
-            tasks: {
-              ...state.currentJob.tasks,
-              [payload.task_id]: {
-                ...state.currentJob.tasks[payload.task_id],
-                status: 'retrying',
-                retry_count: (state.currentJob.tasks[payload.task_id].retry_count || 0) + 1,
-              },
+      if (!state.currentJob || state.currentJob.jobId !== payload.job_id) return state
+      if (!state.currentJob.tasks[payload.task_id]) return state
+      const job = state.currentJob
+      return {
+        currentJob: {
+          ...job,
+          tasks: {
+            ...job.tasks,
+            [payload.task_id]: {
+              ...job.tasks[payload.task_id],
+              status: 'retrying',
+              retry_count: (job.tasks[payload.task_id].retry_count || 0) + 1,
             },
           },
-        }
+        },
       }
-      return state
     })
   },
 
   handleMergeResult: (payload) => {
     set((state) => {
-      if (state.currentJob?.jobId === payload.job_id) {
-        return {
-          currentJob: {
-            ...state.currentJob,
-            mergeSuccesses: state.currentJob.mergeSuccesses + (payload.success ? 1 : 0),
-            mergeFailures: state.currentJob.mergeFailures + (payload.success ? 0 : 1),
-          },
-        }
+      if (!state.currentJob || state.currentJob.jobId !== payload.job_id) return state
+      const job = state.currentJob
+      return {
+        currentJob: {
+          ...job,
+          mergeSuccesses: job.mergeSuccesses + (payload.success ? 1 : 0),
+          mergeFailures: job.mergeFailures + (payload.success ? 0 : 1),
+        },
       }
-      return state
     })
   },
 }))

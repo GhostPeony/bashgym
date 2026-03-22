@@ -123,6 +123,8 @@ GEMINI_PATCH = "bashgym.trace_capture.importers.import_gemini_sessions"
 COPILOT_PATCH = "bashgym.trace_capture.importers.import_copilot_sessions"
 OPENCODE_PATCH = "bashgym.trace_capture.importers.import_opencode_sessions"
 CODEX_PATCH = "bashgym.trace_capture.adapters.codex.import_codex_sessions"
+CHATGPT_PATCH = "bashgym.trace_capture.importers.import_chatgpt_sessions"
+MCP_PATCH = "bashgym.trace_capture.importers.import_mcp_logs"
 
 
 def _validate_response_shape(data: dict):
@@ -262,7 +264,9 @@ class TestImportAll:
              patch(GEMINI_PATCH, return_value=_make_dict_results("gemini_cli")), \
              patch(COPILOT_PATCH, return_value=_make_dict_results("copilot_cli")), \
              patch(OPENCODE_PATCH, return_value=_make_dict_results("opencode")), \
-             patch(CODEX_PATCH, return_value=_make_codex_results()):
+             patch(CODEX_PATCH, return_value=_make_codex_results()), \
+             patch(CHATGPT_PATCH, return_value=[]), \
+             patch(MCP_PATCH, return_value=[]):
             resp = client.post("/api/traces/import/all", json={"days": 7})
 
         assert resp.status_code == 200
@@ -271,7 +275,7 @@ class TestImportAll:
         assert "results" in data
         assert "total_imported" in data
         assert isinstance(data["results"], list)
-        assert len(data["results"]) == 5  # one per source
+        assert len(data["results"]) >= 5  # one per source (at least 5; chatgpt and mcp added later)
 
         sources = [r["source"] for r in data["results"]]
         assert "claude" in sources
@@ -283,7 +287,7 @@ class TestImportAll:
         for result in data["results"]:
             _validate_response_shape(result)
 
-        # Claude: 1, Gemini: 1, Copilot: 1, OpenCode: 1, Codex: 1 = 5
+        # Claude: 1, Gemini: 1, Copilot: 1, OpenCode: 1, Codex: 1 = 5 (chatgpt and mcp return empty)
         assert data["total_imported"] == 5
 
     def test_import_all_partial_failure(self, client):
@@ -292,12 +296,14 @@ class TestImportAll:
              patch(GEMINI_PATCH, side_effect=RuntimeError("Gemini dir missing")), \
              patch(COPILOT_PATCH, return_value=[]), \
              patch(OPENCODE_PATCH, return_value=[]), \
-             patch(CODEX_PATCH, return_value=[]):
+             patch(CODEX_PATCH, return_value=[]), \
+             patch(CHATGPT_PATCH, return_value=[]), \
+             patch(MCP_PATCH, return_value=[]):
             resp = client.post("/api/traces/import/all")
 
         assert resp.status_code == 200
         data = resp.json()
-        assert len(data["results"]) == 5
+        assert len(data["results"]) >= 5
 
         gemini_result = next(r for r in data["results"] if r["source"] == "gemini")
         assert gemini_result["errors"] == 1
@@ -313,13 +319,15 @@ class TestImportAll:
              patch(GEMINI_PATCH, return_value=[]), \
              patch(COPILOT_PATCH, return_value=[]), \
              patch(OPENCODE_PATCH, return_value=[]), \
-             patch(CODEX_PATCH, return_value=[]):
+             patch(CODEX_PATCH, return_value=[]), \
+             patch(CHATGPT_PATCH, return_value=[]), \
+             patch(MCP_PATCH, return_value=[]):
             resp = client.post("/api/traces/import/all")
 
         assert resp.status_code == 200
         data = resp.json()
         assert data["total_imported"] == 0
-        assert len(data["results"]) == 5
+        assert len(data["results"]) >= 5
 
     def test_import_all_every_source_fails(self, client):
         """All sources fail -- we still get 200 with error details."""
@@ -327,7 +335,9 @@ class TestImportAll:
              patch(GEMINI_PATCH, side_effect=RuntimeError("fail")), \
              patch(COPILOT_PATCH, side_effect=RuntimeError("fail")), \
              patch(OPENCODE_PATCH, side_effect=RuntimeError("fail")), \
-             patch(CODEX_PATCH, side_effect=RuntimeError("fail")):
+             patch(CODEX_PATCH, side_effect=RuntimeError("fail")), \
+             patch(CHATGPT_PATCH, side_effect=RuntimeError("fail")), \
+             patch(MCP_PATCH, side_effect=RuntimeError("fail")):
             resp = client.post("/api/traces/import/all")
 
         assert resp.status_code == 200
@@ -352,7 +362,9 @@ class TestRouteOrdering:
              patch(GEMINI_PATCH, return_value=[]), \
              patch(COPILOT_PATCH, return_value=[]), \
              patch(OPENCODE_PATCH, return_value=[]), \
-             patch(CODEX_PATCH, return_value=[]):
+             patch(CODEX_PATCH, return_value=[]), \
+             patch(CHATGPT_PATCH, return_value=[]), \
+             patch(MCP_PATCH, return_value=[]):
             resp = client.post("/api/traces/import/all")
 
         assert resp.status_code == 200

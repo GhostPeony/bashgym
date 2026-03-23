@@ -687,7 +687,7 @@ def formatting_func(examples):
         text = ""
         for msg in messages:
             role = msg.get("role", "")
-            content = msg.get("content", "")
+            content = msg.get("content") or ""
             if role == "system":
                 text += "<|im_start|>system\\n" + content + "<|im_end|>\\n"
             elif role == "user":

@@ -927,6 +927,7 @@ def create_app() -> FastAPI:
 
                 # Determine training data source
                 dataset_path = None
+                val_dataset_path = None
                 if request.data_source == DataSource.SECURITY_DATASET:
                     # Ingest security dataset directly
                     logger.info(f"Ingesting security dataset: {request.security_dataset_type}")
@@ -1019,6 +1020,7 @@ def create_app() -> FastAPI:
                                 examples, output_dir, train_split=0.9
                             )
                             dataset_path = result["train"]
+                            val_dataset_path = result.get("validation")
                             logger.info(f"Training data ready: {dataset_path}")
                         else:
                             raise ValueError("No training examples generated from gold traces")
@@ -1109,6 +1111,7 @@ def create_app() -> FastAPI:
                 if request.strategy == TrainingStrategy.SFT:
                     run = app.state.trainer.train_sft(
                         dataset_path=dataset_path,
+                        val_dataset_path=val_dataset_path,
                         run_id=run_id,
                         callback=callback.on_progress_sync,
                         log_callback=callback.on_log_sync,

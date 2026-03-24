@@ -2392,6 +2392,7 @@ export interface AutoResearchStartConfig {
   trainSteps: number
   mutationRate: number
   mutationScale: number
+  mode: 'simulate' | 'real'
   baseModel: string
   learningRate: number
   loraRank: number
@@ -2414,6 +2415,7 @@ export const autoresearchApi = {
         train_steps: config.trainSteps,
         mutation_rate: config.mutationRate,
         mutation_scale: config.mutationScale,
+        mode: config.mode || 'simulate',
         base_config: {
           base_model: config.baseModel,
           learning_rate: config.learningRate,

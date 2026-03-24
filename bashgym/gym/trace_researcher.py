@@ -13,10 +13,12 @@ import copy
 import logging
 import math
 import random
+import tempfile
 import time
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -355,9 +357,12 @@ class TraceResearcher:
         """Evaluate a data pipeline configuration.
 
         In simulation mode: generates a realistic metric based on the
-        pipeline config.  In production: would actually generate examples,
-        train briefly, and measure val_loss.
+        pipeline config.  In real mode: generates examples with the pipeline,
+        exports train/val, runs a short training, and returns eval_loss.
         """
+        if getattr(self, "_mode", "simulate") == "real":
+            return self._evaluate_pipeline_real(pipeline, experiment_number)
+
         # Simulate compute time (2-4 seconds)
         time.sleep(random.uniform(2.0, 4.0))
 
@@ -366,6 +371,90 @@ class TraceResearcher:
             experiment_number,
             self.config.max_experiments,
         )
+
+    def _evaluate_pipeline_real(
+        self,
+        pipeline: DataPipelineConfig,
+        experiment_number: int,
+    ) -> tuple[float, dict[str, Any]]:
+        """Evaluate a pipeline by actually generating data and training.
+
+        1. Generate examples with this pipeline's config
+        2. Export train/val split
+        3. Run short training
+        4. Return (eval_loss, data_stats)
+        """
+        from bashgym.factory.example_generator import ExampleGenerator, ExampleGeneratorConfig
+        from bashgym.gym.trainer import Trainer, TrainerConfig
+
+        gold_dir = Path(self.config.gold_traces_dir) if self.config.gold_traces_dir else None
+        if not gold_dir or not gold_dir.exists():
+            logger.warning(
+                "[TraceResearch] No gold_traces_dir for real eval, falling back to simulation"
+            )
+            return _simulate_metric(pipeline, experiment_number, self.config.max_experiments)
+
+        with tempfile.TemporaryDirectory(prefix=f"trace_exp{experiment_number}_") as tmpdir:
+            tmpdir_path = Path(tmpdir)
+
+            try:
+                # Generate examples with candidate pipeline config
+                gen_config = ExampleGeneratorConfig(
+                    output_dir=str(tmpdir_path),
+                    min_quality_score=pipeline.min_quality_score,
+                    include_cognitive=pipeline.include_cognitive,
+                )
+                generator = ExampleGenerator(gen_config)
+                examples, _stats = generator.process_directory(gold_dir)
+
+                if not examples:
+                    return 5.0, {
+                        "examples_generated": 0,
+                        "unique_repos": 0,
+                        "avg_example_length": 0,
+                    }
+
+                # Export
+                result = generator.export_for_nemo(examples, tmpdir_path, train_split=0.9)
+                train_path = Path(result["train"])
+                val_path = Path(result["validation"]) if result.get("validation") else None
+
+                data_stats = {
+                    "examples_generated": len(examples),
+                    "unique_repos": len({getattr(e, "repo_name", "unknown") for e in examples}),
+                    "avg_example_length": round(
+                        sum(len(getattr(e, "messages", [])) for e in examples)
+                        / max(len(examples), 1),
+                        1,
+                    ),
+                }
+
+                # Short training
+                trainer_config = TrainerConfig(
+                    max_steps=getattr(self, "_train_steps", 50),
+                    eval_strategy="steps",
+                    eval_steps=max(10, getattr(self, "_train_steps", 50) // 3),
+                    auto_export_gguf=False,
+                    save_steps=999999,
+                    logging_steps=5,
+                )
+                trainer = Trainer(trainer_config)
+                run = trainer.train_sft(
+                    dataset_path=train_path,
+                    val_dataset_path=val_path,
+                )
+
+                eval_loss = run.metrics.get("eval_loss")
+                final_loss = run.metrics.get("final_loss", 5.0)
+                metric = eval_loss if eval_loss is not None else final_loss
+
+                return float(metric), data_stats
+
+            except Exception as e:
+                logger.error(
+                    f"[TraceResearch] Real eval failed for experiment {experiment_number}: {e}"
+                )
+                return 5.0, {"examples_generated": 0, "unique_repos": 0, "avg_example_length": 0}
 
     # -----------------------------------------------------------------
     # Main loop

@@ -953,6 +953,10 @@ class AutoResearchRequest(BaseModel):
         0.3, ge=0.05, le=1.0, description="Probability of mutating each param"
     )
     mutation_scale: float = Field(0.2, ge=0.01, le=1.0, description="Scale of mutations")
+    mode: str = Field(
+        "simulate",
+        description="Experiment mode: 'simulate' for fast heuristic, 'real' for actual short training",
+    )
     base_config: dict[str, Any] | None = Field(
         None, description="Override base TrainerConfig values (e.g. learning_rate, lora_r)"
     )
@@ -994,6 +998,7 @@ class AutoResearchStatusResponse(BaseModel):
         default_factory=dict, description="Current best hyperparameter config"
     )
     search_params: list[str] = Field(default_factory=list, description="Parameters being searched")
+    mode: str = Field("simulate", description="Experiment mode: simulate or real")
     experiments: list[ExperimentResultSchema] = Field(
         default_factory=list, description="All experiment results"
     )

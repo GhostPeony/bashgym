@@ -204,6 +204,7 @@ export function AutoResearchPanel() {
   const [mutationRate, setMutationRate] = useState(0.3)
   const [mutationScale, setMutationScale] = useState(0.2)
   const [trainSteps, setTrainSteps] = useState(100)
+  const [experimentMode, setExperimentMode] = useState<'simulate' | 'real'>('simulate')
 
   // Trace research config state
   const [traceSelectedParams, setTraceSelectedParams] = useState<string[]>(
@@ -258,6 +259,7 @@ export function AutoResearchPanel() {
       trainSteps,
       mutationRate,
       mutationScale,
+      mode: experimentMode,
       // Base training defaults
       baseModel: 'Qwen/Qwen2.5-Coder-1.5B-Instruct',
       learningRate: 2e-4,
@@ -271,7 +273,7 @@ export function AutoResearchPanel() {
       load4Bit: true,
     }
     start(config)
-  }, [selectedParams, maxExperiments, trainSteps, mutationRate, mutationScale, start])
+  }, [selectedParams, maxExperiments, trainSteps, mutationRate, mutationScale, experimentMode, start])
 
   // Mode-aware status helpers
   const isHyperparam = activeMode === 'hyperparam'
@@ -476,6 +478,42 @@ export function AutoResearchPanel() {
                 className="input w-full"
               />
             </div>
+          </div>
+
+          {/* Experiment mode toggle */}
+          <div className="mb-3">
+            <label className="font-mono text-xs uppercase tracking-widest text-text-muted block mb-1">
+              Experiment Mode
+            </label>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setExperimentMode('simulate')}
+                className={clsx(
+                  'px-3 py-1.5 text-xs font-mono uppercase tracking-wider border-2 transition-all',
+                  experimentMode === 'simulate'
+                    ? 'border-accent bg-accent text-white'
+                    : 'border-border-default bg-background-secondary text-text-muted hover:border-accent'
+                )}
+              >
+                Simulate
+              </button>
+              <button
+                onClick={() => setExperimentMode('real')}
+                className={clsx(
+                  'px-3 py-1.5 text-xs font-mono uppercase tracking-wider border-2 transition-all',
+                  experimentMode === 'real'
+                    ? 'border-accent bg-accent text-white'
+                    : 'border-border-default bg-background-secondary text-text-muted hover:border-accent'
+                )}
+              >
+                Real Training
+              </button>
+            </div>
+            {experimentMode === 'real' && (
+              <p className="text-xs text-text-muted mt-1">
+                ~2-5 min per experiment. Runs actual short training with eval_loss.
+              </p>
+            )}
           </div>
 
           {/* Mutation rate slider */}

@@ -113,6 +113,11 @@ class TrainerConfig:
     auto_export_gguf: bool = True  # Automatically export to GGUF after training
     gguf_quantization: str = "q4_k_m"  # Quantization level: q4_k_m, q5_k_m, q8_0, f16
 
+    # Eval settings
+    eval_strategy: str = "steps"  # "steps", "epoch", or "no"
+    eval_steps: int = 50  # Eval every N steps (when eval_strategy="steps")
+    max_steps: int = -1  # Max training steps (-1 = use num_epochs)
+
     # Hardware settings
     device_map: str = "auto"
     use_flash_attention: bool = True
@@ -146,6 +151,7 @@ class TrainingRun:
     error_message: str | None = None
     loss_curve: list[dict[str, Any]] = field(default_factory=list)
     config_snapshot: dict[str, Any] = field(default_factory=dict)
+    val_dataset_path: Path | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
@@ -163,6 +169,7 @@ class TrainingRun:
             "error_message": self.error_message,
             "loss_curve": self.loss_curve,
             "config_snapshot": self.config_snapshot,
+            "val_dataset_path": str(self.val_dataset_path) if self.val_dataset_path else None,
         }
 
     def add_loss_point(
@@ -313,6 +320,7 @@ class Trainer:
     def train_sft(
         self,
         dataset_path: Path,
+        val_dataset_path: Path | None = None,
         run_id: str | None = None,
         callback: Callable[[dict[str, Any]], None] | None = None,
         log_callback: Callable[[str], None] | None = None,
@@ -343,6 +351,7 @@ class Trainer:
             started_at=datetime.now(timezone.utc).isoformat(),
         )
         self.active_runs[run_id] = run
+        run.val_dataset_path = val_dataset_path
 
         try:
             if self.config.use_remote_ssh:
@@ -358,10 +367,7 @@ class Trainer:
             # Save model profile
             self._save_model_profile(run)
 
-            # Auto-export to GGUF if enabled
-            if self.config.auto_export_gguf:
-                print(f"Auto-exporting to GGUF ({self.config.gguf_quantization})...")
-                self.export_model(run_id, "gguf", self.config.gguf_quantization)
+            # GGUF export now happens in-script (model still in GPU memory)
 
             # Export to bashbros integration if linked
             self._export_to_bashbros_integration(run)
@@ -539,6 +545,7 @@ class Trainer:
             last_epoch = 0
             last_step = 0
             last_grad_norm = None
+            last_eval_loss = None
             samples_processed = 0
             start_time = datetime.now(timezone.utc)
 
@@ -565,6 +572,7 @@ class Trainer:
                     epoch_match = re.search(r"'epoch':\s*([\d.]+)", line)
                     step_match = re.search(r"'step':\s*(\d+)", line)
                     grad_norm_match = re.search(r"'grad_norm':\s*([\d.]+)", line)
+                    eval_loss_match = re.search(r"'eval_loss':\s*([\d.]+)", line)
                     total_steps_match = re.search(
                         r"total[_\s]?steps[=:\s]+(\d+)", line, re.IGNORECASE
                     )
@@ -584,6 +592,8 @@ class Trainer:
                         samples_processed = last_step * self.config.batch_size
                     if grad_norm_match:
                         last_grad_norm = float(grad_norm_match.group(1))
+                    if eval_loss_match:
+                        last_eval_loss = float(eval_loss_match.group(1))
                     if total_steps_match:
                         estimated_total_steps = int(total_steps_match.group(1))
                     if unsloth_steps_match:
@@ -612,7 +622,7 @@ class Trainer:
 
                     # Send progress callback with all metrics
                     # Send updates on step changes OR loss updates
-                    if callback and (progress_match or loss_match):
+                    if callback and (progress_match or loss_match or eval_loss_match):
                         callback(
                             {
                                 "epoch": last_epoch,
@@ -622,6 +632,7 @@ class Trainer:
                                 "loss": last_loss,  # May be None initially
                                 "learning_rate": self.config.learning_rate,
                                 "grad_norm": last_grad_norm,
+                                "eval_loss": last_eval_loss,
                                 "eta": eta,
                                 "samples_processed": samples_processed,
                             }
@@ -646,6 +657,7 @@ class Trainer:
                 "final_loss": last_loss or 0.0,
                 "epochs_completed": self.config.num_epochs,
                 "samples_processed": samples_processed,
+                "eval_loss": last_eval_loss,
             }
 
             logger.info(f"Training completed. Model saved to: {run.output_path}")
@@ -661,6 +673,7 @@ class Trainer:
         # Use forward slashes for cross-platform compatibility
         dataset_path = str(run.dataset_path).replace("\\", "/")
         output_path = str(run.output_path).replace("\\", "/")
+        val_path = str(run.val_dataset_path).replace("\\", "/") if run.val_dataset_path else ""
 
         return f'''#!/usr/bin/env python3
 """
@@ -734,6 +747,14 @@ if __name__ == "__main__":
     print("Loading dataset...")
     dataset = load_dataset("json", data_files="{dataset_path}", split="train")
 
+    # Load validation dataset if available
+    val_dataset = None
+    val_dataset_path = "{val_path}"
+    if val_dataset_path and os.path.exists(val_dataset_path):
+        print("Loading validation dataset...")
+        val_dataset = load_dataset("json", data_files=val_dataset_path, split="train")
+        print(f"Validation set: {{len(val_dataset)}} examples")
+
     # Training arguments
     training_args = TrainingArguments(
         output_dir="{output_path}",
@@ -741,6 +762,7 @@ if __name__ == "__main__":
         gradient_accumulation_steps={self.config.gradient_accumulation_steps},
         warmup_ratio={self.config.warmup_ratio},
         num_train_epochs={self.config.num_epochs},
+        max_steps={self.config.max_steps},
         learning_rate={self.config.learning_rate},
         fp16=True,
         logging_steps={self.config.logging_steps},
@@ -748,16 +770,24 @@ if __name__ == "__main__":
         save_total_limit=3,
         optim="adamw_8bit",
         seed=42,
+        # Eval settings (active when val_dataset is available)
+        eval_strategy="{self.config.eval_strategy}" if val_dataset is not None else "no",
+        eval_steps={self.config.eval_steps} if val_dataset is not None else None,
     )
 
     # Apply chat template to dataset (handles all model formats + None content)
     dataset = dataset.map(formatting_prompts_func, batched=True)
+
+    # Apply formatting to val dataset too
+    if val_dataset is not None:
+        val_dataset = val_dataset.map(formatting_prompts_func, batched=True)
 
     # Initialize trainer
     trainer = SFTTrainer(
         model=model,
         tokenizer=tokenizer,
         train_dataset=dataset,
+        eval_dataset=val_dataset,
         dataset_text_field="text",
         max_seq_length=max_seq_length,
         dataset_num_proc=1,  # Required on Windows (avoids multiprocessing crash)
@@ -779,6 +809,19 @@ if __name__ == "__main__":
         tokenizer,
         save_method="merged_16bit",
     )
+
+    # Export to GGUF if enabled
+    if {self.config.auto_export_gguf}:
+        print("Exporting to GGUF ({self.config.gguf_quantization})...")
+        import os
+        gguf_dir = "{output_path}/gguf"
+        os.makedirs(gguf_dir, exist_ok=True)
+        model.save_pretrained_gguf(
+            gguf_dir,
+            tokenizer,
+            quantization_method="{self.config.gguf_quantization}",
+        )
+        print(f"GGUF exported to: {{gguf_dir}}")
 
     print("Training complete!")
 '''
@@ -1212,6 +1255,19 @@ student_model.save_pretrained_merged(
     save_method="merged_16bit",
 )
 
+# Export to GGUF if enabled
+if {self.config.auto_export_gguf}:
+    print("Exporting to GGUF ({self.config.gguf_quantization})...")
+    import os
+    gguf_dir = "{output_path}/gguf"
+    os.makedirs(gguf_dir, exist_ok=True)
+    student_model.save_pretrained_gguf(
+        gguf_dir,
+        tokenizer,
+        quantization_method="{self.config.gguf_quantization}",
+    )
+    print(f"GGUF exported to: {{gguf_dir}}")
+
 print("Knowledge distillation complete!")
 print(f"Student model saved to: {output_path}/final")
 '''
@@ -1292,6 +1348,26 @@ trainer.train()
 print("Saving model...")
 model.save_pretrained("{output_path}/final")
 tokenizer.save_pretrained("{output_path}/final")
+
+# Save merged weights
+model.save_pretrained_merged(
+    "{output_path}/merged",
+    tokenizer,
+    save_method="merged_16bit",
+)
+
+# Export to GGUF if enabled
+if {self.config.auto_export_gguf}:
+    print("Exporting to GGUF ({self.config.gguf_quantization})...")
+    import os
+    gguf_dir = "{output_path}/gguf"
+    os.makedirs(gguf_dir, exist_ok=True)
+    model.save_pretrained_gguf(
+        gguf_dir,
+        tokenizer,
+        quantization_method="{self.config.gguf_quantization}",
+    )
+    print(f"GGUF exported to: {{gguf_dir}}")
 
 print("DPO training complete!")
 '''
@@ -2040,6 +2116,19 @@ if __name__ == "__main__":
     model.save_pretrained("{output_path}/final")
     tokenizer.save_pretrained("{output_path}/final")
     model.save_pretrained_merged("{output_path}/merged", tokenizer, save_method="merged_16bit")
+
+    # Export to GGUF if enabled
+    if {self.config.auto_export_gguf}:
+        print("Exporting to GGUF ({self.config.gguf_quantization})...")
+        import os
+        gguf_dir = "{output_path}/gguf"
+        os.makedirs(gguf_dir, exist_ok=True)
+        model.save_pretrained_gguf(
+            gguf_dir,
+            tokenizer,
+            quantization_method="{self.config.gguf_quantization}",
+        )
+        print(f"GGUF exported to: {{gguf_dir}}")
 
     print("GRPO training complete!")
     print(f"Final model saved to: {output_path}/final")

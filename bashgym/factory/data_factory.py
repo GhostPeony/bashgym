@@ -356,8 +356,8 @@ def build_tool_call_messages(
         # Build assistant content from cognitive data when enabled
         assistant_content = None
         if include_cognitive:
-            meta = step.get("metadata", {})
-            cognitive = meta.get("cognitive", {})
+            meta = step.get("metadata") or {}
+            cognitive = meta.get("cognitive") or {}
             parts = []
             seen_texts = set()  # Avoid injecting duplicate content
 

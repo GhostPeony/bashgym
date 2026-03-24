@@ -27,12 +27,15 @@ export interface TraceExperimentResult {
 export type AutoResearchStatus = 'idle' | 'running' | 'paused' | 'completed' | 'failed'
 export type AutoResearchMode = 'hyperparam' | 'trace'
 
+export type ExperimentMode = 'simulate' | 'real'
+
 export interface AutoResearchStartConfig {
   searchParams: string[]
   maxExperiments: number
   trainSteps: number
   mutationRate: number
   mutationScale: number
+  mode: ExperimentMode
   // Base training config to start from
   baseModel: string
   learningRate: number

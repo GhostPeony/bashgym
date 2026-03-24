@@ -97,6 +97,7 @@ async def start_autoresearch(body: AutoResearchRequest, request: Request):
         )
 
     # Build AutoResearchConfig
+    mode = getattr(body, "mode", "simulate") or "simulate"
     ar_config = AutoResearchConfig(
         search_params=body.search_params,
         max_experiments=body.max_experiments,
@@ -105,6 +106,7 @@ async def start_autoresearch(body: AutoResearchRequest, request: Request):
         eval_metric=body.eval_metric,
         mutation_rate=body.mutation_rate,
         mutation_scale=body.mutation_scale,
+        mode=mode,
     )
 
     # Build base TrainerConfig from request overrides
@@ -114,11 +116,56 @@ async def start_autoresearch(body: AutoResearchRequest, request: Request):
             if hasattr(base_config, key):
                 setattr(base_config, key, value)
 
-    researcher = AutoResearcher(ar_config, base_config)
-    request.app.state.autoresearcher = researcher
-
-    # Dataset path (placeholder — real training would use actual data)
+    # Resolve dataset paths for real mode
     dataset_path = Path("data/gold_traces")
+    val_dataset_path = None
+
+    if mode == "real":
+        # Generate training data from gold traces (same logic as run_training)
+        try:
+            from bashgym.config import get_settings
+            from bashgym.factory.example_generator import (
+                ExampleGenerator,
+                ExampleGeneratorConfig,
+            )
+
+            settings = get_settings()
+            gold_dir = Path(settings.data.gold_traces_dir)
+            output_dir = Path(settings.data.training_batches_dir)
+
+            if gold_dir.exists() and list(gold_dir.glob("*.json")):
+                gen_config = ExampleGeneratorConfig(output_dir=str(output_dir))
+                generator = ExampleGenerator(gen_config)
+                examples, _stats = generator.process_directory(gold_dir)
+
+                if examples:
+                    result = generator.export_for_nemo(examples, output_dir, train_split=0.9)
+                    dataset_path = Path(result["train"])
+                    val_dataset_path = (
+                        Path(result["validation"]) if result.get("validation") else None
+                    )
+                    logger.info(
+                        f"[AutoResearch] Real mode: train={dataset_path}, val={val_dataset_path}"
+                    )
+                else:
+                    logger.warning(
+                        "[AutoResearch] No examples from gold traces, falling back to simulate"
+                    )
+                    ar_config.mode = "simulate"
+            else:
+                logger.warning("[AutoResearch] No gold traces found, falling back to simulate")
+                ar_config.mode = "simulate"
+        except Exception as e:
+            logger.error(f"[AutoResearch] Failed to generate dataset for real mode: {e}")
+            ar_config.mode = "simulate"
+
+    researcher = AutoResearcher(
+        ar_config,
+        base_config,
+        dataset_path=dataset_path,
+        val_dataset_path=val_dataset_path,
+    )
+    request.app.state.autoresearcher = researcher
 
     # Callback that broadcasts each experiment via WebSocket
     total_experiments = ar_config.max_experiments

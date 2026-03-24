@@ -109,6 +109,9 @@ class AutoResearchConfig:
     # Eval
     eval_metric: str = "val_loss"  # What to optimize (lower is better for loss)
 
+    # Mode: "simulate" for fast heuristic, "real" for actual short training runs
+    mode: str = "simulate"
+
     # Mutation
     mutation_rate: float = 0.3  # Probability of mutating each param
     mutation_scale: float = 0.2  # Scale of mutations (20% change)
@@ -232,6 +235,8 @@ class AutoResearcher:
         self,
         config: AutoResearchConfig,
         base_trainer_config: TrainerConfig,
+        dataset_path: Path | None = None,
+        val_dataset_path: Path | None = None,
     ):
         self.config = config
         self.best_config = copy.deepcopy(base_trainer_config)
@@ -243,6 +248,8 @@ class AutoResearcher:
         self._error: str | None = None
         self._started_at: str | None = None
         self._completed_at: str | None = None
+        self._dataset_path = dataset_path
+        self._val_dataset_path = val_dataset_path
 
     # -----------------------------------------------------------------
     # Mutation
@@ -333,11 +340,12 @@ class AutoResearcher:
     ) -> float:
         """Run a short training experiment and return the eval metric.
 
-        Currently simulated: sleeps 2-3 seconds and returns a realistic
-        loss value. Will be replaced with actual short training runs once
-        the simulation is validated.
+        Dispatches to real training or simulation based on self.config.mode.
         """
-        # Simulate compute time
+        if self.config.mode == "real":
+            return self._run_real_experiment(config, experiment_number)
+
+        # Simulate mode: sleep briefly and return heuristic loss
         sleep_time = random.uniform(2.0, 3.0)
         time.sleep(sleep_time)
 
@@ -346,6 +354,67 @@ class AutoResearcher:
             experiment_number,
             self.config.max_experiments,
         )
+
+    def _run_real_experiment(
+        self,
+        config: TrainerConfig,
+        experiment_number: int,
+    ) -> float:
+        """Run a real short training experiment and return eval/final loss.
+
+        Creates a Trainer with max_steps limited to self.config.train_steps,
+        trains in a temp output dir, and returns the eval_loss (or final_loss
+        as fallback).
+        """
+        from bashgym.gym.trainer import Trainer
+
+        # Configure for a short experiment
+        exp_config = copy.deepcopy(config)
+        exp_config.max_steps = self.config.train_steps
+        exp_config.eval_strategy = "steps"
+        exp_config.eval_steps = max(10, self.config.train_steps // 3)
+        exp_config.auto_export_gguf = False  # No export during search
+        exp_config.save_steps = 999999  # Don't save checkpoints
+        exp_config.logging_steps = 5
+
+        # Use a temp output dir for this experiment
+        import tempfile
+
+        with tempfile.TemporaryDirectory(prefix=f"autoresearch_exp{experiment_number}_") as tmpdir:
+            exp_config.output_dir = tmpdir
+
+            trainer = Trainer(exp_config)
+
+            dataset_path = self._dataset_path
+            val_path = self._val_dataset_path
+
+            if not dataset_path or not dataset_path.exists():
+                logger.error(
+                    f"[AutoResearch] Real mode: dataset_path={dataset_path} not found, "
+                    "falling back to simulation"
+                )
+                return _simulate_loss(config, experiment_number, self.config.max_experiments)
+
+            try:
+                run = trainer.train_sft(
+                    dataset_path=dataset_path,
+                    val_dataset_path=val_path,
+                )
+
+                # Prefer eval_loss, fall back to final_loss
+                eval_loss = run.metrics.get("eval_loss")
+                final_loss = run.metrics.get("final_loss", 5.0)
+
+                metric = eval_loss if eval_loss is not None else final_loss
+                logger.info(
+                    f"[AutoResearch] Experiment {experiment_number}: "
+                    f"eval_loss={eval_loss}, final_loss={final_loss}, metric={metric}"
+                )
+                return float(metric)
+
+            except Exception as e:
+                logger.error(f"[AutoResearch] Real experiment {experiment_number} failed: {e}")
+                return 5.0  # Worst-case metric so this config is rejected
 
     # -----------------------------------------------------------------
     # Main loop
@@ -496,6 +565,7 @@ class AutoResearcher:
             "mutation_rate": self.config.mutation_rate,
             "mutation_scale": self.config.mutation_scale,
             "eval_metric": self.config.eval_metric,
+            "mode": self.config.mode,
             "experiments": [asdict(e) for e in self.experiments],
             "started_at": self._started_at,
             "completed_at": self._completed_at,

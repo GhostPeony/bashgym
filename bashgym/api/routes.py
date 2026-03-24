@@ -928,6 +928,7 @@ def create_app() -> FastAPI:
                 # Determine training data source
                 dataset_path = None
                 val_dataset_path = None
+                trace_files_used = []  # Track which traces were used
                 if request.data_source == DataSource.SECURITY_DATASET:
                     # Ingest security dataset directly
                     logger.info(f"Ingesting security dataset: {request.security_dataset_type}")
@@ -1011,6 +1012,7 @@ def create_app() -> FastAPI:
                             except Exception as e:
                                 logger.warning(f"Error processing trace {trace_file}: {e}")
 
+                        trace_files_used = trace_files
                         logger.info(
                             f"Generated {len(examples)} examples from {stats['sessions_processed']} gold traces"
                         )
@@ -1108,6 +1110,39 @@ def create_app() -> FastAPI:
                     save_run_state(state)
                     logger.info(f"Persisted run state for {run_id} (PID {pid})")
 
+                # Build training metadata for model profile enrichment
+                training_metadata = {
+                    "selected_repos": request.selected_repos or [],
+                }
+                if dataset_path:
+                    training_metadata["dataset_path"] = str(dataset_path)
+                if val_dataset_path:
+                    training_metadata["val_dataset_path"] = str(val_dataset_path)
+
+                # Collect trace IDs and repo names
+                if trace_files_used:
+                    training_metadata["trace_ids"] = [f.stem for f in trace_files_used]
+                    training_metadata["trace_count"] = len(trace_files_used)
+                    repos_found = set()
+                    for tf in trace_files_used:
+                        try:
+                            with open(tf, encoding="utf-8") as f:
+                                td = json.load(f)
+                            pr = td.get("primary_repo") or {}
+                            if isinstance(pr, list) and len(pr) > 0:
+                                pr = pr[0]
+                            rn = pr.get("name") if isinstance(pr, dict) else None
+                            if rn:
+                                repos_found.add(rn)
+                        except Exception:
+                            pass
+                    training_metadata["training_repos"] = sorted(repos_found)
+
+                if request.strategy == TrainingStrategy.DISTILLATION:
+                    training_metadata["teacher_model"] = (
+                        request.teacher_model or "claude-sonnet-4-20250514"
+                    )
+
                 if request.strategy == TrainingStrategy.SFT:
                     run = app.state.trainer.train_sft(
                         dataset_path=dataset_path,
@@ -1116,10 +1151,14 @@ def create_app() -> FastAPI:
                         callback=callback.on_progress_sync,
                         log_callback=callback.on_log_sync,
                         pid_callback=_on_pid,
+                        training_metadata=training_metadata,
                     )
                 elif request.strategy == TrainingStrategy.DPO:
                     run = app.state.trainer.train_dpo(
-                        dataset_path=dataset_path, run_id=run_id, callback=callback.on_progress_sync
+                        dataset_path=dataset_path,
+                        run_id=run_id,
+                        callback=callback.on_progress_sync,
+                        training_metadata=training_metadata,
                     )
                 elif request.strategy == TrainingStrategy.DISTILLATION:
                     run = app.state.trainer.train_distillation(
@@ -1128,6 +1167,7 @@ def create_app() -> FastAPI:
                         callback=callback.on_progress_sync,
                         log_callback=callback.on_log_sync,
                         pid_callback=_on_pid,
+                        training_metadata=training_metadata,
                     )
                 elif request.strategy.value == "grpo":
                     from bashgym.gym.trainer import GRPOTrainer
@@ -1140,6 +1180,7 @@ def create_app() -> FastAPI:
                         callback=callback.on_progress_sync,
                         log_callback=callback.on_log_sync,
                         pid_callback=_on_pid,
+                        training_metadata=training_metadata,
                     )
                 elif request.strategy.value == "rlvr":
                     run = app.state.trainer.train_rlvr(
@@ -1148,6 +1189,7 @@ def create_app() -> FastAPI:
                         callback=callback.on_progress_sync,
                         log_callback=callback.on_log_sync,
                         pid_callback=_on_pid,
+                        training_metadata=training_metadata,
                     )
                 else:
                     raise ValueError(f"Unknown training strategy: {request.strategy}")

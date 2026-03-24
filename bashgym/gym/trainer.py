@@ -675,27 +675,20 @@ from trl import SFTTrainer
 from transformers import TrainingArguments
 import torch
 
-def formatting_func(examples):
-    """Format examples for training. Returns list of formatted strings."""
-    output_texts = []
-    # Handle batched input
-    messages_list = examples.get("messages", [])
-    if not isinstance(messages_list[0], list):
-        messages_list = [messages_list]  # Single example case
+def formatting_prompts_func(examples):
+    """Format examples using the tokenizer's chat template.
 
-    for messages in messages_list:
-        text = ""
-        for msg in messages:
-            role = msg.get("role", "")
-            content = msg.get("content") or ""
-            if role == "system":
-                text += "<|im_start|>system\\n" + content + "<|im_end|>\\n"
-            elif role == "user":
-                text += "<|im_start|>user\\n" + content + "<|im_end|>\\n"
-            elif role == "assistant":
-                text += "<|im_start|>assistant\\n" + content + "<|im_end|>\\n"
-        output_texts.append(text)
-    return output_texts
+    This handles all model-specific formatting (Qwen, Llama, Mistral, etc.),
+    None content in tool_call messages, and special tokens automatically.
+    """
+    convos = examples["messages"]
+    texts = [
+        tokenizer.apply_chat_template(
+            convo, tokenize=False, add_generation_prompt=False
+        )
+        for convo in convos
+    ]
+    return {{"text": texts}}
 
 if __name__ == "__main__":
     import gc
@@ -757,13 +750,17 @@ if __name__ == "__main__":
         seed=42,
     )
 
+    # Apply chat template to dataset (handles all model formats + None content)
+    dataset = dataset.map(formatting_prompts_func, batched=True)
+
     # Initialize trainer
     trainer = SFTTrainer(
         model=model,
         tokenizer=tokenizer,
         train_dataset=dataset,
-        formatting_func=formatting_func,
+        dataset_text_field="text",
         max_seq_length=max_seq_length,
+        dataset_num_proc=1,  # Required on Windows (avoids multiprocessing crash)
         args=training_args,
     )
 

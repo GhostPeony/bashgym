@@ -1059,6 +1059,8 @@ def create_app() -> FastAPI:
                     # Export & backend
                     auto_export_gguf=request.auto_export_gguf,
                     gguf_quantization=request.gguf_quantization,
+                    auto_deploy_ollama=getattr(request, "auto_deploy_ollama", False),
+                    ollama_model_name=getattr(request, "ollama_model_name", ""),
                     use_nemo_gym=request.use_nemo_gym,
                     use_remote_ssh=request.use_remote_ssh,
                 )
@@ -1156,6 +1158,7 @@ def create_app() -> FastAPI:
                 elif request.strategy == TrainingStrategy.DPO:
                     run = app.state.trainer.train_dpo(
                         dataset_path=dataset_path,
+                        val_dataset_path=val_dataset_path,
                         run_id=run_id,
                         callback=callback.on_progress_sync,
                         training_metadata=training_metadata,

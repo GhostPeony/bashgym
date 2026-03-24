@@ -53,6 +53,8 @@ export interface TrainingRequest {
   // Export
   auto_export_gguf?: boolean
   gguf_quantization?: string
+  auto_deploy_ollama?: boolean
+  ollama_model_name?: string
   // Backend
   use_nemo_gym?: boolean
   use_remote_ssh?: boolean

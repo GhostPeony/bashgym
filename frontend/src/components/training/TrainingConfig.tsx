@@ -828,6 +828,29 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
               </div>
             </div>
           )}
+          {/* Auto-deploy to Ollama */}
+          <div className="mt-4 p-3 card border-l-4 border-l-accent">
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={config.autoDeployOllama ?? false}
+                onChange={(e) => setConfig({ ...config, autoDeployOllama: e.target.checked })}
+                className="accent-primary"
+              />
+              <span className="text-sm text-text-secondary">Auto-deploy to Ollama after training</span>
+            </div>
+            {config.autoDeployOllama && (
+              <div className="mt-2">
+                <input
+                  type="text"
+                  value={config.ollamaModelName ?? ''}
+                  onChange={(e) => setConfig({ ...config, ollamaModelName: e.target.value })}
+                  className="input w-full"
+                  placeholder="Model name (auto-generated if empty)"
+                />
+              </div>
+            )}
+          </div>
         </form>
 
         {/* Footer */}

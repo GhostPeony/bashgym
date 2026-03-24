@@ -381,12 +381,33 @@ async def start_trace_research(body: TraceResearchRequest, request: Request):
         )
 
     # Build TraceResearchConfig
+    mode = getattr(body, "mode", "simulate") or "simulate"
     tr_config = TraceResearchConfig(
         search_params=body.search_params,
         max_experiments=body.max_experiments,
         mutation_rate=body.mutation_rate,
         mutation_scale=body.mutation_scale,
+        mode=mode,
+        train_steps=body.train_steps,
     )
+
+    # Resolve gold_traces_dir for real mode
+    if mode == "real":
+        try:
+            from bashgym.config import get_settings
+
+            settings = get_settings()
+            gold_dir = Path(settings.data.gold_traces_dir)
+
+            if gold_dir.exists() and list(gold_dir.glob("*.json")):
+                tr_config.gold_traces_dir = str(gold_dir)
+                logger.info(f"[TraceResearch] Real mode: gold_traces_dir={gold_dir}")
+            else:
+                logger.warning("[TraceResearch] No gold traces found, falling back to simulate")
+                tr_config.mode = "simulate"
+        except Exception as e:
+            logger.error(f"[TraceResearch] Failed to resolve gold_traces_dir: {e}")
+            tr_config.mode = "simulate"
 
     researcher = TraceResearcher(tr_config)
     request.app.state.trace_researcher = researcher

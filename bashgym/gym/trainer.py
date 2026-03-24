@@ -11,6 +11,7 @@ import asyncio
 import copy
 import logging
 import os
+import re
 import subprocess
 import sys
 from collections.abc import Callable
@@ -152,6 +153,7 @@ class TrainingRun:
     loss_curve: list[dict[str, Any]] = field(default_factory=list)
     config_snapshot: dict[str, Any] = field(default_factory=dict)
     val_dataset_path: Path | None = None
+    training_metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
@@ -170,6 +172,7 @@ class TrainingRun:
             "loss_curve": self.loss_curve,
             "config_snapshot": self.config_snapshot,
             "val_dataset_path": str(self.val_dataset_path) if self.val_dataset_path else None,
+            "training_metadata": self.training_metadata,
         }
 
     def add_loss_point(
@@ -208,6 +211,69 @@ class Trainer:
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         return f"run_{timestamp}"
 
+    @staticmethod
+    def _extract_param_count(base_model: str) -> str | None:
+        """Extract parameter count from model name, e.g. '1.5B' from 'Qwen2.5-Coder-1.5B'."""
+        match = re.search(r"(\d+\.?\d*)[Bb]", base_model)
+        return f"{match.group(1)}B" if match else None
+
+    @staticmethod
+    def _scan_output_artifacts(output_path: Path):
+        """Scan a training output directory for model artifacts."""
+        from bashgym.models.profile import CheckpointInfo, GGUFExport, ModelArtifacts
+
+        artifacts = ModelArtifacts()
+
+        if not output_path.exists():
+            return artifacts
+
+        # Checkpoints
+        for ckpt_dir in sorted(output_path.glob("checkpoint-*")):
+            step_match = re.search(r"checkpoint-(\d+)", ckpt_dir.name)
+            if step_match:
+                artifacts.checkpoints.append(
+                    CheckpointInfo(path=str(ckpt_dir), step=int(step_match.group(1)))
+                )
+
+        # Final adapter
+        final_dir = output_path / "final"
+        if final_dir.exists():
+            artifacts.final_adapter_path = str(final_dir)
+
+        # Merged model
+        merged_dir = output_path / "merged"
+        if merged_dir.exists():
+            artifacts.merged_path = str(merged_dir)
+
+        # GGUF exports — check both directory names
+        for gguf_dirname in ["gguf", "exported_gguf"]:
+            gguf_dir = output_path / gguf_dirname
+            if gguf_dir.exists():
+                for gguf_file in gguf_dir.glob("*.gguf"):
+                    quant = gguf_file.stem.split("-")[-1] if "-" in gguf_file.stem else "unknown"
+                    artifacts.gguf_exports.append(
+                        GGUFExport(
+                            path=str(gguf_file),
+                            quantization=quant.upper(),
+                            size_bytes=gguf_file.stat().st_size,
+                            created_at=datetime.fromtimestamp(gguf_file.stat().st_mtime),
+                        )
+                    )
+
+        return artifacts
+
+    @staticmethod
+    def _calculate_model_size(output_path: Path) -> int:
+        """Calculate total model size on disk (bytes) from merged/final/gguf dirs."""
+        total = 0
+        for subdir in ["merged", "final", "gguf", "exported_gguf"]:
+            d = output_path / subdir
+            if d.exists():
+                for f in d.rglob("*"):
+                    if f.is_file():
+                        total += f.stat().st_size
+        return total
+
     def _save_model_profile(self, run: TrainingRun) -> None:
         """Save or update the ModelProfile for a completed training run."""
         if not MODEL_PROFILE_AVAILABLE:
@@ -238,6 +304,7 @@ class Trainer:
                 "batch_size": self.config.batch_size,
                 "num_epochs": self.config.num_epochs,
                 "max_seq_length": self.config.max_seq_length,
+                "max_steps": self.config.max_steps,
                 "lora_r": self.config.lora_r,
                 "lora_alpha": self.config.lora_alpha,
                 "lora_dropout": self.config.lora_dropout,
@@ -246,7 +313,33 @@ class Trainer:
                 "weight_decay": self.config.weight_decay,
                 "load_in_4bit": self.config.load_in_4bit,
                 "use_gradient_checkpointing": self.config.use_gradient_checkpointing,
+                "eval_strategy": self.config.eval_strategy,
+                "eval_steps": self.config.eval_steps,
+                "gguf_quantization": self.config.gguf_quantization,
             }
+
+            # Extract enrichment data from training_metadata
+            meta = run.training_metadata or {}
+            training_traces = meta.get("trace_ids", [])
+            training_repos = meta.get("training_repos", [])
+            teacher_model = meta.get("teacher_model")
+            if not teacher_model and run.strategy == TrainingStrategy.DISTILLATION:
+                teacher_model = self.config.teacher_model
+
+            # Scan artifacts and compute sizes
+            artifacts = self._scan_output_artifacts(run.output_path)
+            model_size_bytes = self._calculate_model_size(run.output_path)
+            model_size_params = self._extract_param_count(run.base_model)
+
+            # Build description
+            base_name = run.base_model.split("/")[-1] if run.base_model else "unknown"
+            trace_count = meta.get("trace_count", len(training_traces))
+            desc_parts = [f"Fine-tuned {base_name} with {run.strategy.value.upper()}"]
+            if trace_count:
+                desc_parts.append(f"on {trace_count} traces")
+            if training_repos:
+                desc_parts.append(f"from {', '.join(training_repos[:3])}")
+            description = " ".join(desc_parts)
 
             if existing:
                 # Update existing profile
@@ -258,23 +351,33 @@ class Trainer:
                 existing.loss_curve = run.loss_curve
                 existing.final_metrics = run.metrics
                 existing.config = config_dict
+                existing.artifacts = artifacts
+                existing.model_size_bytes = model_size_bytes
+                existing.model_size_params = model_size_params
+                existing.training_traces = training_traces
+                existing.training_repos = training_repos
+                if teacher_model:
+                    existing.teacher_model = teacher_model
+                existing.description = description
                 existing.save()
                 logger.info(f"Updated model profile for {run.run_id}")
             else:
                 # Create new profile
-                base_name = run.base_model.split("/")[-1] if run.base_model else "unknown"
                 display_name = f"{base_name}-{run.strategy.value}-{run.run_id[-6:]}"
 
                 profile = ModelProfile(
                     model_id=run.run_id,
                     run_id=run.run_id,
                     display_name=display_name,
-                    description=f"Trained with {run.strategy.value.upper()} strategy",
+                    description=description,
                     created_at=(
                         datetime.fromisoformat(run.started_at) if run.started_at else datetime.now()
                     ),
                     base_model=run.base_model,
                     training_strategy=run.strategy.value,
+                    teacher_model=teacher_model,
+                    training_traces=training_traces,
+                    training_repos=training_repos,
                     config=config_dict,
                     started_at=datetime.fromisoformat(run.started_at) if run.started_at else None,
                     completed_at=(
@@ -283,7 +386,10 @@ class Trainer:
                     duration_seconds=duration,
                     loss_curve=run.loss_curve,
                     final_metrics=run.metrics,
+                    artifacts=artifacts,
                     model_dir=str(run.output_path),
+                    model_size_bytes=model_size_bytes,
+                    model_size_params=model_size_params,
                     status="ready" if run.status == "completed" else run.status,
                 )
                 profile.save(Path(run.output_path) / "model_profile.json")
@@ -325,6 +431,7 @@ class Trainer:
         callback: Callable[[dict[str, Any]], None] | None = None,
         log_callback: Callable[[str], None] | None = None,
         pid_callback: Callable[[int, "TrainingRun"], None] | None = None,
+        training_metadata: dict[str, Any] | None = None,
     ) -> TrainingRun:
         """
         Run Supervised Fine-Tuning.
@@ -352,6 +459,8 @@ class Trainer:
         )
         self.active_runs[run_id] = run
         run.val_dataset_path = val_dataset_path
+        if training_metadata:
+            run.training_metadata = training_metadata
 
         try:
             if self.config.use_remote_ssh:
@@ -444,6 +553,7 @@ class Trainer:
         dataset_path: Path,
         run_id: str | None = None,
         callback: Callable[[dict[str, Any]], None] | None = None,
+        training_metadata: dict[str, Any] | None = None,
     ) -> TrainingRun:
         """
         Run Direct Preference Optimization training.
@@ -469,6 +579,8 @@ class Trainer:
             started_at=datetime.now(timezone.utc).isoformat(),
         )
         self.active_runs[run_id] = run
+        if training_metadata:
+            run.training_metadata = training_metadata
 
         try:
             self._train_with_unsloth_dpo(run, callback)
@@ -910,6 +1022,7 @@ if __name__ == "__main__":
         callback: Callable[[dict[str, Any]], None] | None = None,
         log_callback: Callable[[str], None] | None = None,
         pid_callback: Callable[[int, "TrainingRun"], None] | None = None,
+        training_metadata: dict[str, Any] | None = None,
     ) -> TrainingRun:
         """
         Run Knowledge Distillation training.
@@ -938,6 +1051,8 @@ if __name__ == "__main__":
             started_at=datetime.now(timezone.utc).isoformat(),
         )
         self.active_runs[run_id] = run
+        if training_metadata:
+            run.training_metadata = training_metadata
 
         try:
             if self.config.use_remote_ssh:
@@ -1113,6 +1228,7 @@ if __name__ == "__main__":
         callback: Callable[[dict[str, Any]], None] | None = None,
         log_callback: Callable[[str], None] | None = None,
         pid_callback: Callable[[int, "TrainingRun"], None] | None = None,
+        training_metadata: dict[str, Any] | None = None,
     ) -> TrainingRun:
         """
         Run RL with Verifiable Rewards.
@@ -1131,6 +1247,7 @@ if __name__ == "__main__":
             callback=callback,
             log_callback=log_callback,
             pid_callback=pid_callback,
+            training_metadata=training_metadata,
         )
         run.strategy = TrainingStrategy.RLVR
         return run
@@ -1722,6 +1839,7 @@ class GRPOTrainer(Trainer):
         callback: Callable[[dict[str, Any]], None] | None = None,
         log_callback: Callable[[str], None] | None = None,
         pid_callback: Callable[[int, "TrainingRun"], None] | None = None,
+        training_metadata: dict[str, Any] | None = None,
     ) -> TrainingRun:
         """
         Run GRPO training with verifiable rewards.
@@ -1748,6 +1866,8 @@ class GRPOTrainer(Trainer):
             started_at=datetime.now(timezone.utc).isoformat(),
         )
         self.active_runs[run_id] = run
+        if training_metadata:
+            run.training_metadata = training_metadata
 
         try:
             if self.config.use_remote_ssh:

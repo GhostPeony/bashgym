@@ -279,26 +279,33 @@ class ModelRegistry:
         if merged_dir.exists():
             artifacts.merged_path = str(merged_dir)
 
-        # GGUF exports
-        gguf_dir = run_dir / "exported_gguf"
-        if gguf_dir.exists():
-            for gguf_file in gguf_dir.glob("*.gguf"):
-                # Parse quantization from filename (e.g., model-Q4_K_M.gguf)
-                name = gguf_file.stem
-                quant = "unknown"
-                for q in ["Q4_K_M", "Q4_K_S", "Q5_K_M", "Q5_K_S", "Q8_0", "F16", "F32"]:
-                    if q in name:
-                        quant = q
-                        break
+        # GGUF exports - check both new (gguf/) and old (exported_gguf/) directories
+        seen_gguf_paths: set[str] = set()
+        for gguf_dirname in ["gguf", "exported_gguf"]:
+            gguf_dir = run_dir / gguf_dirname
+            if gguf_dir.exists():
+                for gguf_file in gguf_dir.glob("*.gguf"):
+                    # Deduplicate by filename in case both dirs have the same file
+                    if gguf_file.name in seen_gguf_paths:
+                        continue
+                    seen_gguf_paths.add(gguf_file.name)
 
-                artifacts.gguf_exports.append(
-                    GGUFExport(
-                        path=str(gguf_file),
-                        quantization=quant,
-                        size_bytes=gguf_file.stat().st_size,
-                        created_at=datetime.fromtimestamp(gguf_file.stat().st_mtime),
+                    # Parse quantization from filename (e.g., model-Q4_K_M.gguf)
+                    name = gguf_file.stem
+                    quant = "unknown"
+                    for q in ["Q4_K_M", "Q4_K_S", "Q5_K_M", "Q5_K_S", "Q8_0", "F16", "F32"]:
+                        if q in name:
+                            quant = q
+                            break
+
+                    artifacts.gguf_exports.append(
+                        GGUFExport(
+                            path=str(gguf_file),
+                            quantization=quant,
+                            size_bytes=gguf_file.stat().st_size,
+                            created_at=datetime.fromtimestamp(gguf_file.stat().st_mtime),
+                        )
                     )
-                )
 
         return artifacts
 

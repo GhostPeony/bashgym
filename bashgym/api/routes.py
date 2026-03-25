@@ -1061,6 +1061,9 @@ def create_app() -> FastAPI:
                     gguf_quantization=request.gguf_quantization,
                     auto_deploy_ollama=getattr(request, "auto_deploy_ollama", False),
                     ollama_model_name=getattr(request, "ollama_model_name", ""),
+                    auto_push_hf=getattr(request, "auto_push_hf", False),
+                    hf_repo_name=getattr(request, "hf_repo_name", ""),
+                    hf_private=getattr(request, "hf_private", True),
                     use_nemo_gym=request.use_nemo_gym,
                     use_remote_ssh=request.use_remote_ssh,
                 )

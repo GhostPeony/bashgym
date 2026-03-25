@@ -45,6 +45,7 @@ class ModelSummary(BaseModel):
     model_size_display: str
     inference_latency_ms: float | None = None
     training_duration_display: str
+    hf_repo_id: str | None = None
 
 
 class ModelProfileResponse(BaseModel):
@@ -92,6 +93,7 @@ class ModelProfileResponse(BaseModel):
     inference_latency_ms: float | None = None
     status: str
     deployed_to: str | None = None
+    hf_repo_id: str | None = None
 
     # Computed
     custom_eval_pass_rate: float | None = None
@@ -181,6 +183,7 @@ def profile_to_summary(profile: ModelProfile) -> ModelSummary:
         model_size_display=profile.model_size_display,
         inference_latency_ms=profile.inference_latency_ms,
         training_duration_display=profile.training_duration_display,
+        hf_repo_id=profile.hf_repo_id,
     )
 
 
@@ -218,6 +221,7 @@ def profile_to_response(profile: ModelProfile) -> ModelProfileResponse:
         inference_latency_ms=profile.inference_latency_ms,
         status=profile.status,
         deployed_to=profile.deployed_to,
+        hf_repo_id=profile.hf_repo_id,
         custom_eval_pass_rate=profile.custom_eval_pass_rate,
         benchmark_avg_score=profile.benchmark_avg_score,
     )

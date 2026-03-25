@@ -58,6 +58,10 @@ export interface TrainingConfig {
   // Auto-deploy
   autoDeployOllama?: boolean
   ollamaModelName?: string
+  // HuggingFace
+  autoPushHF?: boolean
+  hfRepoName?: string
+  hfPrivate?: boolean
 }
 
 export interface TrainingRun {
@@ -172,6 +176,10 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
         // Auto-deploy
         auto_deploy_ollama: config.autoDeployOllama,
         ollama_model_name: config.ollamaModelName,
+        // HuggingFace
+        auto_push_hf: config.autoPushHF,
+        hf_repo_name: config.hfRepoName,
+        hf_private: config.hfPrivate,
       })
 
       if (response.ok && response.data) {

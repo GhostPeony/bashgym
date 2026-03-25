@@ -55,6 +55,10 @@ export interface TrainingRequest {
   gguf_quantization?: string
   auto_deploy_ollama?: boolean
   ollama_model_name?: string
+  // HuggingFace
+  auto_push_hf?: boolean
+  hf_repo_name?: string
+  hf_private?: boolean
   // Backend
   use_nemo_gym?: boolean
   use_remote_ssh?: boolean
@@ -1328,6 +1332,7 @@ export interface ModelSummary {
   model_size_display: string
   inference_latency_ms: number | null
   training_duration_display: string
+  hf_repo_id?: string | null
 }
 
 export interface BenchmarkResult {
@@ -1406,6 +1411,7 @@ export interface ModelProfile {
   inference_latency_ms: number | null
   status: string
   deployed_to: string | null
+  hf_repo_id?: string | null
 
   // Computed
   custom_eval_pass_rate: number | null
@@ -1770,6 +1776,33 @@ export interface HFInferenceEmbedResponse {
   dimension: number
 }
 
+export interface HFModelPushRequest {
+  model_id: string
+  repo_name?: string
+  private?: boolean
+  push_gguf?: boolean
+  generate_card?: boolean
+}
+
+export interface HFModelPushResponse {
+  repo_id: string
+  url: string
+  gguf_repo_id?: string
+  gguf_url?: string
+  card_generated: boolean
+}
+
+export interface HFMyModel {
+  id: string
+  url: string
+  downloads: number
+  likes: number
+  private: boolean
+  last_modified: string
+  pipeline_tag?: string
+  tags: string[]
+}
+
 // HuggingFace API
 export const hfApi = {
   // Status
@@ -1859,7 +1892,19 @@ export const hfApi = {
     request<HFInferenceEmbedResponse>('/hf/inference/embed', {
       method: 'POST',
       body: JSON.stringify(req)
-    })
+    }),
+
+  pushModel: (req: HFModelPushRequest) =>
+    request<HFModelPushResponse>('/hf/models/push', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
+
+  listMyModels: () =>
+    request<HFMyModel[]>('/hf/models/mine'),
+
+  deleteHFModel: (repoId: string) =>
+    request<{ status: string }>(`/hf/models/${encodeURIComponent(repoId)}`, { method: 'DELETE' }),
 }
 
 // =============================================================================

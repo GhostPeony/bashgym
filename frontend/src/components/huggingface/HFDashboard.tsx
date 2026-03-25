@@ -13,16 +13,18 @@ import {
   CheckCircle2,
   XCircle,
   Eye,
-  EyeOff
+  EyeOff,
+  Package
 } from 'lucide-react'
 import { hfApi, HFStatus } from '../../services/api'
 import { HFStatus as HFStatusBadge } from './HFStatus'
 import { CloudTraining } from './CloudTraining'
 import { SpaceManager } from './SpaceManager'
 import { DatasetBrowser } from './DatasetBrowser'
+import { MyModels } from './MyModels'
 import { clsx } from 'clsx'
 
-type Tab = 'training' | 'spaces' | 'datasets'
+type Tab = 'training' | 'spaces' | 'datasets' | 'models'
 
 export function HFDashboard() {
   const [status, setStatus] = useState<HFStatus | null>(null)
@@ -224,6 +226,12 @@ export function HFDashboard() {
       icon: Database,
       requiresPro: false,
     },
+    {
+      id: 'models' as Tab,
+      label: 'My Models',
+      icon: Package,
+      requiresPro: false,
+    },
   ]
 
   return (
@@ -332,6 +340,7 @@ export function HFDashboard() {
         {activeTab === 'training' && <CloudTraining />}
         {activeTab === 'spaces' && <SpaceManager />}
         {activeTab === 'datasets' && <DatasetBrowser />}
+        {activeTab === 'models' && <MyModels />}
       </div>
     </div>
   )

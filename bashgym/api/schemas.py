@@ -192,6 +192,9 @@ class TrainingRequest(BaseModel):
     gguf_quantization: str = Field("q4_k_m", description="GGUF quantization level")
     auto_deploy_ollama: bool = Field(False, description="Auto-deploy to Ollama after training")
     ollama_model_name: str = Field("", description="Ollama model name (empty = auto-generate)")
+    auto_push_hf: bool = Field(False, description="Auto-push to HuggingFace Hub after training")
+    hf_repo_name: str = Field("", description="HF repo name (empty = auto-generate)")
+    hf_private: bool = Field(True, description="Make HF repo private")
     # Backend selection
     use_nemo_gym: bool = Field(False, description="Use NVIDIA NeMo cloud training instead of local")
     use_remote_ssh: bool = Field(False, description="Execute training on remote DGX Spark via SSH")

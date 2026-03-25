@@ -13,7 +13,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -105,6 +105,39 @@ class DatasetResponse(BaseModel):
     url: str
     train_count: int = 0
     val_count: int = 0
+
+
+class ModelPushRequest(BaseModel):
+    """Request to push a model to HuggingFace Hub."""
+
+    model_id: str = Field(..., description="Local model ID from /api/models")
+    repo_name: str = Field("", description="HF repo name (auto-generated if empty)")
+    private: bool = Field(True, description="Private repository")
+    push_gguf: bool = Field(True, description="Also push GGUF exports")
+    generate_card: bool = Field(True, description="Auto-generate model card")
+
+
+class ModelPushResponse(BaseModel):
+    """Response from pushing a model to HuggingFace Hub."""
+
+    repo_id: str
+    url: str
+    gguf_repo_id: str | None = None
+    gguf_url: str | None = None
+    card_generated: bool = False
+
+
+class HFMyModel(BaseModel):
+    """Summary of a model on HuggingFace Hub."""
+
+    id: str
+    url: str = ""
+    downloads: int = 0
+    likes: int = 0
+    private: bool = False
+    last_modified: str = ""
+    pipeline_tag: str | None = None
+    tags: list[str] = []
 
 
 class InferenceGenerateRequest(BaseModel):
@@ -816,3 +849,157 @@ async def delete_dataset(repo_name: str):
             raise HTTPException(status_code=500, detail="Failed to delete dataset")
     except HFError as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# Model Push / Management Endpoints
+# =============================================================================
+
+
+@router.post("/models/push")
+async def push_model_to_hub(body: ModelPushRequest, request: Request):
+    """Push a trained model to HuggingFace Hub."""
+    from bashgym.integrations.huggingface import get_hf_client, get_model_manager
+    from bashgym.models.registry import get_registry
+
+    client = get_hf_client()
+    if not client.is_enabled:
+        raise HTTPException(status_code=503, detail="HuggingFace not configured")
+
+    registry = get_registry()
+    profile = registry.get(body.model_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail=f"Model not found: {body.model_id}")
+
+    manager = get_model_manager(client)
+
+    # Determine repo name
+    repo_name = body.repo_name
+    if not repo_name:
+        base_short = (
+            profile.base_model.split("/")[-1].lower().replace(" ", "-")
+            if profile.base_model
+            else "model"
+        )
+        repo_name = f"bashgym-{base_short}-{profile.model_id[-6:]}"
+
+    repo_id = client.get_repo_id(repo_name)
+    result = {
+        "repo_id": repo_id,
+        "url": "",
+        "gguf_repo_id": None,
+        "gguf_url": None,
+        "card_generated": False,
+    }
+
+    try:
+        # Push merged model (preferred) or final adapter
+        model_dir = None
+        if profile.artifacts and getattr(profile.artifacts, "merged_path", None):
+            merged = (
+                profile.artifacts.merged_path
+                if isinstance(profile.artifacts, dict) is False
+                else profile.artifacts.get("merged_path")
+            )
+            if merged:
+                model_dir = Path(merged) if isinstance(merged, str) else merged
+        if model_dir is None and profile.artifacts:
+            final = (
+                profile.artifacts.final_adapter_path
+                if isinstance(profile.artifacts, dict) is False
+                else profile.artifacts.get("final_adapter_path")
+            )
+            if final:
+                model_dir = Path(final) if isinstance(final, str) else final
+
+        if model_dir and Path(model_dir).exists():
+            url = manager.push_model(Path(model_dir), repo_name, private=body.private)
+            result["url"] = url
+        else:
+            raise HTTPException(status_code=400, detail="No merged or final model found to push")
+
+        # Push GGUF if requested
+        if body.push_gguf and profile.artifacts:
+            gguf_exports = []
+            if hasattr(profile.artifacts, "gguf_exports"):
+                gguf_exports = (
+                    profile.artifacts.gguf_exports
+                    if not isinstance(profile.artifacts, dict)
+                    else profile.artifacts.get("gguf_exports", [])
+                )
+            elif isinstance(profile.artifacts, dict):
+                gguf_exports = profile.artifacts.get("gguf_exports", [])
+
+            for export in gguf_exports:
+                gguf_path_str = export.path if hasattr(export, "path") else export.get("path", "")
+                gguf_path = Path(gguf_path_str)
+                if gguf_path.exists():
+                    gguf_url = manager.push_gguf(gguf_path, repo_name, private=body.private)
+                    gguf_repo_name = (
+                        f"{repo_name}-GGUF" if not repo_name.endswith("-GGUF") else repo_name
+                    )
+                    result["gguf_repo_id"] = client.get_repo_id(gguf_repo_name)
+                    result["gguf_url"] = gguf_url
+                    break  # Push first GGUF only
+
+        # Generate and push model card
+        if body.generate_card:
+            profile_data = profile.to_dict() if hasattr(profile, "to_dict") else {}
+            card = manager.generate_model_card(repo_id, profile_data)
+            manager.push_model_card(repo_id, card)
+            result["card_generated"] = True
+
+        # Update local profile with HF repo ID
+        profile.hf_repo_id = repo_id
+        profile.save()
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to push model to Hub: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/models/mine")
+async def list_my_models(request: Request):
+    """List the authenticated user's models on HuggingFace Hub."""
+    from bashgym.integrations.huggingface import get_hf_client, get_model_manager
+
+    client = get_hf_client()
+    if not client.is_enabled:
+        raise HTTPException(status_code=503, detail="HuggingFace not configured")
+
+    manager = get_model_manager(client)
+    models = manager.list_my_models()
+
+    return [
+        {
+            "id": m.id,
+            "url": m.url,
+            "downloads": m.downloads,
+            "likes": m.likes,
+            "private": m.private,
+            "last_modified": m.last_modified,
+            "pipeline_tag": m.pipeline_tag,
+            "tags": m.tags,
+        }
+        for m in models
+    ]
+
+
+@router.delete("/models/{repo_id:path}")
+async def delete_hf_model(repo_id: str, request: Request):
+    """Delete a model from HuggingFace Hub."""
+    from bashgym.integrations.huggingface import get_hf_client, get_model_manager
+
+    client = get_hf_client()
+    if not client.is_enabled:
+        raise HTTPException(status_code=503, detail="HuggingFace not configured")
+
+    manager = get_model_manager(client)
+    success = manager.delete_model(repo_id)
+    if not success:
+        raise HTTPException(status_code=500, detail=f"Failed to delete {repo_id}")
+    return {"status": "deleted", "repo_id": repo_id}

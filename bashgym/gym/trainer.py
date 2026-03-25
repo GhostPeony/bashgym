@@ -115,6 +115,9 @@ class TrainerConfig:
     gguf_quantization: str = "q4_k_m"  # Quantization level: q4_k_m, q5_k_m, q8_0, f16
     auto_deploy_ollama: bool = False  # Auto-deploy GGUF to Ollama after training
     ollama_model_name: str = ""  # Empty = auto-generate from base model + run_id
+    auto_push_hf: bool = False  # Auto-push to HuggingFace Hub after training
+    hf_repo_name: str = ""  # Empty = auto-generate from base model + run_id
+    hf_private: bool = True  # Private repo by default
 
     # Eval settings
     eval_strategy: str = "steps"  # "steps", "epoch", or "no"
@@ -485,6 +488,10 @@ class Trainer:
             if self.config.auto_deploy_ollama:
                 self._auto_deploy_to_ollama(run)
 
+            # Auto-push to HuggingFace Hub if enabled
+            if self.config.auto_push_hf:
+                self._auto_push_to_hf(run)
+
             # Export to bashbros integration if linked
             self._export_to_bashbros_integration(run)
 
@@ -521,6 +528,105 @@ class Trainer:
                 logger.warning(f"Ollama deploy failed: {result.get('error')}")
         except Exception as e:
             logger.warning(f"Auto-deploy to Ollama failed: {e}")
+
+    def _auto_push_to_hf(self, run: TrainingRun) -> None:
+        """Push trained model to HuggingFace Hub after training."""
+        try:
+            from bashgym.integrations.huggingface import get_hf_client
+            from bashgym.integrations.huggingface.model_manager import get_model_manager
+
+            client = get_hf_client()
+            if not client.is_enabled:
+                logger.info("HuggingFace not configured, skipping auto-push")
+                return
+
+            manager = get_model_manager(client)
+
+            # Determine repo name
+            repo_name = self.config.hf_repo_name
+            if not repo_name:
+                base_short = (
+                    run.base_model.split("/")[-1].lower().replace(" ", "-")
+                    if run.base_model
+                    else "model"
+                )
+                repo_name = f"bashgym-{base_short}-{run.run_id[-6:]}"
+
+            repo_id = client.get_repo_id(repo_name)
+
+            # Push merged model (preferred) or final adapter
+            merged_dir = run.output_path / "merged"
+            final_dir = run.output_path / "final"
+            push_dir = (
+                merged_dir if merged_dir.exists() else final_dir if final_dir.exists() else None
+            )
+
+            if not push_dir:
+                logger.warning("No merged or final model found, skipping HF push")
+                return
+
+            logger.info(f"Pushing model to HuggingFace Hub as '{repo_id}'...")
+            url = manager.push_model(push_dir, repo_name, private=self.config.hf_private)
+            run.metrics["hf_repo_id"] = repo_id
+            run.metrics["hf_url"] = url
+
+            # Push GGUF exports
+            gguf_dir = run.output_path / "gguf"
+            if gguf_dir.exists():
+                gguf_files = sorted(gguf_dir.glob("*.gguf"))
+                if gguf_files:
+                    logger.info(f"Pushing GGUF to {repo_name}-GGUF...")
+                    manager.push_gguf(gguf_files[0], repo_name, private=self.config.hf_private)
+
+            # Generate and push model card
+            try:
+                profile_data = {
+                    "base_model": run.base_model,
+                    "training_strategy": run.strategy.value,
+                    "display_name": repo_name,
+                    "description": (
+                        f"Fine-tuned {run.base_model} with" f" {run.strategy.value.upper()}"
+                    ),
+                    "final_metrics": run.metrics,
+                    "duration_seconds": 0,
+                    "training_traces": run.training_metadata.get("trace_ids", []),
+                    "training_repos": run.training_metadata.get("training_repos", []),
+                    "config": {
+                        "learning_rate": self.config.learning_rate,
+                        "batch_size": self.config.batch_size,
+                        "num_epochs": self.config.num_epochs,
+                        "max_seq_length": self.config.max_seq_length,
+                        "lora_r": self.config.lora_r,
+                        "lora_alpha": self.config.lora_alpha,
+                    },
+                }
+                if run.started_at and run.completed_at:
+                    start = datetime.fromisoformat(run.started_at)
+                    end = datetime.fromisoformat(run.completed_at)
+                    profile_data["duration_seconds"] = (end - start).total_seconds()
+
+                card = manager.generate_model_card(repo_id, profile_data)
+                manager.push_model_card(repo_id, card)
+            except Exception as card_err:
+                logger.warning(f"Model card generation failed: {card_err}")
+
+            # Update model profile if available
+            if MODEL_PROFILE_AVAILABLE:
+                try:
+                    registry = get_registry()
+                    profile = registry.get(run.run_id)
+                    if profile:
+                        profile.hf_repo_id = repo_id
+                        profile.save()
+                except Exception:
+                    pass
+
+            logger.info(f"Model pushed to HuggingFace Hub: {url}")
+
+        except ImportError:
+            logger.debug("HuggingFace integration not available, skipping auto-push")
+        except Exception as e:
+            logger.warning(f"Auto-push to HuggingFace failed: {e}")
 
     def _export_to_bashbros_integration(self, run: TrainingRun) -> None:
         """Export model to bashbros integration if linked.

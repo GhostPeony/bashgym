@@ -18,6 +18,7 @@ import { clsx } from 'clsx'
 import { modelsApi, ModelSummary, LeaderboardEntry } from '../../services/api'
 import { useTutorialComplete } from '../../hooks'
 import { ModelCard } from './ModelCard'
+import { HFStatus } from '../huggingface/HFStatus'
 
 interface ModelBrowserProps {
   onSelectModel: (modelId: string) => void
@@ -145,9 +146,12 @@ export function ModelBrowser({ onSelectModel, onTrainNew, onCompare, onViewTrend
         <div className="flex items-center justify-between mb-4">
           <div>
             <h1 className="font-brand text-3xl text-text-primary">Models</h1>
-            <p className="font-mono text-xs uppercase tracking-widest text-text-muted mt-1">
-              {total} trained model{total !== 1 ? 's' : ''}
-            </p>
+            <div className="flex items-center gap-3 mt-1">
+              <p className="font-mono text-xs uppercase tracking-widest text-text-muted">
+                {total} trained model{total !== 1 ? 's' : ''}
+              </p>
+              <HFStatus />
+            </div>
           </div>
           <div className="flex items-center gap-2">
             {compareMode ? (

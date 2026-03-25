@@ -13,6 +13,7 @@ import { ProfilerDashboard } from '../profiler/ProfilerDashboard'
 import { ModelBrowser, ModelProfilePage, ModelComparison, ModelTrends } from '../models'
 import { HFDashboard } from '../huggingface'
 import { AchievementsView } from '../achievements/AchievementsView'
+import { AutoResearchDashboard } from '../autoresearch/AutoResearchDashboard'
 import { HomeScreen, TutorialChecklist, TutorialTooltip } from '../home'
 import { KeyboardShortcutsModal } from '../common/KeyboardShortcutsModal'
 import { useUIStore } from '../../stores'
@@ -95,6 +96,12 @@ export function MainLayout() {
           {overlayView === 'training' && (
             <div className="flex-1 overflow-auto">
               <TrainingDashboard />
+            </div>
+          )}
+
+          {overlayView === 'autoresearch' && (
+            <div className="flex-1 overflow-auto">
+              <AutoResearchDashboard />
             </div>
           )}
 

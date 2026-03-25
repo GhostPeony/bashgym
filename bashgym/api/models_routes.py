@@ -45,6 +45,7 @@ class ModelSummary(BaseModel):
     model_size_display: str
     inference_latency_ms: float | None = None
     training_duration_display: str
+    hf_repo_id: str | None = None
 
 
 class ModelProfileResponse(BaseModel):
@@ -92,6 +93,7 @@ class ModelProfileResponse(BaseModel):
     inference_latency_ms: float | None = None
     status: str
     deployed_to: str | None = None
+    hf_repo_id: str | None = None
 
     # Computed
     custom_eval_pass_rate: float | None = None
@@ -181,6 +183,7 @@ def profile_to_summary(profile: ModelProfile) -> ModelSummary:
         model_size_display=profile.model_size_display,
         inference_latency_ms=profile.inference_latency_ms,
         training_duration_display=profile.training_duration_display,
+        hf_repo_id=profile.hf_repo_id,
     )
 
 
@@ -218,6 +221,7 @@ def profile_to_response(profile: ModelProfile) -> ModelProfileResponse:
         inference_latency_ms=profile.inference_latency_ms,
         status=profile.status,
         deployed_to=profile.deployed_to,
+        hf_repo_id=profile.hf_repo_id,
         custom_eval_pass_rate=profile.custom_eval_pass_rate,
         benchmark_avg_score=profile.benchmark_avg_score,
     )
@@ -775,6 +779,50 @@ class DeployOllamaRequest(BaseModel):
     quantization: str = "q4_k_m"
 
 
+def deploy_gguf_to_ollama(gguf_path: str, model_name: str) -> dict[str, Any]:
+    """Deploy a GGUF file to Ollama. Returns {'success': bool, 'error': str|None, 'model_name': str}.
+
+    Standalone function usable from both the API endpoint and the trainer auto-deploy.
+    """
+    import subprocess
+    import tempfile
+
+    gguf_file = Path(gguf_path)
+    if not gguf_file.exists():
+        return {"success": False, "error": f"GGUF file not found: {gguf_path}"}
+
+    modelfile_content = f"""FROM {gguf_path}
+
+PARAMETER temperature 0.7
+PARAMETER num_ctx 8192
+
+SYSTEM \"\"\"You are a helpful coding assistant trained with Bash Gym.\"\"\"
+"""
+
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".modelfile", delete=False) as f:
+            f.write(modelfile_content)
+            modelfile_path = f.name
+
+        result = subprocess.run(
+            ["ollama", "create", model_name, "-f", modelfile_path],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        Path(modelfile_path).unlink(missing_ok=True)
+
+        if result.returncode != 0:
+            return {"success": False, "error": f"Ollama create failed: {result.stderr}"}
+        return {"success": True, "model_name": model_name}
+    except FileNotFoundError:
+        return {"success": False, "error": "Ollama not installed"}
+    except subprocess.TimeoutExpired:
+        return {"success": False, "error": "Ollama create timed out"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 @router.post("/{model_id}/deploy-ollama")
 async def deploy_to_ollama(model_id: str, request: DeployOllamaRequest):
     """
@@ -782,9 +830,6 @@ async def deploy_to_ollama(model_id: str, request: DeployOllamaRequest):
 
     Creates a GGUF export if needed, then registers with Ollama.
     """
-    import subprocess
-    import tempfile
-
     registry = get_registry()
     profile = registry.get(model_id)
 
@@ -816,54 +861,27 @@ async def deploy_to_ollama(model_id: str, request: DeployOllamaRequest):
     if not gguf_file.exists():
         raise HTTPException(status_code=404, detail=f"GGUF file not found: {gguf_path}")
 
-    # Create Modelfile
     model_name = request.model_name or profile.display_name.lower().replace(" ", "-")
-    modelfile_content = f'''FROM {gguf_path}
+    result = deploy_gguf_to_ollama(gguf_path, model_name)
 
-PARAMETER temperature 0.7
-PARAMETER num_ctx 8192
+    if not result["success"]:
+        error = result.get("error", "Unknown error")
+        if "not installed" in error:
+            raise HTTPException(status_code=503, detail=error)
+        elif "timed out" in error:
+            raise HTTPException(status_code=504, detail=error)
+        else:
+            raise HTTPException(status_code=500, detail=error)
 
-SYSTEM """You are a helpful coding assistant trained with Bash Gym."""
-'''
+    # Update profile
+    profile.deployed_to = f"ollama:{model_name}"
+    profile.save()
 
-    try:
-        # Write Modelfile
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".modelfile", delete=False) as f:
-            f.write(modelfile_content)
-            modelfile_path = f.name
-
-        # Create model in Ollama
-        result = subprocess.run(
-            ["ollama", "create", model_name, "-f", modelfile_path],
-            capture_output=True,
-            text=True,
-            timeout=300,  # 5 minute timeout
-        )
-
-        # Clean up
-        Path(modelfile_path).unlink(missing_ok=True)
-
-        if result.returncode != 0:
-            raise HTTPException(status_code=500, detail=f"Ollama create failed: {result.stderr}")
-
-        # Update profile
-        profile.deployed_to = f"ollama:{model_name}"
-        profile.save()
-
-        return {
-            "status": "deployed",
-            "model_name": model_name,
-            "message": f"Model deployed to Ollama as '{model_name}'. Run with: ollama run {model_name}",
-        }
-
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=504, detail="Ollama create timed out")
-    except FileNotFoundError:
-        raise HTTPException(
-            status_code=503, detail="Ollama not installed. Install from https://ollama.ai"
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return {
+        "status": "deployed",
+        "model_name": model_name,
+        "message": f"Model deployed to Ollama as '{model_name}'. Run with: ollama run {model_name}",
+    }
 
 
 @router.get("/{model_id}/download")

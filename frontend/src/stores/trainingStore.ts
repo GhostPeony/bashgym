@@ -55,6 +55,13 @@ export interface TrainingConfig {
   securityConversionMode?: 'direct' | 'enriched'
   securityMaxSamples?: number
   securityBalanceClasses?: boolean
+  // Auto-deploy
+  autoDeployOllama?: boolean
+  ollamaModelName?: string
+  // HuggingFace
+  autoPushHF?: boolean
+  hfRepoName?: string
+  hfPrivate?: boolean
 }
 
 export interface TrainingRun {
@@ -165,7 +172,14 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
         security_dataset_path: config.securityDatasetPath,
         security_conversion_mode: config.securityConversionMode,
         security_max_samples: config.securityMaxSamples,
-        security_balance_classes: config.securityBalanceClasses
+        security_balance_classes: config.securityBalanceClasses,
+        // Auto-deploy
+        auto_deploy_ollama: config.autoDeployOllama,
+        ollama_model_name: config.ollamaModelName,
+        // HuggingFace
+        auto_push_hf: config.autoPushHF,
+        hf_repo_name: config.hfRepoName,
+        hf_private: config.hfPrivate,
       })
 
       if (response.ok && response.data) {

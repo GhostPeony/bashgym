@@ -158,6 +158,8 @@ class TraceResearchConfig:
     silver_traces_dir: str = ""
     failed_traces_dir: str = ""
     pending_traces_dir: str = ""
+    mode: str = "simulate"
+    train_steps: int = 50
 
 
 class TraceResearchStatus:
@@ -299,6 +301,8 @@ class TraceResearcher:
 
     def __init__(self, config: TraceResearchConfig):
         self.config = config
+        self._mode = config.mode
+        self._train_steps = config.train_steps
         self.best_pipeline = DataPipelineConfig()
         self.best_metric: float = float("inf")
         self.best_data_stats: dict[str, Any] = {}

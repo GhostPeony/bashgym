@@ -77,6 +77,11 @@ from .jobs import (
     JobStatus,
     create_job_runner,
 )
+from .model_manager import (
+    HFModelInfo,
+    HFModelManager,
+    get_model_manager,
+)
 from .script_adapter import (
     CloudScriptConfig,
     generate_cloud_script,
@@ -134,4 +139,8 @@ __all__ = [
     "HFDatasetManager",
     "DatasetConfig",
     "DATASET_CARD_TEMPLATE",
+    # Model Manager
+    "HFModelManager",
+    "HFModelInfo",
+    "get_model_manager",
 ]

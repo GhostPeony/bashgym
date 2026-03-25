@@ -190,6 +190,11 @@ class TrainingRequest(BaseModel):
     # Export settings
     auto_export_gguf: bool = Field(True, description="Export to GGUF after training")
     gguf_quantization: str = Field("q4_k_m", description="GGUF quantization level")
+    auto_deploy_ollama: bool = Field(False, description="Auto-deploy to Ollama after training")
+    ollama_model_name: str = Field("", description="Ollama model name (empty = auto-generate)")
+    auto_push_hf: bool = Field(False, description="Auto-push to HuggingFace Hub after training")
+    hf_repo_name: str = Field("", description="HF repo name (empty = auto-generate)")
+    hf_private: bool = Field(True, description="Make HF repo private")
     # Backend selection
     use_nemo_gym: bool = Field(False, description="Use NVIDIA NeMo cloud training instead of local")
     use_remote_ssh: bool = Field(False, description="Execute training on remote DGX Spark via SSH")
@@ -1029,6 +1034,8 @@ class TraceResearchRequest(BaseModel):
     max_experiments: int = Field(30, ge=1, le=200)
     mutation_rate: float = Field(0.4, ge=0.05, le=1.0)
     mutation_scale: float = Field(0.25, ge=0.01, le=1.0)
+    mode: str = Field("simulate", description="Experiment mode: 'simulate' or 'real'")
+    train_steps: int = Field(50, ge=10, le=1000, description="Training steps per real experiment")
 
     class Config:
         json_schema_extra = {
@@ -1042,6 +1049,8 @@ class TraceResearchRequest(BaseModel):
                 "max_experiments": 30,
                 "mutation_rate": 0.4,
                 "mutation_scale": 0.25,
+                "mode": "simulate",
+                "train_steps": 50,
             }
         }
 

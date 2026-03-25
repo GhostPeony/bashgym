@@ -12,7 +12,8 @@ import {
   AlertCircle,
   Archive,
   Trash2,
-  BarChart3
+  BarChart3,
+  Cloud
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import { ModelSummary, modelsApi } from '../../services/api'
@@ -74,6 +75,9 @@ export function ModelCard({ model, onSelect, onCompare, onRefresh }: ModelCardPr
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <h3 className="font-brand text-lg text-text-primary truncate">{model.display_name}</h3>
+            {model.hf_repo_id && (
+              <Cloud className="w-3.5 h-3.5 text-accent flex-shrink-0" title="On HuggingFace Hub" />
+            )}
             {model.starred && (
               <Star className="w-4 h-4 text-status-warning fill-current flex-shrink-0" />
             )}

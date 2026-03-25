@@ -242,6 +242,7 @@ class ModelProfile:
     inference_latency_ms: float | None = None
     status: str = "pending"  # pending, training, ready, needs_eval, archived
     deployed_to: str | None = None  # e.g., "ollama:bashgym-v3"
+    hf_repo_id: str | None = None  # e.g., "username/bashgym-model-v1"
 
     # Computed properties
     @property
@@ -320,6 +321,7 @@ class ModelProfile:
             "inference_latency_ms": self.inference_latency_ms,
             "status": self.status,
             "deployed_to": self.deployed_to,
+            "hf_repo_id": self.hf_repo_id,
         }
 
     @classmethod
@@ -371,6 +373,7 @@ class ModelProfile:
             inference_latency_ms=data.get("inference_latency_ms"),
             status=data.get("status", "pending"),
             deployed_to=data.get("deployed_to"),
+            hf_repo_id=data.get("hf_repo_id"),
         )
 
     def save(self, path: Path | None = None) -> Path:

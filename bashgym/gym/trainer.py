@@ -113,11 +113,17 @@ class TrainerConfig:
     # Auto-export settings
     auto_export_gguf: bool = True  # Automatically export to GGUF after training
     gguf_quantization: str = "q4_k_m"  # Quantization level: q4_k_m, q5_k_m, q8_0, f16
+    auto_deploy_ollama: bool = False  # Auto-deploy GGUF to Ollama after training
+    ollama_model_name: str = ""  # Empty = auto-generate from base model + run_id
+    auto_push_hf: bool = False  # Auto-push to HuggingFace Hub after training
+    hf_repo_name: str = ""  # Empty = auto-generate from base model + run_id
+    hf_private: bool = True  # Private repo by default
 
     # Eval settings
     eval_strategy: str = "steps"  # "steps", "epoch", or "no"
     eval_steps: int = 50  # Eval every N steps (when eval_strategy="steps")
     max_steps: int = -1  # Max training steps (-1 = use num_epochs)
+    early_stopping_patience: int = 3  # 0 = disabled
 
     # Hardware settings
     device_map: str = "auto"
@@ -478,6 +484,14 @@ class Trainer:
 
             # GGUF export now happens in-script (model still in GPU memory)
 
+            # Auto-deploy to Ollama if enabled
+            if self.config.auto_deploy_ollama:
+                self._auto_deploy_to_ollama(run)
+
+            # Auto-push to HuggingFace Hub if enabled
+            if self.config.auto_push_hf:
+                self._auto_push_to_hf(run)
+
             # Export to bashbros integration if linked
             self._export_to_bashbros_integration(run)
 
@@ -487,6 +501,132 @@ class Trainer:
             run.completed_at = datetime.now(timezone.utc).isoformat()
 
         return run
+
+    def _auto_deploy_to_ollama(self, run: TrainingRun) -> None:
+        """Deploy GGUF model to Ollama after training."""
+        try:
+            from bashgym.api.models_routes import deploy_gguf_to_ollama
+
+            model_name = self.config.ollama_model_name
+            if not model_name:
+                base_short = run.base_model.split("/")[-1].lower() if run.base_model else "model"
+                model_name = f"bashgym-{base_short}-{run.run_id[-6:]}"
+
+            # Find GGUF file
+            gguf_dir = run.output_path / "gguf"
+            gguf_files = sorted(gguf_dir.glob("*.gguf")) if gguf_dir.exists() else []
+            if not gguf_files:
+                logger.warning(f"No GGUF files in {gguf_dir}, skipping Ollama deploy")
+                return
+
+            logger.info(f"Auto-deploying to Ollama as '{model_name}'...")
+            result = deploy_gguf_to_ollama(str(gguf_files[0]), model_name)
+            if result["success"]:
+                logger.info(f"Deployed to Ollama as '{model_name}'")
+                run.metrics["ollama_model"] = model_name
+            else:
+                logger.warning(f"Ollama deploy failed: {result.get('error')}")
+        except Exception as e:
+            logger.warning(f"Auto-deploy to Ollama failed: {e}")
+
+    def _auto_push_to_hf(self, run: TrainingRun) -> None:
+        """Push trained model to HuggingFace Hub after training."""
+        try:
+            from bashgym.integrations.huggingface import get_hf_client
+            from bashgym.integrations.huggingface.model_manager import get_model_manager
+
+            client = get_hf_client()
+            if not client.is_enabled:
+                logger.info("HuggingFace not configured, skipping auto-push")
+                return
+
+            manager = get_model_manager(client)
+
+            # Determine repo name
+            repo_name = self.config.hf_repo_name
+            if not repo_name:
+                base_short = (
+                    run.base_model.split("/")[-1].lower().replace(" ", "-")
+                    if run.base_model
+                    else "model"
+                )
+                repo_name = f"bashgym-{base_short}-{run.run_id[-6:]}"
+
+            repo_id = client.get_repo_id(repo_name)
+
+            # Push merged model (preferred) or final adapter
+            merged_dir = run.output_path / "merged"
+            final_dir = run.output_path / "final"
+            push_dir = (
+                merged_dir if merged_dir.exists() else final_dir if final_dir.exists() else None
+            )
+
+            if not push_dir:
+                logger.warning("No merged or final model found, skipping HF push")
+                return
+
+            logger.info(f"Pushing model to HuggingFace Hub as '{repo_id}'...")
+            url = manager.push_model(push_dir, repo_name, private=self.config.hf_private)
+            run.metrics["hf_repo_id"] = repo_id
+            run.metrics["hf_url"] = url
+
+            # Push GGUF exports
+            gguf_dir = run.output_path / "gguf"
+            if gguf_dir.exists():
+                gguf_files = sorted(gguf_dir.glob("*.gguf"))
+                if gguf_files:
+                    logger.info(f"Pushing GGUF to {repo_name}-GGUF...")
+                    manager.push_gguf(gguf_files[0], repo_name, private=self.config.hf_private)
+
+            # Generate and push model card
+            try:
+                profile_data = {
+                    "base_model": run.base_model,
+                    "training_strategy": run.strategy.value,
+                    "display_name": repo_name,
+                    "description": (
+                        f"Fine-tuned {run.base_model} with" f" {run.strategy.value.upper()}"
+                    ),
+                    "final_metrics": run.metrics,
+                    "duration_seconds": 0,
+                    "training_traces": run.training_metadata.get("trace_ids", []),
+                    "training_repos": run.training_metadata.get("training_repos", []),
+                    "config": {
+                        "learning_rate": self.config.learning_rate,
+                        "batch_size": self.config.batch_size,
+                        "num_epochs": self.config.num_epochs,
+                        "max_seq_length": self.config.max_seq_length,
+                        "lora_r": self.config.lora_r,
+                        "lora_alpha": self.config.lora_alpha,
+                    },
+                }
+                if run.started_at and run.completed_at:
+                    start = datetime.fromisoformat(run.started_at)
+                    end = datetime.fromisoformat(run.completed_at)
+                    profile_data["duration_seconds"] = (end - start).total_seconds()
+
+                card = manager.generate_model_card(repo_id, profile_data)
+                manager.push_model_card(repo_id, card)
+            except Exception as card_err:
+                logger.warning(f"Model card generation failed: {card_err}")
+
+            # Update model profile if available
+            if MODEL_PROFILE_AVAILABLE:
+                try:
+                    registry = get_registry()
+                    profile = registry.get(run.run_id)
+                    if profile:
+                        profile.hf_repo_id = repo_id
+                        profile.save()
+                except Exception:
+                    pass
+
+            logger.info(f"Model pushed to HuggingFace Hub: {url}")
+
+        except ImportError:
+            logger.debug("HuggingFace integration not available, skipping auto-push")
+        except Exception as e:
+            logger.warning(f"Auto-push to HuggingFace failed: {e}")
 
     def _export_to_bashbros_integration(self, run: TrainingRun) -> None:
         """Export model to bashbros integration if linked.
@@ -551,6 +691,7 @@ class Trainer:
     def train_dpo(
         self,
         dataset_path: Path,
+        val_dataset_path: Path | None = None,
         run_id: str | None = None,
         callback: Callable[[dict[str, Any]], None] | None = None,
         training_metadata: dict[str, Any] | None = None,
@@ -560,6 +701,7 @@ class Trainer:
 
         Args:
             dataset_path: Path to DPO JSONL data (with chosen/rejected pairs)
+            val_dataset_path: Optional path to validation JSONL data
             run_id: Optional run identifier
             callback: Optional callback for progress updates
 
@@ -579,6 +721,7 @@ class Trainer:
             started_at=datetime.now(timezone.utc).isoformat(),
         )
         self.active_runs[run_id] = run
+        run.val_dataset_path = val_dataset_path
         if training_metadata:
             run.training_metadata = training_metadata
 
@@ -797,7 +940,7 @@ Generated: {datetime.now(timezone.utc).isoformat()}
 from unsloth import FastLanguageModel
 from datasets import load_dataset
 from trl import SFTTrainer
-from transformers import TrainingArguments
+from transformers import TrainingArguments, EarlyStoppingCallback
 import torch
 
 def formatting_prompts_func(examples):
@@ -885,6 +1028,9 @@ if __name__ == "__main__":
         # Eval settings (active when val_dataset is available)
         eval_strategy="{self.config.eval_strategy}" if val_dataset is not None else "no",
         eval_steps={self.config.eval_steps} if val_dataset is not None else None,
+        load_best_model_at_end=True if val_dataset is not None else False,
+        metric_for_best_model="eval_loss" if val_dataset is not None else None,
+        greater_is_better=False if val_dataset is not None else None,
     )
 
     # Apply chat template to dataset (handles all model formats + None content)
@@ -893,6 +1039,11 @@ if __name__ == "__main__":
     # Apply formatting to val dataset too
     if val_dataset is not None:
         val_dataset = val_dataset.map(formatting_prompts_func, batched=True)
+
+    # Early stopping (only when val_dataset exists and patience > 0)
+    callbacks = []
+    if val_dataset is not None and {self.config.early_stopping_patience} > 0:
+        callbacks.append(EarlyStoppingCallback(early_stopping_patience={self.config.early_stopping_patience}))
 
     # Initialize trainer
     trainer = SFTTrainer(
@@ -904,6 +1055,7 @@ if __name__ == "__main__":
         max_seq_length=max_seq_length,
         dataset_num_proc=1,  # Required on Windows (avoids multiprocessing crash)
         args=training_args,
+        callbacks=callbacks if callbacks else None,
     )
 
     # Train
@@ -972,6 +1124,7 @@ if __name__ == "__main__":
             last_loss = None
             last_epoch = 0
             reward_margin = 0.0
+            last_eval_loss = None
 
             for line in process.stdout:
                 line = line.strip()
@@ -981,6 +1134,7 @@ if __name__ == "__main__":
                     loss_match = re.search(r"'loss':\s*([\d.]+)", line)
                     epoch_match = re.search(r"'epoch':\s*([\d.]+)", line)
                     reward_match = re.search(r"'rewards/margins':\s*([\d.]+)", line)
+                    eval_loss_match = re.search(r"'eval_loss':\s*([\d.]+)", line)
 
                     if loss_match:
                         last_loss = float(loss_match.group(1))
@@ -988,14 +1142,17 @@ if __name__ == "__main__":
                         last_epoch = int(float(epoch_match.group(1)))
                     if reward_match:
                         reward_margin = float(reward_match.group(1))
+                    if eval_loss_match:
+                        last_eval_loss = float(eval_loss_match.group(1))
 
-                    if callback and last_loss is not None:
+                    if callback and (last_loss is not None or eval_loss_match):
                         callback(
                             {
                                 "epoch": last_epoch,
                                 "total_epochs": self.config.num_epochs,
                                 "loss": last_loss,
                                 "reward_margin": reward_margin,
+                                "eval_loss": last_eval_loss,
                             }
                         )
 
@@ -1007,6 +1164,7 @@ if __name__ == "__main__":
                 "final_loss": last_loss or 0.0,
                 "final_reward_margin": reward_margin,
                 "epochs_completed": self.config.num_epochs,
+                "eval_loss": last_eval_loss,
             }
 
             logger.info(f"DPO training completed. Model saved to: {run.output_path}")
@@ -1394,6 +1552,7 @@ print(f"Student model saved to: {output_path}/final")
         # Use forward slashes for cross-platform compatibility
         dataset_path = str(run.dataset_path).replace("\\", "/")
         output_path = str(run.output_path).replace("\\", "/")
+        val_path = str(run.val_dataset_path).replace("\\", "/") if run.val_dataset_path else ""
 
         return f'''#!/usr/bin/env python3
 """
@@ -1405,6 +1564,7 @@ Generated: {datetime.now(timezone.utc).isoformat()}
 from unsloth import FastLanguageModel
 from datasets import load_dataset
 from trl import DPOTrainer, DPOConfig
+import os
 import torch
 
 # Model configuration
@@ -1434,6 +1594,14 @@ model = FastLanguageModel.get_peft_model(
 # Load DPO dataset
 dataset = load_dataset("json", data_files="{dataset_path}", split="train")
 
+# Load validation dataset if available
+val_dataset = None
+val_dataset_path = "{val_path}"
+if val_dataset_path and os.path.exists(val_dataset_path):
+    print("Loading validation dataset...")
+    val_dataset = load_dataset("json", data_files=val_dataset_path, split="train")
+    print(f"Validation set: {{len(val_dataset)}} examples")
+
 # DPO configuration
 dpo_config = DPOConfig(
     output_dir="{output_path}",
@@ -1446,6 +1614,9 @@ dpo_config = DPOConfig(
     save_steps={self.config.save_steps},
     fp16=True,
     optim="adamw_8bit",
+    # Eval settings (active when val_dataset is available)
+    eval_strategy="{self.config.eval_strategy}" if val_dataset is not None else "no",
+    eval_steps={self.config.eval_steps} if val_dataset is not None else None,
 )
 
 # Initialize DPO trainer
@@ -1454,6 +1625,7 @@ trainer = DPOTrainer(
     ref_model=None,  # Use implicit reference model
     tokenizer=tokenizer,
     train_dataset=dataset,
+    eval_dataset=val_dataset,
     args=dpo_config,
 )
 

@@ -21,10 +21,12 @@ import {
   Loader2,
   Edit3,
   Save,
-  X
+  X,
+  Cloud,
+  ExternalLink
 } from 'lucide-react'
 import { clsx } from 'clsx'
-import { modelsApi, ModelProfile as ModelProfileData } from '../../services/api'
+import { modelsApi, hfApi, ModelProfile as ModelProfileData } from '../../services/api'
 
 interface ModelProfilePageProps {
   modelId: string
@@ -54,6 +56,13 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
   const [editDescription, setEditDescription] = useState('')
   const [editTags, setEditTags] = useState('')
   const [isSaving, setIsSaving] = useState(false)
+
+  // Push to Hub dialog
+  const [showPushDialog, setShowPushDialog] = useState(false)
+  const [pushRepoName, setPushRepoName] = useState('')
+  const [pushPrivate, setPushPrivate] = useState(true)
+  const [pushGguf, setPushGguf] = useState(true)
+  const [isPushing, setIsPushing] = useState(false)
 
   // Fetch profile
   const fetchProfile = useCallback(async () => {
@@ -91,6 +100,29 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
     if (!profile) return
     await modelsApi.star(modelId, !profile.starred)
     fetchProfile()
+  }
+
+  const handlePushToHub = async () => {
+    if (!profile) return
+    setIsPushing(true)
+    try {
+      const response = await hfApi.pushModel({
+        model_id: profile.model_id,
+        repo_name: pushRepoName || undefined,
+        private: pushPrivate,
+        push_gguf: pushGguf,
+        generate_card: true,
+      })
+      if (response.ok && response.data) {
+        // Refresh profile to get hf_repo_id
+        fetchProfile()
+        setShowPushDialog(false)
+      }
+    } catch (err) {
+      console.error('Push failed:', err)
+    } finally {
+      setIsPushing(false)
+    }
   }
 
   const handleSave = async () => {
@@ -270,6 +302,25 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
                   {isExporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
                   Export
                 </button>
+                {profile.hf_repo_id ? (
+                  <a
+                    href={`https://huggingface.co/${profile.hf_repo_id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn-secondary flex items-center gap-2"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    View on HuggingFace
+                  </a>
+                ) : (
+                  <button
+                    onClick={() => setShowPushDialog(true)}
+                    className="btn-secondary flex items-center gap-2"
+                  >
+                    <Cloud className="w-4 h-4" />
+                    Push to Hub
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -673,6 +724,41 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
           </div>
         </CollapsibleSection>
       </div>
+
+      {/* Push to HuggingFace Dialog */}
+      {showPushDialog && (
+        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: 'rgba(27, 32, 64, 0.5)' }}>
+          <div className="card p-6 w-full max-w-md shadow-brutal">
+            <h3 className="font-serif text-lg mb-4">Push to HuggingFace Hub</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="font-mono text-xs uppercase tracking-widest text-text-muted block mb-1">Repository Name</label>
+                <input
+                  type="text"
+                  value={pushRepoName}
+                  onChange={(e) => setPushRepoName(e.target.value)}
+                  className="input w-full"
+                  placeholder={`bashgym-${profile?.base_model?.split('/').pop()?.toLowerCase() || 'model'}-${profile?.model_id?.slice(-6) || ''}`}
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <input type="checkbox" checked={pushPrivate} onChange={(e) => setPushPrivate(e.target.checked)} className="accent-primary" />
+                <span className="text-sm text-text-secondary">Private repository</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <input type="checkbox" checked={pushGguf} onChange={(e) => setPushGguf(e.target.checked)} className="accent-primary" />
+                <span className="text-sm text-text-secondary">Include GGUF exports</span>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={() => setShowPushDialog(false)} className="btn-secondary">Cancel</button>
+              <button onClick={handlePushToHub} disabled={isPushing} className="btn-primary">
+                {isPushing ? 'Pushing...' : 'Push to Hub'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

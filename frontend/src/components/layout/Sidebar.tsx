@@ -84,7 +84,7 @@ interface CollapsibleSectionProps {
 }
 
 function CollapsibleSection({ title, items, defaultExpanded = false }: CollapsibleSectionProps) {
-  const { overlayView, openOverlay, setSidebarOpen } = useUIStore()
+  const { overlayView, openOverlay, setSidebarOpen: _setSidebarOpen } = useUIStore()
   const [isExpanded, setIsExpanded] = useState(defaultExpanded)
 
   const handleClick = (id: SecondaryViewId) => {

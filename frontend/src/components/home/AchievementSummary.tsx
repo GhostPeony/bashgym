@@ -4,7 +4,7 @@ import { useAchievementStore } from '../../stores/achievementStore'
 import { useUIStore } from '../../stores'
 import { clsx } from 'clsx'
 
-const RARITY_STYLES: Record<string, string> = {
+const _RARITY_STYLES: Record<string, string> = {
   common: 'bg-text-muted border-text-muted',
   uncommon: 'bg-status-success border-status-success',
   rare: 'bg-status-info border-status-info',

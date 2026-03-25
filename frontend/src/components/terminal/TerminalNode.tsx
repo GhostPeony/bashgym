@@ -16,8 +16,6 @@ import {
   Folder,
   Cpu,
   Activity,
-  ChevronDown,
-  ChevronRight,
   Coins,
   Pause,
   Play,
@@ -462,6 +460,7 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: Termi
 })
 
 // Node types for React Flow
+// eslint-disable-next-line react-refresh/only-export-components
 export const nodeTypes = {
   terminal: TerminalNode
 }

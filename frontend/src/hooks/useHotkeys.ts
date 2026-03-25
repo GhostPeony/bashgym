@@ -59,7 +59,7 @@ export function useGlobalHotkeys() {
     setKeyboardShortcutsOpen,
     isKeyboardShortcutsOpen,
     isSettingsOpen,
-    isSidebarOpen,
+    isSidebarOpen: _isSidebarOpen,
     openOverlay,
     setCommandPaletteOpen
   } = useUIStore()

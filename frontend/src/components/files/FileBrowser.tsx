@@ -18,7 +18,7 @@ interface FileBrowserProps {
   isActive: boolean
 }
 
-export function FileBrowser({ id, title, isActive }: FileBrowserProps) {
+export function FileBrowser({ id: _id, title, isActive: _isActive }: FileBrowserProps) {
   const {
     rootPath,
     tree,

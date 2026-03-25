@@ -19,7 +19,7 @@ interface StudentModelPickerProps {
 export function StudentModelPicker({
   ollamaModels,
   ollamaAvailable,
-  onRefresh,
+  onRefresh: _onRefresh,
 }: StudentModelPickerProps) {
   const [currentStudent, setCurrentStudent] = useState<string | null>(null)
   const [isSettingModel, setIsSettingModel] = useState<string | null>(null)

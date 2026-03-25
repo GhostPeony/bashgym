@@ -4,8 +4,6 @@ import {
   Pause,
   Plus,
   LayoutGrid,
-  Eye,
-  EyeOff,
   Grid3X3,
   Magnet,
   Map,
@@ -15,7 +13,6 @@ import {
   ChevronDown,
   Settings2,
   Keyboard,
-  X,
   StickyNote,
   Database,
   Triangle

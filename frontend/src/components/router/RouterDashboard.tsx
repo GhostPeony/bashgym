@@ -13,13 +13,13 @@ import {
   LineChart,
   Line
 } from 'recharts'
-import { Settings, RefreshCw, TrendingUp, Clock, CheckCircle, XCircle } from 'lucide-react'
+import { Settings, RefreshCw, TrendingUp, Clock, CheckCircle } from 'lucide-react'
 import { useRouterStore, useThemeStore } from '../../stores'
 import { routerApi } from '../../services/api'
 import { clsx } from 'clsx'
 
 export function RouterDashboard() {
-  const { strategy, studentRate, stats, setStudentRate, setStrategy, updateStats } = useRouterStore()
+  const { strategy, studentRate, stats, setStudentRate, setStrategy: _setStrategy, updateStats } = useRouterStore()
   const { theme } = useThemeStore()
   const [showSettings, setShowSettings] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
@@ -68,11 +68,12 @@ export function RouterDashboard() {
   ] : []
 
   // Latency history - populated via API when available
-  const [latencyHistory, setLatencyHistory] = useState<Array<{ time: string; teacher: number; student: number }>>([])
+  const [latencyHistory, _setLatencyHistory] = useState<Array<{ time: string; teacher: number; student: number }>>([])
 
   // Fetch stats on mount
   useEffect(() => {
     handleRefresh()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   return (

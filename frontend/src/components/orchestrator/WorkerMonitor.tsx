@@ -1,6 +1,5 @@
 import { Terminal, Clock } from 'lucide-react'
 import { useOrchestratorStore } from '../../stores/orchestratorStore'
-import { clsx } from 'clsx'
 
 function shortTerminalId(terminalId: string): string {
   const match = terminalId.match(/(\d+)$/)

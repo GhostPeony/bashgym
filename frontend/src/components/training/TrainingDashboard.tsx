@@ -36,8 +36,8 @@ export function TrainingDashboard() {
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [availableRepos, setAvailableRepos] = useState<RepoInfo[]>([])
   const [goldTraceCount, setGoldTraceCount] = useState(0)
-  const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null)
-  const [recommendations, setRecommendations] = useState<ModelRecommendations | null>(null)
+  const [_systemInfo, setSystemInfo] = useState<SystemInfo | null>(null)
+  const [_recommendations, setRecommendations] = useState<ModelRecommendations | null>(null)
 
   const [exporting, setExporting] = useState(false)
   const [exportResult, setExportResult] = useState<{ train: number; val: number; trainPath?: string } | null>(null)

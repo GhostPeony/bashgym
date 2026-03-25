@@ -18,7 +18,7 @@ import {
   X,
 } from 'lucide-react'
 import { clsx } from 'clsx'
-import { observabilityApi, TraceSummary, TraceDetail, TraceSpan, ToolStat, ObservabilityMetrics } from '../../services/api'
+import { observabilityApi, TraceSummary, TraceDetail, ToolStat, ObservabilityMetrics } from '../../services/api'
 import { SpanTimeline } from './SpanTimeline'
 
 interface ProfileMetric {

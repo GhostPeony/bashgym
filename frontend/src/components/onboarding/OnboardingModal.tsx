@@ -3,15 +3,13 @@ import { Modal } from '../common/Modal'
 import { Button } from '../common/Button'
 import { useUIStore } from '../../stores'
 import { useTutorialStore } from '../../stores/tutorialStore'
-import { hooksApi, systemApi, tracesApi } from '../../services/api'
+import { hooksApi, tracesApi } from '../../services/api'
 import { clsx } from 'clsx'
 import {
   CheckCircle2,
-  Circle,
   Sparkles,
   Terminal,
   FileStack,
-  BarChart3,
   Rocket,
   Copy,
   Check,
@@ -47,6 +45,7 @@ export function OnboardingModal() {
     if (isOnboardingOpen) {
       checkStatus()
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOnboardingOpen])
 
   const checkStatus = async () => {

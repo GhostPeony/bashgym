@@ -45,6 +45,7 @@ export function AgentChat() {
   useEffect(() => {
     initializeDefaultSession()
     loadSessions()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Load active session messages from backend on mount
@@ -62,6 +63,7 @@ export function AgentChat() {
         }
       }).catch(() => {})
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSessionId])
 
   // Track latest context sources from assistant messages

@@ -59,7 +59,7 @@ interface AchievementCardProps {
 }
 
 export function AchievementCard({
-  name, description, category, rarity, icon, points, earned, earned_at, progress,
+  name, description, category: _category, rarity, icon, points, earned, earned_at, progress,
 }: AchievementCardProps) {
   const IconComponent = ICON_MAP[icon] || Award
   const style = RARITY_STYLES[rarity] || RARITY_STYLES.common

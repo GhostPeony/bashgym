@@ -5,12 +5,10 @@ import {
   X,
   TrendingUp,
   TrendingDown,
-  Minus,
   BarChart3,
   Loader2,
   AlertCircle,
   CheckCircle,
-  Clock,
   Cpu,
   Activity
 } from 'lucide-react'
@@ -57,11 +55,12 @@ function formatValue(value: number | null | undefined, format: string): string {
       if (value < 60) return `${value.toFixed(0)}s`
       if (value < 3600) return `${Math.floor(value / 60)}m ${Math.floor(value % 60)}s`
       return `${Math.floor(value / 3600)}h ${Math.floor((value % 3600) / 60)}m`
-    case 'size':
+    case 'size': {
       const gb = value / (1024 * 1024 * 1024)
       if (gb >= 1) return `${gb.toFixed(2)} GB`
       const mb = value / (1024 * 1024)
       return `${mb.toFixed(0)} MB`
+    }
     default:
       return String(value)
   }

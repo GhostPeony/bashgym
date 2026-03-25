@@ -9,7 +9,6 @@ import {
   Cpu,
   GraduationCap,
   ArrowRight,
-  ExternalLink
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import { modelsApi, ModelSummary } from '../../services/api'
@@ -71,7 +70,7 @@ function buildLineageTree(models: ModelSummary[]): TreeNode[] {
     children.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
 
     // Set depth for all children
-    children.forEach((child, i) => {
+    children.forEach((child, _i) => {
       child.depth = 1
     })
 
@@ -315,8 +314,8 @@ export function LineageTree({ onSelectModel, highlightModelId }: LineageTreeProp
 }
 
 // Compact version for embedding in other components
-export function LineageTreeCompact({ modelId, onSelectModel }: { modelId: string; onSelectModel: (id: string) => void }) {
-  const [ancestors, setAncestors] = useState<string[]>([])
+export function LineageTreeCompact({ modelId: _modelId, onSelectModel: _onSelectModel }: { modelId: string; onSelectModel: (id: string) => void }) {
+  const [_ancestors, _setAncestors] = useState<string[]>([])
 
   // For now, just show base model chain
   // In future, could fetch full lineage from API

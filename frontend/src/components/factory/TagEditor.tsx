@@ -1,6 +1,5 @@
 import { useState, useRef } from 'react'
 import { X } from 'lucide-react'
-import { clsx } from 'clsx'
 import { SEED_CATEGORY_TAGS } from './types'
 
 interface TagEditorProps {

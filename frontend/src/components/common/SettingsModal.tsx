@@ -1,7 +1,15 @@
 import { useState, useEffect } from 'react'
 import { Modal } from './Modal'
 import { Button } from './Button'
-import { useUIStore, useAccentStore, ACCENT_PRESETS, TERMINAL_FG_PRESETS } from '../../stores'
+import {
+  useUIStore,
+  useAccentStore,
+  ACCENT_PRESETS,
+  TERMINAL_FG_PRESETS,
+  isTerminalFgHue,
+  getTerminalFgColor,
+  getTerminalFgLabel,
+} from '../../stores'
 import { HooksSection, ModelsSection, ApiKeysSection } from '../settings'
 import { Palette, Key, Cpu, Terminal, Globe, Moon, Sun, Monitor, Dices, RotateCcw, RefreshCw } from 'lucide-react'
 
@@ -51,6 +59,11 @@ export function SettingsModal() {
     { id: 'agents' as const, label: 'Agents', icon: Terminal },
     { id: 'connection' as const, label: 'Connection', icon: Globe },
   ]
+  const previewTheme = theme === 'system' && typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches
+    ? 'dark'
+    : theme === 'system'
+      ? 'light'
+      : theme
 
   return (
     <Modal
@@ -178,6 +191,10 @@ export function SettingsModal() {
                     ))}
                   </div>
 
+                  <p className="text-xs text-text-muted">
+                    Drag for any hue, or use presets for a wider range of curated accent tones.
+                  </p>
+
                   {/* Live Preview Swatches */}
                   <div className="flex items-center gap-3 mt-3">
                     <span className="text-xs font-mono text-text-muted uppercase tracking-widest">Preview:</span>
@@ -212,11 +229,9 @@ export function SettingsModal() {
                       type="range"
                       min="0"
                       max="360"
-                      value={terminalFgHue < 0 ? 0 : terminalFgHue}
+                      value={isTerminalFgHue(terminalFgHue) ? terminalFgHue : 210}
                       onChange={(e) => setTerminalFgHue(Number(e.target.value))}
                       className="hue-slider flex-1"
-                      disabled={terminalFgHue < 0}
-                      style={{ opacity: terminalFgHue < 0 ? 0.4 : 1 }}
                     />
 
                     <button
@@ -242,16 +257,16 @@ export function SettingsModal() {
                       >
                         <span
                           className="w-3 h-3 rounded-full border border-border"
-                          style={{
-                            backgroundColor: preset.hue < 0
-                              ? (theme === 'dark' ? '#E8E4E0' : '#000000')
-                              : (theme === 'dark' ? `hsl(${preset.hue}, 30%, 82%)` : `hsl(${preset.hue}, 45%, 25%)`)
-                          }}
+                          style={{ backgroundColor: getTerminalFgColor(previewTheme, preset.hue) }}
                         />
                         {preset.name}
                       </button>
                     ))}
                   </div>
+
+                  <p className="text-xs text-text-muted">
+                    Use presets for `default`, `black`, or `white`. Dragging the slider switches back to a hue-based text color.
+                  </p>
 
                   {/* Live Preview */}
                   <div className="flex items-center gap-3 mt-3">
@@ -259,16 +274,14 @@ export function SettingsModal() {
                     <div
                       className="px-4 py-2 border-brutal border-border rounded-brutal font-mono text-sm"
                       style={{
-                        backgroundColor: theme === 'dark' ? '#1a1a2e' : `hsl(${accentHue}, 45%, 85%)`,
-                        color: terminalFgHue < 0
-                          ? (theme === 'dark' ? '#E8E4E0' : '#000000')
-                          : (theme === 'dark' ? `hsl(${terminalFgHue}, 30%, 82%)` : `hsl(${terminalFgHue}, 45%, 25%)`)
+                        backgroundColor: previewTheme === 'dark' ? '#1a1a2e' : `hsl(${accentHue}, 45%, 85%)`,
+                        color: getTerminalFgColor(previewTheme, terminalFgHue)
                       }}
                     >
                       $ echo "hello world"
                     </div>
                     <span className="text-xs font-mono text-text-muted">
-                      {terminalFgHue < 0 ? 'default' : `${terminalFgHue}deg`}
+                      {getTerminalFgLabel(terminalFgHue)}
                     </span>
                   </div>
                 </div>

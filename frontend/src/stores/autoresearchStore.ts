@@ -91,7 +91,7 @@ interface AutoResearchState {
   setActiveMode: (mode: AutoResearchMode) => void
 }
 
-export const useAutoResearchStore = create<AutoResearchState>((set, get) => ({
+export const useAutoResearchStore = create<AutoResearchState>((set, _get) => ({
   // Hyperparam state
   status: 'idle',
   experiments: [],
@@ -151,7 +151,7 @@ export const useAutoResearchStore = create<AutoResearchState>((set, get) => ({
       if (!response.ok) {
         set({ status: 'failed' })
       }
-    } catch (error) {
+    } catch (_error) {
       set({ status: 'failed' })
     }
   },
@@ -218,7 +218,7 @@ export const useAutoResearchStore = create<AutoResearchState>((set, get) => ({
       if (!response.ok) {
         set({ traceStatus: 'failed' })
       }
-    } catch (error) {
+    } catch (_error) {
       set({ traceStatus: 'failed' })
     }
   },

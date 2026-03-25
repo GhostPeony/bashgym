@@ -16,7 +16,6 @@ import {
   Package,
   Clock,
   AlertCircle,
-  History,
   RotateCcw
 } from 'lucide-react'
 import { integrationApi, IntegrationStatus, IntegrationSettings, ModelVersion, PendingTrace } from '../../services/api'

@@ -7,7 +7,6 @@ import {
   Database,
   Layers,
   ChevronDown,
-  Settings
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import {
@@ -71,7 +70,7 @@ export function SyntheticGenerator({ onStateChange }: SyntheticGeneratorProps) {
   const [presets, setPresets] = useState<Record<string, SyntheticPreset>>({})
   const [repos, setRepos] = useState<RepoInfo[]>([])
   const [traceCount, setTraceCount] = useState<number>(0)
-  const [jobs, setJobs] = useState<SyntheticJobStatus[]>([])
+  const [_jobs, setJobs] = useState<SyntheticJobStatus[]>([])
 
   // UI state
   const [isLoading, setIsLoading] = useState(true)
@@ -190,6 +189,7 @@ export function SyntheticGenerator({ onStateChange }: SyntheticGeneratorProps) {
         onGenerate: handleGenerate
       })
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isGenerating, canGenerate, preset, customTarget, traceCount, repoFilter, selectedRepos, isLoading])
 
   const getRepoLabel = () => {

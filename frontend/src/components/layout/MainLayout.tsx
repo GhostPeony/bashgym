@@ -49,7 +49,7 @@ function LazyFallback() {
 }
 
 export function MainLayout() {
-  const { isSidebarOpen, overlayView, openOverlay, isAgentChatOpen, toggleAgentChat } = useUIStore()
+  const { isSidebarOpen: _isSidebarOpen, overlayView, openOverlay, isAgentChatOpen, toggleAgentChat } = useUIStore()
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null)
   const [modelSubView, setModelSubView] = useState<ModelSubView>('browser')
   const [compareModelIds, setCompareModelIds] = useState<string[]>([])

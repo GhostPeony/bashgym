@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { Plus, Terminal, Grid, X, Globe, FileText, Layers, FolderTree, GripVertical, LayoutGrid, Maximize2 } from 'lucide-react'
-import { useTerminalStore, type Panel } from '../../stores'
+import { Plus, Terminal, X, Globe, FileText, Layers, FolderTree, GripVertical, LayoutGrid, Maximize2 } from 'lucide-react'
+import { useTerminalStore } from '../../stores'
 import { TerminalPane } from './TerminalPane'
 import { PreviewPane } from './PreviewPane'
 import { BrowserPane } from './BrowserPane'
@@ -16,7 +16,7 @@ export function TerminalGrid() {
     setActivePanel,
     viewMode,
     setViewMode,
-    cycleViewMode,
+    cycleViewMode: _cycleViewMode,
     removePanel,
     renamePanel,
     reorderPanels,
@@ -42,6 +42,7 @@ export function TerminalGrid() {
       initializedRef.current = true
       createTerminal()
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // State for canvas popup - must be before any early returns
@@ -73,7 +74,7 @@ export function TerminalGrid() {
   }, [canvasPopupPanelId, closeCanvasPopup])
 
   // Calculate grid layout based on panel count
-  const getGridClass = () => {
+  const _getGridClass = () => {
     const count = panels.length
     if (count === 0) return ''
     if (count === 1) return 'grid-cols-1'
@@ -109,7 +110,7 @@ export function TerminalGrid() {
   }
 
   // Get view mode icon
-  const getViewModeIcon = () => {
+  const _getViewModeIcon = () => {
     switch (viewMode) {
       case 'grid':
         return <LayoutGrid className="w-4 h-4" />

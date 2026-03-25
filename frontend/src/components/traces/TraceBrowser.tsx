@@ -22,7 +22,6 @@ import {
   X,
   GitBranch,
   Hash,
-  Wrench,
   Loader2,
   Check,
   List
@@ -38,8 +37,8 @@ import {
   Area
 } from 'recharts'
 import { useTracesStore, useThemeStore } from '../../stores'
-import type { Trace, TraceStatus, TraceQualityTier } from '../../stores'
-import { tracesApi, RepoInfo, TraceDetailInfo } from '../../services/api'
+import type { Trace, TraceStatus } from '../../stores'
+import { tracesApi, TraceDetailInfo } from '../../services/api'
 import { clsx } from 'clsx'
 import { TraceAnalytics } from './TraceAnalytics'
 
@@ -133,7 +132,7 @@ export function TraceBrowser() {
   const [examplesFlash, setExamplesFlash] = useState<string | null>(null)
   const [traceDetail, setTraceDetail] = useState<TraceDetailInfo | null>(null)
   const [timelineData, setTimelineData] = useState<{ time: string; gold: number; failed: number; pending: number }[]>([])
-  const [statsLoading, setStatsLoading] = useState(false)
+  const [_statsLoading, setStatsLoading] = useState(false)
   const [timeRange, setTimeRange] = useState<'24h' | '7d' | '30d' | 'all'>('7d')
   const [totalTraces, setTotalTraces] = useState(0)
   const [hasMore, setHasMore] = useState(false)

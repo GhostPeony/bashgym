@@ -46,7 +46,7 @@ interface RouterState {
   addDecision: (decision: RoutingDecision) => void
 }
 
-export const useRouterStore = create<RouterState>((set, get) => ({
+export const useRouterStore = create<RouterState>((set, _get) => ({
   strategy: 'progressive_handoff',
   studentRate: 10,
   confidenceThreshold: 0.7,

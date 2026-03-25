@@ -26,6 +26,7 @@ type AdapterFactory = (
 
 const adapterRegistry = new Map<string, AdapterFactory>()
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function registerAdapter(type: string, factory: AdapterFactory): void {
   adapterRegistry.set(type, factory)
 }
@@ -249,7 +250,7 @@ export const IntegrationNode = memo(function IntegrationNode({
   useEffect(() => {
     if (persistTimer.current) clearTimeout(persistTimer.current)
     persistTimer.current = setTimeout(() => {
-      const { _panelId, ...persistConfig } = config as Record<string, unknown> & { _panelId?: unknown }
+      const { _panelId: _omitPanelId, ...persistConfig } = config as Record<string, unknown> & { _panelId?: unknown }
       useTerminalStore.getState().updatePanelConfig(panelId, persistConfig)
     }, 300)
     return () => {

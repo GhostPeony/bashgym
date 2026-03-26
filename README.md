@@ -2,7 +2,9 @@
 
 **Turn your AI coding sessions into fine-tuned models.**
 
-<img width="1563" height="908" alt="Bash Gym home screen" src="https://github.com/user-attachments/assets/472d7ada-d57b-4e79-8604-c27e4fc99348" />
+
+<img width="1745" height="906" alt="autobashgym" src="https://github.com/user-attachments/assets/3ba9430e-e910-4d74-8860-d9e4c88161d3" />
+
 
 ---
 
@@ -57,7 +59,7 @@ The dashboard **Settings > Agents** tab provides one-click installation for all 
 
 The workspace is an infinite canvas where terminals, browsers, and integration nodes live side by side and connect with edges to share context.
 
-<img width="1563" height="908" alt="Terminal canvas with connected nodes" src="https://github.com/user-attachments/assets/472d7ada-d57b-4e79-8604-c27e4fc99348" />
+<img width="1744" height="915" alt="bgcanvas" src="https://github.com/user-attachments/assets/d30355b8-b64e-4122-902e-6f496b7be33a" />
 
 **Terminals** are real PTY sessions (xterm.js + WebGL rendering, 10k line scrollback). Agent status is detected live from output — idle, running, tool calling, waiting for input — with CWD extraction from shell prompts. Drag files from the built-in file browser or your OS directly into a terminal to insert the path.
 

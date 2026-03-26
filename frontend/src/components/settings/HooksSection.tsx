@@ -329,7 +329,7 @@ export function HooksSection() {
         setApiError(result.error || 'Failed to connect to API')
         setTools(defaultTools)
       }
-    } catch (err) {
+    } catch (_err) {
       setApiError('API server not running')
       setTools(defaultTools)
     } finally {
@@ -367,7 +367,7 @@ export function HooksSection() {
       } else {
         setInstallResult({ success: false, message: result.error || 'Installation failed' })
       }
-    } catch (err) {
+    } catch (_err) {
       setInstallResult({ success: false, message: 'API server not reachable. Try the CLI command below.' })
     } finally {
       setInstallingTool(null)

@@ -1091,3 +1091,49 @@ class TraceResearchStatusResponse(BaseModel):
     started_at: str | None = Field(None, description="When the search started")
     completed_at: str | None = Field(None, description="When the search finished")
     error: str | None = Field(None, description="Error message if failed")
+
+
+# =============================================================================
+# Schema Research Schemas (Data Designer schema evolution)
+# =============================================================================
+
+
+class SchemaResearchRequest(BaseModel):
+    """Request to start schema research (Data Designer schema evolution)."""
+
+    base_template: str = Field(
+        "coding_agent_sft",
+        description="Base pipeline template to evolve from",
+    )
+    max_experiments: int = Field(20, ge=1, le=200, description="Maximum generations")
+    mutation_rate: float = Field(
+        0.3, ge=0.0, le=1.0, description="Probability of mutating each trait"
+    )
+    mutation_scale: float = Field(0.2, ge=0.0, le=1.0, description="Scale of mutations")
+    stage1_examples: int = Field(
+        25, ge=5, le=100, description="Examples for Stage 1 judge filtering"
+    )
+    stage1_judge_threshold: float = Field(
+        3.0, ge=1.0, le=5.0, description="Minimum judge score to pass Stage 1"
+    )
+    stage2_train_steps: int = Field(
+        50, ge=10, le=500, description="Micro-training steps for Stage 2"
+    )
+    mode: str = Field(
+        "simulate",
+        description="'simulate' for fast heuristic or 'real' for actual training",
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "base_template": "coding_agent_sft",
+                "max_experiments": 20,
+                "mutation_rate": 0.3,
+                "mutation_scale": 0.2,
+                "stage1_examples": 25,
+                "stage1_judge_threshold": 3.0,
+                "stage2_train_steps": 50,
+                "mode": "simulate",
+            }
+        }

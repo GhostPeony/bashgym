@@ -13,6 +13,7 @@ interface WebviewElement extends HTMLElement {
 }
 
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace JSX {
     interface IntrinsicElements {
       webview: React.HTMLAttributes<HTMLElement> & { src?: string }
@@ -75,7 +76,7 @@ interface BrowserPaneProps {
   isActive: boolean
 }
 
-export function BrowserPane({ id, title, url: initialUrl, isActive }: BrowserPaneProps) {
+export function BrowserPane({ id, title: _title, url: initialUrl, isActive }: BrowserPaneProps) {
   const { removePanel, setPanelUrl, setPanelThumbnail } = useTerminalStore()
   const [url, setUrl] = useState(initialUrl || 'http://localhost:3000')
   const [inputUrl, setInputUrl] = useState(url)
@@ -134,6 +135,7 @@ export function BrowserPane({ id, title, url: initialUrl, isActive }: BrowserPan
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pickerMode])
 
   // Clean up poll on unmount

@@ -4,12 +4,13 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Square, X, MoreHorizontal, Copy, ClipboardPaste, Loader2, MessageSquare, Wrench, Coffee } from 'lucide-react'
-import { useTerminalStore, useThemeStore, useAccentStore } from '../../stores'
+import { useTerminalStore, useThemeStore, useAccentStore, getTerminalFgColor } from '../../stores'
 import { FileDropZone } from './FileDropZone'
 import { clsx } from 'clsx'
 import '@xterm/xterm/css/xterm.css'
 
 // Strip ANSI escape sequences from raw PTY data so regex patterns can match cleanly
+// eslint-disable-next-line no-control-regex
 const ANSI_RE = /[\x1b\x9b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><~]/g
 
 function stripAnsi(text: string): string {
@@ -28,7 +29,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
-  const lastScrollPositionRef = useRef<number | null>(null)
+  const _lastScrollPositionRef = useRef<number | null>(null)
   const outputBufferRef = useRef('')
   const flushTimerRef = useRef<ReturnType<typeof setTimeout>>()
   const idleTimerRef = useRef<ReturnType<typeof setTimeout>>()
@@ -68,11 +69,11 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
         const targetLine = Math.max(0, newTotalLines - newViewportRows - distanceFromBottom)
         terminal.scrollToLine(targetLine)
       }
-    } catch (e) {
+    } catch {
       // Ignore fit errors
     }
   }, [])
-  const { theme } = useThemeStore()
+  const { resolvedTheme } = useThemeStore()
   const { accentHue, terminalFgHue } = useAccentStore()
 
   const session = sessions.get(id)
@@ -129,17 +130,15 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
   // Accent-influenced terminal theme colors
   const getThemeColors = useCallback(() => {
     const h = accentHue
-    // Guard against undefined from old persisted store data
-    const fgH = typeof terminalFgHue === 'number' ? terminalFgHue : -1
+    const fgValue = typeof terminalFgHue === 'number' ? terminalFgHue : -1
 
-    if (theme === 'dark') {
+    if (resolvedTheme === 'dark') {
       // Dark: rich accent-tinted background — nighttime garden, not void
       const bg = hslToHex(h, 35, 8)
       const bgLight = hslToHex(h, 25, 15)
       const accent = hslToHex(h, 50, 68)
 
-      // Terminal foreground: default white or user-picked hue
-      const fg = fgH < 0 ? '#F0EDE8' : hslToHex(fgH, 30, 82)
+      const fg = getTerminalFgColor('dark', fgValue)
 
       return {
         background: bg,
@@ -169,9 +168,8 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
     // Light: colored accent wash — the terminal lives inside the gradient
     const bg = hslToHex(h, 45, 85)
 
-    // Terminal foreground: default black or user-picked hue
-    const fg = fgH < 0 ? '#000000' : hslToHex(fgH, 45, 25)
-    const fgMid = fgH < 0 ? hslToHex(h, 20, 35) : hslToHex(fgH, 30, 45)
+    const fg = getTerminalFgColor('light', fgValue)
+    const fgMid = fgValue >= 0 ? hslToHex(fgValue, 30, 45) : hslToHex(h, 20, 35)
     const accent = hslToHex(h, 45, 38)
     const accentVivid = hslToHex(h, 55, 32)
 
@@ -198,7 +196,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
       brightCyan: hslToHex((h + 180) % 360, 40, 50),
       brightWhite: '#FFFFFF'
     }
-  }, [theme, accentHue, terminalFgHue, hslToHex, hslToHexAlpha])
+  }, [resolvedTheme, accentHue, terminalFgHue, hslToHex, hslToHexAlpha])
 
   // Initialize terminal (only runs once per terminal ID)
   useEffect(() => {
@@ -214,6 +212,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
       fontFamily: '"SF Mono", "JetBrains Mono", Menlo, Monaco, Consolas, monospace',
       lineHeight: 1.2,
       letterSpacing: 0,
+      minimumContrastRatio: 4.5,
       theme: initialColors,
       allowTransparency: false,
       scrollback: 10000,
@@ -246,7 +245,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
       if (terminalRef.current && fitAddonRef.current) {
         try {
           fitAddonRef.current.fit()
-        } catch (e) {
+        } catch {
           // Ignore - terminal may not be fully ready
         }
       }
@@ -304,7 +303,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
     const green = '\x1b[38;2;118;185;0m'  // NVIDIA green
     const dim = '\x1b[2m'
     const reset = '\x1b[0m'
-    const clear = '\x1b[2J\x1b[H'  // Clear screen and move cursor to top
+    const _clear = '\x1b[2J\x1b[H'  // Clear screen and move cursor to top
 
     // Function to write the Bash Gym banner
     const writeBanner = () => {
@@ -421,7 +420,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
             const targetLine = Math.max(0, newTotalLines - newViewportRows - distanceFromBottom)
             terminal.scrollToLine(targetLine)
           }
-        } catch (e) {
+        } catch {
           // Ignore fit errors (can happen during unmount)
         }
       }, 50)
@@ -437,7 +436,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
     setTimeout(() => {
       try {
         fitAddon.fit()
-      } catch (e) {
+      } catch {
         // Ignore
       }
     }, 100)
@@ -447,7 +446,8 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
       e.preventDefault()
       setContextMenu({ x: e.clientX, y: e.clientY })
     }
-    containerRef.current.addEventListener('contextmenu', handleContextMenu)
+    const currentContainer = containerRef.current
+    currentContainer.addEventListener('contextmenu', handleContextMenu)
 
     return () => {
       removeDataListener?.()
@@ -457,8 +457,8 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
       if (resizeTimeout) {
         clearTimeout(resizeTimeout)
       }
-      containerRef.current?.removeEventListener('contextmenu', handleContextMenu)
-      containerRef.current?.removeEventListener('paste', handlePasteEvent)
+      currentContainer?.removeEventListener('contextmenu', handleContextMenu)
+      currentContainer?.removeEventListener('paste', handlePasteEvent)
       if (flushTimerRef.current) clearTimeout(flushTimerRef.current)
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
       terminal.dispose()
@@ -476,7 +476,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
       // Force xterm to repaint (WebGL renderer caches colors)
       terminalRef.current.refresh(0, terminalRef.current.rows - 1)
     }
-  }, [theme, accentHue, terminalFgHue, getThemeColors])
+  }, [resolvedTheme, accentHue, terminalFgHue, getThemeColors])
 
   // Focus terminal and refit when active
   useEffect(() => {

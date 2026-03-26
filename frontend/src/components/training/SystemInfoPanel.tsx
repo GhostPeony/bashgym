@@ -55,7 +55,7 @@ export function SystemInfoPanel({ onSystemInfo, onRecommendations, compact = fal
       }).catch(() => {
         // SSH not configured or server unavailable
       })
-    } catch (err) {
+    } catch (_err) {
       setError('Failed to connect to API')
     } finally {
       setLoading(false)

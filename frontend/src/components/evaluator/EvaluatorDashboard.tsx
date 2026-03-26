@@ -2,8 +2,6 @@ import { useState, useEffect } from 'react'
 import {
   BarChart3,
   Play,
-  Pause,
-  RefreshCw,
   CheckCircle,
   AlertCircle,
   Loader2,
@@ -15,12 +13,8 @@ import {
   Code,
   Shield,
   MessageSquare,
-  FileText,
-  TrendingUp,
-  Award,
   Clock,
   X,
-  Info,
   AlertTriangle,
   XCircle,
   Timer
@@ -258,6 +252,7 @@ export function EvaluatorDashboard() {
 
     loadModels()
     loadEvaluations()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const toggleBenchmark = (benchmarkId: string) => {

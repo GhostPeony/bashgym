@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { trainingApi } from '../services/api'
 
-export type TrainingStrategy = 'sft' | 'dpo' | 'grpo' | 'distillation'
+export type TrainingStrategy = 'sft' | 'dpo' | 'grpo' | 'distillation' | 'cascade'
 export type TrainingStatus = 'idle' | 'starting' | 'running' | 'paused' | 'completed' | 'failed'
 
 export interface TrainingMetrics {

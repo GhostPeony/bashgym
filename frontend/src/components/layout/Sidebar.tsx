@@ -22,7 +22,8 @@ import {
   Network,
   Rocket,
   Workflow,
-  Download
+  Download,
+  Zap
 } from 'lucide-react'
 import { useUIStore, useTrainingStore } from '../../stores'
 import { hooksApi, systemApi } from '../../services/api'
@@ -74,7 +75,7 @@ function MenuSection({ title, children }: { title?: string; children: React.Reac
   )
 }
 
-type SecondaryViewId = 'traces' | 'models' | 'evaluator' | 'router' | 'guardrails' | 'profiler' | 'huggingface' | 'integration' | 'achievements' | 'orchestrator' | 'pipeline'
+type SecondaryViewId = 'traces' | 'models' | 'evaluator' | 'router' | 'guardrails' | 'profiler' | 'huggingface' | 'integration' | 'achievements' | 'orchestrator' | 'pipeline' | 'autoresearch'
 
 interface CollapsibleSectionProps {
   title: string
@@ -83,7 +84,7 @@ interface CollapsibleSectionProps {
 }
 
 function CollapsibleSection({ title, items, defaultExpanded = false }: CollapsibleSectionProps) {
-  const { overlayView, openOverlay, setSidebarOpen } = useUIStore()
+  const { overlayView, openOverlay, setSidebarOpen: _setSidebarOpen } = useUIStore()
   const [isExpanded, setIsExpanded] = useState(defaultExpanded)
 
   const handleClick = (id: SecondaryViewId) => {
@@ -144,6 +145,7 @@ function SecondarySections() {
   ]
 
   const toolsItems: CollapsibleSectionProps['items'] = [
+    { id: 'autoresearch', icon: <Zap className="w-4 h-4" />, label: 'AutoResearch' },
     { id: 'evaluator', icon: <FlaskConical className="w-4 h-4" />, label: 'Evaluator' },
     { id: 'router', icon: <GitBranch className="w-4 h-4" />, label: 'Router' },
     { id: 'guardrails', icon: <Shield className="w-4 h-4" />, label: 'Guardrails' },

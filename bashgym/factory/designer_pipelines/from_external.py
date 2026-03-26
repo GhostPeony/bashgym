@@ -22,15 +22,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from bashgym.factory.designer_pipelines import build_base_config
+
 if TYPE_CHECKING:
     from bashgym.factory.data_designer import PipelineConfig
 
 try:
     import data_designer.config as dd
-
-    DATA_DESIGNER_AVAILABLE = True
 except ImportError:
-    DATA_DESIGNER_AVAILABLE = False
+    pass
 
 
 def build_external_pipeline(config: PipelineConfig) -> dd.DataDesignerConfigBuilder:
@@ -50,46 +50,7 @@ def build_external_pipeline(config: PipelineConfig) -> dd.DataDesignerConfigBuil
     Returns:
         Configured DataDesignerConfigBuilder
     """
-    if not DATA_DESIGNER_AVAILABLE:
-        raise ImportError("data-designer>=0.5.0 is required")
-
-    builder = dd.DataDesignerConfigBuilder(
-        model_configs=[
-            dd.ModelConfig(
-                alias="text-model",
-                model=config.text_model,
-                inference_parameters=dd.InferenceParameters(
-                    temperature=config.temperature_text,
-                    top_p=0.99,
-                    max_tokens=2048,
-                ),
-            ),
-            dd.ModelConfig(
-                alias="code-model",
-                model=config.code_model,
-                inference_parameters=dd.InferenceParameters(
-                    temperature=config.temperature_code,
-                    max_tokens=4096,
-                ),
-            ),
-            dd.ModelConfig(
-                alias="judge-model",
-                model=config.judge_model,
-                inference_parameters=dd.InferenceParameters(
-                    temperature=config.temperature_judge,
-                    max_tokens=1024,
-                ),
-            ),
-        ],
-        model_providers=[
-            dd.ModelProvider(
-                name=config.provider,
-                endpoint=config.provider_endpoint,
-                provider_type="openai",
-                api_key=f"${{{_env_key_for_provider(config.provider)}}}",
-            ),
-        ],
-    )
+    builder = build_base_config(config)
 
     # --- Augmentation style diversity ---
 
@@ -206,14 +167,3 @@ def build_external_pipeline(config: PipelineConfig) -> dd.DataDesignerConfigBuil
     )
 
     return builder
-
-
-def _env_key_for_provider(provider: str) -> str:
-    """Map provider name to environment variable key."""
-    mapping = {
-        "nvidia": "NVIDIA_API_KEY",
-        "nvidia-nim": "NVIDIA_API_KEY",
-        "anthropic": "ANTHROPIC_API_KEY",
-        "local": "LOCAL_API_KEY",
-    }
-    return mapping.get(provider, "NVIDIA_API_KEY")

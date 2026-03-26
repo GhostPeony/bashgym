@@ -34,7 +34,17 @@ export type { ViewMode } from './uiStore'
 export { useTutorialStore } from './tutorialStore'
 export type { TutorialStep } from './tutorialStore'
 export { useAchievementStore } from './achievementStore'
-export { useAccentStore, ACCENT_PRESETS, TERMINAL_FG_PRESETS } from './accentStore'
+export {
+  useAccentStore,
+  ACCENT_PRESETS,
+  TERMINAL_FG_PRESETS,
+  DEFAULT_TERMINAL_FG_HUE,
+  BLACK_TERMINAL_FG_HUE,
+  WHITE_TERMINAL_FG_HUE,
+  isTerminalFgHue,
+  getTerminalFgColor,
+  getTerminalFgLabel,
+} from './accentStore'
 export type { AccentPreset, TerminalFgPreset } from './accentStore'
 export { useOrchestratorStore } from './orchestratorStore'
 export type { TaskNode, OrchestratorJob, SpecInput } from './orchestratorStore'

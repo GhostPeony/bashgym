@@ -66,7 +66,7 @@ interface OrchestratorState {
   fetchProviders: () => Promise<void>
   setEditedPrompt: (taskId: string, prompt: string) => void
   resetEditedPrompt: (taskId: string) => void
-  dispatchToTerminals: () => void
+  dispatchToTerminals: () => Promise<void>
   dispatchNextQueued: (terminalId: string) => void
 
   // WS handlers
@@ -174,13 +174,13 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
       return { editedPrompts: next }
     }),
 
-  dispatchToTerminals: () => {
+  dispatchToTerminals: async () => {
     const { currentJob, editedPrompts } = get()
     if (!currentJob) return
 
     // Lazy-import terminalStore to avoid circular dependency
-    const { useTerminalStore } = require('./terminalStore') as typeof import('./terminalStore')
-    const { sessions, panels } = useTerminalStore.getState()
+    const { useTerminalStore } = await import('./terminalStore')
+    const { sessions } = useTerminalStore.getState()
 
     const idleTerminalIds = Array.from(sessions.entries())
       .filter(([, s]) => s.status === 'idle')

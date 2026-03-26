@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Download, Monitor, Apple, Terminal, ExternalLink, CheckCircle, ArrowRight } from 'lucide-react'
-import { clsx } from 'clsx'
+import { Download, Monitor, Apple, Terminal, CheckCircle } from 'lucide-react'
 
 type Platform = 'windows' | 'mac' | 'linux' | 'unknown'
 
@@ -110,11 +109,6 @@ export function DownloadPage() {
     return asset?.url ?? null
   }
 
-  const formatSize = (bytes: number) => {
-    const mb = bytes / (1024 * 1024)
-    return `${mb.toFixed(0)} MB`
-  }
-
   const primaryPlatform = platform !== 'unknown' ? platform : 'windows'
   const otherPlatforms = (['windows', 'mac', 'linux'] as const).filter(p => p !== primaryPlatform)
 
@@ -146,7 +140,6 @@ export function DownloadPage() {
             {(() => {
               const url = getDownloadUrl(primaryPlatform)
               const info = PLATFORMS[primaryPlatform]
-              const Icon = info.icon
               return url ? (
                 <a
                   href={url}

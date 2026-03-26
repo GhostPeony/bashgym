@@ -438,6 +438,20 @@ bashgym/
 
 ---
 
+## Roadmap
+
+See [TODOS.md](TODOS.md) for the full roadmap with details.
+
+**Recently shipped:**
+- **AutoCurriculum Compiler** — Data Designer schemas evolve via evolutionary search (SchemaResearcher). Two-stage evaluation: judge scores filter bad candidates fast, micro-training validates winners. Template library auto-selects pipelines from failure analysis.
+- **Cascade RL** — Sequential domain-by-domain GRPO training inspired by Nemotron Cascade 2. Four coding domains (file ops, bash, search, multi-step reasoning) each get tailored reward functions. MOPD distillation merges domain experts into one model.
+
+**Up next:**
+- **Black-Box On-Policy Distillation** — Real-time teacher inference (Claude/NIM) during training, targeting the student's actual weaknesses instead of using stale pre-generated outputs
+- **Schema Sharing** — Export/import evolved schemas with provenance so others can skip the search
+
+---
+
 ## FAQ
 
 **Do I need a GPU?**

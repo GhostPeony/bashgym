@@ -24,8 +24,18 @@ export interface TraceExperimentResult {
   durationSeconds: number
 }
 
+export interface SchemaExperimentResult {
+  experimentId: number
+  totalExperiments: number
+  configSnapshot: Record<string, number | boolean | string>
+  metricValue: number
+  bestMetric: number
+  improved: boolean
+  durationSeconds: number
+}
+
 export type AutoResearchStatus = 'idle' | 'running' | 'paused' | 'completed' | 'failed'
-export type AutoResearchMode = 'hyperparam' | 'trace'
+export type AutoResearchMode = 'hyperparam' | 'trace' | 'schema'
 
 export type ExperimentMode = 'simulate' | 'real'
 
@@ -66,6 +76,15 @@ interface AutoResearchState {
   traceTotalExperiments: number
   traceCurrentExperiment: number
 
+  // Schema research
+  schemaStatus: AutoResearchStatus
+  schemaExperiments: SchemaExperimentResult[]
+  schemaBestMetric: number | null
+  schemaBestGenome: Record<string, any> | null
+  schemaTotalExperiments: number
+  schemaCurrentExperiment: number
+  schemaTemplate: string
+
   // Active mode
   activeMode: AutoResearchMode
 
@@ -87,11 +106,21 @@ interface AutoResearchState {
   pauseTraceResearch: () => Promise<void>
   resumeTraceResearch: () => Promise<void>
 
+  // Schema research actions
+  addSchemaExperiment: (result: SchemaExperimentResult) => void
+  setSchemaStatus: (status: AutoResearchStatus) => void
+  resetSchema: () => void
+  startSchemaResearch: (config: { baseTemplate: string; maxExperiments: number; mutationRate: number; mutationScale: number; mode: string }) => Promise<void>
+  stopSchemaResearch: () => Promise<void>
+  pauseSchemaResearch: () => Promise<void>
+  resumeSchemaResearch: () => Promise<void>
+  setSchemaTemplate: (template: string) => void
+
   // Mode
   setActiveMode: (mode: AutoResearchMode) => void
 }
 
-export const useAutoResearchStore = create<AutoResearchState>((set, get) => ({
+export const useAutoResearchStore = create<AutoResearchState>((set, _get) => ({
   // Hyperparam state
   status: 'idle',
   experiments: [],
@@ -107,6 +136,15 @@ export const useAutoResearchStore = create<AutoResearchState>((set, get) => ({
   traceBestPipeline: null,
   traceTotalExperiments: 0,
   traceCurrentExperiment: 0,
+
+  // Schema research state
+  schemaStatus: 'idle',
+  schemaExperiments: [],
+  schemaBestMetric: null,
+  schemaBestGenome: null,
+  schemaTotalExperiments: 0,
+  schemaCurrentExperiment: 0,
+  schemaTemplate: 'coding_agent_sft',
 
   activeMode: 'hyperparam',
 
@@ -151,7 +189,7 @@ export const useAutoResearchStore = create<AutoResearchState>((set, get) => ({
       if (!response.ok) {
         set({ status: 'failed' })
       }
-    } catch (error) {
+    } catch (_error) {
       set({ status: 'failed' })
     }
   },
@@ -218,7 +256,7 @@ export const useAutoResearchStore = create<AutoResearchState>((set, get) => ({
       if (!response.ok) {
         set({ traceStatus: 'failed' })
       }
-    } catch (error) {
+    } catch (_error) {
       set({ traceStatus: 'failed' })
     }
   },
@@ -242,6 +280,77 @@ export const useAutoResearchStore = create<AutoResearchState>((set, get) => ({
       await autoresearchApi.resumeTraceResearch()
       set({ traceStatus: 'running' })
     } catch {/* */}
+  },
+
+  // ─── Schema research actions ──────────────────────────────────────
+
+  addSchemaExperiment: (result: SchemaExperimentResult) => {
+    set((state) => ({
+      schemaExperiments: [...state.schemaExperiments, result],
+      schemaCurrentExperiment: result.experimentId,
+      schemaTotalExperiments: result.totalExperiments,
+      schemaBestMetric: result.bestMetric,
+      schemaBestGenome: result.improved ? result.configSnapshot : state.schemaBestGenome,
+    }))
+  },
+
+  setSchemaStatus: (status: AutoResearchStatus) => {
+    set({ schemaStatus: status })
+  },
+
+  resetSchema: () => {
+    set({
+      schemaStatus: 'idle',
+      schemaExperiments: [],
+      schemaBestMetric: null,
+      schemaBestGenome: null,
+      schemaTotalExperiments: 0,
+      schemaCurrentExperiment: 0,
+    })
+  },
+
+  startSchemaResearch: async (config) => {
+    set({
+      schemaStatus: 'running',
+      schemaExperiments: [],
+      schemaBestMetric: null,
+      schemaBestGenome: null,
+      schemaTotalExperiments: config.maxExperiments,
+      schemaCurrentExperiment: 0,
+    })
+    try {
+      const response = await autoresearchApi.schemaResearch.start(config)
+      if (!response.ok) {
+        set({ schemaStatus: 'failed' })
+      }
+    } catch (_error) {
+      set({ schemaStatus: 'failed' })
+    }
+  },
+
+  stopSchemaResearch: async () => {
+    try {
+      await autoresearchApi.schemaResearch.stop()
+      set({ schemaStatus: 'idle' })
+    } catch {/* */}
+  },
+
+  pauseSchemaResearch: async () => {
+    try {
+      await autoresearchApi.schemaResearch.pause()
+      set({ schemaStatus: 'paused' })
+    } catch {/* */}
+  },
+
+  resumeSchemaResearch: async () => {
+    try {
+      await autoresearchApi.schemaResearch.resume()
+      set({ schemaStatus: 'running' })
+    } catch {/* */}
+  },
+
+  setSchemaTemplate: (template: string) => {
+    set({ schemaTemplate: template })
   },
 
   setActiveMode: (mode: AutoResearchMode) => {

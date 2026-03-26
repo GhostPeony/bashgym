@@ -2,10 +2,8 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   ArrowLeft,
   TrendingUp,
-  TrendingDown,
   Activity,
   BarChart3,
-  Clock,
   Loader2,
   RefreshCw,
   Calendar
@@ -46,10 +44,11 @@ function formatMetricValue(value: number, metric: string): string {
       return `${value.toFixed(1)}%`
     case 'final_loss':
       return value.toFixed(4)
-    case 'model_size_bytes':
+    case 'model_size_bytes': {
       const gb = value / (1024 * 1024 * 1024)
       if (gb >= 1) return `${gb.toFixed(2)} GB`
       return `${(value / (1024 * 1024)).toFixed(0)} MB`
+    }
     default:
       return value.toFixed(2)
   }

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { X, FolderGit2, Database, Sparkles, Info, Cloud, Monitor, Shield, FileText, Server } from 'lucide-react'
 import type { TrainingConfig as TrainingConfigType, DataSource } from '../../stores'
 import type { TrainingStrategy } from '../../stores'
-import { tracesApi, securityApi, providersApi, RepoInfo, SecurityDatasetInfo, OllamaModel } from '../../services/api'
+import { tracesApi, securityApi, providersApi, cascadeApi, RepoInfo, SecurityDatasetInfo, OllamaModel } from '../../services/api'
 import { useTutorialComplete } from '../../hooks'
 import { clsx } from 'clsx'
 import { DeviceManager } from './DeviceManager'
@@ -28,6 +28,13 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
   const [showCustomModel, setShowCustomModel] = useState(false)
   const { complete: completeTutorialStep } = useTutorialComplete()
   const { defaultDeviceId, fetchDevices } = useDeviceStore()
+
+  // Cascade RL state
+  const [cascadeDomains, setCascadeDomains] = useState<string[]>([
+    'file_operations', 'bash_commands', 'search_and_navigate', 'multi_step_reasoning'
+  ])
+  const [cascadeStepsPerStage, setCascadeStepsPerStage] = useState(200)
+  const [cascadeMode, setCascadeMode] = useState<'simulate' | 'real'>('simulate')
 
   const [config, setConfig] = useState<TrainingConfigType>({
     strategy: 'sft',
@@ -94,10 +101,37 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
     { value: 'dpo', label: 'DPO', description: 'Direct Preference Optimization' },
     { value: 'grpo', label: 'GRPO', description: 'Group Relative Policy Optimization' },
     { value: 'distillation', label: 'KD', description: 'Knowledge Distillation' },
+    { value: 'cascade', label: 'Cascade RL', description: 'Domain-Staged GRPO' },
   ]
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+
+    // Cascade RL uses its own API endpoint
+    if (config.strategy === 'cascade') {
+      try {
+        await cascadeApi.start({
+          domains: cascadeDomains,
+          baseModel: config.baseModel,
+          datasetPath: config.datasetPath || 'data/gold_traces',
+          trainStepsPerStage: cascadeStepsPerStage,
+          grpoNumGenerations: config.grpoNumGenerations ?? 4,
+          grpoTemperature: config.grpoTemperature ?? 0.7,
+          learningRate: config.learningRate,
+          loraR: config.loraRank ?? 16,
+          loraAlpha: config.loraAlpha ?? 32,
+          load4Bit: config.load4Bit ?? true,
+          useRemoteSsh: config.useRemoteSSH ?? false,
+          mode: cascadeMode,
+        })
+        completeTutorialStep('start_training')
+        onClose()
+      } catch (err) {
+        console.error('Failed to start cascade training:', err)
+      }
+      return
+    }
+
     // Include selected repos based on training scope
     const reposToUse = trainingScope === 'all' ? [] : selectedRepos
     onStart({ ...config, dataSource, selectedRepos: reposToUse })
@@ -434,21 +468,21 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
             <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-3">
               Training Strategy
             </label>
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               {strategies.map((s) => (
                 <button
                   key={s.value}
                   type="button"
                   onClick={() => setConfig({ ...config, strategy: s.value })}
                   className={clsx(
-                    'card p-3 text-center transition-press',
+                    'card px-3 py-2 text-left transition-press',
                     config.strategy === s.value
                       ? 'border-accent bg-accent-light text-accent-dark'
                       : 'text-text-secondary'
                   )}
                 >
-                  <span className="block font-mono text-sm font-bold uppercase">{s.label}</span>
-                  <span className="block font-mono text-xs mt-1 text-text-muted">{s.description}</span>
+                  <span className="block font-mono text-xs font-bold uppercase truncate">{s.label}</span>
+                  <span className="block font-mono text-[10px] mt-0.5 text-text-muted truncate">{s.description}</span>
                 </button>
               ))}
             </div>
@@ -493,6 +527,11 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
               <optgroup label="DeepSeek">
                 <option value="deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct">DeepSeek-Coder-V2-Lite</option>
                 <option value="deepseek-ai/deepseek-coder-6.7b-instruct">DeepSeek-Coder-6.7B</option>
+              </optgroup>
+              <optgroup label="Nemotron (NVIDIA)">
+                <option value="nvidia/Nemotron-Cascade-2-30B-A3B">Nemotron-Cascade-2-30B-A3B (MoE, DGX Spark)</option>
+                <option value="nvidia/Nemotron-3-Nano-4B-Instruct">Nemotron-3-Nano-4B</option>
+                <option value="nvidia/Nemotron-Mini-4B-Instruct">Nemotron-Mini-4B</option>
               </optgroup>
               <optgroup label="Other">
                 <option value="mistralai/Mistral-7B-Instruct-v0.3">Mistral-7B-Instruct</option>
@@ -828,6 +867,103 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
               </div>
             </div>
           )}
+          {/* Cascade RL Config */}
+          {config.strategy === 'cascade' && (
+            <div className="card p-4 border-l-4 border-l-accent">
+              <h3 className="font-mono text-xs uppercase tracking-widest text-text-secondary mb-3">
+                Cascade RL Configuration
+              </h3>
+
+              {/* Domain selection */}
+              <div className="mb-4">
+                <label className="block font-mono text-xs uppercase tracking-widest text-text-muted mb-2">Training Domains</label>
+                <div className="space-y-2">
+                  {[
+                    { id: 'file_operations', label: 'File Operations', desc: 'Read, write, edit files', reward: 'syntax' },
+                    { id: 'bash_commands', label: 'Bash Commands', desc: 'Shell execution', reward: 'execution' },
+                    { id: 'search_and_navigate', label: 'Search & Navigate', desc: 'Grep, glob exploration', reward: 'execution' },
+                    { id: 'multi_step_reasoning', label: 'Multi-Step Reasoning', desc: 'Planning, multi-tool chains', reward: 'verification' },
+                  ].map(domain => (
+                    <label key={domain.id} className="flex items-start gap-3 p-2 card cursor-pointer hover-press transition-press">
+                      <input
+                        type="checkbox"
+                        checked={cascadeDomains.includes(domain.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setCascadeDomains([...cascadeDomains, domain.id])
+                          } else {
+                            setCascadeDomains(cascadeDomains.filter(d => d !== domain.id))
+                          }
+                        }}
+                        className="accent-primary mt-1"
+                      />
+                      <div>
+                        <span className="font-mono text-sm">{domain.label}</span>
+                        <span className="text-xs text-text-muted ml-2">({domain.reward} reward)</span>
+                        <p className="text-xs text-text-secondary">{domain.desc}</p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Steps per stage */}
+              <div className="mb-4">
+                <label className="block font-mono text-xs uppercase tracking-widest text-text-muted mb-1">Steps Per Stage</label>
+                <input
+                  type="number"
+                  value={cascadeStepsPerStage}
+                  onChange={e => setCascadeStepsPerStage(Number(e.target.value))}
+                  min={10}
+                  max={5000}
+                  className="input w-full"
+                />
+                <p className="font-mono text-xs text-text-muted mt-1">
+                  GRPO training steps per domain stage (10-5000)
+                </p>
+              </div>
+
+              {/* Mode toggle */}
+              <div className="mb-4">
+                <label className="block font-mono text-xs uppercase tracking-widest text-text-muted mb-2">Mode</label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCascadeMode('simulate')}
+                    className={clsx(
+                      'card px-3 py-1 font-mono text-xs transition-press',
+                      cascadeMode === 'simulate'
+                        ? 'border-accent bg-accent-light text-accent-dark'
+                        : 'text-text-secondary'
+                    )}
+                  >
+                    Simulate
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCascadeMode('real')}
+                    className={clsx(
+                      'card px-3 py-1 font-mono text-xs transition-press',
+                      cascadeMode === 'real'
+                        ? 'border-accent bg-accent-light text-accent-dark'
+                        : 'text-text-secondary'
+                    )}
+                  >
+                    Real Training
+                  </button>
+                </div>
+              </div>
+
+              <div className="card p-3 flex items-start gap-2 border-l-4 border-l-accent">
+                <Info className="w-4 h-4 text-accent flex-shrink-0 mt-0.5" />
+                <p className="font-mono text-xs text-text-secondary">
+                  Cascade RL trains domain-by-domain using GRPO, with each stage building on the previous checkpoint.
+                  After all stages complete, use MOPD distillation to merge domain experts into a unified model.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Auto-deploy to Ollama */}
           <div className="mt-4 p-3 card border-l-4 border-l-accent">
             <div className="flex items-center gap-2">

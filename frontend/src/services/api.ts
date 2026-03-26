@@ -25,7 +25,7 @@ export interface TaskResponse {
 }
 
 export interface TrainingRequest {
-  strategy?: 'sft' | 'dpo' | 'grpo' | 'distillation'
+  strategy?: 'sft' | 'dpo' | 'grpo' | 'distillation' | 'cascade'
   dataset_path?: string
   base_model?: string
   model_type?: string
@@ -1959,6 +1959,62 @@ export const syntheticApi = {
 }
 
 // =============================================================================
+// Cascade RL API
+// =============================================================================
+
+export const cascadeApi = {
+  start: (config: {
+    domains: string[]
+    baseModel: string
+    datasetPath: string
+    trainStepsPerStage: number
+    grpoNumGenerations: number
+    grpoTemperature: number
+    learningRate: number
+    loraR: number
+    loraAlpha: number
+    load4Bit: boolean
+    useRemoteSsh: boolean
+    mode: string
+  }) =>
+    request<{ status: string; domains: string[]; stages: number }>('/cascade/start', {
+      method: 'POST',
+      body: JSON.stringify({
+        domains: config.domains,
+        base_model: config.baseModel,
+        dataset_path: config.datasetPath,
+        train_steps_per_stage: config.trainStepsPerStage,
+        grpo_num_generations: config.grpoNumGenerations,
+        grpo_temperature: config.grpoTemperature,
+        learning_rate: config.learningRate,
+        lora_r: config.loraR,
+        lora_alpha: config.loraAlpha,
+        load_in_4bit: config.load4Bit,
+        use_remote_ssh: config.useRemoteSsh,
+        mode: config.mode,
+      }),
+    }),
+  stop: () => request<{ status: string }>('/cascade/stop', { method: 'POST' }),
+  getStatus: () => request<Record<string, unknown>>('/cascade/status'),
+  distill: (config: {
+    studentModel?: string
+    distillationAlpha?: number
+    temperature?: number
+    trainSteps?: number
+  }) =>
+    request<{ status: string }>('/cascade/distill', {
+      method: 'POST',
+      body: JSON.stringify({
+        student_model: config.studentModel || '',
+        distillation_alpha: config.distillationAlpha || 0.5,
+        temperature: config.temperature || 2.0,
+        train_steps: config.trainSteps || 500,
+      }),
+    }),
+  getDistillStatus: () => request<Record<string, unknown>>('/cascade/distill/status'),
+}
+
+// =============================================================================
 // Integration API (Bashbros)
 // =============================================================================
 
@@ -2513,4 +2569,24 @@ export const autoresearchApi = {
 
   traceResearchStatus: () =>
     request<any>('/autoresearch/trace-research/status'),
+
+  // Schema research
+  schemaResearch: {
+    start: (config: { baseTemplate: string; maxExperiments: number; mutationRate: number; mutationScale: number; mode: string }) =>
+      request<{ status: string; template: string }>('/autoresearch/schema-research/start', {
+        method: 'POST',
+        body: JSON.stringify({
+          base_template: config.baseTemplate,
+          max_experiments: config.maxExperiments,
+          mutation_rate: config.mutationRate,
+          mutation_scale: config.mutationScale,
+          mode: config.mode,
+        }),
+      }),
+    stop: () => request<{ status: string }>('/autoresearch/schema-research/stop', { method: 'POST' }),
+    pause: () => request<{ status: string }>('/autoresearch/schema-research/pause', { method: 'POST' }),
+    resume: () => request<{ status: string }>('/autoresearch/schema-research/resume', { method: 'POST' }),
+    getStatus: () => request<any>('/autoresearch/schema-research/status'),
+    getQuality: () => request<any>('/autoresearch/schema-research/quality'),
+  },
 }

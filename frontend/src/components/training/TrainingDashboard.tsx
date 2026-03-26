@@ -14,9 +14,11 @@ import {
   CheckCircle2,
   BarChart3,
   Cloud,
-  ExternalLink
+  ExternalLink,
+  Zap,
+  ChevronRight
 } from 'lucide-react'
-import { useTrainingStore } from '../../stores'
+import { useTrainingStore, useUIStore } from '../../stores'
 import { trainingApi, tracesApi, hfApi, RepoInfo, SystemInfo, ModelRecommendations } from '../../services/api'
 import { LossCurve } from './LossCurve'
 import { EpochProgress } from './EpochProgress'
@@ -24,18 +26,18 @@ import { MetricsGrid } from './MetricsGrid'
 import { TrainingConfig } from './TrainingConfig'
 import { SystemInfoPanel } from './SystemInfoPanel'
 import { TrainingLogs } from './TrainingLogs'
-import { AutoResearchPanel } from './AutoResearchPanel'
 import { clsx } from 'clsx'
 
 export function TrainingDashboard() {
   const { currentRun, lossHistory, startTraining, pauseTraining, resumeTraining, stopTraining, updateMetrics } =
     useTrainingStore()
+  const { openOverlay } = useUIStore()
   const [showConfig, setShowConfig] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [availableRepos, setAvailableRepos] = useState<RepoInfo[]>([])
   const [goldTraceCount, setGoldTraceCount] = useState(0)
-  const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null)
-  const [recommendations, setRecommendations] = useState<ModelRecommendations | null>(null)
+  const [_systemInfo, setSystemInfo] = useState<SystemInfo | null>(null)
+  const [_recommendations, setRecommendations] = useState<ModelRecommendations | null>(null)
 
   const [exporting, setExporting] = useState(false)
   const [exportResult, setExportResult] = useState<{ train: number; val: number; trainPath?: string } | null>(null)
@@ -540,9 +542,21 @@ export function TrainingDashboard() {
             )}
           </div>
         )}
-        {/* AutoResearch Panel */}
+        {/* AutoResearch Link */}
         <div className="col-span-12">
-          <AutoResearchPanel />
+          <button
+            onClick={() => openOverlay('autoresearch')}
+            className="card w-full p-4 flex items-center justify-between hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all shadow-brutal-sm"
+          >
+            <div className="flex items-center gap-3">
+              <Zap className="w-5 h-5 text-accent" />
+              <div className="text-left">
+                <span className="font-mono text-sm font-semibold">AutoResearch</span>
+                <p className="text-xs text-text-muted">Automated hyperparameter search & trace optimization</p>
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 text-text-muted" />
+          </button>
         </div>
       </div>
 

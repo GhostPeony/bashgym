@@ -17,7 +17,6 @@ import {
   Package
 } from 'lucide-react'
 import { hfApi, HFStatus } from '../../services/api'
-import { HFStatus as HFStatusBadge } from './HFStatus'
 import { CloudTraining } from './CloudTraining'
 import { SpaceManager } from './SpaceManager'
 import { DatasetBrowser } from './DatasetBrowser'

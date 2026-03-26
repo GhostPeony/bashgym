@@ -22,7 +22,7 @@ export function FlywheelVisualization({
   progress = 0,
   showLabels = true
 }: FlywheelVisualizationProps) {
-  const { theme } = useThemeStore()
+  const { theme: _theme } = useThemeStore()
 
   const colors = {
     active: 'var(--accent)',
@@ -169,7 +169,7 @@ export function FlywheelVisualization({
       {showLabels && (
         <div className="absolute inset-0 pointer-events-none">
           {stages.map((stage) => {
-            const pos = getPosition(stage.angle)
+            const _pos = getPosition(stage.angle)
             const isActive = stage.id === currentStage
 
             // Position label outside the circle

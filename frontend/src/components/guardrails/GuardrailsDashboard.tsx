@@ -4,25 +4,19 @@ import {
   ShieldAlert,
   ShieldCheck,
   ShieldX,
-  AlertTriangle,
   Plus,
   Trash2,
   Play,
   Save,
   RefreshCw,
   Loader2,
-  CheckCircle,
-  XCircle,
   ChevronDown,
   ChevronRight,
   FileText,
   Code,
   MessageSquare,
-  Zap,
   Eye,
   Lock,
-  Unlock,
-  Settings
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import { observabilityApi, GuardrailEvent, GuardrailStats } from '../../services/api'

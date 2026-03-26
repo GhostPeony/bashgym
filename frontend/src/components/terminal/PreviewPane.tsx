@@ -9,7 +9,7 @@ interface PreviewPaneProps {
   isActive: boolean
 }
 
-export function PreviewPane({ id, title, filePath, isActive }: PreviewPaneProps) {
+export function PreviewPane({ id, title, filePath, isActive: _isActive }: PreviewPaneProps) {
   const { removePanel } = useTerminalStore()
   const [content, setContent] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)

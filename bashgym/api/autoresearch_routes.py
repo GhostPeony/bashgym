@@ -23,6 +23,7 @@ from bashgym.api.schemas import (
     AutoResearchRequest,
     AutoResearchStatusResponse,
     ExperimentResultSchema,
+    SchemaResearchRequest,
     TraceExperimentResultSchema,
     TraceResearchRequest,
     TraceResearchStatusResponse,
@@ -576,3 +577,247 @@ async def get_trace_research_status(request: Request):
         completed_at=researcher._completed_at,
         error=researcher._error,
     )
+
+
+# =============================================================================
+# Schema Research Helpers
+# =============================================================================
+
+
+def _get_schema_researcher(request: Request) -> AutoResearcher | None:
+    """Retrieve the active schema AutoResearcher from app state, if any."""
+    return getattr(request.app.state, "schema_researcher", None)
+
+
+# =============================================================================
+# Schema Research Endpoints (Data Designer schema evolution)
+# =============================================================================
+
+
+@router.post("/schema-research/start")
+async def start_schema_research(body: SchemaResearchRequest, request: Request):
+    """Start schema research -- evolutionary search over Data Designer pipeline configs."""
+    existing = _get_schema_researcher(request)
+    if existing and existing.status == AutoResearchStatus.RUNNING:
+        raise HTTPException(
+            status_code=409,
+            detail="Schema research is already running. Stop it first.",
+        )
+
+    from bashgym.gym.schema_search_space import SchemaSearchSpace
+
+    # Create search space
+    search_space = SchemaSearchSpace(
+        base_pipeline_name=body.base_template,
+        mutation_rate=body.mutation_rate,
+        mutation_scale=body.mutation_scale,
+        stage1_examples=body.stage1_examples,
+        stage1_judge_threshold=body.stage1_judge_threshold,
+        stage2_train_steps=body.stage2_train_steps,
+    )
+
+    # Create AutoResearcher with schema search space
+    ar_config = AutoResearchConfig(
+        max_experiments=body.max_experiments,
+        mode=body.mode,
+        mutation_rate=body.mutation_rate,
+        mutation_scale=body.mutation_scale,
+    )
+
+    # Use default genome as the "base config"
+    base_genome = SchemaSearchSpace.create_default_genome(body.base_template)
+
+    researcher = AutoResearcher(
+        config=ar_config,
+        base_trainer_config=base_genome,  # genome dict acts as config
+        search_space=search_space,
+    )
+    request.app.state.schema_researcher = researcher
+
+    # Callback that broadcasts each experiment via WebSocket
+    total_experiments = ar_config.max_experiments
+
+    async def on_experiment(result, best_config, best_metric):
+        msg = WSMessage(
+            type="schema-research:experiment",
+            payload={
+                "experiment_id": result.experiment_id,
+                "total_experiments": total_experiments,
+                "config_snapshot": result.config_snapshot,
+                "metric_value": result.metric_value,
+                "best_metric": round(best_metric, 6),
+                "improved": result.improved,
+                "duration_seconds": result.duration_seconds,
+            },
+        )
+        await manager.broadcast(msg)
+
+    # Launch the loop as a background asyncio task
+    dataset_path = Path("data/gold_traces")  # placeholder
+
+    async def _run_wrapper():
+        try:
+            await researcher.run_loop(dataset_path, callback=on_experiment)
+        except Exception as exc:
+            logger.error(f"[SchemaResearch] Background loop crashed: {exc}", exc_info=True)
+            researcher.status = AutoResearchStatus.FAILED
+            researcher._error = str(exc)
+
+        # Broadcast completion/failure
+        final_type = (
+            "schema-research:complete"
+            if researcher.status in (AutoResearchStatus.COMPLETED, AutoResearchStatus.STOPPED)
+            else "schema-research:failed"
+        )
+        msg = WSMessage(
+            type=final_type,
+            payload={
+                "status": researcher.status,
+                "total_experiments": len(researcher.experiments),
+                "best_metric": (
+                    round(researcher.best_metric, 6)
+                    if researcher.best_metric < float("inf")
+                    else None
+                ),
+                "error": researcher._error,
+            },
+        )
+        await manager.broadcast(msg)
+
+    asyncio.create_task(_run_wrapper())
+
+    # Broadcast status
+    status_msg = WSMessage(
+        type="schema-research:status",
+        payload={
+            "status": "running",
+            "template": body.base_template,
+            "max_experiments": ar_config.max_experiments,
+        },
+    )
+    await manager.broadcast(status_msg)
+
+    logger.info(
+        f"[SchemaResearch] Started: {ar_config.max_experiments} experiments, "
+        f"template={body.base_template}"
+    )
+
+    return {
+        "status": "started",
+        "template": body.base_template,
+        "max_experiments": ar_config.max_experiments,
+    }
+
+
+@router.post("/schema-research/stop")
+async def stop_schema_research(request: Request):
+    """Stop the running schema research loop."""
+    researcher = _get_schema_researcher(request)
+    if not researcher:
+        raise HTTPException(status_code=404, detail="No schema research session found")
+
+    if researcher.status not in (AutoResearchStatus.RUNNING, AutoResearchStatus.PAUSED):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Schema research is not running (status: {researcher.status})",
+        )
+
+    researcher.stop()
+    logger.info("[SchemaResearch] Stop requested")
+    return {"status": "stopping", "completed_experiments": len(researcher.experiments)}
+
+
+@router.post("/schema-research/pause")
+async def pause_schema_research(request: Request):
+    """Pause the running schema research loop."""
+    researcher = _get_schema_researcher(request)
+    if not researcher:
+        raise HTTPException(status_code=404, detail="No schema research session found")
+
+    if researcher.status != AutoResearchStatus.RUNNING:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Schema research is not running (status: {researcher.status})",
+        )
+
+    researcher.pause()
+    logger.info("[SchemaResearch] Paused")
+    return {"status": "paused", "completed_experiments": len(researcher.experiments)}
+
+
+@router.post("/schema-research/resume")
+async def resume_schema_research(request: Request):
+    """Resume a paused schema research loop."""
+    researcher = _get_schema_researcher(request)
+    if not researcher:
+        raise HTTPException(status_code=404, detail="No schema research session found")
+
+    if researcher.status != AutoResearchStatus.PAUSED:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Schema research is not paused (status: {researcher.status})",
+        )
+
+    researcher.resume()
+    logger.info("[SchemaResearch] Resumed")
+    return {"status": "running", "completed_experiments": len(researcher.experiments)}
+
+
+@router.get("/schema-research/status")
+async def get_schema_research_status(request: Request):
+    """Get schema research status and experiment history."""
+    researcher = _get_schema_researcher(request)
+    if not researcher:
+        return {
+            "status": "idle",
+            "total_experiments": 0,
+            "completed_experiments": 0,
+            "best_metric": None,
+            "best_config": {},
+            "experiments": [],
+        }
+    return researcher.get_status()
+
+
+@router.get("/schema-research/quality")
+async def get_schema_research_quality(request: Request):
+    """Get quality analytics for the current/last schema research run."""
+    researcher = _get_schema_researcher(request)
+    if not researcher or not researcher.experiments:
+        return {
+            "experiments_count": 0,
+            "improvements": 0,
+            "best_metric": None,
+            "score_distribution": {},
+            "template": None,
+        }
+
+    experiments = researcher.experiments
+    improvements = sum(1 for e in experiments if e.improved)
+
+    # Score distribution for quality dashboard
+    scores = [e.metric_value for e in experiments]
+    buckets: dict[str, int] = {"excellent": 0, "good": 0, "fair": 0, "poor": 0}
+    for s in scores:
+        if s < 1.5:
+            buckets["excellent"] += 1
+        elif s < 2.0:
+            buckets["good"] += 1
+        elif s < 3.0:
+            buckets["fair"] += 1
+        else:
+            buckets["poor"] += 1
+
+    return {
+        "experiments_count": len(experiments),
+        "improvements": improvements,
+        "best_metric": (
+            round(researcher.best_metric, 6) if researcher.best_metric < float("inf") else None
+        ),
+        "score_distribution": buckets,
+        "template": (
+            getattr(researcher.search_space, "base_pipeline_name", None)
+            if hasattr(researcher, "search_space")
+            else None
+        ),
+    }

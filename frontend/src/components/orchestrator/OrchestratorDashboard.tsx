@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { Network, Send, Activity, Clock, Loader2 } from 'lucide-react'
+import { Network, Send, Activity, Clock } from 'lucide-react'
 import { useOrchestratorStore } from '../../stores/orchestratorStore'
 import { useTerminalStore } from '../../stores/terminalStore'
 import { SpecForm } from './SpecForm'
@@ -31,10 +31,11 @@ export function OrchestratorDashboard() {
     )) {
       setActiveTab('active')
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentJob?.jobId])
 
   // Queue watcher: dispatch next queued task when a terminal becomes idle
-  const prevStatusesRef = useRef<Map<string, string>>(new Map())
+  const _prevStatusesRef = useRef<Map<string, string>>(new Map())
   useEffect(() => {
     const unsub = useTerminalStore.subscribe((state, prevState) => {
       state.sessions.forEach((session, terminalId) => {
@@ -213,6 +214,7 @@ function ActiveJobView() {
       fetchStatus(currentJob.jobId)
     }, 5000)
     return () => clearInterval(interval)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentJob?.jobId, fetchStatus])
 
   if (!currentJob) return null

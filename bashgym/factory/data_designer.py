@@ -1,7 +1,7 @@
 """
 DataDesigner Pipeline Integration
 
-Bridges BashGym's training data pipeline with NVIDIA NeMo DataDesigner v0.5.0.
+Bridges BashGym's training data pipeline with NVIDIA NeMo DataDesigner v0.5.0+.
 Provides entry points for generating training data from traces, external datasets,
 and unstructured documents through DataDesigner's column DAG execution engine.
 
@@ -31,7 +31,33 @@ try:
 except ImportError:
     DATA_DESIGNER_AVAILABLE = False
 
+# Feature detection for Data Designer capabilities
+HAS_STRUCTURED_COLUMN = False
+HAS_JUDGE_COLUMN = False
+HAS_VALIDATION_COLUMN = False
+HAS_EMBEDDING_COLUMN = False
+HAS_CUSTOM_COLUMN = False
+HAS_EXPRESSION_COLUMN = False
+
+if DATA_DESIGNER_AVAILABLE:
+    HAS_STRUCTURED_COLUMN = hasattr(dd, "LLMStructuredColumnConfig")
+    HAS_JUDGE_COLUMN = hasattr(dd, "LLMJudgeColumnConfig")
+    HAS_VALIDATION_COLUMN = hasattr(dd, "ValidationColumnConfig")
+    HAS_EMBEDDING_COLUMN = hasattr(dd, "EmbeddingColumnConfig")
+    HAS_CUSTOM_COLUMN = hasattr(dd, "CustomColumnConfig")
+    HAS_EXPRESSION_COLUMN = hasattr(dd, "ExpressionColumnConfig")
+
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ProviderSpec:
+    """Configuration for a single LLM provider in multi-provider pipelines."""
+
+    name: str  # e.g., "nvidia", "anthropic"
+    endpoint: str  # API endpoint URL
+    api_key: str | None = None  # API key (or env var name)
+    models: list[str] = field(default_factory=list)  # Model aliases this provider serves
 
 
 @dataclass
@@ -45,6 +71,9 @@ class PipelineConfig:
     provider: str = "nvidia"
     provider_endpoint: str = "https://integrate.api.nvidia.com/v1"
     provider_api_key: str | None = None
+
+    # Multi-provider support (overrides single provider when set)
+    providers: list[ProviderSpec] = field(default_factory=list)
 
     # Model aliases
     text_model: str = "meta/llama-3.3-70b-instruct"
@@ -77,7 +106,7 @@ class PipelineConfig:
 
 class DataDesignerPipeline:
     """
-    Bridge between BashGym and NVIDIA NeMo DataDesigner v0.5.0.
+    Bridge between BashGym and NVIDIA NeMo DataDesigner v0.5.0+.
 
     Provides three entry points for generating training data:
     1. from_traces() - Seed from gold execution traces

@@ -151,7 +151,7 @@ class TestTrainRemote:
         async def mock_upload(conn, run_id, script_path, dataset_path):
             calls.append("upload")
 
-        async def mock_start(conn, run_id):
+        async def mock_start(conn, run_id, script_name="train_sft.py"):
             calls.append("start")
             return 99999
 

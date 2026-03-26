@@ -153,10 +153,10 @@ function buildNodeData(
 
 function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
   const {
-    panels,
-    sessions,
-    sessionsVersion,
-    activePanelId,
+    panels: _panels,
+    sessions: _sessions,
+    sessionsVersion: _sessionsVersion,
+    activePanelId: _activePanelId,
     canvasNodes,
     updateCanvasNode,
     setActivePanel,

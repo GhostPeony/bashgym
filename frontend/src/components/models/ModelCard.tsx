@@ -3,15 +3,12 @@ import {
   Star,
   MoreVertical,
   TrendingUp,
-  TrendingDown,
   Clock,
   Cpu,
   Zap,
-  GitBranch,
   CheckCircle,
   AlertCircle,
   Archive,
-  Trash2,
   BarChart3,
   Cloud
 } from 'lucide-react'

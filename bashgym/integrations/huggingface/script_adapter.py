@@ -218,6 +218,50 @@ def _adapt_for_cloud(script: str, config: CloudScriptConfig) -> str:
         adapted,
     )
 
+    # 1b. Replace local validation dataset loading block with Hub-based loading
+    # The local scripts load val data from a file path; cloud scripts should use
+    # the "test" split from the same Hub dataset (if it exists).
+    val_block_pattern = (
+        r"# Load validation dataset if available\n"
+        r"[ \t]*val_dataset = None\n"
+        r'[ \t]*val_dataset_path = "[^"]*"\n'
+        r"[ \t]*if val_dataset_path and os\.path\.exists\(val_dataset_path\):\n"
+        r'[ \t]*print\("Loading validation dataset\.\.\."\)\n'
+        r'[ \t]*val_dataset = load_dataset\("json", data_files=val_dataset_path, split="train"\)\n'
+        r'[ \t]*print\(f"Validation set: \{[^}]*\} examples"\)'
+    )
+    val_block_replacement = (
+        f'# Load validation dataset from Hub (if "test" split exists)\n'
+        f"    val_dataset = None\n"
+        f"    try:\n"
+        f'        val_dataset = load_dataset("{config.dataset_repo}", split="test")\n'
+        f'        print(f"Validation set: {{len(val_dataset)}} examples")\n'
+        f"    except ValueError:\n"
+        f'        print("No test split found, skipping validation")'
+    )
+    adapted = re.sub(val_block_pattern, val_block_replacement, adapted)
+
+    # Also handle top-level (unindented) validation blocks (e.g., in DPO scripts)
+    val_block_pattern_toplevel = (
+        r"# Load validation dataset if available\n"
+        r"val_dataset = None\n"
+        r'val_dataset_path = "[^"]*"\n'
+        r"if val_dataset_path and os\.path\.exists\(val_dataset_path\):\n"
+        r'[ \t]+print\("Loading validation dataset\.\.\."\)\n'
+        r'[ \t]+val_dataset = load_dataset\("json", data_files=val_dataset_path, split="train"\)\n'
+        r'[ \t]+print\(f"Validation set: \{[^}]*\} examples"\)'
+    )
+    val_block_replacement_toplevel = (
+        f'# Load validation dataset from Hub (if "test" split exists)\n'
+        f"val_dataset = None\n"
+        f"try:\n"
+        f'    val_dataset = load_dataset("{config.dataset_repo}", split="test")\n'
+        f'    print(f"Validation set: {{len(val_dataset)}} examples")\n'
+        f"except ValueError:\n"
+        f'    print("No test split found, skipping validation")'
+    )
+    adapted = re.sub(val_block_pattern_toplevel, val_block_replacement_toplevel, adapted)
+
     # 2. Replace hardcoded output_dir paths with ./output
     adapted = re.sub(
         r'output_dir\s*=\s*"[^"]*"',

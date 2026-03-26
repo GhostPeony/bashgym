@@ -13,7 +13,6 @@ import {
 import { clsx } from 'clsx'
 import type { FactoryConfig, SeedExample } from '../../services/api'
 import { SeedEditor } from './SeedEditor'
-import { SEED_CATEGORY_TAGS } from './types'
 import type { SeedSourceFilter } from './types'
 
 interface SeedsPanelProps {
@@ -304,7 +303,7 @@ export function SeedsPanel({ config, onConfigChange, onImportFromTraces, onNavig
               )}
             </div>
           ) : (
-            filteredSeeds.map((seed, filteredIdx) => {
+            filteredSeeds.map((seed, _filteredIdx) => {
               const globalIdx = config.seeds.findIndex(s => s.id === seed.id)
               const quality = seedQuality(seed)
               const isSelected = selectedSeedId === seed.id

@@ -39,7 +39,7 @@ function createVercelAdapter(
   const buildLogs = (config.buildLogs as string) || ''
   const v0Files = (config.v0Files as V0File[]) || []
   const v0PreviewUrl = (config.v0PreviewUrl as string) || ''
-  const v0ChatId = (config.v0ChatId as string) || ''
+  const _v0ChatId = (config.v0ChatId as string) || ''
   const v0Prompt = (config.v0Prompt as string) || ''
   const panelId = config._panelId as string | undefined
 

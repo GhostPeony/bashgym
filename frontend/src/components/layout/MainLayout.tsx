@@ -13,6 +13,7 @@ import { ProfilerDashboard } from '../profiler/ProfilerDashboard'
 import { ModelBrowser, ModelProfilePage, ModelComparison, ModelTrends } from '../models'
 import { HFDashboard } from '../huggingface'
 import { AchievementsView } from '../achievements/AchievementsView'
+import { AutoResearchDashboard } from '../autoresearch/AutoResearchDashboard'
 import { HomeScreen, TutorialChecklist, TutorialTooltip } from '../home'
 import { KeyboardShortcutsModal } from '../common/KeyboardShortcutsModal'
 import { useUIStore } from '../../stores'
@@ -48,7 +49,7 @@ function LazyFallback() {
 }
 
 export function MainLayout() {
-  const { isSidebarOpen, overlayView, openOverlay, isAgentChatOpen, toggleAgentChat } = useUIStore()
+  const { isSidebarOpen: _isSidebarOpen, overlayView, openOverlay, isAgentChatOpen, toggleAgentChat } = useUIStore()
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null)
   const [modelSubView, setModelSubView] = useState<ModelSubView>('browser')
   const [compareModelIds, setCompareModelIds] = useState<string[]>([])
@@ -95,6 +96,12 @@ export function MainLayout() {
           {overlayView === 'training' && (
             <div className="flex-1 overflow-auto">
               <TrainingDashboard />
+            </div>
+          )}
+
+          {overlayView === 'autoresearch' && (
+            <div className="flex-1 overflow-auto">
+              <AutoResearchDashboard />
             </div>
           )}
 

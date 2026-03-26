@@ -135,6 +135,7 @@ export function TutorialTooltip() {
       window.removeEventListener('resize', handleUpdate)
       clearInterval(interval)
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isTutorialActive, currentStep, showTooltip])
 
   if (!isTutorialActive || !showTooltip || !position || !tooltipConfig) {

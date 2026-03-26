@@ -141,7 +141,7 @@ export function ModelsSection() {
           setError(ollamaResult.data.error)
         }
       }
-    } catch (err) {
+    } catch (_err) {
       setError('Failed to connect to API')
     } finally {
       setIsLoading(false)

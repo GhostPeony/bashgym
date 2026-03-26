@@ -21,7 +21,7 @@ export function MyModels() {
       } else {
         setError('Failed to load models')
       }
-    } catch (err) {
+    } catch (_err) {
       setError('Failed to connect to HuggingFace')
     } finally {
       setLoading(false)

@@ -193,12 +193,14 @@ class RemoteTrainer:
         await sftp.put(str(dataset_path), f"{remote_dir}/{dataset_path.name}")
         logger.info(f"Uploaded training files to {remote_dir}")
 
-    async def _start_remote_training(self, conn, run_id: str) -> int:
+    async def _start_remote_training(
+        self, conn, run_id: str, script_name: str = "train_sft.py"
+    ) -> int:
         """Start training on the remote machine, return PID."""
         remote_dir = self._remote_run_dir(run_id)
         cmd = (
             f"cd {remote_dir} && "
-            f"nohup bash -c '{self._venv_cmd('python3 train_sft.py')}' > training.log 2>&1 & echo $!"
+            f"nohup bash -c '{self._venv_cmd(f'python3 {script_name}')}' > training.log 2>&1 & echo $!"
         )
         result = await conn.run(cmd, check=False)
         pid = int(result.stdout.strip())
@@ -312,6 +314,7 @@ class RemoteTrainer:
         local_output_dir: Path,
         log_callback: Callable[[str], None] | None = None,
         pid_callback: Callable[[int], None] | None = None,
+        script_name: str = "train_sft.py",
     ) -> dict[str, Any]:
         """Full remote training orchestration.
 
@@ -325,6 +328,7 @@ class RemoteTrainer:
             local_output_dir: Local directory to download artifacts into.
             log_callback: Optional callback invoked with each log line.
             pid_callback: Optional callback invoked with the remote PID once training starts.
+            script_name: Name of the training script to execute on remote.
 
         Returns:
             Dict with 'success' bool plus 'remote_pid'/'run_id' on success
@@ -345,7 +349,7 @@ class RemoteTrainer:
             await self._upload_files(conn, run_id, script_path, dataset_path)
 
             # Execute
-            remote_pid = await self._start_remote_training(conn, run_id)
+            remote_pid = await self._start_remote_training(conn, run_id, script_name)
             if pid_callback:
                 pid_callback(remote_pid)
 

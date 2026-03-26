@@ -1,5 +1,6 @@
 import { create } from 'zustand'
-import { persist, createJSONStorage } from 'zustand/middleware'
+// persist and createJSONStorage available if needed for future state persistence
+// import { persist, createJSONStorage } from 'zustand/middleware'
 
 export type PanelType = 'terminal' | 'preview' | 'browser' | 'files' | 'context' | 'neon' | 'vercel'
 export type AttentionState = 'none' | 'waiting' | 'success' | 'error'
@@ -156,7 +157,7 @@ const PANEL_ORDER_KEY = 'bashgym_panel_order'
 const CANVAS_POSITIONS_KEY = 'bashgym_canvas_positions'
 const VIEW_MODE_KEY = 'bashgym_view_mode'
 
-const loadPanelOrder = (): string[] => {
+const _loadPanelOrder = (): string[] => {
   try {
     const stored = localStorage.getItem(PANEL_ORDER_KEY)
     return stored ? JSON.parse(stored) : []

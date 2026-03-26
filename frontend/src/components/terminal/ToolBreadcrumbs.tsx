@@ -80,7 +80,7 @@ export const ToolBreadcrumbs = memo(function ToolBreadcrumbs({
   history,
   maxItems = 5,
   className,
-  showTimestamps = false
+  showTimestamps: _showTimestamps = false
 }: ToolBreadcrumbsProps) {
   if (!history || history.length === 0) {
     return null
@@ -135,7 +135,7 @@ export const ToolBreadcrumbsCompact = memo(function ToolBreadcrumbsCompact({
       {hasMore && (
         <span className="text-[9px] text-text-muted mr-0.5 font-mono">+{history.length - maxItems}</span>
       )}
-      {displayItems.map((item, index) => (
+      {displayItems.map((item, _index) => (
         <div
           key={`${item.tool}-${item.timestamp}`}
           className={clsx(

@@ -36,6 +36,7 @@ export function useTerminal({
       fontSize: 13,
       fontFamily: '"SF Mono", "JetBrains Mono", Menlo, Monaco, Consolas, monospace',
       lineHeight: 1.2,
+      minimumContrastRatio: 4.5,
       theme: {
         background: '#0D0D0D',
         foreground: '#FFFFFF',
@@ -85,6 +86,7 @@ export function useTerminal({
       removeExitListener?.()
       term.dispose()
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
   // Handle resize

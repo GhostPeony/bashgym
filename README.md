@@ -181,7 +181,9 @@ Trace import, quality scoring, segmentation, and synthetic data generation.
 - **Quality scoring**: 6 metrics classify traces as gold, pending, or failed
 - **Decision extraction**: Structured decision logging captures WHY an agent chose each action — intent, alternatives considered, reasoning, and outcome. Enables step-level DPO pair generation rather than whole-trace pairing.
 - **Segmentation**: Splits multi-task sessions into individual training examples (time gaps, git commits, directory changes)
-- **Synthetic generation**: NVIDIA NeMo Data Designer v0.5.0 integration with 5 pipeline types (`coding_agent_sft`, `coding_agent_dpo`, `tool_use_sft`, `from_external`, `from_unstructured`) plus LLM-based augmentation via Anthropic or NVIDIA NIM
+- **Synthetic generation**: NVIDIA NeMo Data Designer integration with 5 pipeline types (`coding_agent_sft`, `coding_agent_dpo`, `tool_use_sft`, `from_external`, `from_unstructured`) plus LLM-based augmentation via Anthropic or NVIDIA NIM. Multi-provider support assigns different models per column (e.g., NIM for code generation, Anthropic for judge scoring).
+- **Schema evolution**: AutoResearch evolves Data Designer pipeline configs — temperatures, judge rubrics, column toggles, provider assignments — finding schemas that produce better training data than hand-tuned presets
+- **Embedding dedup**: Semantic deduplication via NIM API embeddings removes near-duplicate examples with configurable similarity threshold and diversity scoring
 - **PII scrubbing**: Automatic redaction before training
 
 ### Semantic Judge
@@ -199,13 +201,14 @@ Uses Claude Haiku for cost efficiency (~$2-5 per 1,000 traces). Integrated into 
 
 See [Training](#training) for details.
 
-- **Strategies**: SFT, DPO, GRPO, RLVR, Distillation
+- **Strategies**: SFT, DPO, GRPO, RLVR, Distillation, Cascade RL
+- **Cascade RL**: Sequential domain-by-domain training (file ops → bash → search → multi-step reasoning) with per-domain reward functions, checkpoint chaining, and MOPD distillation to merge domain experts
 - **Acceleration**: Unsloth with QLoRA (4-bit quantization) by default
 - **Providers**: Pluggable inference via Anthropic, NVIDIA NIM, and Ollama. Ollama models are auto-discovered at startup — any model you've pulled is immediately available as a Student model
 - **Compute**: Local GPU, remote SSH (e.g. DGX Spark), or HuggingFace cloud
 - **Output**: LoRA adapter, merged weights (16-bit), GGUF (for Ollama/llama.cpp/LM Studio)
 - **Training goals**: Define weighted success criteria and hard/soft constraints instead of optimizing a single loss scalar. The outcome aggregator tracks progress and recommends when to stop, adjust, or continue.
-- **AutoResearch**: Evolutionary hyperparameter search that respects training goals — stops when criteria are met or hard constraints are violated, widens search when progress stalls.
+- **AutoResearch**: Three evolutionary search modes (hyperparameters, trace curation, schema evolution) — see [AutoResearch](#autoresearch) for the full breakdown
 
 ### Dual-Loop Evolution
 
@@ -310,6 +313,7 @@ Gamified progress tracking across trace collection, quality, training, and maste
 | **GRPO** | Group Relative Policy Optimization via `trl.GRPOTrainer`. Three tiered reward functions: syntax (`ast.parse`), execution (`subprocess`), and verification (`pytest`). Model generates multiple completions per prompt and learns from the reward signal. | When you want RL-based training. Needs test cases for verification mode. |
 | **RLVR** | RL with Verifiable Rewards — GRPO with verification-locked rewards. Test results from `pytest` are the reward signal: pass rate becomes the score. | When your traces include test code. The strongest signal for code correctness. |
 | **Distillation** | Knowledge distillation from a large teacher (e.g. Claude) into a small student. Combines soft labels (KL divergence) and hard labels (cross-entropy) weighted by alpha. Supports offline and on-policy modes. | When you want a compact model that reasons like a larger one. |
+| **Cascade RL** | Sequential domain-by-domain GRPO training inspired by Nemotron Cascade 2. Trains each coding domain independently with tailored reward functions, then merges domain experts via MOPD distillation. | When you want domain-specialized training. Best results with diverse traces across file editing, bash, search, and multi-step tasks. |
 
 ### Base Models
 
@@ -321,11 +325,14 @@ Any HuggingFace model compatible with Unsloth works. Set `BASE_MODEL` in the das
 |-------|------------|------|-------|
 | `Qwen/Qwen2.5-Coder-1.5B-Instruct` | 1.5B | 8GB | Default. Fast training, good for iteration. |
 | `Qwen/Qwen2.5-Coder-7B-Instruct` | 7B | 16GB | Better quality, needs more VRAM. |
+| `Qwen/Qwen3.5-4B` | 4B | 10GB | Newest Qwen (Feb 2026). Strong reasoning. |
+| `Qwen/Qwen3.5-9B` | 9B | 18GB | Best Qwen dense model for coding. |
+| `nvidia/Nemotron-Cascade-2-30B-A3B` | 30B (3B active) | 20GB | MoE. Ideal for Cascade RL on DGX Spark. |
+| `nvidia/Nemotron-3-Nano-4B-Instruct` | 4B | 10GB | NVIDIA's compact coding model. |
 | `meta-llama/Llama-3.2-3B-Instruct` | 3B | 12GB | Alternative architecture. |
 | `deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct` | 2.4B | 10GB | Strong code performance for size. |
-| `microsoft/Phi-3-mini-4k-instruct` | 3.8B | 12GB | Good general + code. |
 
-These are suggestions, not restrictions. Any `AutoModelForCausalLM`-compatible model from HuggingFace will work — including Mistral, StarCoder, CodeGemma, Yi, etc. All training uses QLoRA (4-bit quantization) by default, so VRAM requirements are roughly `model_params / 2` GB.
+These are suggestions, not restrictions. Any `AutoModelForCausalLM`-compatible model from HuggingFace will work — including Mistral, StarCoder, CodeGemma, Yi, Phi, etc. All training uses QLoRA (4-bit quantization) by default, so VRAM requirements are roughly `model_params / 2` GB.
 
 ### Output Formats
 
@@ -351,14 +358,19 @@ Plug-and-play SSH device registry for remote training targets. No manual `.env` 
 
 ### AutoResearch
 
-Automated hyperparameter and training data optimization, inspired by Karpathy's autoresearch. Two independent search loops run evolutionary experiments, keep improvements, and converge on optimal configurations.
+Three evolutionary search loops that continuously improve your training pipeline. Each runs independently, keeps improvements, and converges on optimal configurations — inspired by Karpathy's autoresearch.
 
-| Loop | What It Searches | Parameters |
-|------|-----------------|------------|
-| **Hyperparameter search** | Training configuration | Learning rate, LoRA rank/alpha/dropout, batch size, sequence length, quantization, warmup ratio |
-| **Trace research** | Data curation strategy | Quality thresholds, segmentation boundaries, cognitive tag inclusion, silver trace ratio, dedup threshold, per-repo caps |
+| Mode | What It Evolves | What It Searches | How It Evaluates |
+|------|----------------|-----------------|-----------------|
+| **Hyperparameter search** | Training configuration | Learning rate, LoRA rank/alpha/dropout, batch size, sequence length, quantization, warmup ratio | Short training runs (50-100 steps) measuring validation loss |
+| **Trace research** | Data curation strategy | Quality thresholds, segmentation boundaries, cognitive tag inclusion, silver trace ratio, dedup threshold, per-repo caps | End-to-end: filter traces → generate examples → micro-train → measure loss |
+| **Schema evolution** | Data Designer pipeline configs | Temperatures, column toggles, judge rubrics, provider assignments, code validation, embedding dedup | Two-stage: judge scores filter bad candidates fast (25 examples), then micro-train validates top 5 |
 
-Both loops support start/stop/pause/resume, stream experiment results via WebSocket in real time, and display progress in the AutoResearch panel on the Training Dashboard.
+**Schema evolution** is the newest mode — the AutoCurriculum Compiler. Instead of tuning hyperparameters or data curation rules, it evolves the entire data generation pipeline. A `SchemaSearchSpace` mutates Data Designer configs (which models generate code vs judge quality, what temperature, how many judge dimensions, whether to include code validation), evaluates each mutant by generating real training data and measuring downstream training loss, and keeps winners. The template library maps failure patterns from your traces to starting templates — if your model keeps picking the wrong tool, the schema evolves toward tool-use-focused training data.
+
+All three modes share the same evolutionary engine (`SearchSpace` ABC → `AutoResearcher` loop) and UI (start/stop/pause/resume, real-time experiment streaming via WebSocket, loss curves, generation cards with mutation diffs).
+
+**Embedding-based dedup** runs across all modes via NIM API: computes semantic similarity between training examples and removes near-duplicates (configurable threshold, default 0.95). Diversity scores are tracked in the quality dashboard.
 
 ### Cloud Training
 
@@ -399,9 +411,11 @@ bashgym/
 │   ├── arena/                # Execution (runner, sandbox)
 │   ├── events/               # Typed EventBus (bus, event types, WebSocket bridge)
 │   ├── factory/              # Data synthesis (trace processor, example generator, decision extractor)
-│   ├── gym/                  # Training (trainer, autoresearch, training goals, prompt evolver)
+│   ├── gym/                  # Training (trainer, autoresearch, cascade, training goals)
 │   │   ├── trainer.py        # SFT, DPO, GRPO, RLVR, Distillation
-│   │   ├── autoresearch.py   # Evolutionary hyperparameter search
+│   │   ├── autoresearch.py   # SearchSpace ABC + evolutionary hyperparameter search
+│   │   ├── schema_search_space.py # Schema evolution for Data Designer configs
+│   │   ├── cascade_scheduler.py # Cascade RL + MOPD distillation
 │   │   ├── trace_researcher.py # Data curation optimization
 │   │   └── remote_trainer.py # SSH-based remote training
 │   ├── judge/                # Verification (evaluator, semantic judge, guardrails, benchmarks)
@@ -420,7 +434,8 @@ bashgym/
 │   ├── observability/        # Profiler, span tracing, backend integrations
 │   ├── api/                  # REST API + WebSocket
 │   │   ├── device_routes.py  # Device management endpoints
-│   │   └── autoresearch_routes.py # AutoResearch endpoints
+│   │   ├── autoresearch_routes.py # AutoResearch + schema research endpoints
+│   │   └── cascade_routes.py # Cascade RL + MOPD endpoints
 │   └── integrations/         # HuggingFace, NeMo, Ollama
 │
 ├── frontend/                 # Electron + React dashboard

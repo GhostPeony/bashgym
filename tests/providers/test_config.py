@@ -32,7 +32,14 @@ class TestSettingsIncludesOllama:
 
 
 class TestSSHSettings:
-    def test_defaults(self):
+    def test_defaults(self, monkeypatch):
+        # Clear SSH env vars so we test actual defaults
+        monkeypatch.delenv("SSH_REMOTE_ENABLED", raising=False)
+        monkeypatch.delenv("SSH_REMOTE_HOST", raising=False)
+        monkeypatch.delenv("SSH_REMOTE_PORT", raising=False)
+        monkeypatch.delenv("SSH_REMOTE_USER", raising=False)
+        monkeypatch.delenv("SSH_REMOTE_KEY_PATH", raising=False)
+        monkeypatch.delenv("SSH_REMOTE_WORK_DIR", raising=False)
         s = SSHSettings()
         assert s.enabled is False
         assert s.host == ""

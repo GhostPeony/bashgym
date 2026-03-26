@@ -1,3 +1,6 @@
+# Research scrapes
+.firecrawl/
+
 # Python
 __pycache__/
 *.py[cod]

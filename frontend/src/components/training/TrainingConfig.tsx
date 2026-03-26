@@ -468,21 +468,21 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
             <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-3">
               Training Strategy
             </label>
-            <div className="grid grid-cols-5 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               {strategies.map((s) => (
                 <button
                   key={s.value}
                   type="button"
                   onClick={() => setConfig({ ...config, strategy: s.value })}
                   className={clsx(
-                    'card p-3 text-center transition-press',
+                    'card px-3 py-2 text-left transition-press',
                     config.strategy === s.value
                       ? 'border-accent bg-accent-light text-accent-dark'
                       : 'text-text-secondary'
                   )}
                 >
-                  <span className="block font-mono text-sm font-bold uppercase">{s.label}</span>
-                  <span className="block font-mono text-xs mt-1 text-text-muted">{s.description}</span>
+                  <span className="block font-mono text-xs font-bold uppercase truncate">{s.label}</span>
+                  <span className="block font-mono text-[10px] mt-0.5 text-text-muted truncate">{s.description}</span>
                 </button>
               ))}
             </div>
@@ -527,6 +527,11 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
               <optgroup label="DeepSeek">
                 <option value="deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct">DeepSeek-Coder-V2-Lite</option>
                 <option value="deepseek-ai/deepseek-coder-6.7b-instruct">DeepSeek-Coder-6.7B</option>
+              </optgroup>
+              <optgroup label="Nemotron (NVIDIA)">
+                <option value="nvidia/Nemotron-Cascade-2-30B-A3B">Nemotron-Cascade-2-30B-A3B (MoE, DGX Spark)</option>
+                <option value="nvidia/Nemotron-3-Nano-4B-Instruct">Nemotron-3-Nano-4B</option>
+                <option value="nvidia/Nemotron-Mini-4B-Instruct">Nemotron-Mini-4B</option>
               </optgroup>
               <optgroup label="Other">
                 <option value="mistralai/Mistral-7B-Instruct-v0.3">Mistral-7B-Instruct</option>

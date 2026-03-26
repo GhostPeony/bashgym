@@ -92,6 +92,13 @@ export const MessageTypes = {
   // Schema research events
   AUTORESEARCH_SCHEMA_EXPERIMENT: 'schema-research:experiment',
   AUTORESEARCH_SCHEMA_STATUS: 'schema-research:status',
+  // Cascade RL events
+  CASCADE_STAGE_STARTED: 'cascade:stage-started',
+  CASCADE_STAGE_COMPLETED: 'cascade:stage-completed',
+  CASCADE_STAGE_FAILED: 'cascade:stage-failed',
+  CASCADE_STAGE_SKIPPED: 'cascade:stage-skipped',
+  CASCADE_COMPLETED: 'cascade:completed',
+  CASCADE_PROGRESS: 'cascade:progress',
 } as const
 
 class WebSocketService {
@@ -355,6 +362,16 @@ class WebSocketService {
 
       case MessageTypes.AUTORESEARCH_SCHEMA_STATUS:
         useAutoResearchStore.getState().setSchemaStatus(payload.status)
+        break
+
+      // Cascade RL events
+      case MessageTypes.CASCADE_STAGE_STARTED:
+      case MessageTypes.CASCADE_STAGE_COMPLETED:
+      case MessageTypes.CASCADE_STAGE_FAILED:
+      case MessageTypes.CASCADE_STAGE_SKIPPED:
+      case MessageTypes.CASCADE_COMPLETED:
+      case MessageTypes.CASCADE_PROGRESS:
+        console.log('[WS] Cascade event:', type, payload)
         break
 
       // Connection events

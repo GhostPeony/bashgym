@@ -104,6 +104,18 @@ class MessageType(str, Enum):
     SCHEMA_RESEARCH_COMPLETE = "schema-research:complete"
     SCHEMA_RESEARCH_FAILED = "schema-research:failed"
 
+    # Cascade RL events (domain-by-domain sequential training)
+    CASCADE_STAGE_STARTED = "cascade:stage-started"
+    CASCADE_STAGE_COMPLETED = "cascade:stage-completed"
+    CASCADE_STAGE_FAILED = "cascade:stage-failed"
+    CASCADE_STAGE_SKIPPED = "cascade:stage-skipped"
+    CASCADE_COMPLETED = "cascade:completed"
+    CASCADE_PROGRESS = "cascade:progress"
+    MOPD_DATASET_READY = "cascade:mopd-dataset-ready"
+    MOPD_TRAINING_STARTED = "cascade:mopd-training-started"
+    MOPD_COMPLETED = "cascade:mopd-completed"
+    MOPD_FAILED = "cascade:mopd-failed"
+
 
 @dataclass
 class WSMessage:

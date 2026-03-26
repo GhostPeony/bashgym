@@ -140,6 +140,11 @@ class TrainerConfig:
     # Remote SSH settings (DGX Spark)
     use_remote_ssh: bool = False
 
+    # Cascade RL settings
+    task_domain: str | None = None  # Domain name for cascade stage (e.g., "file_operations")
+    cascade_stage: int | None = None  # Stage number in cascade sequence
+    cascade_run_id: str | None = None  # Parent cascade run ID for linking stages
+
 
 @dataclass
 class TrainingRun:
@@ -323,6 +328,14 @@ class Trainer:
                 "eval_steps": self.config.eval_steps,
                 "gguf_quantization": self.config.gguf_quantization,
             }
+
+            # Add cascade metadata if present
+            if self.config.task_domain:
+                config_dict["cascade"] = {
+                    "domain": self.config.task_domain,
+                    "stage": self.config.cascade_stage,
+                    "cascade_run_id": self.config.cascade_run_id,
+                }
 
             # Extract enrichment data from training_metadata
             meta = run.training_metadata or {}

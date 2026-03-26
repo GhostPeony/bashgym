@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 from bashgym.api.achievements_routes import router as achievements_router  # noqa: E402
 from bashgym.api.agent_routes import router as agent_router  # noqa: E402
 from bashgym.api.autoresearch_routes import router as autoresearch_router  # noqa: E402
+from bashgym.api.cascade_routes import router as cascade_router  # noqa: E402
 from bashgym.api.device_routes import get_registry as get_device_registry  # noqa: E402
 from bashgym.api.device_routes import router as device_router  # noqa: E402
 from bashgym.api.factory_routes import router as factory_router  # noqa: E402
@@ -4610,6 +4611,9 @@ def create_app() -> FastAPI:
 
     # Include AutoResearch routes (hyperparameter search)
     app.include_router(autoresearch_router)
+
+    # Include Cascade RL routes (domain-by-domain sequential training)
+    app.include_router(cascade_router)
 
     # Include Device routes (SSH device registry)
     app.include_router(device_router)

@@ -5,6 +5,7 @@ import {
   Pause,
   Square,
   FlaskConical,
+  Dna,
   TrendingDown,
   Check,
   X,
@@ -38,6 +39,15 @@ const SEARCH_PARAMS = [
   { key: 'batch_size', label: 'Batch Size', defaultChecked: false },
   { key: 'max_seq_length', label: 'Max Seq Length', defaultChecked: false },
   { key: 'load_in_4bit', label: '4-bit Quantization', defaultChecked: false },
+] as const
+
+// Schema templates
+const SCHEMA_TEMPLATES = [
+  { name: 'coding_agent_sft', desc: 'General coding agent SFT', dims: 'correctness, tool_usage, completeness' },
+  { name: 'coding_agent_dpo', desc: 'DPO with dual solutions', dims: 'quality' },
+  { name: 'tool_use_sft', desc: 'Structured tool-call training', dims: 'coherence, tool_appropriateness' },
+  { name: 'from_external', desc: 'Augmented from datasets', dims: 'relevance, training_value' },
+  { name: 'from_unstructured', desc: 'From raw code/docs', dims: 'grounding, solution_quality' },
 ] as const
 
 const STATUS_COLORS: Record<string, string> = {
@@ -194,6 +204,19 @@ export function AutoResearchPanel() {
     pauseTraceResearch,
     resumeTraceResearch,
     resetTrace,
+    // Schema research
+    schemaStatus,
+    schemaExperiments,
+    schemaBestMetric,
+    schemaTotalExperiments,
+    schemaCurrentExperiment,
+    schemaTemplate,
+    startSchemaResearch,
+    stopSchemaResearch,
+    pauseSchemaResearch,
+    resumeSchemaResearch,
+    resetSchema,
+    setSchemaTemplate,
   } = useAutoResearchStore()
 
   // Config form state
@@ -213,6 +236,23 @@ export function AutoResearchPanel() {
   const [traceMaxExperiments, setTraceMaxExperiments] = useState(30)
   const [traceMutationRate, setTraceMutationRate] = useState(0.3)
   const [traceMutationScale, setTraceMutationScale] = useState(0.2)
+
+  // Schema research config state
+  const [schemaTab, setSchemaTab] = useState<'evolution' | 'quality' | 'templates'>('evolution')
+  const [schemaMaxExperiments, setSchemaMaxExperiments] = useState(20)
+  const [schemaMutationRate, setSchemaMutationRate] = useState(0.3)
+  const [schemaMutationScale, setSchemaMutationScale] = useState(0.2)
+  const [schemaMode, setSchemaMode] = useState<'simulate' | 'real'>('simulate')
+
+  const handleStartSchemaResearch = useCallback(() => {
+    startSchemaResearch({
+      baseTemplate: schemaTemplate,
+      maxExperiments: schemaMaxExperiments,
+      mutationRate: schemaMutationRate,
+      mutationScale: schemaMutationScale,
+      mode: schemaMode,
+    })
+  }, [schemaTemplate, schemaMaxExperiments, schemaMutationRate, schemaMutationScale, schemaMode, startSchemaResearch])
 
   const toggleTraceParam = useCallback((key: string) => {
     setTraceSelectedParams((prev) =>
@@ -277,16 +317,22 @@ export function AutoResearchPanel() {
 
   // Mode-aware status helpers
   const isHyperparam = activeMode === 'hyperparam'
-  const activeStatus = isHyperparam ? status : traceStatus
+  const isTrace = activeMode === 'trace'
+  const isSchema = activeMode === 'schema'
+  const activeStatus = isHyperparam ? status : isTrace ? traceStatus : schemaStatus
   const isIdle = activeStatus === 'idle'
   const isRunning = activeStatus === 'running'
   const isPaused = activeStatus === 'paused'
-  const hasResults = isHyperparam ? experiments.length > 0 : traceExperiments.length > 0
-  const activeCurrent = isHyperparam ? currentExperiment : traceCurrentExperiment
-  const activeTotal = isHyperparam ? totalExperiments : traceTotalExperiments
+  const hasResults = isHyperparam
+    ? experiments.length > 0
+    : isTrace
+      ? traceExperiments.length > 0
+      : schemaExperiments.length > 0
+  const activeCurrent = isHyperparam ? currentExperiment : isTrace ? traceCurrentExperiment : schemaCurrentExperiment
+  const activeTotal = isHyperparam ? totalExperiments : isTrace ? traceTotalExperiments : schemaTotalExperiments
   const progressPct =
     activeTotal > 0 ? (activeCurrent / activeTotal) * 100 : 0
-  const activeBestMetric = isHyperparam ? bestMetric : traceBestMetric
+  const activeBestMetric = isHyperparam ? bestMetric : isTrace ? traceBestMetric : schemaBestMetric
 
   // Compute starting config for comparison table
   const startingConfig = useMemo<Record<string, number | boolean>>(() => ({
@@ -319,7 +365,7 @@ export function AutoResearchPanel() {
         </div>
 
         <div className="flex items-center gap-2">
-          {isIdle && (
+          {isIdle && !isSchema && (
             <button
               onClick={isHyperparam ? handleStart : handleStartTrace}
               disabled={isHyperparam ? selectedParams.length === 0 : traceSelectedParams.length === 0}
@@ -332,7 +378,7 @@ export function AutoResearchPanel() {
               Start Search
             </button>
           )}
-          {isRunning && (
+          {isRunning && !isSchema && (
             <>
               <button
                 onClick={isHyperparam ? pause : pauseTraceResearch}
@@ -350,7 +396,7 @@ export function AutoResearchPanel() {
               </button>
             </>
           )}
-          {isPaused && (
+          {isPaused && !isSchema && (
             <>
               <button
                 onClick={isHyperparam ? resume : resumeTraceResearch}
@@ -368,7 +414,7 @@ export function AutoResearchPanel() {
               </button>
             </>
           )}
-          {(activeStatus === 'completed' || activeStatus === 'failed') && (
+          {(activeStatus === 'completed' || activeStatus === 'failed') && !isSchema && (
             <button onClick={isHyperparam ? reset : resetTrace} className="btn-secondary flex items-center gap-2">
               <FlaskConical className="w-4 h-4" />
               New Search
@@ -394,12 +440,24 @@ export function AutoResearchPanel() {
           onClick={() => setActiveMode('trace')}
           className={clsx(
             'px-4 py-1.5 font-mono text-xs uppercase tracking-widest transition-colors rounded-brutal',
-            !isHyperparam
+            isTrace
               ? 'bg-accent text-white border-brutal border-accent-dark'
               : 'text-text-muted hover:text-text-primary'
           )}
         >
           Trace Mining
+        </button>
+        <button
+          onClick={() => setActiveMode('schema')}
+          className={clsx(
+            'px-4 py-1.5 font-mono text-xs uppercase tracking-widest transition-colors rounded-brutal flex items-center gap-1.5',
+            isSchema
+              ? 'bg-accent text-white border-brutal border-accent-dark'
+              : 'text-text-muted hover:text-text-primary'
+          )}
+        >
+          <Dna className="w-3.5 h-3.5" />
+          Schema
         </button>
       </div>
 
@@ -544,7 +602,7 @@ export function AutoResearchPanel() {
       )}
 
       {/* Trace Research Config - shown when idle in trace mode */}
-      {isIdle && !hasResults && !isHyperparam && (
+      {isIdle && !hasResults && isTrace && (
         <div className="space-y-4">
           <p className="text-sm text-text-secondary">
             Optimize your data curation pipeline by experimenting with quality thresholds,
@@ -636,8 +694,323 @@ export function AutoResearchPanel() {
         </div>
       )}
 
+      {/* Schema Research Mode */}
+      {isSchema && (
+        <div className="space-y-6">
+          {/* Status bar */}
+          <div className="flex items-center justify-between p-4 border-2 border-text-primary bg-surface">
+            <div className="flex items-center gap-3">
+              <span
+                className={clsx(
+                  'px-2 py-0.5 text-xs font-mono uppercase tracking-wider',
+                  STATUS_COLORS[schemaStatus] || STATUS_COLORS.idle
+                )}
+              >
+                {schemaStatus}
+              </span>
+              {schemaStatus === 'running' && (
+                <span className="text-sm text-text-secondary font-mono">
+                  Gen {schemaCurrentExperiment}/{schemaTotalExperiments} · Best: {schemaBestMetric?.toFixed(4) ?? '\u2014'}
+                </span>
+              )}
+            </div>
+            <div className="flex gap-2">
+              {schemaStatus === 'idle' && (
+                <button
+                  onClick={handleStartSchemaResearch}
+                  className="px-4 py-2 bg-accent text-white font-mono text-sm uppercase tracking-wider border-2 border-text-primary shadow-[3px_3px_0_0] shadow-text-primary hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_0] transition-all duration-150"
+                >
+                  Start
+                </button>
+              )}
+              {schemaStatus === 'running' && (
+                <>
+                  <button
+                    onClick={pauseSchemaResearch}
+                    className="px-4 py-2 bg-background-secondary text-text-primary font-mono text-sm uppercase tracking-wider border-2 border-text-primary shadow-[3px_3px_0_0] shadow-text-primary hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_0] transition-all duration-150"
+                  >
+                    Pause
+                  </button>
+                  <button
+                    onClick={stopSchemaResearch}
+                    className="px-4 py-2 bg-status-error text-white font-mono text-sm uppercase tracking-wider border-2 border-text-primary shadow-[3px_3px_0_0] shadow-text-primary hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_0] transition-all duration-150"
+                  >
+                    Stop
+                  </button>
+                </>
+              )}
+              {schemaStatus === 'paused' && (
+                <>
+                  <button
+                    onClick={resumeSchemaResearch}
+                    className="px-4 py-2 bg-accent text-white font-mono text-sm uppercase tracking-wider border-2 border-text-primary shadow-[3px_3px_0_0] shadow-text-primary hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_0] transition-all duration-150"
+                  >
+                    Resume
+                  </button>
+                  <button
+                    onClick={stopSchemaResearch}
+                    className="px-4 py-2 bg-status-error text-white font-mono text-sm uppercase tracking-wider border-2 border-text-primary shadow-[3px_3px_0_0] shadow-text-primary hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_0] transition-all duration-150"
+                  >
+                    Stop
+                  </button>
+                </>
+              )}
+              {(schemaStatus === 'completed' || schemaStatus === 'failed') && (
+                <button
+                  onClick={resetSchema}
+                  className="px-4 py-2 bg-background-secondary text-text-primary font-mono text-sm uppercase tracking-wider border-2 border-text-primary shadow-[3px_3px_0_0] shadow-text-primary hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_0] transition-all duration-150"
+                >
+                  New Search
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Config panel - shown when idle */}
+          {schemaStatus === 'idle' && schemaExperiments.length === 0 && (
+            <div className="space-y-4 p-4 border-2 border-text-primary bg-surface">
+              <span className="font-mono text-xs uppercase tracking-widest text-text-muted block mb-2">
+                Schema Evolution Config
+              </span>
+
+              {/* Template selector */}
+              <div>
+                <label className="font-mono text-xs uppercase tracking-widest text-text-muted block mb-1">
+                  Base Template
+                </label>
+                <select
+                  value={schemaTemplate}
+                  onChange={(e) => setSchemaTemplate(e.target.value)}
+                  className="input w-full"
+                >
+                  {SCHEMA_TEMPLATES.map((t) => (
+                    <option key={t.name} value={t.name}>
+                      {t.name} — {t.desc}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Numeric controls */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="font-mono text-xs uppercase tracking-widest text-text-muted block mb-1">
+                    Max Experiments
+                  </label>
+                  <input
+                    type="number"
+                    value={schemaMaxExperiments}
+                    onChange={(e) => setSchemaMaxExperiments(Number(e.target.value))}
+                    min={5}
+                    max={200}
+                    className="input w-full"
+                  />
+                </div>
+                <div>
+                  <label className="font-mono text-xs uppercase tracking-widest text-text-muted block mb-1">
+                    Mutation Scale
+                  </label>
+                  <input
+                    type="number"
+                    value={schemaMutationScale}
+                    onChange={(e) => setSchemaMutationScale(Number(e.target.value))}
+                    min={0.05}
+                    max={1.0}
+                    step={0.05}
+                    className="input w-full"
+                  />
+                </div>
+              </div>
+
+              {/* Experiment mode */}
+              <div>
+                <label className="font-mono text-xs uppercase tracking-widest text-text-muted block mb-1">
+                  Experiment Mode
+                </label>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setSchemaMode('simulate')}
+                    className={clsx(
+                      'px-3 py-1.5 text-xs font-mono uppercase tracking-wider border-2 transition-all',
+                      schemaMode === 'simulate'
+                        ? 'border-accent bg-accent text-white'
+                        : 'border-border-default bg-background-secondary text-text-muted hover:border-accent'
+                    )}
+                  >
+                    Simulate
+                  </button>
+                  <button
+                    onClick={() => setSchemaMode('real')}
+                    className={clsx(
+                      'px-3 py-1.5 text-xs font-mono uppercase tracking-wider border-2 transition-all',
+                      schemaMode === 'real'
+                        ? 'border-accent bg-accent text-white'
+                        : 'border-border-default bg-background-secondary text-text-muted hover:border-accent'
+                    )}
+                  >
+                    Real Training
+                  </button>
+                </div>
+              </div>
+
+              {/* Mutation rate slider */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="font-mono text-xs uppercase tracking-widest text-text-muted">
+                    Mutation Rate
+                  </label>
+                  <span className="font-mono text-xs text-text-primary">
+                    {schemaMutationRate.toFixed(2)}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  value={schemaMutationRate}
+                  onChange={(e) => setSchemaMutationRate(Number(e.target.value))}
+                  min={0.1}
+                  max={0.5}
+                  step={0.05}
+                  className="w-full accent-accent"
+                />
+                <div className="flex justify-between text-[0.6rem] font-mono text-text-muted mt-0.5">
+                  <span>0.1 (Conservative)</span>
+                  <span>0.5 (Aggressive)</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Sub-tabs: Evolution | Quality | Templates */}
+          <div className="flex gap-1 border-b-2 border-text-primary">
+            {(['evolution', 'quality', 'templates'] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setSchemaTab(tab)}
+                className={clsx(
+                  'px-4 py-2 font-mono text-xs uppercase tracking-wider -mb-[2px] border-2 border-b-0',
+                  schemaTab === tab
+                    ? 'bg-surface border-text-primary text-text-primary'
+                    : 'bg-transparent border-transparent text-text-secondary hover:text-text-primary'
+                )}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
+
+          {/* Evolution tab */}
+          {schemaTab === 'evolution' && (
+            <div className="space-y-4">
+              {/* Loss curve */}
+              {schemaExperiments.length > 0 && (
+                <div className="card p-3">
+                  <span className="font-mono text-xs uppercase tracking-widest text-text-muted block mb-2">
+                    Schema Evolution Loss
+                  </span>
+                  <div className="h-40">
+                    <MiniChart experiments={schemaExperiments} />
+                  </div>
+                </div>
+              )}
+
+              {/* Generation cards */}
+              {schemaExperiments.length === 0 ? (
+                <div className="p-8 text-center border-2 border-dashed border-text-secondary/30">
+                  <p className="font-serif text-lg text-text-secondary">Start a schema search to see evolution history</p>
+                  <p className="text-sm text-text-muted mt-2">The system will mutate Data Designer pipeline configs and evaluate them</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {[...schemaExperiments].reverse().map((exp) => (
+                    <div
+                      key={exp.experimentId}
+                      className={clsx(
+                        'p-3 border-2 border-text-primary',
+                        exp.improved ? 'bg-status-success/10 border-l-4 border-l-status-success' : 'bg-surface'
+                      )}
+                    >
+                      <div className="flex justify-between items-center">
+                        <span className="font-mono text-sm">
+                          Gen {exp.experimentId}
+                          {exp.improved && <span className="ml-2 text-status-success font-bold">IMPROVED</span>}
+                        </span>
+                        <span className="font-mono text-sm text-text-secondary">{exp.metricValue.toFixed(4)}</span>
+                      </div>
+                      {exp.configSnapshot && Object.keys(exp.configSnapshot).length > 0 && (
+                        <div className="mt-1 text-xs text-text-muted font-mono">
+                          {Object.entries(exp.configSnapshot).map(([k, v]) => `${k}: ${typeof v === 'number' ? Number(v).toFixed(3) : v}`).join(' \u00b7 ')}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Quality tab */}
+          {schemaTab === 'quality' && (
+            <div className="space-y-4">
+              {schemaExperiments.length === 0 ? (
+                <div className="p-8 text-center border-2 border-dashed border-text-secondary/30">
+                  <p className="font-serif text-lg text-text-secondary">Generate examples first to see quality scores</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-4 border-2 border-text-primary bg-surface">
+                    <h3 className="font-mono text-xs uppercase tracking-wider text-text-secondary mb-2">Experiments</h3>
+                    <p className="font-serif text-2xl">{schemaExperiments.length}</p>
+                  </div>
+                  <div className="p-4 border-2 border-text-primary bg-surface">
+                    <h3 className="font-mono text-xs uppercase tracking-wider text-text-secondary mb-2">Improvements</h3>
+                    <p className="font-serif text-2xl">{schemaExperiments.filter((e) => e.improved).length}</p>
+                  </div>
+                  <div className="p-4 border-2 border-text-primary bg-surface">
+                    <h3 className="font-mono text-xs uppercase tracking-wider text-text-secondary mb-2">Best Loss</h3>
+                    <p className="font-serif text-2xl">{schemaBestMetric?.toFixed(4) ?? '\u2014'}</p>
+                  </div>
+                  <div className="p-4 border-2 border-text-primary bg-surface">
+                    <h3 className="font-mono text-xs uppercase tracking-wider text-text-secondary mb-2">Improvement Rate</h3>
+                    <p className="font-serif text-2xl">
+                      {schemaExperiments.length > 0
+                        ? `${Math.round((schemaExperiments.filter((e) => e.improved).length / schemaExperiments.length) * 100)}%`
+                        : '\u2014'}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Templates tab */}
+          {schemaTab === 'templates' && (
+            <div className="space-y-3">
+              {SCHEMA_TEMPLATES.map((t) => (
+                <div
+                  key={t.name}
+                  className={clsx(
+                    'p-4 border-2 border-text-primary bg-surface cursor-pointer',
+                    schemaTemplate === t.name && 'border-l-4 border-l-accent'
+                  )}
+                  onClick={() => setSchemaTemplate(t.name)}
+                >
+                  <div className="flex justify-between">
+                    <h4 className="font-mono text-sm">{t.name}</h4>
+                    {schemaTemplate === t.name && (
+                      <span className="text-xs font-mono text-accent uppercase">active</span>
+                    )}
+                  </div>
+                  <p className="text-sm text-text-secondary mt-1">{t.desc}</p>
+                  <p className="text-xs text-text-muted font-mono mt-1">Judge: {t.dims}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Live Results Section */}
-      {(isRunning || isPaused || activeStatus === 'completed' || activeStatus === 'failed') && (
+      {!isSchema && (isRunning || isPaused || activeStatus === 'completed' || activeStatus === 'failed') && (
         <div className="space-y-4">
           {/* Progress + Best metric row */}
           <div className="grid grid-cols-12 gap-4">
@@ -778,7 +1151,7 @@ export function AutoResearchPanel() {
       )}
 
       {/* Best config comparison table */}
-      {((isHyperparam && bestConfig) || (!isHyperparam && traceBestPipeline)) && hasResults && (
+      {!isSchema && ((isHyperparam && bestConfig) || (!isHyperparam && traceBestPipeline)) && hasResults && (
         <>
           <div className="section-divider my-4" />
           <div>

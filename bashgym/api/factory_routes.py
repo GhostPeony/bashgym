@@ -560,6 +560,93 @@ async def designer_push_to_hub(request: DesignerPushToHubRequest):
 
 
 # =============================================================================
+# DataDesigner CLI Passthrough Endpoints
+# =============================================================================
+
+
+class ValidateSchemaRequest(BaseModel):
+    """Request to validate a Data Designer pipeline config."""
+
+    config: dict  # Data Designer config dict (YAML-serializable)
+
+
+@router.get("/designer/agent-context")
+async def get_designer_agent_context():
+    """Get Data Designer's full API context for runtime discovery.
+
+    Proxies the `data-designer agent context` CLI command which dumps
+    the complete API surface in a single read.
+    """
+    import shutil
+    import subprocess
+
+    dd_path = shutil.which("data-designer")
+    if not dd_path:
+        raise HTTPException(
+            status_code=404,
+            detail="data-designer CLI not found. Install with: pip install data-designer",
+        )
+
+    try:
+        result = subprocess.run(
+            [dd_path, "agent", "context"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            raise HTTPException(
+                status_code=500,
+                detail=f"data-designer agent context failed: {result.stderr}",
+            )
+        return {"context": result.stdout}
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="data-designer agent context timed out")
+
+
+@router.post("/designer/validate-schema")
+async def validate_designer_schema(request: ValidateSchemaRequest):
+    """Validate a Data Designer pipeline configuration without running generation.
+
+    Accepts a config dict and returns validation results.
+    """
+    try:
+        from bashgym.factory.data_designer import (
+            DATA_DESIGNER_AVAILABLE,
+            DataDesignerPipeline,
+        )
+    except ImportError:
+        raise HTTPException(status_code=404, detail="data-designer not available")
+
+    if not DATA_DESIGNER_AVAILABLE:
+        raise HTTPException(status_code=404, detail="data-designer package not installed")
+
+    try:
+        import json
+        import tempfile
+
+        # Write config to temp JSON file for validation
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(request.config, f)
+            tmp_path = f.name
+
+        pipeline = DataDesignerPipeline()
+        result = pipeline.validate()
+
+        # Clean up
+        Path(tmp_path).unlink(missing_ok=True)
+
+        return result
+    except Exception as e:
+        logger.error(f"Designer schema validation failed: {e}")
+        return {
+            "valid": False,
+            "errors": [str(e)],
+            "columns": [],
+        }
+
+
+# =============================================================================
 # DataDesigner Background Tasks
 # =============================================================================
 

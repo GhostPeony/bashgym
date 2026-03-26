@@ -98,6 +98,12 @@ class MessageType(str, Enum):
     TRACE_RESEARCH_COMPLETE = "autoresearch:trace-research-complete"
     TRACE_RESEARCH_FAILED = "autoresearch:trace-research-failed"
 
+    # Schema Research events (Data Designer schema evolution)
+    SCHEMA_RESEARCH_EXPERIMENT = "schema-research:experiment"
+    SCHEMA_RESEARCH_STATUS = "schema-research:status"
+    SCHEMA_RESEARCH_COMPLETE = "schema-research:complete"
+    SCHEMA_RESEARCH_FAILED = "schema-research:failed"
+
 
 @dataclass
 class WSMessage:

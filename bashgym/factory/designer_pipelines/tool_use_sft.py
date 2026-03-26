@@ -19,15 +19,15 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field
 
+from bashgym.factory.designer_pipelines import build_base_config
+
 if TYPE_CHECKING:
     from bashgym.factory.data_designer import PipelineConfig
 
 try:
     import data_designer.config as dd
-
-    DATA_DESIGNER_AVAILABLE = True
 except ImportError:
-    DATA_DESIGNER_AVAILABLE = False
+    pass
 
 
 # =========================================================================
@@ -85,36 +85,18 @@ def build_tool_use_pipeline(config: PipelineConfig) -> dd.DataDesignerConfigBuil
     Returns:
         Configured DataDesignerConfigBuilder
     """
-    if not DATA_DESIGNER_AVAILABLE:
-        raise ImportError("data-designer>=0.5.0 is required")
+    builder = build_base_config(config)
 
-    builder = dd.DataDesignerConfigBuilder(
-        model_configs=[
-            dd.ModelConfig(
-                alias="main-model",
-                model=config.code_model,
-                inference_parameters=dd.InferenceParameters(
-                    temperature=0.7,
-                    max_tokens=4096,
-                ),
+    # Tool-use pipeline uses a single "main-model" for structured conversation generation
+    builder.model_configs.append(
+        dd.ModelConfig(
+            alias="main-model",
+            model=config.code_model,
+            inference_parameters=dd.InferenceParameters(
+                temperature=0.7,
+                max_tokens=4096,
             ),
-            dd.ModelConfig(
-                alias="judge-model",
-                model=config.judge_model,
-                inference_parameters=dd.InferenceParameters(
-                    temperature=config.temperature_judge,
-                    max_tokens=1024,
-                ),
-            ),
-        ],
-        model_providers=[
-            dd.ModelProvider(
-                name=config.provider,
-                endpoint=config.provider_endpoint,
-                provider_type="openai",
-                api_key=f"${{{_env_key_for_provider(config.provider)}}}",
-            ),
-        ],
+        )
     )
 
     # --- Sampling for diversity ---
@@ -260,14 +242,3 @@ def build_tool_use_pipeline(config: PipelineConfig) -> dd.DataDesignerConfigBuil
     )
 
     return builder
-
-
-def _env_key_for_provider(provider: str) -> str:
-    """Map provider name to environment variable key."""
-    mapping = {
-        "nvidia": "NVIDIA_API_KEY",
-        "nvidia-nim": "NVIDIA_API_KEY",
-        "anthropic": "ANTHROPIC_API_KEY",
-        "local": "LOCAL_API_KEY",
-    }
-    return mapping.get(provider, "NVIDIA_API_KEY")

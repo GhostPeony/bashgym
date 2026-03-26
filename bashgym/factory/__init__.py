@@ -10,6 +10,7 @@ Includes:
 - SyntheticGenerator: Synthetic task generation from extracted patterns
 - SecurityIngester: Public security dataset ingestion (EMBER, PhishTank, etc.)
 - DataDesignerPipeline: NVIDIA NeMo DataDesigner v0.5.0 integration
+- EmbeddingDeduplicator: Semantic deduplication via NIM embeddings
 """
 
 from bashgym.factory.data_designer import DataDesignerPipeline, PipelineConfig
@@ -23,6 +24,7 @@ from bashgym.factory.data_factory import (
     TrainingExample,
     build_tool_call_messages,
 )
+from bashgym.factory.dedup import DedupConfig, DedupResult, EmbeddingDeduplicator
 from bashgym.factory.pattern_extractor import FileCluster, ToolSequence, TracePatterns
 from bashgym.factory.prompt_optimizer import OptimizationResult, PromptOptConfig, PromptOptimizer
 from bashgym.factory.safe_synthesizer import (
@@ -97,4 +99,8 @@ __all__ = [
     # DataDesigner Integration
     "DataDesignerPipeline",
     "PipelineConfig",
+    # Embedding Deduplication
+    "EmbeddingDeduplicator",
+    "DedupConfig",
+    "DedupResult",
 ]

@@ -1,9 +1,14 @@
 """
-AutoResearch — Automated Hyperparameter Search
+AutoResearch — Automated Evolutionary Search
 
-Inspired by Karpathy's autoresearch: runs short training experiments,
+Inspired by Karpathy's autoresearch: runs short experiments,
 evaluates them, keeps improvements, and iterates. A simple evolutionary
-search over hyperparameters with simulated evaluation.
+search with a pluggable SearchSpace abstraction.
+
+The core pattern (mutate -> evaluate -> keep if better) is generic.
+Strategy-specific behavior is encapsulated in SearchSpace subclasses:
+- HyperparamSearchSpace: mutates TrainerConfig fields (learning_rate, lora_r, etc.)
+- SchemaSearchSpace: (future) mutates Data Designer pipeline configs
 """
 
 import asyncio
@@ -12,6 +17,7 @@ import logging
 import math
 import random
 import time
+from abc import ABC, abstractmethod
 from collections.abc import Callable, Coroutine
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -21,6 +27,36 @@ from typing import Any
 from bashgym.gym.trainer import TrainerConfig
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# SearchSpace ABC
+# =============================================================================
+
+
+class SearchSpace(ABC):
+    """Abstract search space for evolutionary optimization.
+
+    Defines what gets mutated and how candidates are evaluated.
+    AutoResearcher uses this to support different optimization targets:
+    - HyperparamSearchSpace: mutates TrainerConfig fields (learning_rate, lora_r, etc.)
+    - SchemaSearchSpace: mutates Data Designer pipeline configs (temperatures, columns, judges)
+    """
+
+    @abstractmethod
+    def mutate(self, config: Any) -> Any:
+        """Create a mutated version of the config."""
+        ...
+
+    @abstractmethod
+    def evaluate(self, config: Any, experiment_number: int, total_experiments: int) -> float:
+        """Evaluate a config and return a metric (lower is better)."""
+        ...
+
+    @abstractmethod
+    def get_config_snapshot(self, config: Any) -> dict[str, Any]:
+        """Extract a serializable snapshot of the searchable params."""
+        ...
 
 
 # =============================================================================
@@ -220,55 +256,98 @@ def _simulate_loss(config: TrainerConfig, experiment_number: int, total_experime
 
 
 # =============================================================================
-# AutoResearcher
+# Mutation Helpers
 # =============================================================================
 
 
-class AutoResearcher:
-    """Automated hyperparameter search via iterative experimentation.
+def _mutate_value(current: Any, spec: dict[str, Any], mutation_scale: float) -> Any:
+    """Mutate a single value according to its search space spec.
 
-    Uses a simple evolutionary strategy: start from the user's config,
-    mutate parameters, keep improvements, iterate.
+    This is a module-level function used by HyperparamSearchSpace.
     """
+    param_type = spec["type"]
+
+    if param_type == "bool":
+        return not current
+
+    if param_type == "float":
+        if spec.get("log_scale"):
+            # Mutate in log space
+            log_val = math.log(max(current, 1e-12))
+            scale = mutation_scale * 2.0  # Wider in log space
+            log_val += random.gauss(0, scale)
+            new_val = math.exp(log_val)
+        else:
+            # Linear mutation
+            delta = current * mutation_scale
+            new_val = (
+                current + random.gauss(0, delta)
+                if delta > 0
+                else random.uniform(spec["min"], spec["max"])
+            )
+        return max(spec["min"], min(spec["max"], new_val))
+
+    if param_type == "int":
+        if "choices" in spec:
+            # Pick from discrete choices, biased toward neighbors
+            choices = spec["choices"]
+            if current in choices:
+                idx = choices.index(current)
+                # Move up or down by 1 with some probability, or random
+                if random.random() < 0.7:
+                    direction = random.choice([-1, 1])
+                    new_idx = max(0, min(len(choices) - 1, idx + direction))
+                else:
+                    new_idx = random.randint(0, len(choices) - 1)
+                return choices[new_idx]
+            else:
+                return random.choice(choices)
+        else:
+            # Continuous int range
+            delta = max(1, int(current * mutation_scale))
+            new_val = current + random.randint(-delta, delta)
+            return max(spec["min"], min(spec["max"], new_val))
+
+    return current  # Fallback
+
+
+# =============================================================================
+# HyperparamSearchSpace
+# =============================================================================
+
+
+class HyperparamSearchSpace(SearchSpace):
+    """Search space for training hyperparameters (the original AutoResearch behavior)."""
 
     def __init__(
         self,
-        config: AutoResearchConfig,
-        base_trainer_config: TrainerConfig,
+        search_params: list[str],
+        mutation_rate: float = 0.3,
+        mutation_scale: float = 0.2,
+        mode: str = "simulate",
+        train_steps: int = 100,
         dataset_path: Path | None = None,
         val_dataset_path: Path | None = None,
     ):
-        self.config = config
-        self.best_config = copy.deepcopy(base_trainer_config)
-        self.best_metric: float = float("inf")  # Lower is better for loss
-        self.experiments: list[ExperimentResult] = []
-        self.status: str = AutoResearchStatus.IDLE
-        self._running = False
-        self._paused = False
-        self._error: str | None = None
-        self._started_at: str | None = None
-        self._completed_at: str | None = None
+        self.search_params = search_params
+        self.mutation_rate = mutation_rate
+        self.mutation_scale = mutation_scale
+        self.mode = mode
+        self.train_steps = train_steps
         self._dataset_path = dataset_path
         self._val_dataset_path = val_dataset_path
 
-    # -----------------------------------------------------------------
-    # Mutation
-    # -----------------------------------------------------------------
-
-    def mutate_config(self, config: TrainerConfig) -> TrainerConfig:
-        """Create a mutated version of the config.
-
-        For each searchable param, probabilistically apply a mutation.
-        """
+    def mutate(self, config: TrainerConfig) -> TrainerConfig:
+        """Create a mutated version of the TrainerConfig."""
         mutated = copy.deepcopy(config)
 
-        for param in self.config.search_params:
+        for param in self.search_params:
             if param not in SEARCH_SPACE:
                 logger.warning(f"Param '{param}' not in SEARCH_SPACE, skipping")
                 continue
 
             # Decide whether to mutate this param
-            if random.random() > self.config.mutation_rate:
+            if random.random() > self.mutation_rate:
                 continue
 
             spec = SEARCH_SPACE[param]
@@ -276,108 +355,46 @@ class AutoResearcher:
             if current_value is None:
                 continue
 
-            new_value = self._mutate_value(current_value, spec)
+            new_value = _mutate_value(current_value, spec, self.mutation_scale)
             setattr(mutated, param, new_value)
 
         return mutated
 
-    def _mutate_value(self, current: Any, spec: dict[str, Any]) -> Any:
-        """Mutate a single value according to its search space spec."""
-        param_type = spec["type"]
-
-        if param_type == "bool":
-            return not current
-
-        if param_type == "float":
-            if spec.get("log_scale"):
-                # Mutate in log space
-                log_val = math.log(max(current, 1e-12))
-                scale = self.config.mutation_scale * 2.0  # Wider in log space
-                log_val += random.gauss(0, scale)
-                new_val = math.exp(log_val)
-            else:
-                # Linear mutation
-                delta = current * self.config.mutation_scale
-                new_val = (
-                    current + random.gauss(0, delta)
-                    if delta > 0
-                    else random.uniform(spec["min"], spec["max"])
-                )
-            return max(spec["min"], min(spec["max"], new_val))
-
-        if param_type == "int":
-            if "choices" in spec:
-                # Pick from discrete choices, biased toward neighbors
-                choices = spec["choices"]
-                if current in choices:
-                    idx = choices.index(current)
-                    # Move up or down by 1 with some probability, or random
-                    if random.random() < 0.7:
-                        direction = random.choice([-1, 1])
-                        new_idx = max(0, min(len(choices) - 1, idx + direction))
-                    else:
-                        new_idx = random.randint(0, len(choices) - 1)
-                    return choices[new_idx]
-                else:
-                    return random.choice(choices)
-            else:
-                # Continuous int range
-                delta = max(1, int(current * self.config.mutation_scale))
-                new_val = current + random.randint(-delta, delta)
-                return max(spec["min"], min(spec["max"], new_val))
-
-        return current  # Fallback
-
-    # -----------------------------------------------------------------
-    # Experiment execution
-    # -----------------------------------------------------------------
-
-    def run_experiment(
-        self,
-        config: TrainerConfig,
-        dataset_path: Path,
-        experiment_number: int,
+    def evaluate(
+        self, config: TrainerConfig, experiment_number: int, total_experiments: int
     ) -> float:
-        """Run a short training experiment and return the eval metric.
-
-        Dispatches to real training or simulation based on self.config.mode.
-        """
-        if self.config.mode == "real":
-            return self._run_real_experiment(config, experiment_number)
+        """Evaluate a config by running a real or simulated training experiment."""
+        if self.mode == "real":
+            return self._run_real_experiment(config, experiment_number, total_experiments)
 
         # Simulate mode: sleep briefly and return heuristic loss
-        sleep_time = random.uniform(2.0, 3.0)
-        time.sleep(sleep_time)
+        time.sleep(random.uniform(2.0, 3.0))
+        return _simulate_loss(config, experiment_number, total_experiments)
 
-        return _simulate_loss(
-            config,
-            experiment_number,
-            self.config.max_experiments,
-        )
+    def get_config_snapshot(self, config: TrainerConfig) -> dict[str, Any]:
+        """Extract a serializable snapshot of the searchable params."""
+        return {
+            param: getattr(config, param) for param in self.search_params if hasattr(config, param)
+        }
 
     def _run_real_experiment(
         self,
         config: TrainerConfig,
         experiment_number: int,
+        total_experiments: int,
     ) -> float:
-        """Run a real short training experiment and return eval/final loss.
-
-        Creates a Trainer with max_steps limited to self.config.train_steps,
-        trains in a temp output dir, and returns the eval_loss (or final_loss
-        as fallback).
-        """
+        """Run a real short training experiment and return eval/final loss."""
         from bashgym.gym.trainer import Trainer
 
         # Configure for a short experiment
         exp_config = copy.deepcopy(config)
-        exp_config.max_steps = self.config.train_steps
+        exp_config.max_steps = self.train_steps
         exp_config.eval_strategy = "steps"
-        exp_config.eval_steps = max(10, self.config.train_steps // 3)
+        exp_config.eval_steps = max(10, self.train_steps // 3)
         exp_config.auto_export_gguf = False  # No export during search
         exp_config.save_steps = 999999  # Don't save checkpoints
         exp_config.logging_steps = 5
 
-        # Use a temp output dir for this experiment
         import tempfile
 
         with tempfile.TemporaryDirectory(prefix=f"autoresearch_exp{experiment_number}_") as tmpdir:
@@ -393,7 +410,7 @@ class AutoResearcher:
                     f"[AutoResearch] Real mode: dataset_path={dataset_path} not found, "
                     "falling back to simulation"
                 )
-                return _simulate_loss(config, experiment_number, self.config.max_experiments)
+                return _simulate_loss(config, experiment_number, total_experiments)
 
             try:
                 run = trainer.train_sft(
@@ -415,6 +432,99 @@ class AutoResearcher:
             except Exception as e:
                 logger.error(f"[AutoResearch] Real experiment {experiment_number} failed: {e}")
                 return 5.0  # Worst-case metric so this config is rejected
+
+
+# =============================================================================
+# AutoResearcher
+# =============================================================================
+
+
+class AutoResearcher:
+    """Automated evolutionary search via iterative experimentation.
+
+    Uses a simple evolutionary strategy: start from a config,
+    mutate parameters, keep improvements, iterate.
+
+    The search behavior is defined by a pluggable SearchSpace:
+    - HyperparamSearchSpace (default): mutates TrainerConfig hyperparameters
+    - Custom SearchSpace subclasses can optimize other targets
+    """
+
+    def __init__(
+        self,
+        config: AutoResearchConfig,
+        base_trainer_config: TrainerConfig,
+        dataset_path: Path | None = None,
+        val_dataset_path: Path | None = None,
+        search_space: SearchSpace | None = None,
+    ):
+        self.config = config
+        self.best_config = copy.deepcopy(base_trainer_config)
+        self.best_metric: float = float("inf")  # Lower is better for loss
+        self.experiments: list[ExperimentResult] = []
+        self.status: str = AutoResearchStatus.IDLE
+        self._running = False
+        self._paused = False
+        self._error: str | None = None
+        self._started_at: str | None = None
+        self._completed_at: str | None = None
+        self._dataset_path = dataset_path
+        self._val_dataset_path = val_dataset_path
+
+        # Use provided search space or create default HyperparamSearchSpace
+        self.search_space = search_space or HyperparamSearchSpace(
+            search_params=config.search_params,
+            mutation_rate=config.mutation_rate,
+            mutation_scale=config.mutation_scale,
+            mode=config.mode,
+            train_steps=config.train_steps,
+            dataset_path=dataset_path,
+            val_dataset_path=val_dataset_path,
+        )
+
+    # -----------------------------------------------------------------
+    # Mutation
+    # -----------------------------------------------------------------
+
+    def mutate_config(self, config: TrainerConfig) -> TrainerConfig:
+        """Create a mutated version of the config. Delegates to search_space."""
+        return self.search_space.mutate(config)
+
+    def _mutate_value(self, current: Any, spec: dict[str, Any]) -> Any:
+        """Mutate a single value. Delegates to module-level _mutate_value.
+
+        Kept for backward compatibility.
+        """
+        return _mutate_value(current, spec, self.config.mutation_scale)
+
+    # -----------------------------------------------------------------
+    # Experiment execution
+    # -----------------------------------------------------------------
+
+    def run_experiment(
+        self,
+        config: TrainerConfig,
+        dataset_path: Path,
+        experiment_number: int,
+    ) -> float:
+        """Run experiment. Delegates to search_space.evaluate()."""
+        return self.search_space.evaluate(config, experiment_number, self.config.max_experiments)
+
+    def _run_real_experiment(
+        self,
+        config: TrainerConfig,
+        experiment_number: int,
+    ) -> float:
+        """Run a real short training experiment. Delegates to search_space.
+
+        Kept for backward compatibility.
+        """
+        if isinstance(self.search_space, HyperparamSearchSpace):
+            return self.search_space._run_real_experiment(
+                config, experiment_number, self.config.max_experiments
+            )
+        # Fallback for non-hyperparam search spaces
+        return self.search_space.evaluate(config, experiment_number, self.config.max_experiments)
 
     # -----------------------------------------------------------------
     # Main loop
@@ -489,11 +599,7 @@ class AutoResearcher:
 
                 result = ExperimentResult(
                     experiment_id=i + 1,
-                    config_snapshot={
-                        param: getattr(candidate, param)
-                        for param in self.config.search_params
-                        if hasattr(candidate, param)
-                    },
+                    config_snapshot=self.search_space.get_config_snapshot(candidate),
                     metric_value=round(metric, 6),
                     improved=improved,
                     duration_seconds=round(duration, 2),
@@ -556,11 +662,7 @@ class AutoResearcher:
             "total_experiments": self.config.max_experiments,
             "completed_experiments": len(self.experiments),
             "best_metric": round(self.best_metric, 6) if self.best_metric < float("inf") else None,
-            "best_config": {
-                param: getattr(self.best_config, param)
-                for param in self.config.search_params
-                if hasattr(self.best_config, param)
-            },
+            "best_config": self.search_space.get_config_snapshot(self.best_config),
             "search_params": self.config.search_params,
             "mutation_rate": self.config.mutation_rate,
             "mutation_scale": self.config.mutation_scale,

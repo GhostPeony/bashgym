@@ -2513,4 +2513,24 @@ export const autoresearchApi = {
 
   traceResearchStatus: () =>
     request<any>('/autoresearch/trace-research/status'),
+
+  // Schema research
+  schemaResearch: {
+    start: (config: { baseTemplate: string; maxExperiments: number; mutationRate: number; mutationScale: number; mode: string }) =>
+      request<{ status: string; template: string }>('/autoresearch/schema-research/start', {
+        method: 'POST',
+        body: JSON.stringify({
+          base_template: config.baseTemplate,
+          max_experiments: config.maxExperiments,
+          mutation_rate: config.mutationRate,
+          mutation_scale: config.mutationScale,
+          mode: config.mode,
+        }),
+      }),
+    stop: () => request<{ status: string }>('/autoresearch/schema-research/stop', { method: 'POST' }),
+    pause: () => request<{ status: string }>('/autoresearch/schema-research/pause', { method: 'POST' }),
+    resume: () => request<{ status: string }>('/autoresearch/schema-research/resume', { method: 'POST' }),
+    getStatus: () => request<any>('/autoresearch/schema-research/status'),
+    getQuality: () => request<any>('/autoresearch/schema-research/quality'),
+  },
 }

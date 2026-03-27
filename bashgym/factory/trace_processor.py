@@ -460,8 +460,9 @@ class TraceProcessor:
             failed_steps=quality.failed_steps,
             unique_commands=quality.unique_commands_count,
             avg_output_length=avg_output_length,
-            has_verification="verification_passed" in metadata,
-            verification_passed=metadata.get("verification_passed", False),
+            has_verification="verification_passed" in metadata
+            and metadata.get("verification_passed") is not None,
+            verification_passed=metadata.get("verification_passed") is True,
             complexity_score=quality.complexity_score,
             tool_diversity=quality.tool_diversity,
             efficiency_score=quality.efficiency_score,

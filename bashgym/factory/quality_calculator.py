@@ -472,11 +472,12 @@ def calculate_quality_breakdown(
         QualityBreakdown with all metrics
     """
     # Extract verification from metadata if not provided
+    # Important: verification_passed=None means "not tested", not "tested and unknown"
     if metadata:
         if verification_passed is None:
             verification_passed = metadata.get("verification_passed")
         if not has_verification:
-            has_verification = "verification_passed" in metadata
+            has_verification = metadata.get("verification_passed") is not None
 
     # Calculate individual metrics
     success_rate, successful, failed = calculate_success_rate(steps)

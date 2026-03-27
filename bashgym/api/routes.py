@@ -3063,8 +3063,12 @@ def create_app() -> FastAPI:
         bronze_quality_score: float = 0.40,
         dry_run: bool = True,
         auto_promote: bool = False,
+        include_failed: bool = False,
     ):
         """Auto-classify pending traces into quality tiers based on NVIDIA NeMo research.
+
+        Set include_failed=True to reclassify traces already in failed_traces/
+        (useful after fixing classification bugs).
 
         Tiered Classification (based on industry standards):
         - GOLD (≥90% success, ≥0.75 quality): SFT training, high-confidence examples
@@ -3150,7 +3154,7 @@ def create_app() -> FastAPI:
                 "unique_tools": quality.unique_tools_count,
             }
 
-        # Collect pending traces from both directories
+        # Collect traces to classify
         pending_dirs = []
         global_traces_dir = global_dir / "traces"
         project_traces_dir = data_dir / "traces"
@@ -3162,6 +3166,12 @@ def create_app() -> FastAPI:
             and project_traces_dir.resolve() != global_traces_dir.resolve()
         ):
             pending_dirs.append(project_traces_dir)
+
+        # Include failed_traces for reclassification (after bug fixes)
+        if include_failed:
+            for failed_dir in [global_dir / "failed_traces", data_dir / "failed_traces"]:
+                if failed_dir.exists() and failed_dir not in pending_dirs:
+                    pending_dirs.append(failed_dir)
 
         seen_files = set()
         for pending_dir in pending_dirs:

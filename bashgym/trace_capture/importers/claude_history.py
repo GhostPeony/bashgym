@@ -162,6 +162,74 @@ class ClaudeSessionImporter:
         session_files.sort(key=lambda x: x[1], reverse=True)
         return session_files
 
+    def find_subagent_files(
+        self,
+        project_filter: str | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> list[tuple[Path, datetime, dict[str, Any]]]:
+        """
+        Find subagent JSONL files within session directories.
+
+        Each session directory may contain a subagents/ subdirectory with
+        agent-{id}.jsonl and agent-{id}.meta.json files.
+
+        Returns:
+            List of (jsonl_path, modified_time, meta_dict) tuples.
+            meta_dict contains: parent_session_id, agent_id, agentType, description.
+        """
+        projects_dir = self.find_projects_dir()
+        if not projects_dir:
+            return []
+
+        subagent_files = []
+
+        for project_dir in projects_dir.iterdir():
+            if not project_dir.is_dir():
+                continue
+
+            if project_filter and project_filter.lower() not in project_dir.name.lower():
+                continue
+
+            # Each session has a directory: {session_id}/subagents/
+            for session_dir in project_dir.iterdir():
+                if not session_dir.is_dir():
+                    continue
+
+                subagents_dir = session_dir / "subagents"
+                if not subagents_dir.exists():
+                    continue
+
+                parent_session_id = session_dir.name
+
+                for jsonl_file in subagents_dir.glob("agent-*.jsonl"):
+                    mtime = datetime.fromtimestamp(jsonl_file.stat().st_mtime, tz=timezone.utc)
+
+                    if since and mtime < since:
+                        continue
+                    if until and mtime > until:
+                        continue
+
+                    # Read meta.json if available
+                    agent_id = jsonl_file.stem  # e.g., "agent-a10f8a4e6fbf19541"
+                    meta_file = subagents_dir / f"{agent_id}.meta.json"
+                    meta = {
+                        "parent_session_id": parent_session_id,
+                        "agent_id": agent_id,
+                        "agentType": "unknown",
+                        "description": "",
+                    }
+                    if meta_file.exists():
+                        try:
+                            meta.update(json.loads(meta_file.read_text(encoding="utf-8")))
+                        except (json.JSONDecodeError, OSError):
+                            pass
+
+                    subagent_files.append((jsonl_file, mtime, meta))
+
+        subagent_files.sort(key=lambda x: x[1], reverse=True)
+        return subagent_files
+
     @staticmethod
     def _extract_text_from_content(content) -> str | None:
         """Extract text from message content (string or list of blocks)."""
@@ -605,6 +673,104 @@ class ClaudeSessionImporter:
             destination_file=destination,
         )
 
+    def import_subagent(
+        self,
+        subagent_file: Path,
+        subagent_meta: dict[str, Any],
+        force: bool = False,
+    ) -> ImportResult:
+        """
+        Import a single subagent session file with metadata tagging.
+
+        Subagent traces get tagged with:
+        - is_subagent: True
+        - parent_session_id: UUID of the parent session
+        - agent_type: e.g., "general-purpose", "code-simplifier"
+        - agent_description: e.g., "Set up GitHub Actions CI"
+
+        Args:
+            subagent_file: Path to the subagent .jsonl file
+            subagent_meta: Dict with parent_session_id, agent_id, agentType, description
+            force: Import even if already imported
+
+        Returns:
+            ImportResult with import details
+        """
+        agent_id = subagent_meta.get("agent_id", subagent_file.stem)
+        parent_session_id = subagent_meta.get("parent_session_id", "unknown")
+        composite_id = f"{parent_session_id}/{agent_id}"
+
+        # Check if already imported
+        if not force and composite_id in self.imported_sessions:
+            return ImportResult(
+                session_id=composite_id,
+                source_file=subagent_file,
+                steps_imported=0,
+                skipped=True,
+                skip_reason="Already imported",
+            )
+
+        # Parse the subagent session (same parser as parent sessions)
+        steps, session_meta = self.parse_session_file(subagent_file)
+
+        if not steps:
+            return ImportResult(
+                session_id=composite_id,
+                source_file=subagent_file,
+                steps_imported=0,
+                skipped=True,
+                skip_reason="No relevant tool executions found",
+            )
+
+        # Tag with subagent metadata
+        session_meta["is_subagent"] = True
+        session_meta["parent_session_id"] = parent_session_id
+        session_meta["agent_type"] = subagent_meta.get("agentType", "unknown")
+        session_meta["agent_description"] = subagent_meta.get("description", "")
+        session_meta["agent_id"] = agent_id
+
+        user_initial_prompt = session_meta.pop("user_initial_prompt", None) or subagent_meta.get(
+            "description", "Subagent task"
+        )
+        session = TraceSession.from_steps(
+            steps,
+            source_tool="claude_code",
+            verification_passed=None,
+            imported=True,
+            import_source=str(subagent_file),
+            user_initial_prompt=user_initial_prompt,
+            **session_meta,
+        )
+
+        # Save with distinct filename
+        mtime = datetime.fromtimestamp(subagent_file.stat().st_mtime)
+        timestamp = mtime.strftime("%Y%m%d_%H%M%S")
+        agent_short = agent_id[-8:] if len(agent_id) > 8 else agent_id
+        filename = (
+            f"imported_claude_subagent_{parent_session_id[:8]}_{agent_short}_{timestamp}.json"
+        )
+        destination = self.trace_capture.traces_dir / filename
+
+        try:
+            with open(destination, "w", encoding="utf-8") as f:
+                json.dump(asdict(session), f, indent=2, ensure_ascii=False)
+        except OSError as e:
+            return ImportResult(
+                session_id=composite_id,
+                source_file=subagent_file,
+                steps_imported=0,
+                error=f"Failed to write trace: {e}",
+            )
+
+        self._save_imported_session(composite_id)
+
+        return ImportResult(
+            session_id=composite_id,
+            source_file=subagent_file,
+            steps_imported=len(steps),
+            destination_file=destination,
+        )
+
     async def import_session_async(
         self,
         session_file: Path,
@@ -842,9 +1008,12 @@ def import_today(project_filter: str | None = None, verbose: bool = True) -> lis
     today_utc = today.astimezone(timezone.utc)
 
     session_files = importer.find_session_files(project_filter=project_filter, since=today_utc)
+    subagent_files = importer.find_subagent_files(project_filter=project_filter, since=today_utc)
 
     if verbose:
-        print(f"[BashGym] Found {len(session_files)} session(s) from today")
+        print(
+            f"[BashGym] Found {len(session_files)} session(s) + {len(subagent_files)} subagent(s) from today"
+        )
 
     results = []
     for session_file, mtime in session_files:
@@ -858,6 +1027,22 @@ def import_today(project_filter: str | None = None, verbose: bool = True) -> lis
                 print(f"  [!] {session_file.name}: {result.error}")
             else:
                 print(f"  [+] {session_file.name}: {result.steps_imported} steps imported")
+
+    # Import subagent traces
+    for subagent_file, mtime, meta in subagent_files:
+        result = importer.import_subagent(subagent_file, meta)
+        results.append(result)
+
+        if verbose:
+            agent_desc = meta.get("description", "")[:40]
+            if result.skipped:
+                print(f"  [-] subagent {meta.get('agent_id', '?')}: {result.skip_reason}")
+            elif result.error:
+                print(f"  [!] subagent {meta.get('agent_id', '?')}: {result.error}")
+            else:
+                print(
+                    f"  [+] subagent {meta.get('agent_id', '?')}: {result.steps_imported} steps ({agent_desc})"
+                )
 
     return results
 
@@ -883,9 +1068,12 @@ def import_recent(
     since = datetime.now(timezone.utc) - timedelta(days=days)
 
     session_files = importer.find_session_files(project_filter=project_filter, since=since)
+    subagent_files = importer.find_subagent_files(project_filter=project_filter, since=since)
 
     if verbose:
-        print(f"[BashGym] Found {len(session_files)} session(s) from last {days} days")
+        print(
+            f"[BashGym] Found {len(session_files)} session(s) + {len(subagent_files)} subagent(s) from last {days} days"
+        )
 
     results = []
     for session_file, mtime in session_files:
@@ -899,6 +1087,22 @@ def import_recent(
                 print(f"  [!] {session_file.name}: {result.error}")
             else:
                 print(f"  [+] {session_file.name}: {result.steps_imported} steps imported")
+
+    # Import subagent traces
+    for subagent_file, mtime, meta in subagent_files:
+        result = importer.import_subagent(subagent_file, meta, force=force)
+        results.append(result)
+
+        if verbose:
+            agent_desc = meta.get("description", "")[:40]
+            if result.skipped:
+                print(f"  [-] subagent {meta.get('agent_id', '?')}: {result.skip_reason}")
+            elif result.error:
+                print(f"  [!] subagent {meta.get('agent_id', '?')}: {result.error}")
+            else:
+                print(
+                    f"  [+] subagent {meta.get('agent_id', '?')}: {result.steps_imported} steps ({agent_desc})"
+                )
 
     return results
 

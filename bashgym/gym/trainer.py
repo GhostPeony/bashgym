@@ -956,6 +956,40 @@ from trl import SFTTrainer
 from transformers import TrainingArguments, EarlyStoppingCallback
 import torch
 
+def _sanitize_messages(messages):
+    """Sanitize messages for chat template compatibility.
+
+    Fixes common format issues:
+    - tool_calls arguments as JSON string -> parse to dict
+    - None content in assistant messages -> empty string
+    - Missing required fields
+    """
+    import json as _json
+    sanitized = []
+    for msg in messages:
+        m = dict(msg)  # shallow copy
+        # Fix None content
+        if m.get("content") is None:
+            m["content"] = ""
+        # Fix tool_calls arguments: some templates expect dict, not JSON string
+        if "tool_calls" in m and isinstance(m["tool_calls"], list):
+            fixed_calls = []
+            for tc in m["tool_calls"]:
+                tc = dict(tc)
+                if "function" in tc and isinstance(tc["function"], dict):
+                    fn = dict(tc["function"])
+                    args = fn.get("arguments", "")
+                    if isinstance(args, str):
+                        try:
+                            fn["arguments"] = _json.loads(args)
+                        except (_json.JSONDecodeError, TypeError):
+                            fn["arguments"] = {{"raw": args}}
+                    tc["function"] = fn
+                fixed_calls.append(tc)
+            m["tool_calls"] = fixed_calls
+        sanitized.append(m)
+    return sanitized
+
 def formatting_prompts_func(examples):
     """Format examples using the tokenizer's chat template.
 
@@ -963,12 +997,27 @@ def formatting_prompts_func(examples):
     None content in tool_call messages, and special tokens automatically.
     """
     convos = examples["messages"]
-    texts = [
-        tokenizer.apply_chat_template(
-            convo, tokenize=False, add_generation_prompt=False
-        )
-        for convo in convos
-    ]
+    texts = []
+    for convo in convos:
+        try:
+            clean = _sanitize_messages(convo)
+            text = tokenizer.apply_chat_template(
+                clean, tokenize=False, add_generation_prompt=False
+            )
+            texts.append(text)
+        except Exception:
+            # Fallback: strip tool_calls entirely and retry
+            fallback = [
+                {{"role": m.get("role", "user"), "content": m.get("content", "") or ""}}
+                for m in convo if m.get("role") in ("system", "user", "assistant")
+            ]
+            try:
+                text = tokenizer.apply_chat_template(
+                    fallback, tokenize=False, add_generation_prompt=False
+                )
+                texts.append(text)
+            except Exception:
+                texts.append("")
     return {{"text": texts}}
 
 if __name__ == "__main__":

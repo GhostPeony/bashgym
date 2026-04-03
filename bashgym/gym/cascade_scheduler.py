@@ -444,26 +444,37 @@ class CascadeScheduler:
     def _filter_dataset(self, domain: CascadeDomain) -> Path:
         """Filter the training dataset for a specific domain.
 
-        Reads JSONL, filters by domain's tool_filter, writes to temp file.
+        Reads both .json (one trace per file) and .jsonl (one trace per line).
         """
         filtered: list[dict[str, Any]] = []
         dataset_path = self.config.dataset_path
 
         if dataset_path.is_dir():
-            # Read all JSONL files in directory
-            jsonl_files = list(dataset_path.glob("*.jsonl"))
-            for jsonl_file in jsonl_files:
-                with open(jsonl_file) as f:
-                    for line in f:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            example = json.loads(line)
-                            if domain.matches(example):
-                                filtered.append(example)
-                        except json.JSONDecodeError:
-                            continue
+            # Read .json files (BashGym trace format — one JSON object per file)
+            for json_file in dataset_path.glob("*.json"):
+                try:
+                    example = json.loads(json_file.read_text(encoding="utf-8", errors="replace"))
+                    if domain.matches(example):
+                        filtered.append(example)
+                except (json.JSONDecodeError, OSError):
+                    continue
+
+            # Read .jsonl files (NeMo training format — one JSON per line)
+            for jsonl_file in dataset_path.glob("*.jsonl"):
+                try:
+                    with open(jsonl_file, encoding="utf-8", errors="replace") as f:
+                        for line in f:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                example = json.loads(line)
+                                if domain.matches(example):
+                                    filtered.append(example)
+                            except json.JSONDecodeError:
+                                continue
+                except OSError:
+                    continue
         elif dataset_path.is_file():
             with open(dataset_path) as f:
                 for line in f:

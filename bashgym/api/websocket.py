@@ -199,29 +199,93 @@ class ConnectionManager:
             self.disconnect(websocket)
 
     async def broadcast(self, message: WSMessage) -> None:
-        """Broadcast a message to all connections."""
+        """Broadcast a message to all connections + optional Discord webhook."""
         import logging
 
         logger = logging.getLogger(__name__)
 
         num_connections = len(self.active_connections)
-        if num_connections == 0:
-            logger.debug(f"[WebSocket] No active connections, skipping broadcast: {message.type}")
+        if num_connections > 0:
+            logger.debug(
+                f"[WebSocket] Broadcasting {message.type} to {num_connections} connections"
+            )
+            disconnected = set()
+
+            for connection in self.active_connections:
+                try:
+                    await connection.send_text(message.to_json())
+                except Exception as e:
+                    logger.warning(f"[WebSocket] Failed to send to connection: {e}")
+                    disconnected.add(connection)
+
+            for conn in disconnected:
+                self.disconnect(conn)
+
+        # Discord webhook for training events
+        await self._discord_notify(message)
+
+    # Discord webhook notification types (only send these, not every WS message)
+    DISCORD_EVENT_TYPES = {
+        "training:complete",
+        "training:failed",
+        "cascade:stage-completed",
+        "cascade:stage-failed",
+        "cascade:completed",
+        "schema-research:experiment",
+        "schema-research:status",
+        "classify:completed",
+        "cascade:mopd-completed",
+        "cascade:mopd-failed",
+    }
+
+    async def _discord_notify(self, message: WSMessage) -> None:
+        """Send training events to Discord webhook if configured."""
+        import os
+
+        webhook_url = os.environ.get("DISCORD_TRAINING_WEBHOOK")
+        if not webhook_url:
             return
 
-        logger.debug(f"[WebSocket] Broadcasting {message.type} to {num_connections} connections")
-        disconnected = set()
+        # Only send significant events, not every progress tick
+        if message.type not in self.DISCORD_EVENT_TYPES:
+            return
 
-        for connection in self.active_connections:
-            try:
-                await connection.send_text(message.to_json())
-            except Exception as e:
-                logger.warning(f"[WebSocket] Failed to send to connection: {e}")
-                disconnected.add(connection)
+        try:
+            import httpx
 
-        # Clean up disconnected clients
-        for conn in disconnected:
-            self.disconnect(conn)
+            # Format a clean Discord embed
+            data = message.data if hasattr(message, "data") else {}
+            if not isinstance(data, dict):
+                data = getattr(message, "payload", {}) or {}
+
+            # Build embed based on event type
+            color = 0x2ECC71  # green
+            if "failed" in message.type:
+                color = 0xE74C3C  # red
+            elif "experiment" in message.type:
+                color = 0x3498DB  # blue
+
+            embed = {
+                "title": f"BashGym: {message.type}",
+                "color": color,
+                "fields": [],
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+
+            # Add relevant fields from the data
+            for key, value in list(data.items())[:6]:
+                embed["fields"].append(
+                    {
+                        "name": str(key).replace("_", " ").title(),
+                        "value": str(value)[:200],
+                        "inline": True,
+                    }
+                )
+
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                await client.post(webhook_url, json={"embeds": [embed]})
+        except Exception:
+            pass  # Discord notifications are best-effort
 
     async def broadcast_to_topic(self, topic: str, message: WSMessage) -> None:
         """Broadcast a message to all subscribers of a topic."""

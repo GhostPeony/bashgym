@@ -39,10 +39,17 @@ class CascadeDomain:
     min_steps: int = 1  # Minimum steps for a segment to belong to this domain
 
     def matches(self, example: dict[str, Any]) -> bool:
-        """Check if a training example belongs to this domain."""
-        messages = example.get("messages", [])
+        """Check if a training example belongs to this domain.
+
+        Checks both formats:
+        - messages[].tool_calls[].function.name (OpenAI/NeMo format)
+        - trace[].tool_name (BashGym native trace format)
+        """
         tools_used: set[str] = set()
         step_count = 0
+
+        # Check messages format (OpenAI/NeMo training examples)
+        messages = example.get("messages", [])
         for msg in messages:
             if msg.get("role") == "assistant":
                 tool_calls = msg.get("tool_calls", [])
@@ -50,6 +57,14 @@ class CascadeDomain:
                     fn = tc.get("function", {})
                     tools_used.add(fn.get("name", ""))
                 step_count += 1
+
+        # Check trace format (BashGym native traces)
+        trace = example.get("trace", [])
+        for step in trace:
+            tool = step.get("tool_name") or step.get("tool") or ""
+            if tool:
+                tools_used.add(tool)
+            step_count += 1
 
         # Check tool presence
         if self.tool_filter:

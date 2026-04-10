@@ -127,8 +127,8 @@ class RepoCascadeDomain(CascadeDomain):
 
     def matches(self, example: dict[str, Any]) -> bool:
         """Match by repo name in metadata, with min_steps check."""
-        meta = example.get("metadata", {})
-        primary_repo = meta.get("primary_repo", {})
+        # Check both top-level and metadata.primary_repo (format varies)
+        primary_repo = example.get("primary_repo") or example.get("metadata", {}).get("primary_repo", {})
         name = primary_repo.get("name", "") if isinstance(primary_repo, dict) else ""
 
         if self.repo_names and name not in self.repo_names:
@@ -166,8 +166,8 @@ def build_repo_domains(
             data = json.loads(trace_file.read_text(encoding="utf-8", errors="replace"))
             if not isinstance(data, dict):
                 continue
-            meta = data.get("metadata", {})
-            primary_repo = meta.get("primary_repo", {})
+            # Check both top-level and metadata.primary_repo (format varies)
+            primary_repo = data.get("primary_repo") or data.get("metadata", {}).get("primary_repo", {})
             name = primary_repo.get("name", "") if isinstance(primary_repo, dict) else ""
             if name:
                 repo_counts[name] += 1

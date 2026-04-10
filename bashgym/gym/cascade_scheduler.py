@@ -111,6 +111,88 @@ DOMAIN_TAXONOMY: dict[str, CascadeDomain] = {
 
 
 # =========================================================================
+# Repo-Based Domains
+# =========================================================================
+
+
+@dataclass
+class RepoCascadeDomain(CascadeDomain):
+    """Domain that matches training examples by repo name rather than tool usage.
+
+    Used for repo-by-repo cascade RL: each repository gets its own training
+    stage, allowing the model to specialize per-project before unification.
+    """
+
+    repo_names: list[str] = field(default_factory=list)
+
+    def matches(self, example: dict[str, Any]) -> bool:
+        """Match by repo name in metadata, with min_steps check."""
+        meta = example.get("metadata", {})
+        primary_repo = meta.get("primary_repo", {})
+        name = primary_repo.get("name", "") if isinstance(primary_repo, dict) else ""
+
+        if self.repo_names and name not in self.repo_names:
+            return False
+
+        # Count steps from either format
+        step_count = len(example.get("trace", []))
+        if not step_count:
+            step_count = sum(
+                1 for m in example.get("messages", []) if m.get("role") == "assistant"
+            )
+
+        return step_count >= self.min_steps
+
+
+def build_repo_domains(
+    gold_traces_dir: Path,
+    min_examples: int = 10,
+) -> dict[str, RepoCascadeDomain]:
+    """Scan gold traces and create a CascadeDomain per repo with enough examples.
+
+    Args:
+        gold_traces_dir: Directory containing gold trace JSON files.
+        min_examples: Minimum traces per repo to create a domain.
+
+    Returns:
+        Dict mapping domain name to RepoCascadeDomain.
+    """
+    from collections import Counter
+
+    repo_counts: Counter[str] = Counter()
+
+    for trace_file in gold_traces_dir.glob("*.json"):
+        try:
+            data = json.loads(trace_file.read_text(encoding="utf-8", errors="replace"))
+            if not isinstance(data, dict):
+                continue
+            meta = data.get("metadata", {})
+            primary_repo = meta.get("primary_repo", {})
+            name = primary_repo.get("name", "") if isinstance(primary_repo, dict) else ""
+            if name:
+                repo_counts[name] += 1
+        except (json.JSONDecodeError, OSError):
+            continue
+
+    domains: dict[str, RepoCascadeDomain] = {}
+    for repo_name, count in repo_counts.most_common():
+        if count < min_examples:
+            continue
+        domain_key = f"repo_{repo_name}"
+        domains[domain_key] = RepoCascadeDomain(
+            name=domain_key,
+            description=f"Repo-specific training for {repo_name} ({count} traces)",
+            reward_mode="verification",
+            tool_filter=[],
+            min_steps=2,
+            repo_names=[repo_name],
+        )
+        logger.info("[Cascade] Repo domain '%s': %d traces", domain_key, count)
+
+    return domains
+
+
+# =========================================================================
 # Stage and Config Dataclasses
 # =========================================================================
 
@@ -178,6 +260,11 @@ class CascadeConfig:
     # Execution
     use_remote_ssh: bool = False
     mode: str = "real"  # "real" or "simulate"
+
+    # Repo-based domains
+    repo_domains_enabled: bool = False  # Build domains from repo names in gold traces
+    repo_domains_dir: str = ""  # Path to gold traces for repo scanning
+    weakest_first: bool = False  # Sort domains by val loss (weakest trains first)
 
     def __post_init__(self):
         self.dataset_path = Path(self.dataset_path)
@@ -256,12 +343,32 @@ class CascadeScheduler:
         self._error: str | None = None
         self._current_stage: int = 0
 
+        # Build domain taxonomy: merge tool-based and repo-based domains
+        available_domains: dict[str, CascadeDomain] = dict(DOMAIN_TAXONOMY)
+
+        if config.repo_domains_enabled:
+            repo_dir = Path(config.repo_domains_dir) if config.repo_domains_dir else config.dataset_path
+            if repo_dir.exists():
+                repo_domains = build_repo_domains(
+                    repo_dir, min_examples=config.min_domain_examples
+                )
+                available_domains.update(repo_domains)
+                # If repo domains are enabled and found, use them as the domain list
+                if repo_domains:
+                    config.domains = list(repo_domains.keys())
+                    logger.info(
+                        "[Cascade] Using %d repo-based domains: %s",
+                        len(repo_domains),
+                        list(repo_domains.keys()),
+                    )
+
         # Build stages from domain list
         for i, domain_name in enumerate(config.domains):
-            domain = DOMAIN_TAXONOMY.get(domain_name)
+            domain = available_domains.get(domain_name)
             if domain is None:
                 raise ValueError(
-                    f"Unknown domain: {domain_name}. " f"Available: {list(DOMAIN_TAXONOMY.keys())}"
+                    f"Unknown domain: {domain_name}. "
+                    f"Available: {list(available_domains.keys())}"
                 )
 
             stage = CascadeStage(
@@ -272,6 +379,57 @@ class CascadeScheduler:
                 run_id=f"cascade-{domain_name}-{int(time.time())}",
             )
             self.stages.append(stage)
+
+    def sort_domains_by_loss(
+        self,
+        val_examples: list[dict[str, Any]],
+        loss_fn: Callable[[list[dict]], float] | None = None,
+    ) -> None:
+        """Re-order stages so the highest-loss (weakest) domain trains first.
+
+        Args:
+            val_examples: Validation examples for loss scoring.
+            loss_fn: Function that takes a list of message dicts and returns loss.
+                     If None, stages keep their current order.
+        """
+        if not loss_fn or not val_examples:
+            return
+
+        domain_losses: dict[str, float] = {}
+        for stage in self.stages:
+            # Filter val examples for this domain
+            domain_examples = [ex for ex in val_examples if stage.domain.matches(ex)]
+            if not domain_examples:
+                domain_losses[stage.domain.name] = 0.0
+                continue
+
+            # Average loss across domain examples
+            losses = []
+            for ex in domain_examples[:20]:  # Cap to avoid slowness
+                msgs = ex.get("messages", [])
+                if msgs:
+                    try:
+                        losses.append(loss_fn(msgs))
+                    except Exception:
+                        continue
+            domain_losses[stage.domain.name] = (
+                sum(losses) / len(losses) if losses else 0.0
+            )
+
+        # Sort stages: highest loss (weakest) first
+        self.stages.sort(
+            key=lambda s: domain_losses.get(s.domain.name, 0.0),
+            reverse=True,
+        )
+
+        # Renumber stages
+        for i, stage in enumerate(self.stages):
+            stage.stage_number = i + 1
+
+        logger.info(
+            "[Cascade] Weakest-first order: %s",
+            [(s.domain.name, round(domain_losses.get(s.domain.name, 0), 4)) for s in self.stages],
+        )
 
     async def run_cascade(
         self,
@@ -488,16 +646,51 @@ class CascadeScheduler:
                     except json.JSONDecodeError:
                         continue
 
+        # Convert raw traces → GRPO format using the dataset converter
+        from bashgym.datasets.converters import trace_to_grpo_example
+        from bashgym.datasets.validator import validate_dataset
+
+        # Detect if the base model is multimodal (Gemma 4 family) — needs list-of-parts content
+        base = (self.config.base_model or "").lower()
+        multimodal = "gemma-4" in base or "gemma4" in base
+
+        grpo_examples = []
+        skipped = 0
+        for trace in filtered:
+            ex = trace_to_grpo_example(trace, multimodal_format=multimodal)
+            if ex is not None:
+                grpo_examples.append(ex)
+            else:
+                skipped += 1
+        logger.info(
+            f"[Cascade] trace→GRPO ({domain.name}): {len(grpo_examples)} converted, "
+            f"{skipped} skipped (multimodal_format={multimodal})"
+        )
+
         # Write filtered dataset
         output_dir = self.config.output_dir / "filtered"
         output_dir.mkdir(parents=True, exist_ok=True)
         filtered_path = output_dir / f"{domain.name}.jsonl"
 
         with open(filtered_path, "w") as f:
-            for example in filtered:
+            for example in grpo_examples:
                 f.write(json.dumps(example) + "\n")
 
-        logger.info(f"[Cascade] Filtered {len(filtered)} examples for {domain.name}")
+        # Validate the dataset before training touches it
+        result = validate_dataset(filtered_path, format="grpo", quiet=True)
+        if not result.is_valid:
+            logger.error(
+                f"[Cascade] {domain.name} dataset failed validation: "
+                f"{result.error_count} errors, {result.valid_examples}/{result.total_examples} valid"
+            )
+            for issue in result.issues[:5]:
+                logger.error(f"  {issue.severity} line {issue.line}: {issue.field} — {issue.message}")
+        else:
+            logger.info(
+                f"[Cascade] Filtered {len(filtered)} traces → "
+                f"{len(grpo_examples)} GRPO examples for {domain.name} (validated ✓)"
+            )
+
         return filtered_path
 
     @staticmethod

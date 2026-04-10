@@ -10,6 +10,7 @@ hyperparameter tuning.
 
 import asyncio
 import copy
+import json
 import logging
 import math
 import random
@@ -95,6 +96,13 @@ DATA_SEARCH_SPACE: dict[str, dict[str, Any]] = {
         "default": 500,
         "description": "Cap examples per repo to prevent dominance",
     },
+    "loss_bias_weight": {
+        "type": "float",
+        "min": 0.0,
+        "max": 2.0,
+        "default": 0.0,
+        "description": "Weight for loss-targeted example upsampling (0 = disabled)",
+    },
 }
 
 
@@ -117,6 +125,10 @@ class DataPipelineConfig:
     silver_inclusion_ratio: float = 0.0
     dedup_similarity_threshold: float = 0.85
     max_examples_per_repo: int = 500
+    # Loss-targeted mining fields (set by LossTargetedMiner, not mutated)
+    loss_bias_weight: float = 0.0
+    focus_repos: list[str] = field(default_factory=list)
+    focus_tool_patterns: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -160,6 +172,113 @@ class TraceResearchConfig:
     pending_traces_dir: str = ""
     mode: str = "simulate"
     train_steps: int = 50
+    # Loss-targeted mining
+    loss_mining_enabled: bool = False
+    loss_mining_model: str = "unsloth/gemma-4-E4B-it"
+    loss_mining_adapter_path: str = ""
+    loss_mining_top_k: int = 20
+
+
+# =============================================================================
+# Loss-Targeted Mining
+# =============================================================================
+
+
+class LossTargetedMiner:
+    """Scores training examples by model loss and extracts high-loss signatures.
+
+    Loads the current Gemma checkpoint (base + optional LoRA adapter) and
+    computes cross-entropy loss on each example. High-loss examples indicate
+    patterns the model hasn't learned — these signatures are used to bias the
+    data pipeline toward hard examples.
+    """
+
+    def __init__(
+        self,
+        base_model: str = "unsloth/gemma-4-E4B-it",
+        adapter_path: str | None = None,
+        top_k: int = 20,
+    ):
+        self.base_model = base_model
+        self.adapter_path = adapter_path
+        self.top_k = top_k
+        self._models: dict[str, Any] | None = None
+
+    def _ensure_loaded(self) -> dict[str, Any]:
+        """Lazy-load the model (expensive, only done once)."""
+        if self._models is None:
+            from bashgym.models.gemma_loader import load_models
+
+            self._models = load_models(
+                base_model=self.base_model,
+                adapter_path=self.adapter_path,
+            )
+            logger.info(
+                "[LossTargetedMiner] Loaded model: %s (adapter: %s)",
+                self.base_model,
+                self.adapter_path or "none",
+            )
+        return self._models
+
+    def score_examples(
+        self,
+        examples: list[dict[str, Any]],
+    ) -> list[tuple[dict[str, Any], float]]:
+        """Score examples by cross-entropy loss and return sorted by loss desc.
+
+        Args:
+            examples: List of training example dicts with 'messages' key.
+
+        Returns:
+            List of (example, loss) tuples sorted highest-loss first.
+        """
+        models = self._ensure_loaded()
+        ft_loss = models["ft_loss"]
+
+        scored: list[tuple[dict[str, Any], float]] = []
+        for ex in examples:
+            messages = ex.get("messages", [])
+            if not messages:
+                continue
+            try:
+                loss = ft_loss(messages)
+                scored.append((ex, float(loss)))
+            except Exception as e:
+                logger.debug("[LossTargetedMiner] Skipping example: %s", e)
+                continue
+
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return scored
+
+    def extract_signatures(
+        self,
+        scored: list[tuple[dict[str, Any], float]],
+    ) -> tuple[list[str], list[str]]:
+        """Extract repo names and tool patterns from the top-k highest-loss examples.
+
+        Returns:
+            (focus_repos, focus_tool_patterns) — unique lists for pipeline biasing.
+        """
+        top_k = scored[: self.top_k]
+
+        repos: set[str] = set()
+        tools: set[str] = set()
+
+        for ex, _loss in top_k:
+            # Extract repo name from metadata
+            meta = ex.get("metadata", {})
+            repo = meta.get("repo_name") or meta.get("primary_repo", {}).get("name", "")
+            if repo:
+                repos.add(repo)
+
+            # Extract tool names from messages
+            for msg in ex.get("messages", []):
+                for tc in msg.get("tool_calls", []):
+                    fn_name = tc.get("function", {}).get("name", "")
+                    if fn_name:
+                        tools.add(fn_name)
+
+        return sorted(repos), sorted(tools)
 
 
 class TraceResearchStatus:
@@ -402,6 +521,47 @@ class TraceResearcher:
             tmpdir_path = Path(tmpdir)
 
             try:
+                # Loss-targeted mining: bias toward examples the model gets wrong
+                repo_filter: list[str] | None = None
+                if (
+                    self.config.loss_mining_enabled
+                    and pipeline.loss_bias_weight > 0
+                    and not hasattr(self, "_loss_miner_failed")
+                ):
+                    try:
+                        if not hasattr(self, "_loss_miner"):
+                            self._loss_miner = LossTargetedMiner(
+                                base_model=self.config.loss_mining_model,
+                                adapter_path=self.config.loss_mining_adapter_path or None,
+                                top_k=self.config.loss_mining_top_k,
+                            )
+                        # Score a sample of gold traces
+                        import json as _json
+
+                        sample_examples = []
+                        for f in list(gold_dir.glob("*.json"))[:100]:
+                            try:
+                                data = _json.loads(f.read_text(encoding="utf-8", errors="replace"))
+                                if isinstance(data, dict) and data.get("messages"):
+                                    sample_examples.append(data)
+                            except (ValueError, OSError):
+                                continue
+                        if sample_examples:
+                            scored = self._loss_miner.score_examples(sample_examples)
+                            focus_repos, focus_tools = self._loss_miner.extract_signatures(scored)
+                            pipeline.focus_repos = focus_repos
+                            pipeline.focus_tool_patterns = focus_tools
+                            if focus_repos:
+                                repo_filter = focus_repos
+                            logger.info(
+                                "[TraceResearch] Loss mining: focus_repos=%s, focus_tools=%s",
+                                focus_repos,
+                                focus_tools,
+                            )
+                    except Exception as e:
+                        logger.warning("[TraceResearch] Loss mining failed (disabling): %s", e)
+                        self._loss_miner_failed = True
+
                 # Generate examples with candidate pipeline config
                 gen_config = ExampleGeneratorConfig(
                     output_dir=str(tmpdir_path),
@@ -418,10 +578,35 @@ class TraceResearcher:
                         "avg_example_length": 0,
                     }
 
-                # Export
-                result = generator.export_for_nemo(examples, tmpdir_path, train_split=0.9)
+                # Export (with optional repo filter from loss mining)
+                result = generator.export_for_nemo(
+                    examples, tmpdir_path, train_split=0.9, repo_filter=repo_filter
+                )
                 train_path = Path(result["train"])
                 val_path = Path(result["validation"]) if result.get("validation") else None
+
+                # DPO failure pairing (when include_failed_as_dpo is enabled)
+                dpo_count = 0
+                if pipeline.include_failed_as_dpo and self.config.failed_traces_dir:
+                    failed_dir = Path(self.config.failed_traces_dir)
+                    if failed_dir.exists():
+                        try:
+                            from bashgym.factory.dpo_pairer import pair_failures_for_dpo
+
+                            dpo_pairs = pair_failures_for_dpo(
+                                gold_dir, failed_dir, max_pairs=50
+                            )
+                            if dpo_pairs:
+                                dpo_path = tmpdir_path / "dpo_pairs.jsonl"
+                                with open(dpo_path, "w") as f:
+                                    for pair in dpo_pairs:
+                                        f.write(json.dumps(pair.to_dict()) + "\n")
+                                dpo_count = len(dpo_pairs)
+                                logger.info(
+                                    "[TraceResearch] Generated %d DPO pairs", dpo_count
+                                )
+                        except Exception as e:
+                            logger.warning("[TraceResearch] DPO pairing failed: %s", e)
 
                 data_stats = {
                     "examples_generated": len(examples),
@@ -431,6 +616,7 @@ class TraceResearcher:
                         / max(len(examples), 1),
                         1,
                     ),
+                    "dpo_pairs": dpo_count,
                 }
 
                 # Short training

@@ -4,6 +4,7 @@ from bashgym.gym.schema_search_space import (
     FAILURE_TEMPLATE_MAP,
     SCHEMA_SEARCH_SPACE,
     TEMPLATE_LIBRARY,
+    GemmaJudge,
     SchemaSearchSpace,
 )
 
@@ -259,3 +260,96 @@ class TestSchemaSearchSpaceInit:
         space = SchemaSearchSpace(base_pipeline_name="nonexistent")
         # _template_meta should fall back to coding_agent_sft
         assert space._template_meta == TEMPLATE_LIBRARY["coding_agent_sft"]
+
+
+# =========================================================================
+# Phase 5: Gemma Judge + judge_backend
+# =========================================================================
+
+
+class TestJudgeBackendSearchParam:
+    def test_judge_backend_in_search_space(self):
+        assert "judge_backend" in SCHEMA_SEARCH_SPACE
+        spec = SCHEMA_SEARCH_SPACE["judge_backend"]
+        assert spec["type"] == "choice"
+        assert "haiku" in spec["choices"]
+        assert "gemma_local" in spec["choices"]
+
+    def test_default_genome_includes_judge_backend(self):
+        genome = SchemaSearchSpace.create_default_genome()
+        assert genome["judge_backend"] == "haiku"
+
+
+class TestChoiceTypeMutation:
+    def test_init_param_choice(self):
+        space = SchemaSearchSpace()
+        spec = SCHEMA_SEARCH_SPACE["judge_backend"]
+        val = space._init_param(spec)
+        # Default is "haiku"
+        assert val == "haiku"
+
+    def test_mutate_param_choice_switches(self):
+        space = SchemaSearchSpace(mutation_rate=1.0)
+        spec = SCHEMA_SEARCH_SPACE["judge_backend"]
+        # Mutating "haiku" should give "gemma_local" (the only other option)
+        result = space._mutate_param("haiku", spec)
+        assert result == "gemma_local"
+
+    def test_mutate_param_choice_from_gemma(self):
+        space = SchemaSearchSpace(mutation_rate=1.0)
+        spec = SCHEMA_SEARCH_SPACE["judge_backend"]
+        result = space._mutate_param("gemma_local", spec)
+        assert result == "haiku"
+
+    def test_mutate_genome_with_judge_backend(self):
+        space = SchemaSearchSpace(mutation_rate=1.0)
+        genome = SchemaSearchSpace.create_default_genome()
+        mutated = space.mutate(genome)
+        # With mutation_rate=1.0, judge_backend MUST have changed
+        assert mutated["judge_backend"] in ("haiku", "gemma_local")
+
+
+class TestGemmaJudge:
+    def test_loss_to_score_low_loss(self):
+        assert GemmaJudge._loss_to_score(0.5) == 5.0
+        assert GemmaJudge._loss_to_score(1.0) == 5.0
+
+    def test_loss_to_score_high_loss(self):
+        assert GemmaJudge._loss_to_score(4.0) == 1.0
+        assert GemmaJudge._loss_to_score(5.0) == 1.0
+
+    def test_loss_to_score_mid_range(self):
+        score = GemmaJudge._loss_to_score(2.5)
+        assert 1.0 < score < 5.0
+
+    def test_loss_to_score_monotonic(self):
+        # Higher loss should give lower score
+        scores = [GemmaJudge._loss_to_score(l) for l in [1.0, 2.0, 3.0, 4.0]]
+        assert scores == sorted(scores, reverse=True)
+
+    def test_score_examples_empty(self):
+        judge = GemmaJudge()
+        judge._models = {"ft_loss": lambda msgs: 2.0}
+        assert judge.score_examples([]) == 3.0
+
+    def test_score_examples_with_mock(self):
+        judge = GemmaJudge()
+        judge._models = {"ft_loss": lambda msgs: 2.5}
+        examples = [
+            {"messages": [{"role": "user", "content": "hi"}]},
+            {"messages": [{"role": "user", "content": "bye"}]},
+        ]
+        score = judge.score_examples(examples)
+        expected = GemmaJudge._loss_to_score(2.5)
+        assert abs(score - expected) < 0.01
+
+    def test_score_examples_skips_empty_messages(self):
+        judge = GemmaJudge()
+        judge._models = {"ft_loss": lambda msgs: 2.0}
+        examples = [
+            {"messages": [{"role": "user", "content": "hi"}]},
+            {"no_messages": True},  # Should be skipped
+        ]
+        score = judge.score_examples(examples)
+        expected = GemmaJudge._loss_to_score(2.0)
+        assert abs(score - expected) < 0.01

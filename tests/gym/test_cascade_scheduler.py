@@ -12,6 +12,8 @@ from bashgym.gym.cascade_scheduler import (
     CascadeConfig,
     CascadeScheduler,
     CascadeStage,
+    RepoCascadeDomain,
+    build_repo_domains,
 )
 
 
@@ -297,3 +299,146 @@ class TestCascadeRun:
         assert result.status == "stopped"
         completed = sum(1 for s in result.stages if s.status == "completed")
         assert completed >= 1
+
+
+# =========================================================================
+# Phase 4: Repo-Based Domains
+# =========================================================================
+
+
+class TestRepoCascadeDomain:
+    def test_matches_by_repo_name(self):
+        domain = RepoCascadeDomain(
+            name="repo_bashgym",
+            description="test",
+            reward_mode="verification",
+            tool_filter=[],
+            min_steps=1,
+            repo_names=["bashgym"],
+        )
+        example = {
+            "metadata": {"primary_repo": {"name": "bashgym"}},
+            "trace": [{"tool_name": "Bash", "command": "ls"}],
+        }
+        assert domain.matches(example)
+
+    def test_no_match_wrong_repo(self):
+        domain = RepoCascadeDomain(
+            name="repo_bashgym",
+            description="test",
+            reward_mode="verification",
+            tool_filter=[],
+            min_steps=1,
+            repo_names=["bashgym"],
+        )
+        example = {
+            "metadata": {"primary_repo": {"name": "other-repo"}},
+            "trace": [{"tool_name": "Bash", "command": "ls"}],
+        }
+        assert not domain.matches(example)
+
+    def test_min_steps_enforced(self):
+        domain = RepoCascadeDomain(
+            name="repo_bashgym",
+            description="test",
+            reward_mode="verification",
+            tool_filter=[],
+            min_steps=3,
+            repo_names=["bashgym"],
+        )
+        example = {
+            "metadata": {"primary_repo": {"name": "bashgym"}},
+            "trace": [{"tool_name": "Bash"}],  # Only 1 step
+        }
+        assert not domain.matches(example)
+
+    def test_matches_messages_format(self):
+        domain = RepoCascadeDomain(
+            name="repo_test",
+            description="test",
+            reward_mode="verification",
+            tool_filter=[],
+            min_steps=1,
+            repo_names=["myrepo"],
+        )
+        example = {
+            "metadata": {"primary_repo": {"name": "myrepo"}},
+            "messages": [{"role": "assistant", "content": "done"}],
+        }
+        assert domain.matches(example)
+
+
+class TestBuildRepoDomains:
+    def test_builds_from_gold_traces(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            gold_dir = Path(tmpdir)
+            # Create 12 traces for repo-a, 3 for repo-b (below threshold)
+            for i in range(12):
+                trace = {"metadata": {"primary_repo": {"name": "repo-a"}}, "trace": []}
+                (gold_dir / f"trace_{i}.json").write_text(json.dumps(trace))
+            for i in range(3):
+                trace = {"metadata": {"primary_repo": {"name": "repo-b"}}, "trace": []}
+                (gold_dir / f"small_{i}.json").write_text(json.dumps(trace))
+
+            domains = build_repo_domains(gold_dir, min_examples=10)
+
+        assert "repo_repo-a" in domains
+        assert "repo_repo-b" not in domains  # below threshold
+        assert domains["repo_repo-a"].repo_names == ["repo-a"]
+
+    def test_empty_dir(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            domains = build_repo_domains(Path(tmpdir))
+        assert domains == {}
+
+
+class TestCascadeConfigRepoDomains:
+    def test_new_fields_default(self):
+        config = CascadeConfig()
+        assert config.repo_domains_enabled is False
+        assert config.repo_domains_dir == ""
+        assert config.weakest_first is False
+
+
+class TestSortDomainsByLoss:
+    def test_weakest_first_ordering(self):
+        config = CascadeConfig(
+            domains=["file_operations", "bash_commands"],
+            output_dir=Path(tempfile.mkdtemp()),
+        )
+        scheduler = CascadeScheduler(config)
+
+        # file_operations has low loss (strong), bash_commands has high loss (weak)
+        val_examples = [
+            {
+                "messages": [{"role": "user", "content": "hi"}],
+                "trace": [{"tool_name": "Read"}],
+            },
+            {
+                "messages": [{"role": "user", "content": "run"}],
+                "trace": [{"tool_name": "Bash"}],
+            },
+        ]
+
+        def mock_loss_fn(messages):
+            content = messages[0].get("content", "")
+            return 1.0 if "hi" in content else 5.0  # bash is "weaker"
+
+        scheduler.sort_domains_by_loss(val_examples, loss_fn=mock_loss_fn)
+
+        # After sorting, bash_commands (higher loss) should be first
+        assert scheduler.stages[0].domain.name == "bash_commands"
+        assert scheduler.stages[1].domain.name == "file_operations"
+        # Stage numbers renumbered
+        assert scheduler.stages[0].stage_number == 1
+        assert scheduler.stages[1].stage_number == 2
+
+    def test_no_loss_fn_keeps_order(self):
+        config = CascadeConfig(
+            domains=["file_operations", "bash_commands"],
+            output_dir=Path(tempfile.mkdtemp()),
+        )
+        scheduler = CascadeScheduler(config)
+        original_order = [s.domain.name for s in scheduler.stages]
+        scheduler.sort_domains_by_loss([], loss_fn=None)
+        assert [s.domain.name for s in scheduler.stages] == original_order

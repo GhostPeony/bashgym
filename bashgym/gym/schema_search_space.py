@@ -54,6 +54,11 @@ SCHEMA_SEARCH_SPACE: dict[str, dict[str, Any]] = {
         "type": "weights",
         "options": ["simple", "moderate", "complex"],
     },
+    "judge_backend": {
+        "type": "choice",
+        "choices": ["haiku", "gemma_local"],
+        "default": "haiku",
+    },
 }
 
 
@@ -142,6 +147,83 @@ FAILURE_TEMPLATE_MAP: dict[str, str] = {}
 for _name, _meta in TEMPLATE_LIBRARY.items():
     for _failure_type in _meta.get("default_for_failures", []):
         FAILURE_TEMPLATE_MAP[_failure_type] = _name
+
+
+# =============================================================================
+# Gemma-Based Judge (Alternative to Claude Haiku)
+# =============================================================================
+
+
+class GemmaJudge:
+    """Evaluates synthetic training examples by perplexity via local Gemma model.
+
+    Instead of using Claude Haiku to score examples on a rubric, this judge
+    computes cross-entropy loss — measuring how well the current Gemma checkpoint
+    can predict the example. This discovers examples the model can actually learn
+    from (moderate loss), filtering out both trivial (too low) and garbage (too high).
+
+    Score mapping (loss -> 0-5 scale for compatibility with haiku judge):
+        loss <= 1.0  -> score 5.0 (model already knows this well)
+        loss >= 4.0  -> score 1.0 (too hard / noisy)
+        linear interpolation between
+    """
+
+    def __init__(
+        self,
+        base_model: str = "unsloth/gemma-4-E4B-it",
+        adapter_path: str | None = None,
+    ):
+        self.base_model = base_model
+        self.adapter_path = adapter_path
+        self._models: dict | None = None
+
+    def _ensure_loaded(self) -> dict:
+        if self._models is None:
+            from bashgym.models.gemma_loader import load_models
+
+            self._models = load_models(
+                base_model=self.base_model,
+                adapter_path=self.adapter_path,
+            )
+        return self._models
+
+    @staticmethod
+    def _loss_to_score(loss: float) -> float:
+        """Convert cross-entropy loss to a 0-5 quality score.
+
+        Moderate loss (1.5-2.5) gives the best scores — these are examples
+        the model hasn't memorized but can plausibly learn.
+        """
+        if loss <= 1.0:
+            return 5.0
+        if loss >= 4.0:
+            return 1.0
+        return 5.0 - (loss - 1.0) * (4.0 / 3.0)
+
+    def score_examples(self, examples: list[dict]) -> float:
+        """Return average quality score (0-5 scale) for a batch of examples.
+
+        Args:
+            examples: List of training example dicts with 'messages' key.
+
+        Returns:
+            Average score in [0, 5]. Higher is better (for stage 1 filtering).
+        """
+        models = self._ensure_loaded()
+        ft_loss = models["ft_loss"]
+
+        scores: list[float] = []
+        for ex in examples:
+            messages = ex.get("messages", [])
+            if not messages:
+                continue
+            try:
+                loss = ft_loss(messages)
+                scores.append(self._loss_to_score(float(loss)))
+            except Exception:
+                continue
+
+        return sum(scores) / len(scores) if scores else 3.0
 
 
 # =============================================================================
@@ -262,6 +344,8 @@ class SchemaSearchSpace(SearchSpace):
             return random.uniform(spec["min"], spec["max"])
         if param_type == "int" and "choices" in spec:
             return random.choice(spec["choices"])
+        if param_type == "choice":
+            return spec.get("default", random.choice(spec["choices"]))
         if param_type == "weights":
             options = spec["options"]
             weights = [random.random() for _ in options]
@@ -290,6 +374,11 @@ class SchemaSearchSpace(SearchSpace):
                 return choices[new_idx]
             return random.choice(choices)
 
+        if param_type == "choice":
+            choices = spec["choices"]
+            other = [c for c in choices if c != current]
+            return random.choice(other) if other else current
+
         if param_type == "weights":
             if isinstance(current, dict):
                 weights = {k: max(0.05, v + random.gauss(0, 0.1)) for k, v in current.items()}
@@ -303,7 +392,14 @@ class SchemaSearchSpace(SearchSpace):
     # -----------------------------------------------------------------
 
     def _stage1_evaluate(self, genome: dict[str, Any]) -> float:
-        """Stage 1: Generate few examples, return average judge score."""
+        """Stage 1: Generate few examples, return average judge score.
+
+        When judge_backend is "gemma_local", uses the local Gemma model's
+        perplexity instead of the Data Designer's LLM judge.
+        """
+        if genome.get("judge_backend") == "gemma_local":
+            return self._stage1_evaluate_gemma(genome)
+
         try:
             from bashgym.factory.data_designer import (
                 DATA_DESIGNER_AVAILABLE,
@@ -353,6 +449,64 @@ class SchemaSearchSpace(SearchSpace):
                 continue
 
         return float(np.mean(scores)) if scores else 3.0
+
+    def _stage1_evaluate_gemma(self, genome: dict[str, Any]) -> float:
+        """Stage 1 alternative: use local Gemma model as judge via perplexity.
+
+        Generates examples using the Data Designer pipeline, then scores them
+        by how well the current Gemma checkpoint predicts them. Returns a
+        quality score on the same 0-5 scale as the haiku judge.
+        """
+        try:
+            from bashgym.factory.data_designer import (
+                DATA_DESIGNER_AVAILABLE,
+                DataDesignerPipeline,
+                PipelineConfig,
+            )
+        except ImportError:
+            logger.warning("[SchemaSearch] Data Designer unavailable for Gemma judge")
+            return 3.0
+
+        if not DATA_DESIGNER_AVAILABLE:
+            return 3.0
+
+        config = PipelineConfig(
+            pipeline=self.base_pipeline_name,
+            temperature_text=genome.get("temperature_text", 0.85),
+            temperature_code=genome.get("temperature_code", 0.2),
+            temperature_judge=genome.get("temperature_judge", 0.1),
+        )
+
+        try:
+            pipeline = DataDesignerPipeline(config)
+            df = pipeline.preview(num_records=self.stage1_examples)
+        except Exception as e:
+            logger.warning("[SchemaSearch] Gemma judge: data generation failed: %s", e)
+            return 3.0
+
+        # Convert DataFrame rows to message dicts for scoring
+        examples: list[dict] = []
+        for _, row in df.iterrows():
+            messages = []
+            if "task_prompt" in row and row["task_prompt"]:
+                messages.append({"role": "user", "content": str(row["task_prompt"])})
+            solution_col = next(
+                (c for c in ("solution", "solution_text", "formatted_response") if c in row),
+                None,
+            )
+            if solution_col and row[solution_col]:
+                messages.append({"role": "assistant", "content": str(row[solution_col])})
+            if messages:
+                examples.append({"messages": messages})
+
+        if not examples:
+            return 3.0
+
+        # Lazy-init judge (shared across experiments for efficiency)
+        if not hasattr(self, "_gemma_judge"):
+            self._gemma_judge = GemmaJudge()
+
+        return self._gemma_judge.score_examples(examples)
 
     # -----------------------------------------------------------------
     # Stage 2: Micro-training evaluation
@@ -521,4 +675,5 @@ class SchemaSearchSpace(SearchSpace):
                 "moderate": 0.5,
                 "complex": 0.2,
             },
+            "judge_backend": "haiku",
         }

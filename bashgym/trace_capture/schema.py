@@ -14,12 +14,51 @@ Module: Trace Capture - Schema Validation
 """
 
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
+
+logger = logging.getLogger(__name__)
+
+# Spill-to-disk threshold for large command outputs (1 MB)
+OUTPUT_SPILL_THRESHOLD = 1_048_576
+_DEFAULT_SPILL_DIR = Path("data/traces/spills")
+
+
+def spill_output_to_disk(
+    output: str,
+    trace_id: str,
+    span_id: str,
+    spill_dir: Path | None = None,
+) -> tuple[str, str]:
+    """Write large output to disk and return a truncated preview + file path.
+
+    Args:
+        output: The full command output string.
+        trace_id: Session-level trace ID (for unique filenames).
+        span_id: Span ID within the session.
+        spill_dir: Directory for spill files. Defaults to data/traces/spills/.
+
+    Returns:
+        (truncated_preview, absolute_file_path) — the preview is the first 1024
+        chars with a "[spilled to disk]" marker appended.
+    """
+    spill_dir = spill_dir or _DEFAULT_SPILL_DIR
+    spill_dir.mkdir(parents=True, exist_ok=True)
+
+    filename = f"{trace_id}_{span_id}.txt"
+    filepath = (spill_dir / filename).resolve()
+
+    filepath.write_text(output, encoding="utf-8")
+    logger.info("Spilled %d bytes to %s", len(output), filepath)
+
+    preview = output[:1024] + f"\n\n[output spilled to disk: {filepath}]"
+    return preview, str(filepath)
 
 
 class SurfaceType(str, Enum):
@@ -50,6 +89,13 @@ class OperationalBody(BaseModel):
     success: bool | None = None
     cwd: str = ""
     duration_ms: float | None = None
+
+    # High-fidelity fields (PRD: bashgym_evolution.md)
+    args: list[str] | None = None  # Discrete argument list (shlex.split)
+    interrupt_reason: str | None = None  # "timeout" | "user_interrupt" | "sigkill"
+    background_task_id: str | None = None  # UUID for backgrounded processes
+    output_file_path: str | None = None  # Path if output spilled to disk
+    is_spilled: bool = False  # True when output exceeded spill threshold
 
     @field_validator("command", mode="before")
     @classmethod
@@ -173,13 +219,28 @@ def trace_step_to_events(
     events = []
 
     # Operational event (always)
-    op_body = {
+    output = step_dict.get("output", "")
+
+    # Spill large outputs to disk to prevent OOM
+    is_spilled = False
+    output_file_path = None
+    if isinstance(output, str) and len(output) > OUTPUT_SPILL_THRESHOLD:
+        output, output_file_path = spill_output_to_disk(output, trace_id, span)
+        is_spilled = True
+
+    op_body: dict[str, Any] = {
         "tool_name": step_dict.get("tool_name", "unknown"),
         "command": step_dict.get("command", ""),
-        "output": step_dict.get("output", ""),
+        "output": output,
         "exit_code": step_dict.get("exit_code"),
         "success": step_dict.get("success"),
         "cwd": step_dict.get("cwd", ""),
+        # High-fidelity fields
+        "args": step_dict.get("args") or meta.get("args"),
+        "interrupt_reason": step_dict.get("interrupt_reason") or meta.get("interrupt_reason"),
+        "background_task_id": step_dict.get("background_task_id") or meta.get("background_task_id"),
+        "output_file_path": output_file_path,
+        "is_spilled": is_spilled,
     }
     op_event = TraceEvent(
         surface_type=SurfaceType.OPERATIONAL,

@@ -217,6 +217,131 @@ Would the proposed prompt additions have improved this agent's performance?"""
 
 
 # =============================================================================
+# Training Trigger (Ouroboros Close)
+# =============================================================================
+
+
+@dataclass
+class TrainingTriggerConfig:
+    """Config for triggering micro-trains from prompt evolution."""
+
+    enabled: bool = False
+    gold_trace_threshold: int = 10  # Trigger after N new gold traces
+    micro_train_steps: int = 50
+    base_model: str = "unsloth/gemma-4-E4B-it"
+    adapter_path: str = ""
+    gold_traces_dir: str = ""
+
+
+class TrainingTrigger:
+    """Monitors gold trace count and triggers micro-trains.
+
+    Closes the ouroboros loop: when the fast loop (prompt evolution) produces
+    enough new gold traces, the slow loop (weight training) runs a micro-train
+    and reports the delta loss back. Negative delta = model improved = the
+    prompt evolution is working.
+    """
+
+    def __init__(self, config: TrainingTriggerConfig):
+        self.config = config
+        self._last_gold_count: int = 0
+        self._last_loss: float | None = None
+        self._initialized = False
+
+    def _count_gold_traces(self) -> int:
+        """Count gold trace files in the configured directory."""
+        gold_dir = Path(self.config.gold_traces_dir)
+        if not gold_dir.exists():
+            return 0
+        return len(list(gold_dir.glob("*.json")))
+
+    def _initialize(self) -> None:
+        """Record the initial gold trace count (first call only)."""
+        if not self._initialized:
+            self._last_gold_count = self._count_gold_traces()
+            self._initialized = True
+            logger.info(
+                "[TrainingTrigger] Initialized: %d gold traces", self._last_gold_count
+            )
+
+    def check_and_train(self) -> float | None:
+        """If enough new gold traces accumulated, run micro-train, return delta loss.
+
+        Returns:
+            None if no training was triggered.
+            (new_loss - old_loss) if training happened. Negative = improvement.
+        """
+        self._initialize()
+
+        current_count = self._count_gold_traces()
+        new_traces = current_count - self._last_gold_count
+
+        if new_traces < self.config.gold_trace_threshold:
+            return None
+
+        logger.info(
+            "[TrainingTrigger] %d new gold traces (threshold=%d) — triggering micro-train",
+            new_traces,
+            self.config.gold_trace_threshold,
+        )
+
+        try:
+            from bashgym.factory.example_generator import ExampleGenerator
+            from bashgym.gym.trainer import Trainer, TrainerConfig
+
+            gold_dir = Path(self.config.gold_traces_dir)
+
+            # Generate examples from gold traces
+            generator = ExampleGenerator()
+            examples, _stats = generator.process_directory(gold_dir)
+
+            if not examples:
+                logger.warning("[TrainingTrigger] No examples generated")
+                return None
+
+            # Export train/val split to temp dir
+            import tempfile
+
+            with tempfile.TemporaryDirectory(prefix="ouroboros_") as tmpdir:
+                result = generator.export_for_nemo(examples, Path(tmpdir), train_split=0.9)
+                train_path = Path(result["train"])
+                val_path = Path(result["validation"]) if result.get("validation") else None
+
+                # Micro-train
+                trainer_config = TrainerConfig(
+                    max_steps=self.config.micro_train_steps,
+                    eval_strategy="steps",
+                    eval_steps=max(10, self.config.micro_train_steps // 3),
+                    auto_export_gguf=False,
+                    save_steps=999999,
+                    logging_steps=10,
+                )
+                trainer = Trainer(trainer_config)
+                run = trainer.train_sft(
+                    dataset_path=train_path,
+                    val_dataset_path=val_path,
+                )
+
+                new_loss = run.metrics.get("eval_loss") or run.metrics.get("final_loss", 5.0)
+                new_loss = float(new_loss)
+
+            delta = new_loss - self._last_loss if self._last_loss is not None else 0.0
+            self._last_loss = new_loss
+            self._last_gold_count = current_count
+
+            logger.info(
+                "[TrainingTrigger] Micro-train complete: loss=%.4f, delta=%.4f",
+                new_loss,
+                delta,
+            )
+            return delta
+
+        except Exception as e:
+            logger.error("[TrainingTrigger] Micro-train failed: %s", e)
+            return None
+
+
+# =============================================================================
 # PromptEvolver
 # =============================================================================
 
@@ -238,6 +363,7 @@ class PromptEvolver:
         provider: str = "anthropic",
         model: str = "claude-sonnet-4-5-20250929",
         storage_dir: Path | None = None,
+        training_trigger_config: TrainingTriggerConfig | None = None,
     ):
         self.provider = provider
         self.model = model
@@ -245,6 +371,11 @@ class PromptEvolver:
         self.variants: list[PromptVariant] = []
         self.best_variant: PromptVariant | None = None
         self._client = None
+        self._training_trigger = (
+            TrainingTrigger(training_trigger_config)
+            if training_trigger_config and training_trigger_config.enabled
+            else None
+        )
 
     def _get_client(self):
         """Lazy-init Anthropic client."""
@@ -646,6 +777,28 @@ class PromptEvolver:
                     gen + 1,
                     improvement,
                 )
+
+            # Ouroboros: check if enough new gold traces to trigger micro-train
+            if self._training_trigger:
+                try:
+                    import asyncio
+
+                    delta_loss = await asyncio.to_thread(
+                        self._training_trigger.check_and_train
+                    )
+                    if delta_loss is not None:
+                        variant.metrics["training_delta_loss"] = delta_loss
+                        if delta_loss < 0:
+                            # Prompt evolution is producing better training data
+                            improvement += abs(delta_loss) * 0.5
+                            variant.metrics["improvement_delta"] = improvement
+                            logger.info(
+                                "Generation %d: ouroboros bonus %.4f (model improved)",
+                                gen + 1,
+                                abs(delta_loss) * 0.5,
+                            )
+                except Exception as e:
+                    logger.warning("TrainingTrigger error: %s", e)
 
             # Emit event
             self._emit_evolved_event(variant, improvement)

@@ -505,6 +505,12 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
               }}
               className="input w-full"
             >
+              <optgroup label="Gemma 4 (Apr 2026)">
+                <option value="google/gemma-4-31B-it">Gemma 4 31B Dense (#3 open model, DGX Spark)</option>
+                <option value="google/gemma-4-26B-A4B-it">Gemma 4 26B MoE (4B active, efficient)</option>
+                <option value="google/gemma-4-E4B-it">Gemma 4 E4B (edge/device)</option>
+                <option value="google/gemma-4-E2B-it">Gemma 4 E2B (edge/device)</option>
+              </optgroup>
               <optgroup label="Qwen 3.5 (Feb 2026)">
                 <option value="Qwen/Qwen3.5-0.8B">Qwen3.5-0.8B (dense)</option>
                 <option value="Qwen/Qwen3.5-4B">Qwen3.5-4B (dense)</option>

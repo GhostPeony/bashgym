@@ -21,7 +21,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import BackgroundTasks, Body, FastAPI, HTTPException, Query, WebSocket
+from fastapi import BackgroundTasks, Body, FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 
 # Set up logging for API routes
@@ -3053,8 +3053,8 @@ def create_app() -> FastAPI:
 
     @app.post("/api/traces/auto-classify", tags=["Traces"])
     async def auto_classify_traces(
+        request: Request,
         # Tiered thresholds based on NVIDIA NeMo recommendations
-        # Reference: NVIDIA min_success_rate: 0.9, min_reward: 0.8 for SFT
         gold_success_rate: float = 0.90,
         gold_quality_score: float = 0.75,
         silver_success_rate: float = 0.75,
@@ -3065,36 +3065,22 @@ def create_app() -> FastAPI:
         auto_promote: bool = False,
         include_failed: bool = False,
     ):
-        """Auto-classify pending traces into quality tiers based on NVIDIA NeMo research.
+        """Auto-classify pending traces into quality tiers.
 
-        Set include_failed=True to reclassify traces already in failed_traces/
-        (useful after fixing classification bugs).
+        Runs as a background task for large trace sets with WebSocket progress.
+        Returns immediately with a job ID — poll /api/traces/classify-status or
+        listen to WebSocket 'classify:progress' messages.
 
-        Tiered Classification (based on industry standards):
-        - GOLD (≥90% success, ≥0.75 quality): SFT training, high-confidence examples
-          → Matches NVIDIA's min_success_rate: 0.9 recommendation
-        - SILVER (≥75% success, ≥0.55 quality): DPO chosen responses, secondary SFT
-        - BRONZE (≥60% success, ≥0.40 quality): DPO rejected responses, review candidates
-        - REJECTED (<60% success): Not suitable for training, archive only
+        Set include_failed=True to reclassify traces already in failed_traces/.
 
-        Verification adjustments:
-        - verification_passed=True -> One-tier boost (e.g. silver→gold, bronze→silver)
-        - verification_passed=False AND has_verification=True -> Failed (verified unsuccessful)
-
-        Args:
-            gold_success_rate: Min success rate for Gold tier (default 0.90 per NVIDIA)
-            gold_quality_score: Min quality score for Gold tier (default 0.75)
-            silver_success_rate: Min success rate for Silver tier (default 0.75)
-            silver_quality_score: Min quality score for Silver tier (default 0.55)
-            bronze_success_rate: Min success rate for Bronze tier (default 0.60)
-            bronze_quality_score: Min quality score for Bronze tier (default 0.40)
-            dry_run: If True, only return classifications without moving files (default True)
-            auto_promote: If True and not dry_run, move traces to their tier directories (default False)
-
-        Returns:
-            Dict with tiered classification results and DPO pairing suggestions.
+        Thresholds (NVIDIA NeMo research):
+        - GOLD: ≥90% success, ≥0.75 quality → SFT training
+        - SILVER: ≥75% success, ≥0.55 quality → DPO chosen
+        - BRONZE: ≥60% success, ≥0.40 quality → DPO rejected
+        - REJECTED: <60% success → archive only
         """
-        import shutil
+        import asyncio
+        import uuid
 
         from bashgym.config import get_bashgym_dir, get_settings
 
@@ -3102,59 +3088,7 @@ def create_app() -> FastAPI:
         global_dir = get_bashgym_dir()
         data_dir = Path(settings.data.data_dir)
 
-        # Tiered classifications based on NVIDIA NeMo research
-        classifications = {
-            "gold": [],  # ≥90% success, ≥0.75 quality → SFT training
-            "silver": [],  # ≥75% success, ≥0.55 quality → DPO chosen
-            "bronze": [],  # ≥60% success, ≥0.40 quality → DPO rejected
-            "rejected": [],  # <60% success → Not suitable for training
-            "failed": [],  # Explicit verification failure
-            "pending": [],  # Unable to process
-        }
-
-        # Track detailed info for DPO pair generation
-        detailed_classifications = {"gold": [], "silver": [], "bronze": [], "rejected": []}
-
-        def calculate_quality(data: Any) -> dict:
-            """Calculate quality metrics for both trace formats using centralized calculator."""
-            steps = []
-            metadata = {}
-
-            # Handle raw trace format (array of steps)
-            if isinstance(data, list):
-                steps = data
-            # Handle imported/gold format (dict with trace key)
-            elif isinstance(data, dict):
-                steps = data.get("trace", [])
-                metadata = data.get("metadata", {})
-                summary = data.get("summary", {})
-                # Merge summary into metadata for verification info
-                if "verification_passed" in summary:
-                    metadata["verification_passed"] = summary["verification_passed"]
-
-            if len(steps) == 0:
-                return {
-                    "success_rate": 0,
-                    "quality_score": 0,
-                    "total_steps": 0,
-                    "verification_passed": False,
-                    "has_verification": False,
-                    "unique_tools": 0,
-                }
-
-            # Use centralized quality calculator
-            quality = calculate_quality_breakdown(steps=steps, metadata=metadata)
-
-            return {
-                "success_rate": round(quality.success_rate, 3),
-                "quality_score": round(quality.total_score, 3),
-                "total_steps": quality.total_steps,
-                "verification_passed": quality.verification_passed_flag is True,
-                "has_verification": quality.has_verification,
-                "unique_tools": quality.unique_tools_count,
-            }
-
-        # Collect traces to classify
+        # Discover files first (fast — just filesystem listing)
         pending_dirs = []
         global_traces_dir = global_dir / "traces"
         project_traces_dir = data_dir / "traces"
@@ -3167,168 +3101,376 @@ def create_app() -> FastAPI:
         ):
             pending_dirs.append(project_traces_dir)
 
-        # Include failed_traces for reclassification (after bug fixes)
         if include_failed:
             for failed_dir in [global_dir / "failed_traces", data_dir / "failed_traces"]:
                 if failed_dir.exists() and failed_dir not in pending_dirs:
                     pending_dirs.append(failed_dir)
 
-        seen_files = set()
-        for pending_dir in pending_dirs:
-            from bashgym.trace_capture.core import glob_pending_traces
+        from bashgym.trace_capture.core import glob_pending_traces
 
-            for trace_file in glob_pending_traces(pending_dir):
-                if trace_file.name in seen_files:
-                    continue
-                seen_files.add(trace_file.name)
+        all_files = []
+        seen = set()
+        for d in pending_dirs:
+            for f in glob_pending_traces(d):
+                if f.name not in seen:
+                    seen.add(f.name)
+                    all_files.append(f)
 
-                try:
-                    from bashgym.trace_capture.core import load_trace_file
+        total = len(all_files)
 
-                    data = load_trace_file(trace_file)
+        # For small batches (< 200), run synchronously like before
+        # For large batches, run as background task with progress
+        if total > 200:
+            job_id = f"classify_{uuid.uuid4().hex[:8]}"
 
-                    metrics = calculate_quality(data)
-                    trace_id = trace_file.stem
-                    success_rate = metrics["success_rate"]
-                    quality_score = metrics["quality_score"]
+            # Store job state on app
+            job_state = {
+                "job_id": job_id,
+                "status": "running",
+                "total": total,
+                "processed": 0,
+                "classifications": {
+                    "gold": 0,
+                    "silver": 0,
+                    "bronze": 0,
+                    "rejected": 0,
+                    "failed": 0,
+                    "pending": 0,
+                },
+                "result": None,
+            }
+            if not hasattr(app.state, "classify_jobs"):
+                app.state.classify_jobs = {}
+            app.state.classify_jobs[job_id] = job_state
 
-                    # Build detailed info for tracking
-                    trace_info = {
-                        "id": trace_id,
-                        "success_rate": success_rate,
-                        "quality_score": quality_score,
-                        "steps": metrics["total_steps"],
-                        "unique_tools": metrics["unique_tools"],
-                        "file_path": str(trace_file),
-                    }
+            async def run_classify():
+                await _classify_traces_batch(
+                    app,
+                    all_files,
+                    data_dir,
+                    job_state,
+                    gold_success_rate,
+                    gold_quality_score,
+                    silver_success_rate,
+                    silver_quality_score,
+                    bronze_success_rate,
+                    bronze_quality_score,
+                    dry_run,
+                    auto_promote,
+                )
 
-                    # Determine tier
-                    # Step 1: Check for explicit verification failure
-                    # Step 2: Classify by quality metrics
-                    # Step 3: Apply verification_passed as a one-tier boost (not a blanket override)
-                    tier = None
-                    target_dir = None
+            asyncio.create_task(run_classify())
 
-                    if metrics["has_verification"] and not metrics["verification_passed"]:
-                        # Verified failed -> Failed (explicit failure overrides all)
-                        tier = "failed"
-                        target_dir = data_dir / "failed_traces"
-                    else:
-                        # Determine base tier from quality metrics
-                        if (
-                            success_rate >= gold_success_rate
-                            and quality_score >= gold_quality_score
-                        ):
-                            base_tier = "gold"
-                        elif (
-                            success_rate >= silver_success_rate
-                            and quality_score >= silver_quality_score
-                        ):
-                            base_tier = "silver"
-                        elif (
-                            success_rate >= bronze_success_rate
-                            and quality_score >= bronze_quality_score
-                        ):
-                            base_tier = "bronze"
-                        else:
-                            base_tier = "rejected"
+            return {
+                "job_id": job_id,
+                "status": "started",
+                "total_traces": total,
+                "message": f"Classifying {total} traces in background. Poll /api/traces/classify-status/{job_id} for progress.",
+            }
 
-                        # Apply verification_passed boost: promote one tier (max gold)
-                        # This rewards traces where tests passed but doesn't skip quality checks
-                        if metrics["verification_passed"] and base_tier != "gold":
-                            tier_promotion = {
-                                "silver": "gold",
-                                "bronze": "silver",
-                                "rejected": "bronze",
-                            }
-                            tier = tier_promotion.get(base_tier, base_tier)
-                        else:
-                            tier = base_tier
+        # Small batch — run synchronously
+        result = _classify_traces_sync(
+            app,
+            all_files,
+            data_dir,
+            gold_success_rate,
+            gold_quality_score,
+            silver_success_rate,
+            silver_quality_score,
+            bronze_success_rate,
+            bronze_quality_score,
+            dry_run,
+            auto_promote,
+        )
+        return result
 
-                        # Map tier to directory
-                        tier_dirs = {
-                            "gold": data_dir / "gold_traces",
-                            "silver": data_dir / "silver_traces",
-                            "bronze": data_dir / "bronze_traces",
-                            "rejected": data_dir / "failed_traces",
-                        }
-                        target_dir = tier_dirs.get(tier, data_dir / "failed_traces")
+    @app.get("/api/traces/classify-status/{job_id}", tags=["Traces"])
+    async def get_classify_status(job_id: str):
+        """Get status of a background classification job."""
+        jobs = getattr(app.state, "classify_jobs", {})
+        job = jobs.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
-                    # Add to classification lists
-                    classifications[tier].append(trace_id)
-                    if tier in detailed_classifications:
-                        detailed_classifications[tier].append(trace_info)
+        if job["status"] == "completed" and job["result"]:
+            return job["result"]
 
-                    # Move file if not dry_run and auto_promote enabled
-                    if not dry_run and auto_promote and target_dir:
-                        target_path = target_dir / f"{trace_id}.json"
-                        target_dir.mkdir(parents=True, exist_ok=True)
-                        shutil.move(str(trace_file), str(target_path))
-                        app.state.trace_cache.invalidate(trace_id)
+        return {
+            "job_id": job_id,
+            "status": job["status"],
+            "progress": {
+                "processed": job["processed"],
+                "total": job["total"],
+                "percent": round(job["processed"] / max(job["total"], 1) * 100, 1),
+            },
+            "classifications_so_far": job["classifications"],
+        }
 
-                except Exception as e:
-                    print(f"[DEBUG] Error processing {trace_file}: {e}")
-                    classifications["pending"].append(trace_file.stem)
+    def _calculate_trace_quality(data: Any) -> dict:
+        """Calculate quality metrics for a trace (extracted for reuse)."""
+        steps = []
+        metadata = {}
 
-        # Generate DPO pair suggestions (Gold + Bronze for contrastive learning)
-        dpo_pairs = []
-        gold_details = detailed_classifications["gold"]
-        bronze_details = detailed_classifications["bronze"]
+        if isinstance(data, list):
+            steps = data
+        elif isinstance(data, dict):
+            steps = data.get("trace", [])
+            metadata = data.get("metadata", {})
+            summary = data.get("summary", {})
+            if "verification_passed" in summary:
+                metadata["verification_passed"] = summary["verification_passed"]
 
-        # Simple pairing: match by similar step count (within 2x range)
-        for gold_trace in gold_details:
-            for bronze_trace in bronze_details:
-                gold_steps = gold_trace["steps"]
-                bronze_steps = bronze_trace["steps"]
-                # Pair traces with similar complexity (step count within 2x)
-                if bronze_steps > 0 and 0.5 <= gold_steps / bronze_steps <= 2.0:
-                    dpo_pairs.append(
-                        {
-                            "chosen": gold_trace["id"],
-                            "chosen_success_rate": gold_trace["success_rate"],
-                            "rejected": bronze_trace["id"],
-                            "rejected_success_rate": bronze_trace["success_rate"],
-                            "quality_gap": round(
-                                gold_trace["quality_score"] - bronze_trace["quality_score"], 3
-                            ),
-                        }
+        if len(steps) == 0:
+            return {
+                "success_rate": 0,
+                "quality_score": 0,
+                "total_steps": 0,
+                "verification_passed": False,
+                "has_verification": False,
+                "unique_tools": 0,
+            }
+
+        quality = calculate_quality_breakdown(steps=steps, metadata=metadata)
+        return {
+            "success_rate": round(quality.success_rate, 3),
+            "quality_score": round(quality.total_score, 3),
+            "total_steps": quality.total_steps,
+            "verification_passed": quality.verification_passed_flag is True,
+            "has_verification": quality.has_verification,
+            "unique_tools": quality.unique_tools_count,
+        }
+
+    def _classify_single_trace(
+        trace_file,
+        data_dir,
+        thresholds,
+        dry_run,
+        auto_promote,
+        app_state,
+    ):
+        """Classify a single trace file. Returns (tier, trace_info) or None on error."""
+        import shutil
+
+        from bashgym.trace_capture.core import load_trace_file
+
+        try:
+            data = load_trace_file(trace_file)
+            metrics = _calculate_trace_quality(data)
+            trace_id = trace_file.stem
+            sr = metrics["success_rate"]
+            qs = metrics["quality_score"]
+
+            trace_info = {
+                "id": trace_id,
+                "success_rate": sr,
+                "quality_score": qs,
+                "steps": metrics["total_steps"],
+                "unique_tools": metrics["unique_tools"],
+            }
+
+            # Determine tier
+            if metrics["has_verification"] and not metrics["verification_passed"]:
+                tier = "failed"
+                target_dir = data_dir / "failed_traces"
+            else:
+                if sr >= thresholds["gold_sr"] and qs >= thresholds["gold_qs"]:
+                    base_tier = "gold"
+                elif sr >= thresholds["silver_sr"] and qs >= thresholds["silver_qs"]:
+                    base_tier = "silver"
+                elif sr >= thresholds["bronze_sr"] and qs >= thresholds["bronze_qs"]:
+                    base_tier = "bronze"
+                else:
+                    base_tier = "rejected"
+
+                if metrics["verification_passed"] and base_tier != "gold":
+                    tier = {"silver": "gold", "bronze": "silver", "rejected": "bronze"}.get(
+                        base_tier, base_tier
                     )
-                    break  # One pair per gold trace
+                else:
+                    tier = base_tier
+
+                tier_dirs = {
+                    "gold": data_dir / "gold_traces",
+                    "silver": data_dir / "silver_traces",
+                    "bronze": data_dir / "bronze_traces",
+                    "rejected": data_dir / "failed_traces",
+                }
+                target_dir = tier_dirs.get(tier, data_dir / "failed_traces")
+
+            if not dry_run and auto_promote and target_dir:
+                target_dir.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(trace_file), str(target_dir / f"{trace_id}.json"))
+                if hasattr(app_state, "trace_cache"):
+                    app_state.trace_cache.invalidate(trace_id)
+
+            return tier, trace_info
+        except Exception as e:
+            logger.debug(f"Error processing {trace_file}: {e}")
+            return "pending", None
+
+    def _classify_traces_sync(
+        app,
+        files,
+        data_dir,
+        gold_sr,
+        gold_qs,
+        silver_sr,
+        silver_qs,
+        bronze_sr,
+        bronze_qs,
+        dry_run,
+        auto_promote,
+    ):
+        """Synchronous classification for small batches (< 200 traces)."""
+        thresholds = {
+            "gold_sr": gold_sr,
+            "gold_qs": gold_qs,
+            "silver_sr": silver_sr,
+            "silver_qs": silver_qs,
+            "bronze_sr": bronze_sr,
+            "bronze_qs": bronze_qs,
+        }
+
+        classifications = {
+            "gold": [],
+            "silver": [],
+            "bronze": [],
+            "rejected": [],
+            "failed": [],
+            "pending": [],
+        }
+        detailed = {"gold": [], "silver": [], "bronze": [], "rejected": []}
+
+        for f in files:
+            tier, info = _classify_single_trace(
+                f, data_dir, thresholds, dry_run, auto_promote, app.state
+            )
+            classifications[tier].append(f.stem)
+            if info and tier in detailed:
+                detailed[tier].append(info)
 
         return {
             "classifications": classifications,
-            "detailed": detailed_classifications,
+            "detailed": detailed,
             "dry_run": dry_run,
-            "thresholds": {
-                "gold": {"success_rate": gold_success_rate, "quality_score": gold_quality_score},
-                "silver": {
-                    "success_rate": silver_success_rate,
-                    "quality_score": silver_quality_score,
-                },
-                "bronze": {
-                    "success_rate": bronze_success_rate,
-                    "quality_score": bronze_quality_score,
-                },
-            },
             "auto_promote": auto_promote,
-            "summary": {
-                "gold": len(classifications["gold"]),
-                "silver": len(classifications["silver"]),
-                "bronze": len(classifications["bronze"]),
-                "rejected": len(classifications["rejected"]),
-                "failed": len(classifications["failed"]),
-                "pending": len(classifications["pending"]),
-                "total_processed": len(seen_files),
-            },
-            "dpo_pairs": dpo_pairs,
-            "dpo_pairs_count": len(dpo_pairs),
+            "summary": {t: len(ids) for t, ids in classifications.items()}
+            | {"total_processed": len(files)},
+            "dpo_pairs_count": min(len(detailed["gold"]), len(detailed["bronze"])),
             "training_recommendations": {
                 "sft_eligible": len(classifications["gold"]) + len(classifications["silver"]),
                 "dpo_chosen_pool": len(classifications["gold"]) + len(classifications["silver"]),
                 "dpo_rejected_pool": len(classifications["bronze"]),
-                "note": "Gold+Silver traces are suitable for SFT. Use Gold as DPO 'chosen', Bronze as DPO 'rejected'.",
             },
         }
+
+    async def _classify_traces_batch(
+        app,
+        files,
+        data_dir,
+        job_state,
+        gold_sr,
+        gold_qs,
+        silver_sr,
+        silver_qs,
+        bronze_sr,
+        bronze_qs,
+        dry_run,
+        auto_promote,
+    ):
+        """Background classification for large batches with progress streaming."""
+        import asyncio
+
+        thresholds = {
+            "gold_sr": gold_sr,
+            "gold_qs": gold_qs,
+            "silver_sr": silver_sr,
+            "silver_qs": silver_qs,
+            "bronze_sr": bronze_sr,
+            "bronze_qs": bronze_qs,
+        }
+
+        classifications = {
+            "gold": [],
+            "silver": [],
+            "bronze": [],
+            "rejected": [],
+            "failed": [],
+            "pending": [],
+        }
+        detailed = {"gold": [], "silver": [], "bronze": [], "rejected": []}
+        loop = asyncio.get_event_loop()
+
+        batch_size = 50
+        for i in range(0, len(files), batch_size):
+            batch = files[i : i + batch_size]
+
+            # Process batch in thread pool to avoid blocking event loop
+            results = await loop.run_in_executor(
+                None,
+                lambda b=batch: [
+                    _classify_single_trace(
+                        f, data_dir, thresholds, dry_run, auto_promote, app.state
+                    )
+                    for f in b
+                ],
+            )
+
+            for (tier, info), f in zip(results, batch):
+                classifications[tier].append(f.stem)
+                if info and tier in detailed:
+                    detailed[tier].append(info)
+
+            job_state["processed"] = min(i + batch_size, len(files))
+            job_state["classifications"] = {t: len(ids) for t, ids in classifications.items()}
+
+            # Broadcast progress via WebSocket
+            try:
+                from bashgym.api.websocket import WSMessage, manager
+
+                msg = WSMessage(
+                    type="classify:progress",
+                    data={
+                        "job_id": job_state["job_id"],
+                        "processed": job_state["processed"],
+                        "total": job_state["total"],
+                        "percent": round(
+                            job_state["processed"] / max(job_state["total"], 1) * 100, 1
+                        ),
+                        "classifications": job_state["classifications"],
+                    },
+                )
+                await manager.broadcast(msg)
+            except Exception:
+                pass  # WebSocket broadcast is best-effort
+
+        # Build final result
+        result = {
+            "classifications": classifications,
+            "detailed": detailed,
+            "dry_run": dry_run,
+            "auto_promote": auto_promote,
+            "summary": {t: len(ids) for t, ids in classifications.items()}
+            | {"total_processed": len(files)},
+            "dpo_pairs_count": min(len(detailed["gold"]), len(detailed["bronze"])),
+            "training_recommendations": {
+                "sft_eligible": len(classifications["gold"]) + len(classifications["silver"]),
+                "dpo_chosen_pool": len(classifications["gold"]) + len(classifications["silver"]),
+                "dpo_rejected_pool": len(classifications["bronze"]),
+            },
+        }
+
+        job_state["status"] = "completed"
+        job_state["result"] = result
+
+        # Broadcast completion
+        try:
+            from bashgym.api.websocket import WSMessage, manager
+
+            msg = WSMessage(type="classify:completed", data=result["summary"])
+            await manager.broadcast(msg)
+        except Exception:
+            pass
 
     # =========================================================================
     # Router Endpoints

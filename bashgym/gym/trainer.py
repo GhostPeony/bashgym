@@ -2452,7 +2452,7 @@ if __name__ == "__main__":
         lora_dropout={self.config.lora_dropout},
         target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
         bias="none",
-        use_gradient_checkpointing="unsloth",
+        use_gradient_checkpointing=True,
         random_state=42,
     )
     model.print_trainable_parameters()

@@ -105,7 +105,12 @@ class TestTrainingTrigger:
         assert current - trigger._last_gold_count >= trigger.config.gold_trace_threshold
 
     def test_check_and_train_catches_errors(self):
-        """check_and_train returns None on import/training errors (doesn't crash)."""
+        """check_and_train returns None on import/training errors (doesn't crash).
+
+        We make the ExampleGenerator import raise ImportError to avoid loading
+        the entire transformers/unsloth stack (~2.5GB) during unit tests.
+        This verifies the error handling path without the memory cost.
+        """
         gold_dir, _ = _create_gold_dir(15)
         config = TrainingTriggerConfig(
             enabled=True,
@@ -117,10 +122,14 @@ class TestTrainingTrigger:
         trigger._last_gold_count = 5
         trigger._last_loss = 3.0
 
-        # check_and_train will try to import Trainer which may or may not exist
-        # in test env — it should catch the error and return None
-        result = trigger.check_and_train()
-        assert result is None or isinstance(result, float)
+        # Block the heavy import so it raises ImportError instead of loading 2.5GB
+        import sys
+        fake_module = type(sys)("bashgym.factory.example_generator")
+        fake_module.ExampleGenerator = None  # will cause AttributeError when used
+        with patch.dict(sys.modules, {"bashgym.factory.example_generator": fake_module}):
+            result = trigger.check_and_train()
+        # Should catch the error and return None
+        assert result is None
 
 
 class TestPromptEvolverTrainingTrigger:

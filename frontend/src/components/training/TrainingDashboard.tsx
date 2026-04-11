@@ -16,7 +16,10 @@ import {
   Cloud,
   ExternalLink,
   Zap,
-  ChevronRight
+  ChevronRight,
+  Gauge,
+  ScrollText,
+  Package
 } from 'lucide-react'
 import { useTrainingStore, useUIStore } from '../../stores'
 import { trainingApi, tracesApi, hfApi, RepoInfo, SystemInfo, ModelRecommendations } from '../../services/api'
@@ -26,12 +29,18 @@ import { MetricsGrid } from './MetricsGrid'
 import { TrainingConfig } from './TrainingConfig'
 import { SystemInfoPanel } from './SystemInfoPanel'
 import { TrainingLogs } from './TrainingLogs'
+import { GrpoMetricsPanel } from './GrpoMetricsPanel'
+import { TrainingLogViewer } from './TrainingLogViewer'
+import { CheckpointBrowser } from './CheckpointBrowser'
 import { clsx } from 'clsx'
+
+type TrainingTab = 'dashboard' | 'logs' | 'checkpoints'
 
 export function TrainingDashboard() {
   const { currentRun, lossHistory, startTraining, pauseTraining, resumeTraining, stopTraining, updateMetrics } =
     useTrainingStore()
   const { openOverlay } = useUIStore()
+  const [activeTab, setActiveTab] = useState<TrainingTab>('dashboard')
   const [showConfig, setShowConfig] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [availableRepos, setAvailableRepos] = useState<RepoInfo[]>([])
@@ -209,7 +218,34 @@ export function TrainingDashboard() {
 
       <div className="section-divider mb-6" />
 
+      {/* Tabs */}
+      <div className="flex gap-1 mb-6 overflow-x-auto">
+        {[
+          { id: 'dashboard' as TrainingTab, label: 'Dashboard', icon: Gauge },
+          { id: 'logs' as TrainingTab, label: 'Logs', icon: ScrollText },
+          { id: 'checkpoints' as TrainingTab, label: 'Checkpoints', icon: Package },
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={clsx(
+              'flex items-center gap-2 px-4 py-2 text-sm font-mono font-semibold tracking-wide uppercase transition-all whitespace-nowrap border-brutal rounded-brutal',
+              activeTab === tab.id
+                ? 'bg-accent-light text-accent-dark border-border shadow-brutal-sm'
+                : 'bg-transparent text-text-secondary border-transparent hover:text-text-primary hover:border-border hover:bg-background-secondary'
+            )}
+          >
+            <tab.icon className="w-4 h-4" />
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'logs' && <TrainingLogViewer />}
+      {activeTab === 'checkpoints' && <CheckpointBrowser />}
+
       {/* Main Grid */}
+      {activeTab === 'dashboard' && (
       <div className="grid grid-cols-12 gap-4">
         {/* Loss Curve - Main Chart */}
         <div className="col-span-8 card p-4">
@@ -258,6 +294,11 @@ export function TrainingDashboard() {
             eta={metrics?.eta}
             isWaiting={!isRunning && !isPaused}
           />
+        </div>
+
+        {/* GRPO per-step metrics (only renders when grpoMetrics.length > 0) */}
+        <div className="col-span-12">
+          <GrpoMetricsPanel />
         </div>
 
         {/* Training Logs */}
@@ -559,6 +600,7 @@ export function TrainingDashboard() {
           </button>
         </div>
       </div>
+      )}
 
       </div>
       {/* Training Config Modal */}

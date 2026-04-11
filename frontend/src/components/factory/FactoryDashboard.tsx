@@ -24,6 +24,7 @@ import {
 import { SyntheticGenerator, SyntheticGeneratorState } from './SyntheticGenerator'
 import { SeedsPanel } from './SeedsPanel'
 import { SettingsPanel } from './SettingsPanel'
+import { DataDesignerTab } from './DataDesignerTab'
 import { useTutorialComplete } from '../../hooks'
 import { clsx } from 'clsx'
 import {
@@ -353,6 +354,7 @@ export function FactoryDashboard() {
         <div className="flex gap-1 mt-6 overflow-x-auto">
           {[
             { id: 'create' as TabId, label: 'Create', icon: Wand2 },
+            { id: 'designer' as TabId, label: 'Data Designer', icon: Sparkles },
             { id: 'seeds' as TabId, label: 'Seeds', icon: Layers, badge: config.seeds.length > 0 ? config.seeds.length : undefined },
             { id: 'settings' as TabId, label: 'Settings', icon: Settings },
             { id: 'jobs' as TabId, label: 'Jobs', icon: RefreshCw, badge: jobs.filter(j => j.status === 'running').length + syntheticJobs.filter(j => j.status === 'running').length || undefined },
@@ -881,6 +883,9 @@ export function FactoryDashboard() {
             </div>
           </div>
         )}
+
+        {/* Data Designer Tab */}
+        {activeTab === 'designer' && <DataDesignerTab />}
 
         {/* Seeds Tab */}
         {activeTab === 'seeds' && (

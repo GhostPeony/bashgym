@@ -431,3 +431,44 @@ When done, append:
 - Repo: `/home/ponyo/bashgym`
 - Branch: `feat/training-strategies-device-mgmt` at `d4b8442`
 - Recent uncommitted work (from today): `bashgym/gym/trainer.py`, `bashgym/gym/cascade_scheduler.py`, `bashgym/api/cascade_routes.py`. Commit these to `feat/training-strategies-device-mgmt` before branching so all three workstreams start from the same base.
+
+---
+
+## Workstream 1: COMPLETED 2026-04-10
+
+- **Commits**:
+  - `ee1c1dc` (base) — GRPO hardening + cascade preflight + datasets package (pre-existing uncommitted work committed per briefing)
+  - `d842a04` — multi-strategy dispatch + SFT/DPO loop hardening
+- **Branch**: `ws1-cascade-multi-strategy` (off `feat/training-strategies-device-mgmt`)
+- **Files touched**:
+  - `bashgym/gym/trainer.py` — `_parse_trl_stats` module-level, SFT/DPO loops rewritten to mirror GRPO (persistent `training.log`, TRL stats, EARLY_STOPPED sentinel), `train_dpo` signature gains `log_callback`/`pid_callback`, generated SFT/DPO scripts gain `LossPlateauStop`/`DegenerateAccuracyStop` TrainerCallbacks
+  - `bashgym/gym/cascade_scheduler.py` — `CascadeStage.strategy`, `CascadeConfig.stage_strategies`, strategy-aware `_run_stage`/`_filter_dataset`, `_strategy_dataset_mismatch`, `_find_stage_checkpoint` prefers `merged/` over `final/`
+  - `bashgym/api/cascade_routes.py` — `CascadeStartRequest.stage_strategies`, start response echoes resolved strategies
+  - `tests/gym/test_cascade_scheduler.py` — 17 new tests (strategy assignment, preflight dispatch, checkpoint chaining)
+
+- **How to run an SFT→DPO cascade**:
+  ```bash
+  curl -X POST http://localhost:8003/api/cascade/start \
+    -H 'Content-Type: application/json' \
+    -d '{
+      "domains": ["file_operations", "bash_commands"],
+      "stage_strategies": ["sft", "dpo"],
+      "base_model": "unsloth/gemma-4-E4B-it",
+      "dataset_path": "/home/ponyo/.bashgym/gold_traces_local",
+      "train_steps_per_stage": 20,
+      "mode": "real"
+    }'
+  ```
+  DPO stage requires pre-paired `chosen`/`rejected` examples — generate via `bashgym.factory.dpo_pairer.pair_failures_for_dpo()` first. The strategy-aware preflight will refuse the run with a clear error message if the dataset can't support the stage.
+
+- **Known limitations**:
+  - DPO preflight now requires chosen/rejected per-example but does **not** auto-pair from gold+failed — user must run the pairer upstream. Adding `pair_failures_for_dpo()` integration to `_filter_dataset` was out of scope for this workstream (touches the factory layer).
+  - `LossPlateauStop` for SFT uses fixed thresholds (`min_step=10, patience=5, min_delta=1e-4`). Not config-driven yet.
+  - `DegenerateAccuracyStop` threshold 0.52 is a heuristic informed by [TRL issue #2194](https://github.com/huggingface/trl/issues/2194) — may need tuning based on real DPO run telemetry.
+  - The 3 pre-existing `TestCascadeRun` / `TestFilterDataset::test_filters_by_domain` failures in `tests/gym/test_cascade_scheduler.py` are **not** caused by this workstream (present in `ee1c1dc`, the base commit). Test data needs to be updated to match the new trace-conversion flow — out of scope.
+
+- **Handoff to Workstream 3 (frontend)**:
+  - The new `stage_strategies: list[str]` field on `CascadeStartRequest` needs a UI control in `TrainingConfig.tsx` — a list of stage slots, each with a dropdown `[SFT | DPO | GRPO]`.
+  - `scheduler.get_status()` now includes `stage.strategy` in each stage dict — surface the badge in the stage list.
+  - The `cascade:stage-log` WebSocket payload now carries a `strategy` field alongside `stage`, `domain`, and `line` — useful for per-strategy metric chart selection.
+  - Error messages from `_strategy_dataset_mismatch` are intentionally verbose and actionable — render them verbatim in the preflight error banner (don't truncate).

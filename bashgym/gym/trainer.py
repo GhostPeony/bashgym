@@ -1004,10 +1004,10 @@ Run ID: {run.run_id}
 Generated: {datetime.now(timezone.utc).isoformat()}
 """
 
-from unsloth import FastLanguageModel
+from unsloth import FastLanguageModel, is_bfloat16_supported
 from datasets import load_dataset
-from trl import SFTTrainer
-from transformers import TrainingArguments, EarlyStoppingCallback, TrainerCallback
+from trl import SFTTrainer, SFTConfig
+from transformers import EarlyStoppingCallback, TrainerCallback, ProcessorMixin
 import os
 import torch
 
@@ -1094,35 +1094,49 @@ def _sanitize_messages(messages):
         sanitized.append(m)
     return sanitized
 
-def formatting_prompts_func(examples):
-    """Format examples using the tokenizer's chat template.
+def _make_formatting_prompts_func(fmt_tokenizer):
+    """Build a formatter closed over the RAW tokenizer (already unwrapped
+    from any ProcessorMixin). Returns a function suitable for Dataset.map.
 
-    This handles all model-specific formatting (Qwen, Llama, Mistral, etc.),
-    None content in tool_call messages, and special tokens automatically.
+    Mirrors Unsloth Studio's chat_templates._format_chatml:
+    - applies the tokenizer's chat template
+    - strips a leading <bos> token (SFTTrainer injects its own)
+    - appends eos_token so the model learns where assistant turns end
     """
-    convos = examples["messages"]
-    texts = []
-    for convo in convos:
-        try:
-            clean = _sanitize_messages(convo)
-            text = tokenizer.apply_chat_template(
-                clean, tokenize=False, add_generation_prompt=False
-            )
-            texts.append(text)
-        except Exception:
-            # Fallback: strip tool_calls entirely and retry
-            fallback = [
-                {{"role": m.get("role", "user"), "content": m.get("content", "") or ""}}
-                for m in convo if m.get("role") in ("system", "user", "assistant")
-            ]
+    eos = fmt_tokenizer.eos_token or ""
+
+    def formatting_prompts_func(examples):
+        convos = examples["messages"]
+        texts = []
+        for convo in convos:
             try:
-                text = tokenizer.apply_chat_template(
-                    fallback, tokenize=False, add_generation_prompt=False
+                clean = _sanitize_messages(convo)
+                text = fmt_tokenizer.apply_chat_template(
+                    clean, tokenize=False, add_generation_prompt=False
                 )
-                texts.append(text)
             except Exception:
-                texts.append("")
-    return {{"text": texts}}
+                # Fallback: strip tool_calls entirely and retry
+                fallback = [
+                    {{"role": m.get("role", "user"), "content": m.get("content", "") or ""}}
+                    for m in convo if m.get("role") in ("system", "user", "assistant")
+                ]
+                try:
+                    text = fmt_tokenizer.apply_chat_template(
+                        fallback, tokenize=False, add_generation_prompt=False
+                    )
+                except Exception:
+                    texts.append("")
+                    continue
+            # Strip any leading <bos> so SFTTrainer's BOS injection doesn't double up
+            if text.startswith("<bos>"):
+                text = text.removeprefix("<bos>")
+            # Append EOS so the model learns sequence termination
+            if eos and not text.endswith(eos):
+                text = text + eos
+            texts.append(text)
+        return {{"text": texts}}
+
+    return formatting_prompts_func
 
 if __name__ == "__main__":
     import gc
@@ -1137,9 +1151,11 @@ if __name__ == "__main__":
         print(f"GPU: {{torch.cuda.get_device_name(0)}}")
         print(f"Available VRAM: {{torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f}} GB")
 
-    # Model configuration
+    # Model configuration. dtype=None lets Unsloth auto-detect the model's
+    # native precision (Gemma 4 is bf16-native — hardcoding float16 causes
+    # numerical instability and an absurdly high starting loss).
     max_seq_length = {self.config.max_seq_length}
-    dtype = torch.float16
+    dtype = None
     load_in_4bit = {self.config.load_in_4bit}
 
     # Load model with Unsloth optimizations
@@ -1150,6 +1166,19 @@ if __name__ == "__main__":
         dtype=dtype,
         load_in_4bit=load_in_4bit,
     )
+
+    # Unwrap ProcessorMixin → raw tokenizer for text-only SFT.
+    # Gemma 3/4 from_pretrained returns a ProcessorMixin (vision-language
+    # wrapper) even for text. If you pass that directly to SFTTrainer, Unsloth
+    # detects the Processor, sets _is_vlm=True, and SKIPS _prepare_dataset(),
+    # meaning the 'text' column never gets tokenized to 'input_ids'. The model
+    # then trains on garbage (loss ≈ ln(vocab_size) ≈ 12.5 on step 1).
+    # Mirror of Unsloth Studio's fix in backend/core/training/trainer.py:3205.
+    if isinstance(tokenizer, ProcessorMixin) and hasattr(tokenizer, "tokenizer"):
+        print("Unwrapping ProcessorMixin -> raw tokenizer for text-only SFT")
+        sft_tokenizer = tokenizer.tokenizer
+    else:
+        sft_tokenizer = tokenizer
 
     # Add LoRA adapters
     print("Adding LoRA adapters...")
@@ -1176,8 +1205,13 @@ if __name__ == "__main__":
         val_dataset = load_dataset("json", data_files=val_dataset_path, split="train")
         print(f"Validation set: {{len(val_dataset)}} examples")
 
-    # Training arguments
-    training_args = TrainingArguments(
+    # Training arguments — use SFTConfig directly (NOT TrainingArguments).
+    # Unsloth's SFTTrainer wrapper has a broken version check that only strips
+    # push_to_hub_token from the dict args on transformers<5.0.0, so passing a
+    # TrainingArguments on transformers>=5.0 fails with TypeError. SFTConfig(...)
+    # sidesteps the conversion path entirely. Also: bf16 when supported (Gemma 4
+    # is bf16-native on Blackwell), fall back to fp16 only on older cards.
+    training_args = SFTConfig(
         output_dir="{output_path}",
         per_device_train_batch_size={self.config.batch_size},
         gradient_accumulation_steps={self.config.gradient_accumulation_steps},
@@ -1185,12 +1219,16 @@ if __name__ == "__main__":
         num_train_epochs={self.config.num_epochs},
         max_steps={self.config.max_steps},
         learning_rate={self.config.learning_rate},
-        fp16=True,
+        fp16=not is_bfloat16_supported(),
+        bf16=is_bfloat16_supported(),
         logging_steps={self.config.logging_steps},
         save_steps={self.config.save_steps},
         save_total_limit=3,
         optim="adamw_8bit",
         seed=42,
+        report_to="none",
+        dataset_text_field="text",
+        max_seq_length=max_seq_length,
         # Eval settings (active when val_dataset is available)
         eval_strategy="{self.config.eval_strategy}" if val_dataset is not None else "no",
         eval_steps={self.config.eval_steps} if val_dataset is not None else None,
@@ -1199,7 +1237,10 @@ if __name__ == "__main__":
         greater_is_better=False if val_dataset is not None else None,
     )
 
-    # Apply chat template to dataset (handles all model formats + None content)
+    # Apply chat template to dataset using the UNWRAPPED tokenizer so the
+    # chat template, BOS handling, and EOS appending all match what SFTTrainer
+    # will see at tokenization time.
+    formatting_prompts_func = _make_formatting_prompts_func(sft_tokenizer)
     dataset = dataset.map(formatting_prompts_func, batched=True)
 
     # Apply formatting to val dataset too
@@ -1216,15 +1257,14 @@ if __name__ == "__main__":
     # the stage instead of silently claiming success.
     callbacks.append(LossPlateauStop(output_dir="{output_path}"))
 
-    # Initialize trainer
+    # Initialize trainer with the UNWRAPPED tokenizer (critical for Gemma 4 —
+    # see unwrap comment above). dataset_text_field and max_seq_length now
+    # live on SFTConfig so they're omitted here.
     trainer = SFTTrainer(
         model=model,
-        tokenizer=tokenizer,
+        processing_class=sft_tokenizer,
         train_dataset=dataset,
         eval_dataset=val_dataset,
-        dataset_text_field="text",
-        max_seq_length=max_seq_length,
-        dataset_num_proc=1,  # Required on Windows (avoids multiprocessing crash)
         args=training_args,
         callbacks=callbacks if callbacks else None,
     )

@@ -42,6 +42,63 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def _parse_trl_stats(text: str) -> dict[str, float] | None:
+    """Extract all numeric key-value pairs from a TRL-printed dict line.
+
+    TRL's ProgressCallback formats values with f"{v:.4g}", which drops
+    precision and can emit 'nan'/'inf'. We require at least one known
+    TRL metric key so we don't match random dict-like strings in user
+    output. Tries ast.literal_eval first (most accurate), falls back to
+    regex on the :.4g form.
+
+    Shared by SFT, DPO, and GRPO subprocess loops.
+    """
+    if "{" not in text or "}" not in text:
+        return None
+    markers = (
+        # GRPO
+        "'reward'", "'train_loss'", "'train_runtime'",
+        "'frac_reward_zero_std'", "'kl'",
+        # SFT / DPO / all
+        "'loss'", "'grad_norm'", "'learning_rate'", "'epoch'",
+        # DPO-specific
+        "'rewards/chosen'", "'rewards/rejected'",
+        "'rewards/accuracies'", "'rewards/margins'",
+        "'logps/chosen'", "'logps/rejected'",
+    )
+    if not any(m in text for m in markers):
+        return None
+    try:
+        import ast as _ast
+        start = text.index("{")
+        end = text.rindex("}") + 1
+        parsed_raw = _ast.literal_eval(text[start:end])
+        if isinstance(parsed_raw, dict):
+            out: dict[str, float] = {}
+            for k, v in parsed_raw.items():
+                if not isinstance(k, str):
+                    continue
+                try:
+                    out[k] = float(v)
+                except (TypeError, ValueError):
+                    continue
+            if out:
+                return out
+    except (ValueError, SyntaxError):
+        pass
+    pairs = re.findall(
+        r"'([A-Za-z_][A-Za-z0-9_/]*)'\s*:\s*'?(-?(?:\d+\.?\d*(?:[eE][+-]?\d+)?|nan|inf))'?",
+        text,
+    )
+    out = {}
+    for k, v in pairs:
+        try:
+            out[k] = float(v)
+        except ValueError:
+            continue
+    return out or None
+
+
 class TrainingStrategy(Enum):
     """Training strategies available."""
 
@@ -707,6 +764,8 @@ class Trainer:
         val_dataset_path: Path | None = None,
         run_id: str | None = None,
         callback: Callable[[dict[str, Any]], None] | None = None,
+        log_callback: Callable[[str], None] | None = None,
+        pid_callback: Callable[[int, "TrainingRun"], None] | None = None,
         training_metadata: dict[str, Any] | None = None,
     ) -> TrainingRun:
         """
@@ -717,6 +776,8 @@ class Trainer:
             val_dataset_path: Optional path to validation JSONL data
             run_id: Optional run identifier
             callback: Optional callback for progress updates
+            log_callback: Optional callback for raw log lines (used by cascade)
+            pid_callback: Optional callback when the subprocess PID is known
 
         Returns:
             TrainingRun with results
@@ -739,7 +800,7 @@ class Trainer:
             run.training_metadata = training_metadata
 
         try:
-            self._train_with_unsloth_dpo(run, callback)
+            self._train_with_unsloth_dpo(run, callback, log_callback, pid_callback)
             run.status = "completed"
             run.completed_at = datetime.now(timezone.utc).isoformat()
 
@@ -763,15 +824,11 @@ class Trainer:
         """
         Train using Unsloth for fast LoRA fine-tuning.
 
-        Generates and executes a training script.
-
-        Args:
-            run: TrainingRun object with configuration
-            callback: Optional callback for training metrics
-            log_callback: Optional callback for raw log lines
+        Generates and executes a training script. Mirrors the GRPO loop's
+        shape: persistent `training.log`, TRL-stats dict parsing (shared
+        `_parse_trl_stats`), and an `EARLY_STOPPED` sentinel check for
+        loss-not-decreasing plateau.
         """
-        import re
-
         # Generate training script
         script_content = self._generate_unsloth_sft_script(run)
         script_path = run.output_path / "train_sft.py"
@@ -779,7 +836,6 @@ class Trainer:
         script_path.write_text(script_content)
 
         # Execute training
-        # Get Python with CUDA support for training
         python_exe = self._get_training_python()
         logger.info(f"Starting SFT training run: {run.run_id}")
         logger.info(f"Dataset: {run.dataset_path}")
@@ -787,7 +843,10 @@ class Trainer:
         logger.info(f"Script: {script_path}")
         logger.info(f"Python: {python_exe}")
 
-        # Actually execute the training script
+        log_file_path = run.output_path / "training.log"
+        log_file = open(log_file_path, "w", buffering=1, encoding="utf-8")
+        logger.info(f"SFT training log: {log_file_path}")
+
         try:
             process = subprocess.Popen(
                 [python_exe, str(script_path)],
@@ -795,146 +854,141 @@ class Trainer:
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
-                cwd=str(Path.cwd()),  # Run from project root
+                cwd=str(Path.cwd()),
             )
 
-            # Store PID for process control (suspend/resume/reconnect)
             run.pid = process.pid
             logger.info(f"Training subprocess started with PID {process.pid}")
 
-            # Notify caller of PID (used to persist state to disk immediately)
             if pid_callback:
                 try:
                     pid_callback(process.pid, run)
                 except Exception as e:
                     logger.warning(f"pid_callback error: {e}")
 
-            last_loss = None
-            last_epoch = 0
+            stats: dict[str, float] = {}
+            final_summary: dict[str, float] = {}
             last_step = 0
-            last_grad_norm = None
-            last_eval_loss = None
+            estimated_total_steps = self.config.max_steps or 1000
             samples_processed = 0
             start_time = datetime.now(timezone.utc)
 
-            # Estimate total steps (will be refined from training output)
-            # HuggingFace estimates: total_steps = (dataset_size / batch_size) * num_epochs
-            estimated_total_steps = 1000  # Default, will update from training output
-
-            # Stream output and parse metrics
             for line in process.stdout:
+                line = line.rstrip("\n")
+                try:
+                    log_file.write(line + "\n")
+                except Exception as e:
+                    logger.warning(f"Log file write error: {e}")
                 line = line.strip()
-                if line:
-                    logger.info(f"[Training] {line}")
+                if not line:
+                    continue
 
-                    # Send raw log line to callback
-                    if log_callback:
-                        try:
-                            log_callback(line)
-                        except Exception as e:
-                            logger.warning(f"Log callback error: {e}")
+                logger.info(f"[SFT Training] {line}")
 
-                    # Parse metrics from training output (HuggingFace format)
-                    # Example: {'loss': 1.234, 'grad_norm': 0.5, 'learning_rate': 2e-05, 'epoch': 1.0}
-                    loss_match = re.search(r"'loss':\s*([\d.]+)", line)
-                    epoch_match = re.search(r"'epoch':\s*([\d.]+)", line)
-                    step_match = re.search(r"'step':\s*(\d+)", line)
-                    grad_norm_match = re.search(r"'grad_norm':\s*([\d.]+)", line)
-                    eval_loss_match = re.search(r"'eval_loss':\s*([\d.]+)", line)
-                    total_steps_match = re.search(
-                        r"total[_\s]?steps[=:\s]+(\d+)", line, re.IGNORECASE
+                if log_callback:
+                    try:
+                        log_callback(line)
+                    except Exception as e:
+                        logger.warning(f"Log callback error: {e}")
+
+                # Tqdm progress bar → step count
+                progress_match = re.search(r"(\d+)%\|[^|]*\|\s*(\d+)/(\d+)", line)
+                if progress_match:
+                    last_step = int(progress_match.group(2))
+                    estimated_total_steps = int(progress_match.group(3))
+                    samples_processed = last_step * self.config.batch_size
+
+                # Unsloth header: "Total steps = 12"
+                unsloth_steps_match = re.search(r"Total steps\s*=\s*(\d+)", line)
+                if unsloth_steps_match:
+                    estimated_total_steps = int(unsloth_steps_match.group(1))
+
+                parsed = _parse_trl_stats(line)
+                if parsed is not None:
+                    if "train_runtime" in parsed or "train_loss" in parsed:
+                        final_summary.update(parsed)
+                    else:
+                        stats.update(parsed)
+
+                    if "epoch" in parsed and last_step == 0:
+                        last_step = max(1, int(parsed.get("epoch", 0) * estimated_total_steps))
+
+                # ETA
+                eta = None
+                if last_step > 0 and estimated_total_steps > 0:
+                    elapsed_s = (datetime.now(timezone.utc) - start_time).total_seconds()
+                    steps_remaining = estimated_total_steps - last_step
+                    if steps_remaining > 0 and last_step > 0:
+                        time_per_step = elapsed_s / last_step
+                        eta_s = steps_remaining * time_per_step
+                        eta = (
+                            f"{int(eta_s)}s" if eta_s < 60
+                            else f"{int(eta_s / 60)}m" if eta_s < 3600
+                            else f"{int(eta_s / 3600)}h {int((eta_s % 3600) / 60)}m"
+                        )
+
+                if callback and (progress_match or parsed):
+                    callback(
+                        {
+                            "epoch": int(stats.get("epoch", 0)),
+                            "total_epochs": self.config.num_epochs,
+                            "step": last_step,
+                            "total_steps": estimated_total_steps,
+                            "loss": stats.get("loss"),
+                            "learning_rate": stats.get("learning_rate") or self.config.learning_rate,
+                            "grad_norm": stats.get("grad_norm"),
+                            "eval_loss": stats.get("eval_loss"),
+                            "eta": eta,
+                            "samples_processed": samples_processed,
+                        }
                     )
 
-                    # Also parse tqdm progress bar: "8%|8 | 1/12 [00:07<01:26, 7.90s/it]"
-                    progress_match = re.search(r"(\d+)%\|[^|]*\|\s*(\d+)/(\d+)", line)
+                # Track loss curve for model profile
+                if parsed and "loss" in parsed and last_step > 0:
+                    run.add_loss_point(
+                        step=last_step,
+                        loss=parsed["loss"],
+                        epoch=int(parsed.get("epoch", 0)),
+                        learning_rate=parsed.get("learning_rate") or self.config.learning_rate,
+                    )
 
-                    # Parse Unsloth header for total steps: "Total steps = 12"
-                    unsloth_steps_match = re.search(r"Total steps\s*=\s*(\d+)", line)
-
-                    if loss_match:
-                        last_loss = float(loss_match.group(1))
-                    if epoch_match:
-                        last_epoch = int(float(epoch_match.group(1)))
-                    if step_match:
-                        last_step = int(step_match.group(1))
-                        samples_processed = last_step * self.config.batch_size
-                    if grad_norm_match:
-                        last_grad_norm = float(grad_norm_match.group(1))
-                    if eval_loss_match:
-                        last_eval_loss = float(eval_loss_match.group(1))
-                    if total_steps_match:
-                        estimated_total_steps = int(total_steps_match.group(1))
-                    if unsloth_steps_match:
-                        estimated_total_steps = int(unsloth_steps_match.group(1))
-                    if progress_match:
-                        last_step = int(progress_match.group(2))
-                        estimated_total_steps = int(progress_match.group(3))
-                        samples_processed = last_step * self.config.batch_size
-
-                    # Calculate ETA based on progress
-                    eta = None
-                    if last_step > 0 and estimated_total_steps > 0:
-                        elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
-                        steps_remaining = estimated_total_steps - last_step
-                        if steps_remaining > 0:
-                            time_per_step = elapsed / last_step
-                            eta_seconds = steps_remaining * time_per_step
-                            if eta_seconds < 60:
-                                eta = f"{int(eta_seconds)}s"
-                            elif eta_seconds < 3600:
-                                eta = f"{int(eta_seconds / 60)}m"
-                            else:
-                                eta = (
-                                    f"{int(eta_seconds / 3600)}h {int((eta_seconds % 3600) / 60)}m"
-                                )
-
-                    # Send progress callback with all metrics
-                    # Send updates on step changes OR loss updates
-                    if callback and (progress_match or loss_match or eval_loss_match):
-                        callback(
-                            {
-                                "epoch": last_epoch,
-                                "total_epochs": self.config.num_epochs,
-                                "step": last_step,
-                                "total_steps": estimated_total_steps,
-                                "loss": last_loss,  # May be None initially
-                                "learning_rate": self.config.learning_rate,
-                                "grad_norm": last_grad_norm,
-                                "eval_loss": last_eval_loss,
-                                "eta": eta,
-                                "samples_processed": samples_processed,
-                            }
-                        )
-
-                    # Track loss curve for model profile
-                    if loss_match and last_loss is not None and last_step > 0:
-                        run.add_loss_point(
-                            step=last_step,
-                            loss=last_loss,
-                            epoch=last_epoch,
-                            learning_rate=self.config.learning_rate,
-                        )
-
-            # Wait for process to complete
             return_code = process.wait()
+
+            # Same early-stop convention as GRPO: script writes EARLY_STOPPED
+            # sentinel when the in-script callback fires on a loss plateau.
+            early_stop_file = run.output_path / "EARLY_STOPPED"
+            if early_stop_file.exists():
+                reason = early_stop_file.read_text().strip()
+                raise RuntimeError(
+                    f"SFT training stopped early by platform safety check: {reason}"
+                )
 
             if return_code != 0:
                 raise RuntimeError(f"Training script exited with code {return_code}")
 
+            combined = {**stats, **final_summary}
             run.metrics = {
-                "final_loss": last_loss or 0.0,
+                "final_loss": combined.get("train_loss", combined.get("loss", 0.0)),
                 "epochs_completed": self.config.num_epochs,
                 "samples_processed": samples_processed,
-                "eval_loss": last_eval_loss,
+                "eval_loss": combined.get("eval_loss"),
+                "final_grad_norm": combined.get("grad_norm"),
+                "train_runtime_s": combined.get("train_runtime"),
+                "steps_completed": last_step,
             }
 
-            logger.info(f"Training completed. Model saved to: {run.output_path}")
+            logger.info(f"SFT training completed. Model saved to: {run.output_path}")
 
         except FileNotFoundError as e:
             raise RuntimeError(f"Python interpreter not found: {e}")
         except Exception as e:
-            logger.error(f"Training failed: {e}")
+            logger.error(f"SFT training failed: {e}")
             raise
+        finally:
+            try:
+                log_file.close()
+            except Exception:
+                pass
 
     def _generate_unsloth_sft_script(self, run: TrainingRun) -> str:
         """Generate Unsloth SFT training script."""
@@ -953,8 +1007,58 @@ Generated: {datetime.now(timezone.utc).isoformat()}
 from unsloth import FastLanguageModel
 from datasets import load_dataset
 from trl import SFTTrainer
-from transformers import TrainingArguments, EarlyStoppingCallback
+from transformers import TrainingArguments, EarlyStoppingCallback, TrainerCallback
+import os
 import torch
+
+
+class LossPlateauStop(TrainerCallback):
+    """Write an EARLY_STOPPED sentinel when train loss stops decreasing.
+
+    Mirrors the DegenerateRewardStop callback in GRPO scripts: activates
+    after `min_step`, tracks the best train loss, and stops training if
+    it fails to improve by `min_delta` for `patience` consecutive log
+    events. The subprocess loop reader checks for the sentinel file and
+    surfaces it as a platform safety-check failure.
+    """
+
+    def __init__(self, output_dir, min_step=10, patience=5, min_delta=1e-4):
+        self.output_dir = output_dir
+        self.min_step = min_step
+        self.patience = patience
+        self.min_delta = min_delta
+        self.best = float("inf")
+        self.bad = 0
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        if logs is None or state.global_step < self.min_step:
+            return control
+        loss = logs.get("loss")
+        if loss is None:
+            return control
+        try:
+            loss = float(loss)
+        except (TypeError, ValueError):
+            return control
+        if loss != loss:  # NaN
+            return control
+        if loss < self.best - self.min_delta:
+            self.best = loss
+            self.bad = 0
+        else:
+            self.bad += 1
+        if self.bad >= self.patience:
+            try:
+                with open(os.path.join(self.output_dir, "EARLY_STOPPED"), "w") as f:
+                    f.write(
+                        f"loss plateau at step {{state.global_step}}: "
+                        f"best={{self.best:.6f}}, no improvement for "
+                        f"{{self.patience}} consecutive logs"
+                    )
+            except Exception as e:
+                print(f"[LossPlateauStop] failed to write sentinel: {{e}}")
+            control.should_training_stop = True
+        return control
 
 def _sanitize_messages(messages):
     """Sanitize messages for chat template compatibility.
@@ -1107,6 +1211,11 @@ if __name__ == "__main__":
     if val_dataset is not None and {self.config.early_stopping_patience} > 0:
         callbacks.append(EarlyStoppingCallback(early_stopping_patience={self.config.early_stopping_patience}))
 
+    # Platform safety: degenerate loss check (always on). Writes EARLY_STOPPED
+    # sentinel if train loss fails to decrease, so the parent cascade can fail
+    # the stage instead of silently claiming success.
+    callbacks.append(LossPlateauStop(output_dir="{output_path}"))
+
     # Initialize trainer
     trainer = SFTTrainer(
         model=model,
@@ -1153,18 +1262,23 @@ if __name__ == "__main__":
 '''
 
     def _train_with_unsloth_dpo(
-        self, run: TrainingRun, callback: Callable[[dict[str, Any]], None] | None = None
+        self,
+        run: TrainingRun,
+        callback: Callable[[dict[str, Any]], None] | None = None,
+        log_callback: Callable[[str], None] | None = None,
+        pid_callback: Callable[[int, "TrainingRun"], None] | None = None,
     ) -> None:
-        """Train using Unsloth with DPO."""
-        import re
+        """Train using Unsloth with DPO.
 
-        # Generate DPO training script
+        Mirrors GRPO/SFT loop shape: persistent `training.log`, shared
+        `_parse_trl_stats`, `EARLY_STOPPED` sentinel check for
+        `rewards/accuracies` collapse.
+        """
         script_content = self._generate_unsloth_dpo_script(run)
         script_path = run.output_path / "train_dpo.py"
         run.output_path.mkdir(parents=True, exist_ok=True)
         script_path.write_text(script_content)
 
-        # Get Python with CUDA support for training
         python_exe = self._get_training_python()
         logger.info(f"Starting DPO training run: {run.run_id}")
         logger.info(f"Dataset: {run.dataset_path}")
@@ -1172,7 +1286,10 @@ if __name__ == "__main__":
         logger.info(f"Script: {script_path}")
         logger.info(f"Python: {python_exe}")
 
-        # Actually execute the training script
+        log_file_path = run.output_path / "training.log"
+        log_file = open(log_file_path, "w", buffering=1, encoding="utf-8")
+        logger.info(f"DPO training log: {log_file_path}")
+
         try:
             process = subprocess.Popen(
                 [python_exe, str(script_path)],
@@ -1183,57 +1300,135 @@ if __name__ == "__main__":
                 cwd=str(Path.cwd()),
             )
 
-            last_loss = None
-            last_epoch = 0
-            reward_margin = 0.0
-            last_eval_loss = None
+            run.pid = process.pid
+            logger.info(f"DPO subprocess started with PID {process.pid}")
+
+            if pid_callback:
+                try:
+                    pid_callback(process.pid, run)
+                except Exception as e:
+                    logger.warning(f"pid_callback error: {e}")
+
+            stats: dict[str, float] = {}
+            final_summary: dict[str, float] = {}
+            last_step = 0
+            estimated_total_steps = self.config.max_steps or 1000
+            samples_processed = 0
+            start_time = datetime.now(timezone.utc)
 
             for line in process.stdout:
+                line = line.rstrip("\n")
+                try:
+                    log_file.write(line + "\n")
+                except Exception as e:
+                    logger.warning(f"Log file write error: {e}")
                 line = line.strip()
-                if line:
-                    logger.info(f"[DPO Training] {line}")
+                if not line:
+                    continue
 
-                    loss_match = re.search(r"'loss':\s*([\d.]+)", line)
-                    epoch_match = re.search(r"'epoch':\s*([\d.]+)", line)
-                    reward_match = re.search(r"'rewards/margins':\s*([\d.]+)", line)
-                    eval_loss_match = re.search(r"'eval_loss':\s*([\d.]+)", line)
+                logger.info(f"[DPO Training] {line}")
 
-                    if loss_match:
-                        last_loss = float(loss_match.group(1))
-                    if epoch_match:
-                        last_epoch = int(float(epoch_match.group(1)))
-                    if reward_match:
-                        reward_margin = float(reward_match.group(1))
-                    if eval_loss_match:
-                        last_eval_loss = float(eval_loss_match.group(1))
+                if log_callback:
+                    try:
+                        log_callback(line)
+                    except Exception as e:
+                        logger.warning(f"Log callback error: {e}")
 
-                    if callback and (last_loss is not None or eval_loss_match):
-                        callback(
-                            {
-                                "epoch": last_epoch,
-                                "total_epochs": self.config.num_epochs,
-                                "loss": last_loss,
-                                "reward_margin": reward_margin,
-                                "eval_loss": last_eval_loss,
-                            }
+                progress_match = re.search(r"(\d+)%\|[^|]*\|\s*(\d+)/(\d+)", line)
+                if progress_match:
+                    last_step = int(progress_match.group(2))
+                    estimated_total_steps = int(progress_match.group(3))
+                    samples_processed = last_step * self.config.batch_size
+
+                parsed = _parse_trl_stats(line)
+                if parsed is not None:
+                    if "train_runtime" in parsed or "train_loss" in parsed:
+                        final_summary.update(parsed)
+                    else:
+                        stats.update(parsed)
+
+                    if "epoch" in parsed and last_step == 0:
+                        last_step = max(1, int(parsed.get("epoch", 0) * estimated_total_steps))
+
+                eta = None
+                if last_step > 0 and estimated_total_steps > 0:
+                    elapsed_s = (datetime.now(timezone.utc) - start_time).total_seconds()
+                    steps_remaining = estimated_total_steps - last_step
+                    if steps_remaining > 0 and last_step > 0:
+                        time_per_step = elapsed_s / last_step
+                        eta_s = steps_remaining * time_per_step
+                        eta = (
+                            f"{int(eta_s)}s" if eta_s < 60
+                            else f"{int(eta_s / 60)}m" if eta_s < 3600
+                            else f"{int(eta_s / 3600)}h {int((eta_s % 3600) / 60)}m"
                         )
 
+                if callback and (progress_match or parsed):
+                    callback(
+                        {
+                            "epoch": int(stats.get("epoch", 0)),
+                            "total_epochs": self.config.num_epochs,
+                            "step": last_step,
+                            "total_steps": estimated_total_steps,
+                            "loss": stats.get("loss"),
+                            "learning_rate": stats.get("learning_rate") or self.config.learning_rate,
+                            "grad_norm": stats.get("grad_norm"),
+                            "eval_loss": stats.get("eval_loss"),
+                            "reward_margin": stats.get("rewards/margins"),
+                            "rewards_chosen": stats.get("rewards/chosen"),
+                            "rewards_rejected": stats.get("rewards/rejected"),
+                            "rewards_accuracies": stats.get("rewards/accuracies"),
+                            "eta": eta,
+                            "samples_processed": samples_processed,
+                        }
+                    )
+
+                if parsed and "loss" in parsed and last_step > 0:
+                    run.add_loss_point(
+                        step=last_step,
+                        loss=parsed["loss"],
+                        epoch=int(parsed.get("epoch", 0)),
+                        learning_rate=parsed.get("learning_rate") or self.config.learning_rate,
+                    )
+
             return_code = process.wait()
+
+            early_stop_file = run.output_path / "EARLY_STOPPED"
+            if early_stop_file.exists():
+                reason = early_stop_file.read_text().strip()
+                raise RuntimeError(
+                    f"DPO training stopped early by platform safety check: {reason}"
+                )
+
             if return_code != 0:
                 raise RuntimeError(f"DPO training script exited with code {return_code}")
 
+            combined = {**stats, **final_summary}
             run.metrics = {
-                "final_loss": last_loss or 0.0,
-                "final_reward_margin": reward_margin,
+                "final_loss": combined.get("train_loss", combined.get("loss", 0.0)),
+                "final_reward_margin": combined.get("rewards/margins"),
+                "final_rewards_chosen": combined.get("rewards/chosen"),
+                "final_rewards_rejected": combined.get("rewards/rejected"),
+                "final_rewards_accuracies": combined.get("rewards/accuracies"),
                 "epochs_completed": self.config.num_epochs,
-                "eval_loss": last_eval_loss,
+                "eval_loss": combined.get("eval_loss"),
+                "train_runtime_s": combined.get("train_runtime"),
+                "steps_completed": last_step,
+                "samples_processed": samples_processed,
             }
 
             logger.info(f"DPO training completed. Model saved to: {run.output_path}")
 
+        except FileNotFoundError as e:
+            raise RuntimeError(f"Python interpreter not found: {e}")
         except Exception as e:
             logger.error(f"DPO training failed: {e}")
             raise
+        finally:
+            try:
+                log_file.close()
+            except Exception:
+                pass
 
     def train_distillation(
         self,
@@ -1626,8 +1821,58 @@ Generated: {datetime.now(timezone.utc).isoformat()}
 from unsloth import FastLanguageModel
 from datasets import load_dataset
 from trl import DPOTrainer, DPOConfig
+from transformers import TrainerCallback
 import os
 import torch
+
+
+class DegenerateAccuracyStop(TrainerCallback):
+    """Write an EARLY_STOPPED sentinel when rewards/accuracies collapses.
+
+    DPO with a dataset the model can't distinguish chosen from rejected
+    on leaves rewards/accuracies stuck at ~0.5 (random). If we see that
+    after `min_step`, the run is burning compute for no gradient signal.
+    Threshold 0.52 is a small tolerance above random — informed by the
+    TRL GitHub issue #2194 where users report the 0.5 stuck state.
+    """
+
+    def __init__(self, output_dir, min_step=10, patience=3, threshold=0.52):
+        self.output_dir = output_dir
+        self.min_step = min_step
+        self.patience = patience
+        self.threshold = threshold
+        self.bad = 0
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        if logs is None or state.global_step < self.min_step:
+            return control
+        acc = logs.get("rewards/accuracies")
+        if acc is None:
+            return control
+        try:
+            acc = float(acc)
+        except (TypeError, ValueError):
+            return control
+        if acc != acc:  # NaN
+            return control
+        if acc <= self.threshold:
+            self.bad += 1
+        else:
+            self.bad = 0
+        if self.bad >= self.patience:
+            try:
+                with open(os.path.join(self.output_dir, "EARLY_STOPPED"), "w") as f:
+                    f.write(
+                        f"rewards/accuracies={{acc:.4f}} <= {{self.threshold}} "
+                        f"for {{self.patience}} consecutive logs at step "
+                        f"{{state.global_step}} — DPO is not distinguishing "
+                        f"chosen from rejected. Check dataset pair quality."
+                    )
+            except Exception as e:
+                print(f"[DegenerateAccuracyStop] failed to write sentinel: {{e}}")
+            control.should_training_stop = True
+        return control
+
 
 # Model configuration
 max_seq_length = {self.config.max_seq_length}
@@ -1689,6 +1934,7 @@ trainer = DPOTrainer(
     train_dataset=dataset,
     eval_dataset=val_dataset,
     args=dpo_config,
+    callbacks=[DegenerateAccuracyStop(output_dir="{output_path}")],
 )
 
 # Train
@@ -2206,54 +2452,6 @@ class GRPOTrainer(Trainer):
             last_step = 0
             estimated_total_steps = self.config.max_steps or 1000
             start_time = datetime.now(timezone.utc)
-
-            def _parse_trl_stats(text: str) -> dict[str, float] | None:
-                """Extract all numeric key-value pairs from a TRL-printed dict line.
-
-                TRL's ProgressCallback formats values with f"{v:.4g}", which
-                drops precision and can emit 'nan'/'inf' — so we also handle
-                those. We require at least one known TRL metric key to avoid
-                matching random dict-like strings in user output.
-                """
-                if "{" not in text or "}" not in text:
-                    return None
-                markers = (
-                    "'loss'", "'reward'", "'train_loss'", "'train_runtime'",
-                    "'frac_reward_zero_std'", "'grad_norm'", "'kl'",
-                )
-                if not any(m in text for m in markers):
-                    return None
-                # Try strict ast.literal_eval first (most accurate when TRL
-                # emits unquoted floats); fall back to regex on the :.4g form.
-                try:
-                    import ast as _ast
-                    start = text.index("{")
-                    end = text.rindex("}") + 1
-                    parsed_raw = _ast.literal_eval(text[start:end])
-                    if isinstance(parsed_raw, dict):
-                        out: dict[str, float] = {}
-                        for k, v in parsed_raw.items():
-                            if not isinstance(k, str):
-                                continue
-                            try:
-                                out[k] = float(v)
-                            except (TypeError, ValueError):
-                                continue
-                        if out:
-                            return out
-                except (ValueError, SyntaxError):
-                    pass
-                pairs = re.findall(
-                    r"'([A-Za-z_][A-Za-z0-9_/]*)'\s*:\s*'?(-?(?:\d+\.?\d*(?:[eE][+-]?\d+)?|nan|inf))'?",
-                    text,
-                )
-                out = {}
-                for k, v in pairs:
-                    try:
-                        out[k] = float(v)
-                    except ValueError:
-                        continue
-                return out or None
 
             for line in process.stdout:
                 line = line.rstrip("\n")

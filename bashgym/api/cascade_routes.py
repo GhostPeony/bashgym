@@ -70,6 +70,13 @@ class CascadeStartRequest(BaseModel):
         "'verification'). Empty preserves per-domain defaults from DOMAIN_TAXONOMY or "
         "build_repo_domains (which hardcodes 'verification' for repo_* domains).",
     )
+    stage_strategies: list[str] = Field(
+        default_factory=list,
+        description="Training strategy per stage, in order. Must match "
+        "len(domains) when provided. Each entry is one of 'sft', 'dpo', "
+        "'grpo'. Empty list defaults to all-GRPO, preserving the original "
+        "cascade behavior. Example: ['sft', 'dpo', 'grpo'].",
+    )
 
 
 class MOPDStartRequest(BaseModel):
@@ -125,6 +132,7 @@ async def start_cascade(request: Request, body: CascadeStartRequest):
         min_domain_examples=body.min_domain_examples,
         repo_domains_enabled=body.repo_domains_enabled,
         repo_domains_dir=body.repo_domains_dir,
+        stage_strategies=body.stage_strategies,
     )
 
     scheduler = CascadeScheduler(config)
@@ -189,6 +197,7 @@ async def start_cascade(request: Request, body: CascadeStartRequest):
         "status": "started",
         "domains": body.domains,
         "stages": len(body.domains),
+        "stage_strategies": [s.strategy for s in scheduler.stages],
         "mode": body.mode,
     }
 

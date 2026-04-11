@@ -11,12 +11,16 @@ from bashgym.research.contracts import (
     FRESHNESS_STALE_DAYS,
     PERMISSIVE_LICENSES,
     POPULARITY_SATURATION_DOWNLOADS,
+    PREFERENCE_COLS,
+    PROMPT_LIKE_COLS,
+    RESPONSE_LIKE_COLS,
     SCHEMA_PATTERNS,
     SIZE_IDEAL_MAX,
     SIZE_IDEAL_MIN,
     SIZE_MAX_HARD,
     SIZE_MIN_HARD,
     TASK_TAGS,
+    TEST_LIKE_COLS,
     WARN_LICENSES,
     WEIGHTS,
 )
@@ -126,19 +130,44 @@ def _score_popularity(downloads: int) -> tuple[float, str]:
     return frac, f"popularity: {downloads:,} downloads"
 
 
-def _infer_format(features: dict[str, str]) -> str | None:
+def _infer_format(features: dict[str, str]) -> tuple[str | None, bool]:
+    """Infer bashgym format from feature column names.
+
+    Returns (format_name, is_exact_match). Exact matches come from
+    SCHEMA_PATTERNS and score full schema credit; heuristic matches
+    (prompt-like + response-like columns) score partial credit.
+    """
     cols = frozenset(features.keys())
     for required, format_name in SCHEMA_PATTERNS:
         if required.issubset(cols):
-            return format_name
-    return None
+            return format_name, True
+
+    # Heuristic fallback — look for semantic column pairs.
+    has_prompt_like = bool(cols & PROMPT_LIKE_COLS)
+    has_response_like = bool(cols & RESPONSE_LIKE_COLS)
+    has_test_like = bool(cols & TEST_LIKE_COLS)
+    has_preference = PREFERENCE_COLS.issubset(cols)
+
+    if has_prompt_like and has_preference:
+        return "dpo", False
+    if has_prompt_like and has_test_like:
+        return "grpo", False
+    if has_prompt_like and has_response_like:
+        return "sft", False
+    return None, False
 
 
-def _score_schema(features: dict[str, str], bashgym_format: str | None) -> tuple[float, str]:
+def _score_schema(
+    features: dict[str, str],
+    bashgym_format: str | None,
+    exact_match: bool,
+) -> tuple[float, str]:
     if bashgym_format is None:
         visible = sorted(features.keys())[:6]
         return 0.0, f"schema: no match (cols={visible})"
-    return 1.0, f"schema: maps to {bashgym_format.upper()}"
+    if exact_match:
+        return 1.0, f"schema: maps to {bashgym_format.upper()} (exact)"
+    return 0.6, f"schema: maps to {bashgym_format.upper()} (heuristic)"
 
 
 def _build_download_command(meta: DatasetMetadata, bashgym_format: str | None) -> str:
@@ -208,8 +237,8 @@ def score_dataset(meta: DatasetMetadata) -> ScoredDataset:
     fresh_score, fresh_reason = _score_freshness(meta.last_modified)
     pop_score, pop_reason = _score_popularity(meta.downloads)
 
-    bashgym_format = _infer_format(meta.features)
-    schema_score, schema_reason = _score_schema(meta.features, bashgym_format)
+    bashgym_format, format_exact = _infer_format(meta.features)
+    schema_score, schema_reason = _score_schema(meta.features, bashgym_format, format_exact)
 
     raw = (
         task_score * WEIGHTS["task_match"]

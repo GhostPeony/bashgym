@@ -136,6 +136,68 @@ class TestSchemaInference:
         assert result.bashgym_format is None
 
 
+class TestHeuristicFormatInference:
+    """Fallback schema detection via PROMPT_LIKE_COLS + RESPONSE_LIKE_COLS."""
+
+    def test_mbpp_text_plus_code_maps_to_grpo(self):
+        """mbpp has text (prompt) + code (response) + test_list → GRPO-compatible."""
+        meta = _fresh_meta(features={"task_id": "string", "text": "string", "code": "string", "test_list": "list"})
+        result = score_dataset(meta)
+        assert result.bashgym_format == "grpo"
+        # Heuristic matches get lower schema credit than exact matches.
+        assert any("heuristic" in r.lower() for r in result.reasons)
+
+    def test_simple_text_plus_code_maps_to_sft(self):
+        """Without tests, text+code is a plain SFT pair."""
+        meta = _fresh_meta(features={"text": "string", "code": "string"})
+        result = score_dataset(meta)
+        assert result.bashgym_format == "sft"
+        assert any("heuristic" in r.lower() for r in result.reasons)
+
+    def test_swe_bench_problem_statement_plus_patch_maps_to_sft(self):
+        meta = _fresh_meta(features={
+            "instance_id": "string",
+            "problem_statement": "string",
+            "patch": "string",
+            "FAIL_TO_PASS": "list",
+        })
+        result = score_dataset(meta)
+        # problem_statement (prompt-like) + patch (response-like) + FAIL_TO_PASS (test-like)
+        # → GRPO takes priority over SFT via the has_test_like branch
+        assert result.bashgym_format == "grpo"
+
+    def test_humaneval_pro_raw_problem_raw_solution(self):
+        meta = _fresh_meta(features={
+            "id": "string",
+            "raw_problem": "string",
+            "raw_solution": "string",
+            "test_code": "string",
+        })
+        result = score_dataset(meta)
+        # raw_problem + test_code → grpo
+        assert result.bashgym_format == "grpo"
+
+    def test_exact_schema_beats_heuristic(self):
+        """When exact and heuristic patterns both match, exact wins."""
+        meta = _fresh_meta(features={"prompt": "string", "completion": "string", "text": "string", "code": "string"})
+        result = score_dataset(meta)
+        assert result.bashgym_format == "sft"
+        # Should be exact match (full schema credit), not heuristic.
+        assert any("exact" in r.lower() for r in result.reasons)
+
+    def test_prompt_only_does_not_match(self):
+        """Single prompt-like column without a response-like column should not match."""
+        meta = _fresh_meta(features={"text": "string"})
+        result = score_dataset(meta)
+        assert result.bashgym_format is None
+
+    def test_response_only_does_not_match(self):
+        """Single response-like column without a prompt-like column should not match."""
+        meta = _fresh_meta(features={"code": "string"})
+        result = score_dataset(meta)
+        assert result.bashgym_format is None
+
+
 class TestOverallScoreBounds:
     def test_score_in_0_to_10_range(self):
         meta = _fresh_meta()

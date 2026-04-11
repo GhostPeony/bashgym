@@ -77,6 +77,7 @@ POPULARITY_SATURATION_DOWNLOADS = 10_000
 
 # Schema-to-format mapping. Evaluated in order — first match wins.
 # Each entry: (required_column_names, bashgym_format_name).
+# These are high-confidence matches — exact column names used by bashgym contracts.
 SCHEMA_PATTERNS: list[tuple[frozenset[str], str]] = [
     (frozenset(["messages"]), "sft"),
     (frozenset(["prompt", "chosen", "rejected"]), "dpo"),
@@ -89,15 +90,78 @@ SCHEMA_PATTERNS: list[tuple[frozenset[str], str]] = [
     (frozenset(["question", "answer"]), "sft"),
 ]
 
+# Heuristic fallback: if no exact SCHEMA_PATTERNS match, look for any column
+# that looks prompt-like + any column that looks response-like. Lower confidence
+# than SCHEMA_PATTERNS, but catches idiomatic dataset layouts (mbpp's text+code,
+# SWE-bench's problem_statement+patch, humaneval-pro's raw_problem+raw_solution).
+PROMPT_LIKE_COLS: frozenset[str] = frozenset([
+    "prompt",
+    "instruction",
+    "input",
+    "question",
+    "task",
+    "text",
+    "problem",
+    "problem_statement",
+    "query",
+    "raw_problem",
+    "new_problem",
+    "source",
+    "context",
+])
+
+RESPONSE_LIKE_COLS: frozenset[str] = frozenset([
+    "completion",
+    "response",
+    "output",
+    "answer",
+    "code",
+    "solution",
+    "patch",
+    "raw_solution",
+    "new_solution",
+    "target",
+    "label",
+])
+
+# Columns that indicate a GRPO-compatible test/verification column.
+TEST_LIKE_COLS: frozenset[str] = frozenset([
+    "tests",
+    "test_cases",
+    "test_list",
+    "test_code",
+    "FAIL_TO_PASS",
+    "PASS_TO_PASS",
+])
+
+# Columns that indicate a DPO-compatible preference structure.
+PREFERENCE_COLS: frozenset[str] = frozenset(["chosen", "rejected"])
+
 # Column mapping hints for download_command generation.
 # hf_col -> DataDesigner seed column name.
 COLUMN_MAP_HINTS: dict[str, str] = {
+    # Prompt-like → seed_task
     "instruction": "seed_task",
     "input": "seed_context",
     "prompt": "seed_task",
     "question": "seed_task",
+    "task": "seed_task",
+    "text": "seed_task",
+    "problem": "seed_task",
+    "problem_statement": "seed_task",
+    "query": "seed_task",
+    "raw_problem": "seed_task",
+    "new_problem": "seed_task",
+    "context": "seed_context",
+    # Response-like → seed_response
     "output": "seed_response",
     "response": "seed_response",
     "completion": "seed_response",
     "answer": "seed_response",
+    "code": "seed_response",
+    "solution": "seed_response",
+    "patch": "seed_response",
+    "raw_solution": "seed_response",
+    "new_solution": "seed_response",
+    "target": "seed_response",
 }

@@ -472,3 +472,62 @@ When done, append:
   - `scheduler.get_status()` now includes `stage.strategy` in each stage dict — surface the badge in the stage list.
   - The `cascade:stage-log` WebSocket payload now carries a `strategy` field alongside `stage`, `domain`, and `line` — useful for per-strategy metric chart selection.
   - Error messages from `_strategy_dataset_mismatch` are intentionally verbose and actionable — render them verbatim in the preflight error banner (don't truncate).
+
+---
+
+## Workstream 2: COMPLETED 2026-04-10
+
+- **Branch**: `ws2-hf-research` (off `ws1-cascade-multi-strategy` at commit `e97d0de` — W1's completion marker. W1 was already merged-in at that point, so W2 stacks on W1.)
+- **Script location**: `bashgym/research/hf_dataset_scanner.py`
+- **CLI usage**:
+  ```bash
+  python -m bashgym.research.hf_dataset_scanner                   # full scan, uses cache
+  python -m bashgym.research.hf_dataset_scanner --limit 50        # cap results per query
+  python -m bashgym.research.hf_dataset_scanner --no-cache        # force re-enrichment
+  python -m bashgym.research.hf_dataset_scanner --max-candidates 100
+  ```
+- **Output paths**:
+  - Report: `~/.bashgym/research/hf_datasets_report.md`
+  - Cache: `~/.bashgym/research/hf_datasets_cache.json` (keyed by repo_id; `--no-cache` to bypass)
+
+- **Module layout**:
+  - `bashgym/research/contracts.py` — scoring weights, thresholds, license policy, schema patterns, column-mapping hints. Tuning constants live here, not in scoring.py.
+  - `bashgym/research/scoring.py` — pure `score_dataset(DatasetMetadata) -> ScoredDataset`. Hard filters + 6 weighted dimensions (task match, license, size, schema, freshness, popularity) + format inference + download-command string builder. Fully unit-tested with mocked inputs, no network calls.
+  - `bashgym/research/hf_client.py` — thin `HFResearchClient` wrapper over `huggingface_hub.HfApi`. Verified against `huggingface_hub` 1.8.0 on 2026-04-10 — see the module docstring for the attribute-access quirks (`card_data.dataset_info` is a dict, `DatasetCardData` is a dataclass not a bare dict, license sometimes lives in `tags` as `license:xxx`).
+  - `bashgym/research/report.py` — pure markdown renderer (header + top-20 summary table + per-dataset details + grouped rejected section).
+  - `bashgym/research/hf_dataset_scanner.py` — argparse CLI that orchestrates discover → cache-check → enrich → score → render → write.
+
+- **Tests**: `tests/research/test_scoring.py` (22 tests), `tests/research/test_report.py` (6 tests). 28/28 passing. No network. Run with `venv/bin/python -m pytest tests/research/ -v`.
+
+- **Top 3 recommended datasets from first smoke run** (2026-04-10, `--limit 15 --max-candidates 60`):
+  1. `SWE-bench/SWE-smith-trajectories` — **score 9.24**, SFT, 76k rows, MIT, updated 2025-07-19. Trajectories from the SWE-smith repo fixing dataset — directly relevant for bash/code-agent training.
+  2. `JackYoung27/humaneval-s0-train` — score 8.14, SFT, 48 rows, MIT, updated 2026-04-08. Tiny but very fresh; useful as an eval set or a bootstrap seed, not a main training corpus.
+  3. `SWE-bench/SWE-smith` — score 7.99, 59k rows, MIT, updated 2025-12-14. Raw SWE-smith issues (companion to the trajectories above). Format not auto-detected — would need a column mapping pass before ingestion.
+
+- **Known limitations**:
+  - **`num_rows` and `features` extraction depends on `card_data.dataset_info` being populated** in the dataset card. Many community uploads omit this — they fall through to `num_rows=None`, `features={}`, which gives them a neutral 0.3 size score and `bashgym_format=None`. The scorer still ranks them on other dimensions but the download command will have an empty `column_mapping`. Consider the absent-format datasets as "worth a closer look," not "definitely usable."
+  - **The discovery query list is tuned for code/tool-use keywords only** (`bashgym/research/hf_client.py::SEARCH_QUERIES`). Change those constants if you want to probe other domains (e.g. DevOps, sysadmin, ML training logs).
+  - **Scheduled re-runs not implemented.** The WORKSTREAMS task 6 "optional" step to diff against a previous report and notify on new high-scoring entries is deferred — use the `schedule` skill or a systemd timer separately when needed.
+  - **No LLM-based scoring** — per the plan, scoring is deterministic rule-based for repeatability and auditability. Reviewing the "rejected" section manually is still recommended after the first run to sanity-check the filters.
+  - **`description` field is truncated to 500 chars** on enrichment to keep the cache small.
+  - **License fallback uses `tags` only when `card.license` is missing.** If both are missing the dataset is hard-rejected as "unknown license" per the WORKSTREAMS briefing — this is deliberate.
+
+- **Handoff to Workstream 1**: Consider ingesting **`SWE-bench/SWE-smith-trajectories`** via `DataDesignerPipeline.from_dataset(source='SWE-bench/SWE-smith-trajectories', split='train')` as augmentation for the next SFT stage — the format already maps to bashgym SFT (has `messages` column).
+
+- **Handoff to Workstream 3**: The report path `~/.bashgym/research/hf_datasets_report.md` should be linked from a frontend "Data Sources" panel. Two natural UIs:
+  - A button next to the cascade config that opens the report in a modal.
+  - A background endpoint `GET /api/research/latest-report` that reads and returns the file (no need to re-run the scanner from the frontend — it's a CLI tool, running it on demand would block the request for 30-120 seconds).
+
+- **Commits on this branch** (all prefixed `feat(research):`, `test(research):`, `chore(research):`, or `docs(research):`):
+  - `feat(research): add bashgym.research package skeleton`
+  - `feat(research): add scoring contracts — weights, license policy, size windows, schema patterns`
+  - `test(research): add hard-filter test cases for score_dataset`
+  - `feat(research): implement hard filters in score_dataset`
+  - `test(research): add weighted dimension, schema inference, and download command tests`
+  - `feat(research): implement weighted scoring, schema inference, download command builder`
+  - `feat(research): add HFResearchClient wrapper for discovery + enrichment`
+  - `test(research): add render_report unit tests`
+  - `feat(research): add markdown report renderer`
+  - `feat(research): add hf_dataset_scanner CLI entrypoint`
+  - `chore(research): pin huggingface_hub>=0.19.0 for dataset scanner`
+  - `docs(research): mark Workstream 2 complete`

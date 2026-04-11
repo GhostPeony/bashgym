@@ -34,7 +34,7 @@ class CascadeStartRequest(BaseModel):
             "search_and_navigate",
             "multi_step_reasoning",
         ],
-        description="Ordered list of domains to train",
+        description="Ordered list of domains to train (ignored when repo_domains_enabled=True)",
     )
     base_model: str = Field("Qwen/Qwen2.5-Coder-1.5B-Instruct", description="Base model")
     dataset_path: str = Field("data/gold_traces", description="Path to training data")
@@ -49,6 +49,27 @@ class CascadeStartRequest(BaseModel):
     mode: str = Field("simulate", description="'simulate' or 'real'")
     early_stopping_patience: int = Field(3, ge=0, le=10)
     min_domain_examples: int = Field(10, ge=1, le=1000)
+    repo_domains_enabled: bool = Field(
+        False,
+        description="If true, auto-build one domain per repo from the gold traces "
+        "directory. Overrides 'domains'.",
+    )
+    repo_domains_dir: str = Field(
+        "",
+        description="Directory of gold traces to scan for repo domains. "
+        "Empty uses dataset_path.",
+    )
+    repo_domains_filter: list[str] = Field(
+        default_factory=list,
+        description="If non-empty, only run repo domains whose name is in this list "
+        "(e.g. ['repo_ghostwork']). Requires repo_domains_enabled=True.",
+    )
+    grpo_reward_mode: str = Field(
+        "",
+        description="Override the reward mode for every stage ('syntax', 'execution', "
+        "'verification'). Empty preserves per-domain defaults from DOMAIN_TAXONOMY or "
+        "build_repo_domains (which hardcodes 'verification' for repo_* domains).",
+    )
 
 
 class MOPDStartRequest(BaseModel):
@@ -102,9 +123,30 @@ async def start_cascade(request: Request, body: CascadeStartRequest):
         mode=body.mode,
         early_stopping_patience=body.early_stopping_patience,
         min_domain_examples=body.min_domain_examples,
+        repo_domains_enabled=body.repo_domains_enabled,
+        repo_domains_dir=body.repo_domains_dir,
     )
 
     scheduler = CascadeScheduler(config)
+
+    # If caller passed a repo_domains_filter, trim stages down to just those.
+    # This lets you train a single repo (e.g. 'repo_ghostwork') via the API.
+    if body.repo_domains_enabled and body.repo_domains_filter:
+        wanted = set(body.repo_domains_filter)
+        scheduler.stages = [s for s in scheduler.stages if s.domain.name in wanted]
+        if not scheduler.stages:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"repo_domains_filter={body.repo_domains_filter} matched no "
+                    f"auto-discovered repo domains. Check that the traces under "
+                    f"{body.repo_domains_dir or body.dataset_path} have primary_repo "
+                    f"metadata and meet min_domain_examples={body.min_domain_examples}."
+                ),
+            )
+        # Renumber the remaining stages so progress reporting is sane
+        for i, stage in enumerate(scheduler.stages):
+            stage.stage_number = i + 1
     request.app.state.cascade_scheduler = scheduler
 
     # Broadcast via WebSocket

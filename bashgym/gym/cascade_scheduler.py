@@ -15,7 +15,7 @@ import asyncio
 import json
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -190,6 +190,65 @@ def build_repo_domains(
         logger.info("[Cascade] Repo domain '%s': %d traces", domain_key, count)
 
     return domains
+
+
+# =========================================================================
+# Preflight: reward ↔ dataset compatibility
+# =========================================================================
+
+
+def _reward_dataset_mismatch(reward_mode: str, example: dict[str, Any]) -> str | None:
+    """Return a human-readable mismatch reason, or None if the pairing is OK.
+
+    We look at one GRPO example and decide whether the configured reward
+    function has any chance of producing a non-degenerate signal on data of
+    this shape. Called from `_filter_dataset` before any training starts.
+    """
+    keys = list(example.keys())
+
+    if reward_mode == "verification":
+        # verification_reward in the generated script needs `tests` per example
+        # (either top-level or inside metadata). Without it, the reward function
+        # returns 0.5 for every parseable completion → zero variance → no gradient.
+        has_tests = "tests" in example or (
+            isinstance(example.get("metadata"), dict)
+            and "tests" in example["metadata"]
+        )
+        if not has_tests:
+            return (
+                f"reward_mode='verification' requires a 'tests' field on each "
+                f"example (per-example pytest code), but this dataset has keys "
+                f"{keys} and no 'tests' key. Without tests, the reward function "
+                f"falls back to a constant 0.5 for every parseable completion, "
+                f"producing zero reward variance across GRPO groups and "
+                f"therefore zero gradient signal — the model cannot learn."
+            )
+        return None
+
+    if reward_mode == "execution":
+        # execution_reward runs `python -c <completion>` and scores on exit code.
+        # It works on any dataset shape as long as completions are expected to
+        # be Python. No per-example contract to validate here beyond "has prompt".
+        if "prompt" not in example:
+            return (
+                f"reward_mode='execution' needs a 'prompt' field on each example, "
+                f"but this one has keys {keys}."
+            )
+        return None
+
+    if reward_mode == "syntax":
+        # syntax_reward ast.parses the completion as Python. Works on any prompt
+        # that encourages a Python code output. No per-example validation.
+        if "prompt" not in example:
+            return (
+                f"reward_mode='syntax' needs a 'prompt' field on each example, "
+                f"but this one has keys {keys}."
+            )
+        return None
+
+    # Unknown reward modes are passed through — the generated script will raise
+    # KeyError on REWARD_FN lookup, which is a clearer error at script time.
+    return None
 
 
 # =========================================================================
@@ -485,7 +544,7 @@ class CascadeScheduler:
                     if self.config.mode == "simulate":
                         metrics = await self._simulate_stage(stage)
                     else:
-                        metrics = await self._run_stage(stage, filtered_path)
+                        metrics = await self._run_stage(stage, filtered_path, callback)
 
                     stage.metrics = metrics
                     stage.status = "completed"
@@ -542,8 +601,18 @@ class CascadeScheduler:
             status=self.status,
         )
 
-    async def _run_stage(self, stage: CascadeStage, dataset_path: Path) -> dict[str, Any]:
-        """Run a single GRPO stage for a domain."""
+    async def _run_stage(
+        self,
+        stage: CascadeStage,
+        dataset_path: Path,
+        callback: Callable[[str, Any], Awaitable[None]] | None = None,
+    ) -> dict[str, Any]:
+        """Run a single GRPO stage for a domain.
+
+        Streams raw training log lines through `callback("stage-log", {...})`
+        so cascade API consumers see the same output they'd see running the
+        script directly.
+        """
         from bashgym.gym.trainer import GRPOTrainer, TrainerConfig, TrainingStrategy
 
         config = TrainerConfig(
@@ -563,17 +632,45 @@ class CascadeScheduler:
 
         trainer = GRPOTrainer(config)
 
+        # Capture the running loop so the worker thread can push log lines
+        # back through the async cascade callback safely.
+        loop = asyncio.get_running_loop()
+
+        def log_callback(line: str) -> None:
+            if callback is None:
+                return
+            payload = {
+                "stage": stage.stage_number,
+                "domain": stage.domain.name,
+                "line": line,
+            }
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    callback("stage-log", payload), loop
+                )
+            except Exception as exc:
+                logger.debug(f"[Cascade] log_callback dispatch failed: {exc}")
+
         run = await asyncio.to_thread(
             trainer.train_grpo,
             dataset_path=dataset_path,
             verifier_fn=lambda p, r: 0.0,  # Reward is in the generated script
             run_id=stage.run_id,
+            log_callback=log_callback,
             training_metadata={
                 "task_domain": stage.domain.name,
                 "cascade_stage": stage.stage_number,
                 "cascade_run_id": stage.run_id,
             },
         )
+
+        # trainer.train_grpo swallows subprocess failures and returns the
+        # TrainingRun with status="failed" instead of raising. We need to
+        # re-raise so the cascade marks the stage failed (not "completed").
+        if getattr(run, "status", None) == "failed":
+            raise RuntimeError(
+                f"GRPO training failed: {getattr(run, 'error_message', 'unknown error')}"
+            )
 
         return run.metrics
 
@@ -690,6 +787,31 @@ class CascadeScheduler:
                 f"[Cascade] Filtered {len(filtered)} traces → "
                 f"{len(grpo_examples)} GRPO examples for {domain.name} (validated ✓)"
             )
+
+        # Preflight: reward function ↔ dataset compatibility.
+        # Refuse to start a run that we know cannot produce a reward signal,
+        # instead of burning compute for an hour to discover it at the end.
+        reward_mode = domain.reward_mode
+        first_example = grpo_examples[0] if grpo_examples else None
+        if first_example is None:
+            raise ValueError(
+                f"Cascade preflight: domain '{domain.name}' produced zero "
+                f"GRPO examples after conversion. Cannot train on an empty "
+                f"dataset. Check the dataset path and domain filter."
+            )
+
+        missing = _reward_dataset_mismatch(reward_mode, first_example)
+        if missing:
+            raise ValueError(
+                f"Cascade preflight: reward_mode='{reward_mode}' cannot work "
+                f"on this dataset for domain '{domain.name}'. {missing} "
+                f"Either change grpo_reward_mode, change the dataset, or "
+                f"build a reward function appropriate for this data shape."
+            )
+        logger.info(
+            f"[Cascade] Preflight OK: reward_mode='{reward_mode}' compatible "
+            f"with dataset for domain '{domain.name}'"
+        )
 
         return filtered_path
 

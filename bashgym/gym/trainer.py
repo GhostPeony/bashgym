@@ -2165,6 +2165,10 @@ class GRPOTrainer(Trainer):
             grpo_env.setdefault("TRITON_PTXAS_PATH", "/usr/local/cuda/bin/ptxas")
         grpo_env.setdefault("TORCH_CUDA_ARCH_LIST", "12.1a")
 
+        log_file_path = run.output_path / "training.log"
+        log_file = open(log_file_path, "w", buffering=1, encoding="utf-8")
+        logger.info(f"GRPO training log: {log_file_path}")
+
         try:
             process = subprocess.Popen(
                 [python_exe, str(script_path)],
@@ -2185,109 +2189,172 @@ class GRPOTrainer(Trainer):
                 except Exception as e:
                     logger.warning(f"pid_callback error: {e}")
 
-            last_loss = None
-            last_epoch = 0
+            # Aggregated per-step metrics parsed from TRL's printed stats dict.
+            # TRL's Trainer.log() passes a dict[str,float] to TrainerCallback.on_log,
+            # but ProgressCallback.on_log stringifies it with f"{v:.4g}" before
+            # printing — that's what we see on stdout. We still parse stdout for
+            # log persistence and cascade-level metrics, but early-stop lives in
+            # a TrainerCallback inside the generated script (raw floats, no
+            # display-layer formatting bugs). See `_generate_grpo_script`.
+            #
+            # The stop-file convention: if the generated script's early-stop
+            # callback fires, it writes {output_path}/EARLY_STOPPED with a reason.
+            # We check that file after process exit to distinguish a clean
+            # completion from an early-stop.
+            stats: dict[str, float] = {}
+            final_summary: dict[str, float] = {}
             last_step = 0
-            samples_processed = 0
-            last_avg_reward = None
-            last_kl_divergence = None
-            last_policy_loss = None
+            estimated_total_steps = self.config.max_steps or 1000
             start_time = datetime.now(timezone.utc)
-            estimated_total_steps = 1000
+
+            def _parse_trl_stats(text: str) -> dict[str, float] | None:
+                """Extract all numeric key-value pairs from a TRL-printed dict line.
+
+                TRL's ProgressCallback formats values with f"{v:.4g}", which
+                drops precision and can emit 'nan'/'inf' — so we also handle
+                those. We require at least one known TRL metric key to avoid
+                matching random dict-like strings in user output.
+                """
+                if "{" not in text or "}" not in text:
+                    return None
+                markers = (
+                    "'loss'", "'reward'", "'train_loss'", "'train_runtime'",
+                    "'frac_reward_zero_std'", "'grad_norm'", "'kl'",
+                )
+                if not any(m in text for m in markers):
+                    return None
+                # Try strict ast.literal_eval first (most accurate when TRL
+                # emits unquoted floats); fall back to regex on the :.4g form.
+                try:
+                    import ast as _ast
+                    start = text.index("{")
+                    end = text.rindex("}") + 1
+                    parsed_raw = _ast.literal_eval(text[start:end])
+                    if isinstance(parsed_raw, dict):
+                        out: dict[str, float] = {}
+                        for k, v in parsed_raw.items():
+                            if not isinstance(k, str):
+                                continue
+                            try:
+                                out[k] = float(v)
+                            except (TypeError, ValueError):
+                                continue
+                        if out:
+                            return out
+                except (ValueError, SyntaxError):
+                    pass
+                pairs = re.findall(
+                    r"'([A-Za-z_][A-Za-z0-9_/]*)'\s*:\s*'?(-?(?:\d+\.?\d*(?:[eE][+-]?\d+)?|nan|inf))'?",
+                    text,
+                )
+                out = {}
+                for k, v in pairs:
+                    try:
+                        out[k] = float(v)
+                    except ValueError:
+                        continue
+                return out or None
 
             for line in process.stdout:
+                line = line.rstrip("\n")
+                try:
+                    log_file.write(line + "\n")
+                except Exception as e:
+                    logger.warning(f"Log file write error: {e}")
                 line = line.strip()
-                if line:
-                    logger.info(f"[GRPO Training] {line}")
+                if not line:
+                    continue
 
-                    if log_callback:
-                        try:
-                            log_callback(line)
-                        except Exception as e:
-                            logger.warning(f"Log callback error: {e}")
+                logger.info(f"[GRPO Training] {line}")
 
-                    # Standard HuggingFace metrics
-                    loss_match = re.search(r"'loss':\s*([\d.-]+)", line)
-                    epoch_match = re.search(r"'epoch':\s*([\d.]+)", line)
-                    step_match = re.search(r"'step':\s*(\d+)", line)
-                    progress_match = re.search(r"(\d+)%\|[^|]*\|\s*(\d+)/(\d+)", line)
-                    unsloth_steps_match = re.search(r"Total steps\s*=\s*(\d+)", line)
+                if log_callback:
+                    try:
+                        log_callback(line)
+                    except Exception as e:
+                        logger.warning(f"Log callback error: {e}")
 
-                    # GRPO-specific trl metrics
-                    reward_match = re.search(r"'reward':\s*([\d.-]+)", line)
-                    mean_reward_match = re.search(r"'mean_reward':\s*([\d.-]+)", line)
-                    kl_match = re.search(r"'kl':\s*([\d.-]+)", line)
-                    policy_loss_match = re.search(r"'policy_loss':\s*([\d.-]+)", line)
+                # Tqdm progress bar → step count (e.g. "20%|██ | 2/10 [...]")
+                progress_match = re.search(r"(\d+)%\|[^|]*\|\s*(\d+)/(\d+)", line)
+                if progress_match:
+                    last_step = int(progress_match.group(2))
+                    estimated_total_steps = int(progress_match.group(3))
 
-                    if loss_match:
-                        last_loss = float(loss_match.group(1))
-                    if epoch_match:
-                        last_epoch = int(float(epoch_match.group(1)))
-                    if step_match:
-                        last_step = int(step_match.group(1))
-                        samples_processed = last_step * self.config.batch_size
-                    if unsloth_steps_match:
-                        estimated_total_steps = int(unsloth_steps_match.group(1))
-                    if progress_match:
-                        last_step = int(progress_match.group(2))
-                        estimated_total_steps = int(progress_match.group(3))
-                        samples_processed = last_step * self.config.batch_size
-                    if reward_match:
-                        last_avg_reward = float(reward_match.group(1))
-                    if mean_reward_match:
-                        last_avg_reward = float(mean_reward_match.group(1))
-                    if kl_match:
-                        last_kl_divergence = float(kl_match.group(1))
-                    if policy_loss_match:
-                        last_policy_loss = float(policy_loss_match.group(1))
+                # Parse TRL stats dict (either per-step or final summary)
+                parsed = _parse_trl_stats(line)
+                if parsed is not None:
+                    if "train_runtime" in parsed or "train_loss" in parsed:
+                        final_summary.update(parsed)
+                    else:
+                        stats.update(parsed)
 
-                    eta = None
-                    if last_step > 0 and estimated_total_steps > 0:
-                        elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
-                        steps_remaining = estimated_total_steps - last_step
-                        if steps_remaining > 0:
-                            time_per_step = elapsed / last_step
-                            eta_seconds = steps_remaining * time_per_step
-                            if eta_seconds < 60:
-                                eta = f"{int(eta_seconds)}s"
-                            elif eta_seconds < 3600:
-                                eta = f"{int(eta_seconds / 60)}m"
-                            else:
-                                eta = (
-                                    f"{int(eta_seconds / 3600)}h {int((eta_seconds % 3600) / 60)}m"
-                                )
+                    # Derive step count if parsed dict has epoch but progress bar
+                    # hasn't fired yet (defensive).
+                    if "epoch" in parsed and last_step == 0:
+                        last_step = max(1, int(parsed.get("epoch", 0) * estimated_total_steps))
 
-                    if callback and (
-                        progress_match or loss_match or reward_match or mean_reward_match
-                    ):
-                        callback(
-                            {
-                                "epoch": last_epoch,
-                                "total_epochs": self.config.num_epochs,
-                                "step": last_step,
-                                "total_steps": estimated_total_steps,
-                                "loss": last_loss,
-                                "learning_rate": self.config.learning_rate,
-                                "eta": eta,
-                                "samples_processed": samples_processed,
-                                "avg_reward": last_avg_reward,
-                                "kl_divergence": last_kl_divergence,
-                                "policy_loss": last_policy_loss,
-                            }
+                # ETA + progress callback for live UI updates
+                eta = None
+                if last_step > 0 and estimated_total_steps > 0:
+                    elapsed_s = (datetime.now(timezone.utc) - start_time).total_seconds()
+                    steps_remaining = estimated_total_steps - last_step
+                    if steps_remaining > 0 and last_step > 0:
+                        time_per_step = elapsed_s / last_step
+                        eta_s = steps_remaining * time_per_step
+                        eta = (
+                            f"{int(eta_s)}s" if eta_s < 60
+                            else f"{int(eta_s / 60)}m" if eta_s < 3600
+                            else f"{int(eta_s / 3600)}h {int((eta_s % 3600) / 60)}m"
                         )
 
+                if callback and (progress_match or parsed):
+                    samples_processed = last_step * max(1, self.config.batch_size)
+                    callback(
+                        {
+                            "epoch": int(stats.get("epoch", 0)),
+                            "total_epochs": self.config.num_epochs,
+                            "step": last_step,
+                            "total_steps": estimated_total_steps,
+                            "loss": stats.get("loss"),
+                            "learning_rate": stats.get("learning_rate") or self.config.learning_rate,
+                            "eta": eta,
+                            "samples_processed": samples_processed,
+                            "avg_reward": stats.get("reward"),
+                            "reward_std": stats.get("reward_std"),
+                            "frac_reward_zero_std": stats.get("frac_reward_zero_std"),
+                            "grad_norm": stats.get("grad_norm"),
+                            "kl_divergence": stats.get("kl"),
+                        }
+                    )
+
             return_code = process.wait()
+
+            # Check for the early-stop sentinel written by the in-script
+            # TrainerCallback when it detects a degenerate reward signal.
+            early_stop_file = run.output_path / "EARLY_STOPPED"
+            if early_stop_file.exists():
+                reason = early_stop_file.read_text().strip()
+                raise RuntimeError(
+                    f"GRPO training stopped early by platform safety check: {reason}"
+                )
 
             if return_code != 0:
                 raise RuntimeError(f"GRPO training script exited with code {return_code}")
 
+            # Final metrics — prefer the final_summary dict if TRL emitted one,
+            # else fall back to the latest per-step stats.
+            combined = {**stats, **final_summary}
+            samples_processed = last_step * max(1, self.config.batch_size)
             run.metrics = {
-                "final_loss": last_loss or 0.0,
+                "final_loss": combined.get("train_loss", combined.get("loss", 0.0)),
                 "epochs_completed": self.config.num_epochs,
                 "samples_processed": samples_processed,
-                "final_avg_reward": last_avg_reward,
-                "final_kl_divergence": last_kl_divergence,
-                "final_policy_loss": last_policy_loss,
+                "final_avg_reward": combined.get("reward"),
+                "final_reward_std": combined.get("reward_std"),
+                "final_frac_reward_zero_std": combined.get("frac_reward_zero_std"),
+                "final_grad_norm": combined.get("grad_norm"),
+                "final_kl_divergence": combined.get("kl"),
+                "train_runtime_s": combined.get("train_runtime"),
+                "steps_completed": last_step,
             }
 
             logger.info(f"GRPO training completed. Model saved to: {run.output_path}")
@@ -2297,6 +2364,11 @@ class GRPOTrainer(Trainer):
         except Exception as e:
             logger.error(f"GRPO training failed: {e}")
             raise
+        finally:
+            try:
+                log_file.close()
+            except Exception:
+                pass
 
     def _generate_grpo_script(self, run: TrainingRun) -> str:
         """Generate GRPO training script using trl.GRPOTrainer with tiered reward functions."""
@@ -2320,7 +2392,100 @@ from unsloth import FastLanguageModel
 import torch
 from datasets import load_dataset
 from trl import GRPOTrainer as TRLGRPOTrainer, GRPOConfig
+from transformers import TrainerCallback
+from pathlib import Path as _Path
 import ast, subprocess, tempfile, os, sys, re
+import warnings
+
+# Silence cosmetic TRL deprecation: pad_token_id + generation_config double-pass
+warnings.filterwarnings(
+    "ignore", message=".*pad_token_id.*deprecated.*", category=UserWarning
+)
+
+
+class DegenerateRewardStop(TrainerCallback):
+    """Stop training if the reward signal is degenerate for too many steps.
+
+    TRL's GRPOTrainer logs `frac_reward_zero_std` per step — the fraction of
+    completion groups whose reward std is (approximately) zero. When that
+    fraction stays near 1.0, every group has the same reward and GRPO's
+    group-relative advantage is 0, so no gradient signal flows and the model
+    cannot learn. Early-stop avoids burning an hour on a dead run.
+
+    Thresholds chosen per huggingface/trl source + community discussion:
+    - A single step above 0.95 is normal cold-start (e.g. verification reward
+      where nothing passes yet). We require a sustained streak.
+    - We don't fire before `min_step` because warm-up is expected.
+    - Raw float values are read from the `logs` dict passed to on_log —
+      NOT the stringified `:.4g` version ProgressCallback prints to stdout.
+    """
+
+    def __init__(self, output_dir, threshold=0.95, min_step=5, streak=3):
+        self.output_dir = _Path(output_dir)
+        self.threshold = threshold
+        self.min_step = min_step
+        self.streak = streak
+        self.consecutive_hits = 0
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        if logs is None or state.global_step < self.min_step:
+            return
+        fzs = logs.get("frac_reward_zero_std")
+        reward_std = logs.get("reward_std")
+        if fzs is None:
+            return
+        # Only count as degenerate if BOTH the group-zero fraction is above
+        # threshold AND reward_std is effectively zero (belt-and-suspenders
+        # against a single flaky step).
+        is_degenerate = fzs > self.threshold and (reward_std is None or reward_std < 1e-6)
+        if is_degenerate:
+            self.consecutive_hits += 1
+            print(
+                f"[DegenerateRewardStop] warning: step {state.global_step} "
+                f"frac_reward_zero_std={{fzs:.4f}} reward_std={{reward_std}} "
+                f"streak={{self.consecutive_hits}}/{{self.streak}}"
+            )
+            if self.consecutive_hits >= self.streak:
+                reason = (
+                    f"frac_reward_zero_std stayed above {{self.threshold}} for "
+                    f"{{self.streak}} consecutive logs (last={{fzs:.4f}}, "
+                    f"reward_std={{reward_std}}). Reward function produces no "
+                    f"variance across completion groups → GRPO advantage=0 → "
+                    f"zero gradient. Change the reward function or the dataset."
+                )
+                try:
+                    (self.output_dir / "EARLY_STOPPED").write_text(reason)
+                except Exception:
+                    pass
+                print(f"[DegenerateRewardStop] STOPPING TRAINING: {{reason}}")
+                control.should_training_stop = True
+        else:
+            self.consecutive_hits = 0
+
+
+def _install_gc_compat(model):
+    """Wrap model.gradient_checkpointing_enable so it accepts both calling conventions.
+
+    Unsloth's FastBaseModel.post_patch_model replaces the method with a kwargs-only
+    closure. TRL's disable_gradient_checkpointing (and its Unsloth compiled cache copy)
+    calls it positionally as `model.gradient_checkpointing_enable(gradient_checkpointing_kwargs)`,
+    which raises TypeError. This wrapper accepts either form.
+
+    Refs: unslothai/unsloth#3828, #2870, #2362; huggingface/trl#3089
+    """
+    inner = model.gradient_checkpointing_enable
+
+    def _compat(gradient_checkpointing_kwargs=None, **kwargs):
+        merged = dict(gradient_checkpointing_kwargs or {{}})
+        merged.update(kwargs)
+        try:
+            return inner(**merged)
+        except TypeError:
+            # Some variants of the patched enable accept no args at all
+            return inner()
+
+    model.gradient_checkpointing_enable = _compat
+    return model
 
 # Configuration
 REWARD_MODE = "{self.config.grpo_reward_mode}"
@@ -2455,12 +2620,21 @@ if __name__ == "__main__":
         use_gradient_checkpointing=True,
         random_state=42,
     )
+    # Fix Unsloth/TRL gradient_checkpointing_enable contract mismatch.
+    _install_gc_compat(model)
     model.print_trainable_parameters()
 
     # Load dataset
     dataset = load_dataset("json", data_files="{dataset_path}", split="train")
 
     # GRPO training configuration
+    # use_vllm=False: Unsloth's GRPO guide recommends non-vLLM path;
+    # vLLM is broken on sm_121 (cu130 aarch64 wheels unstable) and Unsloth
+    # native inference is the supported configuration.
+    # logging_steps=1: we need real per-step metrics visible in the log so the
+    # cascade scheduler + heartbeat monitor can detect degenerate reward signals
+    # (e.g. frac_reward_zero_std > 0.9) early instead of discovering it only
+    # at the end of the run.
     grpo_config = GRPOConfig(
         output_dir="{output_path}",
         num_generations=NUM_GENERATIONS,
@@ -2469,20 +2643,22 @@ if __name__ == "__main__":
         num_train_epochs={self.config.num_epochs},
         max_steps={self.config.max_steps},
         learning_rate={self.config.learning_rate},
-        logging_steps={self.config.logging_steps},
+        logging_steps=1,
         save_steps={self.config.save_steps},
         max_completion_length={self.config.max_seq_length},
         bf16=True,
         report_to="none",
+        use_vllm=False,
     )
 
-    # Initialize TRL GRPOTrainer
+    # Initialize TRL GRPOTrainer with the degenerate-reward early-stop callback.
     trainer = TRLGRPOTrainer(
         model=model,
         processing_class=tokenizer,
         reward_funcs=[REWARD_FN],
         train_dataset=dataset,
         args=grpo_config,
+        callbacks=[DegenerateRewardStop(output_dir="{output_path}")],
     )
 
     print(f"Starting GRPO training with reward_mode={{REWARD_MODE}}...")

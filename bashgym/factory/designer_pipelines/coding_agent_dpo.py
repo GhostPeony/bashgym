@@ -54,7 +54,7 @@ def build_dpo_pipeline(config: PipelineConfig) -> dd.DataDesignerConfigBuilder:
             dd.ModelConfig(
                 alias="solution-model-a",
                 model=config.code_model,
-                inference_parameters=dd.InferenceParameters(
+                inference_parameters=dd.ChatCompletionInferenceParams(
                     temperature=0.9,  # Higher temp for more variation
                     max_tokens=4096,
                 ),
@@ -62,7 +62,7 @@ def build_dpo_pipeline(config: PipelineConfig) -> dd.DataDesignerConfigBuilder:
             dd.ModelConfig(
                 alias="solution-model-b",
                 model=config.code_model,
-                inference_parameters=dd.InferenceParameters(
+                inference_parameters=dd.ChatCompletionInferenceParams(
                     temperature=0.5,  # Lower temp for different style
                     max_tokens=4096,
                 ),

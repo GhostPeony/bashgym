@@ -54,7 +54,7 @@ def build_base_config(config: "PipelineConfig") -> "dd.DataDesignerConfigBuilder
         dd.ModelConfig(
             alias="text-model",
             model=config.text_model,
-            inference_parameters=dd.InferenceParameters(
+            inference_parameters=dd.ChatCompletionInferenceParams(
                 temperature=config.temperature_text,
                 top_p=0.99,
                 max_tokens=2048,
@@ -63,7 +63,7 @@ def build_base_config(config: "PipelineConfig") -> "dd.DataDesignerConfigBuilder
         dd.ModelConfig(
             alias="code-model",
             model=config.code_model,
-            inference_parameters=dd.InferenceParameters(
+            inference_parameters=dd.ChatCompletionInferenceParams(
                 temperature=config.temperature_code,
                 top_p=0.95,
                 max_tokens=4096,
@@ -72,7 +72,7 @@ def build_base_config(config: "PipelineConfig") -> "dd.DataDesignerConfigBuilder
         dd.ModelConfig(
             alias="judge-model",
             model=config.judge_model,
-            inference_parameters=dd.InferenceParameters(
+            inference_parameters=dd.ChatCompletionInferenceParams(
                 temperature=config.temperature_judge,
                 max_tokens=1024,
             ),

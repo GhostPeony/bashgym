@@ -218,6 +218,7 @@ class TrainingRun:
     started_at: str | None = None
     completed_at: str | None = None
     error_message: str | None = None
+    early_stop_reason: str | None = None
     loss_curve: list[dict[str, Any]] = field(default_factory=list)
     config_snapshot: dict[str, Any] = field(default_factory=dict)
     val_dataset_path: Path | None = None
@@ -847,14 +848,23 @@ class Trainer:
         log_file = open(log_file_path, "w", buffering=1, encoding="utf-8")
         logger.info(f"SFT training log: {log_file_path}")
 
+        # Force unbuffered stdout on the child so per-step 'loss' dicts from
+        # TRL's PrinterCallback flush immediately instead of sitting in Python's
+        # block buffer for minutes. Without `-u` the subprocess pipe is not a
+        # tty so print() is block-buffered and we only see tqdm progress bars
+        # (which flush on every \r) — the actual metric dicts arrive in batches.
+        sft_env = os.environ.copy()
+        sft_env.setdefault("PYTHONUNBUFFERED", "1")
+
         try:
             process = subprocess.Popen(
-                [python_exe, str(script_path)],
+                [python_exe, "-u", str(script_path)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
                 cwd=str(Path.cwd()),
+                env=sft_env,
             )
 
             run.pid = process.pid
@@ -956,15 +966,39 @@ class Trainer:
 
             # Same early-stop convention as GRPO: script writes EARLY_STOPPED
             # sentinel when the in-script callback fires on a loss plateau.
+            # BUT — the callback triggers `control.should_training_stop = True`
+            # which only stops the training LOOP. The script still runs its
+            # save-artifacts path (save_pretrained + save_pretrained_merged)
+            # AFTER the loop exits. So if the sentinel file exists AND
+            # artifacts were saved successfully, this is a "completed early"
+            # run, NOT a failure — mark it completed with an early_stop note.
+            # Only treat the sentinel as a failure if no artifacts landed.
             early_stop_file = run.output_path / "EARLY_STOPPED"
+            early_stop_reason = None
             if early_stop_file.exists():
-                reason = early_stop_file.read_text().strip()
+                early_stop_reason = early_stop_file.read_text().strip()
+
+            artifacts_exist = (
+                (run.output_path / "merged" / "model.safetensors").exists()
+                or (run.output_path / "final" / "adapter_model.safetensors").exists()
+            )
+
+            if early_stop_reason and not artifacts_exist:
+                # Callback fired before save path ran → real failure
                 raise RuntimeError(
-                    f"SFT training stopped early by platform safety check: {reason}"
+                    f"SFT training stopped early by platform safety check: "
+                    f"{early_stop_reason}"
                 )
 
-            if return_code != 0:
+            if return_code != 0 and not artifacts_exist:
                 raise RuntimeError(f"Training script exited with code {return_code}")
+
+            if early_stop_reason:
+                logger.warning(
+                    f"SFT training early-stopped but saved artifacts successfully: "
+                    f"{early_stop_reason}"
+                )
+                run.early_stop_reason = early_stop_reason
 
             combined = {**stats, **final_summary}
             run.metrics = {
@@ -1013,21 +1047,40 @@ import torch
 
 
 class LossPlateauStop(TrainerCallback):
-    """Write an EARLY_STOPPED sentinel when train loss stops decreasing.
+    """Write an EARLY_STOPPED sentinel when train loss has genuinely stalled.
 
-    Mirrors the DegenerateRewardStop callback in GRPO scripts: activates
-    after `min_step`, tracks the best train loss, and stops training if
-    it fails to improve by `min_delta` for `patience` consecutive log
-    events. The subprocess loop reader checks for the sentinel file and
-    surfaces it as a platform safety-check failure.
+    Purpose: detect runs that aren't learning — NOT to catch healthy stochastic
+    bounce at the loss floor. A well-behaved SFT run descends quickly in the
+    first few percent of an epoch and then bounces within a ±5% band around
+    a slowly-drifting floor. We must not fire on that bounce.
+
+    Detection strategy:
+      - Wait `min_step` steps before considering any stop (warmup done, descent
+        established).
+      - Maintain a rolling window of the last `window` loss values.
+      - Compare the *mean* of the current window to the mean of the window
+        `window` steps ago (i.e. non-overlapping prior window).
+      - If the current window mean is not at least `min_delta` lower than the
+        prior window mean, increment the patience counter. Else reset.
+      - Fire when the counter reaches `patience`.
+
+    Defaults tuned for SFT stochastic descent on an 8B LoRA at batch 4-8:
+      - min_step=50: never fire during warmup
+      - window=10: smooth over 10 logs (≈10 optimizer steps at logging_steps=1)
+      - patience=10: require 10 consecutive window comparisons with no
+        meaningful improvement
+      - min_delta=5e-3: 0.005 absolute loss — well above stochastic jitter
     """
 
-    def __init__(self, output_dir, min_step=10, patience=5, min_delta=1e-4):
+    def __init__(
+        self, output_dir, min_step=50, window=10, patience=10, min_delta=5e-3,
+    ):
         self.output_dir = output_dir
         self.min_step = min_step
+        self.window = window
         self.patience = patience
         self.min_delta = min_delta
-        self.best = float("inf")
+        self.losses: list[float] = []
         self.bad = 0
 
     def on_log(self, args, state, control, logs=None, **kwargs):
@@ -1042,18 +1095,30 @@ class LossPlateauStop(TrainerCallback):
             return control
         if loss != loss:  # NaN
             return control
-        if loss < self.best - self.min_delta:
-            self.best = loss
-            self.bad = 0
+
+        self.losses.append(loss)
+        # Need 2 full windows before we can compare
+        if len(self.losses) < 2 * self.window:
+            return control
+
+        recent = self.losses[-self.window:]
+        prior = self.losses[-2 * self.window:-self.window]
+        recent_mean = sum(recent) / self.window
+        prior_mean = sum(prior) / self.window
+
+        if recent_mean < prior_mean - self.min_delta:
+            self.bad = 0  # genuine improvement, reset
         else:
             self.bad += 1
+
         if self.bad >= self.patience:
             try:
                 with open(os.path.join(self.output_dir, "EARLY_STOPPED"), "w") as f:
                     f.write(
                         f"loss plateau at step {{state.global_step}}: "
-                        f"best={{self.best:.6f}}, no improvement for "
-                        f"{{self.patience}} consecutive logs"
+                        f"rolling mean {{recent_mean:.4f}} vs prior {{prior_mean:.4f}} "
+                        f"(delta {{prior_mean - recent_mean:+.4f}}), "
+                        f"no meaningful improvement for {{self.patience}} consecutive windows"
                     )
             except Exception as e:
                 print(f"[LossPlateauStop] failed to write sentinel: {{e}}")
@@ -1330,14 +1395,20 @@ if __name__ == "__main__":
         log_file = open(log_file_path, "w", buffering=1, encoding="utf-8")
         logger.info(f"DPO training log: {log_file_path}")
 
+        # Unbuffered stdout — same fix as SFT. Without this the per-step
+        # loss/reward dicts block-buffer and only show up in batches.
+        dpo_env = os.environ.copy()
+        dpo_env.setdefault("PYTHONUNBUFFERED", "1")
+
         try:
             process = subprocess.Popen(
-                [python_exe, str(script_path)],
+                [python_exe, "-u", str(script_path)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
                 cwd=str(Path.cwd()),
+                env=dpo_env,
             )
 
             run.pid = process.pid
@@ -1433,15 +1504,34 @@ if __name__ == "__main__":
 
             return_code = process.wait()
 
+            # Sentinel-race fix: see _train_with_unsloth_sft for the full
+            # explanation. Callback stops the training loop but the save
+            # path still runs, so artifacts may exist even when the sentinel
+            # is written. Only treat as failure if nothing was actually saved.
             early_stop_file = run.output_path / "EARLY_STOPPED"
+            early_stop_reason = None
             if early_stop_file.exists():
-                reason = early_stop_file.read_text().strip()
+                early_stop_reason = early_stop_file.read_text().strip()
+
+            artifacts_exist = (
+                (run.output_path / "merged" / "model.safetensors").exists()
+                or (run.output_path / "final" / "adapter_model.safetensors").exists()
+            )
+
+            if early_stop_reason and not artifacts_exist:
                 raise RuntimeError(
-                    f"DPO training stopped early by platform safety check: {reason}"
+                    f"DPO training stopped early by platform safety check: {early_stop_reason}"
                 )
 
-            if return_code != 0:
+            if return_code != 0 and not artifacts_exist:
                 raise RuntimeError(f"DPO training script exited with code {return_code}")
+
+            if early_stop_reason:
+                logger.warning(
+                    f"DPO training early-stopped but saved artifacts successfully: "
+                    f"{early_stop_reason}"
+                )
+                run.early_stop_reason = early_stop_reason
 
             combined = {**stats, **final_summary}
             run.metrics = {
@@ -2450,6 +2540,9 @@ class GRPOTrainer(Trainer):
         if Path("/usr/local/cuda/bin/ptxas").exists():
             grpo_env.setdefault("TRITON_PTXAS_PATH", "/usr/local/cuda/bin/ptxas")
         grpo_env.setdefault("TORCH_CUDA_ARCH_LIST", "12.1a")
+        # Unbuffered stdout — same fix as SFT/DPO. Without this the per-step
+        # loss/reward dicts block-buffer and only show up in batches.
+        grpo_env.setdefault("PYTHONUNBUFFERED", "1")
 
         log_file_path = run.output_path / "training.log"
         log_file = open(log_file_path, "w", buffering=1, encoding="utf-8")
@@ -2457,7 +2550,7 @@ class GRPOTrainer(Trainer):
 
         try:
             process = subprocess.Popen(
-                [python_exe, str(script_path)],
+                [python_exe, "-u", str(script_path)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -2566,17 +2659,34 @@ class GRPOTrainer(Trainer):
 
             return_code = process.wait()
 
-            # Check for the early-stop sentinel written by the in-script
-            # TrainerCallback when it detects a degenerate reward signal.
+            # Sentinel-race fix: see _train_with_unsloth_sft for the full
+            # explanation. Callback stops the training loop but the save
+            # path still runs, so artifacts may exist even when the sentinel
+            # is written. Only treat as failure if nothing was actually saved.
             early_stop_file = run.output_path / "EARLY_STOPPED"
+            early_stop_reason = None
             if early_stop_file.exists():
-                reason = early_stop_file.read_text().strip()
+                early_stop_reason = early_stop_file.read_text().strip()
+
+            artifacts_exist = (
+                (run.output_path / "merged" / "model.safetensors").exists()
+                or (run.output_path / "final" / "adapter_model.safetensors").exists()
+            )
+
+            if early_stop_reason and not artifacts_exist:
                 raise RuntimeError(
-                    f"GRPO training stopped early by platform safety check: {reason}"
+                    f"GRPO training stopped early by platform safety check: {early_stop_reason}"
                 )
 
-            if return_code != 0:
+            if return_code != 0 and not artifacts_exist:
                 raise RuntimeError(f"GRPO training script exited with code {return_code}")
+
+            if early_stop_reason:
+                logger.warning(
+                    f"GRPO training early-stopped but saved artifacts successfully: "
+                    f"{early_stop_reason}"
+                )
+                run.early_stop_reason = early_stop_reason
 
             # Final metrics — prefer the final_summary dict if TRL emitted one,
             # else fall back to the latest per-step stats.

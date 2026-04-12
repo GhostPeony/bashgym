@@ -215,6 +215,48 @@ The `column_mapping` is built from `COLUMN_MAP_HINTS` — any dataset column who
 
 **This command is a string, not an executed call.** The scanner never imports `DataDesignerPipeline` because that would pull in the heavy NVIDIA NeMo DataDesigner dependency. Copy the command from the report into your own script or REPL to actually run it.
 
+## Empirical dataset ranking (optional, GPU required for real mode)
+
+The rule-based scanner produces a static ranking. If you want to know which datasets *actually* help your model — not just which ones look good on paper — there's a second tool that runs short SFT training experiments per top-N candidate and ranks them by measured eval loss.
+
+```bash
+# Fast dev loop — no training, just verifies the pipeline works
+venv/bin/python -m bashgym.research.dataset_research_runner --top-n 5 --mode simulate
+
+# Real runs — trains briefly on each dataset (GPU required)
+venv/bin/python -m bashgym.research.dataset_research_runner \
+    --top-n 10 --mode real \
+    --train-steps 100 --num-records 500 \
+    --base-model unsloth/gemma-4-E4B-it
+```
+
+**How it works:**
+
+1. Loads the scanner cache (`hf_datasets_cache.json`) — run `hf_dataset_scanner` first.
+2. Filters to non-rejected SFT candidates, sorts by static score, takes top-N.
+3. For each candidate: materializes via `DataDesignerPipeline.from_dataset()` + `export_nemo()`, trains a short SFT run (`train_steps=100` by default), captures `eval_loss`.
+4. Ranks empirically by eval loss (lower = better).
+5. Writes `~/.bashgym/research/dataset_empirical_ranking.md`.
+
+**What you need:**
+
+- `data-designer>=0.5.0` installed (real mode only). Simulate mode has no deps beyond the scanner itself.
+- A GPU capable of running the base model (real mode only).
+- The scanner cache populated — run `hf_dataset_scanner` first.
+
+**How it integrates with autoresearch:**
+
+The runner injects a custom `DatasetSearchSpace` (a concrete impl of the existing `SearchSpace` ABC from `bashgym/gym/autoresearch.py`) into `AutoResearcher`. Instead of mutating hyperparameters against a fixed dataset, it holds hyperparameters fixed and iterates through the candidate list. The orchestrator's status tracking, pause/resume, and experiment history all work unchanged. If you want an API endpoint, the existing autoresearch routes already know how to expose the orchestrator.
+
+**Scope:** SFT-format datasets only. DPO and GRPO candidates are filtered out because their training loops have different eval metrics. Adding those means: extend the filter in `_load_candidates`, pick the right `strategy` on TrainerConfig, and read the right metric from `run.metrics`.
+
+**Module layout:**
+
+| File | Role |
+|---|---|
+| `dataset_search_space.py` | `DatasetSearchSpace(SearchSpace)` — cursor-based dataset enumeration with simulate/real evaluate modes |
+| `dataset_research_runner.py` | CLI entrypoint — loads candidates, wires AutoResearcher, writes ranking report |
+
 ## Extending the scanner
 
 If you want to:

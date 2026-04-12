@@ -36,6 +36,7 @@ from bashgym.api.device_routes import get_registry as get_device_registry  # noq
 from bashgym.api.device_routes import router as device_router  # noqa: E402
 from bashgym.api.factory_routes import router as factory_router  # noqa: E402
 from bashgym.api.hf_routes import router as hf_router  # noqa: E402
+from bashgym.api.research_routes import router as research_router  # noqa: E402
 from bashgym.api.integration_routes import router as integration_router  # noqa: E402
 from bashgym.api.models_routes import router as models_router  # noqa: E402
 from bashgym.api.observability_routes import router as observability_router  # noqa: E402
@@ -4955,6 +4956,9 @@ def create_app() -> FastAPI:
 
     # Include Device routes (SSH device registry)
     app.include_router(device_router)
+
+    # Include Research routes (HF dataset scanner + empirical ranking)
+    app.include_router(research_router)
 
     # Experimental routes — desktop only (hidden in web mode)
     if not _settings.is_web_mode:

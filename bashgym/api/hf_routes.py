@@ -1003,3 +1003,167 @@ async def delete_hf_model(repo_id: str, request: Request):
     if not success:
         raise HTTPException(status_code=500, detail=f"Failed to delete {repo_id}")
     return {"status": "deleted", "repo_id": repo_id}
+
+
+# =============================================================================
+# Storage Buckets (huggingface_hub v1.10+)
+# =============================================================================
+
+
+class BucketCreateRequest(BaseModel):
+    bucket_id: str = Field(description="Bucket ID (e.g., 'user/my-bucket')")
+    private: bool = Field(default=True)
+
+
+class BucketSyncRequest(BaseModel):
+    source: str = Field(description="Source path (local or hf://buckets/...)")
+    dest: str = Field(description="Dest path (local or hf://buckets/...)")
+    delete: bool = Field(default=False, description="Delete files in dest not in source")
+    dry_run: bool = Field(default=False)
+
+
+class CopyFilesRequest(BaseModel):
+    source: str = Field(description="Source URI (hf://buckets/... or hf://datasets/...)")
+    destination: str = Field(description="Destination URI")
+
+
+@router.get("/buckets")
+async def list_buckets(request: Request, namespace: str | None = None):
+    """List storage buckets for the authenticated user."""
+    from bashgym.integrations.huggingface.buckets import BucketManager
+    from bashgym.integrations.huggingface import get_hf_client
+
+    client = get_hf_client()
+    if not client.is_enabled:
+        raise HTTPException(status_code=503, detail="HuggingFace not configured")
+    mgr = BucketManager(token=client._token)
+    return mgr.list_buckets(namespace=namespace)
+
+
+@router.post("/buckets")
+async def create_bucket(body: BucketCreateRequest, request: Request):
+    """Create a storage bucket."""
+    from bashgym.integrations.huggingface.buckets import BucketManager
+    from bashgym.integrations.huggingface import get_hf_client
+
+    client = get_hf_client()
+    if not client.is_enabled:
+        raise HTTPException(status_code=503, detail="HuggingFace not configured")
+    mgr = BucketManager(token=client._token)
+    return mgr.create(bucket_id=body.bucket_id, private=body.private)
+
+
+@router.get("/buckets/{bucket_id:path}/tree")
+async def list_bucket_tree(bucket_id: str, request: Request, prefix: str | None = None, recursive: bool = False):
+    """List files in a storage bucket."""
+    from bashgym.integrations.huggingface.buckets import BucketManager
+    from bashgym.integrations.huggingface import get_hf_client
+
+    client = get_hf_client()
+    if not client.is_enabled:
+        raise HTTPException(status_code=503, detail="HuggingFace not configured")
+    mgr = BucketManager(token=client._token)
+    return mgr.list_tree(bucket_id=bucket_id, prefix=prefix, recursive=recursive)
+
+
+@router.get("/buckets/{bucket_id:path}/info")
+async def get_bucket_info(bucket_id: str, request: Request):
+    """Get bucket metadata."""
+    from bashgym.integrations.huggingface.buckets import BucketManager
+    from bashgym.integrations.huggingface import get_hf_client
+
+    client = get_hf_client()
+    if not client.is_enabled:
+        raise HTTPException(status_code=503, detail="HuggingFace not configured")
+    mgr = BucketManager(token=client._token)
+    return mgr.info(bucket_id=bucket_id)
+
+
+@router.post("/buckets/sync")
+async def sync_bucket(body: BucketSyncRequest, request: Request):
+    """Sync files between local dir and bucket (or bucket to bucket)."""
+    from bashgym.integrations.huggingface.buckets import BucketManager
+    from bashgym.integrations.huggingface import get_hf_client
+
+    client = get_hf_client()
+    if not client.is_enabled:
+        raise HTTPException(status_code=503, detail="HuggingFace not configured")
+    mgr = BucketManager(token=client._token)
+    return mgr.sync(source=body.source, dest=body.dest, delete=body.delete, dry_run=body.dry_run)
+
+
+@router.delete("/buckets/{bucket_id:path}")
+async def delete_bucket(bucket_id: str, request: Request):
+    """Delete a storage bucket."""
+    from bashgym.integrations.huggingface.buckets import BucketManager
+    from bashgym.integrations.huggingface import get_hf_client
+
+    client = get_hf_client()
+    if not client.is_enabled:
+        raise HTTPException(status_code=503, detail="HuggingFace not configured")
+    mgr = BucketManager(token=client._token)
+    mgr.delete(bucket_id=bucket_id)
+    return {"status": "deleted", "bucket_id": bucket_id}
+
+
+@router.post("/copy")
+async def copy_files_endpoint(body: CopyFilesRequest, request: Request):
+    """Server-side instant copy between buckets/repos (zero bandwidth for Xet files)."""
+    from bashgym.integrations.huggingface.buckets import BucketManager
+    from bashgym.integrations.huggingface import get_hf_client
+
+    client = get_hf_client()
+    if not client.is_enabled:
+        raise HTTPException(status_code=503, detail="HuggingFace not configured")
+    return BucketManager.copy(
+        source_uri=body.source,
+        dest_uri=body.destination,
+        token=client._token,
+    )
+
+
+# =============================================================================
+# Agent Traces Upload
+# =============================================================================
+
+
+class TraceUploadRequest(BaseModel):
+    trace_dir: str = Field(description="Local path to trace directory (e.g., ~/.bashgym/gold_traces_local)")
+    repo_id: str = Field(description="HF dataset repo ID (e.g., 'user/bashgym-gold-traces')")
+    private: bool = Field(default=True)
+
+
+@router.post("/traces/upload")
+async def upload_traces(body: TraceUploadRequest, request: Request):
+    """Upload bashgym agent traces to HuggingFace Hub as a dataset."""
+    from bashgym.integrations.huggingface.traces import TraceUploader
+    from bashgym.integrations.huggingface import get_hf_client
+
+    client = get_hf_client()
+    if not client.is_enabled:
+        raise HTTPException(status_code=503, detail="HuggingFace not configured")
+
+    trace_path = Path(body.trace_dir).expanduser()
+    if not trace_path.exists():
+        raise HTTPException(status_code=400, detail=f"Trace directory not found: {body.trace_dir}")
+
+    uploader = TraceUploader(token=client._token)
+    return uploader.upload_traces(
+        trace_dir=trace_path,
+        repo_id=body.repo_id,
+        private=body.private,
+    )
+
+
+@router.get("/traces/datasets")
+async def list_trace_datasets(request: Request, prefix: str = "bashgym"):
+    """List the user's trace datasets on HuggingFace Hub."""
+    from bashgym.integrations.huggingface.traces import TraceUploader
+    from bashgym.integrations.huggingface import get_hf_client
+
+    client = get_hf_client()
+    if not client.is_enabled:
+        raise HTTPException(status_code=503, detail="HuggingFace not configured")
+
+    uploader = TraceUploader(token=client._token)
+    return uploader.list_trace_datasets(prefix=prefix)

@@ -2010,6 +2010,44 @@ export const hfApi = {
 
   deleteHFModel: (repoId: string) =>
     request<{ status: string }>(`/hf/models/${encodeURIComponent(repoId)}`, { method: 'DELETE' }),
+
+  // Storage Buckets (huggingface_hub v1.10+)
+  listBuckets: (namespace?: string) =>
+    request<any[]>(`/hf/buckets${namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''}`),
+  createBucket: (body: { bucket_id: string; private?: boolean }) =>
+    request<{ bucket_id: string; url: string }>('/hf/buckets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  listBucketTree: (bucketId: string, prefix?: string) =>
+    request<any[]>(`/hf/buckets/${encodeURIComponent(bucketId)}/tree${prefix ? `?prefix=${encodeURIComponent(prefix)}` : ''}`),
+  getBucketInfo: (bucketId: string) =>
+    request<any>(`/hf/buckets/${encodeURIComponent(bucketId)}/info`),
+  syncBucket: (body: { source: string; dest: string; delete?: boolean; dry_run?: boolean }) =>
+    request<any>('/hf/buckets/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  deleteBucket: (bucketId: string) =>
+    request<{ status: string }>(`/hf/buckets/${encodeURIComponent(bucketId)}`, { method: 'DELETE' }),
+  copyFiles: (body: { source: string; destination: string }) =>
+    request<{ source: string; destination: string; status: string }>('/hf/copy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+
+  // Agent Traces
+  uploadTraces: (body: { trace_dir: string; repo_id: string; private?: boolean }) =>
+    request<{ repo_id: string; url: string; num_traces: number; total_size_bytes: number }>('/hf/traces/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  listTraceDatasets: (prefix?: string) =>
+    request<any[]>(`/hf/traces/datasets${prefix ? `?prefix=${encodeURIComponent(prefix)}` : ''}`),
 }
 
 // =============================================================================

@@ -116,7 +116,109 @@ class DatasetSearchSpace(SearchSpace):
     def evaluate(
         self, config: Any, experiment_number: int, total_experiments: int
     ) -> float:
-        raise NotImplementedError("Task 3 implements simulate, Task 4 implements real")
+        idx = getattr(config, self._INDEX_ATTR, None)
+        if idx is None or not (0 <= idx < len(self.candidates)):
+            logger.warning("evaluate called with invalid index %s", idx)
+            return 5.0
+        candidate = self.candidates[idx]
+
+        if self._mode == "simulate":
+            return self._simulate(candidate)
+        return self._real(candidate, config, experiment_number, total_experiments)
+
+    # ------------------------------------------------------------------
+    # Simulate mode
+    # ------------------------------------------------------------------
+
+    def _simulate(self, candidate: DatasetCandidate) -> float:
+        """Deterministic heuristic: loss = 10 - hf_score, clamped to [0.1, 10]."""
+        loss = max(0.1, min(10.0, 10.0 - candidate.hf_score))
+        candidate.eval_loss = loss
+        candidate.final_loss = loss
+        logger.info(
+            "[DatasetSearchSpace] SIMULATE %s -> loss=%.3f (hf_score=%.2f)",
+            candidate.repo_id, loss, candidate.hf_score,
+        )
+        return loss
+
+    # ------------------------------------------------------------------
+    # Real mode
+    # ------------------------------------------------------------------
+
+    def _real(
+        self,
+        candidate: DatasetCandidate,
+        config: Any,
+        experiment_number: int,
+        total_experiments: int,
+    ) -> float:
+        candidate_dir = self._work_dir / _safe_dirname(candidate.repo_id)
+        candidate_dir.mkdir(parents=True, exist_ok=True)
+
+        # 1. Materialize via DataDesignerPipeline
+        try:
+            DataDesignerPipeline = _get_data_designer()
+            from bashgym.factory.data_designer import PipelineConfig
+
+            pipeline = DataDesignerPipeline(
+                config=PipelineConfig(
+                    pipeline="coding_agent_sft",
+                    num_records=self._num_records,
+                    output_dir=candidate_dir,
+                )
+            )
+            df = pipeline.from_dataset(
+                source=candidate.repo_id,
+                num_records=self._num_records,
+                split="train",
+            )
+            export_result = pipeline.export_nemo(df, output_dir=candidate_dir)
+        except Exception as exc:
+            logger.error(
+                "[DatasetSearchSpace] materialize failed for %s: %s",
+                candidate.repo_id, exc,
+            )
+            candidate.error = f"materialize: {exc}"
+            return 5.0
+
+        candidate.train_path = Path(export_result["train_path"])
+        candidate.val_path = Path(export_result["val_path"])
+        candidate.num_rows_generated = self._num_records
+
+        # 2. Train short SFT run
+        exp_config = copy.deepcopy(self._base_config)
+        exp_config.max_steps = self._train_steps
+        exp_config.eval_strategy = "steps"
+        exp_config.eval_steps = max(10, self._train_steps // 3)
+        exp_config.save_steps = 999_999
+        exp_config.logging_steps = 5
+        exp_config.output_dir = str(candidate_dir / "training")
+
+        try:
+            Trainer = _get_trainer()
+            trainer = Trainer(exp_config)
+            run = trainer.train_sft(
+                dataset_path=candidate.train_path,
+                val_dataset_path=candidate.val_path,
+            )
+        except Exception as exc:
+            logger.error(
+                "[DatasetSearchSpace] training failed for %s: %s",
+                candidate.repo_id, exc,
+            )
+            candidate.error = f"train: {exc}"
+            return 5.0
+
+        eval_loss = run.metrics.get("eval_loss")
+        final_loss = run.metrics.get("final_loss", 5.0)
+        candidate.eval_loss = float(eval_loss) if eval_loss is not None else None
+        candidate.final_loss = float(final_loss) if final_loss is not None else None
+        metric = float(eval_loss) if eval_loss is not None else float(final_loss)
+        logger.info(
+            "[DatasetSearchSpace] REAL %s -> eval=%s final=%s metric=%.4f",
+            candidate.repo_id, eval_loss, final_loss, metric,
+        )
+        return metric
 
     def get_config_snapshot(self, config: Any) -> dict[str, Any]:
         idx = getattr(config, self._INDEX_ATTR, None)

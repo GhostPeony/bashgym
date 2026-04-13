@@ -68,9 +68,12 @@ def _load_candidates(top_n: int, cache_path: Path) -> list[DatasetCandidate]:
         )
         scored.append(score_dataset(meta))
 
-    sft = [s for s in scored if not s.rejected and s.bashgym_format == "sft"]
-    sft.sort(key=lambda s: s.score, reverse=True)
-    top = sft[:top_n]
+    # Include SFT + GRPO + undetected-format candidates. In simulate mode all
+    # are evaluated heuristically; in real mode, DataDesignerPipeline will
+    # attempt ingestion and fail gracefully on incompatible formats.
+    usable = [s for s in scored if not s.rejected and s.bashgym_format in ("sft", "grpo", None)]
+    usable.sort(key=lambda s: s.score, reverse=True)
+    top = usable[:top_n]
 
     return [
         DatasetCandidate(

@@ -46,6 +46,11 @@ SEARCH_QUERIES: list[dict] = [
     {"search": "python code", "limit": 100},
     {"search": "bash", "limit": 50},
     {"search": "shell command", "limit": 50},
+    {"search": "function calling", "limit": 100},
+    {"search": "code instruction", "limit": 100},
+    {"search": "agentic", "limit": 50},
+    {"search": "software engineering", "limit": 100},
+    {"search": "code completion", "limit": 100},
 ]
 
 

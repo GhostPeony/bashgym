@@ -5,8 +5,6 @@ import {
   Loader2,
   ExternalLink,
   RefreshCw,
-  Trash2,
-  FolderOpen,
 } from 'lucide-react'
 import { hfApi } from '../../services/api'
 

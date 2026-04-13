@@ -80,3 +80,42 @@ async def trigger_scan(body: ScanRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class EmpiricalRequest(BaseModel):
+    top_n: int = Field(default=5, ge=1, le=50, description="Number of top-scored SFT candidates")
+    mode: str = Field(default="simulate", description="'simulate' (fast, no GPU) or 'real' (trains)")
+    num_records: int = Field(default=500, ge=10, le=10000, description="Records per dataset")
+    train_steps: int = Field(default=100, ge=10, le=1000, description="SFT steps per candidate")
+    base_model: str = Field(default="unsloth/gemma-4-E4B-it", description="Base model for SFT runs")
+
+
+@router.post("/empirical")
+async def run_empirical_ranking(body: EmpiricalRequest):
+    """Run an empirical dataset ranking. Evaluate top-N SFT datasets by short training runs.
+
+    In 'simulate' mode this completes instantly. In 'real' mode it trains
+    briefly on each candidate (may take 5-60 minutes depending on top_n).
+    """
+    import asyncio
+    from bashgym.research.dataset_research_runner import _run_async
+
+    try:
+        exit_code = await _run_async(
+            top_n=body.top_n,
+            mode=body.mode,
+            num_records=body.num_records,
+            train_steps=body.train_steps,
+            base_model=body.base_model,
+            cache_path=CACHE_PATH,
+        )
+        if exit_code != 0:
+            raise HTTPException(status_code=500, detail="Empirical runner returned non-zero exit code")
+        content = EMPIRICAL_PATH.read_text() if EMPIRICAL_PATH.exists() else ""
+        return {
+            "status": "completed",
+            "report_path": str(EMPIRICAL_PATH),
+            "content": content,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

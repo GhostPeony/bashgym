@@ -30,6 +30,7 @@ export function ResearchTab() {
   const [cacheStats, setCacheStats] = useState<{ cached_datasets: number } | null>(null)
   const [loading, setLoading] = useState(true)
   const [scanning, setScanning] = useState(false)
+  const [runningEmpirical, setRunningEmpirical] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [view, setView] = useState<'report' | 'empirical'>('report')
 
@@ -47,6 +48,23 @@ export function ResearchTab() {
   }
 
   useEffect(() => { fetchAll() }, [])
+
+  const handleEmpirical = async () => {
+    setRunningEmpirical(true)
+    setError(null)
+    const result = await fetchJSON('/research/empirical', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ top_n: 5, mode: 'simulate' }),
+    })
+    if (result.ok && result.data) {
+      setEmpirical(result.data.content)
+      setView('empirical')
+    } else {
+      setError(result.error || 'Empirical ranking failed')
+    }
+    setRunningEmpirical(false)
+  }
 
   const handleScan = async () => {
     setScanning(true)
@@ -82,6 +100,24 @@ export function ResearchTab() {
           )}
           <button onClick={fetchAll} className="btn-icon" title="Refresh reports">
             <RefreshCw className="w-4 h-4" />
+          </button>
+          <button
+            onClick={handleEmpirical}
+            disabled={runningEmpirical || !cacheStats?.cached_datasets}
+            className="btn-ghost flex items-center gap-2 text-sm"
+            title={cacheStats?.cached_datasets ? 'Run empirical ranking on top SFT datasets' : 'Run a scan first'}
+          >
+            {runningEmpirical ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Ranking...
+              </>
+            ) : (
+              <>
+                <BarChart3 className="w-4 h-4" />
+                Empirical Rank
+              </>
+            )}
           </button>
           <button
             onClick={handleScan}

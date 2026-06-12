@@ -1,11 +1,31 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
 // Type definitions for the exposed API
+export interface TerminalCreateResult {
+  success: boolean
+  id?: string
+  /** true if an existing live PTY was re-attached instead of spawned */
+  attached?: boolean
+  /** scrollback replay payload, present when attached */
+  buffer?: string
+  cwd?: string
+  error?: string
+}
+
+export interface TerminalSessionInfo {
+  id: string
+  cwd: string
+  createdAt: number
+  exited: boolean
+  exitCode: number | null
+}
+
 export interface TerminalAPI {
-  create: (id: string, cwd?: string) => Promise<{ success: boolean; id?: string; error?: string }>
+  create: (id: string, cwd?: string) => Promise<TerminalCreateResult>
   write: (id: string, data: string) => Promise<boolean>
   resize: (id: string, cols: number, rows: number) => Promise<boolean>
   kill: (id: string) => Promise<boolean>
+  list: () => Promise<TerminalSessionInfo[]>
   onData: (id: string, callback: (data: string) => void) => () => void
   onExit: (id: string, callback: (exitCode: number) => void) => () => void
 }
@@ -120,6 +140,7 @@ contextBridge.exposeInMainWorld('bashgym', {
     write: (id: string, data: string) => ipcRenderer.invoke('terminal:write', id, data),
     resize: (id: string, cols: number, rows: number) => ipcRenderer.invoke('terminal:resize', id, cols, rows),
     kill: (id: string) => ipcRenderer.invoke('terminal:kill', id),
+    list: () => ipcRenderer.invoke('terminal:list'),
     onData: (id: string, callback: (data: string) => void) => {
       const channel = `terminal:data:${id}`
       const listener = (_: any, data: string) => callback(data)

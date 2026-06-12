@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, shell, Menu, webContents, clipboard, nativ
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
-import { spawn, ChildProcessWithoutNullStreams } from 'child_process'
+import type { IPty } from 'node-pty'
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling
 // This is only needed for production builds with Squirrel installer
@@ -18,8 +18,37 @@ if (!gotTheLock) {
 
 let mainWindow: BrowserWindow | null = null
 
-// Store for terminal processes
-const terminals: Map<string, ChildProcessWithoutNullStreams> = new Map()
+// PTY session registry — main process owns sessions so they survive renderer
+// reloads and window close; scrollback is retained for re-attach replay.
+interface PtySession {
+  pty: IPty
+  /** Raw output chunks, trimmed to MAX_BUFFER_BYTES — replayed on re-attach */
+  buffer: string[]
+  bufferBytes: number
+  cwd: string
+  createdAt: number
+  exited: boolean
+  exitCode: number | null
+}
+
+const MAX_BUFFER_BYTES = 400_000 // ~400KB of scrollback per session
+const ptySessions: Map<string, PtySession> = new Map()
+
+function appendToBuffer(session: PtySession, data: string) {
+  session.buffer.push(data)
+  session.bufferBytes += data.length
+  while (session.bufferBytes > MAX_BUFFER_BYTES && session.buffer.length > 1) {
+    const removed = session.buffer.shift()
+    session.bufferBytes -= removed?.length ?? 0
+  }
+}
+
+function killAllPtys() {
+  ptySessions.forEach((s) => {
+    try { s.pty.kill() } catch { /* already dead */ }
+  })
+  ptySessions.clear()
+}
 
 // Determine if we're in development
 const isDev = !app.isPackaged
@@ -144,9 +173,7 @@ function createWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null
-    // Clean up all terminal processes
-    terminals.forEach((term) => term.kill())
-    terminals.clear()
+    // PTY processes intentionally survive window close — they are cleaned up on app quit.
   })
 }
 
@@ -177,6 +204,15 @@ if (gotTheLock) {
       app.quit()
     }
   })
+
+  app.on('will-quit', () => {
+    killAllPtys()
+  })
+
+  // Unclean-exit guards: ensure no orphaned PTY processes
+  process.on('exit', () => killAllPtys())
+  process.on('SIGTERM', () => { killAllPtys(); app.quit() })
+  process.on('SIGINT', () => { killAllPtys(); app.quit() })
 }
 
 // IPC Handlers
@@ -209,9 +245,24 @@ function getFreshEnv(): Record<string, string> {
   return env
 }
 
-// Terminal management
+// Terminal management — create-or-attach: a live PTY for this id is re-attached
+// (with scrollback replay) instead of respawned, so renderer remounts never
+// orphan or kill the underlying process.
 ipcMain.handle('terminal:create', async (_, id: string, cwd?: string) => {
   try {
+    const existing = ptySessions.get(id)
+    if (existing && !existing.exited) {
+      return {
+        success: true,
+        id,
+        attached: true,
+        buffer: existing.buffer.join(''),
+        cwd: existing.cwd
+      }
+    }
+    // A dead session being recreated: drop the stale entry
+    if (existing) ptySessions.delete(id)
+
     // Dynamic import for node-pty (native module)
     const pty = await import('node-pty')
 
@@ -224,28 +275,42 @@ ipcMain.handle('terminal:create', async (_, id: string, cwd?: string) => {
       ? ['-NoLogo']
       : []
 
+    const resolvedCwd = cwd || process.env.HOME || process.cwd()
+
     const ptyProcess = pty.spawn(shell, shellArgs, {
       name: 'xterm-256color',
       cols: 80,
       rows: 24,
-      cwd: cwd || process.env.HOME || process.cwd(),
+      cwd: resolvedCwd,
       env: getFreshEnv()
     })
 
-    // Store reference (cast to ChildProcessWithoutNullStreams for type compatibility)
-    terminals.set(id, ptyProcess as unknown as ChildProcessWithoutNullStreams)
+    const session: PtySession = {
+      pty: ptyProcess,
+      buffer: [],
+      bufferBytes: 0,
+      cwd: resolvedCwd,
+      createdAt: Date.now(),
+      exited: false,
+      exitCode: null
+    }
+    ptySessions.set(id, session)
 
-    // Forward output to renderer
+    // Forward output to renderer and retain it for re-attach replay
     ptyProcess.onData((data: string) => {
+      appendToBuffer(session, data)
       mainWindow?.webContents.send(`terminal:data:${id}`, data)
     })
 
     ptyProcess.onExit(({ exitCode }) => {
+      session.exited = true
+      session.exitCode = exitCode
       mainWindow?.webContents.send(`terminal:exit:${id}`, exitCode)
-      terminals.delete(id)
+      // Entry (with buffer) is kept so a reloaded renderer can see it exited;
+      // it is dropped on explicit kill or recreate.
     })
 
-    return { success: true, id }
+    return { success: true, id, attached: false }
   } catch (error) {
     console.error('Failed to create terminal:', error)
     return { success: false, error: String(error) }
@@ -253,31 +318,42 @@ ipcMain.handle('terminal:create', async (_, id: string, cwd?: string) => {
 })
 
 ipcMain.handle('terminal:write', (_, id: string, data: string) => {
-  const term = terminals.get(id)
-  if (term) {
-    (term as any).write(data)
+  const session = ptySessions.get(id)
+  if (session && !session.exited) {
+    session.pty.write(data)
     return true
   }
   return false
 })
 
 ipcMain.handle('terminal:resize', (_, id: string, cols: number, rows: number) => {
-  const term = terminals.get(id)
-  if (term && (term as any).resize) {
-    (term as any).resize(cols, rows)
+  const session = ptySessions.get(id)
+  if (session && !session.exited) {
+    session.pty.resize(cols, rows)
     return true
   }
   return false
 })
 
 ipcMain.handle('terminal:kill', (_, id: string) => {
-  const term = terminals.get(id)
-  if (term) {
-    term.kill()
-    terminals.delete(id)
+  const session = ptySessions.get(id)
+  if (session) {
+    try { session.pty.kill() } catch { /* already dead */ }
+    ptySessions.delete(id)
     return true
   }
   return false
+})
+
+// Enumerate sessions so a reloaded renderer can re-adopt live PTYs
+ipcMain.handle('terminal:list', () => {
+  return Array.from(ptySessions.entries()).map(([id, s]) => ({
+    id,
+    cwd: s.cwd,
+    createdAt: s.createdAt,
+    exited: s.exited,
+    exitCode: s.exitCode
+  }))
 })
 
 // System info

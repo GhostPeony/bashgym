@@ -110,6 +110,10 @@ interface TerminalState {
   // Actions
   createTerminal: (id?: string, title?: string) => string
   closeTerminal: (id: string) => void
+  /** Close with confirmation if the agent is busy. Returns true if closed. */
+  requestCloseTerminal: (id: string) => boolean
+  /** Re-adopt live PTY sessions from the main process (call once on startup). Returns count restored. */
+  restoreSessions: () => Promise<number>
   setActiveTerminal: (id: string) => void
   updateSession: (id: string, updates: Partial<TerminalSession>) => void
 
@@ -156,15 +160,6 @@ const setBannerShown = (): void => {
 const PANEL_ORDER_KEY = 'bashgym_panel_order'
 const CANVAS_POSITIONS_KEY = 'bashgym_canvas_positions'
 const VIEW_MODE_KEY = 'bashgym_view_mode'
-
-const _loadPanelOrder = (): string[] => {
-  try {
-    const stored = localStorage.getItem(PANEL_ORDER_KEY)
-    return stored ? JSON.parse(stored) : []
-  } catch {
-    return []
-  }
-}
 
 const savePanelOrder = (panels: Panel[]) => {
   try {
@@ -214,6 +209,47 @@ const saveViewMode = (mode: ViewMode) => {
   } catch {
     // Ignore
   }
+}
+
+// Session metadata (id + title) persisted so live PTYs re-adopted from the
+// main process after a renderer reload keep their names
+const SESSION_META_KEY = 'bashgym_session_meta'
+
+interface PersistedSessionMeta {
+  id: string
+  title: string
+}
+
+const loadSessionMeta = (): Map<string, PersistedSessionMeta> => {
+  try {
+    const stored = localStorage.getItem(SESSION_META_KEY)
+    if (stored) {
+      const arr: PersistedSessionMeta[] = JSON.parse(stored)
+      return new Map(arr.map((m) => [m.id, m]))
+    }
+  } catch {
+    // Ignore
+  }
+  return new Map()
+}
+
+const saveSessionMeta = (sessions: Map<string, TerminalSession>) => {
+  try {
+    const arr = Array.from(sessions.values()).map((s) => ({ id: s.id, title: s.title }))
+    localStorage.setItem(SESSION_META_KEY, JSON.stringify(arr))
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+// A running/tool_calling session is never killed without explicit confirmation
+const confirmCloseIfBusy = (session: TerminalSession | undefined): boolean => {
+  if (session && (session.status === 'running' || session.status === 'tool_calling')) {
+    return window.confirm(
+      `"${session.title}" still has an agent working. Close it and kill the process?`
+    )
+  }
+  return true
 }
 
 export const useTerminalStore = create<TerminalState>((set, get) => ({
@@ -267,6 +303,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       }
     })
 
+    saveSessionMeta(get().sessions)
     return terminalId
   },
 
@@ -288,8 +325,58 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       }
     })
 
+    saveSessionMeta(get().sessions)
+
     // Kill the terminal process
     window.bashgym?.terminal.kill(id)
+  },
+
+  requestCloseTerminal: (id: string) => {
+    if (!confirmCloseIfBusy(get().sessions.get(id))) return false
+    get().closeTerminal(id)
+    return true
+  },
+
+  restoreSessions: async () => {
+    const api = window.bashgym?.terminal
+    if (!api?.list) return 0
+    let infos: Awaited<ReturnType<typeof api.list>> = []
+    try {
+      infos = await api.list()
+    } catch {
+      return 0
+    }
+    const meta = loadSessionMeta()
+    const live = infos.filter((i) => !i.exited && !get().sessions.has(i.id))
+    if (live.length === 0) return 0
+
+    set((state) => {
+      const newSessions = new Map(state.sessions)
+      const newPanels = [...state.panels]
+      for (const info of live) {
+        const title = meta.get(info.id)?.title || `Terminal ${newSessions.size + 1}`
+        newSessions.set(info.id, {
+          id: info.id,
+          title,
+          cwd: info.cwd,
+          isActive: false,
+          attention: 'none',
+          showBanner: false,
+          status: 'idle',
+          lastActivity: Date.now()
+        })
+        newPanels.push({ id: generateId(), type: 'terminal', title, terminalId: info.id })
+      }
+      const lastPanel = newPanels[newPanels.length - 1]
+      return {
+        sessions: newSessions,
+        panels: newPanels,
+        activeSessionId: state.activeSessionId ?? live[live.length - 1].id,
+        activePanelId: state.activePanelId ?? lastPanel.id
+      }
+    })
+    saveSessionMeta(get().sessions)
+    return live.length
   },
 
   setActiveTerminal: (id: string) => {
@@ -337,6 +424,12 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   },
 
   removePanel: (id: string) => {
+    // Guard every panel-removal path (tab close, canvas node close, Ctrl+W hotkey)
+    const target = get().panels.find((p) => p.id === id)
+    if (target?.type === 'terminal' && target.terminalId) {
+      if (!confirmCloseIfBusy(get().sessions.get(target.terminalId))) return
+    }
+
     set((state) => {
       const panel = state.panels.find((p) => p.id === id)
       const newPanels = state.panels.filter((p) => p.id !== id)
@@ -385,6 +478,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         if (session) {
           newSessions.set(panel.terminalId, { ...session, title })
         }
+        saveSessionMeta(newSessions)
         return { panels: newPanels, sessions: newSessions }
       }
 

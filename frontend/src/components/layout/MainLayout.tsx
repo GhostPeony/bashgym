@@ -16,6 +16,7 @@ import { AchievementsView } from '../achievements/AchievementsView'
 import { AutoResearchDashboard } from '../autoresearch/AutoResearchDashboard'
 import { HomeScreen, TutorialChecklist, TutorialTooltip } from '../home'
 import { KeyboardShortcutsModal } from '../common/KeyboardShortcutsModal'
+import { ActivityFeed } from '../activity/ActivityFeed'
 import { useUIStore } from '../../stores'
 import { isElectron, isWeb } from '../../utils/platform'
 
@@ -250,6 +251,9 @@ export function MainLayout() {
 
       {/* Global Modals */}
       <KeyboardShortcutsModal />
+
+      {/* Unified Agent Activity Feed */}
+      <ActivityFeed />
 
       {/* Agent Chat Panel — Electron only (spawns Claude CLI subprocesses) */}
       {AgentChat && (

@@ -24,6 +24,9 @@ export function RouterDashboard() {
   const [showSettings, setShowSettings] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
 
+  // Latency history - one point appended per stats fetch (capped at 60)
+  const [latencyHistory, setLatencyHistory] = useState<Array<{ time: string; teacher: number; student: number }>>([])
+
   const handleRefresh = useCallback(async () => {
     if (isRefreshing) return
 
@@ -40,6 +43,15 @@ export function RouterDashboard() {
           avgTeacherLatency: result.data.avg_teacher_latency,
           avgStudentLatency: result.data.avg_student_latency,
           currentStudentRate: result.data.current_student_rate * 100
+        })
+        const stats = result.data
+        setLatencyHistory((prev) => {
+          const point = {
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+            teacher: stats.avg_teacher_latency ?? 0,
+            student: stats.avg_student_latency ?? 0
+          }
+          return [...prev, point].slice(-60)
         })
       }
     } finally {
@@ -67,14 +79,17 @@ export function RouterDashboard() {
     { model: 'Student', success: stats.studentSuccessRate, latency: stats.avgStudentLatency }
   ] : []
 
-  // Latency history - populated via API when available
-  const [latencyHistory, _setLatencyHistory] = useState<Array<{ time: string; teacher: number; student: number }>>([])
-
   // Fetch stats on mount
   useEffect(() => {
     handleRefresh()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Poll stats every 15s while mounted so the latency chart accumulates history
+  useEffect(() => {
+    const interval = setInterval(handleRefresh, 15_000)
+    return () => clearInterval(interval)
+  }, [handleRefresh])
 
   return (
     <div className="h-full p-6 overflow-auto">

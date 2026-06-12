@@ -25,6 +25,7 @@ import { useEffect } from 'react'
 import { useTrainingStore, useRouterStore, useTracesStore } from '../stores'
 import { useOrchestratorStore } from '../stores/orchestratorStore'
 import { useAutoResearchStore } from '../stores/autoresearchStore'
+import { useActivityStore } from '../stores/activityStore'
 
 type MessageHandler = (data: any) => void
 
@@ -187,6 +188,9 @@ class WebSocketService {
 
   private handleMessage(message: WebSocketMessage) {
     const { type, payload } = message
+
+    // Feed every tracked event into the unified activity feed
+    useActivityStore.getState().addEvent(type, payload ?? {})
 
     // Handle built-in message types
     switch (type) {

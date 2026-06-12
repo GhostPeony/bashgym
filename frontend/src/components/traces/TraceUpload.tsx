@@ -2,6 +2,7 @@ import { useState, useCallback, useRef } from 'react'
 import { Upload, Loader2, Check, XCircle, AlertTriangle } from 'lucide-react'
 import clsx from 'clsx'
 import { tracesApi } from '../../services/api'
+import { useWebSocket } from '../../services/websocket'
 
 type UploadSource = 'chatgpt' | 'mcp'
 
@@ -17,13 +18,30 @@ interface UploadResult {
   errors: string[]
 }
 
+interface ImportProgress {
+  processed: number
+  total: number
+  current_item?: string
+}
+
 export default function TraceUpload({ onImportComplete }: TraceUploadProps) {
   const [source, setSource] = useState<UploadSource>('chatgpt')
   const [isDragging, setIsDragging] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [result, setResult] = useState<UploadResult | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [importProgress, setImportProgress] = useState<ImportProgress | null>(null)
+  const uploadingRef = useRef(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Live per-item progress streamed over pipeline:import while an upload runs
+  const onImportProgress = useCallback((payload: ImportProgress) => {
+    if (!uploadingRef.current) return
+    if (typeof payload?.processed === 'number' && typeof payload?.total === 'number') {
+      setImportProgress(payload)
+    }
+  }, [])
+  useWebSocket('pipeline:import', onImportProgress)
 
   const acceptedTypes: Record<UploadSource, string> = {
     chatgpt: '.zip,.json',
@@ -37,8 +55,10 @@ export default function TraceUpload({ onImportComplete }: TraceUploadProps) {
 
   const handleUpload = useCallback(async (file: File) => {
     setUploading(true)
+    uploadingRef.current = true
     setResult(null)
     setError(null)
+    setImportProgress(null)
 
     const resp = await tracesApi.uploadAndImport(file, source)
 
@@ -52,6 +72,8 @@ export default function TraceUpload({ onImportComplete }: TraceUploadProps) {
     }
 
     setUploading(false)
+    uploadingRef.current = false
+    setImportProgress(null)
   }, [source, onImportComplete])
 
   const onDrop = useCallback((e: React.DragEvent) => {
@@ -131,6 +153,12 @@ export default function TraceUpload({ onImportComplete }: TraceUploadProps) {
         <span className="text-xs font-mono text-text-secondary text-center">
           {uploading ? 'Importing...' : 'Drop file or click to browse'}
         </span>
+        {uploading && importProgress && (
+          <span className="text-[10px] font-mono text-text-muted text-center">
+            Processing {importProgress.processed}/{importProgress.total}
+            {importProgress.current_item ? ` — ${importProgress.current_item}` : ''}
+          </span>
+        )}
         <span className="text-[10px] font-mono text-text-muted">
           {sourceHints[source]}
         </span>

@@ -113,6 +113,7 @@ from bashgym.api.websocket import (  # noqa: E402
     TrainingProgressCallback,
     broadcast_guardrail_blocked,
     broadcast_guardrail_warn,
+    broadcast_import_progress,
     broadcast_pii_redacted,
     broadcast_task_status,
     broadcast_trace_event,
@@ -364,7 +365,9 @@ def create_app() -> FastAPI:
                             "pid": state.pid,
                         }
                         # Start monitoring via output directory polling
-                        callback = TrainingProgressCallback(state.run_id)
+                        callback = TrainingProgressCallback(
+                            state.run_id, output_dir=state.output_dir
+                        )
                         app.state.training_monitor.start_monitoring(
                             state,
                             progress_callback=callback.on_progress,
@@ -1099,6 +1102,8 @@ def create_app() -> FastAPI:
 
                 # Determine output dir for state persistence
                 output_dir = str(Path(config.output_dir) / run_id)
+                # Enable metric persistence now that the run directory is known
+                callback.output_dir = output_dir
 
                 def _on_pid(pid: int, training_run):
                     """Called immediately after subprocess.Popen — persist PID to disk."""
@@ -1284,6 +1289,63 @@ def create_app() -> FastAPI:
             except Exception:
                 pass  # State file may not exist yet if failure was before subprocess
             await broadcast_training_failed(run_id, error_msg)
+
+    def _models_dir() -> Path:
+        """Authoritative runs root — the live trainer config, else the TrainerConfig default."""
+        trainer = getattr(app.state, "trainer", None)
+        if trainer is not None:
+            return Path(trainer.config.output_dir)
+        return Path("data/models")
+
+    # NOTE: literal /training/runs routes MUST register before /training/{run_id}
+    # or "runs" is captured as a run_id.
+    @app.get("/api/training/runs", tags=["Training"])
+    async def list_persisted_training_runs():
+        """List past training runs found under the models directory (newest first)."""
+        from bashgym.gym.run_metrics import list_runs
+
+        return {"runs": list_runs(models_dir=_models_dir())}
+
+    @app.get("/api/training/runs/{run_id}/metrics", tags=["Training"])
+    async def get_training_run_metrics(run_id: str):
+        """Return the persisted metric history (metrics.jsonl) for one run."""
+        from bashgym.gym.run_metrics import read_run_metrics
+
+        try:
+            points = read_run_metrics(run_id, models_dir=_models_dir())
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid run_id: {run_id}")
+        if points is None:
+            raise HTTPException(status_code=404, detail=f"No metrics for run {run_id}")
+        return {"run_id": run_id, "metrics": points}
+
+    @app.get("/api/training/dataset/inspect", tags=["Training"])
+    async def inspect_training_dataset(path: str = "", offset: int = 0, limit: int = 20):
+        """Inspect exported training examples with chat-template validation warnings.
+
+        Flags the bug classes that silently break Gemma/Qwen chat templates
+        (tool_calls arguments as JSON strings, missing/unknown roles).
+        """
+        from bashgym.config import get_settings
+        from bashgym.factory.dataset_inspector import inspect_dataset
+
+        settings = get_settings()
+        data_dir = Path(settings.data.data_dir)
+        default_path = data_dir / "training_batches" / "train.jsonl"
+        target = Path(path) if path else default_path
+        # Only allow files under the configured data dir, ~/.bashgym, or the repo data dirs
+        allowed_roots = [
+            data_dir.resolve(),
+            (Path.home() / ".bashgym").resolve(),
+            Path("data").resolve(),
+            Path("data-fixed").resolve(),
+        ]
+        resolved = target.resolve()
+        if not any(resolved.is_relative_to(root) for root in allowed_roots):
+            raise HTTPException(status_code=400, detail="Path outside allowed dataset directories")
+        if not resolved.exists():
+            raise HTTPException(status_code=404, detail=f"Dataset not found: {resolved}")
+        return inspect_dataset(resolved, offset=max(0, offset), limit=min(max(1, limit), 100))
 
     @app.get("/api/training/{run_id}", response_model=TrainingResponse, tags=["Training"])
     async def get_training_status(run_id: str):
@@ -4859,25 +4921,54 @@ def create_app() -> FastAPI:
 
         try:
             if source == "chatgpt":
+                import zipfile
+
                 from bashgym.trace_capture.importers.chatgpt import ChatGPTImporter
 
                 importer = ChatGPTImporter()
+
+                # Load conversations up-front so we can stream per-item progress
+                # (mirrors ChatGPTImporter.import_from_zip / import_from_json).
+                load_error: str | None = None
+                conversations: list[Any] = []
                 if file.filename and file.filename.endswith(".zip"):
-                    results = importer.import_from_zip(tmp_path, force=force)
+                    with zipfile.ZipFile(tmp_path, "r") as zf:
+                        convo_files = [n for n in zf.namelist() if n.endswith("conversations.json")]
+                        if not convo_files:
+                            load_error = "No conversations.json found in zip"
+                        for convo_file in convo_files:
+                            data = json.loads(zf.read(convo_file))
+                            conversations.extend(data if isinstance(data, list) else [data])
                 else:
-                    results = importer.import_from_json(tmp_path, force=force)
+                    data = json.loads(tmp_path.read_text())
+                    conversations = data if isinstance(data, list) else [data]
+
+                results = []
+                total = len(conversations)
+                for idx, convo in enumerate(conversations, start=1):
+                    results.append(importer.import_conversation(convo, force=force))
+                    title = convo.get("title") if isinstance(convo, dict) else None
+                    await broadcast_import_progress(
+                        processed=idx,
+                        total=total,
+                        current_item=str(title or f"conversation {idx}"),
+                    )
 
                 imported = [r for r in results if not r.skipped and not r.error]
                 skipped = [r for r in results if r.skipped]
                 failed = [r for r in results if r.error]
 
+                errors = [r.error for r in failed if r.error]
+                if load_error:
+                    errors.append(load_error)
+
                 resp = {
                     "source": "chatgpt",
                     "imported_count": len(imported),
                     "skipped_count": len(skipped),
-                    "failed_count": len(failed),
+                    "failed_count": len(failed) + (1 if load_error else 0),
                     "total_steps": sum(r.steps_imported for r in imported),
-                    "errors": [r.error for r in failed if r.error],
+                    "errors": errors,
                 }
 
             elif source == "mcp":
@@ -4885,6 +4976,11 @@ def create_app() -> FastAPI:
 
                 importer = MCPLogImporter()
                 result = importer.import_from_file(tmp_path, force=force)
+                await broadcast_import_progress(
+                    processed=1,
+                    total=1,
+                    current_item=file.filename or "mcp log",
+                )
 
                 if result.error:
                     resp = {

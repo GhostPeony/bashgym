@@ -318,9 +318,13 @@ class TrainingProgressCallback:
         trainer.train_sft(dataset, callback=callback.on_progress)
     """
 
-    def __init__(self, run_id: str):
+    def __init__(self, run_id: str, output_dir: str | None = None):
         self.run_id = run_id
+        # When set, each progress point is persisted to <output_dir>/metrics.jsonl
+        # so loss curves survive the session (backs the run-comparison API).
+        self.output_dir = output_dir
         self._loop = None
+        self._last_recorded_step = -1
 
     def _get_loop(self):
         """Get the event loop, creating one if needed for sync context."""
@@ -346,6 +350,29 @@ class TrainingProgressCallback:
             },
         )
         await manager.broadcast(message)
+
+        step = metrics.get("step")
+        loss = metrics.get("loss")
+        if (
+            self.output_dir
+            and isinstance(step, int)
+            and loss is not None
+            and step != self._last_recorded_step
+        ):
+            self._last_recorded_step = step
+            from bashgym.gym.run_metrics import record_run_metric
+
+            record_run_metric(
+                self.output_dir,
+                {
+                    "step": step,
+                    "loss": loss,
+                    "epoch": metrics.get("epoch"),
+                    "learning_rate": metrics.get("learning_rate"),
+                    "grad_norm": metrics.get("grad_norm"),
+                    "eval_loss": metrics.get("eval_loss"),
+                },
+            )
 
     def on_progress_sync(self, metrics: dict[str, Any]) -> None:
         """Synchronous version for non-async training loops."""
@@ -825,6 +852,20 @@ async def broadcast_pipeline_event(event_type: MessageType, payload: dict[str, A
     message = WSMessage(
         type=event_type,
         payload=payload,
+    )
+    await manager.broadcast(message)
+
+
+async def broadcast_import_progress(processed: int, total: int, current_item: str = "") -> None:
+    """Broadcast per-item trace import progress (pipeline:import)."""
+    message = WSMessage(
+        type=MessageType.PIPELINE_IMPORT,
+        payload={
+            "processed": processed,
+            "total": total,
+            "current_item": current_item,
+            "phase": "importing",
+        },
     )
     await manager.broadcast(message)
 

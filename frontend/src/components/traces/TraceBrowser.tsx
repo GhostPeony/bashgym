@@ -285,7 +285,6 @@ export function TraceBrowser() {
       }).catch(() => {})
     }
     localStorage.setItem(TRACES_VISIT_KEY, new Date().toISOString())
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setAvailableRepos])
 
   // Fetch stats when timeRange changes

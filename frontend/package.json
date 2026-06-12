@@ -11,7 +11,7 @@
     "electron:build": "vite build && electron-builder",
     "web:dev": "vite --config vite.config.web.ts --mode web",
     "web:build": "vite build --config vite.config.web.ts --mode web",
-    "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "lint": "eslint src --report-unused-disable-directives --max-warnings 0",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

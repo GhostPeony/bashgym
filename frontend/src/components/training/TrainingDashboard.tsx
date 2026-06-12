@@ -26,6 +26,8 @@ import { MetricsGrid } from './MetricsGrid'
 import { TrainingConfig } from './TrainingConfig'
 import { SystemInfoPanel } from './SystemInfoPanel'
 import { TrainingLogs } from './TrainingLogs'
+import { RunComparison } from './RunComparison'
+import { DatasetInspector } from './DatasetInspector'
 import { clsx } from 'clsx'
 
 export function TrainingDashboard() {
@@ -266,6 +268,16 @@ export function TrainingDashboard() {
             <TrainingLogs maxHeight={250} defaultExpanded={true} />
           </div>
         )}
+
+        {/* Run Comparison — overlay persisted loss curves across runs */}
+        <div className="col-span-12">
+          <RunComparison />
+        </div>
+
+        {/* Dataset Inspector — chat-template validation of exported examples */}
+        <div className="col-span-12">
+          <DatasetInspector />
+        </div>
 
         {/* Section divider before config/system panels */}
         {currentRun && (

@@ -80,8 +80,27 @@ export interface TrainingResponse {
   message?: string
   started_at?: string
   completed_at?: string
-  metrics?: Record<string, number>
+  metrics?: TrainingStatusMetrics
   output_path?: string
+}
+
+// Metrics dict emitted by the trainer progress callbacks (see bashgym/gym/trainer.py
+// and bashgym/api/routes.py). Mostly numeric, but `eta` is a preformatted string
+// (e.g. "4m 30s") and `simulation` is a boolean flag.
+export interface TrainingStatusMetrics {
+  epoch?: number
+  total_epochs?: number
+  step?: number
+  total_steps?: number
+  loss?: number
+  learning_rate?: number
+  grad_norm?: number
+  eval_loss?: number
+  samples_processed?: number
+  final_loss?: number
+  eta?: string
+  simulation?: boolean
+  [key: string]: number | string | boolean | undefined
 }
 
 export interface ModelInfo {
@@ -375,6 +394,42 @@ export const taskApi = {
 }
 
 // Training API
+export interface TrainingRunSummary {
+  run_id: string
+  modified: number
+  has_metrics: boolean
+  has_final: boolean
+}
+
+export interface RunMetricPoint {
+  step: number
+  loss: number
+  epoch?: number | null
+  learning_rate?: number | null
+  ts?: number
+}
+
+export interface DatasetInspectMessage {
+  role: string | null
+  content: string | null
+  tool_calls?: unknown[] | null
+  truncated?: boolean
+}
+
+export interface DatasetInspectExample {
+  index: number
+  messages: DatasetInspectMessage[]
+  warnings: string[]
+}
+
+export interface DatasetInspectReport {
+  total: number
+  offset: number
+  limit: number
+  examples: DatasetInspectExample[]
+  with_warnings_in_slice: number
+}
+
 export const trainingApi = {
   start: (config: TrainingRequest) =>
     request<TrainingResponse>('/training/start', {
@@ -410,6 +465,21 @@ export const trainingApi = {
       method: 'POST',
       body: JSON.stringify(options || {}),
     }),
+
+  // Persisted run history (metrics.jsonl written next to checkpoints)
+  listRuns: () =>
+    request<{ runs: TrainingRunSummary[] }>('/training/runs'),
+
+  getRunMetrics: (runId: string) =>
+    request<{ run_id: string; metrics: RunMetricPoint[] }>(
+      `/training/runs/${encodeURIComponent(runId)}/metrics`
+    ),
+
+  // Inspect exported training examples with chat-template validation
+  inspectDataset: (offset = 0, limit = 10, path = '') =>
+    request<DatasetInspectReport>(
+      `/training/dataset/inspect?offset=${offset}&limit=${limit}${path ? `&path=${encodeURIComponent(path)}` : ''}`
+    ),
 
   // Download exported JSONL file as browser download
   downloadExport: async (split: 'train' | 'val' = 'train') => {
@@ -2372,6 +2442,87 @@ export const agentApi = {
 }
 
 // Orchestrator API
+// Orchestrator API response types (see bashgym/api/orchestrator_routes.py)
+export type OrchestratorJobStatus =
+  | 'decomposing'
+  | 'awaiting_approval'
+  | 'executing'
+  | 'dispatched'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+
+export interface OrchestratorTaskDTO {
+  id: string
+  title?: string
+  description?: string
+  priority?: 'CRITICAL' | 'HIGH' | 'NORMAL' | 'LOW'
+  status?:
+    | 'pending'
+    | 'assigned'
+    | 'running'
+    | 'completed'
+    | 'failed'
+    | 'blocked'
+    | 'cancelled'
+    | 'retrying'
+    | 'dispatched'
+  dependencies?: string[]
+  files_touched?: string[]
+  estimated_turns?: number
+  budget_usd?: number
+  retry_count?: number
+  worker_prompt?: string
+  worker_id?: string
+  result?: {
+    cost_usd?: number
+    duration_seconds?: number
+    error?: string
+    success?: boolean
+  }
+}
+
+export interface OrchestratorStatusResponse {
+  job_id: string
+  status: OrchestratorJobStatus
+  error?: string | null
+  title?: string
+  dag?: {
+    tasks?: OrchestratorTaskDTO[]
+    stats?: Record<string, number>
+  }
+  stats?: Record<string, number>
+  total_cost?: number
+  total_time?: number
+  completed?: number
+  failed?: number
+  budget?: {
+    limit_usd: number
+    spent_usd: number
+    remaining_usd: number
+    exceeded: boolean
+  }
+  synthesis?: {
+    merge_successes?: number
+    merge_failures?: number
+  }
+}
+
+export interface OrchestratorJobSummary {
+  job_id: string
+  status: OrchestratorJobStatus
+  title?: string | null
+  task_count?: number
+  stats?: Record<string, number>
+}
+
+export interface OrchestratorProvider {
+  provider: string
+  default_model: string
+  env_key: string
+  base_url?: string
+}
+
 export const orchestratorApi = {
   submitSpec: (spec: {
     title: string
@@ -2387,26 +2538,36 @@ export const orchestratorApi = {
       model?: string
       temperature?: number
     }
-  }) => request('/orchestrate/submit', { method: 'POST', body: JSON.stringify(spec) }),
+  }) =>
+    request<{ job_id: string; status: OrchestratorJobStatus; provider: string; model: string }>(
+      '/orchestrate/submit',
+      { method: 'POST', body: JSON.stringify(spec) }
+    ),
 
   approveJob: (jobId: string) =>
-    request(`/orchestrate/${jobId}/approve`, { method: 'POST', body: '{}' }),
+    request<{ job_id: string; status: OrchestratorJobStatus }>(
+      `/orchestrate/${jobId}/approve`,
+      { method: 'POST', body: '{}' }
+    ),
 
   getStatus: (jobId: string) =>
-    request(`/orchestrate/${jobId}/status`),
+    request<OrchestratorStatusResponse>(`/orchestrate/${jobId}/status`),
 
   retryTask: (jobId: string, taskId: string, modifiedPrompt?: string) =>
-    request(`/orchestrate/${jobId}/task/${taskId}/retry`, {
-      method: 'POST',
-      body: JSON.stringify({ modified_prompt: modifiedPrompt })
-    }),
+    request<{ job_id: string; task_id: string; status: string }>(
+      `/orchestrate/${jobId}/task/${taskId}/retry`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ modified_prompt: modifiedPrompt })
+      }
+    ),
 
   cancelJob: (jobId: string) =>
-    request(`/orchestrate/${jobId}`, { method: 'DELETE' }),
+    request<{ status: string; job_id: string }>(`/orchestrate/${jobId}`, { method: 'DELETE' }),
 
-  listProviders: () => request('/orchestrate/providers'),
+  listProviders: () => request<{ providers: OrchestratorProvider[] }>('/orchestrate/providers'),
 
-  listJobs: () => request('/orchestrate/jobs'),
+  listJobs: () => request<{ jobs: OrchestratorJobSummary[] }>('/orchestrate/jobs'),
 }
 
 // Pipeline API

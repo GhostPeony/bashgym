@@ -193,7 +193,7 @@ export function Sidebar() {
       // Check hooks
       const hooksResult = await hooksApi.getStatus()
       if (hooksResult.ok && hooksResult.data) {
-        setHooksInstalled(hooksResult.data.all_installed)
+        setHooksInstalled(hooksResult.data.all_installed ?? false)
       } else {
         setHooksInstalled(false)
       }

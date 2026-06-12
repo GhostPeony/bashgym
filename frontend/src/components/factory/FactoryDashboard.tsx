@@ -31,6 +31,7 @@ import {
   syntheticApi,
   FactoryConfig,
   ColumnConfig,
+  ColumnConstraint,
   SynthesisJob,
   SyntheticJobStatus
 } from '../../services/api'
@@ -793,7 +794,7 @@ export function FactoryDashboard() {
                                   value={constraint.type}
                                   onChange={(e) => {
                                     const updated = [...(column.constraints || [])]
-                                    updated[idx] = { ...constraint, type: e.target.value }
+                                    updated[idx] = { ...constraint, type: e.target.value as ColumnConstraint['type'] }
                                     updateColumn(column.id, { constraints: updated })
                                   }}
                                   className="input text-sm"
@@ -834,7 +835,7 @@ export function FactoryDashboard() {
                             ))}
                             <button
                               onClick={() => {
-                                const updated = [...(column.constraints || []), { type: 'regex', value: '', error_message: '' }]
+                                const updated: ColumnConstraint[] = [...(column.constraints || []), { type: 'regex', value: '', error_message: '' }]
                                 updateColumn(column.id, { constraints: updated })
                               }}
                               className="font-mono text-xs uppercase tracking-widest text-accent-dark hover:underline"

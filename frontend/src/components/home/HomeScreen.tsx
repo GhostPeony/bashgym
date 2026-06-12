@@ -56,10 +56,11 @@ export function HomeScreen() {
       try {
         const statsResult = await systemApi.stats()
         if (statsResult.ok && statsResult.data) {
+          const data = statsResult.data
           setStats(prev => ({
             ...prev,
-            traces: statsResult.data.gold_traces_count || 0,
-            models: statsResult.data.models_count || 0
+            traces: data.gold_traces_count || 0,
+            models: data.models_count || 0
           }))
         }
         const tracesResult = await tracesApi.listRepos()

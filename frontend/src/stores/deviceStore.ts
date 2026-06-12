@@ -24,71 +24,69 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
 
   fetchDevices: async () => {
     set({ loading: true, error: null })
-    try {
-      const devices = await deviceApi.list()
+    const result = await deviceApi.list()
+    if (result.ok && result.data) {
+      const devices = result.data
       const defaultDevice = devices.find(d => d.is_default)
       set({ devices, defaultDeviceId: defaultDevice?.id || null, loading: false })
-    } catch (e: any) {
-      set({ error: e.message || 'Failed to fetch devices', loading: false })
+    } else {
+      set({ error: result.error || 'Failed to fetch devices', loading: false })
     }
   },
 
   addDevice: async (device: NewDevice) => {
-    try {
-      const added = await deviceApi.add(device)
+    const result = await deviceApi.add(device)
+    if (result.ok && result.data) {
       await get().fetchDevices()
-      return added
-    } catch (e: any) {
-      set({ error: e.message || 'Failed to add device' })
-      return null
+      return result.data
     }
+    set({ error: result.error || 'Failed to add device' })
+    return null
   },
 
   updateDevice: async (id: string, updates: Partial<NewDevice>) => {
-    try {
-      await deviceApi.update(id, updates)
+    const result = await deviceApi.update(id, updates)
+    if (result.ok) {
       await get().fetchDevices()
-    } catch (e: any) {
-      set({ error: e.message || 'Failed to update device' })
+    } else {
+      set({ error: result.error || 'Failed to update device' })
     }
   },
 
   removeDevice: async (id: string) => {
-    try {
-      await deviceApi.remove(id)
+    const result = await deviceApi.remove(id)
+    if (result.ok) {
       await get().fetchDevices()
-    } catch (e: any) {
-      set({ error: e.message || 'Failed to remove device' })
+    } else {
+      set({ error: result.error || 'Failed to remove device' })
     }
   },
 
   runPreflight: async (id: string) => {
-    try {
-      const result = await deviceApi.preflight(id)
+    const result = await deviceApi.preflight(id)
+    if (result.ok && result.data) {
       await get().fetchDevices()
-      return result
-    } catch (e: any) {
-      set({ error: e.message || 'Preflight failed' })
-      return null
+      return result.data
     }
+    set({ error: result.error || 'Preflight failed' })
+    return null
   },
 
   setDefault: async (id: string) => {
-    try {
-      await deviceApi.setDefault(id)
+    const result = await deviceApi.setDefault(id)
+    if (result.ok) {
       await get().fetchDevices()
-    } catch (e: any) {
-      set({ error: e.message || 'Failed to set default' })
+    } else {
+      set({ error: result.error || 'Failed to set default' })
     }
   },
 
   discoverFromSSHConfig: async () => {
-    try {
-      const result = await deviceApi.discover()
-      return result.candidates
-    } catch (e: any) {
-      set({ error: e.message || 'Discovery failed' })
-      return []
+    const result = await deviceApi.discover()
+    if (result.ok && result.data) {
+      return result.data.candidates
     }
+    set({ error: result.error || 'Discovery failed' })
+    return []
   },
 }))

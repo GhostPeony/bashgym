@@ -1,5 +1,5 @@
 import { memo, useCallback, useState } from 'react'
-import { Handle, Position, NodeProps } from '@xyflow/react'
+import { Handle, Position, NodeProps, Node } from '@xyflow/react'
 import {
   Terminal,
   Globe,
@@ -26,7 +26,7 @@ import type { AttentionState, AgentStatus, PanelType, ToolHistoryItem, SessionMe
 import { ToolBreadcrumbs } from './ToolBreadcrumbs'
 import { useCanvasControlStore } from '../../stores'
 
-export interface TerminalNodeData {
+export interface TerminalNodeData extends Record<string, unknown> {
   panelId: string
   title: string
   type: PanelType
@@ -52,7 +52,7 @@ export interface TerminalNodeData {
   onTogglePause?: (panelId: string) => void
 }
 
-export type TerminalNodeType = NodeProps<TerminalNodeData>
+export type TerminalNodeType = Node<TerminalNodeData, 'terminal'>
 
 // Get icon based on panel type
 function getPanelIcon(type: PanelType) {
@@ -138,7 +138,7 @@ function formatCost(cost: number): string {
   return `$${cost.toFixed(2)}`
 }
 
-export const TerminalNode = memo(function TerminalNode({ data, selected }: TerminalNodeType) {
+export const TerminalNode = memo(function TerminalNode({ data, selected }: NodeProps<TerminalNodeType>) {
   const {
     panelId,
     title,

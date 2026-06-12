@@ -95,7 +95,6 @@ function MiniChart({ experiments }: MiniChartProps) {
     bestLinePts.length > 1
       ? bestLinePts.reduce((acc, pt, i) => {
           if (i === 0) return `M${pt}`
-          const _prevX = xScale(experiments[i - 1].experimentId)
           const currX = xScale(experiments[i].experimentId)
           const prevY = yScale(experiments[i - 1].bestMetric)
           // Step function: horizontal then vertical

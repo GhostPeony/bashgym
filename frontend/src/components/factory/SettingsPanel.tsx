@@ -270,7 +270,7 @@ export function SettingsPanel({ config, onConfigChange }: SettingsPanelProps) {
             <div>
               <label className="block font-mono text-xs uppercase tracking-widest text-text-primary mb-1.5">Intensity</label>
               <div className="flex gap-2">
-                {['light', 'medium', 'heavy'].map(intensity => (
+                {(['light', 'medium', 'heavy'] as const).map(intensity => (
                   <button
                     key={intensity}
                     onClick={() => onConfigChange({

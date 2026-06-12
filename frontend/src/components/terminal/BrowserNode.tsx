@@ -1,5 +1,5 @@
 import { memo, useCallback } from 'react'
-import { Handle, Position, NodeProps } from '@xyflow/react'
+import { Handle, Position, NodeProps, Node } from '@xyflow/react'
 import {
   Globe,
   Maximize2,
@@ -16,7 +16,7 @@ import {
 } from 'lucide-react'
 import { clsx } from 'clsx'
 
-export interface BrowserNodeData {
+export interface BrowserNodeData extends Record<string, unknown> {
   panelId: string
   url: string
   pageTitle?: string
@@ -33,7 +33,7 @@ export interface BrowserNodeData {
   onRefresh?: (panelId: string) => void
 }
 
-export type BrowserNodeType = NodeProps<BrowserNodeData>
+export type BrowserNodeType = Node<BrowserNodeData, 'browser'>
 
 // Get status color based on HTTP status code
 function getStatusColor(statusCode?: number): string {
@@ -111,7 +111,7 @@ function parseUrlParts(url: string): { protocol: string; host: string; path: str
   }
 }
 
-export const BrowserNode = memo(function BrowserNode({ data, selected }: BrowserNodeType) {
+export const BrowserNode = memo(function BrowserNode({ data, selected }: NodeProps<BrowserNodeType>) {
   const {
     panelId,
     url,

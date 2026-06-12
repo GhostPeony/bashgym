@@ -130,7 +130,9 @@ function createNeonAdapter(
             const { neon } = await import('@neondatabase/serverless')
             const sql = neon(connStringResult.value, { fullResults: true })
 
-            const result = await sql(query)
+            // Dynamic query strings must go through sql.query(); the bare sql``
+            // form is a tagged-template function and rejects plain strings.
+            const result = await sql.query(query)
 
             // Format as markdown table
             const fields = result.fields ?? []

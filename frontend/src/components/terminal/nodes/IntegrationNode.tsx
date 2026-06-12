@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Handle, Position, type NodeProps } from '@xyflow/react'
+import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
 import {
   Check,
   ChevronDown,
@@ -195,12 +195,12 @@ function CredentialField({
 // IntegrationNode
 // ---------------------------------------------------------------------------
 
-export type IntegrationNodeType = NodeProps<IntegrationNodeData>
+export type IntegrationNodeType = Node<IntegrationNodeData>
 
 export const IntegrationNode = memo(function IntegrationNode({
   data,
   selected
-}: IntegrationNodeType) {
+}: NodeProps<IntegrationNodeType>) {
   const {
     panelId,
     title,
@@ -420,7 +420,7 @@ export const IntegrationNode = memo(function IntegrationNode({
           )}
           <span className="truncate flex-1">{context.summary}</span>
           {/* Neon: table count badge */}
-          {adapterType === 'neon' && config.tableCount && (
+          {adapterType === 'neon' && Boolean(config.tableCount) && (
             <span className="text-[9px] font-mono text-text-secondary flex-shrink-0">
               {String(config.tableCount)} tables
             </span>

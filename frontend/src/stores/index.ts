@@ -23,6 +23,7 @@ export type {
   TrainingMetrics,
   TrainingConfig,
   TrainingRun,
+  TrainingLog,
   DataSource
 } from './trainingStore'
 export { useRouterStore } from './routerStore'

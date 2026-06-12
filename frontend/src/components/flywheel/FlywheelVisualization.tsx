@@ -169,7 +169,6 @@ export function FlywheelVisualization({
       {showLabels && (
         <div className="absolute inset-0 pointer-events-none">
           {stages.map((stage) => {
-            const _pos = getPosition(stage.angle)
             const isActive = stage.id === currentStage
 
             // Position label outside the circle

@@ -216,11 +216,12 @@ export function EvaluatorDashboard() {
         const result = await modelsApi.list()
         console.log('[Evaluator] Models result:', result)
         if (result.ok && result.data) {
-          // Extract model IDs from the response
-          setAvailableModels(result.data.map(m => m.model_id))
+          // Extract model IDs from the response (API returns { models, total })
+          const models = result.data.models
+          setAvailableModels(models.map(m => m.model_id))
           // Auto-select first model if none selected
-          if (result.data.length > 0 && !config.model) {
-            setConfig(prev => ({ ...prev, model: result.data![0].model_id }))
+          if (models.length > 0 && !config.model) {
+            setConfig(prev => ({ ...prev, model: models[0].model_id }))
           }
         }
       } catch (error) {

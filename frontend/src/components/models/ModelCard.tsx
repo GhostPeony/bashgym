@@ -73,7 +73,9 @@ export function ModelCard({ model, onSelect, onCompare, onRefresh }: ModelCardPr
           <div className="flex items-center gap-2">
             <h3 className="font-brand text-lg text-text-primary truncate">{model.display_name}</h3>
             {model.hf_repo_id && (
-              <Cloud className="w-3.5 h-3.5 text-accent flex-shrink-0" title="On HuggingFace Hub" />
+              <span title="On HuggingFace Hub" className="flex-shrink-0 inline-flex">
+                <Cloud className="w-3.5 h-3.5 text-accent" />
+              </span>
             )}
             {model.starred && (
               <Star className="w-4 h-4 text-status-warning fill-current flex-shrink-0" />

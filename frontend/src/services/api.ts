@@ -505,6 +505,111 @@ export const trainingApi = {
       return { ok: false as const, error: String(e) }
     }
   },
+
+  // Fetch last N lines of a run's training.log from disk
+  getLog: (runId: string, opts?: { tail?: number; grep?: string }) => {
+    const params = new URLSearchParams()
+    if (opts?.tail !== undefined) params.set('tail', String(opts.tail))
+    if (opts?.grep) params.set('grep', opts.grep)
+    const qs = params.toString()
+    return request<{
+      run_id: string
+      path: string
+      total_lines: number
+      truncated: boolean
+      lines: string[]
+    }>(`/training/${encodeURIComponent(runId)}/log${qs ? `?${qs}` : ''}`)
+  },
+
+  // List saved checkpoints on disk
+  listCheckpoints: () =>
+    request<Array<{
+      id: string
+      run_id: string
+      kind: 'final' | 'merged' | 'intermediate'
+      path: string
+      size_mb: number
+      created_at: string
+      base_model: string | null
+    }>>('/training/checkpoints'),
+
+  // Delete a checkpoint directory
+  deleteCheckpoint: (id: string) =>
+    request<{ deleted: boolean; id: string }>(
+      `/training/checkpoints/${encodeURIComponent(id)}`,
+      { method: 'DELETE' }
+    ),
+}
+
+// =============================================================================
+// Data Designer API
+// =============================================================================
+
+export interface DesignerPipelineInfo {
+  name: string
+  description: string
+  columns: string[]
+}
+
+export interface DesignerPreviewRequest {
+  pipeline: string
+  num_records?: number
+  provider?: string
+  provider_endpoint?: string
+  text_model?: string
+  code_model?: string
+  judge_model?: string
+}
+
+export interface DesignerCreateRequest {
+  pipeline: string
+  num_records?: number
+  seed_source?: string
+  seed_type?: string
+  provider?: string
+  provider_endpoint?: string
+  text_model?: string
+  code_model?: string
+  judge_model?: string
+  output_dir?: string
+  export_nemo?: boolean
+  train_val_split?: number
+}
+
+export interface DesignerJobStatus {
+  job_id: string
+  status: string
+  pipeline: string
+  num_records: number
+  progress?: { current: number; total: number }
+  output_dir?: string
+  export_result?: Record<string, unknown>
+  error?: string
+}
+
+export const designerApi = {
+  listPipelines: () =>
+    request<{ pipelines: DesignerPipelineInfo[]; available: boolean }>(
+      '/factory/designer/pipelines'
+    ),
+
+  preview: (req: DesignerPreviewRequest) =>
+    request<{ records: Record<string, unknown>[]; columns: string[]; count: number }>(
+      '/factory/designer/preview',
+      {
+        method: 'POST',
+        body: JSON.stringify({ num_records: 5, provider: 'nvidia', ...req }),
+      }
+    ),
+
+  create: (req: DesignerCreateRequest) =>
+    request<DesignerJobStatus>('/factory/designer/create', {
+      method: 'POST',
+      body: JSON.stringify({ num_records: 100, provider: 'nvidia', ...req }),
+    }),
+
+  getJob: (jobId: string) =>
+    request<DesignerJobStatus>(`/factory/designer/jobs/${encodeURIComponent(jobId)}`),
 }
 
 // Legacy Models API (see modelsApi below for full implementation)
@@ -1975,6 +2080,44 @@ export const hfApi = {
 
   deleteHFModel: (repoId: string) =>
     request<{ status: string }>(`/hf/models/${encodeURIComponent(repoId)}`, { method: 'DELETE' }),
+
+  // Storage Buckets (huggingface_hub v1.10+)
+  listBuckets: (namespace?: string) =>
+    request<any[]>(`/hf/buckets${namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''}`),
+  createBucket: (body: { bucket_id: string; private?: boolean }) =>
+    request<{ bucket_id: string; url: string }>('/hf/buckets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  listBucketTree: (bucketId: string, prefix?: string) =>
+    request<any[]>(`/hf/buckets/${encodeURIComponent(bucketId)}/tree${prefix ? `?prefix=${encodeURIComponent(prefix)}` : ''}`),
+  getBucketInfo: (bucketId: string) =>
+    request<any>(`/hf/buckets/${encodeURIComponent(bucketId)}/info`),
+  syncBucket: (body: { source: string; dest: string; delete?: boolean; dry_run?: boolean }) =>
+    request<any>('/hf/buckets/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  deleteBucket: (bucketId: string) =>
+    request<{ status: string }>(`/hf/buckets/${encodeURIComponent(bucketId)}`, { method: 'DELETE' }),
+  copyFiles: (body: { source: string; destination: string }) =>
+    request<{ source: string; destination: string; status: string }>('/hf/copy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+
+  // Agent Traces
+  uploadTraces: (body: { trace_dir: string; repo_id: string; private?: boolean }) =>
+    request<{ repo_id: string; url: string; num_traces: number; total_size_bytes: number }>('/hf/traces/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  listTraceDatasets: (prefix?: string) =>
+    request<any[]>(`/hf/traces/datasets${prefix ? `?prefix=${encodeURIComponent(prefix)}` : ''}`),
 }
 
 // =============================================================================

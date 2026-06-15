@@ -26,6 +26,7 @@ import { useTrainingStore, useRouterStore, useTracesStore } from '../stores'
 import { useOrchestratorStore } from '../stores/orchestratorStore'
 import { useAutoResearchStore } from '../stores/autoresearchStore'
 import { useActivityStore } from '../stores/activityStore'
+import { useCascadeStore } from '../stores/cascadeStore'
 
 type MessageHandler = (data: any) => void
 
@@ -370,12 +371,22 @@ class WebSocketService {
 
       // Cascade RL events
       case MessageTypes.CASCADE_STAGE_STARTED:
+        useCascadeStore.getState().handleStageStarted(payload)
+        break
       case MessageTypes.CASCADE_STAGE_COMPLETED:
+        useCascadeStore.getState().handleStageCompleted(payload)
+        break
       case MessageTypes.CASCADE_STAGE_FAILED:
+        useCascadeStore.getState().handleStageFailed(payload)
+        break
       case MessageTypes.CASCADE_STAGE_SKIPPED:
+        useCascadeStore.getState().handleStageSkipped(payload)
+        break
       case MessageTypes.CASCADE_COMPLETED:
+        useCascadeStore.getState().handleCompleted(payload)
+        break
       case MessageTypes.CASCADE_PROGRESS:
-        console.log('[WS] Cascade event:', type, payload)
+        useCascadeStore.getState().handleProgress(payload)
         break
 
       // Connection events

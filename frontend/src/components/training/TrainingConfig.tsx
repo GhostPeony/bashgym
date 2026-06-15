@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react'
-import { X, FolderGit2, Database, Sparkles, Info, Cloud, Monitor, Shield, FileText, Server } from 'lucide-react'
+import { X, FolderGit2, Database, Sparkles, Info, Cloud, Monitor, Shield, FileText, Server, AlertCircle } from 'lucide-react'
 import type { TrainingConfig as TrainingConfigType, DataSource } from '../../stores'
 import type { TrainingStrategy } from '../../stores'
-import { tracesApi, securityApi, providersApi, cascadeApi, RepoInfo, SecurityDatasetInfo, OllamaModel } from '../../services/api'
+import { tracesApi, securityApi, providersApi, RepoInfo, SecurityDatasetInfo, OllamaModel } from '../../services/api'
 import { useTutorialComplete } from '../../hooks'
 import { clsx } from 'clsx'
 import { DeviceManager } from './DeviceManager'
 import { useDeviceStore } from '../../stores/deviceStore'
+import { useCascadeStore } from '../../stores/cascadeStore'
 
 type TrainingScope = 'all' | 'selected' | 'single'
 type TrainingBackend = 'local' | 'remote_ssh' | 'nemo'
@@ -35,6 +36,9 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
   ])
   const [cascadeStepsPerStage, setCascadeStepsPerStage] = useState(200)
   const [cascadeMode, setCascadeMode] = useState<'simulate' | 'real'>('simulate')
+  const cascadeError = useCascadeStore((s) => s.error)
+  const startCascade = useCascadeStore((s) => s.startCascade)
+  const setPreflightError = useCascadeStore((s) => s.setPreflightError)
 
   const [config, setConfig] = useState<TrainingConfigType>({
     strategy: 'sft',
@@ -107,28 +111,27 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    // Cascade RL uses its own API endpoint
+    // Cascade RL uses its own API endpoint + store-driven error surfacing
     if (config.strategy === 'cascade') {
-      try {
-        await cascadeApi.start({
-          domains: cascadeDomains,
-          baseModel: config.baseModel,
-          datasetPath: config.datasetPath || 'data/gold_traces',
-          trainStepsPerStage: cascadeStepsPerStage,
-          grpoNumGenerations: config.grpoNumGenerations ?? 4,
-          grpoTemperature: config.grpoTemperature ?? 0.7,
-          learningRate: config.learningRate,
-          loraR: config.loraRank ?? 16,
-          loraAlpha: config.loraAlpha ?? 32,
-          load4Bit: config.load4Bit ?? true,
-          useRemoteSsh: config.useRemoteSSH ?? false,
-          mode: cascadeMode,
-        })
+      const result = await startCascade({
+        domains: cascadeDomains,
+        baseModel: config.baseModel,
+        datasetPath: config.datasetPath || 'data/gold_traces',
+        trainStepsPerStage: cascadeStepsPerStage,
+        grpoNumGenerations: config.grpoNumGenerations ?? 4,
+        grpoTemperature: config.grpoTemperature ?? 0.7,
+        learningRate: config.learningRate,
+        loraR: config.loraRank ?? 16,
+        loraAlpha: config.loraAlpha ?? 32,
+        load4Bit: config.load4Bit ?? true,
+        useRemoteSsh: config.useRemoteSSH ?? false,
+        mode: cascadeMode,
+      })
+      if (result.ok) {
         completeTutorialStep('start_training')
         onClose()
-      } catch (err) {
-        console.error('Failed to start cascade training:', err)
       }
+      // If !ok, cascadeStore.error is set; banner renders inline below.
       return
     }
 
@@ -879,6 +882,28 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
               <h3 className="font-mono text-xs uppercase tracking-widest text-text-secondary mb-3">
                 Cascade RL Configuration
               </h3>
+
+              {cascadeError && (
+                <div className="card p-3 mb-4 flex items-start gap-2 border-l-4 border-l-status-error bg-status-error/10">
+                  <AlertCircle className="w-4 h-4 text-status-error flex-shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="font-mono text-xs font-bold text-status-error uppercase tracking-widest mb-1">
+                      Cascade Preflight Failed
+                    </p>
+                    <p className="font-mono text-xs text-text-primary whitespace-pre-wrap break-words">
+                      {cascadeError}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPreflightError(null)}
+                    className="btn-icon w-6 h-6 flex items-center justify-center text-status-error"
+                    aria-label="Dismiss"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
 
               {/* Domain selection */}
               <div className="mb-4">

@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -41,6 +42,7 @@ from bashgym.api.observability_routes import router as observability_router  # n
 from bashgym.api.orchestrator_routes import router as orchestrator_router  # noqa: E402
 from bashgym.api.pipeline_routes import router as pipeline_router  # noqa: E402
 from bashgym.api.pipeline_routes import start_pipeline_watcher, stop_pipeline_watcher  # noqa: E402
+from bashgym.api.research_routes import router as research_router  # noqa: E402
 from bashgym.api.schemas import (  # noqa: E402
     AvailableModel,
     BenchmarkResultSchema,
@@ -1346,6 +1348,191 @@ def create_app() -> FastAPI:
         if not resolved.exists():
             raise HTTPException(status_code=404, detail=f"Dataset not found: {resolved}")
         return inspect_dataset(resolved, offset=max(0, offset), limit=min(max(1, limit), 100))
+
+    # =========================================================================
+    # Training log viewer + checkpoint browser (Workstream 3)
+    # Registered BEFORE /api/training/{run_id} so literal paths win the match.
+    # =========================================================================
+
+    _CHECKPOINT_ROOTS = (
+        Path.home() / ".bashgym" / "cascade",
+        Path.home() / ".bashgym" / "models",
+    )
+    _MAX_TAIL_LINES = 5000
+    _MAX_FULL_LOG_BYTES = 50 * 1024 * 1024
+
+    def _resolve_training_log(run_id: str) -> Path | None:
+        # Run layout is nested: <root>/<stage>/<run>/training.log. Match any depth.
+        # Treat run_id as the immediate parent dir name (e.g. 'cascade-foo-123')
+        # or a relative path like 'stage_1_repo_ghostwork/cascade-foo-123'.
+        for root in _CHECKPOINT_ROOTS:
+            if not root.exists():
+                continue
+            # Direct path match (if caller passed the relative path)
+            direct = root / run_id / "training.log"
+            if direct.exists():
+                return direct
+            # Otherwise walk and find first training.log whose parent matches run_id
+            try:
+                for log in root.rglob("training.log"):
+                    if log.parent.name == run_id or str(log.parent.relative_to(root)) == run_id:
+                        return log
+            except OSError:
+                continue
+        run = app.state.training_runs.get(run_id)
+        if run:
+            output_path = run.get("output_path")
+            if output_path:
+                candidate = Path(output_path) / "training.log"
+                if candidate.exists():
+                    return candidate
+        return None
+
+    def _resolve_checkpoint_path(checkpoint_id: str) -> Path:
+        if ".." in checkpoint_id.split("/"):
+            raise HTTPException(status_code=403, detail="Invalid checkpoint id")
+        for root in _CHECKPOINT_ROOTS:
+            candidate = (root / checkpoint_id).resolve()
+            try:
+                candidate.relative_to(root.resolve())
+            except ValueError:
+                continue
+            return candidate
+        raise HTTPException(status_code=403, detail="Checkpoint id outside allowlisted roots")
+
+    def _dir_size_mb(path: Path) -> float:
+        total = 0
+        try:
+            for p in path.rglob("*"):
+                if p.is_file():
+                    try:
+                        total += p.stat().st_size
+                    except OSError:
+                        continue
+        except OSError:
+            return 0.0
+        return round(total / (1024 * 1024), 2)
+
+    def _read_base_model(checkpoint_dir: Path) -> str | None:
+        for name in ("adapter_config.json", "trainer_config.json", "config.json"):
+            f = checkpoint_dir / name
+            if not f.exists():
+                continue
+            try:
+                data = json.loads(f.read_text())
+            except (OSError, json.JSONDecodeError):
+                continue
+            for key in (
+                "base_model_name_or_path",
+                "base_model",
+                "_name_or_path",
+                "model_name_or_path",
+            ):
+                v = data.get(key)
+                if isinstance(v, str) and v:
+                    return v
+        return None
+
+    @app.get("/api/training/checkpoints", tags=["Training"])
+    async def list_checkpoints():
+        """
+        Scan allowlisted roots for saved checkpoints. Directory layout can be
+        nested (e.g. cascade/<stage>/<run>/final) — walk with rglob and match
+        any dir named final, merged, or checkpoint-*.
+        """
+        results: list[dict[str, Any]] = []
+        for root in _CHECKPOINT_ROOTS:
+            if not root.exists():
+                continue
+            try:
+                candidates: list[Path] = []
+                for name in ("final", "merged"):
+                    candidates.extend(p for p in root.rglob(name) if p.is_dir())
+                candidates.extend(p for p in root.rglob("checkpoint-*") if p.is_dir())
+            except OSError:
+                continue
+            for path in candidates:
+                try:
+                    stat = path.stat()
+                except OSError:
+                    continue
+                name = path.name
+                if name == "final":
+                    kind = "final"
+                elif name == "merged":
+                    kind = "merged"
+                else:
+                    kind = "intermediate"
+                rel = path.relative_to(root)
+                # run_id = the directory that holds this checkpoint
+                run_id = path.parent.name
+                results.append(
+                    {
+                        "id": str(rel),
+                        "run_id": run_id,
+                        "kind": kind,
+                        "path": str(path),
+                        "size_mb": _dir_size_mb(path),
+                        "created_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                        "base_model": _read_base_model(path),
+                    }
+                )
+        results.sort(key=lambda r: r["created_at"], reverse=True)
+        return results
+
+    @app.delete("/api/training/checkpoints/{checkpoint_id:path}", tags=["Training"])
+    async def delete_checkpoint(checkpoint_id: str):
+        path = _resolve_checkpoint_path(checkpoint_id)
+        if not path.exists():
+            raise HTTPException(status_code=404, detail=f"Checkpoint {checkpoint_id} not found")
+        if not path.is_dir():
+            raise HTTPException(status_code=400, detail="Not a directory")
+        try:
+            shutil.rmtree(path)
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=f"Delete failed: {exc}") from exc
+        return {"deleted": True, "id": checkpoint_id}
+
+    @app.get("/api/training/{run_id}/log", tags=["Training"])
+    async def get_training_log(
+        run_id: str,
+        tail: int = 500,
+        grep: str = "",
+    ):
+        log_path = _resolve_training_log(run_id)
+        if log_path is None:
+            raise HTTPException(status_code=404, detail=f"No training.log for run {run_id}")
+        try:
+            size = log_path.stat().st_size
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=f"Cannot stat log: {exc}") from exc
+        if tail == 0 and size > _MAX_FULL_LOG_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Log file too large ({size} bytes). Request a tail instead.",
+            )
+        try:
+            with log_path.open("r", encoding="utf-8", errors="replace") as f:
+                all_lines = f.read().splitlines()
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=f"Cannot read log: {exc}") from exc
+        total_lines = len(all_lines)
+        if tail == 0:
+            lines = all_lines
+            truncated = False
+        else:
+            capped = max(1, min(tail, _MAX_TAIL_LINES))
+            lines = all_lines[-capped:]
+            truncated = total_lines > capped
+        if grep:
+            lines = [ln for ln in lines if grep in ln]
+        return {
+            "run_id": run_id,
+            "path": str(log_path),
+            "total_lines": total_lines,
+            "truncated": truncated,
+            "lines": lines,
+        }
 
     @app.get("/api/training/{run_id}", response_model=TrainingResponse, tags=["Training"])
     async def get_training_status(run_id: str):
@@ -4831,6 +5018,9 @@ def create_app() -> FastAPI:
 
     # Include Device routes (SSH device registry)
     app.include_router(device_router)
+
+    # Include Research routes (HF dataset scanner + empirical ranking)
+    app.include_router(research_router)
 
     # Experimental routes — desktop only (hidden in web mode)
     if not _settings.is_web_mode:

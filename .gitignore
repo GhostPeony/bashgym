@@ -38,6 +38,10 @@ docs/
 
 # Data and models (large/local)
 data/
+data-fixed/
+data-pipeline-fixed/
+data-rebuilt/
+data-pipeline/
 unsloth_compiled_cache/
 result.json
 

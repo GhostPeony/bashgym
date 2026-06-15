@@ -98,6 +98,8 @@ class TrainerConfig:
     grpo_num_generations: int = 4
     grpo_temperature: float = 0.7
     grpo_reward_mode: str = "syntax"  # "syntax", "execution", "verification"
+    grpo_use_vllm: bool = False  # vLLM-backed generation (TRL GRPO); requires vllm in env
+    grpo_backend: str = "auto"  # auto|unsloth|plain|trl_vllm — set by ModelProfile + platform (S1)
 
     # Knowledge Distillation settings
     teacher_model: str = "claude-sonnet-4-20250514"  # Teacher model for distillation
@@ -2156,6 +2158,15 @@ class GRPOTrainer(Trainer):
         logger.info(f"Script: {script_path}")
         logger.info(f"Python: {python_exe}")
 
+        # DGX Spark / GB10 (sm_121) Triton fix:
+        # Triton ships with ptxas from CUDA 12.8 which doesn't recognize sm_121a.
+        # Point it at the system CUDA 13 ptxas which has full sm_121 support.
+        # See: https://github.com/triton-lang/triton/issues/9181
+        grpo_env = os.environ.copy()
+        if Path("/usr/local/cuda/bin/ptxas").exists():
+            grpo_env.setdefault("TRITON_PTXAS_PATH", "/usr/local/cuda/bin/ptxas")
+        grpo_env.setdefault("TORCH_CUDA_ARCH_LIST", "12.1a")
+
         try:
             process = subprocess.Popen(
                 [python_exe, str(script_path)],
@@ -2164,6 +2175,7 @@ class GRPOTrainer(Trainer):
                 text=True,
                 bufsize=1,
                 cwd=str(Path.cwd()),
+                env=grpo_env,
             )
 
             run.pid = process.pid
@@ -2302,12 +2314,49 @@ Generated: {datetime.now(timezone.utc).isoformat()}
 GRPO: Group Relative Policy Optimization with tiered rewards
 - Reward mode: {self.config.grpo_reward_mode}
 - Generations per prompt: {self.config.grpo_num_generations}
+- Quantization: load_in_4bit={self.config.load_in_4bit} (GB10/sm_121 trains in bf16)
+
+NOTE: Uses plain HuggingFace transformers + peft + trl (no Unsloth).
+Unsloth's GRPO path is broken on DGX Spark sm_121 right now.
 """
 
-from unsloth import FastLanguageModel
+import torch
+import torch.nn as nn
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from peft import LoraConfig, get_peft_model
 from datasets import load_dataset
 from trl import GRPOTrainer as TRLGRPOTrainer, GRPOConfig
-import torch, ast, subprocess, tempfile, os, sys, re
+import ast, subprocess, tempfile, os, sys, re
+
+# Gemma 4 + PEFT compatibility patch.
+# Gemma4ClippableLinear inherits from nn.Module so PEFT can't recognize it.
+# Monkey-patch a version that inherits from nn.Linear before model load.
+# Source: https://huggingface.co/google/gemma-4-31B/discussions/3
+try:
+    from transformers.models.gemma4 import modeling_gemma4
+
+    class _PatchedClippableLinear(nn.Linear):
+        def __init__(self, config, in_features, out_features):
+            nn.Linear.__init__(self, in_features, out_features, bias=False)
+            self.use_clipped_linears = getattr(config, "use_clipped_linears", False)
+            if self.use_clipped_linears:
+                self.register_buffer("input_min", torch.tensor(-float("inf")))
+                self.register_buffer("input_max", torch.tensor(float("inf")))
+                self.register_buffer("output_min", torch.tensor(-float("inf")))
+                self.register_buffer("output_max", torch.tensor(float("inf")))
+
+        def forward(self, x):
+            if self.use_clipped_linears:
+                x = torch.clamp(x, self.input_min, self.input_max)
+            out = nn.Linear.forward(self, x)
+            if self.use_clipped_linears:
+                out = torch.clamp(out, self.output_min, self.output_max)
+            return out
+
+    modeling_gemma4.Gemma4ClippableLinear = _PatchedClippableLinear
+    print("Applied Gemma4ClippableLinear -> nn.Linear patch for PEFT compatibility")
+except ImportError:
+    pass  # Not a Gemma 4 model — patch not needed
 
 # Configuration
 REWARD_MODE = "{self.config.grpo_reward_mode}"
@@ -2418,24 +2467,36 @@ if __name__ == "__main__":
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    # Load model and tokenizer
-    model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name="{self.config.base_model}",
-        max_seq_length={self.config.max_seq_length},
-        load_in_4bit={self.config.load_in_4bit},
-    )
+    MODEL_NAME = "{self.config.base_model}"
+    print(f"Loading {{MODEL_NAME}} with plain transformers (no Unsloth)...")
 
-    # Add LoRA adapters
-    model = FastLanguageModel.get_peft_model(
-        model,
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = "left"  # GRPO needs left padding for generation
+
+    model = AutoModelForCausalLM.from_pretrained(
+        MODEL_NAME,
+        dtype=torch.bfloat16,
+        attn_implementation="sdpa",  # SDPA works on GB10 sm_121, FlashAttention does not
+        device_map="cuda:0",
+    )
+    model.config.use_cache = False  # required for gradient checkpointing
+    model.gradient_checkpointing_enable()
+
+    # Add LoRA via plain peft (no Unsloth)
+    # exclude_modules skips vision/audio towers on multimodal models like Gemma 4
+    lora_config = LoraConfig(
         r={self.config.lora_r},
         lora_alpha={self.config.lora_alpha},
         lora_dropout={self.config.lora_dropout},
         target_modules={self.config.lora_target_modules},
+        exclude_modules=["vision_tower", "multi_modal_projector", "audio_tower"],
         bias="none",
-        use_gradient_checkpointing="unsloth",
-        random_state=42,
+        task_type="CAUSAL_LM",
     )
+    model = get_peft_model(model, lora_config)
+    model.print_trainable_parameters()
 
     # Load dataset
     dataset = load_dataset("json", data_files="{dataset_path}", split="train")
@@ -2447,10 +2508,14 @@ if __name__ == "__main__":
         per_device_train_batch_size={self.config.batch_size},
         gradient_accumulation_steps={self.config.gradient_accumulation_steps},
         num_train_epochs={self.config.num_epochs},
+        max_steps={self.config.max_steps},
         learning_rate={self.config.learning_rate},
         logging_steps={self.config.logging_steps},
         save_steps={self.config.save_steps},
         max_completion_length={self.config.max_seq_length},
+        temperature={self.config.grpo_temperature},
+        use_vllm={self.config.grpo_use_vllm},
+        bf16=True,
         report_to="none",
     )
 
@@ -2466,26 +2531,18 @@ if __name__ == "__main__":
     print(f"Starting GRPO training with reward_mode={{REWARD_MODE}}...")
     trainer.train()
 
-    # Save final model and merged weights
+    # Save LoRA adapter (plain peft, no Unsloth)
     model.save_pretrained("{output_path}/final")
     tokenizer.save_pretrained("{output_path}/final")
-    model.save_pretrained_merged("{output_path}/merged", tokenizer, save_method="merged_16bit")
 
-    # Export to GGUF if enabled
-    if {self.config.auto_export_gguf}:
-        print("Exporting to GGUF ({self.config.gguf_quantization})...")
-        import os
-        gguf_dir = "{output_path}/gguf"
-        os.makedirs(gguf_dir, exist_ok=True)
-        model.save_pretrained_gguf(
-            gguf_dir,
-            tokenizer,
-            quantization_method="{self.config.gguf_quantization}",
-        )
-        print(f"GGUF exported to: {{gguf_dir}}")
+    # Merge LoRA into base model and save as standalone
+    print("Merging LoRA into base model...")
+    merged = model.merge_and_unload()
+    merged.save_pretrained("{output_path}/merged")
+    tokenizer.save_pretrained("{output_path}/merged")
 
     print("GRPO training complete!")
-    print(f"Final model saved to: {output_path}/final")
+    print(f"Adapter saved to: {output_path}/final")
     print(f"Merged model saved to: {output_path}/merged")
 '''
 

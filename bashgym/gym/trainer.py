@@ -2742,7 +2742,15 @@ class GRPOTrainer(Trainer):
                 pass
 
     def _generate_grpo_script(self, run: TrainingRun) -> str:
-        """Generate GRPO training script using trl.GRPOTrainer with tiered reward functions."""
+        """Generate GRPO training script using trl.GRPOTrainer with tiered reward functions.
+
+        Model-family-specific values (LoRA target modules, etc.) come from the
+        ModelFamilyProfile resolved from base_model, so supporting a new model
+        family is a registry entry in bashgym.families rather than an edit here.
+        """
+        from bashgym.families import resolve_family_profile
+
+        profile = resolve_family_profile(self.config.base_model)
         dataset_path = str(run.dataset_path).replace("\\", "/")
         output_path = str(run.output_path).replace("\\", "/")
 
@@ -2986,7 +2994,7 @@ if __name__ == "__main__":
         r={self.config.lora_r},
         lora_alpha={self.config.lora_alpha},
         lora_dropout={self.config.lora_dropout},
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+        target_modules={list(profile.lora_target_modules)},
         bias="none",
         use_gradient_checkpointing=True,
         random_state=42,

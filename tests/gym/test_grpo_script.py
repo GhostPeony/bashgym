@@ -68,3 +68,14 @@ class TestGRPOScriptGeneration:
         assert "max_steps=200" in script
         assert "temperature=0.7" in script
         assert "load_in_4bit=False" in script
+
+    def test_target_modules_come_from_family_profile(self):
+        """The generator consumes the ModelFamilyProfile rather than a hardcoded list."""
+        from bashgym.families import resolve_family_profile
+
+        config = TrainerConfig(base_model="google/gemma-4-31B-it")
+        script = _generate_script(config)
+        profile = resolve_family_profile(config.base_model)
+        assert profile.lora_target_modules  # sanity
+        for mod in profile.lora_target_modules:
+            assert f"'{mod}'" in script, f"{mod} missing from generated GRPO script"

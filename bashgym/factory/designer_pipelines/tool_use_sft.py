@@ -92,7 +92,7 @@ def build_tool_use_pipeline(config: PipelineConfig) -> dd.DataDesignerConfigBuil
         dd.ModelConfig(
             alias="main-model",
             model=config.code_model,
-            inference_parameters=dd.InferenceParameters(
+            inference_parameters=dd.ChatCompletionInferenceParams(
                 temperature=0.7,
                 max_tokens=4096,
             ),

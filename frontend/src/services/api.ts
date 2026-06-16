@@ -2728,6 +2728,8 @@ export interface PipelineConfig {
   generate_gold_threshold: number
   train_enabled: boolean
   train_examples_threshold: number
+  cascade_enabled: boolean
+  cascade_gold_threshold: number
 }
 
 export interface PipelineStatus {

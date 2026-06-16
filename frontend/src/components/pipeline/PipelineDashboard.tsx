@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   Eye, Filter, Sparkles, GraduationCap,
   Play, ArrowRight, RefreshCw,
-  CheckCircle2, XCircle, Clock
+  CheckCircle2, XCircle, Clock, Layers
 } from 'lucide-react'
 import { pipelineApi, PipelineConfig, PipelineStatus } from '../../services/api'
 import { clsx } from 'clsx'
@@ -244,6 +244,19 @@ export function PipelineDashboard() {
             onThresholdChange={(v) => updateConfig({ train_examples_threshold: v })}
             description="Auto-start training run when generated examples reach threshold"
             color="text-rose-500"
+            showThreshold
+          />
+
+          <StageCard
+            title="Cascade RL"
+            icon={<Layers className="w-5 h-5" />}
+            enabled={config.cascade_enabled}
+            onToggle={(v) => updateConfig({ cascade_enabled: v })}
+            count={0}
+            threshold={config.cascade_gold_threshold}
+            onThresholdChange={(v) => updateConfig({ cascade_gold_threshold: v })}
+            description="Auto-trigger a domain Cascade RL run when new gold traces reach threshold"
+            color="text-violet-500"
             showThreshold
           />
         </div>

@@ -79,3 +79,32 @@ class TestGRPOScriptGeneration:
         assert profile.lora_target_modules  # sanity
         for mod in profile.lora_target_modules:
             assert f"'{mod}'" in script, f"{mod} missing from generated GRPO script"
+
+
+class TestGRPOBackendDispatch:
+    def test_plain_backend_generates_plain_transformers_script(self):
+        config = TrainerConfig(grpo_backend="plain", base_model="google/gemma-4-31B-it")
+        script = _generate_script(config)
+        assert "AutoModelForCausalLM" in script
+        assert "from unsloth" not in script
+        # Gemma 4 patch + multimodal excludes flow from the profile.
+        assert "apply_patches(['gemma4_clippable_linear'])" in script
+        assert "exclude_modules=['vision_tower', 'multi_modal_projector', 'audio_tower']" in script
+
+    def test_plain_backend_no_gemma_patch_for_qwen(self):
+        config = TrainerConfig(grpo_backend="plain", base_model="Qwen/Qwen3.6-35B-A3B")
+        script = _generate_script(config)
+        assert "apply_patches([])" in script
+        assert "exclude_modules=[]" in script
+
+    def test_unsloth_backend_generates_unsloth_script(self):
+        config = TrainerConfig(grpo_backend="unsloth", base_model="google/gemma-4-31B-it")
+        script = _generate_script(config)
+        assert "FastLanguageModel" in script
+
+    def test_both_backends_emit_valid_python(self):
+        import ast
+
+        for backend in ("plain", "unsloth"):
+            config = TrainerConfig(grpo_backend=backend, base_model="google/gemma-4-31B-it")
+            ast.parse(_generate_script(config))  # raises SyntaxError if escaping is wrong

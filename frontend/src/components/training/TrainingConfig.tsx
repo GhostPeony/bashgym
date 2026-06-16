@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
-import { X, FolderGit2, Database, Sparkles, Info, Cloud, Monitor, Shield, FileText, Server, AlertCircle } from 'lucide-react'
+import { X, FolderGit2, Database, Sparkles, Info, Cloud, Monitor, Shield, FileText, Server, AlertCircle, Boxes } from 'lucide-react'
 import type { TrainingConfig as TrainingConfigType, DataSource } from '../../stores'
 import type { TrainingStrategy } from '../../stores'
-import { tracesApi, securityApi, providersApi, RepoInfo, SecurityDatasetInfo, OllamaModel } from '../../services/api'
+import { tracesApi, securityApi, providersApi, trainingApi, RepoInfo, SecurityDatasetInfo, OllamaModel } from '../../services/api'
 import { useTutorialComplete } from '../../hooks'
 import { clsx } from 'clsx'
 import { DeviceManager } from './DeviceManager'
@@ -10,7 +10,7 @@ import { useDeviceStore } from '../../stores/deviceStore'
 import { useCascadeStore } from '../../stores/cascadeStore'
 
 type TrainingScope = 'all' | 'selected' | 'single'
-type TrainingBackend = 'local' | 'remote_ssh' | 'nemo'
+type TrainingBackend = 'local' | 'remote_ssh' | 'nemo' | 'managed'
 
 interface TrainingConfigProps {
   onClose: () => void
@@ -22,6 +22,8 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
   const [trainingScope, setTrainingScope] = useState<TrainingScope>('all')
   const [selectedRepos, setSelectedRepos] = useState<string[]>([])
   const [trainingBackend, setTrainingBackend] = useState<TrainingBackend>('local')
+  const [managedPlatform, setManagedPlatform] = useState<'together' | 'openai'>('together')
+  const [managedMsg, setManagedMsg] = useState<string | null>(null)
   const [dataSource, setDataSource] = useState<DataSource>('traces')
   const [securityDatasets, setSecurityDatasets] = useState<SecurityDatasetInfo[]>([])
   const [ollamaModels, setOllamaModels] = useState<OllamaModel[]>([])
@@ -135,6 +137,24 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
         onClose()
       }
       // If !ok, cascadeStore.error is set; banner renders inline below.
+      return
+    }
+
+    // Managed fine-tune (Together/OpenAI) submits a hosted job instead of a local run
+    if (trainingBackend === 'managed') {
+      setManagedMsg('Submitting…')
+      const result = await trainingApi.managedSubmit({
+        platform: managedPlatform,
+        base_model: config.baseModel,
+        dataset_path: config.datasetPath || 'data/gold_traces/train.jsonl',
+        n_epochs: config.epochs,
+      })
+      if (result.ok && result.data?.job_id) {
+        setManagedMsg(`Submitted ${result.data.backend} job ${result.data.job_id} — ${result.data.status}`)
+      } else {
+        setManagedMsg(result.data?.error || result.error || 'Submit failed')
+      }
+      completeTutorialStep('start_training')
       return
     }
 
@@ -396,7 +416,7 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
             <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-3">
               Training Backend
             </label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
                 onClick={() => {
@@ -448,11 +468,49 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
                 <span className="block font-mono text-xs font-bold uppercase">NeMo Cloud</span>
                 <span className="block font-mono text-xs mt-1 text-text-muted">NVIDIA Microservices</span>
               </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setTrainingBackend('managed')
+                  setConfig({ ...config, useNemoGym: false, useRemoteSSH: false })
+                }}
+                className={clsx(
+                  'card p-3 text-center transition-press',
+                  trainingBackend === 'managed'
+                    ? 'border-accent bg-accent-light text-accent-dark'
+                    : 'text-text-secondary'
+                )}
+              >
+                <Boxes className="w-5 h-5 mx-auto mb-1" />
+                <span className="block font-mono text-xs font-bold uppercase">Managed</span>
+                <span className="block font-mono text-xs mt-1 text-text-muted">Together / OpenAI</span>
+              </button>
             </div>
 
             {trainingBackend === 'remote_ssh' && (
               <div className="mt-4">
                 <DeviceManager />
+              </div>
+            )}
+
+            {trainingBackend === 'managed' && (
+              <div className="mt-4 card p-3 border-l-4 border-l-accent space-y-2">
+                <label className="block font-mono text-xs text-text-muted mb-1">Platform</label>
+                <select
+                  value={managedPlatform}
+                  onChange={(e) => setManagedPlatform(e.target.value as 'together' | 'openai')}
+                  className="input w-full"
+                >
+                  <option value="together">Together</option>
+                  <option value="openai">OpenAI</option>
+                </select>
+                <p className="font-mono text-xs text-text-muted">
+                  Submits a hosted fine-tune job (no local GPU). Connect the platform in
+                  Settings → Models first so the API key is reused.
+                </p>
+                {managedMsg && (
+                  <p className="font-mono text-xs text-text-secondary">{managedMsg}</p>
+                )}
               </div>
             )}
 
@@ -464,7 +522,9 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
                   ? 'Train locally using your GPU with Unsloth. Requires CUDA-capable GPU.'
                   : trainingBackend === 'remote_ssh'
                     ? 'Select or add a remote SSH device for training.'
-                    : 'Train using NVIDIA NeMo Microservices for scalable cloud training.'}
+                    : trainingBackend === 'managed'
+                      ? 'Submit a hosted fine-tune job to Together or OpenAI — no local GPU.'
+                      : 'Train using NVIDIA NeMo Microservices for scalable cloud training.'}
               </p>
             </div>
           </div>

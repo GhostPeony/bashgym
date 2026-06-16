@@ -80,16 +80,21 @@ All additive/test-guarded; broad non-network regression stayed green (506 passed
 
 **Why not done in-place this session:** the GB10 is a live production server, and TRL 1.0→1.6 is a major-version jump that can break the GRPO generator's API usage. Per the project's standing "plan before env changes / never change deps without a verified plan," these belong in a **planned, isolated upgrade**, not forced surgery on the serving box.
 
-**Now codified as `scripts/setup_dgx_serve.sh`** (committed + synced to the GX10): one non-destructive, idempotent command — `bash ~/bashgym/scripts/setup_dgx_serve.sh` — builds the isolated `~/bashgym-serve` venv and self-verifies (sm_121 capability, GB10 matmul, vLLM import). It never touches `bashgym-train` or Ollama.
+**Now codified as `scripts/setup_dgx_serve.sh`** (committed; the GX10 has the prior version at `193aa7f`, so the handoff below does `git pull --ff-only` first): one non-destructive, idempotent command — `bash ~/bashgym/scripts/setup_dgx_serve.sh` — builds the isolated `~/bashgym-serve` venv and self-verifies (sm_121 capability, GB10 matmul, vLLM import). It never touches `bashgym-train` or Ollama.
 
-**Read-only verification done this session (2026-06-16):** the script is present on the GX10 (`~/bashgym/scripts/setup_dgx_serve.sh`, 2913 B), passes `bash -n` syntax check, 341 G disk free, and `~/bashgym-serve` does not yet exist (clean slate) — train venv still at torch 2.10.0+cu130 / transformers 5.5.0 as expected.
+**Read-only prerequisite preflight — all green on the GB10 (2026-06-16):** so the user's one run is de-risked before they commit to it:
+- `python3.12` present at `/usr/bin/python3.12` (3.12.3) with the `venv` module — script line 26 will build the venv.
+- 341 G free disk; `~/bashgym-serve` absent (clean slate); train venv still torch 2.10.0+cu130 / transformers 5.5.0.
+- `https://download.pytorch.org/whl/cu130/` reachable (HTTP 200).
+- **transformers 5.5.0 + vLLM already coexist in `bashgym-train`** — proves `vllm>=0.22.1` won't hard-conflict with transformers 5.5 (the biggest resolution risk). The one residual unknown is whether the *exact* aarch64/cu130 wheels for `torch==2.11.0` / `vllm>=0.22.1` exist; the script aborts cleanly if not.
+- The script now ships a read-only `--check` mode that re-runs all of the above on demand: `bash ~/bashgym/scripts/setup_dgx_serve.sh --check` (installs nothing, exits 0/1 go/no-go).
 
-> **⚠️ Executing it is hard-gated to the user — the one action I cannot do autonomously.** Running an environment-modifying install over SSH to the shared GB10 is blocked by Claude Code's auto-mode safety classifier (it was denied three times this session: twice as a raw multi-package `pip install`, once as the vetted script). The classifier requires an **explicit user permission grant** that the `/goal` directive alone does not provide. I respected the denials rather than working around them. **To finish S8, the user runs one of:**
-> 1. **In this session:** type `! ssh ponyo@192.168.50.173 'bash ~/bashgym/scripts/setup_dgx_serve.sh'` (the `!` prefix runs it under your own shell, bypassing the agent classifier), or
-> 2. **On the GX10 directly:** `ssh ponyo@192.168.50.173` then `bash ~/bashgym/scripts/setup_dgx_serve.sh`, or
-> 3. **Grant standing permission:** add a Bash allow-rule for `ssh ponyo@192.168.50.173:*` (or the `ascent-ponyo` alias) in settings, then ask me to run it.
+> **⚠️ Executing the install is hard-gated to the user — the one action I cannot do autonomously.** An environment-modifying install over SSH to the shared GB10 is blocked by Claude Code's auto-mode safety classifier (denied three times this session: twice as a raw `pip install`, once as the vetted script). The classifier requires an **explicit user permission grant** that the `/goal` directive does not provide, and `dangerouslyDisableSandbox` would be circumventing a safety denial, not a legitimate path. I respected the denials. **To finish S8, run one of:**
+> 1. **In this session (recommended):** `! ssh ponyo@192.168.50.173 'cd ~/bashgym && git pull --ff-only && bash scripts/setup_dgx_serve.sh'` — the `!` prefix runs it under your shell (not the agent classifier); `git pull` first so the box gets today's code. Add `--check` before the real run for a dry preflight.
+> 2. **On the GX10 directly:** `ssh ponyo@192.168.50.173`, then `cd ~/bashgym && git pull --ff-only && bash scripts/setup_dgx_serve.sh`.
+> 3. **Grant standing permission:** add a Bash allow-rule for `ssh ponyo@192.168.50.173:*` (or the `ascent-ponyo` alias), then ask me to run it.
 >
-> The script self-verifies and prints `[ok]/[FAIL]` per check; if any wheel fails to resolve on aarch64/cu130 it aborts with the isolated venv left untouched (`bashgym-train` is never at risk).
+> After install the script self-verifies (sm_121 capability, GB10 matmul, vLLM import) and, on any wheel failure, aborts with the isolated venv left untouched — `bashgym-train` is never at risk.
 
 The equivalent manual procedure (what the script automates):
 

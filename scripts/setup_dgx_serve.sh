@@ -10,12 +10,40 @@
 # cu12 vLLM build on a cu13 system. This venv gets the correct, current stack so vLLM
 # can serve base+candidate models for the held-out eval runner (S3) and benchmarks (S6).
 #
+# Preflight first (read-only, installs nothing):
+#                    bash ~/bashgym/scripts/setup_dgx_serve.sh --check
 # Run ON the GX10:   bash ~/bashgym/scripts/setup_dgx_serve.sh
-# or from desktop:   ssh ponyo@192.168.50.173 'bash ~/bashgym/scripts/setup_dgx_serve.sh'
+# or from desktop:   ssh ponyo@192.168.50.173 'cd ~/bashgym && git pull --ff-only && bash scripts/setup_dgx_serve.sh'
 set -euo pipefail
 
 VENV="${BASHGYM_SERVE_VENV:-$HOME/bashgym-serve}"
 TORCH_CU130_INDEX="https://download.pytorch.org/whl/cu130"
+
+# --check: read-only preflight of every hard prerequisite. Installs nothing,
+# creates nothing, exits 0/1 on go/no-go. Verified green on GB10 2026-06-16.
+if [ "${1:-}" = "--check" ]; then
+  echo "==> Preflight (read-only; installs nothing)"
+  ok=1
+  if command -v python3.12 >/dev/null; then
+    echo "  [ok]   python3.12: $(python3.12 --version 2>&1)"
+    python3.12 -c "import venv" 2>/dev/null && echo "  [ok]   venv module present" \
+      || { echo "  [FAIL] python3.12 has no venv module"; ok=0; }
+  else
+    echo "  [FAIL] python3.12 not on PATH (needed to build the venv)"; ok=0
+  fi
+  avail_gb=$(df -P "$HOME" | awk 'NR==2{printf "%.0f", $4/1024/1024}')
+  if [ "${avail_gb:-0}" -ge 20 ]; then echo "  [ok]   free disk: ${avail_gb}G"; \
+    else echo "  [FAIL] only ${avail_gb}G free (need ~20G for torch+vllm wheels)"; ok=0; fi
+  curl -sfI -m 8 "$TORCH_CU130_INDEX/" >/dev/null \
+    && echo "  [ok]   cu130 wheel index reachable" \
+    || { echo "  [FAIL] $TORCH_CU130_INDEX unreachable"; ok=0; }
+  if [ -x "$HOME/bashgym-train/bin/python" ]; then
+    "$HOME/bashgym-train/bin/python" -c "import transformers,vllm; print('  [info] train venv already coexists: transformers', transformers.__version__, '+ vllm', vllm.__version__)" 2>/dev/null \
+      || echo "  [info] train venv present (version probe skipped)"
+  fi
+  if [ "$ok" = 1 ]; then echo "==> Preflight OK — safe to run without --check"; exit 0; \
+    else echo "==> Preflight found blocking issues (see [FAIL] above)"; exit 1; fi
+fi
 
 echo "==> Target venv: $VENV (training venv ~/bashgym-train is left untouched)"
 

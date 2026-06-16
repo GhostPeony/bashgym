@@ -235,6 +235,10 @@ class ModelProfile:
     benchmarks: dict[str, BenchmarkResult] = field(default_factory=dict)
     custom_evals: dict[str, CustomEvalResult] = field(default_factory=dict)
     evaluation_history: list[EvaluationRecord] = field(default_factory=list)
+    # Held-out trace eval verdicts (HeldoutReport.to_dict() records, newest last).
+    # Comparative base-vs-candidate ship/no-ship — distinct from the pass/fail
+    # benchmarks and custom_evals above, hence its own field.
+    heldout_evals: list[dict[str, Any]] = field(default_factory=list)
 
     # Operational
     model_size_bytes: int = 0
@@ -315,6 +319,7 @@ class ModelProfile:
             "benchmarks": {k: v.to_dict() for k, v in self.benchmarks.items()},
             "custom_evals": {k: v.to_dict() for k, v in self.custom_evals.items()},
             "evaluation_history": [e.to_dict() for e in self.evaluation_history],
+            "heldout_evals": self.heldout_evals,
             # Operational
             "model_size_bytes": self.model_size_bytes,
             "model_size_params": self.model_size_params,
@@ -367,6 +372,7 @@ class ModelProfile:
             evaluation_history=[
                 EvaluationRecord.from_dict(e) for e in data.get("evaluation_history", [])
             ],
+            heldout_evals=data.get("heldout_evals", []),
             # Operational
             model_size_bytes=data.get("model_size_bytes", 0),
             model_size_params=data.get("model_size_params"),
@@ -402,6 +408,22 @@ class ModelProfile:
         """Add a custom eval result and update history."""
         self.custom_evals[result.eval_set_id] = result
         self._update_evaluation_history()
+
+    def add_heldout_eval(self, report: dict[str, Any], keep: int = 20) -> None:
+        """Record a held-out trace eval verdict (a ``HeldoutReport.to_dict()``).
+
+        Kept newest-last, trimmed to the most recent ``keep``. Distinct from
+        benchmarks/custom_evals because the held-out eval is a *comparative*
+        base-vs-candidate ship/no-ship verdict, not a standalone pass/fail score.
+        """
+        self.heldout_evals.append(report)
+        if keep and len(self.heldout_evals) > keep:
+            self.heldout_evals = self.heldout_evals[-keep:]
+
+    @property
+    def latest_heldout_eval(self) -> dict[str, Any] | None:
+        """The most recent held-out eval verdict, or None if never evaluated."""
+        return self.heldout_evals[-1] if self.heldout_evals else None
 
     def _update_evaluation_history(self):
         """Add current evaluation state to history."""

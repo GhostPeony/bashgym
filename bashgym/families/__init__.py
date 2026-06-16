@@ -15,6 +15,7 @@ from .profiles import (
     ModelFamilyProfile,
     resolve_family_profile,
 )
+from .tools import sanitize_message_tool_calls, sanitize_tool_call, validate_tool_call
 
 __all__ = [
     "ModelFamilyProfile",
@@ -26,4 +27,7 @@ __all__ = [
     "VALID_BACKENDS",
     "PATCHES",
     "apply_patches",
+    "sanitize_tool_call",
+    "sanitize_message_tool_calls",
+    "validate_tool_call",
 ]

@@ -184,6 +184,9 @@ class TrainerConfig:
     gguf_quantization: str = "q4_k_m"  # Quantization level: q4_k_m, q5_k_m, q8_0, f16
     auto_deploy_ollama: bool = False  # Auto-deploy GGUF to Ollama after training
     ollama_model_name: str = ""  # Empty = auto-generate from base model + run_id
+    ollama_base_tag: str = (
+        ""  # Reuse this base Ollama model's TEMPLATE on deploy (correct tool-call format)
+    )
     auto_push_hf: bool = False  # Auto-push to HuggingFace Hub after training
     hf_repo_name: str = ""  # Empty = auto-generate from base model + run_id
     hf_private: bool = True  # Private repo by default
@@ -603,7 +606,11 @@ class Trainer:
                 return
 
             logger.info(f"Auto-deploying to Ollama as '{model_name}'...")
-            result = deploy_gguf_to_ollama(str(gguf_files[0]), model_name)
+            result = deploy_gguf_to_ollama(
+                str(gguf_files[0]),
+                model_name,
+                base_ollama_tag=self.config.ollama_base_tag or None,
+            )
             if result["success"]:
                 logger.info(f"Deployed to Ollama as '{model_name}'")
                 run.metrics["ollama_model"] = model_name

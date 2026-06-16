@@ -779,25 +779,53 @@ class DeployOllamaRequest(BaseModel):
     quantization: str = "q4_k_m"
 
 
-def deploy_gguf_to_ollama(gguf_path: str, model_name: str) -> dict[str, Any]:
-    """Deploy a GGUF file to Ollama. Returns {'success': bool, 'error': str|None, 'model_name': str}.
+def deploy_gguf_to_ollama(
+    gguf_path: str,
+    model_name: str,
+    *,
+    base_ollama_tag: str | None = None,
+    template: str | None = None,
+    stop_tokens: tuple[str, ...] = (),
+    system: str | None = "You are a helpful coding assistant trained with Bash Gym.",
+) -> dict[str, Any]:
+    """Deploy a GGUF file to Ollama with a CORRECT Modelfile template.
+
+    When ``base_ollama_tag`` is given, reuses that base model's known-good Ollama
+    TEMPLATE (via ``ollama show``) so served chat/tool-call formatting matches
+    training — fixing the #1 deploy bug where a template-less Modelfile makes Ollama
+    infer a wrong Go template (double-BOS, broken Gemma 4 tool calls).
 
     Standalone function usable from both the API endpoint and the trainer auto-deploy.
     """
+    import logging
     import subprocess
     import tempfile
 
+    from bashgym.export.gguf import ModelfileSpec, build_modelfile, template_from_ollama_base
+
+    _log = logging.getLogger(__name__)
     gguf_file = Path(gguf_path)
     if not gguf_file.exists():
         return {"success": False, "error": f"GGUF file not found: {gguf_path}"}
 
-    modelfile_content = f"""FROM {gguf_path}
+    resolved_template = template or ""
+    resolved_stops = tuple(stop_tokens)
+    if base_ollama_tag and not resolved_template:
+        try:
+            resolved_template, base_stops = template_from_ollama_base(base_ollama_tag)
+            resolved_stops = resolved_stops or base_stops
+        except Exception as exc:  # degrade to template-less deploy rather than fail
+            _log.warning("Could not reuse base template from %s: %s", base_ollama_tag, exc)
 
-PARAMETER temperature 0.7
-PARAMETER num_ctx 8192
-
-SYSTEM \"\"\"You are a helpful coding assistant trained with Bash Gym.\"\"\"
-"""
+    modelfile_content = build_modelfile(
+        ModelfileSpec(
+            from_path=gguf_path,
+            template=resolved_template,
+            system=system,
+            stop_tokens=resolved_stops,
+            parameters={"temperature": 0.7, "num_ctx": 8192},
+        )
+    )
 
     try:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".modelfile", delete=False) as f:

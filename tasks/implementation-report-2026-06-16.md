@@ -54,8 +54,8 @@ All additive/test-guarded; broad non-network regression stayed green (506 passed
 ## 3. Test & verification status
 
 - **Hermetic, bounded suite:** `pytest` no longer hangs; `pytest -m "not network"` is the fast/CI path; `--run-network` runs live-service tests. ~180+ new tests added this session, all green (incl. 8 cascade-trigger + 10 held-out-runner + 6 decision-DPO in the continuation).
-- **Regression discipline:** ran broad non-network suites (datasets/gym/factory/eval/export/families/pipeline) after each change — **506 passed** at the S5 checkpoint; the continuation's final broad run was **572 passed, 0 failed** (factory/pipeline/eval/datasets/families/export/gym), nothing broken by the additive work.
-- **Known non-hanging failures (tracked, task #13):** `tests/orchestrator/test_e2e_api` (1), `tests/research/test_backend_integration` (4, likely API drift like the fixed `test_pipeline_builders`), `tests/orchestrator/test_e2e_worktrees` (14, git-worktree env). These complete (don't hang) and are isolated under `network`/triage.
+- **Regression discipline:** ran broad non-network suites after each change — **506 passed** at the S5 checkpoint; the continuation's final broad run was **831 passed, 0 failed** across orchestrator/research/factory/pipeline/eval/datasets/families/export/gym (the jump from 572 reflects the 19 recovered #13 tests + orchestrator/research now running in the default path), nothing broken by the additive work.
+- **Drift failures (task #13) — ✅ FIXED** (`fc0cac5`): all were stale tests, not product bugs. `test_e2e_worktrees` (14) errored because the `async_git_repo` fixture did `repo._git = git` on a pathlib `Path` (`__slots__` rejects it); `test_e2e_api` (1) expected the old `"executing"` status vs the refactored `"dispatched"`; `test_task_to_dict` expected the int priority vs the `.name` serialization; `test_approve_request_defaults` referenced the deleted `ApproveRequest` model. **19 tests recovered**; `tests/research/test_backend_integration` (4) already green after the earlier hub sync. Full orchestrator+research now run in the default (non-network) path.
 - **GX10 verified:** backend healthy (HTTP 200, 216 routes) after each sync; `families`/`export`/`eval`/`converters` import on the Spark; GB10 matmul works.
 
 ---
@@ -137,8 +137,8 @@ export OLLAMA_CONTEXT_LENGTH=64000   # Hermes needs >=64k; Ollama defaults to 40
 7. **S7 auto-trigger** — the detection seam is **built + tested** (`daecfa6`): `ThresholdMonitor.should_cascade` (gold-count watermark) fires `pipeline:threshold_reached` (stage=cascade) and invokes an optional, error-isolated `cascade_trigger` callback, config-gated off by default. *Remaining = wire it live:* set `Pipeline.cascade_trigger` to call `POST /api/cascade/start` (the API knows the orchestrator), flip `cascade_enabled` from the Pipeline UI, gate `auto_deploy_ollama` on the S3 verdict, and add cascade stage-resumption.
 
 **C. Hygiene (tracked):**
-8. **Task #13** — triage the 5 non-hanging drift failures (likely API-drift fixes like `test_pipeline_builders`).
-9. **S1 follow-ups (#12)** — Liger FLCE (fused CE for Gemma's 262k vocab; Liger-Kernel#1186) and SFT/DPO backend dispatch with config-override-vs-profile-default precedence.
+8. **Task #13 — ✅ DONE** (`fc0cac5`): all drift failures were stale tests (fixture `__slots__` bug + `dispatched`/`.name`/`ApproveRequest` API drift). 19 tests recovered; orchestrator+research green in the default path. See §3.
+9. **S1 follow-ups (#12)** — Liger FLCE (fused CE for Gemma's 262k vocab; Liger-Kernel#1186) and SFT/DPO backend dispatch with config-override-vs-profile-default precedence. *Assessed this session:* SFT/DPO need a new plain-transformers script generator (GRPO already had both variants); weak hermetic-test story (training scripts can't run in CI), so best done with a GPU smoke test on the serving venv rather than rushed.
 
 **D. DGX (planned window):** execute §4 (serving venv → verify → adopt; Hermes install). Keep `bashgym-train` as the fallback until proven.
 
@@ -158,7 +158,7 @@ operate best with our system — model-agnostic, rigorously evaluated, full flyw
 | Training data that matters (continuous scoring, masking, **step-level DPO**) | ✅ S5 complete — decision-DPO now mined from gold traces |
 | Cascade RL flywheel | ✅ MOPD unstubbed **+ auto-trigger built/tested**; API wire = next |
 | Deploy→trace loop (Hermes) | ✅ importer built; install = next |
-| Clean, bounded, hermetic test base | ✅ #2 + #3 |
+| Clean, bounded, hermetic test base | ✅ #2 + #3 + #13 (drift fixed; 831 green, 0 failed) |
 | DGX single-venv consolidation | ✅ already in place; version-upgrade script built — **execution user-gated (§4)** |
 | Serve for eval + run benchmarks | ⏳ Ollama works; vLLM-cu130 (run §4 script) + S6 = next |
 

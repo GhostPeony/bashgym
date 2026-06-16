@@ -322,3 +322,70 @@ def write_jsonl(examples: list[dict], path: Path) -> Path:
         for ex in examples:
             f.write(json.dumps(ex, ensure_ascii=False) + "\n")
     return path
+
+
+# =========================================================================
+# Public dataset → unified messages format
+# =========================================================================
+
+_ROLE_ALIASES = {"human": "user", "gpt": "assistant", "bot": "assistant", "tool": "tool"}
+
+
+def _sanitize_tool_calls(tool_calls: list) -> list:
+    """Coerce tool_call ``arguments`` from JSON strings to dicts.
+
+    Public datasets (e.g. SWE-rebench OpenHands trajectories) serialize tool-call
+    arguments as strings; Gemma/Qwen chat templates require dicts.
+    """
+    fixed = []
+    for tc in tool_calls:
+        if not isinstance(tc, dict):
+            continue
+        tc = dict(tc)
+        fn = tc.get("function")
+        if isinstance(fn, dict):
+            fn = dict(fn)
+            args = fn.get("arguments")
+            if isinstance(args, str):
+                try:
+                    fn["arguments"] = json.loads(args)
+                except (json.JSONDecodeError, TypeError):
+                    fn["arguments"] = {"raw": args}
+            tc["function"] = fn
+        fixed.append(tc)
+    return fixed
+
+
+def normalize_public_messages(example: dict) -> dict | None:
+    """Normalize a public dataset example to our ``{"messages": [...]}`` format.
+
+    Handles the common OpenHands / SWE-agent / ShareGPT shapes: the turns live
+    under ``messages``/``conversations``/``trajectory``, roles may use ShareGPT
+    aliases (``human``/``gpt``), content may be under ``content`` or ``value``, and
+    tool-call arguments are coerced to dicts. Returns None if there is no usable
+    user turn (no prompt to learn from).
+    """
+    turns = example.get("messages") or example.get("conversations") or example.get("trajectory")
+    if not isinstance(turns, list) or not turns:
+        return None
+
+    out: list[dict] = []
+    for msg in turns:
+        if not isinstance(msg, dict):
+            continue
+        role = msg.get("role") or msg.get("from")
+        role = _ROLE_ALIASES.get(role, role)
+        if role not in ("system", "user", "assistant", "tool"):
+            continue
+        content = msg.get("content")
+        if content is None:
+            content = msg.get("value", "")
+        norm = {"role": role, "content": content if isinstance(content, str) else str(content)}
+        tcs = msg.get("tool_calls")
+        if isinstance(tcs, list) and tcs:
+            norm["tool_calls"] = _sanitize_tool_calls(tcs)
+        out.append(norm)
+
+    if not any(m["role"] == "user" for m in out):
+        return None
+    return {"messages": out}

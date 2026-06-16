@@ -66,7 +66,12 @@ where = ["."]
 asyncio_mode = "auto"
 testpaths = ["."]
 python_files = ["test_*.py", "*_test.py"]
-addopts = "-v --tb=short"
+addopts = "-v --tb=short --timeout=120"
+markers = [
+    "network: makes real network/SSH/subprocess calls to external services (deselect with -m 'not network')",
+    "integration: end-to-end integration test needing live services",
+    "slow: slow test (heavy imports/compute)",
+]
 
 [tool.black]
 line-length = 100

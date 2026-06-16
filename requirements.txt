@@ -37,6 +37,7 @@ huggingface_hub>=1.10.0    # HF Hub API — buckets, copy_files, agent-aware CLI
 pytest>=7.4.0              # Test framework
 pytest-asyncio>=0.23.0     # Async test support
 pytest-cov>=4.1.0          # Code coverage
+pytest-timeout>=2.0.0      # Bound every test so a hung network/SSH call can't stall the suite
 
 # =========================================
 # Remote Training (SSH)

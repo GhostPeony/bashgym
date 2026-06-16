@@ -23,7 +23,7 @@ from .stats import BootstrapResult, paired_bootstrap
 # A predictor maps a held-out example to its predicted tool call (OpenAI-style or flat).
 Predictor = Callable[[dict], dict]
 
-_METRICS = ("exact_match", "name_match", "arg_f1")
+_METRICS = ("exact_match", "name_match", "arg_f1", "soft")
 
 
 def first_gold_tool_call(example: dict) -> dict:
@@ -45,9 +45,12 @@ def first_gold_tool_call(example: dict) -> dict:
 
 def _metric_score(predicted: dict, gold: dict, metric: str) -> float:
     """Scalar in [0, 1] for one predicted/gold pair under the chosen metric."""
+    if metric == "soft":
+        from .soft import soft_call_score  # SERA-style graded partial credit
+
+        return soft_call_score(predicted, gold)
     scores = score_tool_call(predicted, gold)
-    value = scores[metric]
-    return float(value)
+    return float(scores[metric])
 
 
 @dataclass

@@ -19,6 +19,7 @@ from .heldout import (
     score_predictions,
 )
 from .metrics import score_tool_call, tool_arg_f1, tool_name_match
+from .soft import soft_call_score, soft_trajectory_score
 from .split import HoldoutSplit, contamination, example_hash, make_holdout_split
 from .stats import BootstrapResult, paired_bootstrap
 
@@ -46,4 +47,6 @@ __all__ = [
     "parse_lm_eval_results",
     "lm_eval_command",
     "DEFAULT_FORGETTING_TASKS",
+    "soft_call_score",
+    "soft_trajectory_score",
 ]

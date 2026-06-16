@@ -2,6 +2,17 @@
 paired-bootstrap statistics for answering "is this fine-tune actually better?".
 """
 
+from .benchmarks_ext import (
+    BenchmarkReport,
+    BenchmarkResult,
+    BenchmarkSpec,
+    bfcl_command,
+    forgetting_suite_spec,
+    record_benchmarks,
+    run_benchmarks,
+    swebench_command,
+    terminal_bench_command,
+)
 from .forgetting import (
     DEFAULT_FORGETTING_TASKS,
     ForgettingReport,
@@ -66,4 +77,13 @@ __all__ = [
     "openai_complete",
     "parse_tool_call",
     "build_prompt_messages",
+    "BenchmarkResult",
+    "BenchmarkReport",
+    "BenchmarkSpec",
+    "run_benchmarks",
+    "record_benchmarks",
+    "forgetting_suite_spec",
+    "terminal_bench_command",
+    "bfcl_command",
+    "swebench_command",
 ]

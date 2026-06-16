@@ -44,7 +44,7 @@ and tested, so what's left is integration against served models on the Spark.
 | **#3** Hermeticity | `e1bc45b` | `--timeout=120` bounds every test; `conftest.py` skips `@pytest.mark.network` by default (`--run-network` opts in); confirmed hangers marked. Suite no longer hangs; bulk green. | 484 bulk green |
 | **S3** Held-out eval | `6cd57cb`, `b3ef6c0` | `bashgym/eval/`: tool-call metrics (exact name + per-arg F1), **session-clustered paired bootstrap** (ship only if 95% CI excludes 0), contamination-free session/repo split + manifest, deploy gate (min delta + CI + max forgetting). **`heldout.py` runner** ties them together: model-agnostic (injected base/candidate predictors → score → clustered CI → gate → `HeldoutReport.ship`/`.to_dict`), no network in the module. | 31 + 10 |
 | **S4** HF ingestion | `b91ea13` | `decontaminate.py` (13-gram + 3-gram-Jaccard benchmark gates — closes the no-decontamination gap), `mixer.py` (self-fraction ratio mixing), `converters.normalize_public_messages` (OpenHands/ShareGPT → our format, JSON-string tool args → dicts). | 23 |
-| **S5** Data quality | `ac367fa` | Continuous `quality_score` [0,1] carried into example metadata (SERA-style soft signal, not just gold/failed); `masking.py` (SFT loss policy: assistant turns only). | 8 |
+| **S5** Data quality | `ac367fa`, `d95b3b2` | Continuous `quality_score` [0,1] carried into example metadata (SERA-style soft signal, not just gold/failed); `masking.py` (SFT loss policy: assistant turns only); **decision-level DPO wiring** — `process_trace_directory` now mines step-level FAILURE→SUCCESS pairs from gold traces (additive + guarded), turning on a generator that existed but was never called. | 8 + 6 |
 | **S7** Flywheel | `cdbba2f`, `29cca12`, `daecfa6` | MOPD distill route now calls the real `distill_cascade()` (was a 4-line sleep stub — the biggest cascade blocker); `hermes_history.py` importer (defensive SQLite reader → BashGym traces, closes deploy→trace loop); **`ThresholdMonitor` → cascade auto-trigger** (gold-count watermark → `pipeline:threshold_reached` stage=cascade → optional, error-isolated `cascade_trigger` callback; config-gated off by default). | 63 cascade + 4 hermes + 8 trigger |
 
 All additive/test-guarded; broad non-network regression stayed green (506 passed at S5; the S7-trigger + S3-runner continuation re-verified **364 passed** across the touched areas + **41** in the full eval suite, nothing broken).
@@ -53,8 +53,8 @@ All additive/test-guarded; broad non-network regression stayed green (506 passed
 
 ## 3. Test & verification status
 
-- **Hermetic, bounded suite:** `pytest` no longer hangs; `pytest -m "not network"` is the fast/CI path; `--run-network` runs live-service tests. ~175+ new tests added this session, all green (incl. 8 cascade-trigger + 10 held-out-runner in the continuation).
-- **Regression discipline:** ran broad non-network suites (datasets/gym/factory/eval/export/families/pipeline) after each change — **506 passed** at the S5 checkpoint; the continuation re-ran 364 across touched areas + 41 in the eval suite, nothing broken.
+- **Hermetic, bounded suite:** `pytest` no longer hangs; `pytest -m "not network"` is the fast/CI path; `--run-network` runs live-service tests. ~180+ new tests added this session, all green (incl. 8 cascade-trigger + 10 held-out-runner + 6 decision-DPO in the continuation).
+- **Regression discipline:** ran broad non-network suites (datasets/gym/factory/eval/export/families/pipeline) after each change — **506 passed** at the S5 checkpoint; the continuation's final broad run was **572 passed, 0 failed** (factory/pipeline/eval/datasets/families/export/gym), nothing broken by the additive work.
 - **Known non-hanging failures (tracked, task #13):** `tests/orchestrator/test_e2e_api` (1), `tests/research/test_backend_integration` (4, likely API drift like the fixed `test_pipeline_builders`), `tests/orchestrator/test_e2e_worktrees` (14, git-worktree env). These complete (don't hang) and are isolated under `network`/triage.
 - **GX10 verified:** backend healthy (HTTP 200, 216 routes) after each sync; `families`/`export`/`eval`/`converters` import on the Spark; GB10 matmul works.
 
@@ -126,7 +126,7 @@ export OLLAMA_CONTEXT_LENGTH=64000   # Hermes needs >=64k; Ollama defaults to 40
 3. **S2 deploy smoke** — export a merged checkpoint → GGUF → Ollama, then run `check_template_roundtrip` against the real HF-template vs Ollama render; wire it as a pre-deploy gate.
 
 **B. Remaining local pieces (no DGX needed):**
-4. **S5 decision-level DPO wiring** — `data_factory.generate_decision_level_dpo_pairs(trace)` (859) is never called by `process_trace_directory` (which only does trace-level `generate_dpo_pairs` at 994). Not a 1-liner: it needs a `ProcessedTrace` that's been through `DecisionExtractor` per gold trace, but the gold loop uses `process_gold_trace`→`TrainingExample`. Wiring: expose/reuse the `ProcessedTrace` in that loop, call the decision-level generator, extend `dpo_examples` (+ test). Done this session: per-family tool sanitization (`bashgym/families/tools.py`) instead, which was the lower-risk S5 item.
+4. **S5 decision-level DPO wiring — ✅ DONE** (`d95b3b2`). `generate_decision_level_dpo_pairs` existed but was never called; `process_trace_directory` now mines step-level FAILURE→SUCCESS preferences from every gold trace via `DataFactory._decision_dpo_for_trace` (runs `DecisionExtractor` over the `ProcessedTrace`, attaches `.decisions`, emits pairs). Purely additive + per-trace try/except guarded so one malformed trace can't break SFT or trace-DPO; `config.generate_decision_dpo` (default on). 6 tests incl. a real `cat`→`ls` recovery pair, flag-off, and bad-trace isolation.
 5. **S5 per-ModelProfile tool sanitization** — extend `families` so tool-call rendering matches each family's template (Gemma 4 `<|"|>` delimiter, qwen_xml, hermes); validate against `apply_chat_template`.
 6. **S4 real ingestion** — promote `bashgym/research` scanner simulate→real; `hf_ingest.py` to download SWE-rebench-openhands (`resolved=1`), Kwai-Klear, Nemotron-SWE, Toucan, SWE-chat, run them through `normalize_public_messages`→`decontaminate`→`mix` (the logic is built/tested).
 7. **S7 auto-trigger** — the detection seam is **built + tested** (`daecfa6`): `ThresholdMonitor.should_cascade` (gold-count watermark) fires `pipeline:threshold_reached` (stage=cascade) and invokes an optional, error-isolated `cascade_trigger` callback, config-gated off by default. *Remaining = wire it live:* set `Pipeline.cascade_trigger` to call `POST /api/cascade/start` (the API knows the orchestrator), flip `cascade_enabled` from the Pipeline UI, gate `auto_deploy_ollama` on the S3 verdict, and add cascade stage-resumption.
@@ -150,7 +150,7 @@ operate best with our system — model-agnostic, rigorously evaluated, full flyw
 | Correct local deployment (no broken tool calls) | ✅ S2 template fix |
 | "Is it actually better?" with rigor | ✅ S3 logic **+ runner built/tested**; serving predictors = next |
 | Leverage public datasets, decontaminated | ✅ S4 logic (download = next) |
-| Training data that matters (continuous scoring, masking) | ✅ S5 (decision-DPO = next) |
+| Training data that matters (continuous scoring, masking, **step-level DPO**) | ✅ S5 complete — decision-DPO now mined from gold traces |
 | Cascade RL flywheel | ✅ MOPD unstubbed **+ auto-trigger built/tested**; API wire = next |
 | Deploy→trace loop (Hermes) | ✅ importer built; install = next |
 | Clean, bounded, hermetic test base | ✅ #2 + #3 |

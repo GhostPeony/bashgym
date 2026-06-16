@@ -52,3 +52,15 @@ class ThresholdMonitor:
         count = sum(1 for _ in open(examples_file, encoding="utf-8"))
         self._watermarks["train_at"] = count
         self._save_watermarks()
+
+    def should_cascade(self, gold_dir: Path) -> bool:
+        """Auto-trigger a cascade RL run once enough new gold traces accumulate."""
+        if not getattr(self.config, "cascade_enabled", False):
+            return False
+        count = len(list(gold_dir.glob("*.json")))
+        last_triggered = self._watermarks.get("cascade_at", 0)
+        return count >= last_triggered + self.config.cascade_gold_threshold
+
+    def mark_cascade_triggered(self, gold_dir: Path) -> None:
+        self._watermarks["cascade_at"] = len(list(gold_dir.glob("*.json")))
+        self._save_watermarks()

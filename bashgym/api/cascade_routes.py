@@ -273,37 +273,12 @@ async def start_mopd_distillation(request: Request, body: MOPDStartRequest):
 
     async def run_mopd():
         try:
-            # MOPD distillation is a future feature — for now broadcast readiness
-            await mopd_callback(
-                "mopd-dataset-ready",
-                {
-                    "domains": list(mopd_config.domain_checkpoints.keys()),
-                    "student_model": mopd_config.student_model,
-                    "output_path": str(mopd_config.output_path),
-                },
-            )
+            # Run the real MOPD distillation. distill_cascade emits mopd-dataset-ready
+            # and mopd-training-started via the callback itself, then trains the unified
+            # student from the per-domain checkpoints' filtered datasets.
+            from bashgym.gym.cascade_scheduler import distill_cascade
 
-            await mopd_callback(
-                "mopd-training-started",
-                {
-                    "student_model": mopd_config.student_model,
-                    "train_steps": mopd_config.train_steps,
-                    "domains": list(mopd_config.domain_checkpoints.keys()),
-                },
-            )
-
-            # Placeholder: actual MOPD training will be implemented
-            # in a future step; for now simulate completion
-            import random
-
-            await asyncio.sleep(random.uniform(2.0, 5.0))
-
-            result = {
-                "status": "completed",
-                "student_model": mopd_config.student_model,
-                "output_path": str(mopd_config.output_path),
-                "domains_distilled": list(mopd_config.domain_checkpoints.keys()),
-            }
+            result = await distill_cascade(mopd_config, callback=mopd_callback)
             request.app.state.mopd_result = result
             await mopd_callback("mopd-completed", result)
 

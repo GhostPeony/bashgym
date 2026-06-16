@@ -38,6 +38,9 @@ export interface TrainingConfig {
   dpoBeta?: number
   grpoNumGenerations?: number
   grpoTemperature?: number
+  grpoLossType?: string  // grpo | gspo | dr_grpo | dapo | bnpo
+  grpoBackend?: string   // auto | unsloth | plain | trl_vllm
+  grpoUseVllm?: boolean
   // Knowledge Distillation
   teacherModel?: string
   teacherTemperature?: number
@@ -216,6 +219,9 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
         dpo_beta: config.dpoBeta,
         grpo_num_generations: config.grpoNumGenerations,
         grpo_temperature: config.grpoTemperature,
+        grpo_loss_type: config.grpoLossType,
+        grpo_backend: config.grpoBackend,
+        grpo_use_vllm: config.grpoUseVllm,
         // Knowledge Distillation
         teacher_model: config.teacherModel,
         teacher_temperature: config.teacherTemperature,

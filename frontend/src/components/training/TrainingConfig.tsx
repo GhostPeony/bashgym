@@ -61,6 +61,9 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
     // GRPO defaults
     grpoNumGenerations: 4,
     grpoTemperature: 0.7,
+    grpoLossType: 'grpo',
+    grpoBackend: 'auto',
+    grpoUseVllm: false,
     // KD defaults
     teacherModel: 'meta-llama/Llama-3.1-70B-Instruct',
     teacherTemperature: 2.0,
@@ -791,6 +794,49 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
                   />
                 </div>
               </div>
+              <div className="grid grid-cols-2 gap-4 mt-4">
+                <div>
+                  <label className="block font-mono text-xs text-text-muted mb-2">Loss Variant</label>
+                  <select
+                    value={config.grpoLossType ?? 'grpo'}
+                    onChange={(e) => setConfig({ ...config, grpoLossType: e.target.value })}
+                    className="input w-full"
+                  >
+                    <option value="grpo">GRPO (default)</option>
+                    <option value="gspo">GSPO — sequence-level (Qwen)</option>
+                    <option value="dr_grpo">Dr. GRPO</option>
+                    <option value="dapo">DAPO</option>
+                    <option value="bnpo">BNPO</option>
+                  </select>
+                  <p className="font-mono text-xs text-text-muted mt-1">
+                    GSPO is more stable for long sequences and MoE models
+                  </p>
+                </div>
+                <div>
+                  <label className="block font-mono text-xs text-text-muted mb-2">Compute Backend</label>
+                  <select
+                    value={config.grpoBackend ?? 'auto'}
+                    onChange={(e) => setConfig({ ...config, grpoBackend: e.target.value })}
+                    className="input w-full"
+                  >
+                    <option value="auto">Auto (detect)</option>
+                    <option value="unsloth">Unsloth</option>
+                    <option value="plain">Plain transformers</option>
+                    <option value="trl_vllm">TRL + vLLM</option>
+                  </select>
+                </div>
+              </div>
+              <label className="flex items-center gap-2 mt-3">
+                <input
+                  type="checkbox"
+                  checked={config.grpoUseVllm ?? false}
+                  onChange={(e) => setConfig({ ...config, grpoUseVllm: e.target.checked })}
+                  className="accent-primary"
+                />
+                <span className="text-sm text-text-secondary">
+                  Use vLLM-backed generation (faster rollouts; requires vLLM in the env)
+                </span>
+              </label>
             </div>
           )}
 

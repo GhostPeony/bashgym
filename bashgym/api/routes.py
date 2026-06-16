@@ -1058,6 +1058,9 @@ def create_app() -> FastAPI:
                     grpo_num_generations=request.grpo_num_generations,
                     grpo_temperature=request.grpo_temperature,
                     grpo_reward_mode=getattr(request, "grpo_reward_mode", "syntax"),
+                    grpo_loss_type=getattr(request, "grpo_loss_type", "grpo"),
+                    grpo_backend=getattr(request, "grpo_backend", "auto"),
+                    grpo_use_vllm=getattr(request, "grpo_use_vllm", False),
                     # Knowledge Distillation
                     teacher_model=request.teacher_model or "claude-sonnet-4-20250514",
                     teacher_temperature=request.teacher_temperature,

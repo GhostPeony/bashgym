@@ -176,6 +176,16 @@ class TrainingRequest(BaseModel):
     grpo_reward_mode: str = Field(
         "syntax", description="GRPO reward mode: syntax, execution, or verification"
     )
+    grpo_loss_type: str = Field(
+        "grpo",
+        description="GRPO loss variant: grpo, gspo (sequence-level), dr_grpo, dapo, bnpo",
+    )
+    grpo_backend: str = Field(
+        "auto", description="GRPO training backend: auto, unsloth, plain, trl_vllm"
+    )
+    grpo_use_vllm: bool = Field(
+        False, description="Use vLLM-backed generation for GRPO (requires vllm in the env)"
+    )
     # Knowledge Distillation settings
     teacher_model: str | None = Field(None, description="Teacher model for distillation")
     teacher_temperature: float = Field(

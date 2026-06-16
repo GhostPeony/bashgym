@@ -9,6 +9,7 @@ from .base import HealthStatus, InferenceProvider, ProviderModel, ProviderRespon
 from .detector import ProviderType, detect_providers, get_available_models
 from .nim import NIMProvider
 from .ollama import OllamaModel, OllamaProvider
+from .openai_compatible import PRESETS, OpenAICompatibleProvider
 from .registry import ProviderRegistry, get_registry
 
 __all__ = [
@@ -22,6 +23,8 @@ __all__ = [
     "OllamaModel",
     "AnthropicProvider",
     "NIMProvider",
+    "OpenAICompatibleProvider",
+    "PRESETS",
     "ProviderType",
     "detect_providers",
     "get_available_models",

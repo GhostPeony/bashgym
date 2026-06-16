@@ -2,6 +2,13 @@
 paired-bootstrap statistics for answering "is this fine-tune actually better?".
 """
 
+from .forgetting import (
+    DEFAULT_FORGETTING_TASKS,
+    ForgettingReport,
+    compute_forgetting,
+    lm_eval_command,
+    parse_lm_eval_results,
+)
 from .gate import GateThresholds, GateVerdict, evaluate_gate
 from .heldout import (
     ExampleEval,
@@ -34,4 +41,9 @@ __all__ = [
     "run_heldout_eval",
     "evaluate_candidate",
     "first_gold_tool_call",
+    "compute_forgetting",
+    "ForgettingReport",
+    "parse_lm_eval_results",
+    "lm_eval_command",
+    "DEFAULT_FORGETTING_TASKS",
 ]

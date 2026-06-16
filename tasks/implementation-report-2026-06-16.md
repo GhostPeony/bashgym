@@ -111,7 +111,7 @@ export OLLAMA_CONTEXT_LENGTH=64000   # Hermes needs >=64k; Ollama defaults to 40
 3. **S2 deploy smoke** — export a merged checkpoint → GGUF → Ollama, then run `check_template_roundtrip` against the real HF-template vs Ollama render; wire it as a pre-deploy gate.
 
 **B. Remaining local pieces (no DGX needed):**
-4. **S5 decision-level DPO wiring** — `data_factory.py:859-942` builds decision-level DPO pairs but isn't called by the main factory flow; wire it into the DPO export path (+ test).
+4. **S5 decision-level DPO wiring** — `data_factory.generate_decision_level_dpo_pairs(trace)` (859) is never called by `process_trace_directory` (which only does trace-level `generate_dpo_pairs` at 994). Not a 1-liner: it needs a `ProcessedTrace` that's been through `DecisionExtractor` per gold trace, but the gold loop uses `process_gold_trace`→`TrainingExample`. Wiring: expose/reuse the `ProcessedTrace` in that loop, call the decision-level generator, extend `dpo_examples` (+ test). Done this session: per-family tool sanitization (`bashgym/families/tools.py`) instead, which was the lower-risk S5 item.
 5. **S5 per-ModelProfile tool sanitization** — extend `families` so tool-call rendering matches each family's template (Gemma 4 `<|"|>` delimiter, qwen_xml, hermes); validate against `apply_chat_template`.
 6. **S4 real ingestion** — promote `bashgym/research` scanner simulate→real; `hf_ingest.py` to download SWE-rebench-openhands (`resolved=1`), Kwai-Klear, Nemotron-SWE, Toucan, SWE-chat, run them through `normalize_public_messages`→`decontaminate`→`mix` (the logic is built/tested).
 7. **S7 auto-trigger** — `ThresholdMonitor` → `POST /api/cascade/start`; set `auto_deploy_ollama` gated by the S3 verdict; cascade stage-resumption.

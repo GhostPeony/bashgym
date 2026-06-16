@@ -22,6 +22,10 @@ from .gemini_history import (
     GeminiSessionImporter,
     import_gemini_sessions,
 )
+from .hermes_history import (
+    HermesSessionImporter,
+    import_hermes_sessions,
+)
 from .mcp_logs import (
     MCPLogImporter,
     import_mcp_logs,
@@ -32,6 +36,9 @@ from .opencode_history import (
 )
 
 __all__ = [
+    # Hermes Agent
+    "import_hermes_sessions",
+    "HermesSessionImporter",
     # Claude Code
     "import_today",
     "import_recent",

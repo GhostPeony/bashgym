@@ -167,6 +167,10 @@ class TrainerConfig:
     grpo_reward_mode: str = "syntax"  # "syntax", "execution", "verification"
     grpo_use_vllm: bool = False  # vLLM-backed generation (TRL GRPO); requires vllm in env
     grpo_backend: str = "auto"  # auto|unsloth|plain|trl_vllm — set by ModelProfile + platform (S1)
+    # GRPO loss variant (TRL/Unsloth GRPOConfig.loss_type). "gspo" = Qwen's
+    # sequence-level Group Sequence Policy Optimization (more stable for long
+    # sequences/MoE); "dr_grpo" = Dr. GRPO. Default "grpo" matches TRL's default.
+    grpo_loss_type: str = "grpo"
 
     # Knowledge Distillation settings
     teacher_model: str = "claude-sonnet-4-20250514"  # Teacher model for distillation
@@ -2758,6 +2762,12 @@ class GRPOTrainer(Trainer):
         """
         from bashgym.families import resolve_family_profile, select_backend
 
+        valid_loss = {"grpo", "gspo", "dr_grpo", "dapo", "bnpo"}
+        if self.config.grpo_loss_type not in valid_loss:
+            raise ValueError(
+                f"grpo_loss_type={self.config.grpo_loss_type!r} must be one of {sorted(valid_loss)}"
+            )
+
         profile = resolve_family_profile(self.config.base_model)
         backend = select_backend(profile, self.config.grpo_backend)
         if backend == "plain":
@@ -2970,6 +2980,7 @@ if __name__ == "__main__":
         max_completion_length={self.config.max_seq_length},
         temperature={self.config.grpo_temperature},
         use_vllm={self.config.grpo_use_vllm},
+        loss_type="{self.config.grpo_loss_type}",
         bf16=True,
         report_to="none",
     )
@@ -3278,6 +3289,7 @@ if __name__ == "__main__":
         bf16=True,
         report_to="none",
         use_vllm={self.config.grpo_use_vllm},
+        loss_type="{self.config.grpo_loss_type}",
     )
 
     # Initialize TRL GRPOTrainer with the degenerate-reward early-stop callback.

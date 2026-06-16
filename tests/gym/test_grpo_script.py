@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from bashgym.gym.trainer import GRPOTrainer, TrainerConfig, TrainingRun, TrainingStrategy
 
 
@@ -108,3 +110,32 @@ class TestGRPOBackendDispatch:
         for backend in ("plain", "unsloth"):
             config = TrainerConfig(grpo_backend=backend, base_model="google/gemma-4-31B-it")
             ast.parse(_generate_script(config))  # raises SyntaxError if escaping is wrong
+
+
+class TestGRPOLossType:
+    """GSPO / Dr. GRPO variant selection via GRPOConfig.loss_type."""
+
+    def test_default_is_grpo(self):
+        for backend in ("plain", "unsloth"):
+            script = _generate_script(TrainerConfig(grpo_backend=backend))
+            assert 'loss_type="grpo"' in script
+
+    def test_gspo_threads_into_both_backends(self):
+        for backend in ("plain", "unsloth"):
+            script = _generate_script(TrainerConfig(grpo_backend=backend, grpo_loss_type="gspo"))
+            assert 'loss_type="gspo"' in script
+
+    def test_dr_grpo_variant(self):
+        script = _generate_script(TrainerConfig(grpo_backend="plain", grpo_loss_type="dr_grpo"))
+        assert 'loss_type="dr_grpo"' in script
+
+    def test_invalid_loss_type_raises(self):
+        with pytest.raises(ValueError, match="grpo_loss_type"):
+            _generate_script(TrainerConfig(grpo_loss_type="not_a_real_loss"))
+
+    def test_gspo_script_still_valid_python(self):
+        import ast
+
+        for backend in ("plain", "unsloth"):
+            script = _generate_script(TrainerConfig(grpo_backend=backend, grpo_loss_type="gspo"))
+            ast.parse(script)

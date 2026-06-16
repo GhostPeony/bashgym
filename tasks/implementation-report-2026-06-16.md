@@ -76,7 +76,7 @@ All additive/test-guarded; broad non-network regression stayed green (506 passed
 
 **Why not done in-place this session:** the GB10 is a live production server, and TRL 1.0→1.6 is a major-version jump that can break the GRPO generator's API usage. Per the project's standing "plan before env changes / never change deps without a verified plan," these belong in a **planned, isolated upgrade**, not forced surgery on the serving box.
 
-**Exact, safe upgrade procedure (recommended: a fresh isolated `bashgym-serve` venv first, prove it, then adopt):**
+**Now codified as `scripts/setup_dgx_serve.sh`** (committed + synced to the GX10): one non-destructive, idempotent command — `bash ~/bashgym/scripts/setup_dgx_serve.sh` — builds the isolated `~/bashgym-serve` venv and self-verifies (sm_121 capability, GB10 matmul, vLLM import). It never touches `bashgym-train` or Ollama. Executing it on the live GB10 is the one remaining step (safety-gated to the user). The equivalent manual procedure:
 
 ```bash
 # On the GX10, in a maintenance window. Build serving venv WITHOUT touching bashgym-train.

@@ -941,6 +941,81 @@ def create_app() -> FastAPI:
     # Training Endpoints
     # =========================================================================
 
+    def _managed_api_key(platform: str, supplied: str | None) -> str | None:
+        """Resolve a managed-platform API key: the supplied one, else the key from a
+        provider connected for the same platform via /api/providers/connect."""
+        if supplied:
+            return supplied
+        registry = getattr(app.state, "provider_registry", None)
+        provider = registry.get_provider(platform) if registry else None
+        return getattr(provider, "_api_key", None)
+
+    @app.post("/api/training/managed/submit", tags=["Training"])
+    async def submit_managed_finetune(body: dict):
+        """Submit a fine-tune to a managed platform (Together / OpenAI) and return the job.
+
+        Body: {platform, base_model, dataset_path, n_epochs?, learning_rate?, suffix?,
+        api_key?}. When api_key is omitted, the key from a provider connected for the
+        same platform is reused.
+        """
+        from pathlib import Path as _Path
+
+        from bashgym.gym.training_backends import ManagedFineTuneBackend, TrainingSpec
+        from bashgym.gym.training_backends.managed import DIALECTS
+
+        platform = (body.get("platform") or "").strip()
+        if platform not in DIALECTS:
+            raise HTTPException(
+                status_code=400, detail=f"platform must be one of {sorted(DIALECTS)}"
+            )
+        base_model = (body.get("base_model") or "").strip()
+        dataset_path = (body.get("dataset_path") or "").strip()
+        if not base_model or not dataset_path:
+            raise HTTPException(status_code=400, detail="base_model and dataset_path are required")
+        if not _Path(dataset_path).exists():
+            raise HTTPException(status_code=400, detail=f"dataset not found: {dataset_path}")
+        api_key = _managed_api_key(platform, body.get("api_key"))
+        if not api_key:
+            raise HTTPException(
+                status_code=400, detail=f"No API key — connect {platform} first or pass api_key"
+            )
+
+        spec = TrainingSpec(
+            base_model=base_model,
+            dataset_path=_Path(dataset_path),
+            n_epochs=int(body.get("n_epochs") or 1),
+            learning_rate=float(body.get("learning_rate") or 1e-5),
+            suffix=(body.get("suffix") or "").strip(),
+        )
+        backend = ManagedFineTuneBackend.for_platform(platform, api_key=api_key)
+        try:
+            job = await backend.submit(spec)
+        except Exception as e:  # noqa: BLE001 - surface platform errors to the UI
+            raise HTTPException(status_code=502, detail=f"submit failed: {e}") from e
+        if not hasattr(app.state, "managed_jobs"):
+            app.state.managed_jobs = {}
+        app.state.managed_jobs[job.job_id] = {"platform": platform}
+        return job.to_dict()
+
+    @app.get("/api/training/managed/{platform}/{job_id}", tags=["Training"])
+    async def poll_managed_finetune(platform: str, job_id: str):
+        """Poll a managed fine-tune job's status."""
+        from bashgym.gym.training_backends import ManagedFineTuneBackend, TrainingJob
+        from bashgym.gym.training_backends.managed import DIALECTS
+
+        if platform not in DIALECTS:
+            raise HTTPException(
+                status_code=400, detail=f"platform must be one of {sorted(DIALECTS)}"
+            )
+        backend = ManagedFineTuneBackend.for_platform(
+            platform, api_key=_managed_api_key(platform, None) or ""
+        )
+        try:
+            job = await backend.poll(TrainingJob(job_id=job_id, backend=platform))
+        except Exception as e:  # noqa: BLE001 - surface platform errors to the UI
+            raise HTTPException(status_code=502, detail=f"poll failed: {e}") from e
+        return job.to_dict()
+
     @app.post("/api/training/start", response_model=TrainingResponse, tags=["Training"])
     async def start_training(request: TrainingRequest, background_tasks: BackgroundTasks):
         """Start a new training run."""

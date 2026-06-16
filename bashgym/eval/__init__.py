@@ -19,6 +19,14 @@ from .heldout import (
     score_predictions,
 )
 from .metrics import score_tool_call, tool_arg_f1, tool_name_match
+from .passk import (
+    EpisodeResult,
+    PassKReport,
+    compute_pass_at_k,
+    evaluate_pass_at_k,
+    pass_at_k,
+)
+from .predictors import build_prompt_messages, endpoint_predictor, openai_complete, parse_tool_call
 from .soft import soft_call_score, soft_trajectory_score
 from .split import HoldoutSplit, contamination, example_hash, make_holdout_split
 from .stats import BootstrapResult, paired_bootstrap
@@ -49,4 +57,13 @@ __all__ = [
     "DEFAULT_FORGETTING_TASKS",
     "soft_call_score",
     "soft_trajectory_score",
+    "pass_at_k",
+    "compute_pass_at_k",
+    "evaluate_pass_at_k",
+    "EpisodeResult",
+    "PassKReport",
+    "endpoint_predictor",
+    "openai_complete",
+    "parse_tool_call",
+    "build_prompt_messages",
 ]

@@ -152,13 +152,29 @@ operate best with our system — model-agnostic, rigorously evaluated, full flyw
 |---|---|
 | Any open model trainable (Qwen 3.6 / latest Gemma / Llama) | ✅ S1 registry + backend switch + CLI |
 | Correct local deployment (no broken tool calls) | ✅ S2 template fix |
-| "Is it actually better?" with rigor | ✅ S3 logic + runner + **registry record** built/tested; serving predictors = next |
+| "Is it actually better?" with rigor | ✅ S3 runner + registry + **forgetting eval** (lm-eval/NeMo-Evaluator → gate) + **SERA soft/graded scoring**; serving predictors = next |
 | Leverage public datasets, decontaminated | ✅ S4 logic (download = next) |
 | Training data that matters (continuous scoring, masking, **step-level DPO**) | ✅ S5 complete — decision-DPO now mined from gold traces |
 | Cascade RL flywheel | ✅ MOPD unstubbed **+ auto-trigger built/tested**; API wire = next |
 | Deploy→trace loop (Hermes) | ✅ importer built; install = next |
-| Clean, bounded, hermetic test base | ✅ #2 + #3 + #13 (drift fixed; 831 green, 0 failed) |
+| Clean, bounded, hermetic test base | ✅ #2 + #3 + #13 (drift fixed; **863 green, 0 failed**) |
 | DGX single-venv consolidation | ✅ **DONE** — `~/bashgym-serve` built + verified (torch 2.11/transformers 5.5.4/trl 1.6/vllm 0.23, cuda cap 12,1); train venv untouched |
 | Serve for eval + run benchmarks | ✅ vLLM 0.23 serving venv ready on the GB10; wire S3 predictors + S6 benchmarks against it = next |
 
 The pure-logic spine is done and tested; the remaining work is runtime integration on the Spark.
+
+---
+
+## 7. Post-S8 eval/training upgrades (2026-06-16, latest NVIDIA/Unsloth)
+
+After S8 unblocked vLLM serving, three improvements grounded in current tooling (web-researched, sources below):
+
+| Commit | What | Grounding |
+|---|---|---|
+| `64b350c` | **Forgetting/regression eval** (`eval/forgetting.py`) — parse NeMo Evaluator / lm-eval output (MMLU/GSM8K/IFEval/HellaSwag), compute per-task drops, feed the gate's previously-dead `forgetting_drops`. `lm_eval_command()` targets the new vLLM `local-completions` endpoint. (S6 start.) | NVIDIA **NeMo Evaluator** (open-source lm-eval/BigCode wrapper) |
+| `2a998ba` | **SERA soft/graded scoring** (`eval/soft.py`) — continuous partial credit per call (wrong tool→0, right tool→`name_weight`+arg-F1) and per **trajectory** (positional align, length-penalized: 4/5→0.8 not 0). Wired as a `"soft"` metric in the runner; doubles as a dense GRPO reward. | **SERA** (arXiv:2601.20789) |
+| `c18dc66` | **GSPO / Dr. GRPO switch** — `TrainerConfig.grpo_loss_type` threads `GRPOConfig.loss_type` through both GRPO backends (validated). GSPO = Qwen's sequence-level policy optimization, more stable for long-seq/MoE (our 26B-A4B). | **Unsloth/TRL** GRPO variants |
+
+Note: Unsloth's 2026 advances (GSPO/DAPO/Dr.GRPO, FP8 RL, 380K-context RL) are **training**-side; the eval-suite gains come from NVIDIA NeMo Evaluator + the SERA/CUBE research line. Next eval steps: episode pass@k through the sandbox (Terminal-Bench/NeMo-Gym style) and the first real end-to-end eval on a served checkpoint.
+
+**Sources:** [NeMo Evaluator](https://github.com/NVIDIA-NeMo/evaluator) · [NeMo Eval docs](https://docs.nvidia.com/nemo/eval/latest/index.html) · [NeMo Gym](https://docs.nvidia.com/nemo/gym/about) · [Unsloth RL guide](https://unsloth.ai/docs/get-started/reinforcement-learning-rl-guide) · SERA (arXiv:2601.20789) · CUBE (arXiv:2603.15798) · [coding-agent benchmarks 2026](https://llm-stats.com/benchmarks)

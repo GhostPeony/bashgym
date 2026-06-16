@@ -8,10 +8,8 @@ contract for a specific training method.
 import hashlib
 import json
 import logging
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Iterator
-
-from bashgym.datasets.contracts import DatasetFormat
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +36,16 @@ def _extract_user_prompt(trace: dict) -> str:
             v = step.get(key)
             if v and isinstance(v, str) and len(v.strip()) > 10:
                 return v.strip()
+
+    # OpenAI/NeMo messages format: first user turn's text.
+    for msg in trace.get("messages", []):
+        if not isinstance(msg, dict) or msg.get("role") != "user":
+            continue
+        content = msg.get("content")
+        if isinstance(content, list):
+            content = " ".join(p.get("text", "") for p in content if isinstance(p, dict))
+        if isinstance(content, str) and len(content.strip()) > 10:
+            return content.strip()
     return ""
 
 
@@ -50,6 +58,17 @@ def _summarize_tool_usage(trace: dict, max_steps: int = 10) -> str:
             continue
         tool = step.get("tool_name") or step.get("tool") or "?"
         tool_counts[tool] = tool_counts.get(tool, 0) + 1
+    # OpenAI/NeMo messages format: count tools from assistant tool_calls.
+    for msg in trace.get("messages", []):
+        if not isinstance(msg, dict):
+            continue
+        for tc in msg.get("tool_calls") or []:
+            if not isinstance(tc, dict):
+                continue
+            fn = tc.get("function") if isinstance(tc.get("function"), dict) else {}
+            name = fn.get("name") or tc.get("name")
+            if name:
+                tool_counts[name] = tool_counts.get(name, 0) + 1
     if not tool_counts:
         return ""
     parts = ", ".join(f"{c} {n}" for n, c in sorted(tool_counts.items(), key=lambda x: -x[1]))
@@ -139,9 +158,7 @@ def trace_to_grpo_example(
     return example
 
 
-def traces_to_grpo_dataset(
-    traces: list[dict], system_prompt: str | None = None
-) -> list[dict]:
+def traces_to_grpo_dataset(traces: list[dict], system_prompt: str | None = None) -> list[dict]:
     """Batch-convert raw traces to GRPO format, dropping invalid ones."""
     out = []
     skipped = 0
@@ -171,9 +188,7 @@ def trace_to_sft_example(trace: dict, system_prompt: str | None = None) -> dict 
     if not user_prompt:
         return None
 
-    sys_content = system_prompt or (
-        "You are an expert software development agent."
-    )
+    sys_content = system_prompt or ("You are an expert software development agent.")
 
     messages = [
         {"role": "system", "content": sys_content},

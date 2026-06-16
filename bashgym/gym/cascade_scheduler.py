@@ -128,7 +128,9 @@ class RepoCascadeDomain(CascadeDomain):
     def matches(self, example: dict[str, Any]) -> bool:
         """Match by repo name in metadata, with min_steps check."""
         # Check both top-level and metadata.primary_repo (format varies)
-        primary_repo = example.get("primary_repo") or example.get("metadata", {}).get("primary_repo", {})
+        primary_repo = example.get("primary_repo") or example.get("metadata", {}).get(
+            "primary_repo", {}
+        )
         name = primary_repo.get("name", "") if isinstance(primary_repo, dict) else ""
 
         if self.repo_names and name not in self.repo_names:
@@ -137,9 +139,7 @@ class RepoCascadeDomain(CascadeDomain):
         # Count steps from either format
         step_count = len(example.get("trace", []))
         if not step_count:
-            step_count = sum(
-                1 for m in example.get("messages", []) if m.get("role") == "assistant"
-            )
+            step_count = sum(1 for m in example.get("messages", []) if m.get("role") == "assistant")
 
         return step_count >= self.min_steps
 
@@ -167,7 +167,9 @@ def build_repo_domains(
             if not isinstance(data, dict):
                 continue
             # Check both top-level and metadata.primary_repo (format varies)
-            primary_repo = data.get("primary_repo") or data.get("metadata", {}).get("primary_repo", {})
+            primary_repo = data.get("primary_repo") or data.get("metadata", {}).get(
+                "primary_repo", {}
+            )
             name = primary_repo.get("name", "") if isinstance(primary_repo, dict) else ""
             if name:
                 repo_counts[name] += 1
@@ -211,8 +213,7 @@ def _reward_dataset_mismatch(reward_mode: str, example: dict[str, Any]) -> str |
         # (either top-level or inside metadata). Without it, the reward function
         # returns 0.5 for every parseable completion → zero variance → no gradient.
         has_tests = "tests" in example or (
-            isinstance(example.get("metadata"), dict)
-            and "tests" in example["metadata"]
+            isinstance(example.get("metadata"), dict) and "tests" in example["metadata"]
         )
         if not has_tests:
             return (
@@ -487,11 +488,11 @@ class CascadeScheduler:
         available_domains: dict[str, CascadeDomain] = dict(DOMAIN_TAXONOMY)
 
         if config.repo_domains_enabled:
-            repo_dir = Path(config.repo_domains_dir) if config.repo_domains_dir else config.dataset_path
+            repo_dir = (
+                Path(config.repo_domains_dir) if config.repo_domains_dir else config.dataset_path
+            )
             if repo_dir.exists():
-                repo_domains = build_repo_domains(
-                    repo_dir, min_examples=config.min_domain_examples
-                )
+                repo_domains = build_repo_domains(repo_dir, min_examples=config.min_domain_examples)
                 available_domains.update(repo_domains)
                 # If repo domains are enabled and found, use them as the domain list
                 if repo_domains:
@@ -526,11 +527,7 @@ class CascadeScheduler:
                     f"Available: {list(available_domains.keys())}"
                 )
 
-            strategy = (
-                config.stage_strategies[i]
-                if config.stage_strategies
-                else "grpo"
-            )
+            strategy = config.stage_strategies[i] if config.stage_strategies else "grpo"
 
             stage = CascadeStage(
                 domain=domain,
@@ -574,9 +571,7 @@ class CascadeScheduler:
                         losses.append(loss_fn(msgs))
                     except Exception:
                         continue
-            domain_losses[stage.domain.name] = (
-                sum(losses) / len(losses) if losses else 0.0
-            )
+            domain_losses[stage.domain.name] = sum(losses) / len(losses) if losses else 0.0
 
         # Sort stages: highest loss (weakest) first
         self.stages.sort(
@@ -765,9 +760,7 @@ class CascadeScheduler:
                 "line": line,
             }
             try:
-                asyncio.run_coroutine_threadsafe(
-                    callback("stage-log", payload), loop
-                )
+                asyncio.run_coroutine_threadsafe(callback("stage-log", payload), loop)
             except Exception as exc:
                 logger.debug(f"[Cascade] log_callback dispatch failed: {exc}")
 
@@ -842,9 +835,7 @@ class CascadeScheduler:
             "simulated": True,
         }
 
-    def _filter_dataset(
-        self, domain: CascadeDomain, strategy: str = "grpo"
-    ) -> Path:
+    def _filter_dataset(self, domain: CascadeDomain, strategy: str = "grpo") -> Path:
         """Filter the training dataset for a specific domain + strategy.
 
         Reads both .json (one trace per file) and .jsonl (one JSON per line),
@@ -962,8 +953,7 @@ class CascadeScheduler:
                 )
                 for issue in result.issues[:5]:
                     logger.error(
-                        f"  {issue.severity} line {issue.line}: "
-                        f"{issue.field} — {issue.message}"
+                        f"  {issue.severity} line {issue.line}: " f"{issue.field} — {issue.message}"
                     )
             else:
                 logger.info(
@@ -973,24 +963,26 @@ class CascadeScheduler:
                 )
         except (KeyError, ValueError) as e:
             # validate_dataset doesn't implement every FormatContract yet.
-            logger.warning(
-                f"[Cascade] Skipping validation for {validator_format}: {e}"
-            )
+            logger.warning(f"[Cascade] Skipping validation for {validator_format}: {e}")
 
         # Strategy-aware preflight. Refuse to start a run that we know
         # cannot produce a learning signal — burn compute only when the
         # data ↔ config pairing has a chance.
         first_example = converted[0] if converted else None
         if first_example is None:
-            raise ValueError(
+            msg = (
                 f"Cascade preflight: domain '{domain.name}' produced zero "
                 f"{strategy.upper()} examples after conversion. Cannot train "
                 f"on an empty dataset. Check dataset path and domain filter."
             )
+            # Simulate runs don't train, so an empty domain is fine there — only
+            # refuse a real run that would burn compute with no learning signal.
+            if self.config.mode == "simulate":
+                logger.warning(f"[Cascade] (simulate) {msg}")
+                return filtered_path  # nothing to preflight when there's no example
+            raise ValueError(msg)
 
-        missing = _strategy_dataset_mismatch(
-            strategy, domain.reward_mode, first_example
-        )
+        missing = _strategy_dataset_mismatch(strategy, domain.reward_mode, first_example)
         if missing:
             raise ValueError(
                 f"Cascade preflight: strategy='{strategy}' cannot work on "

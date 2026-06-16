@@ -1094,6 +1094,12 @@ export const providersApi = {
   getProviders: () =>
     request<ProvidersResponse>('/providers'),
 
+  connect: (body: { platform?: string; base_url?: string; api_key?: string; default_model?: string; name?: string }) =>
+    request<{ ok: boolean; provider_type?: string; available?: boolean; models?: string[]; error?: string }>('/providers/connect', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
   getModels: (params?: { include_local?: boolean; include_cloud?: boolean; code_only?: boolean }) => {
     const searchParams = new URLSearchParams()
     if (params?.include_local !== undefined) searchParams.set('include_local', String(params.include_local))

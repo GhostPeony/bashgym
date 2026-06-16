@@ -649,6 +649,65 @@ def create_app() -> FastAPI:
         except ImportError:
             return {"providers": [], "summary": {"available": 0, "total": 0}}
 
+    @app.post("/api/providers/connect", tags=["Providers"])
+    async def connect_openai_compatible(body: dict):
+        """Connect a generic OpenAI-compatible provider (Together/Fireworks/Groq/vLLM/...).
+
+        Body: {platform?, base_url?, api_key?, default_model?, name?}. Pass a known
+        ``platform`` (preset base URL) or an explicit ``base_url``. The provider is
+        registered into the live registry for this session; the API key is held in
+        memory only and never written to disk.
+        """
+        from bashgym.providers.openai_compatible import PRESETS, OpenAICompatibleProvider
+
+        platform = (body.get("platform") or "").strip()
+        base_url = (body.get("base_url") or "").strip()
+        api_key = body.get("api_key") or None
+        default_model = (body.get("default_model") or "").strip()
+        try:
+            if platform and platform in PRESETS:
+                provider = OpenAICompatibleProvider.for_platform(
+                    platform, api_key=api_key, default_model=default_model
+                )
+                name = platform
+            elif base_url:
+                name = (body.get("name") or "openai_compatible").strip()
+                provider = OpenAICompatibleProvider(
+                    name=name, base_url=base_url, api_key=api_key, default_model=default_model
+                )
+            else:
+                raise HTTPException(
+                    status_code=400, detail="Provide a known 'platform' or an explicit 'base_url'"
+                )
+
+            registry = getattr(app.state, "provider_registry", None)
+            if registry is None:
+                from bashgym.providers import get_registry
+
+                registry = get_registry()
+            registry.register(provider)
+            app.state.provider_registry = registry
+
+            health = await provider.health_check()
+            return {
+                "ok": True,
+                "provider_type": name,
+                "available": health.available,
+                "models": health.models_loaded[:50],
+                "error": health.error,
+            }
+        except HTTPException:
+            raise
+        except Exception as e:  # noqa: BLE001 - report connection failure to the UI
+            return {"ok": False, "error": str(e)}
+
+    @app.get("/api/providers/openai-compatible/presets", tags=["Providers"])
+    async def openai_compatible_presets():
+        """Known OpenAI-compatible platform presets (name -> base URL)."""
+        from bashgym.providers.openai_compatible import PRESETS
+
+        return {"presets": PRESETS}
+
     @app.get("/api/providers/models", tags=["Providers"])
     async def get_available_models(
         include_local: bool = True, include_cloud: bool = True, code_only: bool = False

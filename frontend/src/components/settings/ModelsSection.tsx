@@ -120,6 +120,14 @@ export function ModelsSection() {
   const [customModel, setCustomModel] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [showMoreModels, setShowMoreModels] = useState(false)
+  // Connect cloud provider (OpenAI-compatible) form
+  const [showConnect, setShowConnect] = useState(false)
+  const [connectPlatform, setConnectPlatform] = useState('together')
+  const [connectBaseUrl, setConnectBaseUrl] = useState('')
+  const [connectKey, setConnectKey] = useState('')
+  const [connectModel, setConnectModel] = useState('')
+  const [connecting, setConnecting] = useState(false)
+  const [connectMsg, setConnectMsg] = useState<string | null>(null)
 
   const fetchData = useCallback(async () => {
     setIsLoading(true)
@@ -162,6 +170,30 @@ export function ModelsSection() {
       }
     } finally {
       setIsPulling(null)
+    }
+  }
+
+  const handleConnect = async () => {
+    setConnecting(true)
+    setConnectMsg(null)
+    try {
+      const body =
+        connectPlatform === '__custom__'
+          ? { base_url: connectBaseUrl, api_key: connectKey || undefined, default_model: connectModel || undefined }
+          : { platform: connectPlatform, api_key: connectKey || undefined, default_model: connectModel || undefined }
+      const result = await providersApi.connect(body)
+      if (result.ok && result.data?.ok) {
+        const n = result.data.models?.length ?? 0
+        setConnectMsg(
+          `Connected ${result.data.provider_type} — ${result.data.available ? `${n} models` : 'registered (health check failed)'}`
+        )
+        setConnectKey('')
+        setTimeout(() => fetchData(), 500)
+      } else {
+        setConnectMsg(result.data?.error || result.error || 'Connection failed')
+      }
+    } finally {
+      setConnecting(false)
     }
   }
 
@@ -210,6 +242,78 @@ export function ModelsSection() {
         {providers.map(provider => (
           <ProviderCard key={provider.type} provider={provider} />
         ))}
+      </div>
+
+      {/* Connect Cloud Provider (OpenAI-compatible) */}
+      <div>
+        <button
+          onClick={() => setShowConnect(!showConnect)}
+          className="flex items-center gap-1.5 text-xs font-mono uppercase tracking-widest text-text-muted hover:text-accent-dark"
+        >
+          {showConnect ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+          <Plus className="w-3 h-3" /> Connect cloud provider
+        </button>
+        {showConnect && (
+          <div className="mt-2 p-3 border-brutal border-border rounded-brutal bg-background-card space-y-2.5">
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block font-mono text-[10px] uppercase tracking-widest text-text-muted mb-1">Platform</label>
+                <select
+                  value={connectPlatform}
+                  onChange={(e) => setConnectPlatform(e.target.value)}
+                  className="input w-full text-xs"
+                >
+                  <option value="together">Together</option>
+                  <option value="fireworks">Fireworks</option>
+                  <option value="openrouter">OpenRouter</option>
+                  <option value="groq">Groq</option>
+                  <option value="deepinfra">DeepInfra</option>
+                  <option value="hyperbolic">Hyperbolic</option>
+                  <option value="vllm">vLLM (local, no key)</option>
+                  <option value="__custom__">Custom base URL…</option>
+                </select>
+              </div>
+              <div>
+                <label className="block font-mono text-[10px] uppercase tracking-widest text-text-muted mb-1">Default Model</label>
+                <input
+                  value={connectModel}
+                  onChange={(e) => setConnectModel(e.target.value)}
+                  className="input w-full text-xs"
+                  placeholder="Qwen/Qwen2.5-Coder-32B-Instruct"
+                />
+              </div>
+            </div>
+            {connectPlatform === '__custom__' && (
+              <div>
+                <label className="block font-mono text-[10px] uppercase tracking-widest text-text-muted mb-1">Base URL</label>
+                <input
+                  value={connectBaseUrl}
+                  onChange={(e) => setConnectBaseUrl(e.target.value)}
+                  className="input w-full text-xs"
+                  placeholder="https://host/v1"
+                />
+              </div>
+            )}
+            {connectPlatform !== 'vllm' && (
+              <div>
+                <label className="block font-mono text-[10px] uppercase tracking-widest text-text-muted mb-1">API Key</label>
+                <input
+                  type="password"
+                  value={connectKey}
+                  onChange={(e) => setConnectKey(e.target.value)}
+                  className="input w-full text-xs"
+                  placeholder="held in memory only — never written to disk"
+                />
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              <button onClick={handleConnect} disabled={connecting} className="btn-primary text-xs px-3 py-1.5">
+                {connecting ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Connect'}
+              </button>
+              {connectMsg && <span className="text-[11px] font-mono text-text-secondary">{connectMsg}</span>}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Ollama Section */}

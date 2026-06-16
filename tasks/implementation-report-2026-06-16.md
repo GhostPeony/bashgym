@@ -19,13 +19,14 @@ blocker (the MOPD distill stub) is removed, the Hermes deploy→trace loop has a
 gold-accumulation **auto-trigger** that closes the loop is built and tested (S7). The test suite was
 made green and hermetic (#2, #3).
 
-The **DGX environment consolidation (S8) is effectively already in place** — the `bashgym-train`
-venv runs transformers 5.5 + Unsloth + vLLM + TRL together on the GB10, which was the hard part.
-What remains is a set of *version upgrades* (vLLM cu13 build, TRL 1.6, torch 2.11), now codified as
-an isolated, self-verifying script (`scripts/setup_dgx_serve.sh`). **Running it is the single step I
-could not do autonomously:** the auto-mode safety classifier hard-gates environment-modifying SSH
-writes to the shared GB10 (denied three times), so execution needs an explicit user action — the
-exact one-liner is in §4. Everything up to that line is done, verified read-only on the box, and waiting.
+The **DGX environment consolidation (S8) is COMPLETE** (executed 2026-06-16 with the user's explicit
+authorization). The serving venv `~/bashgym-serve` is built and self-verified on the GB10:
+**torch 2.11.0+cu130 / transformers 5.5.4 / trl 1.6.0 / vllm 0.23.0**, `cuda cap (12,1)` with no
+"max 12.0" warning, GB10 matmul OK, vLLM imports clean. The working `~/bashgym-train` venv was left
+untouched (still torch 2.10/transformers 5.5.0) — the build was fully isolated as designed. This
+unblocks vLLM logprob-capable serving for the S3 eval runner and S6 benchmarks. (It had been gated
+three times by the auto-mode safety classifier as an unsupervised write to shared infra; once the
+user authorized it, it ran via the committed `scripts/setup_dgx_serve.sh`.)
 
 The **runtime half** of the flywheel (serve base+candidate via vLLM, episode pass@k in the
 sandbox, external benchmarks) is the main remaining work; its pure-logic cores are already built
@@ -89,12 +90,7 @@ All additive/test-guarded; broad non-network regression stayed green (506 passed
 - **transformers 5.5.0 + vLLM already coexist in `bashgym-train`** — proves `vllm>=0.22.1` won't hard-conflict with transformers 5.5 (the biggest resolution risk). The one residual unknown is whether the *exact* aarch64/cu130 wheels for `torch==2.11.0` / `vllm>=0.22.1` exist; the script aborts cleanly if not.
 - The script now ships a read-only `--check` mode that re-runs all of the above on demand: `bash ~/bashgym/scripts/setup_dgx_serve.sh --check` (installs nothing, exits 0/1 go/no-go).
 
-> **⚠️ Executing the install is hard-gated to the user — the one action I cannot do autonomously.** An environment-modifying install over SSH to the shared GB10 is blocked by Claude Code's auto-mode safety classifier (denied three times this session: twice as a raw `pip install`, once as the vetted script). The classifier requires an **explicit user permission grant** that the `/goal` directive does not provide, and `dangerouslyDisableSandbox` would be circumventing a safety denial, not a legitimate path. I respected the denials. **To finish S8, run one of:**
-> 1. **In this session (recommended):** `! ssh ponyo@192.168.50.173 'cd ~/bashgym && git pull --ff-only && bash scripts/setup_dgx_serve.sh'` — the `!` prefix runs it under your shell (not the agent classifier); `git pull` first so the box gets today's code. Add `--check` before the real run for a dry preflight.
-> 2. **On the GX10 directly:** `ssh ponyo@192.168.50.173`, then `cd ~/bashgym && git pull --ff-only && bash scripts/setup_dgx_serve.sh`.
-> 3. **Grant standing permission:** add a Bash allow-rule for `ssh ponyo@192.168.50.173:*` (or the `ascent-ponyo` alias), then ask me to run it.
->
-> After install the script self-verifies (sm_121 capability, GB10 matmul, vLLM import) and, on any wheel failure, aborts with the isolated venv left untouched — `bashgym-train` is never at risk.
+> **✅ EXECUTED 2026-06-16 (user-authorized).** It had been gated three times by the auto-mode safety classifier as an unsupervised env-write to shared infra (twice as a raw `pip install`, once as the vetted script) — correctly, since an agent shouldn't run unsupervised installs on a production box. Once the user explicitly authorized it, `scripts/setup_dgx_serve.sh` ran via SSH (detached/nohup, so it survived session hiccups) and self-verified: torch 2.11.0+cu130, transformers 5.5.4, trl 1.6.0, vllm 0.23.0, `cuda cap (12,1)`, GB10 matmul OK, vLLM import OK. `~/bashgym-train` confirmed untouched (still torch 2.10/transformers 5.5.0). The aarch64/cu130 wheels for both torch 2.11 and vllm 0.23 resolved — the one residual unknown, now cleared.
 
 The equivalent manual procedure (what the script automates):
 
@@ -162,7 +158,7 @@ operate best with our system — model-agnostic, rigorously evaluated, full flyw
 | Cascade RL flywheel | ✅ MOPD unstubbed **+ auto-trigger built/tested**; API wire = next |
 | Deploy→trace loop (Hermes) | ✅ importer built; install = next |
 | Clean, bounded, hermetic test base | ✅ #2 + #3 + #13 (drift fixed; 831 green, 0 failed) |
-| DGX single-venv consolidation | ✅ already in place; version-upgrade script built — **execution user-gated (§4)** |
-| Serve for eval + run benchmarks | ⏳ Ollama works; vLLM-cu130 (run §4 script) + S6 = next |
+| DGX single-venv consolidation | ✅ **DONE** — `~/bashgym-serve` built + verified (torch 2.11/transformers 5.5.4/trl 1.6/vllm 0.23, cuda cap 12,1); train venv untouched |
+| Serve for eval + run benchmarks | ✅ vLLM 0.23 serving venv ready on the GB10; wire S3 predictors + S6 benchmarks against it = next |
 
 The pure-logic spine is done and tested; the remaining work is runtime integration on the Spark.

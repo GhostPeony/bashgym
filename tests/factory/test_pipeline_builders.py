@@ -76,7 +76,7 @@ class TestBuildBaseConfig:
         mock_dd.DataDesignerConfigBuilder.return_value = mock_builder_instance
         mock_dd.ModelConfig.return_value = MagicMock()
         mock_dd.ModelProvider.return_value = MagicMock()
-        mock_dd.InferenceParameters.return_value = MagicMock()
+        mock_dd.ChatCompletionInferenceParams.return_value = MagicMock()
 
         config = PipelineConfig(
             provider="nvidia",
@@ -108,7 +108,7 @@ class TestBuildBaseConfig:
         mock_dd.DataDesignerConfigBuilder.return_value = mock_builder_instance
         mock_dd.ModelConfig.return_value = MagicMock()
         mock_dd.ModelProvider.return_value = MagicMock()
-        mock_dd.InferenceParameters.return_value = MagicMock()
+        mock_dd.ChatCompletionInferenceParams.return_value = MagicMock()
 
         providers = [
             ProviderSpec(name="nvidia", endpoint="https://nim.example.com"),
@@ -132,7 +132,7 @@ class TestBuildBaseConfig:
         mock_dd.DataDesignerConfigBuilder.return_value = MagicMock()
         mock_dd.ModelConfig.return_value = MagicMock()
         mock_dd.ModelProvider.return_value = MagicMock()
-        mock_dd.InferenceParameters.return_value = MagicMock()
+        mock_dd.ChatCompletionInferenceParams.return_value = MagicMock()
 
         providers = [
             ProviderSpec(
@@ -155,7 +155,7 @@ class TestBuildBaseConfig:
         mock_dd.DataDesignerConfigBuilder.return_value = MagicMock()
         mock_dd.ModelConfig.return_value = MagicMock()
         mock_dd.ModelProvider.return_value = MagicMock()
-        mock_dd.InferenceParameters.return_value = MagicMock()
+        mock_dd.ChatCompletionInferenceParams.return_value = MagicMock()
 
         providers = [
             ProviderSpec(
@@ -178,7 +178,7 @@ class TestBuildBaseConfig:
         mock_dd.DataDesignerConfigBuilder.return_value = MagicMock()
         mock_dd.ModelConfig.return_value = MagicMock()
         mock_dd.ModelProvider.return_value = MagicMock()
-        mock_dd.InferenceParameters.return_value = MagicMock()
+        mock_dd.ChatCompletionInferenceParams.return_value = MagicMock()
 
         config = PipelineConfig(
             temperature_text=0.9,
@@ -187,9 +187,9 @@ class TestBuildBaseConfig:
         )
         build_base_config(config)
 
-        # InferenceParameters should be called 3 times with the configured temps
-        assert mock_dd.InferenceParameters.call_count == 3
-        temp_calls = mock_dd.InferenceParameters.call_args_list
+        # ChatCompletionInferenceParams should be called 3 times with the configured temps
+        assert mock_dd.ChatCompletionInferenceParams.call_count == 3
+        temp_calls = mock_dd.ChatCompletionInferenceParams.call_args_list
 
         temps_used = [c[1]["temperature"] for c in temp_calls]
         assert 0.9 in temps_used  # text
@@ -204,7 +204,7 @@ class TestBuildBaseConfig:
         mock_dd.DataDesignerConfigBuilder.return_value = MagicMock()
         mock_dd.ModelConfig.return_value = MagicMock()
         mock_dd.ModelProvider.return_value = MagicMock()
-        mock_dd.InferenceParameters.return_value = MagicMock()
+        mock_dd.ChatCompletionInferenceParams.return_value = MagicMock()
 
         config = PipelineConfig(
             text_model="custom/text",
@@ -227,7 +227,7 @@ class TestBuildBaseConfig:
         mock_dd.DataDesignerConfigBuilder.return_value = mock_builder_instance
         mock_dd.ModelConfig.return_value = MagicMock()
         mock_dd.ModelProvider.return_value = MagicMock()
-        mock_dd.InferenceParameters.return_value = MagicMock()
+        mock_dd.ChatCompletionInferenceParams.return_value = MagicMock()
 
         config = PipelineConfig()
         result = build_base_config(config)

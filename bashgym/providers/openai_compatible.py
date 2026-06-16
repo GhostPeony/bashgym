@@ -1,12 +1,9 @@
 """Generic OpenAI-compatible inference provider.
 
-Not everyone running BashGym has a DGX Spark or local Ollama. Most cloud GPU
-platforms — Together, Fireworks, OpenRouter, Groq, DeepInfra, Hyperbolic,
-Replicate, and any self-hosted vLLM — expose the *same* OpenAI ``/chat/
-completions`` + ``/models`` API that our NIM provider already speaks. So one
-provider, pointed at a ``base_url`` with an API key, makes the Student/teacher
-inference leg portable across all of them. Users link a platform with two env
-vars (``OPENAI_COMPAT_BASE_URL`` + key) instead of needing NVIDIA hardware.
+Talks to any OpenAI ``/chat/completions`` + ``/models`` endpoint via a
+configurable ``base_url`` and API key. ``PRESETS`` maps known platforms
+(Together, Fireworks, OpenRouter, Groq, DeepInfra, Hyperbolic, self-hosted
+vLLM) to their base URLs.
 """
 
 from __future__ import annotations

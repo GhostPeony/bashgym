@@ -86,6 +86,32 @@ def _gold_tool_sequence(trace: dict, max_steps: int = 5) -> list[str]:
     return seq
 
 
+def _quality_score(trace: dict) -> float | None:
+    """Continuous quality score in [0, 1] for a trace (SERA-style soft signal).
+
+    Carried into example metadata so downstream curriculum / loss-weighting can use a
+    continuous score instead of the hard gold/failed bucket. Returns None when the
+    trace has no scorable steps (e.g. public messages-format examples).
+    """
+    steps = trace.get("trace") or trace.get("steps") or []
+    if not isinstance(steps, list) or not steps:
+        return None
+    try:
+        from bashgym.factory.quality_calculator import calculate_quality_breakdown
+
+        vp = trace.get("verification_passed")
+        meta = trace.get("metadata")
+        breakdown = calculate_quality_breakdown(
+            steps,
+            verification_passed=vp,
+            has_verification=vp is not None,
+            metadata=meta if isinstance(meta, dict) else None,
+        )
+        return round(breakdown.total_score, 3)
+    except Exception:
+        return None
+
+
 # =========================================================================
 # Trace → GRPO converter
 # =========================================================================
@@ -143,6 +169,7 @@ def trace_to_grpo_example(
         "source": trace.get("source_tool", "unknown"),
         "gold_tool_sequence": gold_tools,
         "primary_repo": (trace.get("primary_repo") or {}).get("name"),
+        "quality_score": _quality_score(trace),
     }
 
     example = {
@@ -256,6 +283,7 @@ def trace_to_sft_example(trace: dict, system_prompt: str | None = None) -> dict 
         "metadata": {
             "trace_id": trace.get("session_id", "unknown"),
             "source": trace.get("source_tool", "unknown"),
+            "quality_score": _quality_score(trace),
         },
     }
 

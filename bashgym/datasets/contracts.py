@@ -5,17 +5,17 @@ Defines the exact schema each training strategy expects so converters
 and validators have a single source of truth.
 """
 
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
 from enum import Enum
-from typing import Callable, Optional
 
 
 class DatasetFormat(Enum):
     """Supported training dataset formats."""
 
-    SFT = "sft"               # Supervised fine-tuning (OpenAI messages format)
-    DPO = "dpo"               # Direct Preference Optimization
-    GRPO = "grpo"             # Group Relative Policy Optimization
+    SFT = "sft"  # Supervised fine-tuning (OpenAI messages format)
+    DPO = "dpo"  # Direct Preference Optimization
+    GRPO = "grpo"  # Group Relative Policy Optimization
     DISTILLATION = "distillation"  # Teacher → student knowledge transfer
 
 
@@ -27,7 +27,7 @@ class FieldSpec:
     type: type | tuple[type, ...]
     required: bool = True
     description: str = ""
-    validator: Optional[Callable] = None  # Optional fn(value) -> bool
+    validator: Callable | None = None  # Optional fn(value) -> bool
 
 
 @dataclass

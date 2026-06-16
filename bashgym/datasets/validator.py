@@ -12,7 +12,6 @@ from bashgym.datasets.contracts import (
     CONTRACTS,
     DatasetFormat,
     FormatContract,
-    get_contract,
 )
 
 
@@ -73,9 +72,7 @@ class ValidationResult:
         }
 
 
-def _check_field(
-    example: dict, spec, line: int, issues: list[ValidationIssue]
-) -> bool:
+def _check_field(example: dict, spec, line: int, issues: list[ValidationIssue]) -> bool:
     """Check a single field against its spec. Returns True if valid."""
     if spec.name not in example:
         if spec.required:
@@ -254,9 +251,7 @@ def validate_dataset(
                 if isinstance(p, str):
                     prompt_lengths.append(len(p))
                 elif isinstance(p, list):
-                    total = sum(
-                        len(m.get("content", "") or "") for m in p if isinstance(m, dict)
-                    )
+                    total = sum(len(m.get("content", "") or "") for m in p if isinstance(m, dict))
                     prompt_lengths.append(total)
 
             elif format == DatasetFormat.DPO:
@@ -302,7 +297,7 @@ def validate_dataset(
 def print_validation_report(result: ValidationResult, max_issues: int = 10) -> None:
     """Pretty-print a validation result."""
     print("=" * 70)
-    print(f"Dataset Validation Report")
+    print("Dataset Validation Report")
     print("=" * 70)
     print(f"  Path:    {result.path}")
     print(f"  Format:  {result.format.value}")

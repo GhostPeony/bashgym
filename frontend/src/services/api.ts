@@ -440,7 +440,7 @@ export const trainingApi = {
       body: JSON.stringify(config)
     }),
 
-  managedSubmit: (body: { platform: string; base_model: string; dataset_path: string; n_epochs?: number; learning_rate?: number; suffix?: string; api_key?: string }) =>
+  managedSubmit: (body: { platform: string; base_model: string; dataset_path: string; n_epochs?: number; learning_rate?: number; suffix?: string; api_key?: string; account_id?: string }) =>
     request<{ job_id: string; backend: string; status: string; output_model?: string; error?: string }>('/training/managed/submit', {
       method: 'POST',
       body: JSON.stringify(body),

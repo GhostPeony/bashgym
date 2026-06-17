@@ -130,6 +130,78 @@ class TestTogetherDialect:
         assert "OOM" in job.error
 
 
+class TestFireworksDialect:
+    def test_requires_account_id(self):
+        with pytest.raises(ValueError, match="requires an account_id"):
+            ManagedFineTuneBackend.for_platform("fireworks", api_key="k")
+
+    async def test_submit_two_step_dataset_then_camelcase_job(self, tmp_path):
+        captured: dict = {"hits": set()}
+
+        def handler(req):
+            path = req.url.path
+            captured["hits"].add(path.split("/v1")[-1])
+            if path.endswith("/datasets") and req.method == "POST":
+                return httpx.Response(200, json={"datasetId": "bashgym-x"})
+            if ":upload" in path:
+                return httpx.Response(200, json={})
+            if path.endswith("/supervisedFineTuningJobs") and req.method == "POST":
+                captured["payload"] = json.loads(req.content)
+                captured["job_path"] = path
+                return httpx.Response(
+                    200,
+                    json={
+                        "name": "accounts/acct-1/supervisedFineTuningJobs/ftj-9",
+                        "state": "JOB_STATE_RUNNING",
+                        "outputModel": "accounts/acct-1/models/m",
+                    },
+                )
+            return httpx.Response(404)
+
+        backend = ManagedFineTuneBackend.for_platform(
+            "fireworks", api_key="k", account_id="acct-1", client=_client(handler)
+        )
+        job = await backend.submit(_spec(tmp_path))
+
+        assert job.job_id == "ftj-9"  # resource name reduced to the short id
+        assert job.status == TrainingStatus.RUNNING
+        assert job.output_model == "accounts/acct-1/models/m"
+        # account-scoped path + two-step dataset upload happened
+        assert "/accounts/acct-1/" in captured["job_path"]
+        assert any(h.endswith("/datasets") for h in captured["hits"])
+        assert any(":upload" in h for h in captured["hits"])
+        # camelCase job payload referencing the dataset resource
+        p = captured["payload"]
+        assert p["baseModel"] == "meta-llama/Llama-3-8B"
+        assert p["dataset"].startswith("accounts/acct-1/datasets/")
+        assert p["epochs"] == 2 and "learningRate" in p
+
+    async def test_poll_completed_and_failed(self, tmp_path):
+        def ok(req):
+            return httpx.Response(
+                200, json={"state": "JOB_STATE_COMPLETED", "outputModel": "accounts/a/models/m"}
+            )
+
+        backend = ManagedFineTuneBackend.for_platform(
+            "fireworks", api_key="k", account_id="a", client=_client(ok)
+        )
+        job = await backend.poll(TrainingJob(job_id="ftj-9", backend="fireworks"))
+        assert job.status == TrainingStatus.SUCCEEDED
+        assert job.output_model == "accounts/a/models/m"
+
+        def failed(req):
+            return httpx.Response(
+                200, json={"state": "JOB_STATE_FAILED", "status": {"code": 13, "message": "boom"}}
+            )
+
+        backend2 = ManagedFineTuneBackend.for_platform(
+            "fireworks", api_key="k", account_id="a", client=_client(failed)
+        )
+        job2 = await backend2.poll(TrainingJob(job_id="ftj-9", backend="fireworks"))
+        assert job2.status == TrainingStatus.FAILED
+        assert "boom" in job2.error
+
+
 class TestUnknownStatus:
     async def test_unrecognized_status_is_unknown(self, tmp_path):
         def handler(req):

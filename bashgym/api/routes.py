@@ -988,18 +988,24 @@ def create_app() -> FastAPI:
             learning_rate=float(body.get("learning_rate") or 1e-5),
             suffix=(body.get("suffix") or "").strip(),
         )
-        backend = ManagedFineTuneBackend.for_platform(platform, api_key=api_key)
+        account_id = (body.get("account_id") or "").strip() or None
+        try:
+            backend = ManagedFineTuneBackend.for_platform(
+                platform, api_key=api_key, account_id=account_id
+            )
+        except ValueError as e:  # e.g. Fireworks without an account_id
+            raise HTTPException(status_code=400, detail=str(e)) from e
         try:
             job = await backend.submit(spec)
         except Exception as e:  # noqa: BLE001 - surface platform errors to the UI
             raise HTTPException(status_code=502, detail=f"submit failed: {e}") from e
         if not hasattr(app.state, "managed_jobs"):
             app.state.managed_jobs = {}
-        app.state.managed_jobs[job.job_id] = {"platform": platform}
+        app.state.managed_jobs[job.job_id] = {"platform": platform, "account_id": account_id}
         return job.to_dict()
 
     @app.get("/api/training/managed/{platform}/{job_id}", tags=["Training"])
-    async def poll_managed_finetune(platform: str, job_id: str):
+    async def poll_managed_finetune(platform: str, job_id: str, account_id: str | None = None):
         """Poll a managed fine-tune job's status."""
         from bashgym.gym.training_backends import ManagedFineTuneBackend, TrainingJob
         from bashgym.gym.training_backends.managed import DIALECTS
@@ -1008,9 +1014,15 @@ def create_app() -> FastAPI:
             raise HTTPException(
                 status_code=400, detail=f"platform must be one of {sorted(DIALECTS)}"
             )
-        backend = ManagedFineTuneBackend.for_platform(
-            platform, api_key=_managed_api_key(platform, None) or ""
-        )
+        rec = getattr(app.state, "managed_jobs", {}).get(job_id, {})
+        try:
+            backend = ManagedFineTuneBackend.for_platform(
+                platform,
+                api_key=_managed_api_key(platform, None) or "",
+                account_id=rec.get("account_id") or account_id,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
         try:
             job = await backend.poll(TrainingJob(job_id=job_id, backend=platform))
         except Exception as e:  # noqa: BLE001 - surface platform errors to the UI

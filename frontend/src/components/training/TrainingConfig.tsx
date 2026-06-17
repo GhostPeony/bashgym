@@ -22,7 +22,8 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
   const [trainingScope, setTrainingScope] = useState<TrainingScope>('all')
   const [selectedRepos, setSelectedRepos] = useState<string[]>([])
   const [trainingBackend, setTrainingBackend] = useState<TrainingBackend>('local')
-  const [managedPlatform, setManagedPlatform] = useState<'together' | 'openai'>('together')
+  const [managedPlatform, setManagedPlatform] = useState<'together' | 'openai' | 'fireworks'>('together')
+  const [managedAccountId, setManagedAccountId] = useState('')
   const [managedMsg, setManagedMsg] = useState<string | null>(null)
   const [dataSource, setDataSource] = useState<DataSource>('traces')
   const [securityDatasets, setSecurityDatasets] = useState<SecurityDatasetInfo[]>([])
@@ -148,6 +149,7 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
         base_model: config.baseModel,
         dataset_path: config.datasetPath || 'data/gold_traces/train.jsonl',
         n_epochs: config.epochs,
+        account_id: managedPlatform === 'fireworks' ? managedAccountId || undefined : undefined,
       })
       if (result.ok && result.data?.job_id) {
         setManagedMsg(`Submitted ${result.data.backend} job ${result.data.job_id} — ${result.data.status}`)
@@ -498,12 +500,24 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
                 <label className="block font-mono text-xs text-text-muted mb-1">Platform</label>
                 <select
                   value={managedPlatform}
-                  onChange={(e) => setManagedPlatform(e.target.value as 'together' | 'openai')}
+                  onChange={(e) => setManagedPlatform(e.target.value as 'together' | 'openai' | 'fireworks')}
                   className="input w-full"
                 >
                   <option value="together">Together</option>
                   <option value="openai">OpenAI</option>
+                  <option value="fireworks">Fireworks</option>
                 </select>
+                {managedPlatform === 'fireworks' && (
+                  <div>
+                    <label className="block font-mono text-xs text-text-muted mb-1">Fireworks account ID</label>
+                    <input
+                      value={managedAccountId}
+                      onChange={(e) => setManagedAccountId(e.target.value)}
+                      placeholder="your-account-id"
+                      className="input w-full"
+                    />
+                  </div>
+                )}
                 <p className="font-mono text-xs text-text-muted">
                   Submits a hosted fine-tune job (no local GPU). Connect the platform in
                   Settings → Models first so the API key is reused.

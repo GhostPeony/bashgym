@@ -25,6 +25,8 @@ import { SyntheticGenerator, SyntheticGeneratorState } from './SyntheticGenerato
 import { SeedsPanel } from './SeedsPanel'
 import { SettingsPanel } from './SettingsPanel'
 import { DataDesignerTab } from './DataDesignerTab'
+import { DecisionDpoPanel } from './DecisionDpoPanel'
+import { GitBranch } from 'lucide-react'
 import { useTutorialComplete } from '../../hooks'
 import { clsx } from 'clsx'
 import {
@@ -313,7 +315,7 @@ export function FactoryDashboard() {
             )}
 
             {/* Advanced/Settings tab controls */}
-            {activeTab !== 'create' && (
+            {activeTab !== 'create' && activeTab !== 'quality' && (
               <>
                 <button
                   onClick={handleImportClick}
@@ -356,6 +358,7 @@ export function FactoryDashboard() {
           {[
             { id: 'create' as TabId, label: 'Create', icon: Wand2 },
             { id: 'designer' as TabId, label: 'Data Designer', icon: Sparkles },
+            { id: 'quality' as TabId, label: 'Quality', icon: GitBranch },
             { id: 'seeds' as TabId, label: 'Seeds', icon: Layers, badge: config.seeds.length > 0 ? config.seeds.length : undefined },
             { id: 'settings' as TabId, label: 'Settings', icon: Settings },
             { id: 'jobs' as TabId, label: 'Jobs', icon: RefreshCw, badge: jobs.filter(j => j.status === 'running').length + syntheticJobs.filter(j => j.status === 'running').length || undefined },
@@ -887,6 +890,9 @@ export function FactoryDashboard() {
 
         {/* Data Designer Tab */}
         {activeTab === 'designer' && <DataDesignerTab />}
+
+        {/* Quality Tab - decision-DPO mining + trace-quality toggles */}
+        {activeTab === 'quality' && <DecisionDpoPanel />}
 
         {/* Seeds Tab */}
         {activeTab === 'seeds' && (

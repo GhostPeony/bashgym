@@ -2295,6 +2295,46 @@ export const syntheticApi = {
     request<Record<string, SyntheticPreset>>('/factory/synthetic/presets')
 }
 
+// Decision-DPO mining (trace data quality)
+export interface DataQualityDefaults {
+  generate_decision_dpo: boolean
+  require_successful_verification: boolean
+  min_trace_steps: number
+  max_trace_steps: number
+}
+
+export interface DecisionDpoRequest {
+  gold_dir?: string
+  failed_dir?: string
+  generate_decision_dpo?: boolean
+  require_successful_verification?: boolean
+  min_trace_steps?: number
+  max_trace_steps?: number
+}
+
+export interface DecisionDpoJob {
+  job_id: string
+  status: 'queued' | 'running' | 'completed' | 'failed'
+  n_training_examples?: number
+  n_dpo_pairs?: number
+  dpo_output_path?: string
+  error?: string
+}
+
+export const dataQualityApi = {
+  defaults: () =>
+    request<DataQualityDefaults>('/factory/data-quality/defaults'),
+
+  mineDecisionDpo: (req: DecisionDpoRequest) =>
+    request<DecisionDpoJob>('/factory/decision-dpo/generate', {
+      method: 'POST',
+      body: JSON.stringify(req)
+    }),
+
+  decisionDpoStatus: (jobId: string) =>
+    request<DecisionDpoJob>(`/factory/decision-dpo/jobs/${jobId}`)
+}
+
 // =============================================================================
 // Cascade RL API
 // =============================================================================

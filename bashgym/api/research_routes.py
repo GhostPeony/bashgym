@@ -44,6 +44,7 @@ async def get_cache_stats():
     if not CACHE_PATH.exists():
         return {"cached_datasets": 0, "path": str(CACHE_PATH)}
     import json
+
     try:
         data = json.loads(CACHE_PATH.read_text())
         return {
@@ -64,6 +65,7 @@ class ScanRequest(BaseModel):
 async def trigger_scan(body: ScanRequest):
     """Trigger a fresh HF dataset scan. Runs synchronously (may take 30-120s)."""
     from bashgym.research.hf_dataset_scanner import run
+
     try:
         exit_code = run(
             limit_per_query=body.limit,
@@ -84,7 +86,9 @@ async def trigger_scan(body: ScanRequest):
 
 class EmpiricalRequest(BaseModel):
     top_n: int = Field(default=5, ge=1, le=50, description="Number of top-scored SFT candidates")
-    mode: str = Field(default="simulate", description="'simulate' (fast, no GPU) or 'real' (trains)")
+    mode: str = Field(
+        default="simulate", description="'simulate' (fast, no GPU) or 'real' (trains)"
+    )
     num_records: int = Field(default=500, ge=10, le=10000, description="Records per dataset")
     train_steps: int = Field(default=100, ge=10, le=1000, description="SFT steps per candidate")
     base_model: str = Field(default="unsloth/gemma-4-E4B-it", description="Base model for SFT runs")
@@ -97,7 +101,6 @@ async def run_empirical_ranking(body: EmpiricalRequest):
     In 'simulate' mode this completes instantly. In 'real' mode it trains
     briefly on each candidate (may take 5-60 minutes depending on top_n).
     """
-    import asyncio
     from bashgym.research.dataset_research_runner import _run_async
 
     try:
@@ -110,7 +113,9 @@ async def run_empirical_ranking(body: EmpiricalRequest):
             cache_path=CACHE_PATH,
         )
         if exit_code != 0:
-            raise HTTPException(status_code=500, detail="Empirical runner returned non-zero exit code")
+            raise HTTPException(
+                status_code=500, detail="Empirical runner returned non-zero exit code"
+            )
         content = EMPIRICAL_PATH.read_text() if EMPIRICAL_PATH.exists() else ""
         return {
             "status": "completed",
@@ -119,3 +124,71 @@ async def run_empirical_ranking(body: EmpiricalRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# Firecrawl research index — news feed + AutoResearch advice
+# =============================================================================
+
+
+class AdviseRequest(BaseModel):
+    base_model: str = Field("", description="Base model (used to resolve the family)")
+    strategy: str = Field("sft", description="sft | dpo | grpo | rlvr | distillation")
+    family: str = Field("", description="Override family; else resolved from base_model")
+    domain: str = Field("", description="Optional weak capability/domain to target")
+
+
+def _build_advisor():
+    """A ResearchAdvisor over a fresh Firecrawl client (key from FIRECRAWL_API_KEY)."""
+    from bashgym.research.advisor import ResearchAdvisor
+    from bashgym.research.firecrawl_client import FirecrawlResearchClient
+
+    client = FirecrawlResearchClient()
+    return ResearchAdvisor(client), client
+
+
+@router.get("/news")
+async def research_news(k: int = 20, since: str | None = None):
+    """Platform news feed: latest training-method changes (tracked GitHub repos +
+    recent papers). Advisory — returns ``configured: false`` (no items) when
+    ``FIRECRAWL_API_KEY`` is unset rather than erroring."""
+    advisor, client = _build_advisor()
+    try:
+        items = await advisor.news_feed(k=k, since=since)
+    finally:
+        await client.close()
+    return {
+        "configured": client.configured,
+        "count": len(items),
+        "items": [i.to_dict() for i in items],
+    }
+
+
+@router.post("/advise")
+async def research_advise(req: AdviseRequest):
+    """Literature/GitHub-grounded advice for a training context: recommended
+    techniques, relevant issues, and a hyperparameter prior for AutoResearch."""
+    from bashgym.research.advisor import TrainingContext
+
+    family = req.family
+    if not family and req.base_model:
+        try:
+            from bashgym.families import resolve_family_profile
+
+            family = resolve_family_profile(req.base_model).family
+        except Exception:  # noqa: BLE001 - family is best-effort
+            family = ""
+
+    advisor, client = _build_advisor()
+    try:
+        report = await advisor.advise(
+            TrainingContext(
+                base_model=req.base_model,
+                strategy=req.strategy,
+                family=family,
+                domain=req.domain,
+            )
+        )
+    finally:
+        await client.close()
+    return {"configured": client.configured, **report.to_dict()}

@@ -160,6 +160,23 @@ Same `DataDesignerConfigBuilder` API both ways — **verified** that `config_bui
 5. **Free wins from the bump:** the **default async engine** (v0.6.0, adaptive per-provider concurrency), **run-resume**, and **reasoning-token usage tracking** come with the version — partial relief for weaknesses #8/#10 with no code. Keep `DATA_DESIGNER_ASYNC_ENGINE=0` documented as the escape hatch if a pipeline misbehaves on the async path during the transition.
 6. **Exit:** `pip install data-designer>=0.6.1` works; all feature flags resolve; existing 5 pipelines still build & preview on the async engine.
 
+#### ✅ Phase 0 — DONE (2026-06-17). What shipped + 0.6.1 API drift discovered
+
+Installed **data-designer 0.6.1** locally (per-user site, Python 3.14; no downgrades — unrelated `browser-use`/`readme-renderer` pins warn but are upward bumps). **235 factory tests pass**, ruff+black clean. Kept DD **optional** (`bashgym[data-designer]` extra; graceful `DATA_DESIGNER_AVAILABLE` fallback) and **dual-use** (training-loop *and* standalone).
+
+Empirically verified against the installed package (not just docs) and **reconciled real breaking drift** that docs alone didn't reveal:
+- **Provider wiring moved**: `DataDesignerConfigBuilder` no longer takes `model_providers=` — providers now attach to `DataDesigner(model_providers=[...])` and `ModelConfig` binds via `provider=<name>`. Refactored into `build_model_providers()` + `_provider_name_for()`; the `designer` property now constructs `DataDesigner(model_providers=...)`. (`ModelConfig.provider=None` is deprecated → issue #589; all inline configs now bind a provider.)
+- **Generation API**: `designer.generate(builder, num_rows=)` → `designer.create(builder, num_records=).load_dataset()`; `preview(...).dataset`; `validate()` returns `None` and raises on invalid (wrapper updated; column introspection via best-effort `_builder_column_names`).
+- **Seed sources**: `dd.FileSeedSource` → `dd.LocalFileSeedSource(path=)`; `HuggingFaceSeedSource` now takes only `path/token/endpoint` (no `split`/`name`/`column_mapping`) → `from_dataset` materializes via the `datasets` lib → `DataFrameSeedSource` when remap/subset/non-default-split is requested.
+- **Feature flags**: all new flags resolve **True** on 0.6.1 — `LLMCodeColumnConfig`, `EmbeddingColumnConfig`, `CustomColumnConfig`, `ImageColumnConfig`, `SeedDatasetColumnConfig`, `AgentRolloutSeedSource` (formats `CLAUDE_CODE/CODEX/HERMES_AGENT/PI_CODING_AGENT/ATIF`), `ToolConfig`+`LocalStdioMCPProvider`, `SchemaTransformProcessorConfig`, `compose_workflow`. **This retires the §2.5 feature-gate caveat for the standalone library** (Embedding/Custom *do* exist; gate was only a microservices-PySDK-docs gap).
+- `ChatCompletionInferenceParams(temperature/top_p/max_tokens)` confirmed correct (the in-flight 0.5.x migration is right); import surface unchanged.
+
+**Carried into Phase 2 (blocking for full generation):** Data Designer 0.6.x **removed the row-level `filter` processor** (only `DROP_COLUMNS`/`SCHEMA_TRANSFORM` remain). The 5 pipelines' quality gates were removed to allow construction (judge columns retained on rows); re-implement each as `ValidationColumnConfig(drop=True)` — needs a live generation run (API budget) to verify judge-column row shapes.
+
+**Runtime note (Windows):** DD prints emoji/rich output; the cp1252 console raises `UnicodeEncodeError` on `validate()`/generation. Set `PYTHONUTF8=1` (or `PYTHONIOENCODING=utf-8`) for the backend/launcher — candidate one-line fix in `run_backend.py`/`dev.ps1`.
+
+**Known behavior:** standalone `validate()`/`preview()` build the pipeline **without a seed source**, so seed-derived references (`seed_task`, …) report as missing — expected; `from_traces`/`from_dataset` attach the seed first. (Small future nicety: attach a representative sample seed for validate/preview.)
+
 ### Phase 1 — Native ingestion + trace distillation *(highest ROI)*
 1. **Swap seed extraction for `AgentRolloutSeedSource`.** In `from_traces()` (`data_designer.py:143-174`), when `HAS_AGENT_ROLLOUT`, use `AgentRolloutSeedSource(format=CLAUDE_CODE/HERMES_AGENT, path=...)` instead of `_extract_seeds_from_traces` + `DataFrameSeedSource`. Keep the hand-rolled path as fallback for older DD. This deletes the brittle `:451-503` extractor from the hot path and yields richer fields (`tool_call_count`, `final_assistant_message`, `git_branch`, `is_sidechain`).
    - **Keep our importers** (`trace_capture/importers/`) for *classification* (gold/failed/quality) — they carry verification metadata DD's ingestion lacks. AgentRolloutSeedSource is for *synthesis seeding* only. Document the division.
@@ -167,11 +184,42 @@ Same `DataDesignerConfigBuilder` API both ways — **verified** that `config_bui
 3. Tests: extend `test_pipeline_builders.py` with the new pipeline; add an `AgentRolloutSeedSource` builder test (guarded by feature flag).
 4. **Exit:** "Generate from traces" path uses native ingestion; `coding_agent_distill` available end-to-end and exported to NeMo.
 
+#### ✅ Phase 1 — DONE (2026-06-17)
+
+**243 factory tests pass**, ruff+black clean. Implemented against the installed 0.6.1 (recipe + kwargs verified empirically, not guessed).
+- **Native ingestion via new `from_agent_rollouts(rollout_format, path=, num_records=, recursive=, file_pattern=)`** on `DataDesignerPipeline` — wraps `dd.AgentRolloutSeedSource` (formats `claude_code`/`codex`/`hermes_agent`/`pi_coding_agent`/`atif`; `atif` requires `path`). **Design refinement vs the original plan:** kept `from_traces` (it seeds from BashGym's *processed* gold-trace schema) and added `from_agent_rollouts` as a *parallel* path that ingests *raw* rollouts (`~/.claude/projects/*.jsonl`, Hermes, …) — they consume different data shapes, so this adds the capability without breaking the gold-trace flow. Importers still own classification.
+- **New `coding_agent_distill` pipeline** (`designer_pipelines/coding_agent_distill.py`, registered in `PIPELINES`) faithful to NVIDIA's recipe: `LLMStructuredColumnConfig(trace_digest=AgentRolloutTraceDigest)` → `LLMStructuredColumnConfig(sft_record=AgentRolloutFinetuningRecord)` → `LLMJudgeColumnConfig(scores=SFT_JUDGE_SCORES, 5 dims 0-4)` → expression columns (`sft_instruction`/`sft_response`/`sft_skill_tags`/`trace_training_value`/`recommended_for_sft`). Teacher reuses the base text/code/judge aliases (point them at `nvidia/nemotron-3-super-120b-a12b` or a DGX model for real distillation).
+- **Bonus fix found via review:** `from_traces`/`from_unstructured` still used the 0.5.x `DataFrameSeedSource(data=)` kwarg → corrected to `df=` (0.6.1); added a regression test exercising the real seed source.
+- Tests: 6-pipeline construction smoke (incl. distill), `from_agent_rollouts` (resolver, atif-needs-path, unsupported-guard, seed-attach), distill internals (5 judge dims, model fields), from_traces real-seed regression.
+- **Deferred to Phase 6:** API route (`/designer/*`) + `DataDesignerTab` wiring for the rollout seed-format selector and the distill pipeline card (Phase 1 delivers the backend/programmatic path; usable standalone today via `DataDesignerPipeline`).
+
 ### Phase 2 — Real validation & in-pipeline dedup *(closes #6, #9)*
 1. **`ValidationColumnConfig` with a BashGym verifier hook.** Add a `LocalCallableValidatorParams(validation_function=run_sandbox_verifier)` (or `RemoteValidatorParams` → a new `/api/verify` endpoint wrapping `bashgym/judge/verifier.py`) so generated solutions are **executed** (pytest/`verify.sh`) and gated on real pass/fail, not just judged. Add to `coding_agent_sft` + `coding_agent_distill` behind a `validate_execution: bool` config flag.
 2. **Cheap pre-gate:** add `CodeValidatorParams(code_lang=PYTHON)` Ruff lint as a fast filter before the expensive execution validator.
 3. **`EmbeddingColumnConfig` in-DAG dedup** — **if `HAS_EMBEDDING_COLUMN` resolves true in the installed 0.6.1** (see §2.5 caveat — unconfirmed in the microservices line), replace the post-hoc `EmbeddingDeduplicator` step for DD-generated rows with an embedding column + filter processor (cosine ≥0.95, mirroring `dedup.py:29`). If absent, fall back to a `LocalCallable`/`Custom` column or keep post-hoc dedup. Saves generation/judge spend either way once moved before the judge.
 4. **Exit:** DD output for coding pipelines carries an execution-verified flag; dedup happens before final judge.
+
+#### ✅ Phase 2 — DONE (2026-06-17), reshaped by two live-verified 0.6.x findings
+
+**257 factory tests pass**, ruff+black clean. Verified end-to-end against the live NVIDIA NIM API (capstone: full `coding_agent_sft` generated structured solution + expressions + judge + flag, then export-gated).
+
+**Finding 1 — auth wiring was broken.** Our `${NVIDIA_API_KEY}` placeholder is sent *literally* by DD's default `PlaintextResolver` → auth failure. **Fixed:** `build_model_providers` now sets `api_key` = the env-var **name**, and the `designer` property passes `secret_resolver=CompositeResolver([EnvironmentResolver, PlaintextResolver])` (`build_secret_resolver`). Env-name resolves from the environment; an explicit raw key falls through to plaintext. *This unblocked all live generation.*
+
+**Finding 2 — there is no in-pipeline row-filter.** `ValidationColumnConfig(drop=True)` drops the **column**, not invalid rows (verified: 10/10 rows survived). The 0.6.x-native pattern (per NVIDIA's own recipe) is **flag-then-filter**. **Implemented:** each base pipeline emits a boolean `passes_quality` `ExpressionColumnConfig`; `export_nemo(quality_flag_column="passes_quality", keep_only_passing=True)` applies the gate (auto-falls back to the distill pipeline's `recommended_for_sft`). This re-introduces the gates removed in Phase 0, the native way. Judge sub-scores are referenced **nested** (`quality_score.correctness.score`), not flat.
+- **Latent expression bugs fixed (only surfaced live):** dpo `chosen`/`rejected` compared judge *dicts* (`judge_a.quality`) → fixed to `.quality.score`; distill `recommended_for_sft` used the recipe's flat `groundedness_score` → fixed to nested `sft_quality_judge_result.groundedness.score`.
+
+**Model adaptability (per user feedback — no hardcoded model IDs; any open model from Ollama/Unsloth/HF/NIM):**
+- Completed the **NIM gap** in the shared discovery: `detector.get_nim_models()` + wired into `get_available_models(include_cloud=True)` → discovery now spans Ollama/LM-Studio (local) + live NIM catalog + curated HF training/teacher.
+- DD: `list_inference_models()` (cross-source catalog for UI/selection), `provider_model_ids(provider, endpoint)` (live `/v1/models` for any OpenAI-compatible endpoint), and `PipelineConfig.resolve_models()` — validates text/code/judge against the live catalog and **substitutes** stale/unserved IDs (verified: swapped the stale `qwen/qwen2.5-coder-32b-instruct` default → an available coder), preferring instruction/chat-tuned models.
+- **Caveat (verified):** NIM's `/v1/models` lists some **non-invokable** models (`starcoder2-15b`, `deepseek-coder-6.7b-instruct` listed but fail chat health-checks). So listing ≠ usable; `resolve_models` picks from the listing and DD health-checks at generation. The user's real target — **DGX Ollama** — lists only served models, so it's reliable there. A future refinement could health-check candidates.
+
+**Scope adjusted vs original Phase 2 (premised on a row-drop that 0.6.x lacks):**
+- **In-DAG embedding dedup → deferred.** Dedup is cross-row; with no row-drop and `EmbeddingColumnConfig` only producing vectors, in-pipeline dedup isn't possible in 0.6.x. Post-hoc `EmbeddingDeduplicator` stays. (Weakness #9 is a 0.6.x limitation, not a wiring gap.)
+- **Execution/sandbox-verifier validator → deferred to Phase 3.** Our pipelines emit tool-use *trajectories*, not standalone testable code, and validators annotate (don't drop). Real execution fits the MCP work (Phase 3).
+
+**Also:** Windows UTF-8 fix shipped (`run_backend.py` sets `PYTHONUTF8=1`/`PYTHONIOENCODING` for the uvicorn child; `dev.ps1` sets it in the backend job) — DD's emoji output no longer crashes the cp1252 console.
+
+**Deferred to Phase 6 (UI):** `/designer/*` + `DataDesignerTab` wiring for model selection (from `list_inference_models`), the quality-gate toggle, and the rollout/distill controls.
 
 ### Phase 3 — Real tool-use via MCP *(closes #6 for agentic data)*
 1. **Wrap our sandbox as an MCP server** (`bashgym/mcp/sandbox_server.py`) exposing BASH/READ/WRITE/EDIT against `sandbox.py` with existing guardrails (`_is_dangerous_command`).

@@ -246,6 +246,20 @@ class PipelineConfig:
         return self
 
 
+@dataclass
+class GenerationStats:
+    """Lightweight observability for a generation run.
+
+    Token costs / per-column timings are emitted to DD's logs by the async
+    engine; these are the robustly-accessible counts (records, filtered rows,
+    and the stage names for chained workflows).
+    """
+
+    records: int = 0
+    filtered_out: int = 0
+    stages: list[str] = field(default_factory=list)
+
+
 class DataDesignerPipeline:
     """
     Bridge between BashGym and NVIDIA NeMo DataDesigner v0.6.1+.
@@ -266,6 +280,7 @@ class DataDesignerPipeline:
         self.config = config or PipelineConfig()
         self._designer = None
         self._builder = None
+        self.last_stats: GenerationStats | None = None
 
     @property
     def designer(self):
@@ -522,6 +537,42 @@ class DataDesignerPipeline:
         builder = dd.DataDesignerConfigBuilder.from_config(raw)
         num = num_records or self.config.num_records
         return self.designer.create(builder, num_records=num).load_dataset()
+
+    def generate_chained(
+        self,
+        stages: list[dict],
+        workflow_name: str = "bashgym-chain",
+    ) -> "pd.DataFrame":
+        """Run a multi-stage Data Designer workflow and return the final dataset.
+
+        Each ``stage`` is a dict::
+
+            {"name": str, "builder": DataDesignerConfigBuilder,
+             "num_records": int | None, "output_processors": list | None,
+             "output": str}
+
+        Stages run sequentially (each stage's output threads into the next);
+        ``output_processors`` (e.g. ``messages_schema_transform``) reshape a
+        stage's output — the 0.6.x-native, processor-driven path for
+        curriculum/multi-stage generation and ChatML export.
+
+        Experimental in Data Designer 0.6.x: linear topology only, no stage-resume.
+        Populates ``self.last_stats``.
+        """
+        if not stages:
+            raise ValueError("generate_chained requires at least one stage")
+        workflow = self.designer.compose_workflow(name=workflow_name)
+        for st in stages:
+            workflow.add_stage(
+                st["name"],
+                st["builder"],
+                num_records=st.get("num_records"),
+                output_processors=st.get("output_processors"),
+                output=st.get("output", "final"),
+            )
+        df = workflow.run().load_dataset()
+        self.last_stats = GenerationStats(records=len(df), stages=[s["name"] for s in stages])
+        return df
 
     # =========================================================================
     # Operations

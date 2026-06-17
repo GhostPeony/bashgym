@@ -124,6 +124,28 @@ def build_mcp_providers(config: "PipelineConfig") -> list:
     ]
 
 
+def messages_schema_transform(
+    user_col: str,
+    assistant_col: str,
+    system_prompt: str | None = None,
+    name: str = "to_messages",
+):
+    """Build a SchemaTransformProcessorConfig that emits a ChatML ``messages`` column.
+
+    The 0.6.x-native export path: maps generated columns to an OpenAI-style
+    ``messages`` list via Jinja, usable as a workflow stage ``output_processor``
+    (replaces hand-written JSONL assembly).
+    """
+    if not DATA_DESIGNER_AVAILABLE:
+        raise ImportError("data-designer>=0.6.1 is required")
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": "{{ " + user_col + " }}"})
+    messages.append({"role": "assistant", "content": "{{ " + assistant_col + " }}"})
+    return dd.SchemaTransformProcessorConfig(name=name, template={"messages": messages})
+
+
 def build_sandbox_tool_config(config: "PipelineConfig"):
     """Build the dd.ToolConfig granting the sandbox MCP tools to LLM columns."""
     if not (DATA_DESIGNER_AVAILABLE and HAS_MCP):

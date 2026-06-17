@@ -1013,6 +1013,63 @@ class TestListInferenceModels:
 
 
 # =========================================================================
+# Phase 4: workflow chaining + schema-transform export
+# =========================================================================
+
+
+class TestMessagesSchemaTransform:
+    @pytest.mark.skipif(not DATA_DESIGNER_AVAILABLE, reason="data-designer not installed")
+    def test_template_with_system(self):
+        from bashgym.factory.designer_pipelines import messages_schema_transform
+
+        proc = messages_schema_transform("task_prompt", "solution_text", system_prompt="sys")
+        msgs = proc.template["messages"]
+        assert [m["role"] for m in msgs] == ["system", "user", "assistant"]
+        assert msgs[0]["content"] == "sys"
+        assert "{{ task_prompt }}" in msgs[1]["content"]
+        assert "{{ solution_text }}" in msgs[2]["content"]
+
+    @pytest.mark.skipif(not DATA_DESIGNER_AVAILABLE, reason="data-designer not installed")
+    def test_template_without_system(self):
+        from bashgym.factory.designer_pipelines import messages_schema_transform
+
+        proc = messages_schema_transform("u", "a")
+        assert [m["role"] for m in proc.template["messages"]] == ["user", "assistant"]
+
+
+class TestGenerateChained:
+    def test_empty_stages_raises(self):
+        with pytest.raises(ValueError, match="at least one stage"):
+            DataDesignerPipeline().generate_chained([])
+
+    @pytest.mark.skipif(not DATA_DESIGNER_AVAILABLE, reason="data-designer not installed")
+    def test_runs_workflow_and_records_stats(self):
+        pipeline = DataDesignerPipeline()
+        mock_df = MagicMock()
+        mock_df.__len__.return_value = 3
+        with patch.object(
+            DataDesignerPipeline, "designer", new_callable=PropertyMock
+        ) as mock_designer_prop:
+            designer = MagicMock()
+            workflow = MagicMock()
+            designer.compose_workflow.return_value = workflow
+            workflow.run.return_value.load_dataset.return_value = mock_df
+            mock_designer_prop.return_value = designer
+
+            df = pipeline.generate_chained(
+                [
+                    {"name": "gen", "builder": MagicMock(), "num_records": 5},
+                    {"name": "to_msgs", "builder": MagicMock(), "output": "processor:x"},
+                ]
+            )
+
+        assert df is mock_df
+        assert workflow.add_stage.call_count == 2
+        assert pipeline.last_stats.records == 3
+        assert pipeline.last_stats.stages == ["gen", "to_msgs"]
+
+
+# =========================================================================
 # SYSTEM_PROMPT
 # =========================================================================
 

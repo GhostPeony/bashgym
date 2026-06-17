@@ -287,6 +287,45 @@ async def get_lm_studio_models() -> list[UnifiedModel]:
     return models
 
 
+async def get_nim_models() -> list[UnifiedModel]:
+    """Get models served by the configured NVIDIA NIM endpoint (if a key is set)."""
+    import re
+
+    import httpx
+
+    key = os.environ.get("NVIDIA_API_KEY")
+    if not key:
+        return []
+    base = os.environ.get("NIM_ENDPOINT", "https://integrate.api.nvidia.com/v1").rstrip("/")
+    models = []
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{base}/models", headers={"Authorization": f"Bearer {key}"}
+            )
+            if response.status_code == 200:
+                for m in response.json().get("data", []):
+                    model_id = m.get("id", "")
+                    if not model_id:
+                        continue
+                    models.append(
+                        UnifiedModel(
+                            id=f"nim/{model_id}",
+                            name=model_id,
+                            provider=ProviderType.NVIDIA_NIM,
+                            is_code_model=bool(
+                                re.search(r"cod(e|er)|deepseek|starcoder", model_id, re.I)
+                            ),
+                            is_local=False,
+                            supports_inference=True,
+                        )
+                    )
+    except Exception:
+        pass
+
+    return models
+
+
 # Curated list of recommended models for training
 RECOMMENDED_TRAINING_MODELS = [
     UnifiedModel(
@@ -399,6 +438,11 @@ async def get_available_models(
         # Local models can also be used for inference
         result["inference"].extend(ollama_models)
         result["inference"].extend(lm_models)
+
+    if include_cloud:
+        # Live NVIDIA NIM catalog (served, OpenAI-compatible). HF/Unsloth weights
+        # appear here once served (NIM, or pulled into Ollama under "local").
+        result["inference"].extend(await get_nim_models())
 
     if code_only:
         for key in result:

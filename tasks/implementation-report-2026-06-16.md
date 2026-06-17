@@ -221,3 +221,18 @@ The platform-recap audit (`tasks/platform-recap-2026-06-16.md`) flagged two gaps
 **Verification status (honest):** both are implemented to the published contracts and covered by hermetic tests (Fireworks mock-transport request/response shapes; GGUF converter command-construction + failure paths). The remaining steps to *finish* each are environment-bound and can't run in this dev box:
 - **Fireworks** — a live smoke test with real credentials + an `account_id` (and confirmation of the `exampleCount` placement and dataset-ready timing, which the docs leave ambiguous).
 - **GGUF auto-export** — a real conversion requires `llama.cpp` installed on the serving host (`LLAMA_CPP_DIR` or `convert_hf_to_gguf.py` on PATH); without it the endpoint now returns a precise install hint instead of a vague error.
+
+## 10. S1 follow-up closure — SFT/DPO backend dispatch + Liger FLCE (2026-06-16)
+
+The last open S-task (#12). GRPO already chose its backend via `select_backend` (Unsloth ↔ plain transformers+peft, the GB10/sm_121 fallback for unslothai#4867); SFT/DPO were Unsloth-only and Liger FLCE was unwired.
+
+| Part | Fix | Commit |
+|---|---|---|
+| **SFT/DPO backend dispatch** | New `_generate_sft_script` / `_generate_dpo_script` dispatchers resolve a `ModelFamilyProfile` + `select_backend(profile, sft_backend/dpo_backend)`; new `_generate_sft_script_plain` / `_generate_dpo_script_plain` (family-correct LoRA targets/excludes, attn impl, patches). All four call sites — local **and** remote-SSH — route through the dispatchers. | `16a4a2e` |
+| **Liger FLCE** | `use_liger` flag emits `use_liger_kernel` into the **plain** SFT/DPO configs (transformers-native fused-linear-CE; Unsloth keeps its own CE) — the 262k-vocab (Gemma) fused-CE OOM fix. `liger-kernel` added to `requirements-training.txt`. `sft_backend`/`dpo_backend`/`use_liger` threaded through the API + a Training Config UI toggle. | `16a4a2e` + `986bda0` |
+
+Tests: `tests/gym/test_sft_dpo_backend.py` (10) — dispatch selection, Liger on/off (and absent from the Unsloth path), family-targets in the plain script, and `ast.parse` validity of both generated plain scripts. 36 trainer/training-API tests pass; ruff + black + tsc + eslint clean.
+
+**Verification status (honest):** dispatch + script generation are verified hermetically (string/`ast.parse` assertions, same approach as the existing GRPO plain-backend tests). A real training run with the plain backend + Liger is **DGX-bound** — it requires `liger-kernel` installed in the GB10 train venv (`~/bashgym-train`); that install is the remaining step (DGX installs are classifier-gated, so it's handed off as a `! ssh …` one-liner rather than run from here).
+
+**All tracked S-stage tasks (S0–S8) and their follow-ups are now complete.**

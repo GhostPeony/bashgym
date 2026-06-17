@@ -183,3 +183,23 @@ After S8 unblocked vLLM serving, three improvements grounded in current tooling 
 Note: Unsloth's 2026 advances (GSPO/DAPO/Dr.GRPO, FP8 RL, 380K-context RL) are **training**-side; the eval-suite gains come from NVIDIA NeMo Evaluator + the SERA/CUBE research line. **Portability:** the flywheel no longer assumes a DGX — inference runs against any OpenAI-compatible platform, and training can target managed fine-tuning APIs (Together/OpenAI) or any SSH GPU host (existing `remote_trainer`). Serverless training backends (Modal/RunPod) slot behind the same `TrainingBackend` ABC next. Full non-network suite: **1000 passed, 0 failed**.
 
 **Sources:** [NeMo Evaluator](https://github.com/NVIDIA-NeMo/evaluator) · [NeMo Eval docs](https://docs.nvidia.com/nemo/eval/latest/index.html) · [NeMo Gym](https://docs.nvidia.com/nemo/gym/about) · [Unsloth RL guide](https://unsloth.ai/docs/get-started/reinforcement-learning-rl-guide) · SERA (arXiv:2601.20789) · CUBE (arXiv:2603.15798) · [coding-agent benchmarks 2026](https://llm-stats.com/benchmarks)
+
+## 8. UI surfacing of the new configs/features (2026-06-16)
+
+The backend gains above were surfaced in the React UI so they're usable without the API directly. Each is a vertical slice (route/schema + hermetic tests + typecheck/lint-clean UI).
+
+| Commit | Surface | Where |
+|---|---|---|
+| `336771f` | GRPO **loss variant** (GSPO/Dr.GRPO/DAPO/BNPO) + compute backend + vLLM toggle | Training Config → GRPO Settings |
+| `13ae3fb` | **Cascade auto-trigger** (`cascade_enabled` / `cascade_gold_threshold`) | Pipeline dashboard |
+| `8cc2798` | **Connect any OpenAI-compatible cloud provider** (`POST /api/providers/connect`, presets) | Settings → Models |
+| `4e405b3` + `0314a89` | **Managed fine-tune backend** (Together/OpenAI submit+poll routes; backend option) | Training Config |
+| _(this slice)_ | **Eval & benchmark dashboard** — held-out trace gate (ship/no-ship) | Evaluator → Held-out Gate tab |
+
+**Eval & benchmark dashboard.** New `bashgym/eval/service.py` is the testable orchestration seam: it resolves a served endpoint (a connected OpenAI-compatible provider *or* an explicit `base_url`/`model`), builds predictors, loads the frozen held-out `.jsonl`, and runs the base-vs-candidate gate — the network/predictor factory is injected so it stays hermetic. New `bashgym/api/eval_routes.py` exposes it:
+- `POST /api/eval/heldout` (async job) → `GET /api/eval/heldout/{id}` / `GET /api/eval/heldout` — runs the gate against served endpoints, records the verdict via `registry.record_heldout_eval`.
+- `GET /api/eval/verdict/{model_id}` — latest ship/no-ship from the model profile.
+- `GET /api/eval/benchmark-commands` — argv for lm-eval/Terminal-Bench/BFCL/SWE-bench to run on the serving host.
+- `POST /api/eval/benchmarks/ingest` — diff base vs candidate lm-eval results into forgetting drops + record per-task scores.
+
+UI: a new **Held-out Gate** tab in `EvaluatorDashboard` (existing benchmark UI untouched) renders the **SHIP / NO-SHIP** verdict, base/candidate pass rates, trace delta, the session-clustered 95% bootstrap CI, forgetting drops, and the gate's reasons; plus a copyable external-benchmark command helper. Frontend `evalAdvancedApi` wires all six endpoints. Tests: `tests/eval/test_service.py` (17) + `tests/api/test_eval_routes.py` (11), all green; full eval suite **116 passed**; ruff + black + tsc + eslint clean.

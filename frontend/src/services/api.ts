@@ -665,6 +665,112 @@ export const evaluatorApi = {
     request<EvaluationResponse[]>('/evaluation')
 }
 
+// Advanced eval: held-out trace gate + benchmark wiring (bashgym/eval modules)
+export interface EvalEndpointSpec {
+  provider?: string
+  base_url?: string
+  model?: string
+  api_key?: string
+}
+
+export interface HeldoutEvalRequest {
+  model_id: string
+  dataset_path: string
+  candidate: EvalEndpointSpec
+  base: EvalEndpointSpec
+  metric?: string
+  limit?: number
+  min_trace_delta?: number
+  max_forgetting_drop?: number
+  require_ci_excludes_zero?: boolean
+  forgetting_drops?: Record<string, number>
+  n_resamples?: number
+  seed?: number
+}
+
+export interface HeldoutBootstrap {
+  mean: number
+  ci_low: number
+  ci_high: number
+  significant: boolean
+  better: boolean
+  n_clusters: number
+}
+
+export interface HeldoutReport {
+  n: number
+  n_clusters: number
+  metric: string
+  base_pass_rate: number
+  candidate_pass_rate: number
+  trace_delta: number
+  bootstrap: HeldoutBootstrap
+  forgetting_drops: Record<string, number>
+  ship: boolean
+  reasons: string[]
+}
+
+export interface HeldoutJobResponse {
+  job_id: string
+  model_id: string
+  metric: string
+  status: 'running' | 'completed' | 'failed'
+  report?: HeldoutReport
+  error?: string
+  created_at?: string
+}
+
+export interface VerdictResponse {
+  model_id: string
+  display_name: string
+  latest_heldout_eval: HeldoutReport | null
+  n_heldout_evals: number
+}
+
+export interface BenchmarkIngestRequest {
+  model_id: string
+  base_results: Record<string, unknown>
+  candidate_results: Record<string, unknown>
+  max_forgetting_drop?: number
+}
+
+export const evalAdvancedApi = {
+  runHeldout: (req: HeldoutEvalRequest) =>
+    request<HeldoutJobResponse>('/eval/heldout', {
+      method: 'POST',
+      body: JSON.stringify(req)
+    }),
+
+  heldoutStatus: (jobId: string) =>
+    request<HeldoutJobResponse>(`/eval/heldout/${jobId}`),
+
+  heldoutList: (limit = 20) =>
+    request<HeldoutJobResponse[]>(`/eval/heldout?limit=${limit}`),
+
+  verdict: (modelId: string) =>
+    request<VerdictResponse>(`/eval/verdict/${encodeURIComponent(modelId)}`),
+
+  benchmarkCommands: (params: { base_url: string; model: string; tasks?: string; include?: string }) => {
+    const qs = new URLSearchParams({ base_url: params.base_url, model: params.model })
+    if (params.tasks) qs.set('tasks', params.tasks)
+    if (params.include) qs.set('include', params.include)
+    return request<{ commands: Record<string, string[]> }>(`/eval/benchmark-commands?${qs.toString()}`)
+  },
+
+  ingestBenchmarks: (req: BenchmarkIngestRequest) =>
+    request<{
+      model_id: string
+      forgetting: { drops: Record<string, number>; regressed: Record<string, number>; worst: [string, number] | null }
+      recorded: string[]
+      max_forgetting_drop: number
+      forgetting_ok: boolean
+      worst: [string, number] | null
+    }>('/eval/benchmarks/ingest', {
+      method: 'POST',
+      body: JSON.stringify(req)
+    })
+}
+
 // Traces API
 export const tracesApi = {
   list: (options?: { status?: 'gold' | 'silver' | 'bronze' | 'failed' | 'pending', repo?: string, source_tool?: string, limit?: number, offset?: number }) => {

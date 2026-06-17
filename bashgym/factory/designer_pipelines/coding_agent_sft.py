@@ -252,11 +252,16 @@ def build_sft_pipeline(config: PipelineConfig) -> dd.DataDesignerConfigBuilder:
         )
     )
 
-    # --- Filter low-quality examples ---
-
-    builder.add_processor(
-        processor_type="filter",
-        condition="quality_score.correctness >= 3 and quality_score.tool_usage >= 3",
+    # Quality flag (0.6.x has no row-filter processor; flag here, filter at export).
+    builder.add_column(
+        dd.ExpressionColumnConfig(
+            name="passes_quality",
+            dtype="bool",
+            expr=(
+                "{{ quality_score.correctness.score >= 3 "
+                "and quality_score.tool_usage.score >= 3 }}"
+            ),
+        )
     )
 
     return builder

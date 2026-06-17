@@ -48,6 +48,13 @@ dev = [
     "black>=23.0.0",
     "ruff>=0.1.0",
 ]
+# Optional: NVIDIA NeMo Data Designer for synthetic data generation. BashGym runs
+# fully without it (graceful fallback); install to enable the Factory's Data
+# Designer pipelines and the standalone DataDesignerPipeline / API.
+data-designer = [
+    "data-designer>=0.6.1",
+    "pandas>=2.0.0",
+]
 all = ["bashgym[training,dev]"]
 
 [project.scripts]

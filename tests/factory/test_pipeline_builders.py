@@ -59,6 +59,10 @@ class TestEnvKeyForProvider:
 
 
 class TestBuildBaseConfig:
+    """As of Data Designer 0.6.x, build_base_config builds only ModelConfigs (each
+    bound to a provider name); providers are created by build_model_providers and
+    attached to the DataDesigner instance, not the builder."""
+
     @patch("bashgym.factory.designer_pipelines.DATA_DESIGNER_AVAILABLE", False)
     def test_raises_when_dd_unavailable(self):
         from bashgym.factory.designer_pipelines import build_base_config
@@ -69,31 +73,16 @@ class TestBuildBaseConfig:
 
     @patch("bashgym.factory.designer_pipelines.DATA_DESIGNER_AVAILABLE", True)
     @patch("bashgym.factory.designer_pipelines.dd", create=True)
-    def test_single_provider(self, mock_dd):
+    def test_creates_three_model_configs(self, mock_dd):
         from bashgym.factory.designer_pipelines import build_base_config
 
-        mock_builder_instance = MagicMock()
-        mock_dd.DataDesignerConfigBuilder.return_value = mock_builder_instance
+        mock_dd.DataDesignerConfigBuilder.return_value = MagicMock()
         mock_dd.ModelConfig.return_value = MagicMock()
-        mock_dd.ModelProvider.return_value = MagicMock()
         mock_dd.ChatCompletionInferenceParams.return_value = MagicMock()
 
-        config = PipelineConfig(
-            provider="nvidia",
-            provider_endpoint="https://nim.example.com",
-        )
-        build_base_config(config)
+        build_base_config(PipelineConfig(provider="nvidia"))
 
-        # Should create 1 provider
-        assert mock_dd.ModelProvider.call_count == 1
-        provider_call = mock_dd.ModelProvider.call_args
-        assert provider_call[1]["name"] == "nvidia"
-        assert provider_call[1]["endpoint"] == "https://nim.example.com"
-
-        # Should create 3 model configs (text, code, judge)
         assert mock_dd.ModelConfig.call_count == 3
-
-        # Verify model aliases
         model_aliases = [c[1]["alias"] for c in mock_dd.ModelConfig.call_args_list]
         assert "text-model" in model_aliases
         assert "code-model" in model_aliases
@@ -101,74 +90,32 @@ class TestBuildBaseConfig:
 
     @patch("bashgym.factory.designer_pipelines.DATA_DESIGNER_AVAILABLE", True)
     @patch("bashgym.factory.designer_pipelines.dd", create=True)
-    def test_multi_provider(self, mock_dd):
-        from bashgym.factory.designer_pipelines import build_base_config
-
-        mock_builder_instance = MagicMock()
-        mock_dd.DataDesignerConfigBuilder.return_value = mock_builder_instance
-        mock_dd.ModelConfig.return_value = MagicMock()
-        mock_dd.ModelProvider.return_value = MagicMock()
-        mock_dd.ChatCompletionInferenceParams.return_value = MagicMock()
-
-        providers = [
-            ProviderSpec(name="nvidia", endpoint="https://nim.example.com"),
-            ProviderSpec(name="anthropic", endpoint="https://api.anthropic.com"),
-        ]
-        config = PipelineConfig(providers=providers)
-        build_base_config(config)
-
-        # Should create 2 providers
-        assert mock_dd.ModelProvider.call_count == 2
-
-        provider_names = [c[1]["name"] for c in mock_dd.ModelProvider.call_args_list]
-        assert "nvidia" in provider_names
-        assert "anthropic" in provider_names
-
-    @patch("bashgym.factory.designer_pipelines.DATA_DESIGNER_AVAILABLE", True)
-    @patch("bashgym.factory.designer_pipelines.dd", create=True)
-    def test_multi_provider_with_explicit_api_key(self, mock_dd):
+    def test_model_configs_bind_provider_name(self, mock_dd):
         from bashgym.factory.designer_pipelines import build_base_config
 
         mock_dd.DataDesignerConfigBuilder.return_value = MagicMock()
         mock_dd.ModelConfig.return_value = MagicMock()
-        mock_dd.ModelProvider.return_value = MagicMock()
         mock_dd.ChatCompletionInferenceParams.return_value = MagicMock()
 
-        providers = [
-            ProviderSpec(
-                name="nvidia",
-                endpoint="https://nim.example.com",
-                api_key="explicit-nvidia-key",
-            ),
-        ]
-        config = PipelineConfig(providers=providers)
-        build_base_config(config)
+        build_base_config(PipelineConfig(provider="nvidia"))
 
-        provider_call = mock_dd.ModelProvider.call_args
-        assert provider_call[1]["api_key"] == "explicit-nvidia-key"
+        providers_used = [c[1]["provider"] for c in mock_dd.ModelConfig.call_args_list]
+        assert providers_used == ["nvidia", "nvidia", "nvidia"]
 
     @patch("bashgym.factory.designer_pipelines.DATA_DESIGNER_AVAILABLE", True)
     @patch("bashgym.factory.designer_pipelines.dd", create=True)
-    def test_multi_provider_falls_back_to_env_key(self, mock_dd):
+    def test_builder_not_passed_model_providers(self, mock_dd):
         from bashgym.factory.designer_pipelines import build_base_config
 
         mock_dd.DataDesignerConfigBuilder.return_value = MagicMock()
         mock_dd.ModelConfig.return_value = MagicMock()
-        mock_dd.ModelProvider.return_value = MagicMock()
         mock_dd.ChatCompletionInferenceParams.return_value = MagicMock()
 
-        providers = [
-            ProviderSpec(
-                name="anthropic",
-                endpoint="https://api.anthropic.com",
-                # api_key is None
-            ),
-        ]
-        config = PipelineConfig(providers=providers)
-        build_base_config(config)
+        build_base_config(PipelineConfig())
 
-        provider_call = mock_dd.ModelProvider.call_args
-        assert provider_call[1]["api_key"] == "${ANTHROPIC_API_KEY}"
+        _, kwargs = mock_dd.DataDesignerConfigBuilder.call_args
+        assert "model_configs" in kwargs
+        assert "model_providers" not in kwargs  # 0.6.x: providers go on DataDesigner
 
     @patch("bashgym.factory.designer_pipelines.DATA_DESIGNER_AVAILABLE", True)
     @patch("bashgym.factory.designer_pipelines.dd", create=True)
@@ -177,7 +124,6 @@ class TestBuildBaseConfig:
 
         mock_dd.DataDesignerConfigBuilder.return_value = MagicMock()
         mock_dd.ModelConfig.return_value = MagicMock()
-        mock_dd.ModelProvider.return_value = MagicMock()
         mock_dd.ChatCompletionInferenceParams.return_value = MagicMock()
 
         config = PipelineConfig(
@@ -187,10 +133,8 @@ class TestBuildBaseConfig:
         )
         build_base_config(config)
 
-        # ChatCompletionInferenceParams should be called 3 times with the configured temps
         assert mock_dd.ChatCompletionInferenceParams.call_count == 3
         temp_calls = mock_dd.ChatCompletionInferenceParams.call_args_list
-
         temps_used = [c[1]["temperature"] for c in temp_calls]
         assert 0.9 in temps_used  # text
         assert 0.3 in temps_used  # code
@@ -203,7 +147,6 @@ class TestBuildBaseConfig:
 
         mock_dd.DataDesignerConfigBuilder.return_value = MagicMock()
         mock_dd.ModelConfig.return_value = MagicMock()
-        mock_dd.ModelProvider.return_value = MagicMock()
         mock_dd.ChatCompletionInferenceParams.return_value = MagicMock()
 
         config = PipelineConfig(
@@ -226,13 +169,96 @@ class TestBuildBaseConfig:
         mock_builder_instance = MagicMock()
         mock_dd.DataDesignerConfigBuilder.return_value = mock_builder_instance
         mock_dd.ModelConfig.return_value = MagicMock()
-        mock_dd.ModelProvider.return_value = MagicMock()
         mock_dd.ChatCompletionInferenceParams.return_value = MagicMock()
 
-        config = PipelineConfig()
-        result = build_base_config(config)
+        result = build_base_config(PipelineConfig())
 
         assert result == mock_builder_instance
+
+
+class TestBuildModelProviders:
+    """Providers are built separately (0.6.x) and attached to the DataDesigner."""
+
+    @patch("bashgym.factory.designer_pipelines.DATA_DESIGNER_AVAILABLE", False)
+    def test_raises_when_dd_unavailable(self):
+        from bashgym.factory.designer_pipelines import build_model_providers
+
+        with pytest.raises(ImportError, match="data-designer"):
+            build_model_providers(PipelineConfig())
+
+    @patch("bashgym.factory.designer_pipelines.DATA_DESIGNER_AVAILABLE", True)
+    @patch("bashgym.factory.designer_pipelines.dd", create=True)
+    def test_single_provider(self, mock_dd):
+        from bashgym.factory.designer_pipelines import build_model_providers
+
+        mock_dd.ModelProvider.return_value = MagicMock()
+
+        build_model_providers(
+            PipelineConfig(provider="nvidia", provider_endpoint="https://nim.example.com")
+        )
+
+        assert mock_dd.ModelProvider.call_count == 1
+        provider_call = mock_dd.ModelProvider.call_args
+        assert provider_call[1]["name"] == "nvidia"
+        assert provider_call[1]["endpoint"] == "https://nim.example.com"
+
+    @patch("bashgym.factory.designer_pipelines.DATA_DESIGNER_AVAILABLE", True)
+    @patch("bashgym.factory.designer_pipelines.dd", create=True)
+    def test_multi_provider(self, mock_dd):
+        from bashgym.factory.designer_pipelines import build_model_providers
+
+        mock_dd.ModelProvider.return_value = MagicMock()
+
+        config = PipelineConfig(
+            providers=[
+                ProviderSpec(name="nvidia", endpoint="https://nim.example.com"),
+                ProviderSpec(name="anthropic", endpoint="https://api.anthropic.com"),
+            ]
+        )
+        build_model_providers(config)
+
+        assert mock_dd.ModelProvider.call_count == 2
+        provider_names = [c[1]["name"] for c in mock_dd.ModelProvider.call_args_list]
+        assert "nvidia" in provider_names
+        assert "anthropic" in provider_names
+
+    @patch("bashgym.factory.designer_pipelines.DATA_DESIGNER_AVAILABLE", True)
+    @patch("bashgym.factory.designer_pipelines.dd", create=True)
+    def test_explicit_api_key(self, mock_dd):
+        from bashgym.factory.designer_pipelines import build_model_providers
+
+        mock_dd.ModelProvider.return_value = MagicMock()
+
+        config = PipelineConfig(
+            providers=[
+                ProviderSpec(
+                    name="nvidia",
+                    endpoint="https://nim.example.com",
+                    api_key="explicit-nvidia-key",
+                ),
+            ]
+        )
+        build_model_providers(config)
+
+        assert mock_dd.ModelProvider.call_args[1]["api_key"] == "explicit-nvidia-key"
+
+    @patch("bashgym.factory.designer_pipelines.DATA_DESIGNER_AVAILABLE", True)
+    @patch("bashgym.factory.designer_pipelines.dd", create=True)
+    def test_falls_back_to_env_key(self, mock_dd):
+        from bashgym.factory.designer_pipelines import build_model_providers
+
+        mock_dd.ModelProvider.return_value = MagicMock()
+
+        config = PipelineConfig(
+            providers=[
+                ProviderSpec(name="anthropic", endpoint="https://api.anthropic.com"),
+            ]
+        )
+        build_model_providers(config)
+
+        # 0.6.x: api_key carries the env-var NAME (resolved by EnvironmentResolver),
+        # not a "${...}" placeholder.
+        assert mock_dd.ModelProvider.call_args[1]["api_key"] == "ANTHROPIC_API_KEY"
 
 
 # =========================================================================

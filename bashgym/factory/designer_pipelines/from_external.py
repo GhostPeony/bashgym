@@ -159,11 +159,16 @@ def build_external_pipeline(config: PipelineConfig) -> dd.DataDesignerConfigBuil
         )
     )
 
-    # --- Filter ---
-
-    builder.add_processor(
-        processor_type="filter",
-        condition="quality_score.relevance >= 3 and quality_score.training_value >= 3",
+    # Quality flag (0.6.x has no row-filter processor; flag here, filter at export).
+    builder.add_column(
+        dd.ExpressionColumnConfig(
+            name="passes_quality",
+            dtype="bool",
+            expr=(
+                "{{ quality_score.relevance.score >= 3 "
+                "and quality_score.training_value.score >= 3 }}"
+            ),
+        )
     )
 
     return builder

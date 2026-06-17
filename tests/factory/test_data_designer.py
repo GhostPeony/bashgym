@@ -8,16 +8,16 @@ from unittest.mock import MagicMock, PropertyMock, patch
 import pytest
 
 from bashgym.factory.data_designer import (
-    HAS_CUSTOM_COLUMN,
-    HAS_EMBEDDING_COLUMN,
-    HAS_EXPRESSION_COLUMN,
-    HAS_JUDGE_COLUMN,
-    HAS_STRUCTURED_COLUMN,
-    HAS_VALIDATION_COLUMN,
+    DATA_DESIGNER_AVAILABLE,
     SYSTEM_PROMPT,
     DataDesignerPipeline,
     PipelineConfig,
     ProviderSpec,
+    _is_truthy,
+    _looks_like_chat_model,
+    _looks_like_code_model,
+    list_inference_models,
+    provider_model_ids,
 )
 
 # =========================================================================
@@ -142,25 +142,43 @@ class TestPipelineConfig:
 
 
 class TestFeatureDetection:
+    # Original (v0.5.x) flags plus the v0.6.1-capability flags.
+    _FLAGS = (
+        "HAS_STRUCTURED_COLUMN",
+        "HAS_JUDGE_COLUMN",
+        "HAS_VALIDATION_COLUMN",
+        "HAS_EMBEDDING_COLUMN",
+        "HAS_CUSTOM_COLUMN",
+        "HAS_EXPRESSION_COLUMN",
+        "HAS_CODE_COLUMN",
+        "HAS_SEED_DATASET_COLUMN",
+        "HAS_AGENT_ROLLOUT",
+        "HAS_MCP",
+        "HAS_WORKFLOW",
+        "HAS_SCHEMA_TRANSFORM",
+    )
+
     def test_feature_flags_exist(self):
         """Feature flags should be defined regardless of DD availability."""
         from bashgym.factory import data_designer
 
-        assert hasattr(data_designer, "HAS_STRUCTURED_COLUMN")
-        assert hasattr(data_designer, "HAS_JUDGE_COLUMN")
-        assert hasattr(data_designer, "HAS_VALIDATION_COLUMN")
-        assert hasattr(data_designer, "HAS_EMBEDDING_COLUMN")
-        assert hasattr(data_designer, "HAS_CUSTOM_COLUMN")
-        assert hasattr(data_designer, "HAS_EXPRESSION_COLUMN")
+        for flag in self._FLAGS:
+            assert hasattr(data_designer, flag), f"missing feature flag {flag}"
 
     def test_feature_flags_are_bool(self):
         """All feature flags should be booleans."""
-        assert isinstance(HAS_STRUCTURED_COLUMN, bool)
-        assert isinstance(HAS_JUDGE_COLUMN, bool)
-        assert isinstance(HAS_VALIDATION_COLUMN, bool)
-        assert isinstance(HAS_EMBEDDING_COLUMN, bool)
-        assert isinstance(HAS_CUSTOM_COLUMN, bool)
-        assert isinstance(HAS_EXPRESSION_COLUMN, bool)
+        from bashgym.factory import data_designer
+
+        for flag in self._FLAGS:
+            assert isinstance(getattr(data_designer, flag), bool), f"{flag} is not bool"
+
+    @pytest.mark.skipif(not DATA_DESIGNER_AVAILABLE, reason="data-designer not installed")
+    def test_flags_true_when_installed(self):
+        """With data-designer 0.6.1 installed, every capability flag resolves True."""
+        for flag in self._FLAGS:
+            from bashgym.factory import data_designer
+
+            assert getattr(data_designer, flag) is True, f"{flag} should be True on 0.6.1"
 
 
 # =========================================================================
@@ -521,7 +539,7 @@ class TestFromConfig:
                     new_callable=PropertyMock,
                 ) as mock_designer_prop:
                     mock_designer = MagicMock()
-                    mock_designer.generate.return_value = mock_df
+                    mock_designer.create.return_value.load_dataset.return_value = mock_df
                     mock_designer_prop.return_value = mock_designer
 
                     result = pipeline.from_config(str(config_path))
@@ -692,6 +710,306 @@ class TestGetPipelineBuilder:
 
         assert result == mock_builder
         mock_builder_fn.assert_called_once_with(pipeline.config)
+
+
+# =========================================================================
+# Live construction against the installed data-designer (0.6.1)
+# =========================================================================
+
+
+@pytest.mark.skipif(not DATA_DESIGNER_AVAILABLE, reason="data-designer not installed")
+class TestRealPipelineConstruction:
+    """Build real config DAGs against the installed Data Designer (no model calls).
+
+    Exercises the 0.6.x API surface: provider wiring lives on the DataDesigner
+    instance, ModelConfig binds via provider name, and every pipeline's column
+    DAG constructs.
+    """
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "coding_agent_sft",
+            "coding_agent_dpo",
+            "coding_agent_distill",
+            "tool_use_sft",
+            "from_external",
+            "from_unstructured",
+        ],
+    )
+    def test_pipeline_builds(self, name):
+        from bashgym.factory.designer_pipelines import PIPELINES
+
+        builder = PIPELINES[name](PipelineConfig(pipeline=name))
+        assert builder is not None
+
+    def test_build_model_providers_single(self):
+        from bashgym.factory.designer_pipelines import build_model_providers
+
+        providers = build_model_providers(PipelineConfig(provider="nvidia"))
+        assert len(providers) == 1
+        assert providers[0].name == "nvidia"
+
+    def test_build_model_providers_multi(self):
+        from bashgym.factory.designer_pipelines import build_model_providers
+
+        config = PipelineConfig(
+            providers=[
+                ProviderSpec(name="nvidia", endpoint="https://nim.example.com"),
+                ProviderSpec(name="anthropic", endpoint="https://api.anthropic.com"),
+            ]
+        )
+        providers = build_model_providers(config)
+        assert {p.name for p in providers} == {"nvidia", "anthropic"}
+
+    def test_designer_instantiates_with_providers(self):
+        pipeline = DataDesignerPipeline(PipelineConfig(pipeline="coding_agent_sft"))
+        # Accessing .designer builds DataDesigner(model_providers=...).
+        assert pipeline.designer is not None
+
+
+# =========================================================================
+# from_agent_rollouts (native AgentRolloutSeedSource ingestion)
+# =========================================================================
+
+
+class TestFromAgentRollouts:
+    def test_raises_when_agent_rollout_unsupported(self):
+        """Without AgentRolloutSeedSource support, the call raises clearly."""
+        pipeline = DataDesignerPipeline()
+        with patch("bashgym.factory.data_designer.HAS_AGENT_ROLLOUT", False):
+            with pytest.raises(RuntimeError, match="AgentRolloutSeedSource"):
+                pipeline.from_agent_rollouts()
+
+    @pytest.mark.skipif(not DATA_DESIGNER_AVAILABLE, reason="data-designer not installed")
+    def test_resolve_rollout_format(self):
+        import data_designer.config as dd
+
+        pipeline = DataDesignerPipeline()
+        assert pipeline._resolve_rollout_format("claude_code") == dd.AgentRolloutFormat.CLAUDE_CODE
+        assert (
+            pipeline._resolve_rollout_format("HERMES_AGENT") == dd.AgentRolloutFormat.HERMES_AGENT
+        )
+        with pytest.raises(ValueError, match="Unknown rollout format"):
+            pipeline._resolve_rollout_format("not_a_format")
+
+    @pytest.mark.skipif(not DATA_DESIGNER_AVAILABLE, reason="data-designer not installed")
+    def test_atif_requires_path(self):
+        pipeline = DataDesignerPipeline(PipelineConfig(pipeline="coding_agent_distill"))
+        with pytest.raises(ValueError, match="path is required"):
+            pipeline.from_agent_rollouts(rollout_format="atif")
+
+    @pytest.mark.skipif(not DATA_DESIGNER_AVAILABLE, reason="data-designer not installed")
+    def test_attaches_seed_and_creates(self):
+        pipeline = DataDesignerPipeline(PipelineConfig(pipeline="coding_agent_distill"))
+        mock_builder = MagicMock()
+        mock_df = MagicMock()
+        with patch.object(pipeline, "_get_pipeline_builder", return_value=mock_builder):
+            with patch.object(
+                DataDesignerPipeline, "designer", new_callable=PropertyMock
+            ) as mock_designer_prop:
+                mock_designer = MagicMock()
+                mock_designer.create.return_value.load_dataset.return_value = mock_df
+                mock_designer_prop.return_value = mock_designer
+                result = pipeline.from_agent_rollouts(rollout_format="claude_code", num_records=7)
+
+        assert result is mock_df
+        mock_builder.with_seed_dataset.assert_called_once()
+        _, kwargs = mock_designer.create.call_args
+        assert kwargs.get("num_records") == 7
+
+
+# =========================================================================
+# coding_agent_distill pipeline internals
+# =========================================================================
+
+
+@pytest.mark.skipif(not DATA_DESIGNER_AVAILABLE, reason="data-designer not installed")
+class TestDistillPipeline:
+    def test_judge_scores_five_dimensions(self):
+        from bashgym.factory.designer_pipelines.coding_agent_distill import _sft_judge_scores
+
+        scores = _sft_judge_scores()
+        assert len(scores) == 5
+        assert {s.name for s in scores} == {
+            "groundedness",
+            "standalone_task",
+            "response_quality",
+            "faithfulness",
+            "training_utility",
+        }
+
+    def test_models_have_expected_fields(self):
+        from bashgym.factory.designer_pipelines.coding_agent_distill import (
+            AgentRolloutFinetuningRecord,
+            AgentRolloutTraceDigest,
+        )
+
+        assert "user_goal" in AgentRolloutTraceDigest.model_fields
+        assert "training_value" in AgentRolloutTraceDigest.model_fields
+        assert "instruction" in AgentRolloutFinetuningRecord.model_fields
+        assert "response" in AgentRolloutFinetuningRecord.model_fields
+
+
+# =========================================================================
+# from_traces seed attach (real DataFrameSeedSource against 0.6.1)
+# =========================================================================
+
+
+@pytest.mark.skipif(not DATA_DESIGNER_AVAILABLE, reason="data-designer not installed")
+class TestFromTracesSeed:
+    def test_attaches_real_dataframe_seed(self, tmp_path):
+        """Exercises real dd.DataFrameSeedSource(df=...) — guards the 0.6.1 kwarg."""
+        import data_designer.config as dd
+
+        trace = {
+            "metadata": {"user_initial_prompt": "Fix the failing test"},
+            "trace": [{"tool_name": "bash", "command": "pytest tests/"}],
+        }
+        (tmp_path / "t.json").write_text(json.dumps(trace), encoding="utf-8")
+
+        pipeline = DataDesignerPipeline()
+        mock_builder = MagicMock()
+        mock_df = MagicMock()
+        with patch.object(pipeline, "_get_pipeline_builder", return_value=mock_builder):
+            with patch.object(
+                DataDesignerPipeline, "designer", new_callable=PropertyMock
+            ) as mock_designer_prop:
+                mock_designer = MagicMock()
+                mock_designer.create.return_value.load_dataset.return_value = mock_df
+                mock_designer_prop.return_value = mock_designer
+                result = pipeline.from_traces(tmp_path, num_records=3)
+
+        assert result is mock_df
+        seed_arg = mock_builder.with_seed_dataset.call_args[0][0]
+        assert isinstance(seed_arg, dd.DataFrameSeedSource)
+
+
+# =========================================================================
+# Quality-gate export filtering + model adaptability
+# =========================================================================
+
+
+class TestIsTruthy:
+    def test_bools(self):
+        assert _is_truthy(True) is True
+        assert _is_truthy(False) is False
+
+    def test_strings(self):
+        assert _is_truthy("true") is True
+        assert _is_truthy("True") is True
+        assert _is_truthy("1") is True
+        assert _is_truthy("yes") is True
+        assert _is_truthy("false") is False
+        assert _is_truthy("") is False
+
+    def test_other(self):
+        assert _is_truthy(1) is True
+        assert _is_truthy(0) is False
+        assert _is_truthy(None) is False
+
+
+class TestModelHelpers:
+    def test_looks_like_code_model(self):
+        assert _looks_like_code_model("deepseek-ai/deepseek-coder-6.7b-instruct")
+        assert _looks_like_code_model("bigcode/starcoder2-15b")
+        assert _looks_like_code_model("mistralai/codestral-22b-instruct-v0.1")
+        assert not _looks_like_code_model("meta/llama-3.3-70b-instruct")
+
+    def test_looks_like_chat_model(self):
+        assert _looks_like_chat_model("meta/llama-3.3-70b-instruct")
+        assert _looks_like_chat_model("nvidia/llama-3.1-nemotron-70b-instruct")
+        assert not _looks_like_chat_model("bigcode/starcoder2-15b")
+
+
+class TestExportNemoQualityGate:
+    def _df(self, pd, flag_col="passes_quality", flags=(True, False, True)):
+        return pd.DataFrame(
+            {
+                "task_prompt": [f"task {i}" for i in range(len(flags))],
+                "solution_text": [f"sol {i}" for i in range(len(flags))],
+                flag_col: list(flags),
+            }
+        )
+
+    def test_filters_failing_rows(self):
+        pd = pytest.importorskip("pandas")
+        pipeline = DataDesignerPipeline()
+        with tempfile.TemporaryDirectory() as tmp:
+            res = pipeline.export_nemo(self._df(pd), output_dir=Path(tmp))
+        assert res["filtered_out"] == 1
+        assert res["train_count"] + res["val_count"] == 2
+
+    def test_no_filter_when_disabled(self):
+        pd = pytest.importorskip("pandas")
+        pipeline = DataDesignerPipeline()
+        with tempfile.TemporaryDirectory() as tmp:
+            res = pipeline.export_nemo(self._df(pd), output_dir=Path(tmp), keep_only_passing=False)
+        assert res["filtered_out"] == 0
+        assert res["train_count"] + res["val_count"] == 3
+
+    def test_no_flag_column_keeps_all(self):
+        pd = pytest.importorskip("pandas")
+        pipeline = DataDesignerPipeline()
+        df = pd.DataFrame({"task_prompt": ["a", "b"], "solution_text": ["x", "y"]})
+        with tempfile.TemporaryDirectory() as tmp:
+            res = pipeline.export_nemo(df, output_dir=Path(tmp))
+        assert res["filtered_out"] == 0
+
+    def test_recommended_for_sft_fallback(self):
+        pd = pytest.importorskip("pandas")
+        pipeline = DataDesignerPipeline()
+        df = self._df(pd, flag_col="recommended_for_sft", flags=(True, False, False))
+        with tempfile.TemporaryDirectory() as tmp:
+            res = pipeline.export_nemo(df, output_dir=Path(tmp))  # default flag absent
+        assert res["filtered_out"] == 2
+
+
+class TestResolveModels:
+    def test_substitutes_unavailable(self):
+        available = [
+            "meta/llama-3.3-70b-instruct",
+            "deepseek-ai/deepseek-coder-6.7b-instruct",
+        ]
+        with patch("bashgym.factory.data_designer.provider_model_ids", return_value=available):
+            cfg = PipelineConfig(
+                text_model="meta/llama-3.3-70b-instruct",
+                code_model="qwen/qwen2.5-coder-32b-instruct",  # not served
+                judge_model="meta/llama-3.3-70b-instruct",
+            ).resolve_models()
+        assert cfg.text_model == "meta/llama-3.3-70b-instruct"  # available -> kept
+        assert cfg.code_model == "deepseek-ai/deepseek-coder-6.7b-instruct"  # swapped
+        assert cfg.judge_model == "meta/llama-3.3-70b-instruct"
+
+    def test_noop_when_discovery_empty(self):
+        with patch("bashgym.factory.data_designer.provider_model_ids", return_value=[]):
+            cfg = PipelineConfig(code_model="qwen/qwen2.5-coder-32b-instruct").resolve_models()
+        assert cfg.code_model == "qwen/qwen2.5-coder-32b-instruct"  # unchanged
+
+
+class TestProviderModelIds:
+    def test_returns_empty_on_error(self):
+        with patch("httpx.get", side_effect=RuntimeError("boom")):
+            assert provider_model_ids("nvidia", "https://example.com/v1") == []
+
+
+class TestListInferenceModels:
+    def test_aggregates_discovery(self):
+        fake = {
+            "inference": [{"id": "nim/meta/llama-3.3-70b-instruct"}],
+            "local": [{"id": "ollama/qwen2.5"}],
+        }
+        with patch("bashgym.providers.detector.get_available_models_sync", return_value=fake):
+            models = list_inference_models()
+        ids = {m["id"] for m in models}
+        assert ids == {"nim/meta/llama-3.3-70b-instruct", "ollama/qwen2.5"}
+
+    def test_returns_empty_on_failure(self):
+        with patch(
+            "bashgym.providers.detector.get_available_models_sync",
+            side_effect=RuntimeError("down"),
+        ):
+            assert list_inference_models() == []
 
 
 # =========================================================================

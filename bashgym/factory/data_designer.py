@@ -1,7 +1,7 @@
 """
 DataDesigner Pipeline Integration
 
-Bridges BashGym's training data pipeline with NVIDIA NeMo DataDesigner v0.5.0+.
+Bridges BashGym's training data pipeline with NVIDIA NeMo DataDesigner v0.6.1+.
 Provides entry points for generating training data from traces, external datasets,
 and unstructured documents through DataDesigner's column DAG execution engine.
 
@@ -11,6 +11,7 @@ Module 3: Data Synthesis (The "Factory") - DataDesigner Integration
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -31,13 +32,24 @@ try:
 except ImportError:
     DATA_DESIGNER_AVAILABLE = False
 
-# Feature detection for Data Designer capabilities
+# Feature detection for Data Designer capabilities.
+# Every flag is hasattr-guarded so the module imports cleanly whether or not the
+# optional `data-designer` package is installed, and degrades gracefully across
+# the v0.5.x -> v0.6.1 surface (and the separately-versioned NeMo Microservices
+# PySDK line, which may not expose every column type).
 HAS_STRUCTURED_COLUMN = False
 HAS_JUDGE_COLUMN = False
 HAS_VALIDATION_COLUMN = False
 HAS_EMBEDDING_COLUMN = False
 HAS_CUSTOM_COLUMN = False
 HAS_EXPRESSION_COLUMN = False
+# v0.6.1 capabilities
+HAS_CODE_COLUMN = False
+HAS_SEED_DATASET_COLUMN = False
+HAS_AGENT_ROLLOUT = False
+HAS_MCP = False
+HAS_WORKFLOW = False
+HAS_SCHEMA_TRANSFORM = False
 
 if DATA_DESIGNER_AVAILABLE:
     HAS_STRUCTURED_COLUMN = hasattr(dd, "LLMStructuredColumnConfig")
@@ -46,8 +58,96 @@ if DATA_DESIGNER_AVAILABLE:
     HAS_EMBEDDING_COLUMN = hasattr(dd, "EmbeddingColumnConfig")
     HAS_CUSTOM_COLUMN = hasattr(dd, "CustomColumnConfig")
     HAS_EXPRESSION_COLUMN = hasattr(dd, "ExpressionColumnConfig")
+    # v0.6.1: code-generation column, seed-dataset column, native agent-rollout
+    # ingestion, in-pipeline MCP tool use, workflow chaining, schema-transform
+    # processor (chat/messages export).
+    HAS_CODE_COLUMN = hasattr(dd, "LLMCodeColumnConfig")
+    HAS_SEED_DATASET_COLUMN = hasattr(dd, "SeedDatasetColumnConfig")
+    HAS_AGENT_ROLLOUT = hasattr(dd, "AgentRolloutSeedSource") and hasattr(dd, "AgentRolloutFormat")
+    HAS_MCP = hasattr(dd, "ToolConfig") and hasattr(dd, "LocalStdioMCPProvider")
+    HAS_WORKFLOW = hasattr(DataDesigner, "compose_workflow")
+    HAS_SCHEMA_TRANSFORM = hasattr(dd, "SchemaTransformProcessorConfig")
 
 logger = logging.getLogger(__name__)
+
+
+def _is_truthy(value: Any) -> bool:
+    """Coerce a Data Designer flag cell (bool, or a rendered string) to a bool."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1", "yes"}
+    return bool(value)
+
+
+_PROVIDER_KEY_ENV = {
+    "nvidia": "NVIDIA_API_KEY",
+    "nvidia-nim": "NVIDIA_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+}
+
+_CODE_MODEL_RE = re.compile(r"cod(e|er)|deepseek|starcoder|granite-.*code", re.IGNORECASE)
+# Instruction/chat-tuned models support the chat-completions API; base/completion
+# models (e.g. starcoder2-15b without "-instruct") fail chat health checks.
+_CHAT_MODEL_RE = re.compile(r"instruct|chat|nemotron", re.IGNORECASE)
+
+
+def _looks_like_code_model(model_id: str) -> bool:
+    return bool(_CODE_MODEL_RE.search(model_id or ""))
+
+
+def _looks_like_chat_model(model_id: str) -> bool:
+    return bool(_CHAT_MODEL_RE.search(model_id or ""))
+
+
+def provider_model_ids(provider: str, endpoint: str) -> list[str]:
+    """Bare model IDs served by an OpenAI-compatible provider endpoint.
+
+    Works for any ``/v1/models`` endpoint (NVIDIA NIM, Ollama, vLLM, OpenAI,
+    OpenRouter, ...) so model selection adapts to whatever is actually served.
+    Best-effort: returns [] on any error (offline, auth, unknown provider).
+    """
+    import httpx
+
+    headers = {}
+    key_env = _PROVIDER_KEY_ENV.get(provider)
+    if key_env and os.environ.get(key_env):
+        headers["Authorization"] = f"Bearer {os.environ[key_env]}"
+    try:
+        resp = httpx.get(f"{endpoint.rstrip('/')}/models", headers=headers, timeout=10.0)
+        resp.raise_for_status()
+        return [m["id"] for m in resp.json().get("data", []) if m.get("id")]
+    except Exception as e:  # noqa: BLE001 - discovery is best-effort
+        logger.debug("provider_model_ids(%s) failed: %s", provider, e)
+        return []
+
+
+def list_inference_models(code_only: bool = False) -> list[dict[str, Any]]:
+    """Discover inference models across configured open-model sources.
+
+    Adaptable: aggregates local Ollama / LM Studio models and the live NVIDIA NIM
+    catalog via ``bashgym.providers`` discovery. Models served from HuggingFace /
+    Unsloth weights appear once served (NIM, or pulled into Ollama). Intended for
+    UI/CLI selection. Best-effort: returns [] if discovery is unavailable. Must be
+    called from a synchronous context (it drives the async discovery internally).
+    """
+    try:
+        from bashgym.providers.detector import get_available_models_sync
+
+        cats = get_available_models_sync(code_only=code_only)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("list_inference_models discovery failed: %s", e)
+        return []
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for cat in ("inference", "local"):
+        for m in cats.get(cat, []):
+            d = m.to_dict() if hasattr(m, "to_dict") else dict(m)
+            if d.get("id") and d["id"] not in seen:
+                seen.add(d["id"])
+                out.append(d)
+    return out
 
 
 @dataclass
@@ -103,10 +203,37 @@ class PipelineConfig:
         if not self.provider_api_key:
             self.provider_api_key = os.environ.get("NVIDIA_API_KEY")
 
+    def resolve_models(self) -> "PipelineConfig":
+        """Adapt text/code/judge models to the configured provider's live catalog.
+
+        Substitutes an available model when a configured one isn't served (so the
+        defaults are preferences, not hardcoded requirements). Works against any
+        OpenAI-compatible provider (NVIDIA NIM, Ollama/DGX, vLLM, ...). Best-effort:
+        no-ops if discovery returns nothing (offline / unknown provider). Returns
+        self for chaining; mutate then build/generate.
+        """
+        available = provider_model_ids(self.provider, self.provider_endpoint)
+        if not available:
+            return self
+        available_set = set(available)
+        # Prefer instruction/chat-tuned models (base/completion models fail chat
+        # health checks); for code, prefer code+chat, else any chat model.
+        chat = [m for m in available if _looks_like_chat_model(m)]
+        general_pool = chat or available
+        code_pool = [m for m in chat if _looks_like_code_model(m)] or general_pool
+
+        def pick(preferred: str, pool: list[str]) -> str:
+            return preferred if preferred in available_set else pool[0]
+
+        self.text_model = pick(self.text_model, general_pool)
+        self.code_model = pick(self.code_model, code_pool)
+        self.judge_model = pick(self.judge_model, general_pool)
+        return self
+
 
 class DataDesignerPipeline:
     """
-    Bridge between BashGym and NVIDIA NeMo DataDesigner v0.5.0+.
+    Bridge between BashGym and NVIDIA NeMo DataDesigner v0.6.1+.
 
     Provides three entry points for generating training data:
     1. from_traces() - Seed from gold execution traces
@@ -127,13 +254,26 @@ class DataDesignerPipeline:
 
     @property
     def designer(self):
-        """Lazy-init DataDesigner instance."""
+        """Lazy-init DataDesigner instance.
+
+        As of Data Designer 0.6.x, model providers are attached to the
+        DataDesigner instance (``DataDesigner(model_providers=...)``) rather than
+        to the config builder.
+        """
         if self._designer is None:
             if not DATA_DESIGNER_AVAILABLE:
                 raise ImportError(
-                    "data-designer>=0.5.0 is required. " "Install with: pip install data-designer"
+                    "data-designer>=0.6.1 is required. Install with: pip install data-designer"
                 )
-            self._designer = DataDesigner()
+            from bashgym.factory.designer_pipelines import (
+                build_model_providers,
+                build_secret_resolver,
+            )
+
+            self._designer = DataDesigner(
+                model_providers=build_model_providers(self.config),
+                secret_resolver=build_secret_resolver(),
+            )
         return self._designer
 
     # =========================================================================
@@ -168,10 +308,71 @@ class DataDesignerPipeline:
 
         seed_df = pd.DataFrame(seeds)
         builder = self._get_pipeline_builder()
-        builder.with_seed_dataset(dd.DataFrameSeedSource(data=seed_df))
+        builder.with_seed_dataset(dd.DataFrameSeedSource(df=seed_df))
 
         num = num_records or self.config.num_records
-        return self.designer.generate(builder, num_rows=num)
+        return self.designer.create(builder, num_records=num).load_dataset()
+
+    def from_agent_rollouts(
+        self,
+        rollout_format: str = "claude_code",
+        path: str | Path | None = None,
+        num_records: int | None = None,
+        recursive: bool = True,
+        file_pattern: str | None = None,
+    ) -> "pd.DataFrame":
+        """Generate training data seeded directly from native agent rollouts.
+
+        Uses Data Designer's ``AgentRolloutSeedSource`` (v0.6.x) to ingest raw
+        rollout artifacts straight from disk -- no hand-rolled trace parsing.
+        Supported formats: ``claude_code`` (~/.claude/projects), ``codex``
+        (~/.codex/sessions), ``hermes_agent`` (~/.hermes/sessions),
+        ``pi_coding_agent`` (~/.pi/agent/sessions), ``atif`` (requires ``path``).
+
+        This complements ``from_traces`` (which seeds from BashGym's processed
+        gold-trace schema). Pair it with the ``coding_agent_distill`` pipeline to
+        distill rollouts into standalone SFT examples.
+
+        Args:
+            rollout_format: Rollout format name (see above).
+            path: Optional directory override (required for the ``atif`` format).
+            num_records: Number of records to generate (overrides config).
+            recursive: Recurse into subdirectories when scanning for rollouts.
+            file_pattern: Optional glob override for rollout files.
+
+        Returns:
+            DataFrame with generated training data.
+        """
+        if not HAS_AGENT_ROLLOUT:
+            raise RuntimeError(
+                "AgentRolloutSeedSource requires data-designer>=0.6.x (HAS_AGENT_ROLLOUT is False)."
+            )
+        if path is None and rollout_format.strip().lower() == "atif":
+            raise ValueError("path is required for the 'atif' rollout format")
+
+        builder = self._get_pipeline_builder()
+        seed_kwargs: dict[str, Any] = {
+            "format": self._resolve_rollout_format(rollout_format),
+            "recursive": recursive,
+        }
+        if path is not None:
+            seed_kwargs["path"] = str(path)
+        if file_pattern is not None:
+            seed_kwargs["file_pattern"] = file_pattern
+        builder.with_seed_dataset(dd.AgentRolloutSeedSource(**seed_kwargs))
+
+        num = num_records or self.config.num_records
+        return self.designer.create(builder, num_records=num).load_dataset()
+
+    @staticmethod
+    def _resolve_rollout_format(rollout_format: str) -> "dd.AgentRolloutFormat":
+        """Map a format name (e.g. ``claude_code``) to the dd.AgentRolloutFormat enum."""
+        key = rollout_format.strip().upper()
+        try:
+            return getattr(dd.AgentRolloutFormat, key)
+        except AttributeError:
+            valid = [m for m in dir(dd.AgentRolloutFormat) if m.isupper()]
+            raise ValueError(f"Unknown rollout format '{rollout_format}'. Valid: {valid}") from None
 
     def from_dataset(
         self,
@@ -198,25 +399,46 @@ class DataDesignerPipeline:
         builder = self._get_pipeline_builder()
 
         source_path = Path(source)
+        needs_materialize = bool(column_mapping) or bool(subset) or split != "train"
+
         if source_path.exists():
-            # Local file
-            builder.with_seed_dataset(
-                dd.FileSeedSource(
-                    path=str(source_path),
-                    column_mapping=column_mapping,
-                )
-            )
-        else:
-            # Treat as HuggingFace dataset
-            seed_kwargs = {"path": source, "split": split}
-            if subset:
-                seed_kwargs["name"] = subset
             if column_mapping:
-                seed_kwargs["column_mapping"] = column_mapping
-            builder.with_seed_dataset(dd.HuggingFaceSeedSource(**seed_kwargs))
+                # Remap columns by materializing to a DataFrame seed source.
+                seed_df = self._read_tabular(source_path).rename(columns=column_mapping)
+                builder.with_seed_dataset(dd.DataFrameSeedSource(df=seed_df))
+            else:
+                # Data Designer 0.6.x: local files use LocalFileSeedSource(path=...).
+                builder.with_seed_dataset(dd.LocalFileSeedSource(path=str(source_path)))
+        elif needs_materialize:
+            # 0.6.x HuggingFaceSeedSource accepts only path/token/endpoint, so load the
+            # requested subset/split (and apply any column remap) via the datasets lib.
+            from datasets import load_dataset
+
+            seed_df = load_dataset(source, name=subset, split=split).to_pandas()
+            if column_mapping:
+                seed_df = seed_df.rename(columns=column_mapping)
+            builder.with_seed_dataset(dd.DataFrameSeedSource(df=seed_df))
+        else:
+            builder.with_seed_dataset(
+                dd.HuggingFaceSeedSource(path=source, token=os.environ.get("HF_TOKEN"))
+            )
 
         num = num_records or self.config.num_records
-        return self.designer.generate(builder, num_rows=num)
+        return self.designer.create(builder, num_records=num).load_dataset()
+
+    @staticmethod
+    def _read_tabular(path: Path) -> "pd.DataFrame":
+        """Read a local CSV/Parquet/JSON/JSONL file into a DataFrame."""
+        if not PANDAS_AVAILABLE:
+            raise ImportError("pandas is required to read local seed files")
+        suffix = path.suffix.lower()
+        if suffix == ".parquet":
+            return pd.read_parquet(path)
+        if suffix in (".jsonl", ".ndjson"):
+            return pd.read_json(path, lines=True)
+        if suffix == ".json":
+            return pd.read_json(path)
+        return pd.read_csv(path)
 
     def from_unstructured(
         self,
@@ -244,10 +466,10 @@ class DataDesignerPipeline:
 
         seed_df = pd.DataFrame(seeds)
         builder = self._get_pipeline_builder()
-        builder.with_seed_dataset(dd.DataFrameSeedSource(data=seed_df))
+        builder.with_seed_dataset(dd.DataFrameSeedSource(df=seed_df))
 
         num = num_records or self.config.num_records
-        return self.designer.generate(builder, num_rows=num)
+        return self.designer.create(builder, num_records=num).load_dataset()
 
     def from_config(
         self,
@@ -282,7 +504,7 @@ class DataDesignerPipeline:
 
         builder = dd.DataDesignerConfigBuilder.from_config(raw)
         num = num_records or self.config.num_records
-        return self.designer.generate(builder, num_rows=num)
+        return self.designer.create(builder, num_records=num).load_dataset()
 
     # =========================================================================
     # Operations
@@ -298,49 +520,84 @@ class DataDesignerPipeline:
             Small DataFrame for inspection
         """
         builder = self._get_pipeline_builder()
-        return self.designer.preview(builder, num_rows=num_records)
+        return self.designer.preview(builder, num_records=num_records).dataset
 
     def validate(self) -> dict[str, Any]:
         """Validate pipeline configuration without running generation.
 
+        As of Data Designer 0.6.x, ``DataDesigner.validate()`` returns ``None`` and
+        raises on an invalid config, so success means "did not raise".
+
         Returns:
-            Dict with validation results: {valid, errors, columns, dag}
+            Dict with validation results: {valid, errors, columns, dag_order}
         """
         builder = self._get_pipeline_builder()
+        columns = self._builder_column_names(builder)
         try:
-            result = self.designer.validate(builder)
-            return {
-                "valid": True,
-                "errors": [],
-                "columns": [c.name for c in builder.columns],
-                "dag_order": result.get("execution_order", []),
-            }
+            self.designer.validate(builder)
+            return {"valid": True, "errors": [], "columns": columns, "dag_order": columns}
         except Exception as e:
-            return {
-                "valid": False,
-                "errors": [str(e)],
-                "columns": [c.name for c in builder.columns],
-            }
+            return {"valid": False, "errors": [str(e)], "columns": columns}
+
+    @staticmethod
+    def _builder_column_names(builder) -> list[str]:
+        """Best-effort column-name introspection across Data Designer versions.
+
+        The 0.6.x ``DataDesignerConfigBuilder`` no longer exposes a public
+        ``columns`` attribute, so fall back through known accessors.
+        """
+        for attr in ("columns", "column_names"):
+            cols = getattr(builder, attr, None)
+            if cols:
+                try:
+                    return [getattr(c, "name", c) for c in cols]
+                except TypeError:
+                    pass
+        private = getattr(builder, "_column_configs", None)
+        if isinstance(private, dict):
+            return list(private.keys())
+        return []
 
     def export_nemo(
         self,
         df: "pd.DataFrame",
         output_dir: Path | None = None,
+        quality_flag_column: str | None = "passes_quality",
+        keep_only_passing: bool = True,
     ) -> dict[str, Any]:
         """Export generated data to NeMo train/val JSONL format.
 
-        Splits data according to train_val_split and converts to
-        NeMo-compatible messages format.
+        Splits data according to train_val_split and converts to NeMo-compatible
+        messages format. When ``keep_only_passing`` is set and a quality-flag
+        column is present (``passes_quality``, or the distill pipeline's
+        ``recommended_for_sft``), low-quality rows are dropped first. This is
+        BashGym's quality gate: Data Designer 0.6.x has no in-pipeline row-filter
+        (``ValidationColumnConfig(drop=True)`` drops the *column*, not rows), so
+        pipelines emit a boolean flag column and the gate is applied here.
 
         Args:
             df: DataFrame from generation
             output_dir: Output directory (defaults to config.output_dir)
+            quality_flag_column: Boolean column to gate on (None disables the gate).
+            keep_only_passing: Drop rows whose quality flag is falsy.
 
         Returns:
-            Dict with {train_path, val_path, train_count, val_count}
+            Dict with {train_path, val_path, train_count, val_count, filtered_out}
         """
         out = output_dir or self.config.output_dir
         out.mkdir(parents=True, exist_ok=True)
+
+        # Quality gate: drop rows whose flag column is falsy (0.6.x flag-then-filter).
+        filtered_out = 0
+        flag = quality_flag_column
+        if keep_only_passing:
+            if (flag is None or flag not in df.columns) and "recommended_for_sft" in df.columns:
+                flag = "recommended_for_sft"
+            if flag and flag in df.columns:
+                before = len(df)
+                df = df[df[flag].map(_is_truthy)]
+                filtered_out = before - len(df)
+                logger.info(f"Quality gate ({flag}): kept {len(df)}/{before}")
 
         # Split
         split_idx = int(len(df) * self.config.train_val_split)
@@ -359,10 +616,12 @@ class DataDesignerPipeline:
             "val_path": str(val_path),
             "train_count": len(train_df),
             "val_count": len(val_df),
+            "filtered_out": filtered_out,
         }
         logger.info(
             f"Exported {result['train_count']} train + "
-            f"{result['val_count']} val examples to {out}"
+            f"{result['val_count']} val examples to {out} "
+            f"(quality-filtered out {filtered_out})"
         )
         return result
 
@@ -420,7 +679,7 @@ class DataDesignerPipeline:
         """
         if not DATA_DESIGNER_AVAILABLE:
             raise ImportError(
-                "data-designer>=0.5.0 is required. " "Install with: pip install data-designer"
+                "data-designer>=0.6.1 is required. Install with: pip install data-designer"
             )
 
         from bashgym.factory.designer_pipelines import PIPELINES

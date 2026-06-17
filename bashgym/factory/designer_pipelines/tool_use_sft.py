@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field
 
-from bashgym.factory.designer_pipelines import build_base_config
+from bashgym.factory.designer_pipelines import _provider_name_for, build_base_config
 
 if TYPE_CHECKING:
     from bashgym.factory.data_designer import PipelineConfig
@@ -92,6 +92,7 @@ def build_tool_use_pipeline(config: PipelineConfig) -> dd.DataDesignerConfigBuil
         dd.ModelConfig(
             alias="main-model",
             model=config.code_model,
+            provider=_provider_name_for("code-model", config),
             inference_parameters=dd.ChatCompletionInferenceParams(
                 temperature=0.7,
                 max_tokens=4096,
@@ -234,11 +235,16 @@ def build_tool_use_pipeline(config: PipelineConfig) -> dd.DataDesignerConfigBuil
         )
     )
 
-    # --- Filter low quality ---
-
-    builder.add_processor(
-        processor_type="filter",
-        condition="interaction_quality.coherence >= 3 and interaction_quality.tool_appropriateness >= 3",
+    # Quality flag (0.6.x has no row-filter processor; flag here, filter at export).
+    builder.add_column(
+        dd.ExpressionColumnConfig(
+            name="passes_quality",
+            dtype="bool",
+            expr=(
+                "{{ interaction_quality.coherence.score >= 3 "
+                "and interaction_quality.tool_appropriateness.score >= 3 }}"
+            ),
+        )
     )
 
     return builder

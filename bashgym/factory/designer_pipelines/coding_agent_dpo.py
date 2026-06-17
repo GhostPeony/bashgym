@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from bashgym.factory.designer_pipelines import build_base_config
+from bashgym.factory.designer_pipelines import _provider_name_for, build_base_config
 
 if TYPE_CHECKING:
     from bashgym.factory.data_designer import PipelineConfig
@@ -54,6 +54,7 @@ def build_dpo_pipeline(config: PipelineConfig) -> dd.DataDesignerConfigBuilder:
             dd.ModelConfig(
                 alias="solution-model-a",
                 model=config.code_model,
+                provider=_provider_name_for("code-model", config),
                 inference_parameters=dd.ChatCompletionInferenceParams(
                     temperature=0.9,  # Higher temp for more variation
                     max_tokens=4096,
@@ -62,6 +63,7 @@ def build_dpo_pipeline(config: PipelineConfig) -> dd.DataDesignerConfigBuilder:
             dd.ModelConfig(
                 alias="solution-model-b",
                 model=config.code_model,
+                provider=_provider_name_for("code-model", config),
                 inference_parameters=dd.ChatCompletionInferenceParams(
                     temperature=0.5,  # Lower temp for different style
                     max_tokens=4096,
@@ -208,7 +210,7 @@ def build_dpo_pipeline(config: PipelineConfig) -> dd.DataDesignerConfigBuilder:
         dd.ExpressionColumnConfig(
             name="chosen",
             expr=(
-                "{% if judge_a.quality >= judge_b.quality %}"
+                "{% if judge_a.quality.score >= judge_b.quality.score %}"
                 "{{ solution_a }}"
                 "{% else %}"
                 "{{ solution_b }}"
@@ -221,7 +223,7 @@ def build_dpo_pipeline(config: PipelineConfig) -> dd.DataDesignerConfigBuilder:
         dd.ExpressionColumnConfig(
             name="rejected",
             expr=(
-                "{% if judge_a.quality >= judge_b.quality %}"
+                "{% if judge_a.quality.score >= judge_b.quality.score %}"
                 "{{ solution_b }}"
                 "{% else %}"
                 "{{ solution_a }}"
@@ -230,11 +232,15 @@ def build_dpo_pipeline(config: PipelineConfig) -> dd.DataDesignerConfigBuilder:
         )
     )
 
-    # --- Filter: only keep pairs where scores differ ---
-
-    builder.add_processor(
-        processor_type="filter",
-        condition="judge_a.quality != judge_b.quality",
+    # Quality flag: keep pairs whose judged quality differs (a meaningful
+    # preference signal). 0.6.x has no row-filter processor, so flag here and
+    # filter at export (DataDesignerPipeline.export_nemo).
+    builder.add_column(
+        dd.ExpressionColumnConfig(
+            name="passes_quality",
+            dtype="bool",
+            expr="{{ judge_a.quality.score != judge_b.quality.score }}",
+        )
     )
 
     return builder

@@ -186,6 +186,13 @@ class TrainingRequest(BaseModel):
     grpo_use_vllm: bool = Field(
         False, description="Use vLLM-backed generation for GRPO (requires vllm in the env)"
     )
+    sft_backend: str = Field("auto", description="SFT training backend: auto, unsloth, plain")
+    dpo_backend: str = Field("auto", description="DPO training backend: auto, unsloth, plain")
+    use_liger: bool = Field(
+        False,
+        description="Plain backend: enable Liger fused-linear-CE (use_liger_kernel) — the "
+        "262k-vocab (Gemma) OOM fix; requires liger-kernel in the training env",
+    )
     # Knowledge Distillation settings
     teacher_model: str | None = Field(None, description="Teacher model for distillation")
     teacher_temperature: float = Field(

@@ -167,6 +167,10 @@ class TrainerConfig:
     grpo_reward_mode: str = "syntax"  # "syntax", "execution", "verification"
     grpo_use_vllm: bool = False  # vLLM-backed generation (TRL GRPO); requires vllm in env
     grpo_backend: str = "auto"  # auto|unsloth|plain|trl_vllm — set by ModelProfile + platform (S1)
+    sft_backend: str = "auto"  # auto|unsloth|plain — plain is the GB10/sm_121 fallback (S1)
+    dpo_backend: str = "auto"  # auto|unsloth|plain
+    use_liger: bool = False  # plain backend: Liger fused-linear-CE (use_liger_kernel) — the
+    # 262k-vocab (Gemma) fused-CE OOM fix; requires liger-kernel in the training env
     # GRPO loss variant (TRL/Unsloth GRPOConfig.loss_type). "gspo" = Qwen's
     # sequence-level Group Sequence Policy Optimization (more stable for long
     # sequences/MoE); "dr_grpo" = Dr. GRPO. Default "grpo" matches TRL's default.
@@ -854,7 +858,7 @@ class Trainer:
         loss-not-decreasing plateau.
         """
         # Generate training script
-        script_content = self._generate_unsloth_sft_script(run)
+        script_content = self._generate_sft_script(run)
         script_path = run.output_path / "train_sft.py"
         run.output_path.mkdir(parents=True, exist_ok=True)
         script_path.write_text(script_content)
@@ -1049,6 +1053,312 @@ class Trainer:
                 log_file.close()
             except Exception:
                 pass
+
+    def _generate_sft_script(self, run: TrainingRun) -> str:
+        """Dispatch SFT script generation to the backend-appropriate generator.
+
+        Mirrors the GRPO dispatch: explicit ``sft_backend`` > family default >
+        platform probe. Unsloth where available; the plain transformers+peft path
+        on GB10/sm_121 where Unsloth can't load (unslothai#4867).
+        """
+        from bashgym.families import resolve_family_profile, select_backend
+
+        profile = resolve_family_profile(self.config.base_model)
+        backend = select_backend(profile, self.config.sft_backend)
+        if backend == "plain":
+            return self._generate_sft_script_plain(run, profile)
+        return self._generate_unsloth_sft_script(run)
+
+    def _generate_dpo_script(self, run: TrainingRun) -> str:
+        """Dispatch DPO script generation (Unsloth vs plain transformers+peft)."""
+        from bashgym.families import resolve_family_profile, select_backend
+
+        profile = resolve_family_profile(self.config.base_model)
+        backend = select_backend(profile, self.config.dpo_backend)
+        if backend == "plain":
+            return self._generate_dpo_script_plain(run, profile)
+        return self._generate_unsloth_dpo_script(run)
+
+    def _generate_sft_script_plain(self, run: TrainingRun, profile) -> str:
+        """Generate an SFT script using plain transformers + peft (no Unsloth).
+
+        The GB10/sm_121 fallback. Family-correct LoRA targets/excludes, attention
+        impl, and correctness patches come from the ModelFamilyProfile; Liger
+        fused-linear-CE is enabled via ``use_liger_kernel`` when ``use_liger`` is
+        set (the 262k-vocab fused-CE OOM fix).
+        """
+        dataset_path = str(run.dataset_path).replace("\\", "/")
+        output_path = str(run.output_path).replace("\\", "/")
+        val_path = str(run.val_dataset_path).replace("\\", "/") if run.val_dataset_path else ""
+
+        return f'''#!/usr/bin/env python3
+"""
+Auto-generated SFT Training Script for BashGym (plain transformers+peft backend)
+Run ID: {run.run_id}
+Generated: {datetime.now(timezone.utc).isoformat()}
+
+Plain HuggingFace transformers + peft + trl (no Unsloth) — the GB10/sm_121
+fallback for when Unsloth can't load (unslothai#4867). Liger fused-linear-CE is
+enabled via use_liger_kernel={self.config.use_liger}.
+Family: {profile.family}; patches: {list(profile.patches)}
+"""
+
+import json as _json
+import os
+
+import torch
+from datasets import load_dataset
+from peft import LoraConfig, get_peft_model
+from transformers import AutoModelForCausalLM, AutoTokenizer, EarlyStoppingCallback
+from trl import SFTConfig, SFTTrainer
+
+from bashgym.families.patches import apply_patches
+
+apply_patches({list(profile.patches)})
+
+
+def _sanitize_messages(messages):
+    out = []
+    for msg in messages:
+        m = dict(msg)
+        if m.get("content") is None:
+            m["content"] = ""
+        if isinstance(m.get("tool_calls"), list):
+            calls = []
+            for tc in m["tool_calls"]:
+                tc = dict(tc)
+                fn = tc.get("function")
+                if isinstance(fn, dict):
+                    fn = dict(fn)
+                    args = fn.get("arguments", "")
+                    if isinstance(args, str):
+                        try:
+                            fn["arguments"] = _json.loads(args)
+                        except (_json.JSONDecodeError, TypeError):
+                            fn["arguments"] = {{"raw": args}}
+                    tc["function"] = fn
+                calls.append(tc)
+            m["tool_calls"] = calls
+        out.append(m)
+    return out
+
+
+if __name__ == "__main__":
+    MODEL_NAME = "{self.config.base_model}"
+    print(f"Loading {{MODEL_NAME}} with plain transformers (no Unsloth)...")
+
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    model = AutoModelForCausalLM.from_pretrained(
+        MODEL_NAME,
+        dtype=torch.bfloat16,
+        attn_implementation="{profile.attn_implementation}",
+        device_map="cuda:0",
+    )
+    model.config.use_cache = False
+    model.gradient_checkpointing_enable()
+
+    lora_config = LoraConfig(
+        r={self.config.lora_r},
+        lora_alpha={self.config.lora_alpha},
+        lora_dropout={self.config.lora_dropout},
+        target_modules={list(profile.lora_target_modules)},
+        exclude_modules={list(profile.lora_exclude_modules)},
+        bias="none",
+        task_type="CAUSAL_LM",
+    )
+    model = get_peft_model(model, lora_config)
+    model.print_trainable_parameters()
+
+    dataset = load_dataset("json", data_files="{dataset_path}", split="train")
+
+    val_dataset = None
+    val_path = "{val_path}"
+    if val_path and os.path.exists(val_path):
+        val_dataset = load_dataset("json", data_files=val_path, split="train")
+
+    def _to_text(examples):
+        texts = []
+        for messages in examples["messages"]:
+            texts.append(
+                tokenizer.apply_chat_template(_sanitize_messages(messages), tokenize=False)
+            )
+        return {{"text": texts}}
+
+    dataset = dataset.map(_to_text, batched=True)
+    if val_dataset is not None:
+        val_dataset = val_dataset.map(_to_text, batched=True)
+
+    sft_config = SFTConfig(
+        output_dir="{output_path}",
+        per_device_train_batch_size={self.config.batch_size},
+        gradient_accumulation_steps={self.config.gradient_accumulation_steps},
+        warmup_ratio={self.config.warmup_ratio},
+        num_train_epochs={self.config.num_epochs},
+        max_steps={self.config.max_steps},
+        learning_rate={self.config.learning_rate},
+        bf16=True,
+        logging_steps={self.config.logging_steps},
+        save_steps={self.config.save_steps},
+        save_total_limit=3,
+        optim="adamw_torch",
+        seed=42,
+        report_to="none",
+        dataset_text_field="text",
+        max_seq_length={self.config.max_seq_length},
+        use_liger_kernel={self.config.use_liger},
+        eval_strategy="{self.config.eval_strategy}" if val_dataset is not None else "no",
+        eval_steps={self.config.eval_steps} if val_dataset is not None else None,
+        load_best_model_at_end=True if val_dataset is not None else False,
+        metric_for_best_model="eval_loss" if val_dataset is not None else None,
+        greater_is_better=False if val_dataset is not None else None,
+    )
+
+    callbacks = []
+    if val_dataset is not None and {self.config.early_stopping_patience} > 0:
+        callbacks.append(
+            EarlyStoppingCallback(early_stopping_patience={self.config.early_stopping_patience})
+        )
+
+    trainer = SFTTrainer(
+        model=model,
+        processing_class=tokenizer,
+        train_dataset=dataset,
+        eval_dataset=val_dataset,
+        args=sft_config,
+        callbacks=callbacks or None,
+    )
+
+    print("Starting SFT training (plain backend)...")
+    trainer.train()
+
+    model.save_pretrained("{output_path}/final")
+    tokenizer.save_pretrained("{output_path}/final")
+
+    print("Merging LoRA into base model...")
+    merged = model.merge_and_unload()
+    merged.save_pretrained("{output_path}/merged")
+    tokenizer.save_pretrained("{output_path}/merged")
+
+    print("SFT training complete (plain backend)!")
+'''
+
+    def _generate_dpo_script_plain(self, run: TrainingRun, profile) -> str:
+        """Generate a DPO script using plain transformers + peft (no Unsloth).
+
+        The GB10/sm_121 fallback. Implicit-reference DPO (``ref_model=None``);
+        dataset columns are passed straight to ``DPOTrainer`` (same as the Unsloth
+        path). Liger fused-linear-CE via ``use_liger_kernel`` when ``use_liger``.
+        """
+        dataset_path = str(run.dataset_path).replace("\\", "/")
+        output_path = str(run.output_path).replace("\\", "/")
+
+        return f'''#!/usr/bin/env python3
+"""
+Auto-generated DPO Training Script for BashGym (plain transformers+peft backend)
+Run ID: {run.run_id}
+Generated: {datetime.now(timezone.utc).isoformat()}
+
+Plain HuggingFace transformers + peft + trl (no Unsloth) — the GB10/sm_121
+fallback. Liger fused-linear-CE enabled via use_liger_kernel={self.config.use_liger}.
+Family: {profile.family}; patches: {list(profile.patches)}
+"""
+
+import os
+
+import torch
+from datasets import load_dataset
+from peft import LoraConfig, get_peft_model
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from trl import DPOConfig, DPOTrainer
+
+from bashgym.families.patches import apply_patches
+
+apply_patches({list(profile.patches)})
+
+
+if __name__ == "__main__":
+    MODEL_NAME = "{self.config.base_model}"
+    print(f"Loading {{MODEL_NAME}} with plain transformers (no Unsloth)...")
+
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    model = AutoModelForCausalLM.from_pretrained(
+        MODEL_NAME,
+        dtype=torch.bfloat16,
+        attn_implementation="{profile.attn_implementation}",
+        device_map="cuda:0",
+    )
+    model.config.use_cache = False
+    model.gradient_checkpointing_enable()
+
+    lora_config = LoraConfig(
+        r={self.config.lora_r},
+        lora_alpha={self.config.lora_alpha},
+        lora_dropout={self.config.lora_dropout},
+        target_modules={list(profile.lora_target_modules)},
+        exclude_modules={list(profile.lora_exclude_modules)},
+        bias="none",
+        task_type="CAUSAL_LM",
+    )
+    model = get_peft_model(model, lora_config)
+    model.print_trainable_parameters()
+
+    dataset = load_dataset("json", data_files="{dataset_path}", split="train")
+
+    val_dataset = None
+    val_path = "{str(run.val_dataset_path).replace(chr(92), '/') if run.val_dataset_path else ''}"
+    if val_path and os.path.exists(val_path):
+        val_dataset = load_dataset("json", data_files=val_path, split="train")
+
+    dpo_config = DPOConfig(
+        output_dir="{output_path}",
+        per_device_train_batch_size={self.config.batch_size},
+        gradient_accumulation_steps={self.config.gradient_accumulation_steps},
+        warmup_ratio={self.config.warmup_ratio},
+        num_train_epochs={self.config.num_epochs},
+        max_steps={self.config.max_steps},
+        learning_rate={self.config.learning_rate},
+        beta={self.config.dpo_beta},
+        bf16=True,
+        logging_steps={self.config.logging_steps},
+        save_steps={self.config.save_steps},
+        save_total_limit=3,
+        optim="adamw_torch",
+        seed=42,
+        report_to="none",
+        max_length={self.config.max_seq_length},
+        use_liger_kernel={self.config.use_liger},
+        eval_strategy="{self.config.eval_strategy}" if val_dataset is not None else "no",
+        eval_steps={self.config.eval_steps} if val_dataset is not None else None,
+    )
+
+    trainer = DPOTrainer(
+        model=model,
+        ref_model=None,
+        processing_class=tokenizer,
+        train_dataset=dataset,
+        eval_dataset=val_dataset,
+        args=dpo_config,
+    )
+
+    print("Starting DPO training (plain backend)...")
+    trainer.train()
+
+    model.save_pretrained("{output_path}/final")
+    tokenizer.save_pretrained("{output_path}/final")
+
+    print("Merging LoRA into base model...")
+    merged = model.merge_and_unload()
+    merged.save_pretrained("{output_path}/merged")
+    tokenizer.save_pretrained("{output_path}/merged")
+
+    print("DPO training complete (plain backend)!")
+'''
 
     def _generate_unsloth_sft_script(self, run: TrainingRun) -> str:
         """Generate Unsloth SFT training script."""
@@ -1405,7 +1715,7 @@ if __name__ == "__main__":
         `_parse_trl_stats`, `EARLY_STOPPED` sentinel check for
         `rewards/accuracies` collapse.
         """
-        script_content = self._generate_unsloth_dpo_script(run)
+        script_content = self._generate_dpo_script(run)
         script_path = run.output_path / "train_dpo.py"
         run.output_path.mkdir(parents=True, exist_ok=True)
         script_path.write_text(script_content)
@@ -2153,14 +2463,14 @@ print("DPO training complete!")
             script_content = self._generate_distillation_script(run)
             script_path = run.output_path / "train_distillation.py"
         elif run.strategy == TrainingStrategy.DPO:
-            script_content = self._generate_unsloth_dpo_script(run)
+            script_content = self._generate_dpo_script(run)
             script_path = run.output_path / "train_dpo.py"
         elif run.strategy in (TrainingStrategy.GRPO, TrainingStrategy.RLVR):
             grpo_trainer = GRPOTrainer(self.config)
             script_content = grpo_trainer._generate_grpo_script(run)
             script_path = run.output_path / "train_grpo.py"
         else:
-            script_content = self._generate_unsloth_sft_script(run)
+            script_content = self._generate_sft_script(run)
             script_path = run.output_path / "train_sft.py"
 
         script_path.write_text(script_content)

@@ -243,6 +243,16 @@ Empirically verified against the installed package (not just docs) and **reconci
 3. **Observability:** capture DD's adaptive-concurrency / token-cost / per-column counts and stream them over the existing training/factory WebSocket; record in `DesignerJobResponse`.
 4. **Exit:** generation reports per-column timings + token cost + filter counts; export is processor-driven.
 
+#### ✅ Phase 4 — DONE (2026-06-17)
+
+**273 factory tests pass** (+4), ruff+black clean; live workflow run verified.
+- **Workflow chaining:** `DataDesignerPipeline.generate_chained(stages)` wraps `compose_workflow` → `add_stage(name, builder, num_records=, output_processors=, output=)` → `run().load_dataset()`. Enables multi-stage / curriculum generation and processor-driven stages. (Experimental in DD: linear topology, no stage-resume.)
+- **Processor-based ChatML export:** `messages_schema_transform(user_col, assistant_col, system_prompt=)` returns a `SchemaTransformProcessorConfig` emitting an OpenAI-style `messages` column — the 0.6.x-native export replacing hand-assembled JSONL. **Live-verified:** a chained run produced `{"messages": [{system},{user},{assistant}]}` via the stage's `output_processor`.
+- **Observability:** `GenerationStats` (records, filtered_out, stage names) on `pipeline.last_stats`; `export_nemo` already returns `filtered_out`. Token costs / per-column timings are emitted by DD's async engine to logs (the engine exposes `usage_stats` internally; not surfaced on the public `DatasetCreationResults`, so we don't couple to it).
+- **Scope note:** the async engine (default since v0.6.0) already provides adaptive per-provider concurrency + run-resume + reasoning-token tracking (the throughput half of #8), gained on the version bump.
+
+**Deferred to Phase 6 (UI):** stream `GenerationStats` + DD's usage logs over the factory WebSocket and surface a chained/curriculum builder in `DataDesignerTab`.
+
 ### Phase 5 — Plugins, provider routing, diversity *(reuse + quality)*
 1. **BashGym DD plugin package** (`bashgym/factory/dd_plugin/`): (a) `SEED_READER` for our gold/failed trace layout (if richer than AgentRollout), (b) `PROCESSOR`/validator wrapping the verifier, (c) `COLUMN_GENERATOR` exposing the 7-metric `quality_calculator` score. Register via entry points so it works from the `data-designer` CLI too.
 2. **Explicit per-column provider routing** (closes #7): give each `LLMTextColumnConfig`/`LLMCodeColumnConfig`/`LLMJudgeColumnConfig` an explicit `model_alias`→`ModelConfig(provider=...)`; wire **DGX Ollama** as an OpenAI-compatible `ModelProvider(endpoint="http://192.168.50.173:11434/v1")` for cheap local generation, NVIDIA NIM for teacher.

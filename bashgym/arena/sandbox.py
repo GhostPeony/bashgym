@@ -15,6 +15,31 @@ import docker
 from docker.errors import APIError, ImageNotFound
 from docker.types import Mount
 
+DANGEROUS_COMMAND_PATTERNS = [
+    "rm -rf /",
+    "rm -rf /*",
+    "mkfs",
+    "dd if=/dev/zero",
+    ":(){:|:&};:",  # Fork bomb
+    "chmod -R 777 /",
+    "chown -R",
+    "> /dev/sda",
+    "curl | bash",
+    "wget | bash",
+    "nc -e",
+    "python -c.*socket",
+]
+
+
+def is_dangerous_command(command: str) -> bool:
+    """Return True if a command matches a known-dangerous pattern.
+
+    Shared guard used by both the Docker sandbox and the MCP tool server so they
+    enforce the same safety policy.
+    """
+    normalized = command.lower().replace(" ", "")
+    return any(p.lower().replace(" ", "") in normalized for p in DANGEROUS_COMMAND_PATTERNS)
+
 
 @dataclass
 class SandboxConfig:
@@ -317,27 +342,7 @@ class SandboxManager:
 
     def _is_dangerous_command(self, command: str) -> bool:
         """Check if a command is potentially dangerous."""
-        dangerous_patterns = [
-            "rm -rf /",
-            "rm -rf /*",
-            "mkfs",
-            "dd if=/dev/zero",
-            ":(){:|:&};:",  # Fork bomb
-            "chmod -R 777 /",
-            "chown -R",
-            "> /dev/sda",
-            "curl | bash",
-            "wget | bash",
-            "nc -e",
-            "python -c.*socket",
-        ]
-
-        command_lower = command.lower().replace(" ", "")
-        for pattern in dangerous_patterns:
-            if pattern.replace(" ", "") in command_lower:
-                return True
-
-        return False
+        return is_dangerous_command(command)
 
     def __enter__(self):
         """Context manager entry."""

@@ -52,6 +52,7 @@ try {
         $backendJob = Start-Job -Name "backend" -ScriptBlock {
             param($root, $port)
             Set-Location $root
+            $env:PYTHONUTF8 = "1"  # UTF-8 console for emoji/rich output (NeMo Data Designer)
             & python run_backend.py --port $port 2>&1
         } -ArgumentList $ProjectRoot, $Port
 

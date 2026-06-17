@@ -55,6 +55,8 @@ node_modules/
 nul
 =*
 output/
+artifacts/              # NeMo Data Designer create() default artifact output
+data/designer_output/   # DataDesignerPipeline.export_nemo default output
 
 # Assistant secrets
 assistant/config/config.json

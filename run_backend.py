@@ -7,9 +7,10 @@ Usage:
     python run_backend.py --port 8002
 """
 
+import os
 import subprocess
 import sys
-import os
+
 
 def main():
     port = "8003"
@@ -29,15 +30,25 @@ def main():
 
     # Set environment
     os.environ.setdefault("PYTHONPATH", os.getcwd())
+    # Force UTF-8 I/O so libraries that emit emoji / rich output (e.g. NeMo Data
+    # Designer) don't crash on Windows' default cp1252 console. Set before the
+    # uvicorn child is spawned so it inherits UTF-8 mode at interpreter startup.
+    os.environ.setdefault("PYTHONUTF8", "1")
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 
     cmd = [
-        sys.executable, "-m", "uvicorn",
+        sys.executable,
+        "-m",
+        "uvicorn",
         "bashgym.api.routes:create_app",
         "--factory",
-        "--host", host,
-        "--port", port,
+        "--host",
+        host,
+        "--port",
+        port,
         "--reload",  # Hot reload enabled!
-        "--reload-dir", "bashgym",  # Watch bashgym directory
+        "--reload-dir",
+        "bashgym",  # Watch bashgym directory
     ]
 
     mode = os.environ.get("BASHGYM_MODE", "desktop")
@@ -50,6 +61,7 @@ def main():
         subprocess.run(cmd)
     except KeyboardInterrupt:
         print("\nShutting down...")
+
 
 if __name__ == "__main__":
     main()

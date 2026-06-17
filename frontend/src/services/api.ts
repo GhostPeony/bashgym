@@ -2981,6 +2981,37 @@ export interface AutoResearchStartConfig {
   load4Bit: boolean
 }
 
+// Research index — Firecrawl-grounded news feed + AutoResearch advice
+export interface ResearchNewsItem {
+  kind: 'github' | 'paper'
+  title: string
+  url: string
+  source: string
+  summary: string
+  score: number
+}
+
+export interface ResearchAdvice {
+  configured: boolean
+  context: Record<string, unknown>
+  techniques: { title: string; url: string; abstract: string; score: number }[]
+  issues: { repository: string; url: string; snippet: string; title: string }[]
+  prior: { suggested: Record<string, unknown>; notes: string[] }
+}
+
+export const researchApi = {
+  news: (k = 20) =>
+    request<{ configured: boolean; count: number; items: ResearchNewsItem[] }>(
+      `/research/news?k=${k}`
+    ),
+
+  advise: (body: { base_model?: string; strategy?: string; family?: string; domain?: string }) =>
+    request<ResearchAdvice>('/research/advise', {
+      method: 'POST',
+      body: JSON.stringify(body)
+    })
+}
+
 export const autoresearchApi = {
   start: (config: AutoResearchStartConfig) =>
     request<{ status: string; message: string }>('/autoresearch/start', {

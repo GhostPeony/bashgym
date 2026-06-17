@@ -7,6 +7,8 @@ a DataDesignerConfigBuilder with the full column DAG configured.
 Pipeline builders are registered in PIPELINES for lookup by name.
 """
 
+import os
+import sys
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -24,8 +26,10 @@ try:
     )
 
     DATA_DESIGNER_AVAILABLE = True
+    HAS_MCP = hasattr(dd, "ToolConfig") and hasattr(dd, "LocalStdioMCPProvider")
 except ImportError:
     DATA_DESIGNER_AVAILABLE = False
+    HAS_MCP = False
 
 # Registry of available pipeline builders
 # Each entry maps a name to a function: (PipelineConfig) -> DataDesignerConfigBuilder
@@ -92,6 +96,47 @@ def build_secret_resolver():
     return CompositeResolver([EnvironmentResolver(), PlaintextResolver()])
 
 
+SANDBOX_MCP_NAME = "bashgym-sandbox"
+
+
+def build_mcp_providers(config: "PipelineConfig") -> list:
+    """Build dd.LocalStdioMCPProvider list for the DataDesigner instance.
+
+    Returns the BashGym sandbox MCP server (launched as ``python -m
+    bashgym.mcp.sandbox_server``) when ``config.enable_tools`` is set, else [].
+    The ``BASHGYM_MCP_BACKEND`` env var (docker|local|auto) selects the executor.
+    """
+    if not (DATA_DESIGNER_AVAILABLE and HAS_MCP and getattr(config, "enable_tools", False)):
+        return []
+    # Pass a full env so the subprocess can import bashgym (PYTHONPATH) and emit
+    # UTF-8; merge over the parent environment rather than replacing it.
+    env = dict(os.environ)
+    env["BASHGYM_MCP_BACKEND"] = getattr(config, "mcp_backend", "auto")
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONPATH"] = os.pathsep.join(filter(None, [os.getcwd(), env.get("PYTHONPATH", "")]))
+    return [
+        dd.LocalStdioMCPProvider(
+            name=SANDBOX_MCP_NAME,
+            command=sys.executable,
+            args=["-m", "bashgym.mcp.sandbox_server"],
+            env=env,
+        )
+    ]
+
+
+def build_sandbox_tool_config(config: "PipelineConfig"):
+    """Build the dd.ToolConfig granting the sandbox MCP tools to LLM columns."""
+    if not (DATA_DESIGNER_AVAILABLE and HAS_MCP):
+        raise ImportError("data-designer>=0.6.1 with MCP support is required")
+    return dd.ToolConfig(
+        tool_alias=getattr(config, "mcp_tool_alias", "sandbox"),
+        providers=[SANDBOX_MCP_NAME],
+        allow_tools=["bash", "read_file", "write_file", "edit_file", "grep", "list_files"],
+        max_tool_call_turns=getattr(config, "mcp_max_tool_turns", 8),
+        timeout_sec=getattr(config, "mcp_tool_timeout_sec", 120),
+    )
+
+
 def _provider_name_for(alias: str, config: "PipelineConfig") -> str:
     """Resolve which provider serves a given model alias.
 
@@ -107,12 +152,16 @@ def _provider_name_for(alias: str, config: "PipelineConfig") -> str:
     return config.provider
 
 
-def build_base_config(config: "PipelineConfig") -> "dd.DataDesignerConfigBuilder":
+def build_base_config(
+    config: "PipelineConfig", tool_configs: "list | None" = None
+) -> "dd.DataDesignerConfigBuilder":
     """Build the shared ModelConfig base for all pipelines (Data Designer 0.6.x).
 
     Each ModelConfig binds to a provider by name; the providers themselves are
     created by ``build_model_providers`` and attached to the DataDesigner
     instance. Each pipeline builder calls this, then adds its columns on top.
+    ``tool_configs`` (MCP tool aliases) are attached to the builder for tool-use
+    pipelines.
     """
     if not DATA_DESIGNER_AVAILABLE:
         raise ImportError("data-designer>=0.6.1 is required")
@@ -149,7 +198,10 @@ def build_base_config(config: "PipelineConfig") -> "dd.DataDesignerConfigBuilder
         ),
     ]
 
-    return dd.DataDesignerConfigBuilder(model_configs=model_configs)
+    builder_kwargs = {"model_configs": model_configs}
+    if tool_configs:
+        builder_kwargs["tool_configs"] = tool_configs
+    return dd.DataDesignerConfigBuilder(**builder_kwargs)
 
 
 def register_pipeline(name: str):
@@ -169,6 +221,7 @@ try:
     from bashgym.factory.designer_pipelines.coding_agent_sft import build_sft_pipeline
     from bashgym.factory.designer_pipelines.from_external import build_external_pipeline
     from bashgym.factory.designer_pipelines.from_unstructured import build_unstructured_pipeline
+    from bashgym.factory.designer_pipelines.mcp_tool_use import build_mcp_tool_use_pipeline
     from bashgym.factory.designer_pipelines.tool_use_sft import build_tool_use_pipeline
 
     PIPELINES["coding_agent_sft"] = build_sft_pipeline
@@ -177,6 +230,9 @@ try:
     PIPELINES["tool_use_sft"] = build_tool_use_pipeline
     PIPELINES["from_external"] = build_external_pipeline
     PIPELINES["from_unstructured"] = build_unstructured_pipeline
+    if HAS_MCP:
+        # Real tool-use pipeline only registers when MCP (ToolConfig) is available.
+        PIPELINES["mcp_tool_use"] = build_mcp_tool_use_pipeline
 except ImportError:
     # data-designer not installed - pipelines unavailable
     pass

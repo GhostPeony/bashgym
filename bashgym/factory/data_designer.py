@@ -70,6 +70,9 @@ if DATA_DESIGNER_AVAILABLE:
 
 logger = logging.getLogger(__name__)
 
+# Pipelines that require the sandbox MCP tool server (real tool execution).
+_TOOL_PIPELINES = {"mcp_tool_use"}
+
 
 def _is_truthy(value: Any) -> bool:
     """Coerce a Data Designer flag cell (bool, or a rendered string) to a bool."""
@@ -197,11 +200,23 @@ class PipelineConfig:
     # Seed source
     seed_source: str | None = None
 
+    # MCP tool-use (Phase 3) — real tool execution during generation
+    enable_tools: bool = False
+    mcp_tool_alias: str = "sandbox"
+    mcp_backend: str = "auto"  # auto | docker | local
+    mcp_max_tool_turns: int = 8
+    mcp_tool_timeout_sec: int = 120
+
     def __post_init__(self):
         if isinstance(self.output_dir, str):
             self.output_dir = Path(self.output_dir)
         if not self.provider_api_key:
             self.provider_api_key = os.environ.get("NVIDIA_API_KEY")
+        # Tool-use pipelines require the sandbox MCP server; flag it at construction
+        # so the DataDesigner instance attaches the MCP provider regardless of the
+        # order in which the builder and the .designer property are accessed.
+        if self.pipeline in _TOOL_PIPELINES:
+            self.enable_tools = True
 
     def resolve_models(self) -> "PipelineConfig":
         """Adapt text/code/judge models to the configured provider's live catalog.
@@ -266,12 +281,14 @@ class DataDesignerPipeline:
                     "data-designer>=0.6.1 is required. Install with: pip install data-designer"
                 )
             from bashgym.factory.designer_pipelines import (
+                build_mcp_providers,
                 build_model_providers,
                 build_secret_resolver,
             )
 
             self._designer = DataDesigner(
                 model_providers=build_model_providers(self.config),
+                mcp_providers=build_mcp_providers(self.config) or None,
                 secret_resolver=build_secret_resolver(),
             )
         return self._designer

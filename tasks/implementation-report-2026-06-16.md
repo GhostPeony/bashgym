@@ -194,7 +194,8 @@ The backend gains above were surfaced in the React UI so they're usable without 
 | `13ae3fb` | **Cascade auto-trigger** (`cascade_enabled` / `cascade_gold_threshold`) | Pipeline dashboard |
 | `8cc2798` | **Connect any OpenAI-compatible cloud provider** (`POST /api/providers/connect`, presets) | Settings → Models |
 | `4e405b3` + `0314a89` | **Managed fine-tune backend** (Together/OpenAI submit+poll routes; backend option) | Training Config |
-| _(this slice)_ | **Eval & benchmark dashboard** — held-out trace gate (ship/no-ship) | Evaluator → Held-out Gate tab |
+| `bafeb64` + `1962020` | **Eval & benchmark dashboard** — held-out trace gate (ship/no-ship) | Evaluator → Held-out Gate tab |
+| `270e364` + `c67cb72` | **Data-quality toggles** — decision-DPO mining (FAILURE→SUCCESS pairs) | Data Creator → Quality tab |
 
 **Eval & benchmark dashboard.** New `bashgym/eval/service.py` is the testable orchestration seam: it resolves a served endpoint (a connected OpenAI-compatible provider *or* an explicit `base_url`/`model`), builds predictors, loads the frozen held-out `.jsonl`, and runs the base-vs-candidate gate — the network/predictor factory is injected so it stays hermetic. New `bashgym/api/eval_routes.py` exposes it:
 - `POST /api/eval/heldout` (async job) → `GET /api/eval/heldout/{id}` / `GET /api/eval/heldout` — runs the gate against served endpoints, records the verdict via `registry.record_heldout_eval`.
@@ -203,3 +204,7 @@ The backend gains above were surfaced in the React UI so they're usable without 
 - `POST /api/eval/benchmarks/ingest` — diff base vs candidate lm-eval results into forgetting drops + record per-task scores.
 
 UI: a new **Held-out Gate** tab in `EvaluatorDashboard` (existing benchmark UI untouched) renders the **SHIP / NO-SHIP** verdict, base/candidate pass rates, trace delta, the session-clustered 95% bootstrap CI, forgetting drops, and the gate's reasons; plus a copyable external-benchmark command helper. Frontend `evalAdvancedApi` wires all six endpoints. Tests: `tests/eval/test_service.py` (17) + `tests/api/test_eval_routes.py` (11), all green; full eval suite **116 passed**; ruff + black + tsc + eslint clean.
+
+**Data-quality toggles.** `DataFactory`'s decision-DPO path (mining step-level FAILURE→SUCCESS preference pairs from within gold traces) was built but had no API surface. New `/api/factory` endpoints expose it: `POST /decision-dpo/generate` (async job, `DIRECT` strategy = fully local/no-LLM) gated by the trace-quality toggles (`generate_decision_dpo`, `require_successful_verification`, `min/max_trace_steps`) and exports a NeMo DPO batch; `GET /decision-dpo/jobs/{id}` polls counts; `GET /data-quality/defaults` seeds the form. UI: a new **Quality** tab in the Data Creator (`FactoryDashboard`) with the toggles, step-bound filters, gold/failed dirs, a Mine-DPO-pairs action, and a result card (pair/example counts + output path). `dataQualityApi` wires the three endpoints. Tests: `tests/api/test_decision_dpo_routes.py` (7); factory suite **229 passed**; all gates clean.
+
+**All four user-selected UI features are now shipped** (cloud provider connect, managed fine-tune, eval/benchmark dashboard, data-quality toggles), plus the two config slices (GRPO variants, cascade trigger).

@@ -49,6 +49,9 @@ export interface TrainingRequest {
   grpo_loss_type?: string
   grpo_backend?: string
   grpo_use_vllm?: boolean
+  sft_backend?: string
+  dpo_backend?: string
+  use_liger?: boolean
   // Knowledge Distillation
   teacher_model?: string
   teacher_temperature?: number

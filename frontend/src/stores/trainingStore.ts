@@ -41,6 +41,7 @@ export interface TrainingConfig {
   grpoLossType?: string  // grpo | gspo | dr_grpo | dapo | bnpo
   grpoBackend?: string   // auto | unsloth | plain | trl_vllm
   grpoUseVllm?: boolean
+  useLiger?: boolean     // plain backend: Liger fused-linear-CE (262k-vocab OOM fix)
   // Knowledge Distillation
   teacherModel?: string
   teacherTemperature?: number
@@ -222,6 +223,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
         grpo_loss_type: config.grpoLossType,
         grpo_backend: config.grpoBackend,
         grpo_use_vllm: config.grpoUseVllm,
+        use_liger: config.useLiger,
         // Knowledge Distillation
         teacher_model: config.teacherModel,
         teacher_temperature: config.teacherTemperature,

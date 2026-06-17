@@ -67,6 +67,7 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
     grpoLossType: 'grpo',
     grpoBackend: 'auto',
     grpoUseVllm: false,
+    useLiger: false,
     // KD defaults
     teacherModel: 'meta-llama/Llama-3.1-70B-Instruct',
     teacherTemperature: 2.0,
@@ -913,6 +914,19 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
               </label>
             </div>
           )}
+
+          {/* Liger fused-CE — plain backend (SFT/DPO) large-vocab OOM fix */}
+          <label className="flex items-center gap-2 mt-1">
+            <input
+              type="checkbox"
+              checked={config.useLiger ?? false}
+              onChange={(e) => setConfig({ ...config, useLiger: e.target.checked })}
+              className="accent-primary"
+            />
+            <span className="text-sm text-text-secondary">
+              Liger fused cross-entropy (plain backend) — avoids 262k-vocab OOM for Gemma; requires liger-kernel
+            </span>
+          </label>
 
           {/* Knowledge Distillation Config */}
           {config.strategy === 'distillation' && (

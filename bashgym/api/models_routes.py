@@ -864,25 +864,59 @@ async def deploy_to_ollama(model_id: str, request: DeployOllamaRequest):
     if not profile:
         raise HTTPException(status_code=404, detail="Model not found")
 
-    # Find or create GGUF
+    def _export_attr(exp, key):
+        # gguf_exports may hold GGUFExport dataclasses (loaded from disk) or dicts.
+        return exp.get(key) if isinstance(exp, dict) else getattr(exp, key, None)
+
+    # Find an existing GGUF for the requested quantization.
     gguf_path = None
     for export in profile.artifacts.gguf_exports:
-        if export.get("quantization") == request.quantization:
-            gguf_path = export.get("path")
+        if _export_attr(export, "quantization") == request.quantization:
+            gguf_path = _export_attr(export, "path")
             break
 
+    # None found — auto-export from the merged checkpoint via llama.cpp.
     if not gguf_path:
-        # Check if there's a merged model to convert
-        if profile.artifacts.merged_path:
-            # TODO: Trigger GGUF export
-            raise HTTPException(
-                status_code=400,
-                detail=f"No GGUF export found with quantization {request.quantization}. Export first.",
-            )
-        else:
+        merged = profile.artifacts.merged_path
+        if not (merged and Path(merged).exists()):
             raise HTTPException(
                 status_code=400, detail="No merged model found. Complete training first."
             )
+
+        import logging
+        from datetime import datetime
+
+        import anyio
+
+        from bashgym.export.gguf import convert_merged_to_gguf
+        from bashgym.models.profile import GGUFExport
+
+        out_dir = Path(profile.model_dir) / "gguf"
+        conv = await anyio.to_thread.run_sync(
+            lambda: convert_merged_to_gguf(merged, str(out_dir), quantization=request.quantization)
+        )
+        if not conv.get("success"):
+            detail = conv.get("error", "GGUF export failed")
+            hint = conv.get("hint")
+            status_code = 501 if "not found" in detail else 500
+            raise HTTPException(
+                status_code=status_code, detail=detail + (f" — {hint}" if hint else "")
+            )
+        gguf_path = conv["path"]
+        # Record the new export so future deploys reuse it.
+        try:
+            gguf_file = Path(gguf_path)
+            profile.artifacts.gguf_exports.append(
+                GGUFExport(
+                    path=gguf_path,
+                    quantization=conv.get("quantization", request.quantization),
+                    size_bytes=gguf_file.stat().st_size if gguf_file.exists() else 0,
+                    created_at=datetime.now(),
+                )
+            )
+            profile.save()
+        except Exception as e:
+            logging.getLogger(__name__).warning("Could not record GGUF export: %s", e)
 
     # Verify GGUF file exists
     gguf_file = Path(gguf_path)

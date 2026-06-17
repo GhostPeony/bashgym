@@ -12,9 +12,14 @@ per family — and :func:`check_template_roundtrip` guards train↔serve consist
 
 from __future__ import annotations
 
+import os
 import re
+import shutil
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
 
 
 @dataclass
@@ -134,3 +139,103 @@ def build_finetuned_modelfile(
         parameters=params,
     )
     return build_modelfile(spec)
+
+
+# ── Merged HF checkpoint -> GGUF (llama.cpp) ─────────────────────────────────
+#
+# GGUF is normally produced inside the trainer via Unsloth's
+# ``save_pretrained_gguf``. This standalone path converts an *already-merged* HF
+# directory after the fact (e.g. when deploying a checkpoint that was never
+# GGUF-exported) by shelling out to llama.cpp — no Unsloth/GPU needed.
+
+
+def find_gguf_converter() -> str | None:
+    """Locate llama.cpp's ``convert_hf_to_gguf.py``.
+
+    Checks ``LLAMA_CPP_DIR`` (a llama.cpp checkout), then ``PATH``. Returns the
+    script path or ``None`` when llama.cpp is not installed.
+    """
+    names = ("convert_hf_to_gguf.py", "convert-hf-to-gguf.py")
+    env_dir = os.environ.get("LLAMA_CPP_DIR")
+    if env_dir:
+        for name in names:
+            p = Path(env_dir) / name
+            if p.exists():
+                return str(p)
+    for name in names:
+        found = shutil.which(name)
+        if found:
+            return found
+    return None
+
+
+# Quantizations the converter emits directly; anything else needs llama-quantize.
+_DIRECT_OUTTYPES = {"F16": "f16", "FP16": "f16", "F32": "f32", "FP32": "f32", "BF16": "bf16"}
+
+
+def convert_merged_to_gguf(
+    merged_path: str,
+    out_dir: str,
+    *,
+    quantization: str = "Q4_K_M",
+    python_exe: str = "python",
+    converter: str | None = None,
+    quantize_bin: str = "llama-quantize",
+    run: Callable[..., Any] = subprocess.run,
+    timeout: float = 1800.0,
+) -> dict[str, Any]:
+    """Convert a merged HF model directory to a GGUF file via llama.cpp.
+
+    Two stages: ``convert_hf_to_gguf.py`` produces an f16 GGUF, then (for a
+    k-quant like ``Q4_K_M``) ``llama-quantize`` quantizes it. ``run`` and
+    ``converter`` are injected so this is unit-testable without llama.cpp.
+
+    Returns ``{"success": True, "path", "quantization"}`` or
+    ``{"success": False, "error", "hint"?}``. A missing quantizer degrades to the
+    f16 GGUF with a ``note`` rather than failing the whole export.
+    """
+    merged = Path(merged_path)
+    if not merged.exists():
+        return {"success": False, "error": f"merged model not found: {merged}"}
+
+    conv = converter or find_gguf_converter()
+    if not conv:
+        return {
+            "success": False,
+            "error": "llama.cpp GGUF converter not found",
+            "hint": "Set LLAMA_CPP_DIR to a llama.cpp checkout, or put "
+            "convert_hf_to_gguf.py on PATH (pip install gguf + clone ggml-org/llama.cpp).",
+        }
+
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    quant = (quantization or "F16").upper()
+    f16_path = out / "model-f16.gguf"
+
+    r1 = run(
+        [python_exe, conv, str(merged), "--outfile", str(f16_path), "--outtype", "f16"],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    if getattr(r1, "returncode", 1) != 0:
+        return {"success": False, "error": f"convert failed: {(r1.stderr or '').strip()[:500]}"}
+
+    if quant in _DIRECT_OUTTYPES or quant in ("", "F16"):
+        return {"success": True, "path": str(f16_path), "quantization": "F16"}
+
+    quant_path = out / f"model-{quant}.gguf"
+    r2 = run(
+        [quantize_bin, str(f16_path), str(quant_path), quant],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    if getattr(r2, "returncode", 1) != 0:
+        return {
+            "success": True,
+            "path": str(f16_path),
+            "quantization": "F16",
+            "note": f"quantize to {quant} failed ({(r2.stderr or '').strip()[:200]}); kept F16",
+        }
+    return {"success": True, "path": str(quant_path), "quantization": quant}

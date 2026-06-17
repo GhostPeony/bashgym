@@ -227,6 +227,16 @@ Empirically verified against the installed package (not just docs) and **reconci
 3. Optional new pipeline `deep_research_trajectories` modeled on the DD recipe (MCP + search tool) for browse/agent data.
 4. **Exit:** tool-use trajectories contain real tool calls + observations from our sandbox.
 
+#### ✅ Phase 3 — DONE (2026-06-17)
+
+**269 factory tests pass** (+12 MCP), ruff+black clean; live `mcp_tool_use` run completed end-to-end against NIM.
+- **Sandbox MCP server** (`bashgym/mcp/sandbox_server.py`, FastMCP over stdio): tools `bash/read_file/write_file/edit_file/grep/list_files`. Backend chosen by `BASHGYM_MCP_BACKEND` (`auto`|`docker`|`local`, per the user's choice): **DockerWorkspace** (reuses `SandboxManager`, network-off, dangerous-cmd guard) with a **guarded-local fallback** (path-confined temp workspace, dangerous-cmd guard, per-call timeout). Refactored the dangerous-command guard into a shared `is_dangerous_command` in `arena/sandbox.py` (now **case-insensitive** — fixes a latent miss on `-R` variants).
+- **DD wiring:** `build_mcp_providers` (LocalStdioMCPProvider launching `python -m bashgym.mcp.sandbox_server` with a full env so the subprocess can import bashgym), `build_sandbox_tool_config` (allowlist + `max_tool_call_turns` + `timeout_sec`), `build_base_config(tool_configs=...)`, and the `designer` property passes `mcp_providers`. New `PipelineConfig` fields (`enable_tools`/`mcp_backend`/`mcp_tool_alias`/`mcp_max_tool_turns`/`mcp_tool_timeout_sec`); `__post_init__` sets `enable_tools` for tool pipelines so MCP attaches **order-independently**.
+- **New `mcp_tool_use` pipeline** (registered only when `HAS_MCP`): generates a task, grants the agent column the sandbox `tool_alias` for real execution, judges, and flags `passes_quality`.
+- **Live verification:** DD spawned the MCP subprocess, the tool health-check passed, providers registered, all columns generated, and the model emitted a `write_file` tool call. **Caveat:** the transcript showed tool-call-shaped JSON with a single request, i.e. llama-3.3-70b (via NIM/LiteLLM) emitted the call as *text* rather than DD driving a full multi-turn execution loop — real execution engagement depends on the model's native function-calling support (a model-selection matter; tool-calling-capable / DGX models would exercise the loop). Infra (server, guards, confinement, wiring, registration, health-check) is verified correct.
+
+**Deferred to Phase 6 (UI):** `DataDesignerTab` controls for the tool backend + the `mcp_tool_use` pipeline.
+
 ### Phase 4 — Workflow chaining + processors + observability *(closes #8/#10 partially)*
 1. **Replace `_write_nemo_jsonl` / `export_nemo`** with `SchemaTransformProcessorConfig` (chat/messages) + `DropColumnsProcessorConfig` (strip intermediates) as terminal processors. Keep our splitter for train/val until DD covers it.
 2. **`compose_workflow` multi-stage** entry point `from_traces_chained()`: stage1 ingest+generate → stage2 validate → stage3 judge-filter → stage4 schema-transform. Surface as an optional "advanced/curriculum" mode.

@@ -208,3 +208,16 @@ UI: a new **Held-out Gate** tab in `EvaluatorDashboard` (existing benchmark UI u
 **Data-quality toggles.** `DataFactory`'s decision-DPO path (mining step-level FAILURE→SUCCESS preference pairs from within gold traces) was built but had no API surface. New `/api/factory` endpoints expose it: `POST /decision-dpo/generate` (async job, `DIRECT` strategy = fully local/no-LLM) gated by the trace-quality toggles (`generate_decision_dpo`, `require_successful_verification`, `min/max_trace_steps`) and exports a NeMo DPO batch; `GET /decision-dpo/jobs/{id}` polls counts; `GET /data-quality/defaults` seeds the form. UI: a new **Quality** tab in the Data Creator (`FactoryDashboard`) with the toggles, step-bound filters, gold/failed dirs, a Mine-DPO-pairs action, and a result card (pair/example counts + output path). `dataQualityApi` wires the three endpoints. Tests: `tests/api/test_decision_dpo_routes.py` (7); factory suite **229 passed**; all gates clean.
 
 **All four user-selected UI features are now shipped** (cloud provider connect, managed fine-tune, eval/benchmark dashboard, data-quality toggles), plus the two config slices (GRPO variants, cascade trigger).
+
+## 9. Audit gap closure (2026-06-16)
+
+The platform-recap audit (`tasks/platform-recap-2026-06-16.md`) flagged two gaps; both closed:
+
+| Gap | Fix | Commit |
+|---|---|---|
+| `managed.py` docstring claimed **Fireworks** but only openai/together dialects existed | Generalized `FineTuneDialect` (account-scoped `base_url`, pluggable `upload`, configurable `job_id`/`status`/`output` fields) and added a real **Fireworks** dialect — two-step dataset upload (`create` → `:upload`), camelCase job payload, `JOB_STATE_*` map, resource-name job ids. `account_id` threads through `for_platform` + managed submit/poll API + Training Config UI. | `3534990` |
+| `deploy-ollama` had a TODO and **errored** when a merged checkpoint existed but no GGUF | `convert_merged_to_gguf()` (llama.cpp `convert_hf_to_gguf.py` + `llama-quantize`, discoverable via `LLAMA_CPP_DIR`/PATH); deploy now auto-converts, records the `GGUFExport`, then deploys, with an actionable error when llama.cpp is absent. Also fixed a pre-existing `gguf_exports` dataclass-vs-dict `.get()` bug. | `14d7ca1` |
+
+**Verification status (honest):** both are implemented to the published contracts and covered by hermetic tests (Fireworks mock-transport request/response shapes; GGUF converter command-construction + failure paths). The remaining steps to *finish* each are environment-bound and can't run in this dev box:
+- **Fireworks** — a live smoke test with real credentials + an `account_id` (and confirmation of the `exampleCount` placement and dataset-ready timing, which the docs leave ambiguous).
+- **GGUF auto-export** — a real conversion requires `llama.cpp` installed on the serving host (`LLAMA_CPP_DIR` or `convert_hf_to_gguf.py` on PATH); without it the endpoint now returns a precise install hint instead of a vague error.

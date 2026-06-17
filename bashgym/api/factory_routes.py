@@ -134,6 +134,131 @@ async def get_presets():
 
 
 # =============================================================================
+# Decision-DPO mining (trace data quality)
+# =============================================================================
+
+
+class DecisionDpoRequest(BaseModel):
+    """Configuration for mining decision-level DPO pairs from gold traces.
+
+    Mines step-level FAILURE->SUCCESS preference pairs from within each gold
+    trace, gated by the trace-quality toggles. Runs fully local (DIRECT strategy,
+    no LLM augmentation)."""
+
+    gold_dir: str | None = None  # default: settings.data.gold_traces_dir
+    failed_dir: str | None = None  # optional cross-trace DPO source
+    generate_decision_dpo: bool = True
+    require_successful_verification: bool = True
+    min_trace_steps: int = 2
+    max_trace_steps: int = 50
+
+
+class DecisionDpoResponse(BaseModel):
+    """Status of a decision-DPO mining job."""
+
+    job_id: str
+    status: str  # queued, running, completed, failed
+    n_training_examples: int | None = None
+    n_dpo_pairs: int | None = None
+    dpo_output_path: str | None = None
+    error: str | None = None
+
+
+# Decision-DPO job tracking
+decision_dpo_jobs: dict[str, dict] = {}
+
+
+@router.get("/data-quality/defaults")
+async def get_data_quality_defaults():
+    """Default trace-quality knobs (from DataFactoryConfig) to seed the UI form."""
+    from bashgym.factory.data_factory import DataFactoryConfig
+
+    cfg = DataFactoryConfig()
+    return {
+        "generate_decision_dpo": cfg.generate_decision_dpo,
+        "require_successful_verification": cfg.require_successful_verification,
+        "min_trace_steps": cfg.min_trace_steps,
+        "max_trace_steps": cfg.max_trace_steps,
+    }
+
+
+@router.post("/decision-dpo/generate", response_model=DecisionDpoResponse)
+async def generate_decision_dpo_pairs(
+    request: DecisionDpoRequest, background_tasks: BackgroundTasks
+):
+    """Start a decision-DPO mining job over the gold trace directory."""
+    if request.gold_dir and not Path(request.gold_dir).exists():
+        raise HTTPException(status_code=400, detail=f"gold_dir not found: {request.gold_dir}")
+    if request.failed_dir and not Path(request.failed_dir).exists():
+        raise HTTPException(status_code=400, detail=f"failed_dir not found: {request.failed_dir}")
+    if request.min_trace_steps > request.max_trace_steps:
+        raise HTTPException(status_code=400, detail="min_trace_steps must be <= max_trace_steps")
+
+    job_id = f"ddpo_{uuid.uuid4().hex[:8]}"
+    decision_dpo_jobs[job_id] = {"status": "queued", "config": request.model_dump()}
+    background_tasks.add_task(run_decision_dpo_job, job_id, request)
+    return DecisionDpoResponse(job_id=job_id, status="queued")
+
+
+@router.get("/decision-dpo/jobs/{job_id}", response_model=DecisionDpoResponse)
+async def decision_dpo_status(job_id: str):
+    """Get a decision-DPO mining job's status and counts."""
+    if job_id not in decision_dpo_jobs:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    job = decision_dpo_jobs[job_id]
+    return DecisionDpoResponse(
+        job_id=job_id,
+        status=job["status"],
+        n_training_examples=job.get("n_training_examples"),
+        n_dpo_pairs=job.get("n_dpo_pairs"),
+        dpo_output_path=job.get("dpo_output_path"),
+        error=job.get("error"),
+    )
+
+
+async def run_decision_dpo_job(job_id: str, request: DecisionDpoRequest):
+    """Background task: mine decision-DPO pairs with the quality toggles applied."""
+    from bashgym.config import get_settings
+    from bashgym.factory.data_factory import DataFactory, DataFactoryConfig, SynthesisStrategy
+
+    factory = None
+    try:
+        decision_dpo_jobs[job_id]["status"] = "running"
+        settings = get_settings()
+        gold_dir = Path(request.gold_dir or settings.data.gold_traces_dir)
+        if not gold_dir.exists():
+            raise FileNotFoundError(f"gold traces dir not found: {gold_dir}")
+        failed_dir = Path(request.failed_dir) if request.failed_dir else None
+
+        # DIRECT strategy keeps this local — no LLM augmentation, only trace mining.
+        config = DataFactoryConfig(
+            strategy=SynthesisStrategy.DIRECT,
+            generate_decision_dpo=request.generate_decision_dpo,
+            require_successful_verification=request.require_successful_verification,
+            min_trace_steps=request.min_trace_steps,
+            max_trace_steps=request.max_trace_steps,
+        )
+        factory = DataFactory(config)
+        training, dpo = await factory.process_trace_directory(gold_dir, failed_dir)
+
+        out_path = str(factory.save_dpo_batch(dpo, "decision_dpo")) if dpo else None
+
+        job = decision_dpo_jobs[job_id]
+        job["status"] = "completed"
+        job["n_training_examples"] = len(training)
+        job["n_dpo_pairs"] = len(dpo)
+        job["dpo_output_path"] = out_path
+        logger.info(f"Decision-DPO job {job_id}: {len(dpo)} pairs from {gold_dir}")
+    except Exception as e:
+        logger.error(f"Decision-DPO job {job_id} failed: {e}")
+        decision_dpo_jobs[job_id]["status"] = "failed"
+        decision_dpo_jobs[job_id]["error"] = str(e)
+    finally:
+        if factory is not None:
+            await factory.close()
+
+
+# =============================================================================
 # Background Task
 # =============================================================================
 

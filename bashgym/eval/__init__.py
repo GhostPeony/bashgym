@@ -38,6 +38,16 @@ from .passk import (
     pass_at_k,
 )
 from .predictors import build_prompt_messages, endpoint_predictor, openai_complete, parse_tool_call
+from .service import (
+    EndpointConfig,
+    benchmark_commands,
+    ingest_forgetting,
+    load_jsonl_examples,
+    record_forgetting,
+    resolve_endpoint,
+    run_heldout,
+    thresholds_from,
+)
 from .soft import soft_call_score, soft_trajectory_score
 from .split import HoldoutSplit, contamination, example_hash, make_holdout_split
 from .stats import BootstrapResult, paired_bootstrap
@@ -86,4 +96,12 @@ __all__ = [
     "terminal_bench_command",
     "bfcl_command",
     "swebench_command",
+    "EndpointConfig",
+    "resolve_endpoint",
+    "load_jsonl_examples",
+    "run_heldout",
+    "thresholds_from",
+    "benchmark_commands",
+    "ingest_forgetting",
+    "record_forgetting",
 ]

@@ -74,6 +74,18 @@ class OpenAICompatibleProvider(InferenceProvider):
         return self._name
 
     @property
+    def base_url(self) -> str:
+        return self._base_url
+
+    @property
+    def api_key(self) -> str | None:
+        return self._api_key
+
+    @property
+    def default_model(self) -> str:
+        return self._default_model
+
+    @property
     def requires_api_key(self) -> bool:
         return not self._is_local
 

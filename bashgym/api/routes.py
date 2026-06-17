@@ -34,6 +34,7 @@ from bashgym.api.autoresearch_routes import router as autoresearch_router  # noq
 from bashgym.api.cascade_routes import router as cascade_router  # noqa: E402
 from bashgym.api.device_routes import get_registry as get_device_registry  # noqa: E402
 from bashgym.api.device_routes import router as device_router  # noqa: E402
+from bashgym.api.eval_routes import router as eval_router  # noqa: E402
 from bashgym.api.factory_routes import router as factory_router  # noqa: E402
 from bashgym.api.hf_routes import router as hf_router  # noqa: E402
 from bashgym.api.integration_routes import router as integration_router  # noqa: E402
@@ -5152,6 +5153,8 @@ def create_app() -> FastAPI:
 
     # Include Cascade RL routes (domain-by-domain sequential training)
     app.include_router(cascade_router)
+
+    app.include_router(eval_router)
 
     # Include Device routes (SSH device registry)
     app.include_router(device_router)

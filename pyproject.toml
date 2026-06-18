@@ -60,6 +60,12 @@ all = ["bashgym[training,dev]"]
 [project.scripts]
 bashgym = "main:main"
 
+# BashGym Data Designer plugins. Discovered by Data Designer's plugin manager
+# after `pip install -e .`; makes our gold-trace seed reader usable from the
+# `data-designer` CLI and any DD config (seed_type: "bashgym_gold_trace").
+[project.entry-points."data_designer.plugins"]
+bashgym-gold-trace = "bashgym.factory.dd_plugin.plugin:gold_trace_plugin"
+
 [project.urls]
 Homepage = "https://github.com/your-org/project-bashgym"
 Documentation = "https://github.com/your-org/project-bashgym#readme"

@@ -155,13 +155,13 @@
     transition: transform 0.15s ease, box-shadow 0.15s ease;
   }
 
+  /* Containers must NOT move on hover — a subtle shadow change cues hover.
+     The press/translate effect is reserved for buttons on :active (clicks). */
   .card:hover {
-    transform: translate(2px, 2px);
-    box-shadow: 1px 1px 0px var(--shadow-color);
+    box-shadow: var(--shadow);
   }
 
   .dark .card:hover {
-    transform: translate(1px, 1px);
     box-shadow: 0 0 8px hsla(var(--accent-hue), 20%, 60%, 0.08);
   }
 
@@ -170,12 +170,10 @@
   }
 
   .card-elevated:hover {
-    transform: translate(2px, 2px);
-    box-shadow: 2px 2px 0px var(--shadow-color);
+    box-shadow: 3px 3px 0px var(--shadow-color);
   }
 
   .dark .card-elevated:hover {
-    transform: translate(1px, 1px);
     box-shadow: 0 0 12px hsla(var(--accent-hue), 20%, 60%, 0.1);
   }
 
@@ -235,7 +233,7 @@
     transition: transform 0.15s ease, box-shadow 0.15s ease;
   }
 
-  .btn-primary:hover {
+  .btn-primary:active {
     transform: translate(2px, 2px);
   }
 
@@ -262,6 +260,10 @@
   }
 
   .btn-secondary:hover {
+    box-shadow: 3px 3px 0px var(--shadow-color);
+  }
+
+  .btn-secondary:active {
     transform: translate(2px, 2px);
     box-shadow: 1px 1px 0px var(--shadow-color);
   }
@@ -296,6 +298,10 @@
   }
 
   .btn-icon:hover {
+    box-shadow: 2px 2px 0px var(--shadow-color);
+  }
+
+  .btn-icon:active {
     transform: translate(1px, 1px);
     box-shadow: 1px 1px 0px var(--shadow-color);
   }
@@ -329,6 +335,10 @@
   }
 
   .btn-cta:hover {
+    box-shadow: 3px 3px 0px var(--shadow-color);
+  }
+
+  .btn-cta:active {
     transform: translate(2px, 2px);
     box-shadow: 1px 1px 0px var(--shadow-color);
   }

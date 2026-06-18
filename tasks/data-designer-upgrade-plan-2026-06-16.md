@@ -259,6 +259,14 @@ Empirically verified against the installed package (not just docs) and **reconci
 3. **Diversity:** adopt **Nemotron-Personas** + diverse-preamble sampling and `Subcategory` samplers in the prompt-generation columns to fight mode collapse.
 4. **Exit:** our verifier/quality scorer usable as DD plugins; per-column provider control; persona-diversified prompts.
 
+#### ◑ Phase 5 — provider routing + diversity DONE (2026-06-17); plugin pending
+
+**281 factory tests pass** (+8), ruff+black clean.
+- **Per-column provider routing (closes #7):** confirmed the existing `ProviderSpec.models` + `_provider_name_for` already routes per alias (verified: text/code→ollama, judge→nvidia). Added ergonomic presets in `designer_pipelines`: **`ollama_provider_spec(models, endpoint=)`** (OpenAI-compatible Ollama / DGX Spark — no API key; endpoint auto-`/v1`; `OLLAMA_BASE_URL` default) and **`nim_provider_spec(models)`**. So a mixed config routes cheap columns to **DGX Ollama** and the judge to NIM/Claude — directly serving the deploy-on-DGX architecture.
+- **Diversity:** `subcategory_sampler(name, category_column, values)` (SUBCATEGORY conditioned on a parent category) and `persona_sampler(with_synthetic_personas=True)` (Nemotron-Personas PERSON sampler) for prompt diversity / robustness.
+
+**Remaining (Phase 5):** the **BashGym Data Designer plugin** (gold-trace `SeedReader` + verifier validator + 7-metric quality `COLUMN_GENERATOR`, registered via `pyproject.toml` entry points so they work from the `data-designer` CLI). Deferred because verifying CLI discovery needs `pip install -e .` (an env change to confirm first); the plugin classes can be built and unit-verified independently.
+
 ### Phase 6 — Frontend surfacing + optional microservice
 1. **`DataDesignerTab` upgrades** (see §5).
 2. **Optional DD microservice on DGX** for large runs (NGC Docker image), selectable as a backend alongside library mode — reuse the SSH/remote-trainer pattern.

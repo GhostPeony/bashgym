@@ -236,6 +236,67 @@ def register_pipeline(name: str):
     return decorator
 
 
+def ollama_provider_spec(models: list, endpoint: str | None = None, name: str = "ollama"):
+    """ProviderSpec for an OpenAI-compatible Ollama endpoint (e.g. DGX Spark).
+
+    No API key is needed (Ollama ignores auth); ``models`` are the column aliases
+    this provider serves, enabling per-column routing (weakness #7) — e.g. route
+    text/code columns to local/DGX Ollama and the judge to NIM or Claude.
+    Endpoint defaults to ``OLLAMA_BASE_URL`` then ``http://localhost:11434``.
+    """
+    from bashgym.factory.data_designer import ProviderSpec
+
+    endpoint = (endpoint or os.environ.get("OLLAMA_BASE_URL") or "http://localhost:11434").rstrip(
+        "/"
+    )
+    if not endpoint.endswith("/v1"):
+        endpoint += "/v1"
+    # Non-empty api_key so the plaintext resolver passes a value Ollama ignores.
+    return ProviderSpec(name=name, endpoint=endpoint, api_key="ollama", models=list(models))
+
+
+def nim_provider_spec(
+    models: list,
+    name: str = "nvidia",
+    endpoint: str = "https://integrate.api.nvidia.com/v1",
+):
+    """ProviderSpec for NVIDIA NIM serving the given column aliases (uses NVIDIA_API_KEY)."""
+    from bashgym.factory.data_designer import ProviderSpec
+
+    return ProviderSpec(name=name, endpoint=endpoint, models=list(models))
+
+
+def subcategory_sampler(name: str, category_column: str, values: dict):
+    """SamplerColumnConfig: a subcategory conditioned on a parent category column.
+
+    ``values`` maps each parent-category value to its list of subcategory choices —
+    diversity that respects category structure (e.g. language -> framework).
+    """
+    if not DATA_DESIGNER_AVAILABLE:
+        raise ImportError("data-designer>=0.6.1 is required")
+    return dd.SamplerColumnConfig(
+        name=name,
+        sampler_type=dd.SamplerType.SUBCATEGORY,
+        params=dd.SubcategorySamplerParams(category=category_column, values=values),
+    )
+
+
+def persona_sampler(
+    name: str = "persona", with_synthetic_personas: bool = True, locale: str | None = None
+):
+    """SamplerColumnConfig: a Nemotron-Personas persona for prompt-diversity / robustness."""
+    if not DATA_DESIGNER_AVAILABLE:
+        raise ImportError("data-designer>=0.6.1 is required")
+    params_kwargs = {"with_synthetic_personas": with_synthetic_personas}
+    if locale:
+        params_kwargs["locale"] = locale
+    return dd.SamplerColumnConfig(
+        name=name,
+        sampler_type=dd.SamplerType.PERSON,
+        params=dd.PersonSamplerParams(**params_kwargs),
+    )
+
+
 # Import pipeline modules to trigger registration
 try:
     from bashgym.factory.designer_pipelines.coding_agent_distill import build_distill_pipeline

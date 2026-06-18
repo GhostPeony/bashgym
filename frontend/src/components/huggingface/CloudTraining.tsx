@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { BaseModelSelect } from '../common/BaseModelSelect'
 import {
   Play,
   Square,
@@ -50,7 +51,7 @@ export function CloudTraining({ className }: CloudTrainingProps) {
     dataset_repo: '',
     output_repo: '',
     hardware: 'a10g-small',
-    base_model: 'Qwen/Qwen2.5-Coder-1.5B-Instruct',
+    base_model: '',
     num_epochs: 3,
     learning_rate: 2e-5,
     strategy: 'sft',
@@ -255,11 +256,9 @@ export function CloudTraining({ className }: CloudTrainingProps) {
             </div>
             <div>
               <label className="block text-xs font-mono text-text-secondary mb-1 uppercase tracking-widest">Base Model</label>
-              <input
-                type="text"
-                value={formData.base_model}
-                onChange={(e) => setFormData({ ...formData, base_model: e.target.value })}
-                className="input w-full text-sm"
+              <BaseModelSelect
+                value={formData.base_model ?? ''}
+                onChange={(v) => setFormData({ ...formData, base_model: v })}
               />
             </div>
             <div>

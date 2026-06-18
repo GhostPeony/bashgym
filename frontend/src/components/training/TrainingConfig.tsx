@@ -599,13 +599,6 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
                 <option value="Qwen/Qwen3.5-27B">Qwen3.5-27B (dense)</option>
                 <option value="Qwen/Qwen3.5-35B-A3B">Qwen3.5-35B-A3B (MoE, ~74GB VRAM)</option>
               </optgroup>
-              <optgroup label="Qwen 2.5 Coder">
-                <option value="Qwen/Qwen2.5-Coder-1.5B-Instruct">Qwen2.5-Coder-1.5B-Instruct</option>
-                <option value="Qwen/Qwen2.5-Coder-3B-Instruct">Qwen2.5-Coder-3B-Instruct</option>
-                <option value="Qwen/Qwen2.5-Coder-7B-Instruct">Qwen2.5-Coder-7B-Instruct</option>
-                <option value="Qwen/Qwen2.5-Coder-14B-Instruct">Qwen2.5-Coder-14B-Instruct</option>
-                <option value="Qwen/Qwen2.5-Coder-32B-Instruct">Qwen2.5-Coder-32B-Instruct</option>
-              </optgroup>
               <optgroup label="Llama">
                 <option value="meta-llama/Llama-3.2-1B-Instruct">Llama-3.2-1B-Instruct</option>
                 <option value="meta-llama/Llama-3.2-3B-Instruct">Llama-3.2-3B-Instruct</option>

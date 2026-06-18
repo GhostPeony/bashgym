@@ -372,7 +372,7 @@ class CascadeConfig:
     """Configuration for a cascade RL training run."""
 
     domains: list[str] = field(default_factory=lambda: list(DOMAIN_TAXONOMY.keys()))
-    base_model: str = "Qwen/Qwen2.5-Coder-1.5B-Instruct"
+    base_model: str = ""  # No default — an explicit base model is required
     dataset_path: Path = field(default_factory=lambda: Path("data/gold_traces"))
     output_dir: Path = field(default_factory=lambda: Path.home() / ".bashgym" / "cascade")
 
@@ -443,7 +443,7 @@ class MOPDConfig:
     domain_datasets: dict[str, str] = field(
         default_factory=dict
     )  # domain_name -> filtered dataset path
-    student_model: str = "Qwen/Qwen2.5-Coder-1.5B-Instruct"  # Base model for student
+    student_model: str = ""  # Base model for student (required — no default)
     distillation_alpha: float = 0.5  # Balance between soft (teacher) and hard (ground truth) labels
     temperature: float = 2.0  # Softmax temperature for distillation
     train_steps: int = 500

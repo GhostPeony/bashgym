@@ -36,7 +36,7 @@ class CascadeStartRequest(BaseModel):
         ],
         description="Ordered list of domains to train (ignored when repo_domains_enabled=True)",
     )
-    base_model: str = Field("Qwen/Qwen2.5-Coder-1.5B-Instruct", description="Base model")
+    base_model: str = Field("", description="Base model to fine-tune (required)")
     dataset_path: str = Field("data/gold_traces", description="Path to training data")
     train_steps_per_stage: int = Field(200, ge=10, le=5000, description="Steps per domain stage")
     grpo_num_generations: int = Field(4, ge=2, le=16, description="GRPO generations per prompt")

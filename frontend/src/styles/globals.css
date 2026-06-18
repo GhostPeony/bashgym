@@ -19,26 +19,28 @@
   --accent-dark: hsl(var(--accent-hue), 30%, 47%);
 
   /* Botanical surfaces */
-  --bg-primary: #F5F0EB;
+  --bg-primary: #f4f1eb;
   --bg-secondary: #EDE8E3;
   --bg-tertiary: #E5E0DB;
   --bg-card: #FFFFFF;
   --bg-terminal: #1E1E1E;
 
   /* Text */
-  --text-primary: #1B2040;
-  --text-secondary: #5A607A;
-  --text-muted: #8A8FA6;
+  --text-primary: #1e1e24;
+  --text-secondary: #6b6a68;
+  --text-muted: #9b9a97;
 
   /* Brutalist structure */
   --border-color: var(--text-primary);
   --border-subtle: #C8C4BF;
-  --border-weight: 3px;
+  --border-weight: 2px;
 
   --shadow-color: var(--text-primary);
   --shadow: 5px 5px 0px var(--shadow-color);
   --shadow-sm: 3px 3px 0px var(--shadow-color);
-  --radius: 2px;
+  --shadow-soft: 0 1px 2px 0 rgba(60, 50, 40, 0.04), 0 4px 12px -2px rgba(60, 50, 40, 0.08);
+  --shadow-soft-lg: 0 2px 4px 0 rgba(60, 50, 40, 0.05), 0 12px 28px -4px rgba(60, 50, 40, 0.12);
+  --radius: 8px;
 
   /* Status — botanical tones */
   --status-success: #4A8C5C;
@@ -61,16 +63,16 @@
   --accent-lgt: 70%;
 
   /* Deep warm backgrounds — rich soil, not void */
-  --bg-primary: #0a0a0b;
-  --bg-secondary: #111113;
-  --bg-tertiary: #1a1a2e;
-  --bg-card: #141416;
-  --bg-terminal: #0a0a0b;
+  --bg-primary: #1c1b1a;
+  --bg-secondary: #232221;
+  --bg-tertiary: #2a2826;
+  --bg-card: #262524;
+  --bg-terminal: #161514;
 
   /* Text */
-  --text-primary: #E8E4E0;
-  --text-secondary: #9A9AA0;
-  --text-muted: #6A6A72;
+  --text-primary: #e8e6e3;
+  --text-secondary: #9ca3af;
+  --text-muted: #6b7280;
 
   /* Structure relaxes */
   --border-color: rgba(255, 255, 255, 0.1);
@@ -80,6 +82,8 @@
   --shadow-color: transparent;
   --shadow: 0 0 20px hsla(var(--accent-hue), 20%, 60%, 0.15);
   --shadow-sm: 0 0 12px hsla(var(--accent-hue), 20%, 60%, 0.1);
+  --shadow-soft: 0 1px 2px 0 rgba(0, 0, 0, 0.3), 0 4px 12px -2px rgba(0, 0, 0, 0.4);
+  --shadow-soft-lg: 0 2px 4px 0 rgba(0, 0, 0, 0.35), 0 12px 28px -4px rgba(0, 0, 0, 0.5);
   --radius: 8px;
 
   /* Status — slightly warmer for dark bg */
@@ -98,11 +102,35 @@
   }
 
   body {
-    background: var(--bg-primary);
+    background-color: var(--bg-primary);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+    background-repeat: repeat;
     color: var(--text-primary);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     line-height: 1.6;
+  }
+
+  .dark body {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.06'/%3E%3C/svg%3E");
+  }
+
+  /* Faint grain overlay for surfaces/containers — opt-in tactile depth */
+  .grain {
+    position: relative;
+  }
+
+  .grain::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='0.025'/%3E%3C/svg%3E");
+  }
+
+  .dark .grain::before {
+    opacity: 0.5;
   }
 
   /* Electron window controls */
@@ -598,7 +626,7 @@
 @layer utilities {
   /* Typography helpers */
   .font-brand {
-    font-family: 'Playfair Display', Georgia, serif;
+    font-family: 'DM Serif Display', Georgia, serif;
   }
 
   .font-body {
@@ -678,7 +706,7 @@ html.electron-window {
 .prose-brutal h2,
 .prose-brutal h3,
 .prose-brutal h4 {
-  font-family: 'Playfair Display', Georgia, serif;
+  font-family: 'DM Serif Display', Georgia, serif;
   color: var(--text-primary);
   margin-top: 1em;
   margin-bottom: 0.4em;

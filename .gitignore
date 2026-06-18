@@ -64,3 +64,8 @@ data/designer_output/
 assistant/config/config.json
 assistant/.env
 .gstack/
+
+# design-sync build output
+ds-bundle/
+.ds-sync/
+.design-sync/.cache/

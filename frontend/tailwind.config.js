@@ -43,7 +43,7 @@ export default {
       },
       fontFamily: {
         brand: [
-          'Playfair Display',
+          'DM Serif Display',
           'Georgia',
           'serif'
         ],
@@ -75,6 +75,8 @@ export default {
         'brutal-sm': 'var(--shadow-sm)',
         'brutal-hover': '2px 2px 0px var(--shadow-color)',
         'brutal-pressed': '1px 1px 0px var(--shadow-color)',
+        'soft': 'var(--shadow-soft)',
+        'soft-lg': 'var(--shadow-soft-lg)',
         'none': 'none'
       },
       borderWidth: {

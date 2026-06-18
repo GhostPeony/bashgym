@@ -2151,7 +2151,37 @@ def create_app() -> FastAPI:
                     if isinstance(data, dict):
                         src = data.get("source_tool", "claude_code")
                         metadata = data.get("metadata", {})
+                        # Recompute at current rates: prefer the per-model token
+                        # breakdown, fall back to single-model totals, then the
+                        # stored estimate when neither is present.
+                        from bashgym.trace_capture.core import estimate_cost_usd
+
                         cost = metadata.get("api_equivalent_cost_usd", 0) or 0
+                        mtu = metadata.get("model_token_usage")
+                        if isinstance(mtu, dict) and mtu:
+                            cost = sum(
+                                estimate_cost_usd(
+                                    m,
+                                    u.get("input", 0),
+                                    u.get("output", 0),
+                                    u.get("cache_creation", 0),
+                                    u.get("cache_read", 0),
+                                )
+                                for m, u in mtu.items()
+                            )
+                        else:
+                            model = (
+                                metadata.get("model") or (metadata.get("models_used") or [""])[0]
+                            )
+                            in_tok = metadata.get("total_input_tokens")
+                            if model and in_tok is not None:
+                                cost = estimate_cost_usd(
+                                    model,
+                                    in_tok,
+                                    metadata.get("total_output_tokens", 0) or 0,
+                                    metadata.get("total_cache_creation_tokens", 0) or 0,
+                                    metadata.get("total_cache_read_tokens", 0) or 0,
+                                )
                         cost_total_usd += float(cost)
 
                         # Quality score from metadata or summary

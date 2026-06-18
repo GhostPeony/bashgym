@@ -481,14 +481,14 @@ class TestCostEstimation:
         assert cost == 3.0
 
     def test_known_model_output(self):
-        # 1M output tokens of opus-4-6 = $75.00
+        # 1M output tokens of opus-4-6 = $25.00 (Opus 4.5+ rate)
         cost = estimate_cost_usd("claude-opus-4-6", 0, 1_000_000)
-        assert cost == 75.0
+        assert cost == 25.0
 
     def test_cache_tokens(self):
-        # haiku-4-5: 1M cache_creation = $1.0, 1M cache_read = $0.08
+        # haiku-4-5: 1M cache_creation = $1.25, 1M cache_read = $0.10
         cost = estimate_cost_usd("claude-haiku-4-5", 0, 0, 1_000_000, 1_000_000)
-        assert cost == pytest.approx(1.08)
+        assert cost == pytest.approx(1.35)
 
     def test_unknown_model_returns_zero(self):
         cost = estimate_cost_usd("gpt-4o", 1_000_000, 1_000_000)

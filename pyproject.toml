@@ -48,10 +48,23 @@ dev = [
     "black>=23.0.0",
     "ruff>=0.1.0",
 ]
+# Optional: NVIDIA NeMo Data Designer for synthetic data generation. BashGym runs
+# fully without it (graceful fallback); install to enable the Factory's Data
+# Designer pipelines and the standalone DataDesignerPipeline / API.
+data-designer = [
+    "data-designer>=0.6.1",
+    "pandas>=2.0.0",
+]
 all = ["bashgym[training,dev]"]
 
 [project.scripts]
 bashgym = "main:main"
+
+# BashGym Data Designer plugins. Discovered by Data Designer's plugin manager
+# after `pip install -e .`; makes our gold-trace seed reader usable from the
+# `data-designer` CLI and any DD config (seed_type: "bashgym_gold_trace").
+[project.entry-points."data_designer.plugins"]
+bashgym-gold-trace = "bashgym.factory.dd_plugin.plugin:gold_trace_plugin"
 
 [project.urls]
 Homepage = "https://github.com/your-org/project-bashgym"
@@ -66,7 +79,12 @@ where = ["."]
 asyncio_mode = "auto"
 testpaths = ["."]
 python_files = ["test_*.py", "*_test.py"]
-addopts = "-v --tb=short"
+addopts = "-v --tb=short --timeout=120"
+markers = [
+    "network: makes real network/SSH/subprocess calls to external services (deselect with -m 'not network')",
+    "integration: end-to-end integration test needing live services",
+    "slow: slow test (heavy imports/compute)",
+]
 
 [tool.black]
 line-length = 100

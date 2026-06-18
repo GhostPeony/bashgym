@@ -116,6 +116,26 @@ class Pipeline:
             )
             self._monitor.mark_generate_triggered(self._trace_capture.gold_traces_dir)
 
+        if self._monitor.should_cascade(self._trace_capture.gold_traces_dir):
+            gold_count = len(list(self._trace_capture.gold_traces_dir.glob("*.json")))
+            self._emit(
+                "pipeline:threshold_reached",
+                {
+                    "stage": "cascade",
+                    "gold_count": gold_count,
+                    "threshold": self.config.cascade_gold_threshold,
+                },
+            )
+            self._monitor.mark_cascade_triggered(self._trace_capture.gold_traces_dir)
+            # Optional hook (set externally, e.g. the API wires it to run_cascade) so the
+            # detection stays side-effect-free by default.
+            trigger = getattr(self, "cascade_trigger", None)
+            if callable(trigger):
+                try:
+                    trigger(gold_count)
+                except Exception as exc:
+                    self._emit("pipeline:cascade_error", {"error": str(exc)})
+
         return {
             "session_id": result.session_id,
             "steps_imported": result.steps_imported,

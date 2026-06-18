@@ -287,6 +287,45 @@ async def get_lm_studio_models() -> list[UnifiedModel]:
     return models
 
 
+async def get_nim_models() -> list[UnifiedModel]:
+    """Get models served by the configured NVIDIA NIM endpoint (if a key is set)."""
+    import re
+
+    import httpx
+
+    key = os.environ.get("NVIDIA_API_KEY")
+    if not key:
+        return []
+    base = os.environ.get("NIM_ENDPOINT", "https://integrate.api.nvidia.com/v1").rstrip("/")
+    models = []
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{base}/models", headers={"Authorization": f"Bearer {key}"}
+            )
+            if response.status_code == 200:
+                for m in response.json().get("data", []):
+                    model_id = m.get("id", "")
+                    if not model_id:
+                        continue
+                    models.append(
+                        UnifiedModel(
+                            id=f"nim/{model_id}",
+                            name=model_id,
+                            provider=ProviderType.NVIDIA_NIM,
+                            is_code_model=bool(
+                                re.search(r"cod(e|er)|deepseek|starcoder", model_id, re.I)
+                            ),
+                            is_local=False,
+                            supports_inference=True,
+                        )
+                    )
+    except Exception:
+        pass
+
+    return models
+
+
 # Curated list of recommended models for training
 RECOMMENDED_TRAINING_MODELS = [
     UnifiedModel(
@@ -344,20 +383,28 @@ RECOMMENDED_TRAINING_MODELS = [
 # Curated list of teacher models for knowledge distillation
 TEACHER_MODELS = [
     UnifiedModel(
-        id="anthropic/claude-3-5-sonnet",
-        name="Claude 3.5 Sonnet",
+        id="anthropic/claude-opus-4-8",
+        name="Claude Opus 4.8",
         provider=ProviderType.ANTHROPIC,
         is_code_model=True,
         supports_inference=True,
-        description="Excellent for code generation and reasoning.",
+        description="Most capable teacher for distillation.",
     ),
     UnifiedModel(
-        id="openai/gpt-4-turbo",
-        name="GPT-4 Turbo",
+        id="anthropic/claude-sonnet-4-6",
+        name="Claude Sonnet 4.6",
+        provider=ProviderType.ANTHROPIC,
+        is_code_model=True,
+        supports_inference=True,
+        description="Fast, capable teacher with a strong quality/cost balance.",
+    ),
+    UnifiedModel(
+        id="openai/gpt-4o",
+        name="GPT-4o",
         provider=ProviderType.OPENAI,
         is_code_model=True,
         supports_inference=True,
-        description="Strong general-purpose model.",
+        description="Strong general-purpose teacher.",
     ),
     UnifiedModel(
         id="hf/Qwen/Qwen2.5-Coder-32B-Instruct",
@@ -399,6 +446,11 @@ async def get_available_models(
         # Local models can also be used for inference
         result["inference"].extend(ollama_models)
         result["inference"].extend(lm_models)
+
+    if include_cloud:
+        # Live NVIDIA NIM catalog (served, OpenAI-compatible). HF/Unsloth weights
+        # appear here once served (NIM, or pulled into Ollama under "local").
+        result["inference"].extend(await get_nim_models())
 
     if code_only:
         for key in result:

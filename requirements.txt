@@ -22,13 +22,19 @@ watchdog>=4.0.0            # Cross-platform filesystem watcher
 # Benchmark Datasets
 # =========================================
 datasets>=2.14.0           # HuggingFace datasets for benchmarks
+huggingface_hub>=1.10.0    # HF Hub API — buckets, copy_files, agent-aware CLI, dataset scanner
 
 # =========================================
 # DataDesigner Integration (Optional)
 # =========================================
-# data-designer>=0.5.0      # NVIDIA NeMo DataDesigner for synthetic data generation
-# Install with: pip install data-designer>=0.5.0
-# Requires: pandas (included as transitive dep)
+# NVIDIA NeMo DataDesigner — synthetic data generation. Optional & lazily imported:
+# BashGym runs fully without it; install to enable the Factory's DataDesigner
+# pipelines and the standalone DataDesignerPipeline / API.
+#   pip install "bashgym[data-designer]"      # or:  pip install "data-designer>=0.6.1"
+# Pulls data-designer-config + data-designer-engine (+ pandas, pyarrow, litellm, mcp).
+# Async engine is the default since 0.6.0; set DATA_DESIGNER_ASYNC_ENGINE=0 to fall
+# back to the legacy sync engine for one transitional release.
+# data-designer>=0.6.1
 
 # =========================================
 # Testing Dependencies
@@ -36,6 +42,7 @@ datasets>=2.14.0           # HuggingFace datasets for benchmarks
 pytest>=7.4.0              # Test framework
 pytest-asyncio>=0.23.0     # Async test support
 pytest-cov>=4.1.0          # Code coverage
+pytest-timeout>=2.0.0      # Bound every test so a hung network/SSH call can't stall the suite
 
 # =========================================
 # Remote Training (SSH)

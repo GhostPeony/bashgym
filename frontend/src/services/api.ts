@@ -46,6 +46,12 @@ export interface TrainingRequest {
   dpo_beta?: number
   grpo_num_generations?: number
   grpo_temperature?: number
+  grpo_loss_type?: string
+  grpo_backend?: string
+  grpo_use_vllm?: boolean
+  sft_backend?: string
+  dpo_backend?: string
+  use_liger?: boolean
   // Knowledge Distillation
   teacher_model?: string
   teacher_temperature?: number
@@ -80,8 +86,27 @@ export interface TrainingResponse {
   message?: string
   started_at?: string
   completed_at?: string
-  metrics?: Record<string, number>
+  metrics?: TrainingStatusMetrics
   output_path?: string
+}
+
+// Metrics dict emitted by the trainer progress callbacks (see bashgym/gym/trainer.py
+// and bashgym/api/routes.py). Mostly numeric, but `eta` is a preformatted string
+// (e.g. "4m 30s") and `simulation` is a boolean flag.
+export interface TrainingStatusMetrics {
+  epoch?: number
+  total_epochs?: number
+  step?: number
+  total_steps?: number
+  loss?: number
+  learning_rate?: number
+  grad_norm?: number
+  eval_loss?: number
+  samples_processed?: number
+  final_loss?: number
+  eta?: string
+  simulation?: boolean
+  [key: string]: number | string | boolean | undefined
 }
 
 export interface ModelInfo {
@@ -375,12 +400,57 @@ export const taskApi = {
 }
 
 // Training API
+export interface TrainingRunSummary {
+  run_id: string
+  modified: number
+  has_metrics: boolean
+  has_final: boolean
+}
+
+export interface RunMetricPoint {
+  step: number
+  loss: number
+  epoch?: number | null
+  learning_rate?: number | null
+  ts?: number
+}
+
+export interface DatasetInspectMessage {
+  role: string | null
+  content: string | null
+  tool_calls?: unknown[] | null
+  truncated?: boolean
+}
+
+export interface DatasetInspectExample {
+  index: number
+  messages: DatasetInspectMessage[]
+  warnings: string[]
+}
+
+export interface DatasetInspectReport {
+  total: number
+  offset: number
+  limit: number
+  examples: DatasetInspectExample[]
+  with_warnings_in_slice: number
+}
+
 export const trainingApi = {
   start: (config: TrainingRequest) =>
     request<TrainingResponse>('/training/start', {
       method: 'POST',
       body: JSON.stringify(config)
     }),
+
+  managedSubmit: (body: { platform: string; base_model: string; dataset_path: string; n_epochs?: number; learning_rate?: number; suffix?: string; api_key?: string; account_id?: string }) =>
+    request<{ job_id: string; backend: string; status: string; output_model?: string; error?: string }>('/training/managed/submit', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  managedPoll: (platform: string, jobId: string) =>
+    request<{ job_id: string; backend: string; status: string; output_model?: string; error?: string }>(`/training/managed/${platform}/${jobId}`),
 
   getStatus: (runId: string) =>
     request<TrainingResponse>(`/training/${runId}`),
@@ -411,6 +481,21 @@ export const trainingApi = {
       body: JSON.stringify(options || {}),
     }),
 
+  // Persisted run history (metrics.jsonl written next to checkpoints)
+  listRuns: () =>
+    request<{ runs: TrainingRunSummary[] }>('/training/runs'),
+
+  getRunMetrics: (runId: string) =>
+    request<{ run_id: string; metrics: RunMetricPoint[] }>(
+      `/training/runs/${encodeURIComponent(runId)}/metrics`
+    ),
+
+  // Inspect exported training examples with chat-template validation
+  inspectDataset: (offset = 0, limit = 10, path = '') =>
+    request<DatasetInspectReport>(
+      `/training/dataset/inspect?offset=${offset}&limit=${limit}${path ? `&path=${encodeURIComponent(path)}` : ''}`
+    ),
+
   // Download exported JSONL file as browser download
   downloadExport: async (split: 'train' | 'val' = 'train') => {
     try {
@@ -435,6 +520,129 @@ export const trainingApi = {
       return { ok: false as const, error: String(e) }
     }
   },
+
+  // Fetch last N lines of a run's training.log from disk
+  getLog: (runId: string, opts?: { tail?: number; grep?: string }) => {
+    const params = new URLSearchParams()
+    if (opts?.tail !== undefined) params.set('tail', String(opts.tail))
+    if (opts?.grep) params.set('grep', opts.grep)
+    const qs = params.toString()
+    return request<{
+      run_id: string
+      path: string
+      total_lines: number
+      truncated: boolean
+      lines: string[]
+    }>(`/training/${encodeURIComponent(runId)}/log${qs ? `?${qs}` : ''}`)
+  },
+
+  // List saved checkpoints on disk
+  listCheckpoints: () =>
+    request<Array<{
+      id: string
+      run_id: string
+      kind: 'final' | 'merged' | 'intermediate'
+      path: string
+      size_mb: number
+      created_at: string
+      base_model: string | null
+    }>>('/training/checkpoints'),
+
+  // Delete a checkpoint directory
+  deleteCheckpoint: (id: string) =>
+    request<{ deleted: boolean; id: string }>(
+      `/training/checkpoints/${encodeURIComponent(id)}`,
+      { method: 'DELETE' }
+    ),
+}
+
+// =============================================================================
+// Data Designer API
+// =============================================================================
+
+export interface DesignerPipelineInfo {
+  name: string
+  description: string
+  columns: string[]
+}
+
+export interface DesignerPreviewRequest {
+  pipeline: string
+  num_records?: number
+  provider?: string
+  provider_endpoint?: string
+  text_model?: string
+  code_model?: string
+  judge_model?: string
+}
+
+export interface DesignerCreateRequest {
+  pipeline: string
+  num_records?: number
+  seed_source?: string
+  seed_type?: string
+  seed_format?: string
+  provider?: string
+  provider_endpoint?: string
+  text_model?: string
+  code_model?: string
+  judge_model?: string
+  mcp_backend?: string
+  output_dir?: string
+  export_nemo?: boolean
+  keep_only_passing?: boolean
+  train_val_split?: number
+}
+
+export interface DesignerModel {
+  id: string
+  name: string
+  provider: string
+  is_code_model?: boolean
+  is_local?: boolean
+  parameter_size?: string | null
+  description?: string | null
+}
+
+export interface DesignerJobStatus {
+  job_id: string
+  status: string
+  pipeline: string
+  num_records: number
+  progress?: { current: number; total: number }
+  output_dir?: string
+  export_result?: Record<string, unknown>
+  error?: string
+}
+
+export const designerApi = {
+  listPipelines: () =>
+    request<{ pipelines: DesignerPipelineInfo[]; available: boolean }>(
+      '/factory/designer/pipelines'
+    ),
+
+  preview: (req: DesignerPreviewRequest) =>
+    request<{ records: Record<string, unknown>[]; columns: string[]; count: number }>(
+      '/factory/designer/preview',
+      {
+        method: 'POST',
+        body: JSON.stringify({ num_records: 5, provider: 'nvidia', ...req }),
+      }
+    ),
+
+  create: (req: DesignerCreateRequest) =>
+    request<DesignerJobStatus>('/factory/designer/create', {
+      method: 'POST',
+      body: JSON.stringify({ num_records: 100, provider: 'nvidia', ...req }),
+    }),
+
+  getJob: (jobId: string) =>
+    request<DesignerJobStatus>(`/factory/designer/jobs/${encodeURIComponent(jobId)}`),
+
+  listModels: (codeOnly = false) =>
+    request<{ models: DesignerModel[]; provider_models: string[]; available: boolean }>(
+      `/factory/designer/models?code_only=${codeOnly}`
+    ),
 }
 
 // Legacy Models API (see modelsApi below for full implementation)
@@ -476,6 +684,112 @@ export const evaluatorApi = {
 
   list: () =>
     request<EvaluationResponse[]>('/evaluation')
+}
+
+// Advanced eval: held-out trace gate + benchmark wiring (bashgym/eval modules)
+export interface EvalEndpointSpec {
+  provider?: string
+  base_url?: string
+  model?: string
+  api_key?: string
+}
+
+export interface HeldoutEvalRequest {
+  model_id: string
+  dataset_path: string
+  candidate: EvalEndpointSpec
+  base: EvalEndpointSpec
+  metric?: string
+  limit?: number
+  min_trace_delta?: number
+  max_forgetting_drop?: number
+  require_ci_excludes_zero?: boolean
+  forgetting_drops?: Record<string, number>
+  n_resamples?: number
+  seed?: number
+}
+
+export interface HeldoutBootstrap {
+  mean: number
+  ci_low: number
+  ci_high: number
+  significant: boolean
+  better: boolean
+  n_clusters: number
+}
+
+export interface HeldoutReport {
+  n: number
+  n_clusters: number
+  metric: string
+  base_pass_rate: number
+  candidate_pass_rate: number
+  trace_delta: number
+  bootstrap: HeldoutBootstrap
+  forgetting_drops: Record<string, number>
+  ship: boolean
+  reasons: string[]
+}
+
+export interface HeldoutJobResponse {
+  job_id: string
+  model_id: string
+  metric: string
+  status: 'running' | 'completed' | 'failed'
+  report?: HeldoutReport
+  error?: string
+  created_at?: string
+}
+
+export interface VerdictResponse {
+  model_id: string
+  display_name: string
+  latest_heldout_eval: HeldoutReport | null
+  n_heldout_evals: number
+}
+
+export interface BenchmarkIngestRequest {
+  model_id: string
+  base_results: Record<string, unknown>
+  candidate_results: Record<string, unknown>
+  max_forgetting_drop?: number
+}
+
+export const evalAdvancedApi = {
+  runHeldout: (req: HeldoutEvalRequest) =>
+    request<HeldoutJobResponse>('/eval/heldout', {
+      method: 'POST',
+      body: JSON.stringify(req)
+    }),
+
+  heldoutStatus: (jobId: string) =>
+    request<HeldoutJobResponse>(`/eval/heldout/${jobId}`),
+
+  heldoutList: (limit = 20) =>
+    request<HeldoutJobResponse[]>(`/eval/heldout?limit=${limit}`),
+
+  verdict: (modelId: string) =>
+    request<VerdictResponse>(`/eval/verdict/${encodeURIComponent(modelId)}`),
+
+  benchmarkCommands: (params: { base_url: string; model: string; tasks?: string; include?: string }) => {
+    const qs = new URLSearchParams({ base_url: params.base_url, model: params.model })
+    if (params.tasks) qs.set('tasks', params.tasks)
+    if (params.include) qs.set('include', params.include)
+    return request<{ commands: Record<string, string[]> }>(`/eval/benchmark-commands?${qs.toString()}`)
+  },
+
+  ingestBenchmarks: (req: BenchmarkIngestRequest) =>
+    request<{
+      model_id: string
+      forgetting: { drops: Record<string, number>; regressed: Record<string, number>; worst: [string, number] | null }
+      recorded: string[]
+      max_forgetting_drop: number
+      forgetting_ok: boolean
+      worst: [string, number] | null
+    }>('/eval/benchmarks/ingest', {
+      method: 'POST',
+      body: JSON.stringify(req)
+    })
 }
 
 // Traces API
@@ -915,6 +1229,12 @@ export interface OllamaModelsResponse {
 export const providersApi = {
   getProviders: () =>
     request<ProvidersResponse>('/providers'),
+
+  connect: (body: { platform?: string; base_url?: string; api_key?: string; default_model?: string; name?: string }) =>
+    request<{ ok: boolean; provider_type?: string; available?: boolean; models?: string[]; error?: string }>('/providers/connect', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 
   getModels: (params?: { include_local?: boolean; include_cloud?: boolean; code_only?: boolean }) => {
     const searchParams = new URLSearchParams()
@@ -1905,6 +2225,44 @@ export const hfApi = {
 
   deleteHFModel: (repoId: string) =>
     request<{ status: string }>(`/hf/models/${encodeURIComponent(repoId)}`, { method: 'DELETE' }),
+
+  // Storage Buckets (huggingface_hub v1.10+)
+  listBuckets: (namespace?: string) =>
+    request<any[]>(`/hf/buckets${namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''}`),
+  createBucket: (body: { bucket_id: string; private?: boolean }) =>
+    request<{ bucket_id: string; url: string }>('/hf/buckets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  listBucketTree: (bucketId: string, prefix?: string) =>
+    request<any[]>(`/hf/buckets/${encodeURIComponent(bucketId)}/tree${prefix ? `?prefix=${encodeURIComponent(prefix)}` : ''}`),
+  getBucketInfo: (bucketId: string) =>
+    request<any>(`/hf/buckets/${encodeURIComponent(bucketId)}/info`),
+  syncBucket: (body: { source: string; dest: string; delete?: boolean; dry_run?: boolean }) =>
+    request<any>('/hf/buckets/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  deleteBucket: (bucketId: string) =>
+    request<{ status: string }>(`/hf/buckets/${encodeURIComponent(bucketId)}`, { method: 'DELETE' }),
+  copyFiles: (body: { source: string; destination: string }) =>
+    request<{ source: string; destination: string; status: string }>('/hf/copy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+
+  // Agent Traces
+  uploadTraces: (body: { trace_dir: string; repo_id: string; private?: boolean }) =>
+    request<{ repo_id: string; url: string; num_traces: number; total_size_bytes: number }>('/hf/traces/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  listTraceDatasets: (prefix?: string) =>
+    request<any[]>(`/hf/traces/datasets${prefix ? `?prefix=${encodeURIComponent(prefix)}` : ''}`),
 }
 
 // =============================================================================
@@ -1956,6 +2314,46 @@ export const syntheticApi = {
   // Get available presets
   getPresets: () =>
     request<Record<string, SyntheticPreset>>('/factory/synthetic/presets')
+}
+
+// Decision-DPO mining (trace data quality)
+export interface DataQualityDefaults {
+  generate_decision_dpo: boolean
+  require_successful_verification: boolean
+  min_trace_steps: number
+  max_trace_steps: number
+}
+
+export interface DecisionDpoRequest {
+  gold_dir?: string
+  failed_dir?: string
+  generate_decision_dpo?: boolean
+  require_successful_verification?: boolean
+  min_trace_steps?: number
+  max_trace_steps?: number
+}
+
+export interface DecisionDpoJob {
+  job_id: string
+  status: 'queued' | 'running' | 'completed' | 'failed'
+  n_training_examples?: number
+  n_dpo_pairs?: number
+  dpo_output_path?: string
+  error?: string
+}
+
+export const dataQualityApi = {
+  defaults: () =>
+    request<DataQualityDefaults>('/factory/data-quality/defaults'),
+
+  mineDecisionDpo: (req: DecisionDpoRequest) =>
+    request<DecisionDpoJob>('/factory/decision-dpo/generate', {
+      method: 'POST',
+      body: JSON.stringify(req)
+    }),
+
+  decisionDpoStatus: (jobId: string) =>
+    request<DecisionDpoJob>(`/factory/decision-dpo/jobs/${jobId}`)
 }
 
 // =============================================================================
@@ -2372,6 +2770,87 @@ export const agentApi = {
 }
 
 // Orchestrator API
+// Orchestrator API response types (see bashgym/api/orchestrator_routes.py)
+export type OrchestratorJobStatus =
+  | 'decomposing'
+  | 'awaiting_approval'
+  | 'executing'
+  | 'dispatched'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+
+export interface OrchestratorTaskDTO {
+  id: string
+  title?: string
+  description?: string
+  priority?: 'CRITICAL' | 'HIGH' | 'NORMAL' | 'LOW'
+  status?:
+    | 'pending'
+    | 'assigned'
+    | 'running'
+    | 'completed'
+    | 'failed'
+    | 'blocked'
+    | 'cancelled'
+    | 'retrying'
+    | 'dispatched'
+  dependencies?: string[]
+  files_touched?: string[]
+  estimated_turns?: number
+  budget_usd?: number
+  retry_count?: number
+  worker_prompt?: string
+  worker_id?: string
+  result?: {
+    cost_usd?: number
+    duration_seconds?: number
+    error?: string
+    success?: boolean
+  }
+}
+
+export interface OrchestratorStatusResponse {
+  job_id: string
+  status: OrchestratorJobStatus
+  error?: string | null
+  title?: string
+  dag?: {
+    tasks?: OrchestratorTaskDTO[]
+    stats?: Record<string, number>
+  }
+  stats?: Record<string, number>
+  total_cost?: number
+  total_time?: number
+  completed?: number
+  failed?: number
+  budget?: {
+    limit_usd: number
+    spent_usd: number
+    remaining_usd: number
+    exceeded: boolean
+  }
+  synthesis?: {
+    merge_successes?: number
+    merge_failures?: number
+  }
+}
+
+export interface OrchestratorJobSummary {
+  job_id: string
+  status: OrchestratorJobStatus
+  title?: string | null
+  task_count?: number
+  stats?: Record<string, number>
+}
+
+export interface OrchestratorProvider {
+  provider: string
+  default_model: string
+  env_key: string
+  base_url?: string
+}
+
 export const orchestratorApi = {
   submitSpec: (spec: {
     title: string
@@ -2387,26 +2866,36 @@ export const orchestratorApi = {
       model?: string
       temperature?: number
     }
-  }) => request('/orchestrate/submit', { method: 'POST', body: JSON.stringify(spec) }),
+  }) =>
+    request<{ job_id: string; status: OrchestratorJobStatus; provider: string; model: string }>(
+      '/orchestrate/submit',
+      { method: 'POST', body: JSON.stringify(spec) }
+    ),
 
   approveJob: (jobId: string) =>
-    request(`/orchestrate/${jobId}/approve`, { method: 'POST', body: '{}' }),
+    request<{ job_id: string; status: OrchestratorJobStatus }>(
+      `/orchestrate/${jobId}/approve`,
+      { method: 'POST', body: '{}' }
+    ),
 
   getStatus: (jobId: string) =>
-    request(`/orchestrate/${jobId}/status`),
+    request<OrchestratorStatusResponse>(`/orchestrate/${jobId}/status`),
 
   retryTask: (jobId: string, taskId: string, modifiedPrompt?: string) =>
-    request(`/orchestrate/${jobId}/task/${taskId}/retry`, {
-      method: 'POST',
-      body: JSON.stringify({ modified_prompt: modifiedPrompt })
-    }),
+    request<{ job_id: string; task_id: string; status: string }>(
+      `/orchestrate/${jobId}/task/${taskId}/retry`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ modified_prompt: modifiedPrompt })
+      }
+    ),
 
   cancelJob: (jobId: string) =>
-    request(`/orchestrate/${jobId}`, { method: 'DELETE' }),
+    request<{ status: string; job_id: string }>(`/orchestrate/${jobId}`, { method: 'DELETE' }),
 
-  listProviders: () => request('/orchestrate/providers'),
+  listProviders: () => request<{ providers: OrchestratorProvider[] }>('/orchestrate/providers'),
 
-  listJobs: () => request('/orchestrate/jobs'),
+  listJobs: () => request<{ jobs: OrchestratorJobSummary[] }>('/orchestrate/jobs'),
 }
 
 // Pipeline API
@@ -2421,6 +2910,8 @@ export interface PipelineConfig {
   generate_gold_threshold: number
   train_enabled: boolean
   train_examples_threshold: number
+  cascade_enabled: boolean
+  cascade_gold_threshold: number
 }
 
 export interface PipelineStatus {
@@ -2506,6 +2997,37 @@ export interface AutoResearchStartConfig {
   batchSize: number
   maxSeqLength: number
   load4Bit: boolean
+}
+
+// Research index — Firecrawl-grounded news feed + AutoResearch advice
+export interface ResearchNewsItem {
+  kind: 'github' | 'paper'
+  title: string
+  url: string
+  source: string
+  summary: string
+  score: number
+}
+
+export interface ResearchAdvice {
+  configured: boolean
+  context: Record<string, unknown>
+  techniques: { title: string; url: string; abstract: string; score: number }[]
+  issues: { repository: string; url: string; snippet: string; title: string }[]
+  prior: { suggested: Record<string, unknown>; notes: string[] }
+}
+
+export const researchApi = {
+  news: (k = 20) =>
+    request<{ configured: boolean; count: number; items: ResearchNewsItem[] }>(
+      `/research/news?k=${k}`
+    ),
+
+  advise: (body: { base_model?: string; strategy?: string; family?: string; domain?: string }) =>
+    request<ResearchAdvice>('/research/advise', {
+      method: 'POST',
+      body: JSON.stringify(body)
+    })
 }
 
 export const autoresearchApi = {

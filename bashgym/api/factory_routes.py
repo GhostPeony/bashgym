@@ -134,6 +134,131 @@ async def get_presets():
 
 
 # =============================================================================
+# Decision-DPO mining (trace data quality)
+# =============================================================================
+
+
+class DecisionDpoRequest(BaseModel):
+    """Configuration for mining decision-level DPO pairs from gold traces.
+
+    Mines step-level FAILURE->SUCCESS preference pairs from within each gold
+    trace, gated by the trace-quality toggles. Runs fully local (DIRECT strategy,
+    no LLM augmentation)."""
+
+    gold_dir: str | None = None  # default: settings.data.gold_traces_dir
+    failed_dir: str | None = None  # optional cross-trace DPO source
+    generate_decision_dpo: bool = True
+    require_successful_verification: bool = True
+    min_trace_steps: int = 2
+    max_trace_steps: int = 50
+
+
+class DecisionDpoResponse(BaseModel):
+    """Status of a decision-DPO mining job."""
+
+    job_id: str
+    status: str  # queued, running, completed, failed
+    n_training_examples: int | None = None
+    n_dpo_pairs: int | None = None
+    dpo_output_path: str | None = None
+    error: str | None = None
+
+
+# Decision-DPO job tracking
+decision_dpo_jobs: dict[str, dict] = {}
+
+
+@router.get("/data-quality/defaults")
+async def get_data_quality_defaults():
+    """Default trace-quality knobs (from DataFactoryConfig) to seed the UI form."""
+    from bashgym.factory.data_factory import DataFactoryConfig
+
+    cfg = DataFactoryConfig()
+    return {
+        "generate_decision_dpo": cfg.generate_decision_dpo,
+        "require_successful_verification": cfg.require_successful_verification,
+        "min_trace_steps": cfg.min_trace_steps,
+        "max_trace_steps": cfg.max_trace_steps,
+    }
+
+
+@router.post("/decision-dpo/generate", response_model=DecisionDpoResponse)
+async def generate_decision_dpo_pairs(
+    request: DecisionDpoRequest, background_tasks: BackgroundTasks
+):
+    """Start a decision-DPO mining job over the gold trace directory."""
+    if request.gold_dir and not Path(request.gold_dir).exists():
+        raise HTTPException(status_code=400, detail=f"gold_dir not found: {request.gold_dir}")
+    if request.failed_dir and not Path(request.failed_dir).exists():
+        raise HTTPException(status_code=400, detail=f"failed_dir not found: {request.failed_dir}")
+    if request.min_trace_steps > request.max_trace_steps:
+        raise HTTPException(status_code=400, detail="min_trace_steps must be <= max_trace_steps")
+
+    job_id = f"ddpo_{uuid.uuid4().hex[:8]}"
+    decision_dpo_jobs[job_id] = {"status": "queued", "config": request.model_dump()}
+    background_tasks.add_task(run_decision_dpo_job, job_id, request)
+    return DecisionDpoResponse(job_id=job_id, status="queued")
+
+
+@router.get("/decision-dpo/jobs/{job_id}", response_model=DecisionDpoResponse)
+async def decision_dpo_status(job_id: str):
+    """Get a decision-DPO mining job's status and counts."""
+    if job_id not in decision_dpo_jobs:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    job = decision_dpo_jobs[job_id]
+    return DecisionDpoResponse(
+        job_id=job_id,
+        status=job["status"],
+        n_training_examples=job.get("n_training_examples"),
+        n_dpo_pairs=job.get("n_dpo_pairs"),
+        dpo_output_path=job.get("dpo_output_path"),
+        error=job.get("error"),
+    )
+
+
+async def run_decision_dpo_job(job_id: str, request: DecisionDpoRequest):
+    """Background task: mine decision-DPO pairs with the quality toggles applied."""
+    from bashgym.config import get_settings
+    from bashgym.factory.data_factory import DataFactory, DataFactoryConfig, SynthesisStrategy
+
+    factory = None
+    try:
+        decision_dpo_jobs[job_id]["status"] = "running"
+        settings = get_settings()
+        gold_dir = Path(request.gold_dir or settings.data.gold_traces_dir)
+        if not gold_dir.exists():
+            raise FileNotFoundError(f"gold traces dir not found: {gold_dir}")
+        failed_dir = Path(request.failed_dir) if request.failed_dir else None
+
+        # DIRECT strategy keeps this local — no LLM augmentation, only trace mining.
+        config = DataFactoryConfig(
+            strategy=SynthesisStrategy.DIRECT,
+            generate_decision_dpo=request.generate_decision_dpo,
+            require_successful_verification=request.require_successful_verification,
+            min_trace_steps=request.min_trace_steps,
+            max_trace_steps=request.max_trace_steps,
+        )
+        factory = DataFactory(config)
+        training, dpo = await factory.process_trace_directory(gold_dir, failed_dir)
+
+        out_path = str(factory.save_dpo_batch(dpo, "decision_dpo")) if dpo else None
+
+        job = decision_dpo_jobs[job_id]
+        job["status"] = "completed"
+        job["n_training_examples"] = len(training)
+        job["n_dpo_pairs"] = len(dpo)
+        job["dpo_output_path"] = out_path
+        logger.info(f"Decision-DPO job {job_id}: {len(dpo)} pairs from {gold_dir}")
+    except Exception as e:
+        logger.error(f"Decision-DPO job {job_id} failed: {e}")
+        decision_dpo_jobs[job_id]["status"] = "failed"
+        decision_dpo_jobs[job_id]["error"] = str(e)
+    finally:
+        if factory is not None:
+            await factory.close()
+
+
+# =============================================================================
 # Background Task
 # =============================================================================
 
@@ -305,15 +430,20 @@ class DesignerCreateRequest(BaseModel):
     pipeline: str = "coding_agent_sft"
     num_records: int = 100
     seed_source: str | None = None
-    seed_type: str = "traces"  # traces, huggingface, file, unstructured
+    seed_type: str = "traces"  # traces, agent_rollouts, huggingface, file, unstructured
+    seed_format: str | None = (
+        None  # agent_rollouts: claude_code/codex/hermes_agent/pi_coding_agent/atif
+    )
     column_mapping: dict[str, str] | None = None
     provider: str = "nvidia"
     provider_endpoint: str = "https://integrate.api.nvidia.com/v1"
     text_model: str | None = None
     code_model: str | None = None
     judge_model: str | None = None
+    mcp_backend: str = "auto"  # mcp_tool_use: docker/local/auto
     output_dir: str | None = None
     export_nemo: bool = True
+    keep_only_passing: bool = True  # quality gate at export (passes_quality / recommended_for_sft)
     train_val_split: float = 0.9
 
 
@@ -456,8 +586,9 @@ async def designer_job_status(job_id: str):
 
 @router.get("/designer/pipelines")
 async def list_designer_pipelines():
-    """List available DataDesigner pipeline builders."""
+    """List available DataDesigner pipelines with their column DAGs."""
     try:
+        from bashgym.factory.data_designer import DataDesignerPipeline, PipelineConfig
         from bashgym.factory.designer_pipelines import PIPELINES
     except ImportError:
         return {"pipelines": [], "available": False}
@@ -466,15 +597,46 @@ async def list_designer_pipelines():
     for name, builder_fn in PIPELINES.items():
         doc = builder_fn.__doc__ or ""
         first_line = doc.strip().split("\n")[0] if doc.strip() else name
-        pipelines.append(
-            DesignerPipelineInfo(
-                name=name,
-                description=first_line,
-                columns=[],  # Would need to introspect builder
-            )
-        )
+        columns: list[str] = []
+        try:
+            builder = builder_fn(PipelineConfig(pipeline=name))
+            columns = DataDesignerPipeline._builder_column_names(builder)
+        except Exception as e:  # introspection is best-effort
+            logger.debug("column introspection failed for %s: %s", name, e)
+        pipelines.append(DesignerPipelineInfo(name=name, description=first_line, columns=columns))
 
     return {"pipelines": [p.model_dump() for p in pipelines], "available": True}
+
+
+@router.get("/designer/models")
+async def list_designer_models(
+    code_only: bool = False,
+    provider: str | None = None,
+    endpoint: str | None = None,
+):
+    """Adaptable inference-model catalog for Data Designer generation.
+
+    Aggregates models across configured sources (local Ollama / LM Studio + live
+    NVIDIA NIM, etc.) so the UI can offer real, current choices instead of
+    hardcoded IDs. When ``provider`` + ``endpoint`` are given, also returns the
+    bare model IDs that endpoint serves (any OpenAI-compatible /v1/models).
+    """
+    import asyncio
+
+    try:
+        from bashgym.factory.data_designer import list_inference_models, provider_model_ids
+    except ImportError:
+        return {"models": [], "provider_models": [], "available": False}
+
+    # Run off the event loop: discovery drives its own asyncio loop and the
+    # /v1/models call is blocking httpx.
+    models = await asyncio.to_thread(list_inference_models, code_only)
+    provider_models = (
+        await asyncio.to_thread(provider_model_ids, provider, endpoint)
+        if provider and endpoint
+        else []
+    )
+    return {"models": models, "provider_models": provider_models, "available": True}
 
 
 @router.post("/designer/validate")
@@ -663,6 +825,7 @@ async def run_designer_job(job_id: str, request: DesignerCreateRequest):
             num_records=request.num_records,
             provider=request.provider,
             provider_endpoint=request.provider_endpoint,
+            mcp_backend=request.mcp_backend,
             output_dir=Path(request.output_dir or f"data/designer_output/{job_id}"),
             train_val_split=request.train_val_split,
         )
@@ -683,6 +846,12 @@ async def run_designer_job(job_id: str, request: DesignerCreateRequest):
 
         if request.seed_type == "traces":
             df = pipeline.from_traces(Path(seed), request.num_records)
+        elif request.seed_type == "agent_rollouts":
+            df = pipeline.from_agent_rollouts(
+                rollout_format=request.seed_format or "claude_code",
+                path=request.seed_source,  # None -> the format's default dir (~/.claude/projects, ...)
+                num_records=request.num_records,
+            )
         elif request.seed_type == "huggingface":
             df = pipeline.from_dataset(
                 seed,
@@ -698,10 +867,10 @@ async def run_designer_job(job_id: str, request: DesignerCreateRequest):
 
         designer_jobs[job_id]["progress"]["current"] = len(df)
 
-        # Export to NeMo format if requested
+        # Export to NeMo format if requested (with the quality gate)
         export_result = None
         if request.export_nemo:
-            export_result = pipeline.export_nemo(df)
+            export_result = pipeline.export_nemo(df, keep_only_passing=request.keep_only_passing)
             designer_jobs[job_id]["export_result"] = export_result
 
         designer_jobs[job_id]["status"] = "completed"

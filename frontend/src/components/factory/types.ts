@@ -10,7 +10,7 @@ import {
 } from 'lucide-react'
 import type { FactoryConfig } from '../../services/api'
 
-export type TabId = 'create' | 'seeds' | 'settings' | 'jobs'
+export type TabId = 'create' | 'seeds' | 'settings' | 'jobs' | 'designer' | 'quality'
 
 export const COLUMN_TYPES = [
   { id: 'llm', label: 'LLM Column', icon: Sparkles, description: 'AI-generated content from prompts' },

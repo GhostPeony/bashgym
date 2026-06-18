@@ -1,16 +1,16 @@
 """Tests for AnthropicProvider."""
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
 
-from bashgym.providers.anthropic import AnthropicProvider, ANTHROPIC_MODELS
+from bashgym.providers.anthropic import ANTHROPIC_MODELS, AnthropicProvider
 from bashgym.providers.base import (
-    InferenceProvider,
-    ProviderResponse,
     HealthStatus,
+    InferenceProvider,
     ProviderModel,
+    ProviderResponse,
 )
-
 
 # ── Property tests ─────────────────────────────────────────────────
 
@@ -55,7 +55,7 @@ class TestAnthropicProviderConstructor:
 
     def test_default_model(self):
         provider = AnthropicProvider(api_key="sk-test")
-        assert provider.default_model == "claude-sonnet-4-20250514"
+        assert provider.default_model == "claude-sonnet-4-6"
 
     def test_custom_default_model(self):
         provider = AnthropicProvider(api_key="sk-test", default_model="claude-opus-4-6")
@@ -83,14 +83,16 @@ class TestAnthropicProviderGenerate:
             "type": "message",
             "role": "assistant",
             "content": [{"type": "text", "text": "Hello from Claude!"}],
-            "model": "claude-sonnet-4-20250514",
+            "model": "claude-sonnet-4-6",
             "usage": {
                 "input_tokens": 25,
                 "output_tokens": 10,
             },
         }
 
-        with patch.object(provider._client, "post", new_callable=AsyncMock, return_value=mock_response):
+        with patch.object(
+            provider._client, "post", new_callable=AsyncMock, return_value=mock_response
+        ):
             result = await provider.generate(
                 messages=[{"role": "user", "content": "Say hello"}],
             )
@@ -98,7 +100,7 @@ class TestAnthropicProviderGenerate:
         assert isinstance(result, ProviderResponse)
         assert result.success is True
         assert result.content == "Hello from Claude!"
-        assert result.model_name == "claude-sonnet-4-20250514"
+        assert result.model_name == "claude-sonnet-4-6"
         assert result.provider_type == "anthropic"
         assert result.tokens_used == 10
         assert result.error is None
@@ -112,11 +114,13 @@ class TestAnthropicProviderGenerate:
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "content": [{"type": "text", "text": "I am a helpful bot."}],
-            "model": "claude-sonnet-4-20250514",
+            "model": "claude-sonnet-4-6",
             "usage": {"input_tokens": 30, "output_tokens": 8},
         }
 
-        with patch.object(provider._client, "post", new_callable=AsyncMock, return_value=mock_response) as mock_post:
+        with patch.object(
+            provider._client, "post", new_callable=AsyncMock, return_value=mock_response
+        ) as mock_post:
             await provider.generate(
                 messages=[{"role": "user", "content": "Who are you?"}],
                 system_prompt="You are a helpful bot.",
@@ -135,7 +139,7 @@ class TestAnthropicProviderGenerate:
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "content": [{"type": "text", "text": "Got it."}],
-            "model": "claude-sonnet-4-20250514",
+            "model": "claude-sonnet-4-6",
             "usage": {"input_tokens": 20, "output_tokens": 5},
         }
 
@@ -144,7 +148,9 @@ class TestAnthropicProviderGenerate:
             {"role": "user", "content": "Hi"},
         ]
 
-        with patch.object(provider._client, "post", new_callable=AsyncMock, return_value=mock_response) as mock_post:
+        with patch.object(
+            provider._client, "post", new_callable=AsyncMock, return_value=mock_response
+        ) as mock_post:
             await provider.generate(messages=messages)
 
             call_kwargs = mock_post.call_args
@@ -165,7 +171,9 @@ class TestAnthropicProviderGenerate:
             "usage": {"input_tokens": 10, "output_tokens": 2},
         }
 
-        with patch.object(provider._client, "post", new_callable=AsyncMock, return_value=mock_response) as mock_post:
+        with patch.object(
+            provider._client, "post", new_callable=AsyncMock, return_value=mock_response
+        ) as mock_post:
             result = await provider.generate(
                 messages=[{"role": "user", "content": "Hi"}],
                 model="claude-opus-4-6",
@@ -184,7 +192,9 @@ class TestAnthropicProviderGenerate:
         mock_response.status_code = 429
         mock_response.text = "Rate limit exceeded"
 
-        with patch.object(provider._client, "post", new_callable=AsyncMock, return_value=mock_response):
+        with patch.object(
+            provider._client, "post", new_callable=AsyncMock, return_value=mock_response
+        ):
             result = await provider.generate(
                 messages=[{"role": "user", "content": "Hello"}],
             )
@@ -204,7 +214,9 @@ class TestAnthropicProviderGenerate:
         mock_response.status_code = 500
         mock_response.text = "Internal server error"
 
-        with patch.object(provider._client, "post", new_callable=AsyncMock, return_value=mock_response):
+        with patch.object(
+            provider._client, "post", new_callable=AsyncMock, return_value=mock_response
+        ):
             result = await provider.generate(
                 messages=[{"role": "user", "content": "Hello"}],
             )
@@ -216,6 +228,7 @@ class TestAnthropicProviderGenerate:
     async def test_generate_network_exception(self):
         """Network errors return error ProviderResponse, do not raise."""
         import httpx
+
         provider = AnthropicProvider(api_key="sk-test-key")
 
         with patch.object(
@@ -254,9 +267,22 @@ class TestAnthropicProviderHealthCheck:
 class TestAnthropicProviderListModels:
     """Tests for list_models method."""
 
+    @staticmethod
+    def _offline(provider):
+        """Patch the client so list_models falls back to the static catalogue."""
+        import httpx
+
+        return patch.object(
+            provider._client,
+            "get",
+            new_callable=AsyncMock,
+            side_effect=httpx.ConnectError("offline"),
+        )
+
     async def test_list_models_returns_models(self):
         provider = AnthropicProvider(api_key="sk-test-key")
-        models = await provider.list_models()
+        with self._offline(provider):
+            models = await provider.list_models()
 
         assert isinstance(models, list)
         assert len(models) > 0
@@ -264,22 +290,51 @@ class TestAnthropicProviderListModels:
 
     async def test_list_models_contains_sonnet(self):
         provider = AnthropicProvider(api_key="sk-test-key")
-        models = await provider.list_models()
+        with self._offline(provider):
+            models = await provider.list_models()
 
         sonnet_models = [m for m in models if "sonnet" in m.id.lower()]
         assert len(sonnet_models) > 0
 
     async def test_list_models_all_anthropic_provider_type(self):
         provider = AnthropicProvider(api_key="sk-test-key")
-        models = await provider.list_models()
+        with self._offline(provider):
+            models = await provider.list_models()
 
         assert all(m.provider_type == "anthropic" for m in models)
 
     async def test_list_models_all_not_local(self):
         provider = AnthropicProvider(api_key="sk-test-key")
-        models = await provider.list_models()
+        with self._offline(provider):
+            models = await provider.list_models()
 
         assert all(m.is_local is False for m in models)
+
+    async def test_list_models_uses_live_api(self):
+        """When the Models API responds, its catalogue is returned."""
+        provider = AnthropicProvider(api_key="sk-test-key")
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "data": [
+                {"id": "claude-opus-4-8", "display_name": "Claude Opus 4.8"},
+                {"id": "claude-haiku-4-5", "display_name": "Claude Haiku 4.5"},
+            ]
+        }
+
+        with patch.object(
+            provider._client, "get", new_callable=AsyncMock, return_value=mock_response
+        ):
+            models = await provider.list_models()
+
+        ids = [m.id for m in models]
+        assert "claude-opus-4-8" in ids
+        # Haiku → 200K window; Opus/Sonnet/Fable → 1M.
+        haiku = next(m for m in models if m.id == "claude-haiku-4-5")
+        assert haiku.context_length == 200_000
+        opus = next(m for m in models if m.id == "claude-opus-4-8")
+        assert opus.context_length == 1_000_000
 
 
 # ── Module-level ANTHROPIC_MODELS tests ────────────────────────────

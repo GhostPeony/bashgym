@@ -15,7 +15,7 @@ import asyncio
 import json
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -127,8 +127,10 @@ class RepoCascadeDomain(CascadeDomain):
 
     def matches(self, example: dict[str, Any]) -> bool:
         """Match by repo name in metadata, with min_steps check."""
-        meta = example.get("metadata", {})
-        primary_repo = meta.get("primary_repo", {})
+        # Check both top-level and metadata.primary_repo (format varies)
+        primary_repo = example.get("primary_repo") or example.get("metadata", {}).get(
+            "primary_repo", {}
+        )
         name = primary_repo.get("name", "") if isinstance(primary_repo, dict) else ""
 
         if self.repo_names and name not in self.repo_names:
@@ -137,9 +139,7 @@ class RepoCascadeDomain(CascadeDomain):
         # Count steps from either format
         step_count = len(example.get("trace", []))
         if not step_count:
-            step_count = sum(
-                1 for m in example.get("messages", []) if m.get("role") == "assistant"
-            )
+            step_count = sum(1 for m in example.get("messages", []) if m.get("role") == "assistant")
 
         return step_count >= self.min_steps
 
@@ -166,8 +166,10 @@ def build_repo_domains(
             data = json.loads(trace_file.read_text(encoding="utf-8", errors="replace"))
             if not isinstance(data, dict):
                 continue
-            meta = data.get("metadata", {})
-            primary_repo = meta.get("primary_repo", {})
+            # Check both top-level and metadata.primary_repo (format varies)
+            primary_repo = data.get("primary_repo") or data.get("metadata", {}).get(
+                "primary_repo", {}
+            )
             name = primary_repo.get("name", "") if isinstance(primary_repo, dict) else ""
             if name:
                 repo_counts[name] += 1
@@ -193,8 +195,140 @@ def build_repo_domains(
 
 
 # =========================================================================
+# Preflight: reward ↔ dataset compatibility
+# =========================================================================
+
+
+def _reward_dataset_mismatch(reward_mode: str, example: dict[str, Any]) -> str | None:
+    """Return a human-readable mismatch reason, or None if the pairing is OK.
+
+    We look at one GRPO example and decide whether the configured reward
+    function has any chance of producing a non-degenerate signal on data of
+    this shape. Called from `_filter_dataset` before any training starts.
+    """
+    keys = list(example.keys())
+
+    if reward_mode == "verification":
+        # verification_reward in the generated script needs `tests` per example
+        # (either top-level or inside metadata). Without it, the reward function
+        # returns 0.5 for every parseable completion → zero variance → no gradient.
+        has_tests = "tests" in example or (
+            isinstance(example.get("metadata"), dict) and "tests" in example["metadata"]
+        )
+        if not has_tests:
+            return (
+                f"reward_mode='verification' requires a 'tests' field on each "
+                f"example (per-example pytest code), but this dataset has keys "
+                f"{keys} and no 'tests' key. Without tests, the reward function "
+                f"falls back to a constant 0.5 for every parseable completion, "
+                f"producing zero reward variance across GRPO groups and "
+                f"therefore zero gradient signal — the model cannot learn."
+            )
+        return None
+
+    if reward_mode == "execution":
+        # execution_reward runs `python -c <completion>` and scores on exit code.
+        # It works on any dataset shape as long as completions are expected to
+        # be Python. No per-example contract to validate here beyond "has prompt".
+        if "prompt" not in example:
+            return (
+                f"reward_mode='execution' needs a 'prompt' field on each example, "
+                f"but this one has keys {keys}."
+            )
+        return None
+
+    if reward_mode == "syntax":
+        # syntax_reward ast.parses the completion as Python. Works on any prompt
+        # that encourages a Python code output. No per-example validation.
+        if "prompt" not in example:
+            return (
+                f"reward_mode='syntax' needs a 'prompt' field on each example, "
+                f"but this one has keys {keys}."
+            )
+        return None
+
+    # Unknown reward modes are passed through — the generated script will raise
+    # KeyError on REWARD_FN lookup, which is a clearer error at script time.
+    return None
+
+
+def _find_stage_checkpoint(stage_output_path: Path) -> Path | None:
+    """Find the best checkpoint produced by a cascade stage.
+
+    Trainers write artifacts to {output_dir}/{run_id}/{merged|final}
+    (or directly into stage_output_path when the run_id collides with
+    a parent dir). Walk for 'merged/' first (full-weight, loadable as
+    base_model), then 'final/' (LoRA adapter).
+    """
+    if not stage_output_path.exists():
+        return None
+
+    # Prefer merged (full weights) over final (LoRA)
+    for name in ("merged", "final"):
+        # Shallow: stage_output_path/merged
+        direct = stage_output_path / name
+        if direct.exists() and direct.is_dir():
+            return direct
+        # One level deep: stage_output_path/{run_id}/merged
+        for sub in stage_output_path.iterdir():
+            if sub.is_dir():
+                nested = sub / name
+                if nested.exists() and nested.is_dir():
+                    return nested
+    return None
+
+
+def _strategy_dataset_mismatch(
+    strategy: str,
+    reward_mode: str,
+    example: dict[str, Any],
+) -> str | None:
+    """Strategy-aware preflight — return a mismatch reason or None.
+
+    SFT needs a `messages` field (chat format) or `prompt`+`completion`.
+    DPO needs `chosen` and `rejected` on every example, and hints at
+    `pair_failures_for_dpo()` if they're missing.
+    GRPO defers to `_reward_dataset_mismatch` (reward-mode-aware).
+    """
+    keys = list(example.keys())
+
+    if strategy == "sft":
+        has_messages = isinstance(example.get("messages"), list) and example["messages"]
+        has_prompt_completion = "prompt" in example and "completion" in example
+        if not (has_messages or has_prompt_completion):
+            return (
+                f"strategy='sft' requires either a 'messages' field (chat "
+                f"format, list of dicts) or both 'prompt' and 'completion', "
+                f"but this example has keys {keys}. For trace data, run it "
+                f"through ExampleGenerator.export_for_nemo() to produce "
+                f"chat-format JSONL before training."
+            )
+        return None
+
+    if strategy == "dpo":
+        has_pair = "chosen" in example and "rejected" in example
+        if not has_pair:
+            return (
+                f"strategy='dpo' requires 'chosen' and 'rejected' fields on "
+                f"every example, but this one has keys {keys}. Build DPO "
+                f"pairs from gold + failed traces via "
+                f"bashgym.factory.dpo_pairer.pair_failures_for_dpo() before "
+                f"running a DPO stage."
+            )
+        return None
+
+    if strategy == "grpo":
+        return _reward_dataset_mismatch(reward_mode, example)
+
+    return None
+
+
+# =========================================================================
 # Stage and Config Dataclasses
 # =========================================================================
+
+
+VALID_STRATEGIES = {"sft", "dpo", "grpo"}
 
 
 @dataclass
@@ -206,6 +340,7 @@ class CascadeStage:
     base_model: str
     output_path: Path
     run_id: str
+    strategy: str = "grpo"  # one of: "sft" | "dpo" | "grpo"
     status: str = "pending"  # pending | running | completed | failed | skipped
     metrics: dict[str, Any] = field(default_factory=dict)
     started_at: str | None = None
@@ -221,6 +356,7 @@ class CascadeStage:
             "base_model": self.base_model,
             "output_path": str(self.output_path),
             "run_id": self.run_id,
+            "strategy": self.strategy,
             "status": self.status,
             "metrics": self.metrics,
             "started_at": self.started_at,
@@ -245,6 +381,11 @@ class CascadeConfig:
     grpo_temperature: float = 0.7
     train_steps_per_stage: int = 200
     learning_rate: float = 2e-5
+
+    # Multi-strategy: which training strategy runs at each stage, in order.
+    # Length must match len(domains). Empty list defaults to all-GRPO,
+    # preserving the original cascade behavior.
+    stage_strategies: list[str] = field(default_factory=list)
 
     # LoRA settings
     lora_r: int = 16
@@ -347,11 +488,11 @@ class CascadeScheduler:
         available_domains: dict[str, CascadeDomain] = dict(DOMAIN_TAXONOMY)
 
         if config.repo_domains_enabled:
-            repo_dir = Path(config.repo_domains_dir) if config.repo_domains_dir else config.dataset_path
+            repo_dir = (
+                Path(config.repo_domains_dir) if config.repo_domains_dir else config.dataset_path
+            )
             if repo_dir.exists():
-                repo_domains = build_repo_domains(
-                    repo_dir, min_examples=config.min_domain_examples
-                )
+                repo_domains = build_repo_domains(repo_dir, min_examples=config.min_domain_examples)
                 available_domains.update(repo_domains)
                 # If repo domains are enabled and found, use them as the domain list
                 if repo_domains:
@@ -362,6 +503,21 @@ class CascadeScheduler:
                         list(repo_domains.keys()),
                     )
 
+        # Validate stage_strategies if provided: must be same length as
+        # domains, and every entry must be a known strategy.
+        if config.stage_strategies:
+            if len(config.stage_strategies) != len(config.domains):
+                raise ValueError(
+                    f"stage_strategies length ({len(config.stage_strategies)}) "
+                    f"must match domains length ({len(config.domains)})"
+                )
+            bad = [s for s in config.stage_strategies if s not in VALID_STRATEGIES]
+            if bad:
+                raise ValueError(
+                    f"Unknown training strategy in stage_strategies: {bad}. "
+                    f"Must be one of {sorted(VALID_STRATEGIES)}"
+                )
+
         # Build stages from domain list
         for i, domain_name in enumerate(config.domains):
             domain = available_domains.get(domain_name)
@@ -371,12 +527,15 @@ class CascadeScheduler:
                     f"Available: {list(available_domains.keys())}"
                 )
 
+            strategy = config.stage_strategies[i] if config.stage_strategies else "grpo"
+
             stage = CascadeStage(
                 domain=domain,
                 stage_number=i + 1,
                 base_model=config.base_model,  # Will be updated during execution
                 output_path=config.output_dir / f"stage_{i + 1}_{domain_name}",
                 run_id=f"cascade-{domain_name}-{int(time.time())}",
+                strategy=strategy,
             )
             self.stages.append(stage)
 
@@ -412,9 +571,7 @@ class CascadeScheduler:
                         losses.append(loss_fn(msgs))
                     except Exception:
                         continue
-            domain_losses[stage.domain.name] = (
-                sum(losses) / len(losses) if losses else 0.0
-            )
+            domain_losses[stage.domain.name] = sum(losses) / len(losses) if losses else 0.0
 
         # Sort stages: highest loss (weakest) first
         self.stages.sort(
@@ -458,8 +615,8 @@ class CascadeScheduler:
                 if prev_checkpoint:
                     stage.base_model = prev_checkpoint
 
-                # Filter dataset for this domain
-                filtered_path = self._filter_dataset(stage.domain)
+                # Filter dataset for this domain + strategy
+                filtered_path = self._filter_dataset(stage.domain, stage.strategy)
                 stage.examples_count = self._count_jsonl(filtered_path)
 
                 # Skip if too few examples
@@ -485,15 +642,19 @@ class CascadeScheduler:
                     if self.config.mode == "simulate":
                         metrics = await self._simulate_stage(stage)
                     else:
-                        metrics = await self._run_stage(stage, filtered_path)
+                        metrics = await self._run_stage(stage, filtered_path, callback)
 
                     stage.metrics = metrics
                     stage.status = "completed"
                     stage.completed_at = datetime.now(timezone.utc).isoformat()
 
-                    # Track checkpoint
-                    checkpoint = stage.output_path / "final"
-                    if checkpoint.exists():
+                    # Track checkpoint — trainers write artifacts to
+                    # {stage.output_path}/{run_id}/{merged|final} via
+                    # Trainer.output_dir + run_id. Prefer the merged
+                    # full-weight model over the LoRA-only final adapter
+                    # since downstream stages need a loadable base model.
+                    checkpoint = _find_stage_checkpoint(stage.output_path)
+                    if checkpoint is not None:
                         stage.checkpoint_path = checkpoint
                         best_checkpoints[stage.domain.name] = checkpoint
                         prev_checkpoint = str(checkpoint)
@@ -542,13 +703,37 @@ class CascadeScheduler:
             status=self.status,
         )
 
-    async def _run_stage(self, stage: CascadeStage, dataset_path: Path) -> dict[str, Any]:
-        """Run a single GRPO stage for a domain."""
-        from bashgym.gym.trainer import GRPOTrainer, TrainerConfig, TrainingStrategy
+    async def _run_stage(
+        self,
+        stage: CascadeStage,
+        dataset_path: Path,
+        callback: Callable[[str, Any], Awaitable[None]] | None = None,
+    ) -> dict[str, Any]:
+        """Run a single training stage for a domain, dispatching by strategy.
+
+        Streams raw training log lines through `callback("stage-log", {...})`
+        so cascade API consumers see the same output they'd see running the
+        script directly.
+
+        Supported strategies: "sft", "dpo", "grpo". Each trainer is called
+        in a worker thread because the subprocess loop is blocking.
+        """
+        from bashgym.gym.trainer import (
+            GRPOTrainer,
+            Trainer,
+            TrainerConfig,
+            TrainingStrategy,
+        )
+
+        strategy_enum = {
+            "sft": TrainingStrategy.SFT,
+            "dpo": TrainingStrategy.DPO,
+            "grpo": TrainingStrategy.GRPO,
+        }[stage.strategy]
 
         config = TrainerConfig(
             base_model=stage.base_model,
-            strategy=TrainingStrategy.GRPO,
+            strategy=strategy_enum,
             grpo_num_generations=self.config.grpo_num_generations,
             grpo_temperature=self.config.grpo_temperature,
             grpo_reward_mode=stage.domain.reward_mode,
@@ -561,19 +746,70 @@ class CascadeScheduler:
             use_remote_ssh=self.config.use_remote_ssh,
         )
 
-        trainer = GRPOTrainer(config)
+        # Capture the running loop so the worker thread can push log lines
+        # back through the async cascade callback safely.
+        loop = asyncio.get_running_loop()
 
-        run = await asyncio.to_thread(
-            trainer.train_grpo,
-            dataset_path=dataset_path,
-            verifier_fn=lambda p, r: 0.0,  # Reward is in the generated script
-            run_id=stage.run_id,
-            training_metadata={
-                "task_domain": stage.domain.name,
-                "cascade_stage": stage.stage_number,
-                "cascade_run_id": stage.run_id,
-            },
-        )
+        def log_callback(line: str) -> None:
+            if callback is None:
+                return
+            payload = {
+                "stage": stage.stage_number,
+                "domain": stage.domain.name,
+                "strategy": stage.strategy,
+                "line": line,
+            }
+            try:
+                asyncio.run_coroutine_threadsafe(callback("stage-log", payload), loop)
+            except Exception as exc:
+                logger.debug(f"[Cascade] log_callback dispatch failed: {exc}")
+
+        training_metadata = {
+            "task_domain": stage.domain.name,
+            "cascade_stage": stage.stage_number,
+            "cascade_strategy": stage.strategy,
+            "cascade_run_id": stage.run_id,
+        }
+
+        if stage.strategy == "grpo":
+            trainer = GRPOTrainer(config)
+            run = await asyncio.to_thread(
+                trainer.train_grpo,
+                dataset_path=dataset_path,
+                verifier_fn=lambda p, r: 0.0,  # Reward is in the generated script
+                run_id=stage.run_id,
+                log_callback=log_callback,
+                training_metadata=training_metadata,
+            )
+        elif stage.strategy == "sft":
+            trainer = Trainer(config)
+            run = await asyncio.to_thread(
+                trainer.train_sft,
+                dataset_path=dataset_path,
+                run_id=stage.run_id,
+                log_callback=log_callback,
+                training_metadata=training_metadata,
+            )
+        elif stage.strategy == "dpo":
+            trainer = Trainer(config)
+            run = await asyncio.to_thread(
+                trainer.train_dpo,
+                dataset_path=dataset_path,
+                run_id=stage.run_id,
+                log_callback=log_callback,
+                training_metadata=training_metadata,
+            )
+        else:
+            raise ValueError(f"Unknown stage strategy: {stage.strategy!r}")
+
+        # The trainers swallow subprocess failures and return the TrainingRun
+        # with status="failed" instead of raising. Re-raise so the cascade
+        # marks the stage failed (not "completed").
+        if getattr(run, "status", None) == "failed":
+            raise RuntimeError(
+                f"{stage.strategy.upper()} training failed: "
+                f"{getattr(run, 'error_message', 'unknown error')}"
+            )
 
         return run.metrics
 
@@ -599,16 +835,21 @@ class CascadeScheduler:
             "simulated": True,
         }
 
-    def _filter_dataset(self, domain: CascadeDomain) -> Path:
-        """Filter the training dataset for a specific domain.
+    def _filter_dataset(self, domain: CascadeDomain, strategy: str = "grpo") -> Path:
+        """Filter the training dataset for a specific domain + strategy.
 
-        Reads both .json (one trace per file) and .jsonl (one trace per line).
+        Reads both .json (one trace per file) and .jsonl (one JSON per line),
+        filters by `domain.matches()`, then converts to the shape the target
+        strategy needs:
+
+        - grpo: trace → {prompt, completion, tests, ...} via trace_to_grpo_example
+        - sft:  trace → {messages: [...]} via trace_to_sft_example
+        - dpo:  passthrough — examples must already carry chosen/rejected
         """
         filtered: list[dict[str, Any]] = []
         dataset_path = self.config.dataset_path
 
         if dataset_path.is_dir():
-            # Read .json files (BashGym trace format — one JSON object per file)
             for json_file in dataset_path.glob("*.json"):
                 try:
                     example = json.loads(json_file.read_text(encoding="utf-8", errors="replace"))
@@ -617,7 +858,6 @@ class CascadeScheduler:
                 except (json.JSONDecodeError, OSError):
                     continue
 
-            # Read .jsonl files (NeMo training format — one JSON per line)
             for jsonl_file in dataset_path.glob("*.jsonl"):
                 try:
                     with open(jsonl_file, encoding="utf-8", errors="replace") as f:
@@ -646,50 +886,113 @@ class CascadeScheduler:
                     except json.JSONDecodeError:
                         continue
 
-        # Convert raw traces → GRPO format using the dataset converter
-        from bashgym.datasets.converters import trace_to_grpo_example
+        from bashgym.datasets.converters import (
+            trace_to_grpo_example,
+            trace_to_sft_example,
+        )
         from bashgym.datasets.validator import validate_dataset
 
-        # Detect if the base model is multimodal (Gemma 4 family) — needs list-of-parts content
         base = (self.config.base_model or "").lower()
         multimodal = "gemma-4" in base or "gemma4" in base
 
-        grpo_examples = []
+        converted: list[dict[str, Any]] = []
         skipped = 0
-        for trace in filtered:
-            ex = trace_to_grpo_example(trace, multimodal_format=multimodal)
-            if ex is not None:
-                grpo_examples.append(ex)
-            else:
-                skipped += 1
+
+        if strategy == "grpo":
+            for trace in filtered:
+                ex = trace_to_grpo_example(trace, multimodal_format=multimodal)
+                if ex is not None:
+                    converted.append(ex)
+                else:
+                    skipped += 1
+            validator_format = "grpo"
+        elif strategy == "sft":
+            for trace in filtered:
+                ex = trace_to_sft_example(trace)
+                if ex is not None:
+                    converted.append(ex)
+                else:
+                    skipped += 1
+            validator_format = "sft"
+        elif strategy == "dpo":
+            # DPO examples must already be pre-paired (chosen+rejected).
+            # The domain-filter step above has no way to construct pairs
+            # from a single-stream filter — pair upstream via
+            # bashgym.factory.dpo_pairer.pair_failures_for_dpo().
+            for ex in filtered:
+                if "chosen" in ex and "rejected" in ex:
+                    converted.append(ex)
+                else:
+                    skipped += 1
+            validator_format = "dpo"
+        else:
+            raise ValueError(f"Unknown strategy for _filter_dataset: {strategy!r}")
+
         logger.info(
-            f"[Cascade] trace→GRPO ({domain.name}): {len(grpo_examples)} converted, "
-            f"{skipped} skipped (multimodal_format={multimodal})"
+            f"[Cascade] trace→{strategy.upper()} ({domain.name}): "
+            f"{len(converted)} converted, {skipped} skipped "
+            f"(multimodal_format={multimodal})"
         )
 
-        # Write filtered dataset
         output_dir = self.config.output_dir / "filtered"
         output_dir.mkdir(parents=True, exist_ok=True)
-        filtered_path = output_dir / f"{domain.name}.jsonl"
+        filtered_path = output_dir / f"{domain.name}_{strategy}.jsonl"
 
         with open(filtered_path, "w") as f:
-            for example in grpo_examples:
+            for example in converted:
                 f.write(json.dumps(example) + "\n")
 
         # Validate the dataset before training touches it
-        result = validate_dataset(filtered_path, format="grpo", quiet=True)
-        if not result.is_valid:
-            logger.error(
-                f"[Cascade] {domain.name} dataset failed validation: "
-                f"{result.error_count} errors, {result.valid_examples}/{result.total_examples} valid"
+        try:
+            result = validate_dataset(filtered_path, format=validator_format, quiet=True)
+            if not result.is_valid:
+                logger.error(
+                    f"[Cascade] {domain.name}/{strategy} dataset failed validation: "
+                    f"{result.error_count} errors, "
+                    f"{result.valid_examples}/{result.total_examples} valid"
+                )
+                for issue in result.issues[:5]:
+                    logger.error(
+                        f"  {issue.severity} line {issue.line}: " f"{issue.field} — {issue.message}"
+                    )
+            else:
+                logger.info(
+                    f"[Cascade] Filtered {len(filtered)} traces → "
+                    f"{len(converted)} {strategy.upper()} examples for "
+                    f"{domain.name} (validated ✓)"
+                )
+        except (KeyError, ValueError) as e:
+            # validate_dataset doesn't implement every FormatContract yet.
+            logger.warning(f"[Cascade] Skipping validation for {validator_format}: {e}")
+
+        # Strategy-aware preflight. Refuse to start a run that we know
+        # cannot produce a learning signal — burn compute only when the
+        # data ↔ config pairing has a chance.
+        first_example = converted[0] if converted else None
+        if first_example is None:
+            msg = (
+                f"Cascade preflight: domain '{domain.name}' produced zero "
+                f"{strategy.upper()} examples after conversion. Cannot train "
+                f"on an empty dataset. Check dataset path and domain filter."
             )
-            for issue in result.issues[:5]:
-                logger.error(f"  {issue.severity} line {issue.line}: {issue.field} — {issue.message}")
-        else:
-            logger.info(
-                f"[Cascade] Filtered {len(filtered)} traces → "
-                f"{len(grpo_examples)} GRPO examples for {domain.name} (validated ✓)"
+            # Simulate runs don't train, so an empty domain is fine there — only
+            # refuse a real run that would burn compute with no learning signal.
+            if self.config.mode == "simulate":
+                logger.warning(f"[Cascade] (simulate) {msg}")
+                return filtered_path  # nothing to preflight when there's no example
+            raise ValueError(msg)
+
+        missing = _strategy_dataset_mismatch(strategy, domain.reward_mode, first_example)
+        if missing:
+            raise ValueError(
+                f"Cascade preflight: strategy='{strategy}' cannot work on "
+                f"this dataset for domain '{domain.name}'. {missing}"
             )
+        logger.info(
+            f"[Cascade] Preflight OK: strategy='{strategy}' "
+            f"reward_mode='{domain.reward_mode}' compatible "
+            f"with dataset for domain '{domain.name}'"
+        )
 
         return filtered_path
 

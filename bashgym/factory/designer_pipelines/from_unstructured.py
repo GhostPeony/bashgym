@@ -184,11 +184,16 @@ def build_unstructured_pipeline(config: PipelineConfig) -> dd.DataDesignerConfig
         )
     )
 
-    # --- Filter ---
-
-    builder.add_processor(
-        processor_type="filter",
-        condition="quality_score.grounding >= 3 and quality_score.solution_quality >= 3",
+    # Quality flag (0.6.x has no row-filter processor; flag here, filter at export).
+    builder.add_column(
+        dd.ExpressionColumnConfig(
+            name="passes_quality",
+            dtype="bool",
+            expr=(
+                "{{ quality_score.grounding.score >= 3 "
+                "and quality_score.solution_quality.score >= 3 }}"
+            ),
+        )
     )
 
     return builder

@@ -24,6 +24,9 @@ import {
 import { SyntheticGenerator, SyntheticGeneratorState } from './SyntheticGenerator'
 import { SeedsPanel } from './SeedsPanel'
 import { SettingsPanel } from './SettingsPanel'
+import { DataDesignerTab } from './DataDesignerTab'
+import { DecisionDpoPanel } from './DecisionDpoPanel'
+import { GitBranch } from 'lucide-react'
 import { useTutorialComplete } from '../../hooks'
 import { clsx } from 'clsx'
 import {
@@ -31,6 +34,7 @@ import {
   syntheticApi,
   FactoryConfig,
   ColumnConfig,
+  ColumnConstraint,
   SynthesisJob,
   SyntheticJobStatus
 } from '../../services/api'
@@ -311,7 +315,7 @@ export function FactoryDashboard() {
             )}
 
             {/* Advanced/Settings tab controls */}
-            {activeTab !== 'create' && (
+            {activeTab !== 'create' && activeTab !== 'quality' && (
               <>
                 <button
                   onClick={handleImportClick}
@@ -353,6 +357,8 @@ export function FactoryDashboard() {
         <div className="flex gap-1 mt-6 overflow-x-auto">
           {[
             { id: 'create' as TabId, label: 'Create', icon: Wand2 },
+            { id: 'designer' as TabId, label: 'Data Designer', icon: Sparkles },
+            { id: 'quality' as TabId, label: 'Quality', icon: GitBranch },
             { id: 'seeds' as TabId, label: 'Seeds', icon: Layers, badge: config.seeds.length > 0 ? config.seeds.length : undefined },
             { id: 'settings' as TabId, label: 'Settings', icon: Settings },
             { id: 'jobs' as TabId, label: 'Jobs', icon: RefreshCw, badge: jobs.filter(j => j.status === 'running').length + syntheticJobs.filter(j => j.status === 'running').length || undefined },
@@ -793,7 +799,7 @@ export function FactoryDashboard() {
                                   value={constraint.type}
                                   onChange={(e) => {
                                     const updated = [...(column.constraints || [])]
-                                    updated[idx] = { ...constraint, type: e.target.value }
+                                    updated[idx] = { ...constraint, type: e.target.value as ColumnConstraint['type'] }
                                     updateColumn(column.id, { constraints: updated })
                                   }}
                                   className="input text-sm"
@@ -834,7 +840,7 @@ export function FactoryDashboard() {
                             ))}
                             <button
                               onClick={() => {
-                                const updated = [...(column.constraints || []), { type: 'regex', value: '', error_message: '' }]
+                                const updated: ColumnConstraint[] = [...(column.constraints || []), { type: 'regex', value: '', error_message: '' }]
                                 updateColumn(column.id, { constraints: updated })
                               }}
                               className="font-mono text-xs uppercase tracking-widest text-accent-dark hover:underline"
@@ -881,6 +887,12 @@ export function FactoryDashboard() {
             </div>
           </div>
         )}
+
+        {/* Data Designer Tab */}
+        {activeTab === 'designer' && <DataDesignerTab />}
+
+        {/* Quality Tab - decision-DPO mining + trace-quality toggles */}
+        {activeTab === 'quality' && <DecisionDpoPanel />}
 
         {/* Seeds Tab */}
         {activeTab === 'seeds' && (

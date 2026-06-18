@@ -62,7 +62,7 @@ We achieved multi-provider by adding multiple `ModelProvider` entries and assign
 dd.LLMStructuredColumnConfig(
     name="solution",
     provider="nvidia-nim",  # Explicit provider for this column
-    model="qwen/qwen2.5-coder-32b-instruct",
+    model="deepseek-ai/deepseek-v4-flash",
     ...
 )
 ```

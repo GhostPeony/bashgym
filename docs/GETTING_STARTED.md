@@ -124,12 +124,12 @@ The factory segments multi-task sessions into individual training examples, scru
 Open the **Training** dashboard:
 
 1. Select **SFT** (Supervised Fine-Tuning) as the strategy
-2. Choose a base model — any HuggingFace model works. `Qwen/Qwen2.5-Coder-1.5B-Instruct` is the default and trains fast
+2. Choose a base model — any HuggingFace model works (training is accelerated with Unsloth). Smaller models train fast on a consumer GPU; larger ones run on the DGX Spark. See the [Unsloth model catalog](https://unsloth.ai/docs/get-started/unsloth-model-catalog) for current options
 3. Select which repos to train on (or use all gold traces)
 4. Click **Start Training**
 5. Watch the live loss curve and training logs
 
-Training a 1.5B model with LoRA typically takes 30-90 minutes depending on your GPU and trace count. The model auto-exports to GGUF when complete.
+Training a small model with LoRA typically takes 30-90 minutes depending on your GPU and trace count. The model auto-exports to GGUF when complete.
 
 ### Cloud Training Alternative
 

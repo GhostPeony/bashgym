@@ -4,9 +4,6 @@ Uses FastAPI TestClient against the actual route handlers
 with mocked LLM and CLI backends.
 """
 
-import asyncio
-import json
-import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -15,16 +12,11 @@ from fastapi.testclient import TestClient
 from bashgym.api.routes import create_app
 from bashgym.orchestrator.models import (
     LLMConfig,
-    LLMProvider,
     OrchestratorSpec,
-    TaskNode,
     TaskStatus,
-    WorkerResult,
 )
 from bashgym.orchestrator.task_dag import TaskDAG
-
-from tests.orchestrator.conftest import THREE_TASK_DECOMPOSITION, make_task, make_result
-
+from tests.orchestrator.conftest import make_result, make_task
 
 # =============================================================================
 # Fixtures
@@ -47,6 +39,7 @@ def client(app):
 def clear_jobs():
     """Clear the in-memory job store before each test."""
     from bashgym.api import orchestrator_routes
+
     orchestrator_routes._jobs.clear()
     yield
     orchestrator_routes._jobs.clear()
@@ -134,7 +127,12 @@ class TestApproveEndpoint:
     """Tests for POST /api/orchestrate/{job_id}/approve."""
 
     def test_approve_starts_execution(self, client):
-        """Submit → manually set to awaiting_approval → approve → executing."""
+        """Submit → manually set to awaiting_approval → approve → dispatched.
+
+        The approve endpoint now returns the task list for frontend terminal
+        dispatch (status 'dispatched'); it no longer starts a background
+        subprocess, so there is nothing to patch.
+        """
         from bashgym.api import orchestrator_routes
         from bashgym.orchestrator.agent import OrchestrationAgent
 
@@ -143,8 +141,10 @@ class TestApproveEndpoint:
         dag.add_task(make_task("t1"))
 
         spec = OrchestratorSpec(
-            title="Test", description="Test desc",
-            max_budget_usd=5.0, max_workers=3,
+            title="Test",
+            description="Test desc",
+            max_budget_usd=5.0,
+            max_workers=3,
         )
 
         agent = MagicMock(spec=OrchestrationAgent)
@@ -162,19 +162,16 @@ class TestApproveEndpoint:
             "error": None,
         }
 
-        with patch(
-            "bashgym.api.orchestrator_routes._execute_dag",
-            new_callable=AsyncMock,
-        ):
-            resp = client.post(
-                f"/api/orchestrate/{job_id}/approve",
-                json={"base_branch": "main"},
-            )
+        resp = client.post(
+            f"/api/orchestrate/{job_id}/approve",
+            json={"base_branch": "main"},
+        )
 
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] == "executing"
+        assert data["status"] == "dispatched"
         assert data["task_count"] == 1
+        assert [t["id"] for t in data["tasks"]] == ["t1"]
 
     def test_approve_nonexistent_job_returns_404(self, client):
         """Approve unknown job_id → 404."""
@@ -301,7 +298,8 @@ class TestRetryEndpoint:
         dag.add_task(task)
 
         spec = OrchestratorSpec(
-            title="Test", description="desc",
+            title="Test",
+            description="desc",
             base_branch="main",
         )
 
@@ -343,7 +341,9 @@ class TestRetryEndpoint:
         dag.add_task(task)
 
         spec = OrchestratorSpec(
-            title="Test", description="desc", base_branch="main",
+            title="Test",
+            description="desc",
+            base_branch="main",
         )
 
         orchestrator_routes._jobs["job-rtp"] = {

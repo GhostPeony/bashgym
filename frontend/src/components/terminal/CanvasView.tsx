@@ -11,6 +11,8 @@ import {
   addEdge,
   Connection,
   Node,
+  Edge,
+  NodeChange,
   BackgroundVariant,
   Panel as FlowPanel,
   Viewport,
@@ -33,6 +35,10 @@ import { MasterControlPanel } from './MasterControlPanel'
 import { AlertCircle } from 'lucide-react'
 
 const VIEWPORT_KEY = 'bashgym_canvas_viewport'
+
+// Union of all node data shapes rendered on the canvas
+type CanvasNodeData = TerminalNodeData | PreviewNodeData | BrowserNodeData | IntegrationNodeData
+type CanvasFlowNode = Node<CanvasNodeData>
 
 // Load saved viewport
 const loadViewport = (): Viewport | null => {
@@ -190,8 +196,8 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
   const canvasNodesRef = useRef(canvasNodes)
   canvasNodesRef.current = canvasNodes
 
-  const [nodes, setNodes, onNodesChange] = useNodesState([])
-  const [edges, setEdges, onEdgesChange] = useEdgesState([])
+  const [nodes, setNodes, onNodesChange] = useNodesState<CanvasFlowNode>([])
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
 
   // Sync React Flow edges to Zustand store for cross-component routing (e.g. BrowserPane screenshot routing)
   useEffect(() => {
@@ -252,11 +258,11 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
   }, [setNodes]) // setNodes is stable; callbacks accessed via ref
 
   // Handle node position changes
-  const handleNodesChange = useCallback((changes: any) => {
+  const handleNodesChange = useCallback((changes: NodeChange<CanvasFlowNode>[]) => {
     onNodesChange(changes)
 
     // Save position changes
-    changes.forEach((change: any) => {
+    changes.forEach((change) => {
       if (change.type === 'position' && change.position && !change.dragging) {
         updateCanvasNode(change.id, change.position)
       }
@@ -291,6 +297,8 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
             updated = addEdge({
               source: a,
               target: b,
+              sourceHandle: null,
+              targetHandle: null,
               animated: true,
               style: { stroke: 'var(--accent)', strokeWidth: 2 }
             }, updated)

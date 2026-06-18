@@ -54,7 +54,7 @@ export function OnboardingModal() {
       // Check hooks
       const hooksResult = await hooksApi.getStatus()
       if (hooksResult.ok && hooksResult.data) {
-        setHooksInstalled(hooksResult.data.all_installed)
+        setHooksInstalled(hooksResult.data.all_installed ?? false)
         if (hooksResult.data.all_installed && currentStep === 0) {
           setCurrentStep(1)
         }

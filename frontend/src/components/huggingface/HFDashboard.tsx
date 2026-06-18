@@ -14,16 +14,22 @@ import {
   XCircle,
   Eye,
   EyeOff,
-  Package
+  Package,
+  HardDrive,
+  Search,
+  FileText
 } from 'lucide-react'
 import { hfApi, HFStatus } from '../../services/api'
 import { CloudTraining } from './CloudTraining'
 import { SpaceManager } from './SpaceManager'
 import { DatasetBrowser } from './DatasetBrowser'
 import { MyModels } from './MyModels'
+import { BucketsTab } from './BucketsTab'
+import { ResearchTab } from './ResearchTab'
+import { TracesTab } from './TracesTab'
 import { clsx } from 'clsx'
 
-type Tab = 'training' | 'spaces' | 'datasets' | 'models'
+type Tab = 'training' | 'spaces' | 'datasets' | 'models' | 'buckets' | 'research' | 'traces'
 
 export function HFDashboard() {
   const [status, setStatus] = useState<HFStatus | null>(null)
@@ -231,6 +237,24 @@ export function HFDashboard() {
       icon: Package,
       requiresPro: false,
     },
+    {
+      id: 'buckets' as Tab,
+      label: 'Buckets',
+      icon: HardDrive,
+      requiresPro: false,
+    },
+    {
+      id: 'research' as Tab,
+      label: 'Research',
+      icon: Search,
+      requiresPro: false,
+    },
+    {
+      id: 'traces' as Tab,
+      label: 'Traces',
+      icon: FileText,
+      requiresPro: false,
+    },
   ]
 
   return (
@@ -340,6 +364,9 @@ export function HFDashboard() {
         {activeTab === 'spaces' && <SpaceManager />}
         {activeTab === 'datasets' && <DatasetBrowser />}
         {activeTab === 'models' && <MyModels />}
+        {activeTab === 'buckets' && <BucketsTab />}
+        {activeTab === 'research' && <ResearchTab />}
+        {activeTab === 'traces' && <TracesTab />}
       </div>
     </div>
   )

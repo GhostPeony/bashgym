@@ -38,6 +38,10 @@ export interface TrainingConfig {
   dpoBeta?: number
   grpoNumGenerations?: number
   grpoTemperature?: number
+  grpoLossType?: string  // grpo | gspo | dr_grpo | dapo | bnpo
+  grpoBackend?: string   // auto | unsloth | plain | trl_vllm
+  grpoUseVllm?: boolean
+  useLiger?: boolean     // plain backend: Liger fused-linear-CE (262k-vocab OOM fix)
   // Knowledge Distillation
   teacherModel?: string
   teacherTemperature?: number
@@ -82,6 +86,18 @@ export interface TrainingLog {
   level: 'info' | 'warning' | 'error'
 }
 
+export interface GrpoMetric {
+  step: number
+  loss?: number
+  reward?: number
+  rewardStd?: number
+  fracRewardZeroStd?: number
+  kl?: number
+  gradNorm?: number
+  learningRate?: number
+  timestamp: number
+}
+
 interface TrainingState {
   // Current training
   currentRun: TrainingRun | null
@@ -94,6 +110,13 @@ interface TrainingState {
   // Training logs
   logs: TrainingLog[]
 
+  // Parsed GRPO per-step metrics (extracted from training:log TRL stats dicts)
+  grpoMetrics: GrpoMetric[]
+
+  // Cross-component overrides applied on next TrainingConfig open
+  baseModelOverride: string | null
+  datasetPathOverride: string | null
+
   // Actions
   startTraining: (config: TrainingConfig) => Promise<string>
   pauseTraining: () => Promise<void>
@@ -105,9 +128,45 @@ interface TrainingState {
   setConnected: (connected: boolean) => void
   addLog: (log: TrainingLog) => void
   clearLogs: () => void
+  clearGrpoMetrics: () => void
+  setBaseModelOverride: (path: string | null) => void
+  setDatasetPathOverride: (path: string | null) => void
   hydrateFromReconnect: (runId: string, metrics: TrainingMetrics) => void
 
   getRun: (id: string) => TrainingRun | undefined
+}
+
+// TRL stats dicts look like: {'loss': 0.12, 'grad_norm': 0.4, 'learning_rate': 2e-5,
+//   'reward': 0.5, 'reward_std': 0.1, 'frac_reward_zero_std': 0.3, 'kl': 0.02,
+//   'epoch': 0.1, 'step': 42, ...}. We do a fast substring gate then regex-extract fields.
+const STATS_SIGNATURE_KEYS = ["'loss':", "'kl':"]
+const FIELD_RE = /'([a-z_]+)':\s*([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?|nan|inf|-inf)/g
+
+function parseStatsLine(line: string): GrpoMetric | null {
+  if (!STATS_SIGNATURE_KEYS.every((k) => line.includes(k))) return null
+  const parsed: Record<string, number> = {}
+  let match: RegExpExecArray | null
+  FIELD_RE.lastIndex = 0
+  while ((match = FIELD_RE.exec(line)) !== null) {
+    const key = match[1]
+    const raw = match[2]
+    if (raw === 'nan' || raw === 'inf' || raw === '-inf') continue
+    const num = Number(raw)
+    if (Number.isFinite(num)) parsed[key] = num
+  }
+  if (!('loss' in parsed) && !('reward' in parsed)) return null
+  const step = parsed.step ?? 0
+  return {
+    step,
+    loss: parsed.loss,
+    reward: parsed.reward,
+    rewardStd: parsed.reward_std,
+    fracRewardZeroStd: parsed.frac_reward_zero_std,
+    kl: parsed.kl,
+    gradNorm: parsed.grad_norm,
+    learningRate: parsed.learning_rate,
+    timestamp: Date.now(),
+  }
 }
 
 export const useTrainingStore = create<TrainingState>((set, get) => ({
@@ -116,6 +175,9 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
   lossHistory: [],
   isConnected: false,
   logs: [],
+  grpoMetrics: [],
+  baseModelOverride: null,
+  datasetPathOverride: null,
 
   startTraining: async (config: TrainingConfig) => {
     // Set initial state
@@ -132,7 +194,8 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
       currentRun: tempRun,
       runs: [...get().runs, tempRun],
       lossHistory: [],
-      logs: []  // Clear logs when starting new training
+      logs: [],  // Clear logs when starting new training
+      grpoMetrics: []
     })
 
     try {
@@ -157,6 +220,10 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
         dpo_beta: config.dpoBeta,
         grpo_num_generations: config.grpoNumGenerations,
         grpo_temperature: config.grpoTemperature,
+        grpo_loss_type: config.grpoLossType,
+        grpo_backend: config.grpoBackend,
+        grpo_use_vllm: config.grpoUseVllm,
+        use_liger: config.useLiger,
         // Knowledge Distillation
         teacher_model: config.teacherModel,
         teacher_temperature: config.teacherTemperature,
@@ -329,12 +396,28 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
   },
 
   addLog: (log: TrainingLog) => {
+    const parsed = parseStatsLine(log.message)
     set((state) => ({
-      logs: [...state.logs, log].slice(-1000) // Keep last 1000 logs
+      logs: [...state.logs, log].slice(-1000),
+      grpoMetrics: parsed
+        ? [...state.grpoMetrics, parsed].slice(-300)
+        : state.grpoMetrics,
     }))
   },
 
   clearLogs: () => {
     set({ logs: [] })
-  }
+  },
+
+  clearGrpoMetrics: () => {
+    set({ grpoMetrics: [] })
+  },
+
+  setBaseModelOverride: (path: string | null) => {
+    set({ baseModelOverride: path })
+  },
+
+  setDatasetPathOverride: (path: string | null) => {
+    set({ datasetPathOverride: path })
+  },
 }))

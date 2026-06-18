@@ -3,7 +3,12 @@
 
 import pytest
 from fastapi.testclient import TestClient
+
 from bashgym.api.routes import app
+
+# These endpoints invoke the real synthetic-data generator (NVIDIA NIM / Anthropic)
+# with no mock, so they make live outbound calls — gate behind --run-network.
+pytestmark = pytest.mark.network
 
 client = TestClient(app)
 
@@ -13,13 +18,16 @@ class TestSyntheticGenerateEndpoint:
 
     def test_post_synthetic_generate(self):
         """Should accept synthetic generation request and return job ID."""
-        response = client.post("/api/factory/synthetic/generate", json={
-            "strategy": "trace_seeded",
-            "repo_filter": "single",
-            "selected_repos": ["ghostwork"],
-            "preset": "quick_test",
-            "provider": "nim"
-        })
+        response = client.post(
+            "/api/factory/synthetic/generate",
+            json={
+                "strategy": "trace_seeded",
+                "repo_filter": "single",
+                "selected_repos": ["ghostwork"],
+                "preset": "quick_test",
+                "provider": "nim",
+            },
+        )
 
         assert response.status_code in [200, 202]
         data = response.json()
@@ -39,10 +47,9 @@ class TestSyntheticGenerateEndpoint:
 
     def test_post_synthetic_generate_augmented_strategy(self):
         """Should accept augmented strategy."""
-        response = client.post("/api/factory/synthetic/generate", json={
-            "strategy": "augmented",
-            "preset": "balanced"
-        })
+        response = client.post(
+            "/api/factory/synthetic/generate", json={"strategy": "augmented", "preset": "balanced"}
+        )
 
         assert response.status_code == 200
         data = response.json()
@@ -50,10 +57,10 @@ class TestSyntheticGenerateEndpoint:
 
     def test_post_synthetic_generate_schema_driven_strategy(self):
         """Should accept schema_driven strategy."""
-        response = client.post("/api/factory/synthetic/generate", json={
-            "strategy": "schema_driven",
-            "preset": "quick_test"
-        })
+        response = client.post(
+            "/api/factory/synthetic/generate",
+            json={"strategy": "schema_driven", "preset": "quick_test"},
+        )
 
         assert response.status_code == 200
         data = response.json()
@@ -66,9 +73,9 @@ class TestJobStatusEndpoint:
     def test_get_job_status(self):
         """Should return job status for existing job."""
         # First create a job
-        create_response = client.post("/api/factory/synthetic/generate", json={
-            "preset": "quick_test"
-        })
+        create_response = client.post(
+            "/api/factory/synthetic/generate", json={"preset": "quick_test"}
+        )
         job_id = create_response.json()["job_id"]
 
         # Then check status
@@ -93,9 +100,7 @@ class TestListJobsEndpoint:
     def test_list_jobs(self):
         """Should list all jobs."""
         # Create a job first
-        client.post("/api/factory/synthetic/generate", json={
-            "preset": "quick_test"
-        })
+        client.post("/api/factory/synthetic/generate", json={"preset": "quick_test"})
 
         response = client.get("/api/factory/synthetic/jobs")
 

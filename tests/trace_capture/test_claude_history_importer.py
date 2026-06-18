@@ -375,7 +375,7 @@ class TestPerStepEnrichment:
         assert steps[0].metadata["assistant_text"] == "Let me check the code."
 
     def test_thinking_truncation(self, tmp_path):
-        long_thinking = "X" * 5000
+        long_thinking = "X" * 12000
         events = [
             {"type": "user", "message": {"content": "go"}, "cwd": "/repo"},
             _assistant_event(
@@ -386,9 +386,9 @@ class TestPerStepEnrichment:
         f = _write_session(events, tmp_path)
         importer = ClaudeSessionImporter()
 
-        # Default truncation at 2000
+        # Default thinking truncation is 10000 chars (the 10KB thinking limit)
         steps, _ = importer.parse_session_file(f)
-        assert len(steps[0].metadata["thinking_content"]) == 2000
+        assert len(steps[0].metadata["thinking_content"]) == 10000
 
         # Custom truncation
         steps2, _ = importer.parse_session_file(f, thinking_max_chars=500)

@@ -89,7 +89,7 @@ class APISettings:
     # Anthropic (Claude)
     anthropic_api_key: str = field(default_factory=lambda: get_env("ANTHROPIC_API_KEY"))
     anthropic_model: str = field(
-        default_factory=lambda: get_env("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
+        default_factory=lambda: get_env("ANTHROPIC_MODEL", "claude-sonnet-4-6")
     )
 
     # OpenAI
@@ -691,7 +691,7 @@ ANTHROPIC_API_KEY=your-anthropic-key-here
 NVIDIA_API_KEY=your-nvidia-key-here
 
 # Optional API Settings
-ANTHROPIC_MODEL=claude-sonnet-4-20250514
+ANTHROPIC_MODEL=claude-sonnet-4-6
 NEMO_ENDPOINT=http://localhost:8000
 NIM_ENDPOINT=https://integrate.api.nvidia.com/v1
 NIM_MODEL=meta/llama-3.1-70b-instruct

@@ -38,6 +38,10 @@ docs/
 
 # Data and models (large/local)
 data/
+data-fixed/
+data-pipeline-fixed/
+data-rebuilt/
+data-pipeline/
 unsloth_compiled_cache/
 result.json
 
@@ -51,7 +55,12 @@ node_modules/
 nul
 =*
 output/
+# NeMo Data Designer create() default artifact output
+artifacts/
+# DataDesignerPipeline.export_nemo default output
+data/designer_output/
 
 # Assistant secrets
 assistant/config/config.json
 assistant/.env
+.gstack/

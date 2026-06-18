@@ -36,11 +36,16 @@ export function TerminalGrid() {
   // Prevent React Strict Mode from creating multiple terminals
   const initializedRef = useRef(false)
 
-  // Create initial terminal on mount if none exist
+  // On first mount: re-adopt any live PTY sessions from the main process,
+  // then create a fresh terminal only if none were restored.
   useEffect(() => {
     if (panels.length === 0 && !initializedRef.current) {
       initializedRef.current = true
-      createTerminal()
+      useTerminalStore.getState().restoreSessions().then((restored) => {
+        if (restored === 0 && useTerminalStore.getState().panels.length === 0) {
+          createTerminal()
+        }
+      })
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -73,18 +78,6 @@ export function TerminalGrid() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [canvasPopupPanelId, closeCanvasPopup])
 
-  // Calculate grid layout based on panel count
-  const _getGridClass = () => {
-    const count = panels.length
-    if (count === 0) return ''
-    if (count === 1) return 'grid-cols-1'
-    if (count === 2) return 'grid-cols-2'
-    if (count === 3) return 'grid-cols-2 grid-rows-2'
-    if (count === 4) return 'grid-cols-2 grid-rows-2'
-    if (count <= 6) return 'grid-cols-3 grid-rows-2'
-    return 'grid-cols-3 grid-rows-3'
-  }
-
   // Get span class for 3-panel layout
   const getSpanClass = (index: number, total: number) => {
     if (total === 3 && index === 2) {
@@ -106,18 +99,6 @@ export function TerminalGrid() {
         return <FolderTree className="w-3.5 h-3.5 flex-shrink-0" />
       default:
         return <Terminal className="w-3.5 h-3.5 flex-shrink-0" />
-    }
-  }
-
-  // Get view mode icon
-  const _getViewModeIcon = () => {
-    switch (viewMode) {
-      case 'grid':
-        return <LayoutGrid className="w-4 h-4" />
-      case 'single':
-        return <Maximize2 className="w-4 h-4" />
-      case 'canvas':
-        return <Layers className="w-4 h-4" />
     }
   }
 

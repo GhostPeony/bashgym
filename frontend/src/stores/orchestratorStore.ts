@@ -288,9 +288,8 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
   fetchJobs: async () => {
     const result = await orchestratorApi.listJobs()
     if (result.ok && result.data) {
-      const jobsList = (result.data.jobs || result.data || []) as any[]
       set({
-        jobs: jobsList.map((j: any) => ({
+        jobs: (result.data.jobs ?? []).map((j) => ({
           jobId: j.job_id,
           status: j.status,
           title: j.title || j.job_id,

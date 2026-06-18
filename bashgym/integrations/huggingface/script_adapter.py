@@ -77,7 +77,7 @@ class CloudScriptConfig:
     dpo_beta: float = 0.1
 
     # Distillation-specific
-    teacher_model: str = "claude-sonnet-4-20250514"
+    teacher_model: str = "claude-sonnet-4-6"
     distillation_alpha: float = 0.5
     teacher_temperature: float = 0.7
 

@@ -671,6 +671,22 @@ class ModelRegistry:
         self._save_index()
         return profile
 
+    def record_heldout_eval(self, model_id: str, report: dict[str, Any]) -> ModelProfile | None:
+        """Record a held-out trace eval verdict against a model.
+
+        ``report`` is a ``HeldoutReport.to_dict()`` — passed as a plain dict so the
+        registry stays decoupled from ``bashgym.eval``. Persists the profile + index
+        so the deploy gate can query ``profile.latest_heldout_eval``.
+        """
+        profile = self._profiles.get(model_id)
+        if not profile:
+            return None
+        profile.add_heldout_eval(report)
+        profile.update_status()
+        profile.save()
+        self._save_index()
+        return profile
+
 
 # Singleton registry instance
 _registry: ModelRegistry | None = None

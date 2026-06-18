@@ -17,10 +17,12 @@ import {
   X,
   AlertTriangle,
   XCircle,
-  Timer
+  Timer,
+  GitCompare
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import { modelsApi, evaluatorApi } from '../../services/api'
+import { HeldoutGatePanel } from './HeldoutGatePanel'
 
 // Benchmark categories and their benchmarks
 // All benchmarks load from HuggingFace datasets on first run
@@ -207,6 +209,7 @@ export function EvaluatorDashboard() {
   const [isRunning, setIsRunning] = useState(false)
   const [selectedJob, setSelectedJob] = useState<EvalJob | null>(null)
   const [availableModels, setAvailableModels] = useState<string[]>([])
+  const [mode, setMode] = useState<'benchmarks' | 'heldout'>('benchmarks')
 
   useEffect(() => {
     // Load available models from API
@@ -216,11 +219,12 @@ export function EvaluatorDashboard() {
         const result = await modelsApi.list()
         console.log('[Evaluator] Models result:', result)
         if (result.ok && result.data) {
-          // Extract model IDs from the response
-          setAvailableModels(result.data.map(m => m.model_id))
+          // Extract model IDs from the response (API returns { models, total })
+          const models = result.data.models
+          setAvailableModels(models.map(m => m.model_id))
           // Auto-select first model if none selected
-          if (result.data.length > 0 && !config.model) {
-            setConfig(prev => ({ ...prev, model: result.data![0].model_id }))
+          if (models.length > 0 && !config.model) {
+            setConfig(prev => ({ ...prev, model: models[0].model_id }))
           }
         }
       } catch (error) {
@@ -365,30 +369,61 @@ export function EvaluatorDashboard() {
               <span className="tag"><span>EVALUATOR</span></span>
             </div>
             <p className="text-sm text-text-secondary mt-1">
-              Run comprehensive benchmarks on your trained models
+              Benchmark suites and the held-out ship/no-ship gate for your trained models
             </p>
           </div>
+          {mode === 'benchmarks' && (
+            <button
+              onClick={runEvaluation}
+              disabled={isRunning || !config.model || config.benchmarks.length === 0}
+              className="btn-primary flex items-center gap-2"
+            >
+              {isRunning ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Running...
+                </>
+              ) : (
+                <>
+                  <Play className="w-4 h-4" />
+                  Run Evaluation
+                </>
+              )}
+            </button>
+          )}
+        </div>
+
+        {/* Mode tabs */}
+        <div className="flex items-center gap-2 mt-4">
           <button
-            onClick={runEvaluation}
-            disabled={isRunning || !config.model || config.benchmarks.length === 0}
-            className="btn-primary flex items-center gap-2"
-          >
-            {isRunning ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Running...
-              </>
-            ) : (
-              <>
-                <Play className="w-4 h-4" />
-                Run Evaluation
-              </>
+            onClick={() => setMode('benchmarks')}
+            className={clsx(
+              'flex items-center gap-2 px-3 py-1.5 border-brutal rounded-brutal font-mono text-xs uppercase tracking-widest transition-colors',
+              mode === 'benchmarks'
+                ? 'bg-accent-light border-border text-text-primary'
+                : 'bg-background-secondary border-border-subtle text-text-muted hover:border-border'
             )}
+          >
+            <BarChart3 className="w-4 h-4" /> Benchmarks
+          </button>
+          <button
+            onClick={() => setMode('heldout')}
+            className={clsx(
+              'flex items-center gap-2 px-3 py-1.5 border-brutal rounded-brutal font-mono text-xs uppercase tracking-widest transition-colors',
+              mode === 'heldout'
+                ? 'bg-accent-light border-border text-text-primary'
+                : 'bg-background-secondary border-border-subtle text-text-muted hover:border-border'
+            )}
+          >
+            <GitCompare className="w-4 h-4" /> Held-out Gate
           </button>
         </div>
       </div>
 
       <div className="flex-1 overflow-auto p-6">
+        {mode === 'heldout' ? (
+          <HeldoutGatePanel />
+        ) : (
         <div className="grid grid-cols-3 gap-6">
           {/* Left: Benchmark Selection */}
           <div className="col-span-2 space-y-4">
@@ -737,6 +772,7 @@ export function EvaluatorDashboard() {
             </div>
           </div>
         </div>
+        )}
       </div>
     </div>
   )

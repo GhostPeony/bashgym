@@ -46,7 +46,7 @@ class AgentConfig:
 
     # Claude Code settings
     claude_cli_path: str = "claude"
-    model: str = "claude-sonnet-4-20250514"
+    model: str = "claude-sonnet-4-6"
     max_tokens: int = 8192
 
     # Execution settings

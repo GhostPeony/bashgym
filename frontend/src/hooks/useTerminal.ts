@@ -9,7 +9,7 @@ interface UseTerminalOptions {
 }
 
 interface UseTerminalReturn {
-  terminalRef: React.RefObject<HTMLDivElement>
+  terminalRef: React.RefObject<HTMLDivElement | null>
   terminal: Terminal | null
   isReady: boolean
   write: (data: string) => void

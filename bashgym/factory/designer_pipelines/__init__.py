@@ -7,6 +7,8 @@ a DataDesignerConfigBuilder with the full column DAG configured.
 Pipeline builders are registered in PIPELINES for lookup by name.
 """
 
+import os
+import sys
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -17,10 +19,17 @@ if TYPE_CHECKING:
 
 try:
     import data_designer.config as dd
+    from data_designer.engine.secret_resolver import (
+        CompositeResolver,
+        EnvironmentResolver,
+        PlaintextResolver,
+    )
 
     DATA_DESIGNER_AVAILABLE = True
+    HAS_MCP = hasattr(dd, "ToolConfig") and hasattr(dd, "LocalStdioMCPProvider")
 except ImportError:
     DATA_DESIGNER_AVAILABLE = False
+    HAS_MCP = False
 
 # Registry of available pipeline builders
 # Each entry maps a name to a function: (PipelineConfig) -> DataDesignerConfigBuilder
@@ -40,21 +49,151 @@ def _env_key_for_provider(provider: str) -> str:
     return mapping.get(provider, "NVIDIA_API_KEY")
 
 
-def build_base_config(config: "PipelineConfig") -> "dd.DataDesignerConfigBuilder":
-    """Build the shared ModelConfig + ModelProvider base for all pipelines.
+def build_model_providers(config: "PipelineConfig") -> "list[dd.ModelProvider]":
+    """Build the dd.ModelProvider list for the DataDesigner instance.
 
+    As of Data Designer 0.6.x, providers are attached to the ``DataDesigner``
+    object (``DataDesigner(model_providers=...)``), not to the config builder.
     Handles both single-provider (legacy) and multi-provider configurations.
-    Each pipeline builder calls this, then adds its specific columns on top.
     """
     if not DATA_DESIGNER_AVAILABLE:
-        raise ImportError("data-designer>=0.5.0 is required")
+        raise ImportError("data-designer>=0.6.1 is required")
 
-    # Build model configs (same for single or multi-provider)
+    # api_key carries the env-var NAME (resolved by EnvironmentResolver in
+    # build_secret_resolver) unless an explicit key is supplied, in which case the
+    # PlaintextResolver fallback uses it verbatim. Data Designer 0.6.x does NOT
+    # expand "${VAR}" placeholders, so the bare name is required.
+    if config.providers:
+        # Multi-provider: each ProviderSpec becomes a ModelProvider
+        return [
+            dd.ModelProvider(
+                name=prov.name,
+                endpoint=prov.endpoint,
+                provider_type="openai",
+                api_key=prov.api_key or _env_key_for_provider(prov.name),
+            )
+            for prov in config.providers
+        ]
+    # Single-provider (legacy/backward compat)
+    return [
+        dd.ModelProvider(
+            name=config.provider,
+            endpoint=config.provider_endpoint,
+            provider_type="openai",
+            api_key=config.provider_api_key or _env_key_for_provider(config.provider),
+        ),
+    ]
+
+
+def build_secret_resolver():
+    """Resolver for ModelProvider api_keys (Data Designer 0.6.x).
+
+    Treats ``api_key`` as an environment-variable NAME first (EnvironmentResolver),
+    then falls back to using it verbatim as a literal secret (PlaintextResolver).
+    """
+    if not DATA_DESIGNER_AVAILABLE:
+        raise ImportError("data-designer>=0.6.1 is required")
+    return CompositeResolver([EnvironmentResolver(), PlaintextResolver()])
+
+
+SANDBOX_MCP_NAME = "bashgym-sandbox"
+
+
+def build_mcp_providers(config: "PipelineConfig") -> list:
+    """Build dd.LocalStdioMCPProvider list for the DataDesigner instance.
+
+    Returns the BashGym sandbox MCP server (launched as ``python -m
+    bashgym.mcp.sandbox_server``) when ``config.enable_tools`` is set, else [].
+    The ``BASHGYM_MCP_BACKEND`` env var (docker|local|auto) selects the executor.
+    """
+    if not (DATA_DESIGNER_AVAILABLE and HAS_MCP and getattr(config, "enable_tools", False)):
+        return []
+    # Pass a full env so the subprocess can import bashgym (PYTHONPATH) and emit
+    # UTF-8; merge over the parent environment rather than replacing it.
+    env = dict(os.environ)
+    env["BASHGYM_MCP_BACKEND"] = getattr(config, "mcp_backend", "auto")
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONPATH"] = os.pathsep.join(filter(None, [os.getcwd(), env.get("PYTHONPATH", "")]))
+    return [
+        dd.LocalStdioMCPProvider(
+            name=SANDBOX_MCP_NAME,
+            command=sys.executable,
+            args=["-m", "bashgym.mcp.sandbox_server"],
+            env=env,
+        )
+    ]
+
+
+def messages_schema_transform(
+    user_col: str,
+    assistant_col: str,
+    system_prompt: str | None = None,
+    name: str = "to_messages",
+):
+    """Build a SchemaTransformProcessorConfig that emits a ChatML ``messages`` column.
+
+    The 0.6.x-native export path: maps generated columns to an OpenAI-style
+    ``messages`` list via Jinja, usable as a workflow stage ``output_processor``
+    (replaces hand-written JSONL assembly).
+    """
+    if not DATA_DESIGNER_AVAILABLE:
+        raise ImportError("data-designer>=0.6.1 is required")
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": "{{ " + user_col + " }}"})
+    messages.append({"role": "assistant", "content": "{{ " + assistant_col + " }}"})
+    return dd.SchemaTransformProcessorConfig(name=name, template={"messages": messages})
+
+
+def build_sandbox_tool_config(config: "PipelineConfig"):
+    """Build the dd.ToolConfig granting the sandbox MCP tools to LLM columns."""
+    if not (DATA_DESIGNER_AVAILABLE and HAS_MCP):
+        raise ImportError("data-designer>=0.6.1 with MCP support is required")
+    return dd.ToolConfig(
+        tool_alias=getattr(config, "mcp_tool_alias", "sandbox"),
+        providers=[SANDBOX_MCP_NAME],
+        allow_tools=["bash", "read_file", "write_file", "edit_file", "grep", "list_files"],
+        max_tool_call_turns=getattr(config, "mcp_max_tool_turns", 8),
+        timeout_sec=getattr(config, "mcp_tool_timeout_sec", 120),
+    )
+
+
+def _provider_name_for(alias: str, config: "PipelineConfig") -> str:
+    """Resolve which provider serves a given model alias.
+
+    In multi-provider mode a ProviderSpec may declare the aliases it serves via
+    ``models``; otherwise the first provider is used. In single-provider mode the
+    one configured provider serves every alias.
+    """
+    if config.providers:
+        for prov in config.providers:
+            if alias in prov.models:
+                return prov.name
+        return config.providers[0].name
+    return config.provider
+
+
+def build_base_config(
+    config: "PipelineConfig", tool_configs: "list | None" = None
+) -> "dd.DataDesignerConfigBuilder":
+    """Build the shared ModelConfig base for all pipelines (Data Designer 0.6.x).
+
+    Each ModelConfig binds to a provider by name; the providers themselves are
+    created by ``build_model_providers`` and attached to the DataDesigner
+    instance. Each pipeline builder calls this, then adds its columns on top.
+    ``tool_configs`` (MCP tool aliases) are attached to the builder for tool-use
+    pipelines.
+    """
+    if not DATA_DESIGNER_AVAILABLE:
+        raise ImportError("data-designer>=0.6.1 is required")
+
     model_configs = [
         dd.ModelConfig(
             alias="text-model",
             model=config.text_model,
-            inference_parameters=dd.InferenceParameters(
+            provider=_provider_name_for("text-model", config),
+            inference_parameters=dd.ChatCompletionInferenceParams(
                 temperature=config.temperature_text,
                 top_p=0.99,
                 max_tokens=2048,
@@ -63,7 +202,8 @@ def build_base_config(config: "PipelineConfig") -> "dd.DataDesignerConfigBuilder
         dd.ModelConfig(
             alias="code-model",
             model=config.code_model,
-            inference_parameters=dd.InferenceParameters(
+            provider=_provider_name_for("code-model", config),
+            inference_parameters=dd.ChatCompletionInferenceParams(
                 temperature=config.temperature_code,
                 top_p=0.95,
                 max_tokens=4096,
@@ -72,42 +212,18 @@ def build_base_config(config: "PipelineConfig") -> "dd.DataDesignerConfigBuilder
         dd.ModelConfig(
             alias="judge-model",
             model=config.judge_model,
-            inference_parameters=dd.InferenceParameters(
+            provider=_provider_name_for("judge-model", config),
+            inference_parameters=dd.ChatCompletionInferenceParams(
                 temperature=config.temperature_judge,
                 max_tokens=1024,
             ),
         ),
     ]
 
-    # Build providers — multi-provider or single-provider
-    if config.providers:
-        # Multi-provider: each ProviderSpec becomes a ModelProvider
-        model_providers = []
-        for prov in config.providers:
-            api_key = prov.api_key or f"${{{_env_key_for_provider(prov.name)}}}"
-            model_providers.append(
-                dd.ModelProvider(
-                    name=prov.name,
-                    endpoint=prov.endpoint,
-                    provider_type="openai",
-                    api_key=api_key,
-                )
-            )
-    else:
-        # Single-provider (legacy/backward compat)
-        model_providers = [
-            dd.ModelProvider(
-                name=config.provider,
-                endpoint=config.provider_endpoint,
-                provider_type="openai",
-                api_key=f"${{{_env_key_for_provider(config.provider)}}}",
-            ),
-        ]
-
-    return dd.DataDesignerConfigBuilder(
-        model_configs=model_configs,
-        model_providers=model_providers,
-    )
+    builder_kwargs = {"model_configs": model_configs}
+    if tool_configs:
+        builder_kwargs["tool_configs"] = tool_configs
+    return dd.DataDesignerConfigBuilder(**builder_kwargs)
 
 
 def register_pipeline(name: str):
@@ -120,19 +236,86 @@ def register_pipeline(name: str):
     return decorator
 
 
+def ollama_provider_spec(models: list, endpoint: str | None = None, name: str = "ollama"):
+    """ProviderSpec for an OpenAI-compatible Ollama endpoint (e.g. DGX Spark).
+
+    No API key is needed (Ollama ignores auth); ``models`` are the column aliases
+    this provider serves, enabling per-column routing (weakness #7) — e.g. route
+    text/code columns to local/DGX Ollama and the judge to NIM or Claude.
+    Endpoint defaults to ``OLLAMA_BASE_URL`` then ``http://localhost:11434``.
+    """
+    from bashgym.factory.data_designer import ProviderSpec
+
+    endpoint = (endpoint or os.environ.get("OLLAMA_BASE_URL") or "http://localhost:11434").rstrip(
+        "/"
+    )
+    if not endpoint.endswith("/v1"):
+        endpoint += "/v1"
+    # Non-empty api_key so the plaintext resolver passes a value Ollama ignores.
+    return ProviderSpec(name=name, endpoint=endpoint, api_key="ollama", models=list(models))
+
+
+def nim_provider_spec(
+    models: list,
+    name: str = "nvidia",
+    endpoint: str = "https://integrate.api.nvidia.com/v1",
+):
+    """ProviderSpec for NVIDIA NIM serving the given column aliases (uses NVIDIA_API_KEY)."""
+    from bashgym.factory.data_designer import ProviderSpec
+
+    return ProviderSpec(name=name, endpoint=endpoint, models=list(models))
+
+
+def subcategory_sampler(name: str, category_column: str, values: dict):
+    """SamplerColumnConfig: a subcategory conditioned on a parent category column.
+
+    ``values`` maps each parent-category value to its list of subcategory choices —
+    diversity that respects category structure (e.g. language -> framework).
+    """
+    if not DATA_DESIGNER_AVAILABLE:
+        raise ImportError("data-designer>=0.6.1 is required")
+    return dd.SamplerColumnConfig(
+        name=name,
+        sampler_type=dd.SamplerType.SUBCATEGORY,
+        params=dd.SubcategorySamplerParams(category=category_column, values=values),
+    )
+
+
+def persona_sampler(
+    name: str = "persona", with_synthetic_personas: bool = True, locale: str | None = None
+):
+    """SamplerColumnConfig: a Nemotron-Personas persona for prompt-diversity / robustness."""
+    if not DATA_DESIGNER_AVAILABLE:
+        raise ImportError("data-designer>=0.6.1 is required")
+    params_kwargs = {"with_synthetic_personas": with_synthetic_personas}
+    if locale:
+        params_kwargs["locale"] = locale
+    return dd.SamplerColumnConfig(
+        name=name,
+        sampler_type=dd.SamplerType.PERSON,
+        params=dd.PersonSamplerParams(**params_kwargs),
+    )
+
+
 # Import pipeline modules to trigger registration
 try:
+    from bashgym.factory.designer_pipelines.coding_agent_distill import build_distill_pipeline
     from bashgym.factory.designer_pipelines.coding_agent_dpo import build_dpo_pipeline
     from bashgym.factory.designer_pipelines.coding_agent_sft import build_sft_pipeline
     from bashgym.factory.designer_pipelines.from_external import build_external_pipeline
     from bashgym.factory.designer_pipelines.from_unstructured import build_unstructured_pipeline
+    from bashgym.factory.designer_pipelines.mcp_tool_use import build_mcp_tool_use_pipeline
     from bashgym.factory.designer_pipelines.tool_use_sft import build_tool_use_pipeline
 
     PIPELINES["coding_agent_sft"] = build_sft_pipeline
     PIPELINES["coding_agent_dpo"] = build_dpo_pipeline
+    PIPELINES["coding_agent_distill"] = build_distill_pipeline
     PIPELINES["tool_use_sft"] = build_tool_use_pipeline
     PIPELINES["from_external"] = build_external_pipeline
     PIPELINES["from_unstructured"] = build_unstructured_pipeline
+    if HAS_MCP:
+        # Real tool-use pipeline only registers when MCP (ToolConfig) is available.
+        PIPELINES["mcp_tool_use"] = build_mcp_tool_use_pipeline
 except ImportError:
     # data-designer not installed - pipelines unavailable
     pass

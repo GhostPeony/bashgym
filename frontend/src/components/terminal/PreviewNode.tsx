@@ -1,5 +1,5 @@
 import { memo, useCallback, useState, useEffect } from 'react'
-import { Handle, Position, NodeProps } from '@xyflow/react'
+import { Handle, Position, NodeProps, Node } from '@xyflow/react'
 import {
   FileText,
   FileCode,
@@ -17,7 +17,7 @@ import {
 } from 'lucide-react'
 import { clsx } from 'clsx'
 
-export interface PreviewNodeData {
+export interface PreviewNodeData extends Record<string, unknown> {
   panelId: string
   filePath: string
   fileSize?: number
@@ -31,7 +31,7 @@ export interface PreviewNodeData {
   onOpenExternal?: (path: string) => void
 }
 
-export type PreviewNodeType = NodeProps<PreviewNodeData>
+export type PreviewNodeType = Node<PreviewNodeData, 'preview'>
 
 // Get language icon based on file extension/language
 function getLanguageIcon(language?: string, filePath?: string) {
@@ -143,7 +143,7 @@ function getSyntaxColor(language?: string): string {
   return 'border-l-border-subtle'
 }
 
-export const PreviewNode = memo(function PreviewNode({ data, selected }: PreviewNodeType) {
+export const PreviewNode = memo(function PreviewNode({ data, selected }: NodeProps<PreviewNodeType>) {
   const {
     panelId,
     filePath,

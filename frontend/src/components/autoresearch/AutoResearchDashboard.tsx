@@ -1,5 +1,6 @@
 import { Zap } from 'lucide-react'
 import { AutoResearchPanel } from '../training/AutoResearchPanel'
+import { ResearchNewsPanel } from './ResearchNewsPanel'
 import { useAutoResearchStore } from '../../stores/autoresearchStore'
 
 export function AutoResearchDashboard() {
@@ -36,6 +37,9 @@ export function AutoResearchDashboard() {
 
         {/* Main Content */}
         <AutoResearchPanel />
+
+        {/* Research-grounded news feed + advice */}
+        <ResearchNewsPanel />
       </div>
     </div>
   )

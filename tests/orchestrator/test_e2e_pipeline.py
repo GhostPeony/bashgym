@@ -26,6 +26,10 @@ from bashgym.orchestrator.task_dag import TaskDAG
 
 from tests.orchestrator.conftest import make_result, make_task
 
+# E2E pipeline tests drive the orchestrator end-to-end and can block on real
+# agent/LLM calls — gate behind --run-network.
+pytestmark = pytest.mark.network
+
 
 # =============================================================================
 # Spec Decomposition

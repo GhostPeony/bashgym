@@ -1,15 +1,16 @@
 import { useState, useEffect } from 'react'
-import { X, FolderGit2, Database, Sparkles, Info, Cloud, Monitor, Shield, FileText, Server } from 'lucide-react'
+import { X, FolderGit2, Database, Sparkles, Info, Cloud, Monitor, Shield, FileText, Server, AlertCircle, Boxes } from 'lucide-react'
 import type { TrainingConfig as TrainingConfigType, DataSource } from '../../stores'
 import type { TrainingStrategy } from '../../stores'
-import { tracesApi, securityApi, providersApi, cascadeApi, RepoInfo, SecurityDatasetInfo, OllamaModel } from '../../services/api'
+import { tracesApi, securityApi, providersApi, trainingApi, RepoInfo, SecurityDatasetInfo, OllamaModel } from '../../services/api'
 import { useTutorialComplete } from '../../hooks'
 import { clsx } from 'clsx'
 import { DeviceManager } from './DeviceManager'
 import { useDeviceStore } from '../../stores/deviceStore'
+import { useCascadeStore } from '../../stores/cascadeStore'
 
 type TrainingScope = 'all' | 'selected' | 'single'
-type TrainingBackend = 'local' | 'remote_ssh' | 'nemo'
+type TrainingBackend = 'local' | 'remote_ssh' | 'nemo' | 'managed'
 
 interface TrainingConfigProps {
   onClose: () => void
@@ -21,6 +22,9 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
   const [trainingScope, setTrainingScope] = useState<TrainingScope>('all')
   const [selectedRepos, setSelectedRepos] = useState<string[]>([])
   const [trainingBackend, setTrainingBackend] = useState<TrainingBackend>('local')
+  const [managedPlatform, setManagedPlatform] = useState<'together' | 'openai' | 'fireworks'>('together')
+  const [managedAccountId, setManagedAccountId] = useState('')
+  const [managedMsg, setManagedMsg] = useState<string | null>(null)
   const [dataSource, setDataSource] = useState<DataSource>('traces')
   const [securityDatasets, setSecurityDatasets] = useState<SecurityDatasetInfo[]>([])
   const [ollamaModels, setOllamaModels] = useState<OllamaModel[]>([])
@@ -35,6 +39,9 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
   ])
   const [cascadeStepsPerStage, setCascadeStepsPerStage] = useState(200)
   const [cascadeMode, setCascadeMode] = useState<'simulate' | 'real'>('simulate')
+  const cascadeError = useCascadeStore((s) => s.error)
+  const startCascade = useCascadeStore((s) => s.startCascade)
+  const setPreflightError = useCascadeStore((s) => s.setPreflightError)
 
   const [config, setConfig] = useState<TrainingConfigType>({
     strategy: 'sft',
@@ -57,6 +64,10 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
     // GRPO defaults
     grpoNumGenerations: 4,
     grpoTemperature: 0.7,
+    grpoLossType: 'grpo',
+    grpoBackend: 'auto',
+    grpoUseVllm: false,
+    useLiger: false,
     // KD defaults
     teacherModel: 'meta-llama/Llama-3.1-70B-Instruct',
     teacherTemperature: 2.0,
@@ -107,28 +118,46 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    // Cascade RL uses its own API endpoint
+    // Cascade RL uses its own API endpoint + store-driven error surfacing
     if (config.strategy === 'cascade') {
-      try {
-        await cascadeApi.start({
-          domains: cascadeDomains,
-          baseModel: config.baseModel,
-          datasetPath: config.datasetPath || 'data/gold_traces',
-          trainStepsPerStage: cascadeStepsPerStage,
-          grpoNumGenerations: config.grpoNumGenerations ?? 4,
-          grpoTemperature: config.grpoTemperature ?? 0.7,
-          learningRate: config.learningRate,
-          loraR: config.loraRank ?? 16,
-          loraAlpha: config.loraAlpha ?? 32,
-          load4Bit: config.load4Bit ?? true,
-          useRemoteSsh: config.useRemoteSSH ?? false,
-          mode: cascadeMode,
-        })
+      const result = await startCascade({
+        domains: cascadeDomains,
+        baseModel: config.baseModel,
+        datasetPath: config.datasetPath || 'data/gold_traces',
+        trainStepsPerStage: cascadeStepsPerStage,
+        grpoNumGenerations: config.grpoNumGenerations ?? 4,
+        grpoTemperature: config.grpoTemperature ?? 0.7,
+        learningRate: config.learningRate,
+        loraR: config.loraRank ?? 16,
+        loraAlpha: config.loraAlpha ?? 32,
+        load4Bit: config.load4Bit ?? true,
+        useRemoteSsh: config.useRemoteSSH ?? false,
+        mode: cascadeMode,
+      })
+      if (result.ok) {
         completeTutorialStep('start_training')
         onClose()
-      } catch (err) {
-        console.error('Failed to start cascade training:', err)
       }
+      // If !ok, cascadeStore.error is set; banner renders inline below.
+      return
+    }
+
+    // Managed fine-tune (Together/OpenAI) submits a hosted job instead of a local run
+    if (trainingBackend === 'managed') {
+      setManagedMsg('Submitting…')
+      const result = await trainingApi.managedSubmit({
+        platform: managedPlatform,
+        base_model: config.baseModel,
+        dataset_path: config.datasetPath || 'data/gold_traces/train.jsonl',
+        n_epochs: config.epochs,
+        account_id: managedPlatform === 'fireworks' ? managedAccountId || undefined : undefined,
+      })
+      if (result.ok && result.data?.job_id) {
+        setManagedMsg(`Submitted ${result.data.backend} job ${result.data.job_id} — ${result.data.status}`)
+      } else {
+        setManagedMsg(result.data?.error || result.error || 'Submit failed')
+      }
+      completeTutorialStep('start_training')
       return
     }
 
@@ -390,7 +419,7 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
             <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-3">
               Training Backend
             </label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
                 onClick={() => {
@@ -442,11 +471,61 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
                 <span className="block font-mono text-xs font-bold uppercase">NeMo Cloud</span>
                 <span className="block font-mono text-xs mt-1 text-text-muted">NVIDIA Microservices</span>
               </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setTrainingBackend('managed')
+                  setConfig({ ...config, useNemoGym: false, useRemoteSSH: false })
+                }}
+                className={clsx(
+                  'card p-3 text-center transition-press',
+                  trainingBackend === 'managed'
+                    ? 'border-accent bg-accent-light text-accent-dark'
+                    : 'text-text-secondary'
+                )}
+              >
+                <Boxes className="w-5 h-5 mx-auto mb-1" />
+                <span className="block font-mono text-xs font-bold uppercase">Managed</span>
+                <span className="block font-mono text-xs mt-1 text-text-muted">Together / OpenAI</span>
+              </button>
             </div>
 
             {trainingBackend === 'remote_ssh' && (
               <div className="mt-4">
                 <DeviceManager />
+              </div>
+            )}
+
+            {trainingBackend === 'managed' && (
+              <div className="mt-4 card p-3 border-l-4 border-l-accent space-y-2">
+                <label className="block font-mono text-xs text-text-muted mb-1">Platform</label>
+                <select
+                  value={managedPlatform}
+                  onChange={(e) => setManagedPlatform(e.target.value as 'together' | 'openai' | 'fireworks')}
+                  className="input w-full"
+                >
+                  <option value="together">Together</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="fireworks">Fireworks</option>
+                </select>
+                {managedPlatform === 'fireworks' && (
+                  <div>
+                    <label className="block font-mono text-xs text-text-muted mb-1">Fireworks account ID</label>
+                    <input
+                      value={managedAccountId}
+                      onChange={(e) => setManagedAccountId(e.target.value)}
+                      placeholder="your-account-id"
+                      className="input w-full"
+                    />
+                  </div>
+                )}
+                <p className="font-mono text-xs text-text-muted">
+                  Submits a hosted fine-tune job (no local GPU). Connect the platform in
+                  Settings → Models first so the API key is reused.
+                </p>
+                {managedMsg && (
+                  <p className="font-mono text-xs text-text-secondary">{managedMsg}</p>
+                )}
               </div>
             )}
 
@@ -458,7 +537,9 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
                   ? 'Train locally using your GPU with Unsloth. Requires CUDA-capable GPU.'
                   : trainingBackend === 'remote_ssh'
                     ? 'Select or add a remote SSH device for training.'
-                    : 'Train using NVIDIA NeMo Microservices for scalable cloud training.'}
+                    : trainingBackend === 'managed'
+                      ? 'Submit a hosted fine-tune job to Together or OpenAI — no local GPU.'
+                      : 'Train using NVIDIA NeMo Microservices for scalable cloud training.'}
               </p>
             </div>
           </div>
@@ -788,8 +869,64 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
                   />
                 </div>
               </div>
+              <div className="grid grid-cols-2 gap-4 mt-4">
+                <div>
+                  <label className="block font-mono text-xs text-text-muted mb-2">Loss Variant</label>
+                  <select
+                    value={config.grpoLossType ?? 'grpo'}
+                    onChange={(e) => setConfig({ ...config, grpoLossType: e.target.value })}
+                    className="input w-full"
+                  >
+                    <option value="grpo">GRPO (default)</option>
+                    <option value="gspo">GSPO — sequence-level (Qwen)</option>
+                    <option value="dr_grpo">Dr. GRPO</option>
+                    <option value="dapo">DAPO</option>
+                    <option value="bnpo">BNPO</option>
+                  </select>
+                  <p className="font-mono text-xs text-text-muted mt-1">
+                    GSPO is more stable for long sequences and MoE models
+                  </p>
+                </div>
+                <div>
+                  <label className="block font-mono text-xs text-text-muted mb-2">Compute Backend</label>
+                  <select
+                    value={config.grpoBackend ?? 'auto'}
+                    onChange={(e) => setConfig({ ...config, grpoBackend: e.target.value })}
+                    className="input w-full"
+                  >
+                    <option value="auto">Auto (detect)</option>
+                    <option value="unsloth">Unsloth</option>
+                    <option value="plain">Plain transformers</option>
+                    <option value="trl_vllm">TRL + vLLM</option>
+                  </select>
+                </div>
+              </div>
+              <label className="flex items-center gap-2 mt-3">
+                <input
+                  type="checkbox"
+                  checked={config.grpoUseVllm ?? false}
+                  onChange={(e) => setConfig({ ...config, grpoUseVllm: e.target.checked })}
+                  className="accent-primary"
+                />
+                <span className="text-sm text-text-secondary">
+                  Use vLLM-backed generation (faster rollouts; requires vLLM in the env)
+                </span>
+              </label>
             </div>
           )}
+
+          {/* Liger fused-CE — plain backend (SFT/DPO) large-vocab OOM fix */}
+          <label className="flex items-center gap-2 mt-1">
+            <input
+              type="checkbox"
+              checked={config.useLiger ?? false}
+              onChange={(e) => setConfig({ ...config, useLiger: e.target.checked })}
+              className="accent-primary"
+            />
+            <span className="text-sm text-text-secondary">
+              Liger fused cross-entropy (plain backend) — avoids 262k-vocab OOM for Gemma; requires liger-kernel
+            </span>
+          </label>
 
           {/* Knowledge Distillation Config */}
           {config.strategy === 'distillation' && (
@@ -879,6 +1016,28 @@ export function TrainingConfig({ onClose, onStart }: TrainingConfigProps) {
               <h3 className="font-mono text-xs uppercase tracking-widest text-text-secondary mb-3">
                 Cascade RL Configuration
               </h3>
+
+              {cascadeError && (
+                <div className="card p-3 mb-4 flex items-start gap-2 border-l-4 border-l-status-error bg-status-error/10">
+                  <AlertCircle className="w-4 h-4 text-status-error flex-shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="font-mono text-xs font-bold text-status-error uppercase tracking-widest mb-1">
+                      Cascade Preflight Failed
+                    </p>
+                    <p className="font-mono text-xs text-text-primary whitespace-pre-wrap break-words">
+                      {cascadeError}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPreflightError(null)}
+                    className="btn-icon w-6 h-6 flex items-center justify-center text-status-error"
+                    aria-label="Dismiss"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
 
               {/* Domain selection */}
               <div className="mb-4">

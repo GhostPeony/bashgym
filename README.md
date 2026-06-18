@@ -12,6 +12,17 @@ Every AI coding session is a chain-of-thought reasoning trace — step-by-step p
 
 ---
 
+## Documentation
+
+- **[docs/PLATFORM_OVERVIEW.md](docs/PLATFORM_OVERVIEW.md)** — what the platform is, the Ouroboros flywheel, architecture, and design rationale.
+- **[docs/TRAINING_SETUP.md](docs/TRAINING_SETUP.md)** — the training stack in depth: hardware tiers, the six strategies, the data factory, and remote training.
+- **[docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)** — install to first trained model, step by step.
+- **[docs/TRAINING_DATA_GUIDE.md](docs/TRAINING_DATA_GUIDE.md)** — trace format, quality tiers, and example generation.
+- **[docs/training-config-guide.md](docs/training-config-guide.md)** — hyperparameters, LoRA/QLoRA, and quick-start recipes.
+- **[docs/API.md](docs/API.md)** — REST API reference.
+
+---
+
 ## How It Works
 
 ```
@@ -232,7 +243,7 @@ Multi-agent task decomposition across LLM providers with git worktree isolation.
 | **Anthropic** | `claude-opus-4-6` |
 | **OpenAI** | `gpt-4o` |
 | **Gemini** | `gemini-2.5-pro` |
-| **Ollama** | `qwen2.5-coder:32b` |
+| **Ollama** | `gemma4` |
 
 Four phases: PLAN → DISPATCH → MONITOR → SYNTHESIZE. Workers always use Claude Code CLI regardless of the planning provider.
 
@@ -319,20 +330,17 @@ Gamified progress tracking across trace collection, quality, training, and maste
 
 Any HuggingFace model compatible with Unsloth works. Set `BASE_MODEL` in the dashboard or `.env` to any model ID. Ollama models are auto-discovered for inference — train on HuggingFace weights, deploy via Ollama.
 
-**Recommended starting points:**
+**Examples (mid-2026 — not requirements; see the [Unsloth model catalog](https://unsloth.ai/docs/get-started/unsloth-model-catalog) for the live list):**
 
-| Model | Parameters | VRAM | Notes |
-|-------|------------|------|-------|
-| `Qwen/Qwen2.5-Coder-1.5B-Instruct` | 1.5B | 8GB | Default. Fast training, good for iteration. |
-| `Qwen/Qwen2.5-Coder-7B-Instruct` | 7B | 16GB | Better quality, needs more VRAM. |
-| `Qwen/Qwen3.5-4B` | 4B | 10GB | Newest Qwen (Feb 2026). Strong reasoning. |
-| `Qwen/Qwen3.5-9B` | 9B | 18GB | Best Qwen dense model for coding. |
-| `nvidia/Nemotron-Cascade-2-30B-A3B` | 30B (3B active) | 20GB | MoE. Ideal for Cascade RL on DGX Spark. |
-| `nvidia/Nemotron-3-Nano-4B-Instruct` | 4B | 10GB | NVIDIA's compact coding model. |
-| `meta-llama/Llama-3.2-3B-Instruct` | 3B | 12GB | Alternative architecture. |
-| `deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct` | 2.4B | 10GB | Strong code performance for size. |
+| Model family | Notes |
+|--------------|-------|
+| Gemma 4 (E2B / E4B / 26B-A4B) | E2B trains in ~8 GB locally; MoE variants for more capacity. |
+| Qwen3 (incl. Qwen3-Coder; 4B–30B dense) | Strong coding/reasoning; small dense models fit consumer GPUs. |
+| DeepSeek V3.x / V4 | Large MoE, long context — DGX Spark. |
+| Llama 4 (Scout / Maverick) | Very long context. |
+| Mistral (Small / Devstral) · Phi-4 | Efficient general/instruct options. |
 
-These are suggestions, not restrictions. Any `AutoModelForCausalLM`-compatible model from HuggingFace will work — including Mistral, StarCoder, CodeGemma, Yi, Phi, etc. All training uses QLoRA (4-bit quantization) by default, so VRAM requirements are roughly `model_params / 2` GB.
+These are suggestions, not restrictions. Any `AutoModelForCausalLM`-compatible model from HuggingFace will work. All training uses QLoRA (4-bit quantization) by default, so VRAM requirements are roughly `model_params / 2` GB.
 
 ### Output Formats
 
@@ -387,7 +395,7 @@ Copy `.env.example` to `.env`:
 | `ANTHROPIC_API_KEY` | Yes | — | Claude API key |
 | `OPENAI_API_KEY` | No | — | OpenAI API key (for Codex trace capture and orchestrator routing) |
 | `GOOGLE_API_KEY` | No | — | Google/Gemini API key (for Gemini CLI trace capture and orchestrator routing) |
-| `BASE_MODEL` | No | `Qwen/Qwen2.5-Coder-1.5B-Instruct` | Any HuggingFace model ID for fine-tuning |
+| `BASE_MODEL` | No | (set per run) | Any HuggingFace model ID for fine-tuning (Unsloth-accelerated) |
 | `HF_TOKEN` | No | — | HuggingFace token (for cloud training and model push) |
 | `NVIDIA_API_KEY` | No | — | NVIDIA NIM API key (for synthetic data augmentation) |
 | `ROUTING_STRATEGY` | No | `confidence_based` | Model routing strategy |

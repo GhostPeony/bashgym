@@ -11,6 +11,12 @@ import { isWeb } from './utils/platform'
 // Tree-shaken in Electron builds (isWeb is a compile-time constant)
 const LoginPage = isWeb ? lazy(() => import('./components/auth/LoginPage').then(m => ({ default: m.LoginPage }))) : null
 
+// The GitHub login gate only applies to a real deployed web build (the dormant
+// web MVP). Local dev runs the backend in desktop mode with no auth enforced
+// (see bashgym/api/auth.py — BASHGYM_MODE != 'web' passes everything through),
+// so bypass the gate to keep the browser app usable without signing in.
+const requireWebAuth = isWeb && !import.meta.env.DEV
+
 function App() {
   const { theme } = useThemeStore()
   const { accentHue } = useAccentStore()
@@ -41,7 +47,7 @@ function App() {
 
   // Connect WebSocket on mount — delay until authenticated in web mode
   useEffect(() => {
-    if (isWeb && !isAuthenticated) return
+    if (requireWebAuth && !isAuthenticated) return
 
     const timer = setTimeout(() => {
       console.log('App: Initiating WebSocket connection...')
@@ -63,8 +69,8 @@ function App() {
   // Global keyboard shortcuts
   useGlobalHotkeys()
 
-  // Web mode: show login page if not authenticated
-  if (isWeb) {
+  // Web mode: show login page if not authenticated (skipped in local dev)
+  if (requireWebAuth) {
     if (isLoading) {
       return (
         <div className="min-h-screen flex items-center justify-center bg-background">

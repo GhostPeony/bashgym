@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -33,6 +34,7 @@ from bashgym.api.autoresearch_routes import router as autoresearch_router  # noq
 from bashgym.api.cascade_routes import router as cascade_router  # noqa: E402
 from bashgym.api.device_routes import get_registry as get_device_registry  # noqa: E402
 from bashgym.api.device_routes import router as device_router  # noqa: E402
+from bashgym.api.eval_routes import router as eval_router  # noqa: E402
 from bashgym.api.factory_routes import router as factory_router  # noqa: E402
 from bashgym.api.hf_routes import router as hf_router  # noqa: E402
 from bashgym.api.integration_routes import router as integration_router  # noqa: E402
@@ -41,6 +43,7 @@ from bashgym.api.observability_routes import router as observability_router  # n
 from bashgym.api.orchestrator_routes import router as orchestrator_router  # noqa: E402
 from bashgym.api.pipeline_routes import router as pipeline_router  # noqa: E402
 from bashgym.api.pipeline_routes import start_pipeline_watcher, stop_pipeline_watcher  # noqa: E402
+from bashgym.api.research_routes import router as research_router  # noqa: E402
 from bashgym.api.schemas import (  # noqa: E402
     AvailableModel,
     BenchmarkResultSchema,
@@ -113,6 +116,7 @@ from bashgym.api.websocket import (  # noqa: E402
     TrainingProgressCallback,
     broadcast_guardrail_blocked,
     broadcast_guardrail_warn,
+    broadcast_import_progress,
     broadcast_pii_redacted,
     broadcast_task_status,
     broadcast_trace_event,
@@ -364,7 +368,9 @@ def create_app() -> FastAPI:
                             "pid": state.pid,
                         }
                         # Start monitoring via output directory polling
-                        callback = TrainingProgressCallback(state.run_id)
+                        callback = TrainingProgressCallback(
+                            state.run_id, output_dir=state.output_dir
+                        )
                         app.state.training_monitor.start_monitoring(
                             state,
                             progress_callback=callback.on_progress,
@@ -644,6 +650,65 @@ def create_app() -> FastAPI:
         except ImportError:
             return {"providers": [], "summary": {"available": 0, "total": 0}}
 
+    @app.post("/api/providers/connect", tags=["Providers"])
+    async def connect_openai_compatible(body: dict):
+        """Connect a generic OpenAI-compatible provider (Together/Fireworks/Groq/vLLM/...).
+
+        Body: {platform?, base_url?, api_key?, default_model?, name?}. Pass a known
+        ``platform`` (preset base URL) or an explicit ``base_url``. The provider is
+        registered into the live registry for this session; the API key is held in
+        memory only and never written to disk.
+        """
+        from bashgym.providers.openai_compatible import PRESETS, OpenAICompatibleProvider
+
+        platform = (body.get("platform") or "").strip()
+        base_url = (body.get("base_url") or "").strip()
+        api_key = body.get("api_key") or None
+        default_model = (body.get("default_model") or "").strip()
+        try:
+            if platform and platform in PRESETS:
+                provider = OpenAICompatibleProvider.for_platform(
+                    platform, api_key=api_key, default_model=default_model
+                )
+                name = platform
+            elif base_url:
+                name = (body.get("name") or "openai_compatible").strip()
+                provider = OpenAICompatibleProvider(
+                    name=name, base_url=base_url, api_key=api_key, default_model=default_model
+                )
+            else:
+                raise HTTPException(
+                    status_code=400, detail="Provide a known 'platform' or an explicit 'base_url'"
+                )
+
+            registry = getattr(app.state, "provider_registry", None)
+            if registry is None:
+                from bashgym.providers import get_registry
+
+                registry = get_registry()
+            registry.register(provider)
+            app.state.provider_registry = registry
+
+            health = await provider.health_check()
+            return {
+                "ok": True,
+                "provider_type": name,
+                "available": health.available,
+                "models": health.models_loaded[:50],
+                "error": health.error,
+            }
+        except HTTPException:
+            raise
+        except Exception as e:  # noqa: BLE001 - report connection failure to the UI
+            return {"ok": False, "error": str(e)}
+
+    @app.get("/api/providers/openai-compatible/presets", tags=["Providers"])
+    async def openai_compatible_presets():
+        """Known OpenAI-compatible platform presets (name -> base URL)."""
+        from bashgym.providers.openai_compatible import PRESETS
+
+        return {"presets": PRESETS}
+
     @app.get("/api/providers/models", tags=["Providers"])
     async def get_available_models(
         include_local: bool = True, include_cloud: bool = True, code_only: bool = False
@@ -877,6 +942,93 @@ def create_app() -> FastAPI:
     # Training Endpoints
     # =========================================================================
 
+    def _managed_api_key(platform: str, supplied: str | None) -> str | None:
+        """Resolve a managed-platform API key: the supplied one, else the key from a
+        provider connected for the same platform via /api/providers/connect."""
+        if supplied:
+            return supplied
+        registry = getattr(app.state, "provider_registry", None)
+        provider = registry.get_provider(platform) if registry else None
+        return getattr(provider, "_api_key", None)
+
+    @app.post("/api/training/managed/submit", tags=["Training"])
+    async def submit_managed_finetune(body: dict):
+        """Submit a fine-tune to a managed platform (Together / OpenAI) and return the job.
+
+        Body: {platform, base_model, dataset_path, n_epochs?, learning_rate?, suffix?,
+        api_key?}. When api_key is omitted, the key from a provider connected for the
+        same platform is reused.
+        """
+        from pathlib import Path as _Path
+
+        from bashgym.gym.training_backends import ManagedFineTuneBackend, TrainingSpec
+        from bashgym.gym.training_backends.managed import DIALECTS
+
+        platform = (body.get("platform") or "").strip()
+        if platform not in DIALECTS:
+            raise HTTPException(
+                status_code=400, detail=f"platform must be one of {sorted(DIALECTS)}"
+            )
+        base_model = (body.get("base_model") or "").strip()
+        dataset_path = (body.get("dataset_path") or "").strip()
+        if not base_model or not dataset_path:
+            raise HTTPException(status_code=400, detail="base_model and dataset_path are required")
+        if not _Path(dataset_path).exists():
+            raise HTTPException(status_code=400, detail=f"dataset not found: {dataset_path}")
+        api_key = _managed_api_key(platform, body.get("api_key"))
+        if not api_key:
+            raise HTTPException(
+                status_code=400, detail=f"No API key — connect {platform} first or pass api_key"
+            )
+
+        spec = TrainingSpec(
+            base_model=base_model,
+            dataset_path=_Path(dataset_path),
+            n_epochs=int(body.get("n_epochs") or 1),
+            learning_rate=float(body.get("learning_rate") or 1e-5),
+            suffix=(body.get("suffix") or "").strip(),
+        )
+        account_id = (body.get("account_id") or "").strip() or None
+        try:
+            backend = ManagedFineTuneBackend.for_platform(
+                platform, api_key=api_key, account_id=account_id
+            )
+        except ValueError as e:  # e.g. Fireworks without an account_id
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        try:
+            job = await backend.submit(spec)
+        except Exception as e:  # noqa: BLE001 - surface platform errors to the UI
+            raise HTTPException(status_code=502, detail=f"submit failed: {e}") from e
+        if not hasattr(app.state, "managed_jobs"):
+            app.state.managed_jobs = {}
+        app.state.managed_jobs[job.job_id] = {"platform": platform, "account_id": account_id}
+        return job.to_dict()
+
+    @app.get("/api/training/managed/{platform}/{job_id}", tags=["Training"])
+    async def poll_managed_finetune(platform: str, job_id: str, account_id: str | None = None):
+        """Poll a managed fine-tune job's status."""
+        from bashgym.gym.training_backends import ManagedFineTuneBackend, TrainingJob
+        from bashgym.gym.training_backends.managed import DIALECTS
+
+        if platform not in DIALECTS:
+            raise HTTPException(
+                status_code=400, detail=f"platform must be one of {sorted(DIALECTS)}"
+            )
+        rec = getattr(app.state, "managed_jobs", {}).get(job_id, {})
+        try:
+            backend = ManagedFineTuneBackend.for_platform(
+                platform,
+                api_key=_managed_api_key(platform, None) or "",
+                account_id=rec.get("account_id") or account_id,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        try:
+            job = await backend.poll(TrainingJob(job_id=job_id, backend=platform))
+        except Exception as e:  # noqa: BLE001 - surface platform errors to the UI
+            raise HTTPException(status_code=502, detail=f"poll failed: {e}") from e
+        return job.to_dict()
+
     @app.post("/api/training/start", response_model=TrainingResponse, tags=["Training"])
     async def start_training(request: TrainingRequest, background_tasks: BackgroundTasks):
         """Start a new training run."""
@@ -1031,8 +1183,17 @@ def create_app() -> FastAPI:
                         raise ValueError(f"No gold traces found in {gold_dir}")
 
                 # Update trainer config
+                resolved_base_model = request.base_model or get_settings().training.base_model
+                if not (resolved_base_model or "").strip():
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            "No base model set. Choose a model to fine-tune — set "
+                            "BASE_MODEL in your environment or pass base_model in the request."
+                        ),
+                    )
                 config = TrainerConfig(
-                    base_model=request.base_model or "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+                    base_model=resolved_base_model,
                     model_type=request.model_type or "qwen",
                     strategy=TS(request.strategy.value),
                     num_epochs=request.num_epochs,
@@ -1053,8 +1214,14 @@ def create_app() -> FastAPI:
                     grpo_num_generations=request.grpo_num_generations,
                     grpo_temperature=request.grpo_temperature,
                     grpo_reward_mode=getattr(request, "grpo_reward_mode", "syntax"),
+                    grpo_loss_type=getattr(request, "grpo_loss_type", "grpo"),
+                    grpo_backend=getattr(request, "grpo_backend", "auto"),
+                    grpo_use_vllm=getattr(request, "grpo_use_vllm", False),
+                    sft_backend=getattr(request, "sft_backend", "auto"),
+                    dpo_backend=getattr(request, "dpo_backend", "auto"),
+                    use_liger=getattr(request, "use_liger", False),
                     # Knowledge Distillation
-                    teacher_model=request.teacher_model or "claude-sonnet-4-20250514",
+                    teacher_model=request.teacher_model or "claude-sonnet-4-6",
                     teacher_temperature=request.teacher_temperature,
                     distillation_alpha=request.distillation_alpha,
                     # Export & backend
@@ -1099,6 +1266,8 @@ def create_app() -> FastAPI:
 
                 # Determine output dir for state persistence
                 output_dir = str(Path(config.output_dir) / run_id)
+                # Enable metric persistence now that the run directory is known
+                callback.output_dir = output_dir
 
                 def _on_pid(pid: int, training_run):
                     """Called immediately after subprocess.Popen — persist PID to disk."""
@@ -1146,7 +1315,7 @@ def create_app() -> FastAPI:
 
                 if request.strategy == TrainingStrategy.DISTILLATION:
                     training_metadata["teacher_model"] = (
-                        request.teacher_model or "claude-sonnet-4-20250514"
+                        request.teacher_model or "claude-sonnet-4-6"
                     )
 
                 if request.strategy == TrainingStrategy.SFT:
@@ -1284,6 +1453,248 @@ def create_app() -> FastAPI:
             except Exception:
                 pass  # State file may not exist yet if failure was before subprocess
             await broadcast_training_failed(run_id, error_msg)
+
+    def _models_dir() -> Path:
+        """Authoritative runs root — the live trainer config, else the TrainerConfig default."""
+        trainer = getattr(app.state, "trainer", None)
+        if trainer is not None:
+            return Path(trainer.config.output_dir)
+        return Path("data/models")
+
+    # NOTE: literal /training/runs routes MUST register before /training/{run_id}
+    # or "runs" is captured as a run_id.
+    @app.get("/api/training/runs", tags=["Training"])
+    async def list_persisted_training_runs():
+        """List past training runs found under the models directory (newest first)."""
+        from bashgym.gym.run_metrics import list_runs
+
+        return {"runs": list_runs(models_dir=_models_dir())}
+
+    @app.get("/api/training/runs/{run_id}/metrics", tags=["Training"])
+    async def get_training_run_metrics(run_id: str):
+        """Return the persisted metric history (metrics.jsonl) for one run."""
+        from bashgym.gym.run_metrics import read_run_metrics
+
+        try:
+            points = read_run_metrics(run_id, models_dir=_models_dir())
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid run_id: {run_id}")
+        if points is None:
+            raise HTTPException(status_code=404, detail=f"No metrics for run {run_id}")
+        return {"run_id": run_id, "metrics": points}
+
+    @app.get("/api/training/dataset/inspect", tags=["Training"])
+    async def inspect_training_dataset(path: str = "", offset: int = 0, limit: int = 20):
+        """Inspect exported training examples with chat-template validation warnings.
+
+        Flags the bug classes that silently break Gemma/Qwen chat templates
+        (tool_calls arguments as JSON strings, missing/unknown roles).
+        """
+        from bashgym.config import get_settings
+        from bashgym.factory.dataset_inspector import inspect_dataset
+
+        settings = get_settings()
+        data_dir = Path(settings.data.data_dir)
+        default_path = data_dir / "training_batches" / "train.jsonl"
+        target = Path(path) if path else default_path
+        # Only allow files under the configured data dir, ~/.bashgym, or the repo data dirs
+        allowed_roots = [
+            data_dir.resolve(),
+            (Path.home() / ".bashgym").resolve(),
+            Path("data").resolve(),
+            Path("data-fixed").resolve(),
+        ]
+        resolved = target.resolve()
+        if not any(resolved.is_relative_to(root) for root in allowed_roots):
+            raise HTTPException(status_code=400, detail="Path outside allowed dataset directories")
+        if not resolved.exists():
+            raise HTTPException(status_code=404, detail=f"Dataset not found: {resolved}")
+        return inspect_dataset(resolved, offset=max(0, offset), limit=min(max(1, limit), 100))
+
+    # =========================================================================
+    # Training log viewer + checkpoint browser (Workstream 3)
+    # Registered BEFORE /api/training/{run_id} so literal paths win the match.
+    # =========================================================================
+
+    _CHECKPOINT_ROOTS = (
+        Path.home() / ".bashgym" / "cascade",
+        Path.home() / ".bashgym" / "models",
+    )
+    _MAX_TAIL_LINES = 5000
+    _MAX_FULL_LOG_BYTES = 50 * 1024 * 1024
+
+    def _resolve_training_log(run_id: str) -> Path | None:
+        # Run layout is nested: <root>/<stage>/<run>/training.log. Match any depth.
+        # Treat run_id as the immediate parent dir name (e.g. 'cascade-foo-123')
+        # or a relative path like 'stage_1_repo_ghostwork/cascade-foo-123'.
+        for root in _CHECKPOINT_ROOTS:
+            if not root.exists():
+                continue
+            # Direct path match (if caller passed the relative path)
+            direct = root / run_id / "training.log"
+            if direct.exists():
+                return direct
+            # Otherwise walk and find first training.log whose parent matches run_id
+            try:
+                for log in root.rglob("training.log"):
+                    if log.parent.name == run_id or str(log.parent.relative_to(root)) == run_id:
+                        return log
+            except OSError:
+                continue
+        run = app.state.training_runs.get(run_id)
+        if run:
+            output_path = run.get("output_path")
+            if output_path:
+                candidate = Path(output_path) / "training.log"
+                if candidate.exists():
+                    return candidate
+        return None
+
+    def _resolve_checkpoint_path(checkpoint_id: str) -> Path:
+        if ".." in checkpoint_id.split("/"):
+            raise HTTPException(status_code=403, detail="Invalid checkpoint id")
+        for root in _CHECKPOINT_ROOTS:
+            candidate = (root / checkpoint_id).resolve()
+            try:
+                candidate.relative_to(root.resolve())
+            except ValueError:
+                continue
+            return candidate
+        raise HTTPException(status_code=403, detail="Checkpoint id outside allowlisted roots")
+
+    def _dir_size_mb(path: Path) -> float:
+        total = 0
+        try:
+            for p in path.rglob("*"):
+                if p.is_file():
+                    try:
+                        total += p.stat().st_size
+                    except OSError:
+                        continue
+        except OSError:
+            return 0.0
+        return round(total / (1024 * 1024), 2)
+
+    def _read_base_model(checkpoint_dir: Path) -> str | None:
+        for name in ("adapter_config.json", "trainer_config.json", "config.json"):
+            f = checkpoint_dir / name
+            if not f.exists():
+                continue
+            try:
+                data = json.loads(f.read_text())
+            except (OSError, json.JSONDecodeError):
+                continue
+            for key in (
+                "base_model_name_or_path",
+                "base_model",
+                "_name_or_path",
+                "model_name_or_path",
+            ):
+                v = data.get(key)
+                if isinstance(v, str) and v:
+                    return v
+        return None
+
+    @app.get("/api/training/checkpoints", tags=["Training"])
+    async def list_checkpoints():
+        """
+        Scan allowlisted roots for saved checkpoints. Directory layout can be
+        nested (e.g. cascade/<stage>/<run>/final) — walk with rglob and match
+        any dir named final, merged, or checkpoint-*.
+        """
+        results: list[dict[str, Any]] = []
+        for root in _CHECKPOINT_ROOTS:
+            if not root.exists():
+                continue
+            try:
+                candidates: list[Path] = []
+                for name in ("final", "merged"):
+                    candidates.extend(p for p in root.rglob(name) if p.is_dir())
+                candidates.extend(p for p in root.rglob("checkpoint-*") if p.is_dir())
+            except OSError:
+                continue
+            for path in candidates:
+                try:
+                    stat = path.stat()
+                except OSError:
+                    continue
+                name = path.name
+                if name == "final":
+                    kind = "final"
+                elif name == "merged":
+                    kind = "merged"
+                else:
+                    kind = "intermediate"
+                rel = path.relative_to(root)
+                # run_id = the directory that holds this checkpoint
+                run_id = path.parent.name
+                results.append(
+                    {
+                        "id": str(rel),
+                        "run_id": run_id,
+                        "kind": kind,
+                        "path": str(path),
+                        "size_mb": _dir_size_mb(path),
+                        "created_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                        "base_model": _read_base_model(path),
+                    }
+                )
+        results.sort(key=lambda r: r["created_at"], reverse=True)
+        return results
+
+    @app.delete("/api/training/checkpoints/{checkpoint_id:path}", tags=["Training"])
+    async def delete_checkpoint(checkpoint_id: str):
+        path = _resolve_checkpoint_path(checkpoint_id)
+        if not path.exists():
+            raise HTTPException(status_code=404, detail=f"Checkpoint {checkpoint_id} not found")
+        if not path.is_dir():
+            raise HTTPException(status_code=400, detail="Not a directory")
+        try:
+            shutil.rmtree(path)
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=f"Delete failed: {exc}") from exc
+        return {"deleted": True, "id": checkpoint_id}
+
+    @app.get("/api/training/{run_id}/log", tags=["Training"])
+    async def get_training_log(
+        run_id: str,
+        tail: int = 500,
+        grep: str = "",
+    ):
+        log_path = _resolve_training_log(run_id)
+        if log_path is None:
+            raise HTTPException(status_code=404, detail=f"No training.log for run {run_id}")
+        try:
+            size = log_path.stat().st_size
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=f"Cannot stat log: {exc}") from exc
+        if tail == 0 and size > _MAX_FULL_LOG_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Log file too large ({size} bytes). Request a tail instead.",
+            )
+        try:
+            with log_path.open("r", encoding="utf-8", errors="replace") as f:
+                all_lines = f.read().splitlines()
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=f"Cannot read log: {exc}") from exc
+        total_lines = len(all_lines)
+        if tail == 0:
+            lines = all_lines
+            truncated = False
+        else:
+            capped = max(1, min(tail, _MAX_TAIL_LINES))
+            lines = all_lines[-capped:]
+            truncated = total_lines > capped
+        if grep:
+            lines = [ln for ln in lines if grep in ln]
+        return {
+            "run_id": run_id,
+            "path": str(log_path),
+            "total_lines": total_lines,
+            "truncated": truncated,
+            "lines": lines,
+        }
 
     @app.get("/api/training/{run_id}", response_model=TrainingResponse, tags=["Training"])
     async def get_training_status(run_id: str):
@@ -4435,50 +4846,49 @@ def create_app() -> FastAPI:
 
     @app.get("/api/factory/models", response_model=list[AvailableModel], tags=["Factory"])
     async def list_available_models():
-        """List available models for LLM columns."""
-        # Return common models - in production this would query NIM or other services
+        """Available models for LLM columns — the live catalog across providers.
+
+        Discovers what providers actually serve (NVIDIA NIM, local Ollama / LM
+        Studio, plus curated teacher models) instead of a hardcoded list. Falls
+        back to a small curated set only if discovery is unavailable (offline).
+        """
+        _PREFIXES = ("nim/", "ollama/", "lm_studio/", "hf/", "anthropic/", "openai/")
+
+        def _bare(model_id: str) -> str:
+            for p in _PREFIXES:
+                if model_id.startswith(p):
+                    return model_id[len(p) :]
+            return model_id
+
+        try:
+            from bashgym.providers.detector import get_available_models
+
+            cats = await get_available_models()
+            seen: set[str] = set()
+            out: list[AvailableModel] = []
+            for cat in ("inference", "local", "teacher"):
+                for m in cats.get(cat, []):
+                    bare = _bare(m.id)
+                    if not bare or bare in seen:
+                        continue
+                    seen.add(bare)
+                    out.append(AvailableModel(id=bare, name=m.name, provider=m.provider.value))
+            if out:
+                return out
+        except Exception as e:  # noqa: BLE001 - discovery is best-effort
+            logger.warning(f"live model discovery failed; using curated fallback: {e}")
+
+        # Offline fallback: small curated set.
         return [
-            # Anthropic Claude 4.5 (recommended for high-quality augmentation)
+            AvailableModel(id="claude-sonnet-4-6", name="Claude Sonnet 4.6", provider="anthropic"),
             AvailableModel(
-                id="claude-opus-4-5-20251101",
-                name="Claude Opus 4.5 (Best Quality)",
-                provider="Anthropic",
+                id="deepseek-ai/deepseek-v4-flash",
+                name="DeepSeek V4 Flash",
+                provider="nvidia_nim",
             ),
             AvailableModel(
-                id="claude-sonnet-4-5-20250929",
-                name="Claude Sonnet 4.5 (Recommended)",
-                provider="Anthropic",
+                id="meta/llama-3.3-70b-instruct", name="Llama 3.3 70B", provider="nvidia_nim"
             ),
-            AvailableModel(
-                id="claude-haiku-4-5-20251001", name="Claude Haiku 4.5 (Fast)", provider="Anthropic"
-            ),
-            # NVIDIA NIM (cost-effective, good for bulk generation)
-            AvailableModel(
-                id="qwen/qwen2.5-coder-32b-instruct",
-                name="Qwen 2.5 Coder 32B (Default NIM)",
-                provider="NVIDIA NIM",
-            ),
-            AvailableModel(
-                id="qwen/qwen2.5-coder-7b-instruct", name="Qwen 2.5 Coder 7B", provider="NVIDIA NIM"
-            ),
-            AvailableModel(
-                id="meta/llama-3.1-8b-instruct", name="Llama 3.1 8B Instruct", provider="NVIDIA NIM"
-            ),
-            AvailableModel(
-                id="meta/llama-3.1-70b-instruct",
-                name="Llama 3.1 70B Instruct",
-                provider="NVIDIA NIM",
-            ),
-            AvailableModel(
-                id="nvidia/nemotron-4-340b-instruct", name="Nemotron 4 340B", provider="NVIDIA NIM"
-            ),
-            AvailableModel(
-                id="mistralai/mistral-7b-instruct-v0.3",
-                name="Mistral 7B Instruct",
-                provider="NVIDIA NIM",
-            ),
-            # OpenAI (alternative)
-            AvailableModel(id="openai/gpt-4o", name="GPT-4o", provider="OpenAI"),
         ]
 
     # =========================================================================
@@ -4767,8 +5177,13 @@ def create_app() -> FastAPI:
     # Include Cascade RL routes (domain-by-domain sequential training)
     app.include_router(cascade_router)
 
+    app.include_router(eval_router)
+
     # Include Device routes (SSH device registry)
     app.include_router(device_router)
+
+    # Include Research routes (HF dataset scanner + empirical ranking)
+    app.include_router(research_router)
 
     # Experimental routes — desktop only (hidden in web mode)
     if not _settings.is_web_mode:
@@ -4859,25 +5274,54 @@ def create_app() -> FastAPI:
 
         try:
             if source == "chatgpt":
+                import zipfile
+
                 from bashgym.trace_capture.importers.chatgpt import ChatGPTImporter
 
                 importer = ChatGPTImporter()
+
+                # Load conversations up-front so we can stream per-item progress
+                # (mirrors ChatGPTImporter.import_from_zip / import_from_json).
+                load_error: str | None = None
+                conversations: list[Any] = []
                 if file.filename and file.filename.endswith(".zip"):
-                    results = importer.import_from_zip(tmp_path, force=force)
+                    with zipfile.ZipFile(tmp_path, "r") as zf:
+                        convo_files = [n for n in zf.namelist() if n.endswith("conversations.json")]
+                        if not convo_files:
+                            load_error = "No conversations.json found in zip"
+                        for convo_file in convo_files:
+                            data = json.loads(zf.read(convo_file))
+                            conversations.extend(data if isinstance(data, list) else [data])
                 else:
-                    results = importer.import_from_json(tmp_path, force=force)
+                    data = json.loads(tmp_path.read_text())
+                    conversations = data if isinstance(data, list) else [data]
+
+                results = []
+                total = len(conversations)
+                for idx, convo in enumerate(conversations, start=1):
+                    results.append(importer.import_conversation(convo, force=force))
+                    title = convo.get("title") if isinstance(convo, dict) else None
+                    await broadcast_import_progress(
+                        processed=idx,
+                        total=total,
+                        current_item=str(title or f"conversation {idx}"),
+                    )
 
                 imported = [r for r in results if not r.skipped and not r.error]
                 skipped = [r for r in results if r.skipped]
                 failed = [r for r in results if r.error]
 
+                errors = [r.error for r in failed if r.error]
+                if load_error:
+                    errors.append(load_error)
+
                 resp = {
                     "source": "chatgpt",
                     "imported_count": len(imported),
                     "skipped_count": len(skipped),
-                    "failed_count": len(failed),
+                    "failed_count": len(failed) + (1 if load_error else 0),
                     "total_steps": sum(r.steps_imported for r in imported),
-                    "errors": [r.error for r in failed if r.error],
+                    "errors": errors,
                 }
 
             elif source == "mcp":
@@ -4885,6 +5329,11 @@ def create_app() -> FastAPI:
 
                 importer = MCPLogImporter()
                 result = importer.import_from_file(tmp_path, force=force)
+                await broadcast_import_progress(
+                    processed=1,
+                    total=1,
+                    current_item=file.filename or "mcp log",
+                )
 
                 if result.error:
                     resp = {

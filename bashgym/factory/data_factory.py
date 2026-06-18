@@ -149,7 +149,7 @@ class SynthesisStrategy(Enum):
 class AugmentationProvider(Enum):
     """LLM provider for data augmentation."""
 
-    NIM = "nim"  # NVIDIA NIM (qwen/qwen2.5-coder-32b-instruct)
+    NIM = "nim"  # NVIDIA NIM (deepseek-ai/deepseek-v4-flash)
     ANTHROPIC = "anthropic"  # Anthropic Claude (higher quality, higher cost)
 
 
@@ -164,7 +164,7 @@ class DataFactoryConfig:
     # NVIDIA NIM settings (for LLM-based synthesis)
     nim_endpoint: str = "https://integrate.api.nvidia.com/v1"
     nim_api_key: str | None = None
-    nim_model: str = "qwen/qwen2.5-coder-32b-instruct"
+    nim_model: str = "deepseek-ai/deepseek-v4-flash"
 
     # Anthropic settings (for higher quality augmentation)
     anthropic_api_key: str | None = None
@@ -179,6 +179,8 @@ class DataFactoryConfig:
     strategy: SynthesisStrategy = SynthesisStrategy.AUGMENTED
     augmentation_factor: int = 3  # Generate N variations per trace
     max_sequence_length: int = 8192
+    # Mine step-level (FAILURE->SUCCESS) DPO pairs from within gold traces
+    generate_decision_dpo: bool = True
 
     # Output settings
     output_dir: str = "data/training_batches"
@@ -942,6 +944,28 @@ Generate {num_variations} variations in JSON format:
 
         return dpo_pairs
 
+    def _decision_dpo_for_trace(self, processed: "ProcessedTrace") -> list[DPOExample]:
+        """Extract structured decisions from one processed gold trace and build
+        step-level DPO pairs (a FAILURE step paired with the later SUCCESS step
+        that recovered). Best-effort: returns [] when the trace yields no
+        FAILURE->SUCCESS decision sequence.
+        """
+        from .decision_extractor import DecisionExtractor
+
+        steps = getattr(processed, "normalized_steps", None) or []
+        if not steps:
+            return []
+        cognitive = None
+        if isinstance(getattr(processed, "metadata", None), dict):
+            cognitive = processed.metadata.get("cognitive_data")
+        decisions = DecisionExtractor().extract(steps, cognitive)
+        if not decisions:
+            return []
+        # generate_decision_level_dpo_pairs reads ``trace.decisions``; ProcessedTrace
+        # carries it as a dynamic attribute (it is not a declared field).
+        processed.decisions = decisions
+        return self.generate_decision_level_dpo_pairs(processed)
+
     @staticmethod
     def _format_decision_as_response(decision: Decision) -> str:
         """Format a Decision as a readable response string for DPO."""
@@ -994,6 +1018,26 @@ Generate {num_variations} variations in JSON format:
                     dpo_example = await self.generate_dpo_pairs(gold_path, failed_path)
                     if dpo_example:
                         dpo_examples.append(dpo_example)
+
+        # Decision-level DPO: mine step-level FAILURE->SUCCESS preferences from
+        # within each gold trace (the agent failed a step, then recovered). Purely
+        # additive and guarded so one malformed trace can never break SFT/trace-DPO.
+        if self.config.generate_decision_dpo:
+            from .trace_processor import TraceProcessor
+
+            processor = TraceProcessor()
+            decision_pairs = 0
+            for trace_path in gold_traces:
+                try:
+                    processed = processor.process_trace(trace_path)
+                    if processed:
+                        pairs = self._decision_dpo_for_trace(processed)
+                        dpo_examples.extend(pairs)
+                        decision_pairs += len(pairs)
+                except Exception as e:  # noqa: BLE001 - never let one trace break the batch
+                    print(f"  decision-DPO skipped for {trace_path.name}: {e}")
+            if decision_pairs:
+                print(f"Mined {decision_pairs} decision-level DPO pairs from gold traces")
 
         return training_examples, dpo_examples
 

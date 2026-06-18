@@ -1,21 +1,21 @@
 # tests/orchestrator/test_orchestrator_agent.py
 """Tests for OrchestrationAgent and API routes."""
 
-import asyncio
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 
+from bashgym.orchestrator.agent import OrchestrationAgent
 from bashgym.orchestrator.models import (
-    OrchestratorSpec, TaskNode, TaskStatus, TaskPriority,
-    WorkerConfig, WorkerResult, MergeResult,
-    LLMConfig, LLMProvider,
+    LLMConfig,
+    LLMProvider,
+    OrchestratorSpec,
+    TaskNode,
+    TaskPriority,
+    TaskStatus,
+    WorkerResult,
 )
 from bashgym.orchestrator.task_dag import TaskDAG
-from bashgym.orchestrator.agent import OrchestrationAgent
-from bashgym.orchestrator.synthesizer import SynthesisReport
-
 
 # =============================================================================
 # OrchestrationAgent Initialization
@@ -128,7 +128,8 @@ class TestSubmitSpec:
         mock_dag.add_task(TaskNode(id="t1", title="T1", description="D1"))
 
         with patch.object(
-            TaskDAG, "from_spec",
+            TaskDAG,
+            "from_spec",
             new_callable=AsyncMock,
             return_value=mock_dag,
         ):
@@ -183,8 +184,12 @@ class TestExecute:
         dag.add_task(TaskNode(id="t1", title="T1", description="Do it"))
 
         result = WorkerResult(
-            task_id="t1", session_id="s1", success=True,
-            output="done", exit_code=0, duration_seconds=5.0,
+            task_id="t1",
+            session_id="s1",
+            success=True,
+            output="done",
+            exit_code=0,
+            duration_seconds=5.0,
             cost_usd=0.25,
         )
 
@@ -197,18 +202,13 @@ class TestExecute:
         agent.pool.cancel_all = AsyncMock()
 
         # After wait_for_any returns, active_count goes to 0
-        type(agent.pool).active_count = PropertyMock(
-            side_effect=[1, 0, 0, 0]
-        )
+        type(agent.pool).active_count = PropertyMock(side_effect=[1, 0, 0, 0])
 
-        with patch.object(
-            agent, "_broadcast_task_started", new_callable=AsyncMock
-        ), patch.object(
-            agent, "_broadcast_task_completed", new_callable=AsyncMock
-        ), patch.object(
-            agent, "_broadcast_budget_update", new_callable=AsyncMock
-        ), patch.object(
-            agent, "_broadcast_complete", new_callable=AsyncMock
+        with (
+            patch.object(agent, "_broadcast_task_started", new_callable=AsyncMock),
+            patch.object(agent, "_broadcast_task_completed", new_callable=AsyncMock),
+            patch.object(agent, "_broadcast_budget_update", new_callable=AsyncMock),
+            patch.object(agent, "_broadcast_complete", new_callable=AsyncMock),
         ):
             results = await agent.execute(dag=dag)
 
@@ -226,8 +226,12 @@ class TestExecute:
         dag.add_task(TaskNode(id="t1", title="T1", description="D1"))
 
         result = WorkerResult(
-            task_id="t1", session_id="", success=True,
-            output="done", exit_code=0, duration_seconds=5.0,
+            task_id="t1",
+            session_id="",
+            success=True,
+            output="done",
+            exit_code=0,
+            duration_seconds=5.0,
             cost_usd=5.0,
         )
 
@@ -236,20 +240,15 @@ class TestExecute:
         agent.pool.spawn_worker = AsyncMock()
         agent.pool.wait_for_any = AsyncMock(return_value=result)
         agent.pool.cancel_all = AsyncMock()
-        type(agent.pool).active_count = PropertyMock(
-            side_effect=[1, 0, 0, 0]
-        )
+        type(agent.pool).active_count = PropertyMock(side_effect=[1, 0, 0, 0])
 
-        with patch.object(
-            agent, "_broadcast_task_started", new_callable=AsyncMock
-        ), patch.object(
-            agent, "_broadcast_task_completed", new_callable=AsyncMock
-        ), patch.object(
-            agent, "_broadcast_budget_update", new_callable=AsyncMock
-        ), patch.object(
-            agent, "_broadcast_complete", new_callable=AsyncMock
+        with (
+            patch.object(agent, "_broadcast_task_started", new_callable=AsyncMock),
+            patch.object(agent, "_broadcast_task_completed", new_callable=AsyncMock),
+            patch.object(agent, "_broadcast_budget_update", new_callable=AsyncMock),
+            patch.object(agent, "_broadcast_complete", new_callable=AsyncMock),
         ):
-            results = await agent.execute(dag=dag, budget_usd=1.0)
+            await agent.execute(dag=dag, budget_usd=1.0)
 
         # Budget exceeded: 5.0 > 1.0
         assert agent._budget_exceeded is True
@@ -269,23 +268,32 @@ class TestHandleFailure:
         agent = OrchestrationAgent()
         dag = TaskDAG()
         task = TaskNode(
-            id="t1", title="T1", description="D1",
-            max_retries=2, retry_count=0,
+            id="t1",
+            title="T1",
+            description="D1",
+            max_retries=2,
+            retry_count=0,
         )
         dag.add_task(task)
 
         result = WorkerResult(
-            task_id="t1", session_id="", success=False,
-            output="error output", exit_code=1, duration_seconds=5.0,
+            task_id="t1",
+            session_id="",
+            success=False,
+            output="error output",
+            exit_code=1,
+            duration_seconds=5.0,
             error="Something broke",
         )
 
-        with patch.object(
-            agent, "_rewrite_prompt_for_retry",
-            new_callable=AsyncMock,
-            return_value="Try again with fix",
-        ), patch.object(
-            agent, "_broadcast_task_failed", new_callable=AsyncMock
+        with (
+            patch.object(
+                agent,
+                "_rewrite_prompt_for_retry",
+                new_callable=AsyncMock,
+                return_value="Try again with fix",
+            ),
+            patch.object(agent, "_broadcast_task_failed", new_callable=AsyncMock),
         ):
             await agent._handle_failure(dag, result)
 
@@ -298,28 +306,35 @@ class TestHandleFailure:
         agent = OrchestrationAgent()
         dag = TaskDAG()
         task = TaskNode(
-            id="t1", title="T1", description="D1",
-            max_retries=1, retry_count=1,  # Already at max
+            id="t1",
+            title="T1",
+            description="D1",
+            max_retries=1,
+            retry_count=1,  # Already at max
             dependencies=[],
         )
         dag.add_task(task)
 
         # Add a dependent task
         task2 = TaskNode(
-            id="t2", title="T2", description="D2",
+            id="t2",
+            title="T2",
+            description="D2",
             dependencies=["t1"],
         )
         dag.add_task(task2)
 
         result = WorkerResult(
-            task_id="t1", session_id="", success=False,
-            output="", exit_code=1, duration_seconds=5.0,
+            task_id="t1",
+            session_id="",
+            success=False,
+            output="",
+            exit_code=1,
+            duration_seconds=5.0,
             error="Still broken",
         )
 
-        with patch.object(
-            agent, "_broadcast_task_failed", new_callable=AsyncMock
-        ):
+        with patch.object(agent, "_broadcast_task_failed", new_callable=AsyncMock):
             await agent._handle_failure(dag, result)
 
         assert task.status == TaskStatus.FAILED
@@ -338,12 +353,19 @@ class TestRewritePrompt:
     async def test_rewrite_uses_llm_when_available(self):
         agent = OrchestrationAgent()
         task = TaskNode(
-            id="t1", title="Test Task", description="Original prompt",
-            retry_count=1, max_retries=3,
+            id="t1",
+            title="Test Task",
+            description="Original prompt",
+            retry_count=1,
+            max_retries=3,
         )
         result = WorkerResult(
-            task_id="t1", session_id="", success=False,
-            output="error trace here", exit_code=1, duration_seconds=5.0,
+            task_id="t1",
+            session_id="",
+            success=False,
+            output="error trace here",
+            exit_code=1,
+            duration_seconds=5.0,
             error="FileNotFoundError: config.json",
         )
 
@@ -361,12 +383,19 @@ class TestRewritePrompt:
     async def test_rewrite_falls_back_to_template(self):
         agent = OrchestrationAgent()
         task = TaskNode(
-            id="t1", title="Test Task", description="Original prompt",
-            retry_count=1, max_retries=3,
+            id="t1",
+            title="Test Task",
+            description="Original prompt",
+            retry_count=1,
+            max_retries=3,
         )
         result = WorkerResult(
-            task_id="t1", session_id="", success=False,
-            output="some output", exit_code=1, duration_seconds=5.0,
+            task_id="t1",
+            session_id="",
+            success=False,
+            output="some output",
+            exit_code=1,
+            duration_seconds=5.0,
             error="Some error",
         )
 
@@ -386,12 +415,19 @@ class TestRewritePrompt:
         """If LLM returns garbage (< 20 chars), use template fallback."""
         agent = OrchestrationAgent()
         task = TaskNode(
-            id="t1", title="Test Task", description="Do the thing",
-            retry_count=1, max_retries=3,
+            id="t1",
+            title="Test Task",
+            description="Do the thing",
+            retry_count=1,
+            max_retries=3,
         )
         result = WorkerResult(
-            task_id="t1", session_id="", success=False,
-            output="output", exit_code=1, duration_seconds=5.0,
+            task_id="t1",
+            session_id="",
+            success=False,
+            output="output",
+            exit_code=1,
+            duration_seconds=5.0,
             error="Error",
         )
 
@@ -417,7 +453,9 @@ class TestStudentRouting:
     def test_no_router_returns_false(self):
         agent = OrchestrationAgent(model_router=None)
         task = TaskNode(
-            id="t1", title="T1", description="D1",
+            id="t1",
+            title="T1",
+            description="D1",
             priority=TaskPriority.LOW,
         )
         assert agent._should_route_to_student(task) is False
@@ -428,7 +466,9 @@ class TestStudentRouting:
 
         for priority in [TaskPriority.CRITICAL, TaskPriority.HIGH]:
             task = TaskNode(
-                id="t1", title="T1", description="D1",
+                id="t1",
+                title="T1",
+                description="D1",
                 priority=priority,
             )
             assert agent._should_route_to_student(task) is False
@@ -446,12 +486,14 @@ class TestStudentRouting:
 
         agent = OrchestrationAgent(model_router=mock_router)
         task = TaskNode(
-            id="t1", title="T1", description="D1",
+            id="t1",
+            title="T1",
+            description="D1",
             priority=TaskPriority.LOW,
         )
 
         # Patch ModelType.STUDENT at the import location inside the method
-        with patch("bashgym.gym.router.ModelType") as MockModelType:
+        with patch("bashgym.gym.router.ModelType") as MockModelType:  # noqa: N806 (class mock)
             MockModelType.STUDENT = mock_student_type
             result = agent._should_route_to_student(task)
 
@@ -464,7 +506,9 @@ class TestStudentRouting:
 
         agent = OrchestrationAgent(model_router=mock_router)
         task = TaskNode(
-            id="t1", title="T1", description="D1",
+            id="t1",
+            title="T1",
+            description="D1",
             priority=TaskPriority.LOW,
         )
 
@@ -481,7 +525,9 @@ class TestEstimateComplexity:
 
     def test_simple_task(self):
         task = TaskNode(
-            id="t1", title="T1", description="D1",
+            id="t1",
+            title="T1",
+            description="D1",
             files_touched=["a.py"],
             estimated_turns=5,
         )
@@ -490,7 +536,9 @@ class TestEstimateComplexity:
 
     def test_moderate_task(self):
         task = TaskNode(
-            id="t1", title="T1", description="D1",
+            id="t1",
+            title="T1",
+            description="D1",
             files_touched=["a.py", "b.py", "c.py"],
             estimated_turns=20,
         )
@@ -499,7 +547,9 @@ class TestEstimateComplexity:
 
     def test_complex_task(self):
         task = TaskNode(
-            id="t1", title="T1", description="D1",
+            id="t1",
+            title="T1",
+            description="D1",
             files_touched=["a.py", "b.py", "c.py", "d.py", "e.py"],
             estimated_turns=50,
         )
@@ -508,7 +558,9 @@ class TestEstimateComplexity:
 
     def test_no_files_few_turns(self):
         task = TaskNode(
-            id="t1", title="T1", description="D1",
+            id="t1",
+            title="T1",
+            description="D1",
             files_touched=[],
             estimated_turns=3,
         )
@@ -528,14 +580,22 @@ class TestCancelRemaining:
     async def test_cancel_remaining_cancels_pool(self):
         agent = OrchestrationAgent()
         dag = TaskDAG()
-        dag.add_task(TaskNode(
-            id="t1", title="T1", description="D1",
-            status=TaskStatus.PENDING,
-        ))
-        dag.add_task(TaskNode(
-            id="t2", title="T2", description="D2",
-            status=TaskStatus.BLOCKED,
-        ))
+        dag.add_task(
+            TaskNode(
+                id="t1",
+                title="T1",
+                description="D1",
+                status=TaskStatus.PENDING,
+            )
+        )
+        dag.add_task(
+            TaskNode(
+                id="t2",
+                title="T2",
+                description="D2",
+                status=TaskStatus.BLOCKED,
+            )
+        )
 
         # Need to set status after add_task since add_task resets it
         dag.nodes["t1"].status = TaskStatus.PENDING
@@ -576,8 +636,12 @@ class TestBroadcasting:
     async def test_broadcast_task_completed_silent(self):
         agent = OrchestrationAgent()
         result = WorkerResult(
-            task_id="t1", session_id="", success=True,
-            output="", exit_code=0, duration_seconds=5.0,
+            task_id="t1",
+            session_id="",
+            success=True,
+            output="",
+            exit_code=0,
+            duration_seconds=5.0,
             cost_usd=0.5,
         )
         # Should not raise even if broadcast fails
@@ -606,8 +670,12 @@ class TestTraceIngestion:
         agent = OrchestrationAgent()
         results = [
             WorkerResult(
-                task_id="t1", session_id="s1", success=True,
-                output="done", exit_code=0, duration_seconds=5.0,
+                task_id="t1",
+                session_id="s1",
+                success=True,
+                output="done",
+                exit_code=0,
+                duration_seconds=5.0,
             ),
         ]
 
@@ -627,12 +695,20 @@ class TestTraceIngestion:
 
         results = [
             WorkerResult(
-                task_id="t1", session_id="s1", success=False,
-                output="error", exit_code=1, duration_seconds=5.0,
+                task_id="t1",
+                session_id="s1",
+                success=False,
+                output="error",
+                exit_code=1,
+                duration_seconds=5.0,
             ),
             WorkerResult(
-                task_id="t2", session_id="", success=True,  # No session_id
-                output="done", exit_code=0, duration_seconds=5.0,
+                task_id="t2",
+                session_id="",
+                success=True,  # No session_id
+                output="done",
+                exit_code=0,
+                duration_seconds=5.0,
             ),
         ]
 
@@ -662,6 +738,7 @@ class TestOrchestratorRoutes:
 
     def test_llm_config_request_defaults(self):
         from bashgym.api.orchestrator_routes import LLMConfigRequest
+
         req = LLMConfigRequest()
         assert req.provider == "anthropic"
         assert req.model is None
@@ -669,6 +746,7 @@ class TestOrchestratorRoutes:
 
     def test_spec_request_defaults(self):
         from bashgym.api.orchestrator_routes import SpecRequest
+
         req = SpecRequest(title="Test", description="Do something")
         assert req.title == "Test"
         assert req.base_branch == "main"
@@ -676,13 +754,13 @@ class TestOrchestratorRoutes:
         assert req.max_workers == 5
         assert req.constraints == []
 
-    def test_approve_request_defaults(self):
-        from bashgym.api.orchestrator_routes import ApproveRequest
-        req = ApproveRequest()
-        assert req.base_branch == "main"
+    # test_approve_request_defaults removed: the approve endpoint was refactored to
+    # take no request body (ApproveRequest deleted); base_branch now defaults on
+    # SpecRequest. See tests/orchestrator/test_e2e_api.py::TestApproveEndpoint.
 
     def test_retry_request_defaults(self):
         from bashgym.api.orchestrator_routes import RetryRequest
+
         req = RetryRequest()
         assert req.modified_prompt is None
 
@@ -692,13 +770,16 @@ class TestBuildLLMConfig:
 
     def test_build_default_config(self):
         from bashgym.api.orchestrator_routes import _build_llm_config
+
         config = _build_llm_config(None)
         assert config.provider == LLMProvider.ANTHROPIC
 
     def test_build_openai_config(self):
         from bashgym.api.orchestrator_routes import (
-            _build_llm_config, LLMConfigRequest,
+            LLMConfigRequest,
+            _build_llm_config,
         )
+
         req = LLMConfigRequest(provider="openai", model="gpt-4o")
         config = _build_llm_config(req)
         assert config.provider == LLMProvider.OPENAI
@@ -706,8 +787,10 @@ class TestBuildLLMConfig:
 
     def test_build_ollama_config(self):
         from bashgym.api.orchestrator_routes import (
-            _build_llm_config, LLMConfigRequest,
+            LLMConfigRequest,
+            _build_llm_config,
         )
+
         req = LLMConfigRequest(
             provider="ollama",
             model="qwen2.5-coder:32b",
@@ -720,16 +803,20 @@ class TestBuildLLMConfig:
 
     def test_build_unknown_provider_raises(self):
         from bashgym.api.orchestrator_routes import (
-            _build_llm_config, LLMConfigRequest,
+            LLMConfigRequest,
+            _build_llm_config,
         )
+
         req = LLMConfigRequest(provider="unknown-ai")
         with pytest.raises(ValueError, match="Unknown provider"):
             _build_llm_config(req)
 
     def test_build_gemini_config(self):
         from bashgym.api.orchestrator_routes import (
-            _build_llm_config, LLMConfigRequest,
+            LLMConfigRequest,
+            _build_llm_config,
         )
+
         req = LLMConfigRequest(provider="gemini", api_key="test-key")
         config = _build_llm_config(req)
         assert config.provider == LLMProvider.GEMINI
@@ -737,8 +824,10 @@ class TestBuildLLMConfig:
 
     def test_build_config_with_empty_model_auto_resolves(self):
         from bashgym.api.orchestrator_routes import (
-            _build_llm_config, LLMConfigRequest,
+            LLMConfigRequest,
+            _build_llm_config,
         )
+
         req = LLMConfigRequest(provider="openai")
         config = _build_llm_config(req)
         # model=None in request -> model="" in LLMConfig -> auto-resolve to gpt-4o

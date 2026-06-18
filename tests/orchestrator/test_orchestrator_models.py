@@ -1,24 +1,32 @@
 """Tests for orchestrator data models, TaskDAG, and prompts."""
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
-from unittest.mock import patch, AsyncMock
 
 from bashgym.orchestrator.models import (
-    LLMProvider, LLMConfig, _PROVIDER_DEFAULTS,
-    TaskStatus, TaskPriority,
-    OrchestratorSpec, TaskNode,
-    WorkerConfig, WorkerResult, MergeResult,
+    _PROVIDER_DEFAULTS,
+    LLMConfig,
+    LLMProvider,
+    MergeResult,
+    OrchestratorSpec,
+    TaskNode,
+    TaskPriority,
+    TaskStatus,
+    WorkerConfig,
+    WorkerResult,
 )
-from bashgym.orchestrator.task_dag import TaskDAG, CyclicDependencyError
 from bashgym.orchestrator.prompts import (
-    WORKER_SYSTEM_PROMPT, RETRY_PROMPT_TEMPLATE,
     RETRY_ANALYSIS_TEMPLATE,
+    RETRY_PROMPT_TEMPLATE,
+    WORKER_SYSTEM_PROMPT,
 )
-
+from bashgym.orchestrator.task_dag import CyclicDependencyError, TaskDAG
 
 # =============================================================================
 # LLMProvider and LLMConfig
 # =============================================================================
+
 
 class TestLLMProvider:
     """Tests for LLMProvider enum."""
@@ -49,9 +57,9 @@ class TestLLMConfig:
         """Each provider should auto-resolve its default model."""
         for provider, defaults in _PROVIDER_DEFAULTS.items():
             config = LLMConfig(provider=LLMProvider(provider))
-            assert config.model == defaults["model"], (
-                f"{provider} should default to {defaults['model']}"
-            )
+            assert (
+                config.model == defaults["model"]
+            ), f"{provider} should default to {defaults['model']}"
 
     def test_explicit_model_overrides_default(self):
         """Explicitly setting model should override provider default."""
@@ -106,6 +114,7 @@ class TestLLMConfig:
 # Task Status and Priority
 # =============================================================================
 
+
 class TestTaskEnums:
     """Tests for TaskStatus and TaskPriority enums."""
 
@@ -113,8 +122,13 @@ class TestTaskEnums:
         """Should have all expected status values."""
         statuses = {s.value for s in TaskStatus}
         assert statuses == {
-            "pending", "assigned", "running", "completed",
-            "failed", "blocked", "cancelled",
+            "pending",
+            "assigned",
+            "running",
+            "completed",
+            "failed",
+            "blocked",
+            "cancelled",
         }
 
     def test_task_priority_ordering(self):
@@ -128,14 +142,13 @@ class TestTaskEnums:
 # OrchestratorSpec
 # =============================================================================
 
+
 class TestOrchestratorSpec:
     """Tests for OrchestratorSpec dataclass."""
 
     def test_spec_defaults(self):
         """Should have sensible defaults."""
-        spec = OrchestratorSpec(
-            title="Test", description="Test desc"
-        )
+        spec = OrchestratorSpec(title="Test", description="Test desc")
         assert spec.base_branch == "main"
         assert spec.max_budget_usd == 10.0
         assert spec.max_workers == 5
@@ -158,6 +171,7 @@ class TestOrchestratorSpec:
 # =============================================================================
 # TaskNode
 # =============================================================================
+
 
 class TestTaskNode:
     """Tests for TaskNode dataclass."""
@@ -182,7 +196,7 @@ class TestTaskNode:
         )
         d = task.to_dict()
         assert d["id"] == "task_1"
-        assert d["priority"] == 2  # HIGH = 2
+        assert d["priority"] == "HIGH"  # to_dict serializes the enum name, not its int value
         assert d["status"] == "pending"
         assert d["files_touched"] == ["src/foo.py"]
 
@@ -190,6 +204,7 @@ class TestTaskNode:
 # =============================================================================
 # WorkerConfig
 # =============================================================================
+
 
 class TestWorkerConfig:
     """Tests for WorkerConfig and CLI argument generation."""
@@ -238,6 +253,7 @@ class TestWorkerConfig:
 # WorkerResult and MergeResult
 # =============================================================================
 
+
 class TestWorkerResult:
     """Tests for WorkerResult dataclass."""
 
@@ -261,9 +277,7 @@ class TestMergeResult:
 
     def test_merge_result_defaults(self):
         """Should default to empty lists for conflicts/files."""
-        result = MergeResult(
-            task_id="t1", branch="task/t1", success=True
-        )
+        result = MergeResult(task_id="t1", branch="task/t1", success=True)
         assert result.conflicts == []
         assert result.files_merged == []
 
@@ -271,6 +285,7 @@ class TestMergeResult:
 # =============================================================================
 # TaskDAG
 # =============================================================================
+
 
 class TestTaskDAG:
     """Tests for TaskDAG dependency resolution and scheduling."""
@@ -280,14 +295,22 @@ class TestTaskDAG:
         """DAG: A -> B -> C (linear chain)."""
         dag = TaskDAG()
         dag.add_task(TaskNode(id="A", title="A", description="Task A"))
-        dag.add_task(TaskNode(
-            id="B", title="B", description="Task B",
-            dependencies=["A"],
-        ))
-        dag.add_task(TaskNode(
-            id="C", title="C", description="Task C",
-            dependencies=["B"],
-        ))
+        dag.add_task(
+            TaskNode(
+                id="B",
+                title="B",
+                description="Task B",
+                dependencies=["A"],
+            )
+        )
+        dag.add_task(
+            TaskNode(
+                id="C",
+                title="C",
+                description="Task C",
+                dependencies=["B"],
+            )
+        )
         return dag
 
     @pytest.fixture
@@ -295,18 +318,30 @@ class TestTaskDAG:
         """DAG: A -> B, A -> C, B -> D, C -> D (diamond)."""
         dag = TaskDAG()
         dag.add_task(TaskNode(id="A", title="A", description="Root"))
-        dag.add_task(TaskNode(
-            id="B", title="B", description="Left",
-            dependencies=["A"],
-        ))
-        dag.add_task(TaskNode(
-            id="C", title="C", description="Right",
-            dependencies=["A"],
-        ))
-        dag.add_task(TaskNode(
-            id="D", title="D", description="Merge",
-            dependencies=["B", "C"],
-        ))
+        dag.add_task(
+            TaskNode(
+                id="B",
+                title="B",
+                description="Left",
+                dependencies=["A"],
+            )
+        )
+        dag.add_task(
+            TaskNode(
+                id="C",
+                title="C",
+                description="Right",
+                dependencies=["A"],
+            )
+        )
+        dag.add_task(
+            TaskNode(
+                id="D",
+                title="D",
+                description="Merge",
+                dependencies=["B", "C"],
+            )
+        )
         return dag
 
     def test_add_task(self):
@@ -332,8 +367,12 @@ class TestTaskDAG:
     def test_get_ready_tasks_after_completion(self, simple_dag):
         """Completing A should make B ready."""
         result = WorkerResult(
-            task_id="A", session_id="s", success=True,
-            output="done", exit_code=0, duration_seconds=1.0,
+            task_id="A",
+            session_id="s",
+            success=True,
+            output="done",
+            exit_code=0,
+            duration_seconds=1.0,
         )
         simple_dag.mark_completed("A", result)
         ready = simple_dag.get_ready_tasks()
@@ -343,18 +382,30 @@ class TestTaskDAG:
     def test_get_ready_tasks_priority_sort(self):
         """Ready tasks should be sorted by priority (critical first)."""
         dag = TaskDAG()
-        dag.add_task(TaskNode(
-            id="low", title="L", description="D",
-            priority=TaskPriority.LOW,
-        ))
-        dag.add_task(TaskNode(
-            id="crit", title="C", description="D",
-            priority=TaskPriority.CRITICAL,
-        ))
-        dag.add_task(TaskNode(
-            id="norm", title="N", description="D",
-            priority=TaskPriority.NORMAL,
-        ))
+        dag.add_task(
+            TaskNode(
+                id="low",
+                title="L",
+                description="D",
+                priority=TaskPriority.LOW,
+            )
+        )
+        dag.add_task(
+            TaskNode(
+                id="crit",
+                title="C",
+                description="D",
+                priority=TaskPriority.CRITICAL,
+            )
+        )
+        dag.add_task(
+            TaskNode(
+                id="norm",
+                title="N",
+                description="D",
+                priority=TaskPriority.NORMAL,
+            )
+        )
         ready = dag.get_ready_tasks()
         assert [t.id for t in ready] == ["crit", "norm", "low"]
 
@@ -374,35 +425,43 @@ class TestTaskDAG:
     def test_cyclic_dependency_detected(self):
         """Should raise CyclicDependencyError for cycles."""
         dag = TaskDAG()
-        dag.add_task(TaskNode(
-            id="X", title="X", description="D", dependencies=["Y"]
-        ))
-        dag.add_task(TaskNode(
-            id="Y", title="Y", description="D", dependencies=["X"]
-        ))
+        dag.add_task(TaskNode(id="X", title="X", description="D", dependencies=["Y"]))
+        dag.add_task(TaskNode(id="Y", title="Y", description="D", dependencies=["X"]))
         with pytest.raises(CyclicDependencyError):
             dag.topological_sort()
 
     def test_mark_completed_returns_newly_ready(self, diamond_dag):
         """Completing both B and C should make D ready."""
         result = WorkerResult(
-            task_id="A", session_id="s", success=True,
-            output="", exit_code=0, duration_seconds=1.0,
+            task_id="A",
+            session_id="s",
+            success=True,
+            output="",
+            exit_code=0,
+            duration_seconds=1.0,
         )
         diamond_dag.mark_completed("A", result)
 
         # Complete B — D not yet ready (C still pending)
         result_b = WorkerResult(
-            task_id="B", session_id="s", success=True,
-            output="", exit_code=0, duration_seconds=1.0,
+            task_id="B",
+            session_id="s",
+            success=True,
+            output="",
+            exit_code=0,
+            duration_seconds=1.0,
         )
         newly = diamond_dag.mark_completed("B", result_b)
         assert len(newly) == 0
 
         # Complete C — D should now be ready
         result_c = WorkerResult(
-            task_id="C", session_id="s", success=True,
-            output="", exit_code=0, duration_seconds=1.0,
+            task_id="C",
+            session_id="s",
+            success=True,
+            output="",
+            exit_code=0,
+            duration_seconds=1.0,
         )
         newly = diamond_dag.mark_completed("C", result_c)
         assert len(newly) == 1
@@ -418,14 +477,22 @@ class TestTaskDAG:
     def test_detect_file_conflicts(self):
         """Should detect overlapping file touches between parallel tasks."""
         dag = TaskDAG()
-        dag.add_task(TaskNode(
-            id="t1", title="T1", description="D",
-            files_touched=["src/app.py", "src/utils.py"],
-        ))
-        dag.add_task(TaskNode(
-            id="t2", title="T2", description="D",
-            files_touched=["src/app.py", "src/db.py"],
-        ))
+        dag.add_task(
+            TaskNode(
+                id="t1",
+                title="T1",
+                description="D",
+                files_touched=["src/app.py", "src/utils.py"],
+            )
+        )
+        dag.add_task(
+            TaskNode(
+                id="t2",
+                title="T2",
+                description="D",
+                files_touched=["src/app.py", "src/db.py"],
+            )
+        )
         conflicts = dag.detect_file_conflicts()
         assert len(conflicts) == 1
         assert "src/app.py" in conflicts[0][2]
@@ -433,15 +500,23 @@ class TestTaskDAG:
     def test_no_conflicts_between_dependent_tasks(self):
         """Tasks with dependency relationship should not be flagged."""
         dag = TaskDAG()
-        dag.add_task(TaskNode(
-            id="t1", title="T1", description="D",
-            files_touched=["src/app.py"],
-        ))
-        dag.add_task(TaskNode(
-            id="t2", title="T2", description="D",
-            files_touched=["src/app.py"],
-            dependencies=["t1"],
-        ))
+        dag.add_task(
+            TaskNode(
+                id="t1",
+                title="T1",
+                description="D",
+                files_touched=["src/app.py"],
+            )
+        )
+        dag.add_task(
+            TaskNode(
+                id="t2",
+                title="T2",
+                description="D",
+                files_touched=["src/app.py"],
+                dependencies=["t1"],
+            )
+        )
         conflicts = dag.detect_file_conflicts()
         assert len(conflicts) == 0
 
@@ -497,8 +572,12 @@ class TestTaskDAG:
         """Should raise ValueError for unknown task ID."""
         dag = TaskDAG()
         result = WorkerResult(
-            task_id="x", session_id="s", success=True,
-            output="", exit_code=0, duration_seconds=1.0,
+            task_id="x",
+            session_id="s",
+            success=True,
+            output="",
+            exit_code=0,
+            duration_seconds=1.0,
         )
         with pytest.raises(ValueError, match="not found"):
             dag.mark_completed("x", result)
@@ -508,15 +587,14 @@ class TestTaskDAG:
 # TaskDAG.from_spec (mocked LLM)
 # =============================================================================
 
+
 class TestTaskDAGFromSpec:
     """Tests for spec decomposition via LLM."""
 
     @pytest.mark.asyncio
     async def test_from_spec_parses_json_response(self):
         """Should parse LLM JSON response into TaskDAG."""
-        spec = OrchestratorSpec(
-            title="Test", description="Test spec"
-        )
+        spec = OrchestratorSpec(title="Test", description="Test spec")
         llm_config = LLMConfig()
 
         mock_response = """[
@@ -597,6 +675,7 @@ class TestTaskDAGFromSpec:
 # =============================================================================
 # Prompts
 # =============================================================================
+
 
 class TestPrompts:
     """Tests for prompt templates."""

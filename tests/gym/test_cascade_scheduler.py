@@ -13,6 +13,8 @@ from bashgym.gym.cascade_scheduler import (
     CascadeScheduler,
     CascadeStage,
     RepoCascadeDomain,
+    _find_stage_checkpoint,
+    _strategy_dataset_mismatch,
     build_repo_domains,
 )
 
@@ -442,3 +444,119 @@ class TestSortDomainsByLoss:
         original_order = [s.domain.name for s in scheduler.stages]
         scheduler.sort_domains_by_loss([], loss_fn=None)
         assert [s.domain.name for s in scheduler.stages] == original_order
+
+
+# =========================================================================
+# Workstream 1: Multi-strategy cascade dispatch
+# =========================================================================
+
+
+class TestStageStrategies:
+    def test_default_is_grpo(self):
+        config = CascadeConfig(domains=["file_operations", "bash_commands"])
+        scheduler = CascadeScheduler(config)
+        assert scheduler.stages[0].strategy == "grpo"
+        assert scheduler.stages[1].strategy == "grpo"
+
+    def test_explicit_strategies_assigned_in_order(self):
+        config = CascadeConfig(
+            domains=["file_operations", "bash_commands"],
+            stage_strategies=["sft", "dpo"],
+        )
+        scheduler = CascadeScheduler(config)
+        assert scheduler.stages[0].strategy == "sft"
+        assert scheduler.stages[1].strategy == "dpo"
+
+    def test_length_mismatch_raises(self):
+        config = CascadeConfig(
+            domains=["file_operations", "bash_commands"],
+            stage_strategies=["sft"],  # too short
+        )
+        with pytest.raises(ValueError, match="length"):
+            CascadeScheduler(config)
+
+    def test_unknown_strategy_raises(self):
+        config = CascadeConfig(
+            domains=["file_operations"],
+            stage_strategies=["rlhf"],  # unknown
+        )
+        with pytest.raises(ValueError, match="Unknown training strategy"):
+            CascadeScheduler(config)
+
+    def test_to_dict_includes_strategy(self):
+        config = CascadeConfig(
+            domains=["file_operations"],
+            stage_strategies=["sft"],
+        )
+        scheduler = CascadeScheduler(config)
+        d = scheduler.stages[0].to_dict()
+        assert d["strategy"] == "sft"
+
+
+class TestStrategyDatasetMismatch:
+    def test_sft_accepts_messages(self):
+        ex = {"messages": [{"role": "user", "content": "hi"}]}
+        assert _strategy_dataset_mismatch("sft", "", ex) is None
+
+    def test_sft_accepts_prompt_completion(self):
+        ex = {"prompt": "p", "completion": "c"}
+        assert _strategy_dataset_mismatch("sft", "", ex) is None
+
+    def test_sft_rejects_bare_trace(self):
+        ex = {"trace": [{"tool_name": "Read"}]}
+        msg = _strategy_dataset_mismatch("sft", "", ex)
+        assert msg is not None
+        assert "messages" in msg or "prompt" in msg
+
+    def test_dpo_accepts_chosen_rejected(self):
+        ex = {"chosen": "good", "rejected": "bad"}
+        assert _strategy_dataset_mismatch("dpo", "", ex) is None
+
+    def test_dpo_rejects_missing_pairs(self):
+        ex = {"messages": [{"role": "user", "content": "hi"}]}
+        msg = _strategy_dataset_mismatch("dpo", "", ex)
+        assert msg is not None
+        assert "chosen" in msg and "rejected" in msg
+        assert "pair_failures_for_dpo" in msg
+
+    def test_grpo_defers_to_reward_mode(self):
+        # No tests field, verification reward → mismatch
+        ex = {"prompt": "p"}
+        msg = _strategy_dataset_mismatch("grpo", "verification", ex)
+        assert msg is not None
+        assert "tests" in msg
+
+    def test_grpo_syntax_needs_prompt_only(self):
+        ex = {"prompt": "p"}
+        assert _strategy_dataset_mismatch("grpo", "syntax", ex) is None
+
+
+class TestFindStageCheckpoint:
+    def test_prefers_merged_over_final(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "final").mkdir()
+            (root / "merged").mkdir()
+            result = _find_stage_checkpoint(root)
+            assert result == root / "merged"
+
+    def test_falls_back_to_final(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "final").mkdir()
+            result = _find_stage_checkpoint(root)
+            assert result == root / "final"
+
+    def test_walks_nested_run_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "run-abc" / "merged").mkdir(parents=True)
+            result = _find_stage_checkpoint(root)
+            assert result == root / "run-abc" / "merged"
+
+    def test_returns_none_when_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            assert _find_stage_checkpoint(Path(tmp)) is None
+
+    def test_nonexistent_path(self):
+        assert _find_stage_checkpoint(Path("/nonexistent/path")) is None

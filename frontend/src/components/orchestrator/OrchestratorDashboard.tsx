@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import { Network, Send, Activity, Clock } from 'lucide-react'
 import { useOrchestratorStore } from '../../stores/orchestratorStore'
 import { useTerminalStore } from '../../stores/terminalStore'
@@ -35,7 +35,6 @@ export function OrchestratorDashboard() {
   }, [currentJob?.jobId])
 
   // Queue watcher: dispatch next queued task when a terminal becomes idle
-  const _prevStatusesRef = useRef<Map<string, string>>(new Map())
   useEffect(() => {
     const unsub = useTerminalStore.subscribe((state, prevState) => {
       state.sessions.forEach((session, terminalId) => {

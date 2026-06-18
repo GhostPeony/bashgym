@@ -6,25 +6,18 @@ mock worker processes, and pre-built DAG structures.
 
 import asyncio
 import json
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from bashgym.orchestrator.models import (
-    LLMConfig,
-    LLMProvider,
-    MergeResult,
     OrchestratorSpec,
     TaskNode,
     TaskPriority,
     TaskStatus,
-    WorkerConfig,
     WorkerResult,
 )
 from bashgym.orchestrator.task_dag import TaskDAG
-from bashgym.orchestrator.worktree import WorktreeManager
-
 
 # =============================================================================
 # Real git repo fixtures
@@ -49,7 +42,8 @@ def real_git_repo(tmp_path):
     def git(*args, cwd=None):
         proc = asyncio.get_event_loop().run_until_complete(
             asyncio.create_subprocess_exec(
-                "git", *args,
+                "git",
+                *args,
                 cwd=str(cwd or repo),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -57,9 +51,7 @@ def real_git_repo(tmp_path):
         )
         out, err = asyncio.get_event_loop().run_until_complete(proc.communicate())
         if proc.returncode != 0:
-            raise RuntimeError(
-                f"git {' '.join(args)} failed: {err.decode()}"
-            )
+            raise RuntimeError(f"git {' '.join(args)} failed: {err.decode()}")
         return out.decode()
 
     git("init", "-b", "main")
@@ -92,16 +84,15 @@ async def async_git_repo(tmp_path):
 
     async def git(*args, cwd=None):
         proc = await asyncio.create_subprocess_exec(
-            "git", *args,
+            "git",
+            *args,
             cwd=str(cwd or repo),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         out, err = await proc.communicate()
         if proc.returncode != 0:
-            raise RuntimeError(
-                f"git {' '.join(args)} failed: {err.decode()}"
-            )
+            raise RuntimeError(f"git {' '.join(args)} failed: {err.decode()}")
         return out.decode()
 
     await git("init", "-b", "main")
@@ -119,7 +110,8 @@ async def async_git_repo(tmp_path):
     await git("add", "-A")
     await git("commit", "-m", "Initial commit")
 
-    repo._git = git  # Attach helper for use in tests
+    # Note: the module-level ``git`` helper in the test files is what tests use;
+    # we don't attach it to ``repo`` (a Path subclass with __slots__ rejects it).
     return repo
 
 
@@ -205,15 +197,18 @@ def mock_llm_all():
     """Patch _call_llm everywhere it's imported (task_dag + synthesizer + agent)."""
     response_text = json.dumps(THREE_TASK_DECOMPOSITION)
 
-    with patch(
-        "bashgym.orchestrator.task_dag._call_llm",
-        new_callable=AsyncMock,
-        return_value=response_text,
-    ) as mock_dag_llm, patch(
-        "bashgym.orchestrator.synthesizer._call_llm",
-        new_callable=AsyncMock,
-        return_value="resolved content",
-    ) as mock_synth_llm:
+    with (
+        patch(
+            "bashgym.orchestrator.task_dag._call_llm",
+            new_callable=AsyncMock,
+            return_value=response_text,
+        ) as mock_dag_llm,
+        patch(
+            "bashgym.orchestrator.synthesizer._call_llm",
+            new_callable=AsyncMock,
+            return_value="resolved content",
+        ) as mock_synth_llm,
+    ):
         yield mock_dag_llm, mock_synth_llm
 
 
@@ -225,12 +220,14 @@ def mock_llm_all():
 def _make_mock_process(returncode=0, stdout_data=None, stderr_data=b""):
     """Create a mock asyncio.subprocess.Process."""
     if stdout_data is None:
-        stdout_data = json.dumps({
-            "result": "Task completed successfully",
-            "session_id": "test-session-001",
-            "cost_usd": 0.05,
-            "usage": {"total_tokens": 1500},
-        }).encode()
+        stdout_data = json.dumps(
+            {
+                "result": "Task completed successfully",
+                "session_id": "test-session-001",
+                "cost_usd": 0.05,
+                "usage": {"total_tokens": 1500},
+            }
+        ).encode()
 
     mock_proc = AsyncMock()
     mock_proc.returncode = returncode
@@ -309,10 +306,15 @@ def three_task_dag():
     dag = TaskDAG()
     dag.add_task(make_task("task_1", "Create data models", files=["src/models.py"]))
     dag.add_task(make_task("task_2", "Add API endpoints", deps=["task_1"], files=["src/api.py"]))
-    dag.add_task(make_task(
-        "task_3", "Write tests", deps=["task_1"],
-        files=["tests/test_models.py"], priority=TaskPriority.LOW,
-    ))
+    dag.add_task(
+        make_task(
+            "task_3",
+            "Write tests",
+            deps=["task_1"],
+            files=["tests/test_models.py"],
+            priority=TaskPriority.LOW,
+        )
+    )
     return dag
 
 

@@ -32,7 +32,7 @@ export interface NodeAdapter {
   onReceive?(data: unknown): void
 }
 
-export interface IntegrationNodeData {
+export interface IntegrationNodeData extends Record<string, unknown> {
   panelId: string
   title: string
   adapterType: 'context' | 'neon' | 'vercel'

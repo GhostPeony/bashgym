@@ -779,25 +779,53 @@ class DeployOllamaRequest(BaseModel):
     quantization: str = "q4_k_m"
 
 
-def deploy_gguf_to_ollama(gguf_path: str, model_name: str) -> dict[str, Any]:
-    """Deploy a GGUF file to Ollama. Returns {'success': bool, 'error': str|None, 'model_name': str}.
+def deploy_gguf_to_ollama(
+    gguf_path: str,
+    model_name: str,
+    *,
+    base_ollama_tag: str | None = None,
+    template: str | None = None,
+    stop_tokens: tuple[str, ...] = (),
+    system: str | None = "You are a helpful coding assistant trained with Bash Gym.",
+) -> dict[str, Any]:
+    """Deploy a GGUF file to Ollama with a CORRECT Modelfile template.
+
+    When ``base_ollama_tag`` is given, reuses that base model's known-good Ollama
+    TEMPLATE (via ``ollama show``) so served chat/tool-call formatting matches
+    training — fixing the #1 deploy bug where a template-less Modelfile makes Ollama
+    infer a wrong Go template (double-BOS, broken Gemma 4 tool calls).
 
     Standalone function usable from both the API endpoint and the trainer auto-deploy.
     """
+    import logging
     import subprocess
     import tempfile
 
+    from bashgym.export.gguf import ModelfileSpec, build_modelfile, template_from_ollama_base
+
+    _log = logging.getLogger(__name__)
     gguf_file = Path(gguf_path)
     if not gguf_file.exists():
         return {"success": False, "error": f"GGUF file not found: {gguf_path}"}
 
-    modelfile_content = f"""FROM {gguf_path}
+    resolved_template = template or ""
+    resolved_stops = tuple(stop_tokens)
+    if base_ollama_tag and not resolved_template:
+        try:
+            resolved_template, base_stops = template_from_ollama_base(base_ollama_tag)
+            resolved_stops = resolved_stops or base_stops
+        except Exception as exc:  # degrade to template-less deploy rather than fail
+            _log.warning("Could not reuse base template from %s: %s", base_ollama_tag, exc)
 
-PARAMETER temperature 0.7
-PARAMETER num_ctx 8192
-
-SYSTEM \"\"\"You are a helpful coding assistant trained with Bash Gym.\"\"\"
-"""
+    modelfile_content = build_modelfile(
+        ModelfileSpec(
+            from_path=gguf_path,
+            template=resolved_template,
+            system=system,
+            stop_tokens=resolved_stops,
+            parameters={"temperature": 0.7, "num_ctx": 8192},
+        )
+    )
 
     try:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".modelfile", delete=False) as f:
@@ -836,25 +864,59 @@ async def deploy_to_ollama(model_id: str, request: DeployOllamaRequest):
     if not profile:
         raise HTTPException(status_code=404, detail="Model not found")
 
-    # Find or create GGUF
+    def _export_attr(exp, key):
+        # gguf_exports may hold GGUFExport dataclasses (loaded from disk) or dicts.
+        return exp.get(key) if isinstance(exp, dict) else getattr(exp, key, None)
+
+    # Find an existing GGUF for the requested quantization.
     gguf_path = None
     for export in profile.artifacts.gguf_exports:
-        if export.get("quantization") == request.quantization:
-            gguf_path = export.get("path")
+        if _export_attr(export, "quantization") == request.quantization:
+            gguf_path = _export_attr(export, "path")
             break
 
+    # None found — auto-export from the merged checkpoint via llama.cpp.
     if not gguf_path:
-        # Check if there's a merged model to convert
-        if profile.artifacts.merged_path:
-            # TODO: Trigger GGUF export
-            raise HTTPException(
-                status_code=400,
-                detail=f"No GGUF export found with quantization {request.quantization}. Export first.",
-            )
-        else:
+        merged = profile.artifacts.merged_path
+        if not (merged and Path(merged).exists()):
             raise HTTPException(
                 status_code=400, detail="No merged model found. Complete training first."
             )
+
+        import logging
+        from datetime import datetime
+
+        import anyio
+
+        from bashgym.export.gguf import convert_merged_to_gguf
+        from bashgym.models.profile import GGUFExport
+
+        out_dir = Path(profile.model_dir) / "gguf"
+        conv = await anyio.to_thread.run_sync(
+            lambda: convert_merged_to_gguf(merged, str(out_dir), quantization=request.quantization)
+        )
+        if not conv.get("success"):
+            detail = conv.get("error", "GGUF export failed")
+            hint = conv.get("hint")
+            status_code = 501 if "not found" in detail else 500
+            raise HTTPException(
+                status_code=status_code, detail=detail + (f" — {hint}" if hint else "")
+            )
+        gguf_path = conv["path"]
+        # Record the new export so future deploys reuse it.
+        try:
+            gguf_file = Path(gguf_path)
+            profile.artifacts.gguf_exports.append(
+                GGUFExport(
+                    path=gguf_path,
+                    quantization=conv.get("quantization", request.quantization),
+                    size_bytes=gguf_file.stat().st_size if gguf_file.exists() else 0,
+                    created_at=datetime.now(),
+                )
+            )
+            profile.save()
+        except Exception as e:
+            logging.getLogger(__name__).warning("Could not record GGUF export: %s", e)
 
     # Verify GGUF file exists
     gguf_file = Path(gguf_path)

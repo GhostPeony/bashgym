@@ -29,12 +29,15 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
-  const _lastScrollPositionRef = useRef<number | null>(null)
   const outputBufferRef = useRef('')
-  const flushTimerRef = useRef<ReturnType<typeof setTimeout>>()
-  const idleTimerRef = useRef<ReturnType<typeof setTimeout>>()
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const startPtyRef = useRef<(() => void) | null>(null)
 
-  const { closeTerminal, updateSession, sessions, setViewMode, setActiveTerminal, panels, viewMode, renamePanel } = useTerminalStore()
+  const { requestCloseTerminal, updateSession, sessions, setViewMode, setActiveTerminal, panels, viewMode, renamePanel } = useTerminalStore()
+
+  // When the PTY exits we keep the pane alive and offer a restart instead of a dead view
+  const [exitedCode, setExitedCode] = useState<number | null>(null)
 
   // Helper to fit terminal while preserving scroll position
   const fitWithScrollPreservation = useCallback(() => {
@@ -303,7 +306,6 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
     const green = '\x1b[38;2;118;185;0m'  // NVIDIA green
     const dim = '\x1b[2m'
     const reset = '\x1b[0m'
-    const _clear = '\x1b[2J\x1b[H'  // Clear screen and move cursor to top
 
     // Function to write the Bash Gym banner
     const writeBanner = () => {
@@ -350,23 +352,40 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
       }
     }
 
-    // Create PTY process
-    window.bashgym?.terminal.create(id).then((result) => {
-      if (!result.success) {
-        terminal.writeln(`\x1b[31mFailed to create terminal: ${result.error}\x1b[0m`)
-        return
-      }
-
-      // Handle input
-      terminal.onData((data) => {
-        window.bashgym?.terminal.write(id, data)
-      })
-
-      // Handle resize
-      terminal.onResize(({ cols, rows }) => {
-        window.bashgym?.terminal.resize(id, cols, rows)
-      })
+    // Handle input/resize — registered once per xterm instance, valid across PTY restarts
+    terminal.onData((data) => {
+      window.bashgym?.terminal.write(id, data)
     })
+    terminal.onResize(({ cols, rows }) => {
+      window.bashgym?.terminal.resize(id, cols, rows)
+    })
+
+    // Create or re-attach the PTY process (main process keeps PTYs alive across remounts)
+    const startPty = () => {
+      window.bashgym?.terminal.create(id).then((result) => {
+        if (!result.success) {
+          terminal.writeln(`\x1b[31mFailed to create terminal: ${result.error}\x1b[0m`)
+          return
+        }
+        setExitedCode(null)
+        // Re-attached to a live PTY: replay retained scrollback
+        if (result.attached && result.buffer) {
+          terminal.write(result.buffer)
+          // Sync PTY size to this (possibly new) viewport
+          setTimeout(() => {
+            try {
+              fitAddon.fit()
+              window.bashgym?.terminal.resize(id, terminal.cols, terminal.rows)
+            } catch {
+              // Ignore - terminal may not be fully ready
+            }
+          }, 50)
+        }
+      })
+    }
+
+    startPty()
+    startPtyRef.current = startPty
 
     // Track if banner has been shown (only for first terminal)
     let bannerShown = false
@@ -389,9 +408,11 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
       parseTerminalOutput(data)
     })
 
-    // Listen for exit
+    // Listen for exit — surface a restart overlay instead of leaving a dead pane
     const removeExitListener = window.bashgym?.terminal.onExit(id, (exitCode) => {
       terminal.writeln(`\r\n\x1b[2mProcess exited with code ${exitCode}\x1b[0m`)
+      setExitedCode(exitCode)
+      updateSession(id, { status: 'idle', attention: exitCode === 0 ? 'none' : 'error', currentTool: undefined })
     })
 
     // Handle resize with debouncing
@@ -682,7 +703,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
     if (onPopupClose) {
       onPopupClose()
     } else {
-      closeTerminal(id)
+      requestCloseTerminal(id)
     }
   }
 
@@ -871,18 +892,37 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
         </div>
 
         {/* Terminal Content */}
-        <div
-          ref={containerRef}
-          className={clsx(
-            'flex-1 overflow-hidden',
-            session?.attention === 'success' && 'terminal-attention-success',
-            session?.attention === 'error' && 'terminal-attention-error',
-            session?.attention === 'waiting' && 'terminal-attention-waiting',
-            session?.status === 'running' && 'terminal-status-running',
-            session?.status === 'tool_calling' && 'terminal-status-tool-calling',
-            session?.status === 'waiting_input' && 'terminal-status-waiting-input'
+        <div className="relative flex-1 overflow-hidden">
+          <div
+            ref={containerRef}
+            className={clsx(
+              'h-full w-full overflow-hidden',
+              session?.attention === 'success' && 'terminal-attention-success',
+              session?.attention === 'error' && 'terminal-attention-error',
+              session?.attention === 'waiting' && 'terminal-attention-waiting',
+              session?.status === 'running' && 'terminal-status-running',
+              session?.status === 'tool_calling' && 'terminal-status-tool-calling',
+              session?.status === 'waiting_input' && 'terminal-status-waiting-input'
+            )}
+          />
+
+          {/* Exited overlay — restart the shell without losing the pane */}
+          {exitedCode !== null && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-background-primary/70">
+              <div className="card flex flex-col items-center gap-3 px-6 py-5">
+                <span className="text-sm font-mono text-text-muted">
+                  Process exited with code {exitedCode}
+                </span>
+                <button
+                  onClick={() => startPtyRef.current?.()}
+                  className="px-4 py-1.5 text-sm font-mono font-semibold bg-accent text-background-primary hover:opacity-90 transition-press"
+                >
+                  Restart shell
+                </button>
+              </div>
+            </div>
           )}
-        />
+        </div>
 
         {/* Right-click Context Menu */}
         {contextMenu && (

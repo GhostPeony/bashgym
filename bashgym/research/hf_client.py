@@ -17,6 +17,7 @@ Verified against huggingface_hub 1.8.0 on 2026-04-10. Key findings:
   contains structured strings like ``"license:mit"`` — a useful fallback when
   ``card.license`` is None.
 """
+
 from __future__ import annotations
 
 import logging

@@ -8,6 +8,7 @@ Output:
     ~/.bashgym/research/hf_datasets_report.md
     ~/.bashgym/research/hf_datasets_cache.json
 """
+
 from __future__ import annotations
 
 import argparse
@@ -18,7 +19,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from bashgym.research.hf_client import HFResearchClient, SEARCH_QUERIES
+from bashgym.research.hf_client import SEARCH_QUERIES, HFResearchClient
 from bashgym.research.report import render_report
 from bashgym.research.scoring import DatasetMetadata, ScoredDataset, score_dataset
 
@@ -81,16 +82,22 @@ def _metadata_from_cache(d: dict) -> DatasetMetadata:
     )
 
 
-def run(limit_per_query: int | None = None, use_cache: bool = True, max_candidates: int = 500) -> int:
+def run(
+    limit_per_query: int | None = None, use_cache: bool = True, max_candidates: int = 500
+) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
-    logger.info("Starting HF dataset scan — cache=%s, limit_per_query=%s", use_cache, limit_per_query)
+    logger.info(
+        "Starting HF dataset scan — cache=%s, limit_per_query=%s", use_cache, limit_per_query
+    )
 
     token = os.environ.get("HF_TOKEN")
     client = HFResearchClient(token=token)
 
     queries = SEARCH_QUERIES
     if limit_per_query is not None:
-        queries = [{**q, "limit": min(q.get("limit", limit_per_query), limit_per_query)} for q in queries]
+        queries = [
+            {**q, "limit": min(q.get("limit", limit_per_query), limit_per_query)} for q in queries
+        ]
 
     logger.info("Running %d discovery queries…", len(queries))
     repo_ids = client.discover_candidates(queries)
@@ -134,7 +141,9 @@ def run(limit_per_query: int | None = None, use_cache: bool = True, max_candidat
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     report_md = render_report(accepted, rejected)
     REPORT_PATH.write_text(report_md)
-    logger.info("Wrote report to %s (%d accepted, %d rejected)", REPORT_PATH, len(accepted), len(rejected))
+    logger.info(
+        "Wrote report to %s (%d accepted, %d rejected)", REPORT_PATH, len(accepted), len(rejected)
+    )
 
     top = sorted(accepted, key=lambda s: s.score, reverse=True)[:20]
     print()
@@ -150,10 +159,16 @@ def run(limit_per_query: int | None = None, use_cache: bool = True, max_candidat
 def main() -> int:
     ap = argparse.ArgumentParser(description="Scan HF Hub for candidate training datasets.")
     ap.add_argument("--limit", type=int, default=None, help="Max results per discovery query")
-    ap.add_argument("--no-cache", action="store_true", help="Ignore the JSON cache and re-enrich everything")
-    ap.add_argument("--max-candidates", type=int, default=500, help="Hard cap on candidates to enrich")
+    ap.add_argument(
+        "--no-cache", action="store_true", help="Ignore the JSON cache and re-enrich everything"
+    )
+    ap.add_argument(
+        "--max-candidates", type=int, default=500, help="Hard cap on candidates to enrich"
+    )
     args = ap.parse_args()
-    return run(limit_per_query=args.limit, use_cache=not args.no_cache, max_candidates=args.max_candidates)
+    return run(
+        limit_per_query=args.limit, use_cache=not args.no_cache, max_candidates=args.max_candidates
+    )
 
 
 if __name__ == "__main__":

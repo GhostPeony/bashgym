@@ -1,4 +1,5 @@
 """Markdown report generator for scored HF datasets. Pure — input list, output string."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -35,7 +36,9 @@ def render_report(accepted: list[ScoredDataset], rejected: list[ScoredDataset]) 
         for rank, s in enumerate(top, start=1):
             rows_str = f"{s.metadata.num_rows:,}" if s.metadata.num_rows else "?"
             lic = s.metadata.license or "unknown"
-            updated = s.metadata.last_modified.date().isoformat() if s.metadata.last_modified else "?"
+            updated = (
+                s.metadata.last_modified.date().isoformat() if s.metadata.last_modified else "?"
+            )
             fmt = s.bashgym_format or "—"
             lines.append(
                 f"| {rank} | `{s.repo_id}` | {s.score:.2f} | {fmt} | {rows_str} | {lic} | {updated} |"

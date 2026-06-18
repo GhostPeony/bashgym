@@ -117,7 +117,11 @@ def pair_failures_for_dpo(
     failed_traces = _load_traces_from_dir(failed_dir)
 
     if not gold_traces or not failed_traces:
-        logger.info("[DPO Pairer] No traces to pair (gold=%d, failed=%d)", len(gold_traces), len(failed_traces))
+        logger.info(
+            "[DPO Pairer] No traces to pair (gold=%d, failed=%d)",
+            len(gold_traces),
+            len(failed_traces),
+        )
         return []
 
     logger.info(
@@ -180,17 +184,21 @@ def pair_failures_for_dpo(
 
         example_id = hashlib.sha256(f"{prompt}{chosen}{rejected}".encode()).hexdigest()[:16]
 
-        pairs.append(DPOExample(
-            example_id=example_id,
-            prompt=prompt,
-            chosen=chosen,
-            rejected=rejected,
-            metadata={
-                "gold_repo": _extract_repo_name(gold_trace),
-                "failed_repo": _extract_repo_name(failed_trace),
-                "similarity": round(best_score, 4),
-            },
-        ))
+        pairs.append(
+            DPOExample(
+                example_id=example_id,
+                prompt=prompt,
+                chosen=chosen,
+                rejected=rejected,
+                metadata={
+                    "gold_repo": _extract_repo_name(gold_trace),
+                    "failed_repo": _extract_repo_name(failed_trace),
+                    "similarity": round(best_score, 4),
+                },
+            )
+        )
 
-    logger.info("[DPO Pairer] Produced %d DPO pairs (threshold=%.2f)", len(pairs), similarity_threshold)
+    logger.info(
+        "[DPO Pairer] Produced %d DPO pairs (threshold=%.2f)", len(pairs), similarity_threshold
+    )
     return pairs

@@ -9,6 +9,7 @@ Usage:
 Output:
     ~/.bashgym/research/dataset_empirical_ranking.md
 """
+
 from __future__ import annotations
 
 import argparse
@@ -88,6 +89,7 @@ def _load_candidates(top_n: int, cache_path: Path) -> list[DatasetCandidate]:
 def _build_base_trainer_config(base_model: str):
     """Build a minimal TrainerConfig. Lazy-imported to avoid pulling in torch at CLI startup."""
     from bashgym.gym.trainer import TrainerConfig
+
     return TrainerConfig(
         base_model=base_model,
         strategy="sft",
@@ -209,9 +211,13 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description="Empirically rank HF datasets by short-run training impact."
     )
-    ap.add_argument("--top-n", type=int, default=5, help="Number of top-scored candidates to evaluate")
+    ap.add_argument(
+        "--top-n", type=int, default=5, help="Number of top-scored candidates to evaluate"
+    )
     ap.add_argument("--mode", choices=["simulate", "real"], default="simulate")
-    ap.add_argument("--num-records", type=int, default=500, help="Records to materialize per dataset")
+    ap.add_argument(
+        "--num-records", type=int, default=500, help="Records to materialize per dataset"
+    )
     ap.add_argument("--train-steps", type=int, default=100, help="SFT training steps per candidate")
     ap.add_argument(
         "--base-model",
@@ -226,14 +232,16 @@ def main() -> int:
     )
     args = ap.parse_args()
 
-    return asyncio.run(_run_async(
-        top_n=args.top_n,
-        mode=args.mode,
-        num_records=args.num_records,
-        train_steps=args.train_steps,
-        base_model=args.base_model,
-        cache_path=args.cache_path,
-    ))
+    return asyncio.run(
+        _run_async(
+            top_n=args.top_n,
+            mode=args.mode,
+            num_records=args.num_records,
+            train_steps=args.train_steps,
+            base_model=args.base_model,
+            cache_path=args.cache_path,
+        )
+    )
 
 
 if __name__ == "__main__":

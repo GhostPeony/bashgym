@@ -593,18 +593,14 @@ class TraceResearcher:
                         try:
                             from bashgym.factory.dpo_pairer import pair_failures_for_dpo
 
-                            dpo_pairs = pair_failures_for_dpo(
-                                gold_dir, failed_dir, max_pairs=50
-                            )
+                            dpo_pairs = pair_failures_for_dpo(gold_dir, failed_dir, max_pairs=50)
                             if dpo_pairs:
                                 dpo_path = tmpdir_path / "dpo_pairs.jsonl"
                                 with open(dpo_path, "w") as f:
                                     for pair in dpo_pairs:
                                         f.write(json.dumps(pair.to_dict()) + "\n")
                                 dpo_count = len(dpo_pairs)
-                                logger.info(
-                                    "[TraceResearch] Generated %d DPO pairs", dpo_count
-                                )
+                                logger.info("[TraceResearch] Generated %d DPO pairs", dpo_count)
                         except Exception as e:
                             logger.warning("[TraceResearch] DPO pairing failed: %s", e)
 

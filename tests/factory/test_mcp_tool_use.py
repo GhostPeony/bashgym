@@ -72,6 +72,7 @@ class TestLocalWorkspace:
 
 class TestServerBuild:
     def test_build_server(self):
+        pytest.importorskip("mcp.server.fastmcp")
         ws = LocalWorkspace(timeout_sec=20)
         try:
             server = build_server(workspace=ws)

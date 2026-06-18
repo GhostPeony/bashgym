@@ -14,12 +14,10 @@ Every AI coding session is a chain-of-thought reasoning trace — step-by-step p
 
 ## Documentation
 
-- **[docs/PLATFORM_OVERVIEW.md](docs/PLATFORM_OVERVIEW.md)** — what the platform is, the Ouroboros flywheel, architecture, and design rationale.
-- **[docs/TRAINING_SETUP.md](docs/TRAINING_SETUP.md)** — the training stack in depth: hardware tiers, the six strategies, the data factory, and remote training.
 - **[docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)** — install to first trained model, step by step.
 - **[docs/TRAINING_DATA_GUIDE.md](docs/TRAINING_DATA_GUIDE.md)** — trace format, quality tiers, and example generation.
-- **[docs/training-config-guide.md](docs/training-config-guide.md)** — hyperparameters, LoRA/QLoRA, and quick-start recipes.
 - **[docs/API.md](docs/API.md)** — REST API reference.
+- **[docs/FRONTEND_DESIGN_GUIDELINES.md](docs/FRONTEND_DESIGN_GUIDELINES.md)** — design tokens, components, and layout patterns.
 
 ---
 
@@ -238,14 +236,14 @@ The slow loop continues as before: gold traces become training examples, the mod
 
 Multi-agent task decomposition across LLM providers with git worktree isolation.
 
-| Provider | Default Model |
+| Provider | Default planner model |
 |----------|---------------|
 | **Anthropic** | `claude-opus-4-6` |
 | **OpenAI** | `gpt-4o` |
 | **Gemini** | `gemini-2.5-pro` |
-| **Ollama** | `gemma4` |
+| **Ollama** | Any local model |
 
-Four phases: PLAN → DISPATCH → MONITOR → SYNTHESIZE. Workers always use Claude Code CLI regardless of the planning provider.
+Defaults are configurable per provider; the Ollama brain uses any model you've pulled. Four phases: PLAN → DISPATCH → MONITOR → SYNTHESIZE. Workers always use Claude Code CLI regardless of the planning provider.
 
 **Three-layer prompt composition** structures worker context into Identity (static role/standards), Narrative (dynamic sibling progress, shared discoveries, file ownership), and Focus (task-specific requirements). Transition markers update running workers when siblings complete.
 
@@ -253,7 +251,7 @@ Four phases: PLAN → DISPATCH → MONITOR → SYNTHESIZE. Workers always use Cl
 
 ### Event System
 
-Typed event bus with 37+ event types covering pipeline, training, orchestration, judge, and system domains. All components emit structured events that are bridged to the WebSocket layer for real-time frontend updates. Supports both sync and async handlers with type-based dispatch.
+Typed event bus with 44 event types covering pipeline, training, orchestration, judge, and system domains. All components emit structured events that are bridged to the WebSocket layer for real-time frontend updates. Supports both sync and async handlers with type-based dispatch.
 
 ### Evaluation
 
@@ -334,11 +332,11 @@ Any HuggingFace model compatible with Unsloth works. Set `BASE_MODEL` in the das
 
 | Model family | Notes |
 |--------------|-------|
-| Gemma 4 (E2B / E4B / 26B-A4B) | E2B trains in ~8 GB locally; MoE variants for more capacity. |
-| Qwen3 (incl. Qwen3-Coder; 4B–30B dense) | Strong coding/reasoning; small dense models fit consumer GPUs. |
-| DeepSeek V3.x / V4 | Large MoE, long context — DGX Spark. |
+| Gemma 4 (E2B / E4B / 12B / 26B-A4B / 31B) | E2B trains in ~8 GB locally; dense and MoE variants for more capacity. |
+| Qwen3.5 / Qwen3.6 (dense 0.8B–27B; MoE 30B-A3B / 35B-A3B / 235B-A22B) | Apache-2.0. Strong coding/reasoning; small dense models fit consumer GPUs, MoE for DGX-class. |
+| DeepSeek V4 | Large MoE, long context, MIT — DGX Spark. |
 | Llama 4 (Scout / Maverick) | Very long context. |
-| Mistral (Small / Devstral) · Phi-4 | Efficient general/instruct options. |
+| Mistral Small 4 / Devstral · Phi-4 | Apache-2.0 efficient general, coding, and instruct options. |
 
 These are suggestions, not restrictions. Any `AutoModelForCausalLM`-compatible model from HuggingFace will work. All training uses QLoRA (4-bit quantization) by default, so VRAM requirements are roughly `model_params / 2` GB.
 
@@ -366,7 +364,7 @@ Plug-and-play SSH device registry for remote training targets. No manual `.env` 
 
 ### AutoResearch
 
-Three evolutionary search loops that continuously improve your training pipeline. Each runs independently, keeps improvements, and converges on optimal configurations — inspired by Karpathy's autoresearch.
+Three evolutionary search loops that continuously improve your training pipeline. Each runs independently, keeps improvements, and converges on optimal configurations.
 
 | Mode | What It Evolves | What It Searches | How It Evaluates |
 |------|----------------|-----------------|-----------------|
@@ -447,7 +445,7 @@ bashgym/
 │   └── integrations/         # HuggingFace, NeMo, Ollama
 │
 ├── frontend/                 # Electron + React dashboard
-│   ├── src/components/       # 72+ React components
+│   ├── src/components/       # 100+ React components
 │   │   └── training/         # DeviceManager, AutoResearchPanel, TrainingConfig, etc.
 │   ├── src/stores/           # Zustand state management
 │   └── electron/             # Main process + secure storage
@@ -492,7 +490,7 @@ Only to the LLM providers you already use (Anthropic, etc.). Traces, training da
 A trace is a complete coding session from any supported tool (many tool calls, potentially 30+ minutes). A training example is a single task-response pair extracted from that trace. One trace typically produces 1–5 examples.
 
 **Can I use other base models?**
-Yes — any HuggingFace model that works with Unsloth/transformers. Qwen, Llama, Mistral, DeepSeek, Phi, StarCoder, CodeGemma, Yi, and more. Set `BASE_MODEL` in the dashboard or `.env`. Larger models need more VRAM (or use cloud training). After training, export to GGUF and run via Ollama, llama.cpp, LM Studio, or any GGUF-compatible runtime.
+Yes — any HuggingFace model that works with Unsloth/transformers. Qwen3.5/3.6, Llama 4, Gemma 4, Mistral, DeepSeek, Phi, and more. Set `BASE_MODEL` in the dashboard or `.env`. Larger models need more VRAM (or use cloud training). After training, export to GGUF and run via Ollama, llama.cpp, LM Studio, or any GGUF-compatible runtime.
 
 **What about synthetic data?**
 The data factory supports NVIDIA NeMo Data Designer for structured synthetic generation, plus LLM-based augmentation using Anthropic or NVIDIA NIM models. Useful for filling gaps in your trace coverage.

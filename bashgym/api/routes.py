@@ -1183,8 +1183,17 @@ def create_app() -> FastAPI:
                         raise ValueError(f"No gold traces found in {gold_dir}")
 
                 # Update trainer config
+                resolved_base_model = request.base_model or get_settings().training.base_model
+                if not (resolved_base_model or "").strip():
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            "No base model set. Choose a model to fine-tune — set "
+                            "BASE_MODEL in your environment or pass base_model in the request."
+                        ),
+                    )
                 config = TrainerConfig(
-                    base_model=request.base_model or "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+                    base_model=resolved_base_model,
                     model_type=request.model_type or "qwen",
                     strategy=TS(request.strategy.value),
                     num_epochs=request.num_epochs,
@@ -4837,46 +4846,49 @@ def create_app() -> FastAPI:
 
     @app.get("/api/factory/models", response_model=list[AvailableModel], tags=["Factory"])
     async def list_available_models():
-        """List available models for LLM columns."""
-        # Return common models - in production this would query NIM or other services
+        """Available models for LLM columns — the live catalog across providers.
+
+        Discovers what providers actually serve (NVIDIA NIM, local Ollama / LM
+        Studio, plus curated teacher models) instead of a hardcoded list. Falls
+        back to a small curated set only if discovery is unavailable (offline).
+        """
+        _PREFIXES = ("nim/", "ollama/", "lm_studio/", "hf/", "anthropic/", "openai/")
+
+        def _bare(model_id: str) -> str:
+            for p in _PREFIXES:
+                if model_id.startswith(p):
+                    return model_id[len(p) :]
+            return model_id
+
+        try:
+            from bashgym.providers.detector import get_available_models
+
+            cats = await get_available_models()
+            seen: set[str] = set()
+            out: list[AvailableModel] = []
+            for cat in ("inference", "local", "teacher"):
+                for m in cats.get(cat, []):
+                    bare = _bare(m.id)
+                    if not bare or bare in seen:
+                        continue
+                    seen.add(bare)
+                    out.append(AvailableModel(id=bare, name=m.name, provider=m.provider.value))
+            if out:
+                return out
+        except Exception as e:  # noqa: BLE001 - discovery is best-effort
+            logger.warning(f"live model discovery failed; using curated fallback: {e}")
+
+        # Offline fallback: small curated set.
         return [
-            # Anthropic Claude (recommended for high-quality augmentation)
-            AvailableModel(
-                id="claude-opus-4-8",
-                name="Claude Opus 4.8 (Best Quality)",
-                provider="Anthropic",
-            ),
-            AvailableModel(
-                id="claude-sonnet-4-6",
-                name="Claude Sonnet 4.6 (Recommended)",
-                provider="Anthropic",
-            ),
-            AvailableModel(
-                id="claude-haiku-4-5", name="Claude Haiku 4.5 (Fast)", provider="Anthropic"
-            ),
-            # NVIDIA NIM (cost-effective, good for bulk generation)
+            AvailableModel(id="claude-sonnet-4-6", name="Claude Sonnet 4.6", provider="anthropic"),
             AvailableModel(
                 id="deepseek-ai/deepseek-v4-flash",
-                name="DeepSeek V4 Flash (Default NIM)",
-                provider="NVIDIA NIM",
+                name="DeepSeek V4 Flash",
+                provider="nvidia_nim",
             ),
             AvailableModel(
-                id="qwen/qwen3-next-80b-a3b-instruct",
-                name="Qwen3 Next 80B",
-                provider="NVIDIA NIM",
+                id="meta/llama-3.3-70b-instruct", name="Llama 3.3 70B", provider="nvidia_nim"
             ),
-            AvailableModel(
-                id="mistralai/codestral-22b-instruct-v0.1",
-                name="Codestral 22B",
-                provider="NVIDIA NIM",
-            ),
-            AvailableModel(
-                id="nvidia/nemotron-3-super-120b-a12b",
-                name="Nemotron 3 Super 120B",
-                provider="NVIDIA NIM",
-            ),
-            # OpenAI (alternative)
-            AvailableModel(id="openai/gpt-4o", name="GPT-4o", provider="OpenAI"),
         ]
 
     # =========================================================================

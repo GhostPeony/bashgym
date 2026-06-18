@@ -633,7 +633,7 @@ class ModelRouter:
         messages = [{"role": "user", "content": prompt}]
 
         payload = {
-            "model": "claude-sonnet-4-20250514",
+            "model": "claude-sonnet-4-6",
             "max_tokens": kwargs.get("max_tokens", model.max_tokens),
             "messages": messages,
         }

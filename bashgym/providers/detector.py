@@ -383,20 +383,28 @@ RECOMMENDED_TRAINING_MODELS = [
 # Curated list of teacher models for knowledge distillation
 TEACHER_MODELS = [
     UnifiedModel(
-        id="anthropic/claude-3-5-sonnet",
-        name="Claude 3.5 Sonnet",
+        id="anthropic/claude-opus-4-8",
+        name="Claude Opus 4.8",
         provider=ProviderType.ANTHROPIC,
         is_code_model=True,
         supports_inference=True,
-        description="Excellent for code generation and reasoning.",
+        description="Most capable teacher for distillation.",
     ),
     UnifiedModel(
-        id="openai/gpt-4-turbo",
-        name="GPT-4 Turbo",
+        id="anthropic/claude-sonnet-4-6",
+        name="Claude Sonnet 4.6",
+        provider=ProviderType.ANTHROPIC,
+        is_code_model=True,
+        supports_inference=True,
+        description="Fast, capable teacher with a strong quality/cost balance.",
+    ),
+    UnifiedModel(
+        id="openai/gpt-4o",
+        name="GPT-4o",
         provider=ProviderType.OPENAI,
         is_code_model=True,
         supports_inference=True,
-        description="Strong general-purpose model.",
+        description="Strong general-purpose teacher.",
     ),
     UnifiedModel(
         id="hf/Qwen/Qwen2.5-Coder-32B-Instruct",

@@ -177,7 +177,7 @@ class TrainerConfig:
     grpo_loss_type: str = "grpo"
 
     # Knowledge Distillation settings
-    teacher_model: str = "claude-sonnet-4-20250514"  # Teacher model for distillation
+    teacher_model: str = "claude-sonnet-4-6"  # Teacher model for distillation
     teacher_temperature: float = 0.7
     distillation_alpha: float = 0.5  # Balance between hard and soft labels
     on_policy_distillation: bool = False  # Use on-policy distillation (Oct 2025+)

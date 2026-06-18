@@ -180,7 +180,7 @@ class PipelineConfig:
 
     # Model aliases
     text_model: str = "meta/llama-3.3-70b-instruct"
-    code_model: str = "qwen/qwen2.5-coder-32b-instruct"
+    code_model: str = "deepseek-ai/deepseek-v4-flash"
     judge_model: str = "meta/llama-3.3-70b-instruct"
 
     # Generation settings

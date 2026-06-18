@@ -5,6 +5,7 @@ Integrates with NVIDIA NIM API (OpenAI-compatible) for cloud inference
 using models like Qwen Coder, Llama, and others hosted on NVIDIA's platform.
 """
 
+import re
 import time
 from typing import Any
 
@@ -17,33 +18,65 @@ from bashgym.providers.base import (
     ProviderResponse,
 )
 
-# Static catalog of key NIM models
+# Fallback only. list_models() queries the live OpenAI-compatible /models
+# endpoint first; this list is returned when that call fails (offline, no key).
+# Entries are current served NIM coding models — keep in step with the endpoint.
 _NIM_MODELS = [
     ProviderModel(
-        id="qwen/qwen2.5-coder-7b-instruct",
-        name="Qwen 2.5 Coder 7B Instruct",
+        id="deepseek-ai/deepseek-v4-flash",
+        name="DeepSeek V4 Flash",
         provider_type="nvidia_nim",
-        parameter_size="7B",
+        parameter_size="284B-MoE",
+        is_code_model=True,
+        context_length=1_000_000,
+    ),
+    ProviderModel(
+        id="qwen/qwen3-next-80b-a3b-instruct",
+        name="Qwen3 Next 80B A3B Instruct",
+        provider_type="nvidia_nim",
+        parameter_size="80B-A3B",
+        is_code_model=True,
+    ),
+    ProviderModel(
+        id="nvidia/nemotron-3-super-120b-a12b",
+        name="Nemotron 3 Super 120B A12B",
+        provider_type="nvidia_nim",
+        parameter_size="120B-A12B",
+        is_code_model=True,
+    ),
+    ProviderModel(
+        id="mistralai/codestral-22b-instruct-v0.1",
+        name="Codestral 22B Instruct",
+        provider_type="nvidia_nim",
+        parameter_size="22B",
         is_code_model=True,
         context_length=32768,
     ),
     ProviderModel(
-        id="qwen/qwen2.5-coder-32b-instruct",
-        name="Qwen 2.5 Coder 32B Instruct",
+        id="bigcode/starcoder2-15b",
+        name="StarCoder2 15B",
         provider_type="nvidia_nim",
-        parameter_size="32B",
+        parameter_size="15B",
         is_code_model=True,
-        context_length=32768,
-    ),
-    ProviderModel(
-        id="meta/llama-3.1-8b-instruct",
-        name="Llama 3.1 8B Instruct",
-        provider_type="nvidia_nim",
-        parameter_size="8B",
-        is_code_model=False,
-        context_length=128000,
+        context_length=16384,
     ),
 ]
+
+# Heuristic for flagging code-capable models in the live catalog. Mirrors the
+# detector's NIM heuristic, extended with current coder families.
+_CODE_MODEL_PATTERN = re.compile(
+    r"cod(e|er)|deepseek|starcoder|qwen|codestral|nemotron|granite", re.I
+)
+
+
+def _model_from_api(model_id: str) -> ProviderModel:
+    """Map an OpenAI-compatible /models id to a ProviderModel."""
+    return ProviderModel(
+        id=model_id,
+        name=model_id,
+        provider_type="nvidia_nim",
+        is_code_model=bool(_CODE_MODEL_PATTERN.search(model_id)),
+    )
 
 
 class NIMProvider(InferenceProvider):
@@ -60,7 +93,7 @@ class NIMProvider(InferenceProvider):
         self,
         api_key: str,
         endpoint: str | None = None,
-        default_model: str = "qwen/qwen2.5-coder-7b-instruct",
+        default_model: str = "deepseek-ai/deepseek-v4-flash",
         timeout: float = 120.0,
     ):
         self._api_key = api_key
@@ -214,7 +247,24 @@ class NIMProvider(InferenceProvider):
     # ── List models ────────────────────────────────────────────────
 
     async def list_models(self) -> list[ProviderModel]:
-        """Return the static catalog of key NIM models."""
+        """Return the live NIM model catalogue.
+
+        Queries the OpenAI-compatible GET /models endpoint so the catalogue
+        reflects what the configured endpoint actually serves. Falls back to
+        _NIM_MODELS if the endpoint is unreachable or returns nothing.
+        """
+        try:
+            response = await self._client.get(
+                f"{self._endpoint}/models",
+                headers={"Authorization": f"Bearer {self._api_key}"},
+            )
+            if response.status_code == 200:
+                data = response.json().get("data", [])
+                models = [_model_from_api(m["id"]) for m in data if m.get("id")]
+                if models:
+                    return models
+        except Exception:
+            pass
         return list(_NIM_MODELS)
 
     # ── Cleanup ────────────────────────────────────────────────────

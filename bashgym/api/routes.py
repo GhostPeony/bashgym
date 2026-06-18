@@ -1212,7 +1212,7 @@ def create_app() -> FastAPI:
                     dpo_backend=getattr(request, "dpo_backend", "auto"),
                     use_liger=getattr(request, "use_liger", False),
                     # Knowledge Distillation
-                    teacher_model=request.teacher_model or "claude-sonnet-4-20250514",
+                    teacher_model=request.teacher_model or "claude-sonnet-4-6",
                     teacher_temperature=request.teacher_temperature,
                     distillation_alpha=request.distillation_alpha,
                     # Export & backend
@@ -1306,7 +1306,7 @@ def create_app() -> FastAPI:
 
                 if request.strategy == TrainingStrategy.DISTILLATION:
                     training_metadata["teacher_model"] = (
-                        request.teacher_model or "claude-sonnet-4-20250514"
+                        request.teacher_model or "claude-sonnet-4-6"
                     )
 
                 if request.strategy == TrainingStrategy.SFT:
@@ -4840,43 +4840,39 @@ def create_app() -> FastAPI:
         """List available models for LLM columns."""
         # Return common models - in production this would query NIM or other services
         return [
-            # Anthropic Claude 4.5 (recommended for high-quality augmentation)
+            # Anthropic Claude (recommended for high-quality augmentation)
             AvailableModel(
-                id="claude-opus-4-5-20251101",
-                name="Claude Opus 4.5 (Best Quality)",
+                id="claude-opus-4-8",
+                name="Claude Opus 4.8 (Best Quality)",
                 provider="Anthropic",
             ),
             AvailableModel(
-                id="claude-sonnet-4-5-20250929",
-                name="Claude Sonnet 4.5 (Recommended)",
+                id="claude-sonnet-4-6",
+                name="Claude Sonnet 4.6 (Recommended)",
                 provider="Anthropic",
             ),
             AvailableModel(
-                id="claude-haiku-4-5-20251001", name="Claude Haiku 4.5 (Fast)", provider="Anthropic"
+                id="claude-haiku-4-5", name="Claude Haiku 4.5 (Fast)", provider="Anthropic"
             ),
             # NVIDIA NIM (cost-effective, good for bulk generation)
             AvailableModel(
-                id="qwen/qwen2.5-coder-32b-instruct",
-                name="Qwen 2.5 Coder 32B (Default NIM)",
+                id="deepseek-ai/deepseek-v4-flash",
+                name="DeepSeek V4 Flash (Default NIM)",
                 provider="NVIDIA NIM",
             ),
             AvailableModel(
-                id="qwen/qwen2.5-coder-7b-instruct", name="Qwen 2.5 Coder 7B", provider="NVIDIA NIM"
-            ),
-            AvailableModel(
-                id="meta/llama-3.1-8b-instruct", name="Llama 3.1 8B Instruct", provider="NVIDIA NIM"
-            ),
-            AvailableModel(
-                id="meta/llama-3.1-70b-instruct",
-                name="Llama 3.1 70B Instruct",
+                id="qwen/qwen3-next-80b-a3b-instruct",
+                name="Qwen3 Next 80B",
                 provider="NVIDIA NIM",
             ),
             AvailableModel(
-                id="nvidia/nemotron-4-340b-instruct", name="Nemotron 4 340B", provider="NVIDIA NIM"
+                id="mistralai/codestral-22b-instruct-v0.1",
+                name="Codestral 22B",
+                provider="NVIDIA NIM",
             ),
             AvailableModel(
-                id="mistralai/mistral-7b-instruct-v0.3",
-                name="Mistral 7B Instruct",
+                id="nvidia/nemotron-3-super-120b-a12b",
+                name="Nemotron 3 Super 120B",
                 provider="NVIDIA NIM",
             ),
             # OpenAI (alternative)

@@ -379,17 +379,19 @@ Key TRL features we can use:
 - **PRMTrainer** (Process Reward Model) with `per_step_success` for stepwise supervision
 - **GRPO** with decomposed rewards (format + correctness + efficiency)
 
-### Qwen2.5-Coder (Target Model)
+### Target model chat template
 
-Qwen2.5-Coder uses ChatML with `<tool_call>` / `<tool_response>` XML tags. TRL handles the conversion automatically when the tokenizer has a tool-call chat template. No manual formatting needed.
+Modern instruct models (Gemma 4, Qwen3, Llama 4, and similar) use a chat template
+with tool-call markup. TRL handles the conversion automatically when the tokenizer
+has a tool-call chat template — no manual formatting needed.
 
 ### Unsloth
 
-Unsloth wraps TRL with 2-5x speed improvements. Same dataset format works directly:
+Unsloth wraps TRL with 2-5x speed improvements. The same dataset format works directly:
 
 ```python
 from unsloth import FastLanguageModel
-model, tokenizer = FastLanguageModel.from_pretrained("Qwen/Qwen2.5-Coder-7B-Instruct")
+model, tokenizer = FastLanguageModel.from_pretrained("<your-base-model>")
 # ... SFTTrainer with same dataset
 ```
 

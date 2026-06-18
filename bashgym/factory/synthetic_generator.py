@@ -219,7 +219,7 @@ Return ONLY the task prompt, nothing else. No quotes, no explanation."""
             Generated text from the NIM model
         """
         endpoint = os.getenv("NIM_ENDPOINT", "https://integrate.api.nvidia.com/v1")
-        model = os.getenv("NIM_MODEL", "qwen/qwen2.5-coder-32b-instruct")
+        model = os.getenv("NIM_MODEL", "deepseek-ai/deepseek-v4-flash")
         api_key = os.getenv("NVIDIA_API_KEY", "")
 
         async with httpx.AsyncClient() as client:

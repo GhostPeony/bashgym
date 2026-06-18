@@ -18,32 +18,49 @@ from bashgym.providers.base import (
 )
 
 # ── Static model catalogue ─────────────────────────────────────────
+# Fallback only. list_models() queries the live Models API first; this list is
+# returned when that call fails (offline, bad key) so we never fall back to a
+# retired model. Keep current with the latest GA Claude models.
 
 ANTHROPIC_MODELS: list[ProviderModel] = [
+    ProviderModel(
+        id="claude-fable-5",
+        name="Claude Fable 5",
+        provider_type="anthropic",
+        is_code_model=True,
+        context_length=1_000_000,
+    ),
+    ProviderModel(
+        id="claude-opus-4-8",
+        name="Claude Opus 4.8",
+        provider_type="anthropic",
+        is_code_model=True,
+        context_length=1_000_000,
+    ),
+    ProviderModel(
+        id="claude-opus-4-7",
+        name="Claude Opus 4.7",
+        provider_type="anthropic",
+        is_code_model=True,
+        context_length=1_000_000,
+    ),
     ProviderModel(
         id="claude-opus-4-6",
         name="Claude Opus 4.6",
         provider_type="anthropic",
         is_code_model=True,
-        context_length=200_000,
+        context_length=1_000_000,
     ),
     ProviderModel(
         id="claude-sonnet-4-6",
         name="Claude Sonnet 4.6",
         provider_type="anthropic",
         is_code_model=True,
-        context_length=200_000,
+        context_length=1_000_000,
     ),
     ProviderModel(
-        id="claude-haiku-4-5-20251001",
+        id="claude-haiku-4-5",
         name="Claude Haiku 4.5",
-        provider_type="anthropic",
-        is_code_model=True,
-        context_length=200_000,
-    ),
-    ProviderModel(
-        id="claude-sonnet-4-20250514",
-        name="Claude Sonnet 4",
         provider_type="anthropic",
         is_code_model=True,
         context_length=200_000,
@@ -51,7 +68,25 @@ ANTHROPIC_MODELS: list[ProviderModel] = [
 ]
 
 API_URL = "https://api.anthropic.com/v1/messages"
+MODELS_URL = "https://api.anthropic.com/v1/models"
 API_VERSION = "2023-06-01"
+
+
+def _model_from_api(entry: dict[str, Any]) -> ProviderModel:
+    """Map a /v1/models entry to a ProviderModel.
+
+    The list endpoint returns id/display_name only, so context length is
+    derived from the family (Haiku is 200K; Opus/Sonnet/Fable are 1M).
+    """
+    model_id = entry["id"]
+    context_length = 200_000 if "haiku" in model_id.lower() else 1_000_000
+    return ProviderModel(
+        id=model_id,
+        name=entry.get("display_name") or model_id,
+        provider_type="anthropic",
+        is_code_model=True,
+        context_length=context_length,
+    )
 
 
 class AnthropicProvider(InferenceProvider):
@@ -64,7 +99,7 @@ class AnthropicProvider(InferenceProvider):
     def __init__(
         self,
         api_key: str,
-        default_model: str = "claude-sonnet-4-20250514",
+        default_model: str = "claude-sonnet-4-6",
         timeout: float = 120.0,
     ) -> None:
         if not api_key:
@@ -193,7 +228,27 @@ class AnthropicProvider(InferenceProvider):
         )
 
     async def list_models(self) -> list[ProviderModel]:
-        """Return the static catalogue of Claude models."""
+        """Return the live Claude model catalogue.
+
+        Queries the Anthropic Models API (GET /v1/models) so the catalogue
+        stays current without code changes. Falls back to ANTHROPIC_MODELS if
+        the API is unreachable or returns nothing.
+        """
+        try:
+            response = await self._client.get(
+                MODELS_URL,
+                headers={
+                    "x-api-key": self._api_key,
+                    "anthropic-version": API_VERSION,
+                },
+            )
+            if response.status_code == 200:
+                data = response.json().get("data", [])
+                models = [_model_from_api(m) for m in data if m.get("id")]
+                if models:
+                    return models
+        except Exception:
+            pass
         return list(ANTHROPIC_MODELS)
 
     async def close(self) -> None:

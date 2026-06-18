@@ -644,7 +644,7 @@ def main():
     )
 
     profiler.record_llm_call(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-6",
         prompt="Fix the bug in this code...",
         response="Here's the fix...",
         input_tokens=1000,

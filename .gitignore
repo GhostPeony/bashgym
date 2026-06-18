@@ -63,3 +63,4 @@ data/designer_output/
 # Assistant secrets
 assistant/config/config.json
 assistant/.env
+.gstack/

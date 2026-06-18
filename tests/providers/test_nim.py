@@ -1,16 +1,14 @@
 """Tests for NIMProvider implementation."""
 
-import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from bashgym.providers.base import (
-    InferenceProvider,
-    ProviderResponse,
     HealthStatus,
+    InferenceProvider,
     ProviderModel,
+    ProviderResponse,
 )
 from bashgym.providers.nim import NIMProvider
-
 
 # ── Property tests ─────────────────────────────────────────────────
 
@@ -44,7 +42,7 @@ class TestNIMProviderProperties:
 
     def test_default_model(self):
         provider = NIMProvider(api_key="test-key")
-        assert provider._default_model == "qwen/qwen2.5-coder-7b-instruct"
+        assert provider._default_model == "deepseek-ai/deepseek-v4-flash"
 
     def test_custom_default_model(self):
         provider = NIMProvider(api_key="test-key", default_model="meta/llama-3.1-8b-instruct")
@@ -114,11 +112,11 @@ class TestNIMProviderGenerate:
                 messages=[{"role": "user", "content": "test"}],
             )
 
-        assert result.model_name == "qwen/qwen2.5-coder-7b-instruct"
+        assert result.model_name == "deepseek-ai/deepseek-v4-flash"
         # Verify the payload used the default model
         call_kwargs = mock_post.call_args
         payload = call_kwargs.kwargs.get("json") or call_kwargs[1].get("json")
-        assert payload["model"] == "qwen/qwen2.5-coder-7b-instruct"
+        assert payload["model"] == "deepseek-ai/deepseek-v4-flash"
 
     async def test_generate_prepends_system_prompt(self):
         """System prompt is prepended when not already in messages."""
@@ -307,10 +305,21 @@ class TestNIMProviderHealthCheck:
 class TestNIMProviderListModels:
     """Tests for NIMProvider.list_models()."""
 
+    @staticmethod
+    def _offline(provider):
+        """Patch the client so list_models falls back to the static catalogue."""
+        return patch.object(
+            provider._client,
+            "get",
+            new_callable=AsyncMock,
+            side_effect=Exception("offline"),
+        )
+
     async def test_list_models_returns_models(self):
-        """list_models returns a non-empty list of ProviderModel."""
+        """Fallback returns a non-empty list of NIM ProviderModel."""
         provider = NIMProvider(api_key="test-key")
-        models = await provider.list_models()
+        with self._offline(provider):
+            models = await provider.list_models()
 
         assert isinstance(models, list)
         assert len(models) > 0
@@ -318,22 +327,38 @@ class TestNIMProviderListModels:
             assert isinstance(model, ProviderModel)
             assert model.provider_type == "nvidia_nim"
 
-    async def test_list_models_includes_qwen_coder(self):
-        """list_models includes qwen coder models."""
+    async def test_list_models_fallback_is_current(self):
+        """Fallback catalogue lists current served coding models."""
         provider = NIMProvider(api_key="test-key")
-        models = await provider.list_models()
+        with self._offline(provider):
+            models = await provider.list_models()
         model_ids = [m.id for m in models]
 
-        assert "qwen/qwen2.5-coder-7b-instruct" in model_ids
-        assert "qwen/qwen2.5-coder-32b-instruct" in model_ids
+        assert "deepseek-ai/deepseek-v4-flash" in model_ids
+        assert all(m.is_code_model for m in models)
 
-    async def test_list_models_includes_llama(self):
-        """list_models includes llama model."""
+    async def test_list_models_uses_live_api(self):
+        """When /models responds, its catalogue is returned and code-flagged."""
         provider = NIMProvider(api_key="test-key")
-        models = await provider.list_models()
-        model_ids = [m.id for m in models]
 
-        assert "meta/llama-3.1-8b-instruct" in model_ids
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "data": [
+                {"id": "qwen/qwen3-coder-480b"},
+                {"id": "meta/llama-4-maverick"},
+            ]
+        }
+
+        with patch.object(
+            provider._client, "get", new_callable=AsyncMock, return_value=mock_response
+        ):
+            models = await provider.list_models()
+
+        ids = [m.id for m in models]
+        assert "qwen/qwen3-coder-480b" in ids
+        coder = next(m for m in models if m.id == "qwen/qwen3-coder-480b")
+        assert coder.is_code_model is True
 
 
 # ── Close tests ────────────────────────────────────────────────────

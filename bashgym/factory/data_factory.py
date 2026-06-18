@@ -149,7 +149,7 @@ class SynthesisStrategy(Enum):
 class AugmentationProvider(Enum):
     """LLM provider for data augmentation."""
 
-    NIM = "nim"  # NVIDIA NIM (qwen/qwen2.5-coder-32b-instruct)
+    NIM = "nim"  # NVIDIA NIM (deepseek-ai/deepseek-v4-flash)
     ANTHROPIC = "anthropic"  # Anthropic Claude (higher quality, higher cost)
 
 
@@ -164,7 +164,7 @@ class DataFactoryConfig:
     # NVIDIA NIM settings (for LLM-based synthesis)
     nim_endpoint: str = "https://integrate.api.nvidia.com/v1"
     nim_api_key: str | None = None
-    nim_model: str = "qwen/qwen2.5-coder-32b-instruct"
+    nim_model: str = "deepseek-ai/deepseek-v4-flash"
 
     # Anthropic settings (for higher quality augmentation)
     anthropic_api_key: str | None = None

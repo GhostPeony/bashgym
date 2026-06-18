@@ -430,15 +430,20 @@ class DesignerCreateRequest(BaseModel):
     pipeline: str = "coding_agent_sft"
     num_records: int = 100
     seed_source: str | None = None
-    seed_type: str = "traces"  # traces, huggingface, file, unstructured
+    seed_type: str = "traces"  # traces, agent_rollouts, huggingface, file, unstructured
+    seed_format: str | None = (
+        None  # agent_rollouts: claude_code/codex/hermes_agent/pi_coding_agent/atif
+    )
     column_mapping: dict[str, str] | None = None
     provider: str = "nvidia"
     provider_endpoint: str = "https://integrate.api.nvidia.com/v1"
     text_model: str | None = None
     code_model: str | None = None
     judge_model: str | None = None
+    mcp_backend: str = "auto"  # mcp_tool_use: docker/local/auto
     output_dir: str | None = None
     export_nemo: bool = True
+    keep_only_passing: bool = True  # quality gate at export (passes_quality / recommended_for_sft)
     train_val_split: float = 0.9
 
 
@@ -581,8 +586,9 @@ async def designer_job_status(job_id: str):
 
 @router.get("/designer/pipelines")
 async def list_designer_pipelines():
-    """List available DataDesigner pipeline builders."""
+    """List available DataDesigner pipelines with their column DAGs."""
     try:
+        from bashgym.factory.data_designer import DataDesignerPipeline, PipelineConfig
         from bashgym.factory.designer_pipelines import PIPELINES
     except ImportError:
         return {"pipelines": [], "available": False}
@@ -591,15 +597,46 @@ async def list_designer_pipelines():
     for name, builder_fn in PIPELINES.items():
         doc = builder_fn.__doc__ or ""
         first_line = doc.strip().split("\n")[0] if doc.strip() else name
-        pipelines.append(
-            DesignerPipelineInfo(
-                name=name,
-                description=first_line,
-                columns=[],  # Would need to introspect builder
-            )
-        )
+        columns: list[str] = []
+        try:
+            builder = builder_fn(PipelineConfig(pipeline=name))
+            columns = DataDesignerPipeline._builder_column_names(builder)
+        except Exception as e:  # introspection is best-effort
+            logger.debug("column introspection failed for %s: %s", name, e)
+        pipelines.append(DesignerPipelineInfo(name=name, description=first_line, columns=columns))
 
     return {"pipelines": [p.model_dump() for p in pipelines], "available": True}
+
+
+@router.get("/designer/models")
+async def list_designer_models(
+    code_only: bool = False,
+    provider: str | None = None,
+    endpoint: str | None = None,
+):
+    """Adaptable inference-model catalog for Data Designer generation.
+
+    Aggregates models across configured sources (local Ollama / LM Studio + live
+    NVIDIA NIM, etc.) so the UI can offer real, current choices instead of
+    hardcoded IDs. When ``provider`` + ``endpoint`` are given, also returns the
+    bare model IDs that endpoint serves (any OpenAI-compatible /v1/models).
+    """
+    import asyncio
+
+    try:
+        from bashgym.factory.data_designer import list_inference_models, provider_model_ids
+    except ImportError:
+        return {"models": [], "provider_models": [], "available": False}
+
+    # Run off the event loop: discovery drives its own asyncio loop and the
+    # /v1/models call is blocking httpx.
+    models = await asyncio.to_thread(list_inference_models, code_only)
+    provider_models = (
+        await asyncio.to_thread(provider_model_ids, provider, endpoint)
+        if provider and endpoint
+        else []
+    )
+    return {"models": models, "provider_models": provider_models, "available": True}
 
 
 @router.post("/designer/validate")
@@ -788,6 +825,7 @@ async def run_designer_job(job_id: str, request: DesignerCreateRequest):
             num_records=request.num_records,
             provider=request.provider,
             provider_endpoint=request.provider_endpoint,
+            mcp_backend=request.mcp_backend,
             output_dir=Path(request.output_dir or f"data/designer_output/{job_id}"),
             train_val_split=request.train_val_split,
         )
@@ -808,6 +846,12 @@ async def run_designer_job(job_id: str, request: DesignerCreateRequest):
 
         if request.seed_type == "traces":
             df = pipeline.from_traces(Path(seed), request.num_records)
+        elif request.seed_type == "agent_rollouts":
+            df = pipeline.from_agent_rollouts(
+                rollout_format=request.seed_format or "claude_code",
+                path=request.seed_source,  # None -> the format's default dir (~/.claude/projects, ...)
+                num_records=request.num_records,
+            )
         elif request.seed_type == "huggingface":
             df = pipeline.from_dataset(
                 seed,
@@ -823,10 +867,10 @@ async def run_designer_job(job_id: str, request: DesignerCreateRequest):
 
         designer_jobs[job_id]["progress"]["current"] = len(df)
 
-        # Export to NeMo format if requested
+        # Export to NeMo format if requested (with the quality gate)
         export_result = None
         if request.export_nemo:
-            export_result = pipeline.export_nemo(df)
+            export_result = pipeline.export_nemo(df, keep_only_passing=request.keep_only_passing)
             designer_jobs[job_id]["export_result"] = export_result
 
         designer_jobs[job_id]["status"] = "completed"

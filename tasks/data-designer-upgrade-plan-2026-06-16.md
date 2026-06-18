@@ -272,6 +272,18 @@ Empirically verified against the installed package (not just docs) and **reconci
 1. **`DataDesignerTab` upgrades** (see §5).
 2. **Optional DD microservice on DGX** for large runs (NGC Docker image), selectable as a backend alongside library mode — reuse the SSH/remote-trainer pattern.
 
+#### ✅ Phase 6 — backend + frontend DONE (2026-06-17); microservice deferred
+
+**Backend (`api/factory_routes.py`, no conflict with the parallel WIP), 284 factory tests pass:**
+- `GET /designer/models` — adaptable inference-model catalog (`list_inference_models` + optional provider `/v1/models`), run via `asyncio.to_thread` so the sync discovery / blocking httpx don't deadlock the event loop. Verified: 121 models.
+- `GET /designer/pipelines` — real **column-DAG introspection** (replaced `columns=[]`); now lists all 7 pipelines incl `coding_agent_distill`, `mcp_tool_use` with their columns.
+- `DesignerCreateRequest` + `run_designer_job`: `seed_type:"agent_rollouts"`(+`seed_format`)→`from_agent_rollouts`, `keep_only_passing`→`export_nemo` gate, `mcp_backend`→tool pipeline.
+
+**Frontend (`DataDesignerTab.tsx` + `api.ts`, both clean — not in the parallel WIP), tsc + eslint clean:**
+Rebuilt the tab in the app's **Botanical Brutalism** (per `~/.claude/DESIGN_SYSTEM.md`): live **Text/Code/Judge model pickers** grouped by provider from `/designer/models` (with refresh + count), the selected pipeline's **column-DAG flow** (boxes + accent arrows), **Agent-Rollout** seed type with a **rollout-format** selector + path, a **Quality-Gate** press-in toggle, and an **MCP tool-backend** selector for `mcp_tool_use`. Header shows `N pipelines · M models`.
+
+**Deferred:** DD **microservice on DGX** (NGC Docker, library↔microservice via the same `config_builder`); WebSocket streaming of `GenerationStats` + token-usage logs; live visual QA (`/qa`) of the rebuilt tab.
+
 ---
 
 ## 5. BashGym ↔ Data Designer interface upgrades

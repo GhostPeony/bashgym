@@ -581,14 +581,27 @@ export interface DesignerCreateRequest {
   num_records?: number
   seed_source?: string
   seed_type?: string
+  seed_format?: string
   provider?: string
   provider_endpoint?: string
   text_model?: string
   code_model?: string
   judge_model?: string
+  mcp_backend?: string
   output_dir?: string
   export_nemo?: boolean
+  keep_only_passing?: boolean
   train_val_split?: number
+}
+
+export interface DesignerModel {
+  id: string
+  name: string
+  provider: string
+  is_code_model?: boolean
+  is_local?: boolean
+  parameter_size?: string | null
+  description?: string | null
 }
 
 export interface DesignerJobStatus {
@@ -625,6 +638,11 @@ export const designerApi = {
 
   getJob: (jobId: string) =>
     request<DesignerJobStatus>(`/factory/designer/jobs/${encodeURIComponent(jobId)}`),
+
+  listModels: (codeOnly = false) =>
+    request<{ models: DesignerModel[]; provider_models: string[]; available: boolean }>(
+      `/factory/designer/models?code_only=${codeOnly}`
+    ),
 }
 
 // Legacy Models API (see modelsApi below for full implementation)

@@ -1,21 +1,92 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Sparkles, Eye, Play, RefreshCw, CheckCircle2, ArrowRight } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Sparkles,
+  Eye,
+  Play,
+  RefreshCw,
+  CheckCircle2,
+  ArrowRight,
+  Cpu,
+  GitBranch,
+  ShieldCheck,
+} from 'lucide-react'
 import { clsx } from 'clsx'
 import {
   designerApi,
+  type DesignerModel,
   type DesignerPipelineInfo,
   type DesignerJobStatus,
 } from '../../services/api'
 import { useTrainingStore } from '../../stores'
+
+const ROLLOUT_FORMATS = [
+  { value: 'claude_code', label: 'Claude Code' },
+  { value: 'codex', label: 'Codex' },
+  { value: 'hermes_agent', label: 'Hermes' },
+  { value: 'pi_coding_agent', label: 'Pi' },
+  { value: 'atif', label: 'ATIF' },
+]
+
+/** A model picker grouped by provider, drawn from the live catalog. */
+function ModelSelect({
+  label,
+  value,
+  onChange,
+  models,
+  codeOnly,
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  models: DesignerModel[]
+  codeOnly?: boolean
+}) {
+  const opts = codeOnly ? models.filter((m) => m.is_code_model) : models
+  const byProvider = useMemo(() => {
+    const groups: Record<string, DesignerModel[]> = {}
+    for (const m of opts) (groups[m.provider] ||= []).push(m)
+    return groups
+  }, [opts])
+
+  return (
+    <label className="block">
+      <span className="block font-mono text-[11px] uppercase tracking-[0.15em] text-text-muted mb-1">
+        {label}
+      </span>
+      <select value={value} onChange={(e) => onChange(e.target.value)} className="input w-full">
+        <option value="">— provider default —</option>
+        {Object.entries(byProvider).map(([prov, ms]) => (
+          <optgroup key={prov} label={prov}>
+            {ms.map((m) => (
+              <option key={m.id} value={m.name}>
+                {m.name}
+              </option>
+            ))}
+          </optgroup>
+        ))}
+      </select>
+    </label>
+  )
+}
 
 export function DataDesignerTab() {
   const [pipelines, setPipelines] = useState<DesignerPipelineInfo[]>([])
   const [available, setAvailable] = useState(true)
   const [loadingPipelines, setLoadingPipelines] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
+
+  const [models, setModels] = useState<DesignerModel[]>([])
+  const [modelsLoading, setModelsLoading] = useState(false)
+  const [textModel, setTextModel] = useState('')
+  const [codeModel, setCodeModel] = useState('')
+  const [judgeModel, setJudgeModel] = useState('')
+
   const [numRecords, setNumRecords] = useState(10)
   const [seedSource, setSeedSource] = useState('')
   const [seedType, setSeedType] = useState('traces')
+  const [seedFormat, setSeedFormat] = useState('claude_code')
+  const [keepOnlyPassing, setKeepOnlyPassing] = useState(true)
+  const [mcpBackend, setMcpBackend] = useState('auto')
 
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewRecords, setPreviewRecords] = useState<Record<string, unknown>[] | null>(null)
@@ -27,6 +98,18 @@ export function DataDesignerTab() {
 
   const setDatasetPathOverride = useTrainingStore((s) => s.setDatasetPathOverride)
 
+  const selectedPipeline = pipelines.find((p) => p.name === selected) || null
+  const isRollout = seedType === 'agent_rollouts'
+  const isToolPipeline = selected === 'mcp_tool_use'
+
+  const loadModels = useCallback(() => {
+    setModelsLoading(true)
+    designerApi.listModels().then((res) => {
+      setModelsLoading(false)
+      if (res.ok && res.data) setModels(res.data.models)
+    })
+  }, [])
+
   useEffect(() => {
     setLoadingPipelines(true)
     designerApi.listPipelines().then((res) => {
@@ -34,11 +117,10 @@ export function DataDesignerTab() {
       if (res.ok && res.data) {
         setPipelines(res.data.pipelines)
         setAvailable(res.data.available)
-        if (res.data.pipelines.length > 0 && !selected) {
-          setSelected(res.data.pipelines[0].name)
-        }
+        if (res.data.pipelines.length > 0) setSelected((s) => s ?? res.data!.pipelines[0].name)
       }
     })
+    loadModels()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -48,7 +130,6 @@ export function DataDesignerTab() {
       pollRef.current = null
     }
   }, [])
-
   useEffect(() => () => clearJobPolling(), [clearJobPolling])
 
   const handlePreview = useCallback(async () => {
@@ -59,26 +140,23 @@ export function DataDesignerTab() {
     const res = await designerApi.preview({
       pipeline: selected,
       num_records: Math.min(numRecords, 5),
+      text_model: textModel || undefined,
+      code_model: codeModel || undefined,
+      judge_model: judgeModel || undefined,
     })
     setPreviewLoading(false)
-    if (res.ok && res.data) {
-      setPreviewRecords(res.data.records)
-    } else {
-      setPreviewError(res.error || 'Preview failed')
-    }
-  }, [selected, numRecords])
+    if (res.ok && res.data) setPreviewRecords(res.data.records)
+    else setPreviewError(res.error || 'Preview failed')
+  }, [selected, numRecords, textModel, codeModel, judgeModel])
 
   const pollJob = useCallback(
     async (jobId: string) => {
       const res = await designerApi.getJob(jobId)
       if (res.ok && res.data) {
         setJob(res.data)
-        const status = res.data.status
-        if (status === 'completed' || status === 'failed') {
+        if (res.data.status === 'completed' || res.data.status === 'failed') {
           clearJobPolling()
-          if (status === 'failed') {
-            setJobError(res.data.error || 'Job failed')
-          }
+          if (res.data.status === 'failed') setJobError(res.data.error || 'Job failed')
           return
         }
       }
@@ -97,6 +175,12 @@ export function DataDesignerTab() {
       num_records: numRecords,
       seed_source: seedSource || undefined,
       seed_type: seedType,
+      seed_format: isRollout ? seedFormat : undefined,
+      text_model: textModel || undefined,
+      code_model: codeModel || undefined,
+      judge_model: judgeModel || undefined,
+      mcp_backend: isToolPipeline ? mcpBackend : undefined,
+      keep_only_passing: keepOnlyPassing,
     })
     if (res.ok && res.data) {
       setJob(res.data)
@@ -104,20 +188,37 @@ export function DataDesignerTab() {
     } else {
       setJobError(res.error || 'Failed to start job')
     }
-  }, [selected, numRecords, seedSource, seedType, pollJob, clearJobPolling])
+  }, [
+    selected,
+    numRecords,
+    seedSource,
+    seedType,
+    seedFormat,
+    isRollout,
+    textModel,
+    codeModel,
+    judgeModel,
+    isToolPipeline,
+    mcpBackend,
+    keepOnlyPassing,
+    pollJob,
+    clearJobPolling,
+  ])
 
   const handleUseDataset = useCallback(() => {
-    if (job?.output_dir) {
-      setDatasetPathOverride(job.output_dir)
-    }
+    if (job?.output_dir) setDatasetPathOverride(job.output_dir)
   }, [job, setDatasetPathOverride])
+
+  const jobRunning = !!job && job.status !== 'completed' && job.status !== 'failed'
 
   if (!available && !loadingPipelines) {
     return (
-      <div className="p-6 max-w-4xl mx-auto">
+      <div className="p-6 max-w-5xl mx-auto">
         <div className="card p-4 border-l-4 border-l-status-warning bg-status-warning/10">
           <p className="font-mono text-xs text-text-primary">
-            DataDesigner pipelines are not installed. Install the factory extras to enable this tab.
+            Data Designer is not installed. Run{' '}
+            <code className="text-accent-dark">pip install "bashgym[data-designer]"</code> to enable
+            synthetic data generation.
           </p>
         </div>
       </div>
@@ -126,21 +227,30 @@ export function DataDesignerTab() {
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
-      <div className="mb-6">
-        <h2 className="font-brand text-2xl text-text-primary flex items-center gap-2">
-          <Sparkles className="w-5 h-5 text-accent" />
-          Data Designer
-        </h2>
-        <p className="font-mono text-xs text-text-muted mt-1">
-          Generate synthetic training datasets from registered pipelines
-        </p>
+      {/* Header */}
+      <div className="mb-6 flex items-end justify-between">
+        <div>
+          <h2 className="font-brand text-3xl text-text-primary flex items-center gap-2">
+            <Sparkles className="w-6 h-6 text-accent" />
+            Data Designer
+          </h2>
+          <p className="font-mono text-xs text-text-muted mt-1">
+            Synthesize training data — traces, agent rollouts, distillation & real tool-use
+          </p>
+        </div>
+        <span className="font-mono text-[11px] uppercase tracking-[0.15em] text-text-muted">
+          {pipelines.length} pipelines · {models.length} models
+        </span>
       </div>
 
-      {/* Pipeline cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
+      {/* Pipeline selector */}
+      <h3 className="font-mono text-[11px] uppercase tracking-[0.15em] text-text-secondary mb-2">
+        Pipeline
+      </h3>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5">
         {loadingPipelines && (
-          <div className="col-span-2 font-mono text-xs text-text-muted text-center py-6">
-            Loading pipelines...
+          <div className="col-span-3 font-mono text-xs text-text-muted text-center py-6">
+            Loading pipelines…
           </div>
         )}
         {pipelines.map((p) => (
@@ -148,110 +258,234 @@ export function DataDesignerTab() {
             key={p.name}
             onClick={() => setSelected(p.name)}
             className={clsx(
-              'card p-4 text-left transition-press',
-              selected === p.name
-                ? 'border-accent bg-accent-light'
-                : 'hover:border-border'
+              'card p-3 text-left transition-press',
+              selected === p.name ? 'border-accent bg-accent-light' : 'hover:border-border'
             )}
           >
-            <div className="flex items-start gap-2">
-              <Sparkles
-                className={clsx(
-                  'w-4 h-4 mt-0.5',
-                  selected === p.name ? 'text-accent-dark' : 'text-text-muted'
-                )}
-              />
-              <div className="flex-1">
-                <p
-                  className={clsx(
-                    'font-mono text-sm font-bold',
-                    selected === p.name ? 'text-accent-dark' : 'text-text-primary'
-                  )}
-                >
-                  {p.name}
-                </p>
-                <p className="text-xs text-text-secondary mt-1">{p.description}</p>
-              </div>
-            </div>
+            <p
+              className={clsx(
+                'font-mono text-sm font-bold truncate',
+                selected === p.name ? 'text-accent-dark' : 'text-text-primary'
+              )}
+            >
+              {p.name}
+            </p>
+            <p className="text-xs text-text-secondary mt-1 line-clamp-2">{p.description}</p>
+            <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-text-muted mt-2">
+              {p.columns.length} columns
+            </p>
           </button>
         ))}
       </div>
 
-      {/* Config form */}
-      {selected && (
-        <div className="card p-4 mb-6">
-          <h3 className="font-mono text-xs uppercase tracking-widest text-text-secondary mb-3">
-            Generation Config
+      {/* Column DAG of the selected pipeline */}
+      {selectedPipeline && selectedPipeline.columns.length > 0 && (
+        <div className="card p-4 mb-5">
+          <h3 className="font-mono text-[11px] uppercase tracking-[0.15em] text-text-secondary mb-3 flex items-center gap-1.5">
+            <GitBranch className="w-3.5 h-3.5 text-accent" />
+            Column Pipeline
           </h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block font-mono text-xs uppercase tracking-widest text-text-muted mb-1">
-                Num Records
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={10000}
-                value={numRecords}
-                onChange={(e) => setNumRecords(Number(e.target.value))}
-                className="input w-full"
-              />
-            </div>
-            <div>
-              <label className="block font-mono text-xs uppercase tracking-widest text-text-muted mb-1">
-                Seed Type
-              </label>
-              <select
-                value={seedType}
-                onChange={(e) => setSeedType(e.target.value)}
-                className="input w-full"
-              >
-                <option value="traces">Gold Traces</option>
-                <option value="huggingface">HuggingFace Dataset</option>
-                <option value="file">File</option>
-                <option value="unstructured">Unstructured Text</option>
-              </select>
-            </div>
-            <div>
-              <label className="block font-mono text-xs uppercase tracking-widest text-text-muted mb-1">
-                Seed Source
-              </label>
-              <input
-                type="text"
-                value={seedSource}
-                onChange={(e) => setSeedSource(e.target.value)}
-                placeholder="Path or HF repo id (optional)"
-                className="input w-full"
-              />
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 mt-4">
-            <button
-              onClick={handlePreview}
-              disabled={previewLoading}
-              className="btn-secondary flex items-center gap-2"
-            >
-              {previewLoading ? (
-                <RefreshCw className="w-4 h-4 animate-spin" />
-              ) : (
-                <Eye className="w-4 h-4" />
-              )}
-              Preview
-            </button>
-            <button
-              onClick={handleGenerate}
-              disabled={!!job && job.status !== 'completed' && job.status !== 'failed'}
-              className="btn-primary flex items-center gap-2"
-            >
-              <Play className="w-4 h-4" />
-              Generate
-            </button>
+          <div className="flex flex-wrap items-center gap-y-2">
+            {selectedPipeline.columns.map((c, i) => (
+              <div key={c} className="flex items-center">
+                <span className="font-mono text-[11px] px-2 py-1 border-2 border-border bg-background-secondary text-text-secondary">
+                  {c}
+                </span>
+                {i < selectedPipeline.columns.length - 1 && (
+                  <ArrowRight className="w-3.5 h-3.5 mx-1 text-accent/50 shrink-0" />
+                )}
+              </div>
+            ))}
           </div>
         </div>
       )}
 
-      {/* Preview output */}
+      {selected && (
+        <>
+          {/* Models */}
+          <div className="card p-4 mb-5">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-mono text-[11px] uppercase tracking-[0.15em] text-text-secondary flex items-center gap-1.5">
+                <Cpu className="w-3.5 h-3.5 text-accent" />
+                Teacher Models
+              </h3>
+              <button
+                onClick={loadModels}
+                className="font-mono text-[10px] uppercase tracking-[0.12em] text-text-muted hover:text-accent-dark flex items-center gap-1 transition-colors"
+                title="Refresh the live model catalog"
+              >
+                <RefreshCw className={clsx('w-3 h-3', modelsLoading && 'animate-spin')} />
+                {models.length} available
+              </button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <ModelSelect label="Text" value={textModel} onChange={setTextModel} models={models} />
+              <ModelSelect
+                label="Code"
+                value={codeModel}
+                onChange={setCodeModel}
+                models={models}
+                codeOnly
+              />
+              <ModelSelect
+                label="Judge"
+                value={judgeModel}
+                onChange={setJudgeModel}
+                models={models}
+              />
+            </div>
+            <p className="font-mono text-[10px] text-text-muted mt-2">
+              Discovered across NVIDIA NIM, Ollama & local sources — leave as default to use the
+              provider's pick.
+            </p>
+          </div>
+
+          {/* Generation config */}
+          <div className="card p-4 mb-5">
+            <h3 className="font-mono text-[11px] uppercase tracking-[0.15em] text-text-secondary mb-3">
+              Generation
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <label className="block">
+                <span className="block font-mono text-[11px] uppercase tracking-[0.15em] text-text-muted mb-1">
+                  Records
+                </span>
+                <input
+                  type="number"
+                  min={1}
+                  max={10000}
+                  value={numRecords}
+                  onChange={(e) => setNumRecords(Number(e.target.value))}
+                  className="input w-full"
+                />
+              </label>
+              <label className="block">
+                <span className="block font-mono text-[11px] uppercase tracking-[0.15em] text-text-muted mb-1">
+                  Seed Type
+                </span>
+                <select
+                  value={seedType}
+                  onChange={(e) => setSeedType(e.target.value)}
+                  className="input w-full"
+                >
+                  <option value="traces">Gold Traces</option>
+                  <option value="agent_rollouts">Agent Rollouts</option>
+                  <option value="huggingface">HuggingFace Dataset</option>
+                  <option value="file">File</option>
+                  <option value="unstructured">Unstructured Text</option>
+                </select>
+              </label>
+              {isRollout ? (
+                <label className="block">
+                  <span className="block font-mono text-[11px] uppercase tracking-[0.15em] text-text-muted mb-1">
+                    Rollout Format
+                  </span>
+                  <select
+                    value={seedFormat}
+                    onChange={(e) => setSeedFormat(e.target.value)}
+                    className="input w-full"
+                  >
+                    {ROLLOUT_FORMATS.map((f) => (
+                      <option key={f.value} value={f.value}>
+                        {f.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <label className="block">
+                  <span className="block font-mono text-[11px] uppercase tracking-[0.15em] text-text-muted mb-1">
+                    Seed Source
+                  </span>
+                  <input
+                    type="text"
+                    value={seedSource}
+                    onChange={(e) => setSeedSource(e.target.value)}
+                    placeholder="Path or HF repo id (optional)"
+                    className="input w-full"
+                  />
+                </label>
+              )}
+            </div>
+
+            {isRollout && (
+              <label className="block mt-4">
+                <span className="block font-mono text-[11px] uppercase tracking-[0.15em] text-text-muted mb-1">
+                  Rollout Path
+                </span>
+                <input
+                  type="text"
+                  value={seedSource}
+                  onChange={(e) => setSeedSource(e.target.value)}
+                  placeholder="Default: ~/.claude/projects (per format) — override optional"
+                  className="input w-full"
+                />
+              </label>
+            )}
+
+            {/* Toggles */}
+            <div className="flex flex-wrap items-center gap-3 mt-4">
+              <button
+                type="button"
+                onClick={() => setKeepOnlyPassing((v) => !v)}
+                className={clsx(
+                  'flex items-center gap-2 px-3 py-1.5 border-2 transition-press font-mono text-[11px] uppercase tracking-[0.12em]',
+                  keepOnlyPassing
+                    ? 'border-accent bg-accent-light text-accent-dark'
+                    : 'border-border text-text-muted'
+                )}
+                title="Drop rows below the pipeline's quality bar at export"
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                Quality Gate {keepOnlyPassing ? 'On' : 'Off'}
+              </button>
+
+              {isToolPipeline && (
+                <label className="flex items-center gap-2">
+                  <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-text-muted">
+                    Tool Backend
+                  </span>
+                  <select
+                    value={mcpBackend}
+                    onChange={(e) => setMcpBackend(e.target.value)}
+                    className="input py-1 text-xs"
+                  >
+                    <option value="auto">Auto</option>
+                    <option value="docker">Docker</option>
+                    <option value="local">Local</option>
+                  </select>
+                </label>
+              )}
+            </div>
+
+            {/* Actions */}
+            <div className="flex items-center gap-2 mt-5">
+              <button
+                onClick={handlePreview}
+                disabled={previewLoading}
+                className="btn-secondary flex items-center gap-2"
+              >
+                {previewLoading ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Eye className="w-4 h-4" />
+                )}
+                Preview
+              </button>
+              <button
+                onClick={handleGenerate}
+                disabled={jobRunning}
+                className="btn-primary flex items-center gap-2"
+              >
+                <Play className="w-4 h-4" />
+                Generate
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Preview */}
       {previewError && (
         <div className="card p-3 mb-4 border-l-4 border-l-status-error bg-status-error/10">
           <p className="font-mono text-xs text-status-error">{previewError}</p>
@@ -259,8 +493,8 @@ export function DataDesignerTab() {
       )}
       {previewRecords && previewRecords.length > 0 && (
         <div className="card p-4 mb-6">
-          <h3 className="font-mono text-xs uppercase tracking-widest text-text-secondary mb-3">
-            Preview ({previewRecords.length} records)
+          <h3 className="font-mono text-[11px] uppercase tracking-[0.15em] text-text-secondary mb-3">
+            Preview · {previewRecords.length} records
           </h3>
           <div className="space-y-3">
             {previewRecords.map((record, idx) => (
@@ -335,9 +569,7 @@ export function DataDesignerTab() {
             </div>
           )}
 
-          {jobError && (
-            <p className="font-mono text-xs text-status-error mt-3">{jobError}</p>
-          )}
+          {jobError && <p className="font-mono text-xs text-status-error mt-3">{jobError}</p>}
         </div>
       )}
     </div>

@@ -197,7 +197,7 @@ interface EvalConfig {
 const DEFAULT_CONFIG: EvalConfig = {
   model: '',
   benchmarks: [],
-  judge_model: 'claude-sonnet-4-5-20250929',
+  judge_model: 'claude-sonnet-4-6',
   num_samples: 100,
   temperature: 0.0
 }
@@ -569,21 +569,18 @@ export function EvaluatorDashboard() {
                     onChange={(e) => setConfig(prev => ({ ...prev, judge_model: e.target.value }))}
                     className="input text-sm w-full"
                   >
-                    <optgroup label="Anthropic Claude 4.5">
-                      <option value="claude-opus-4-5-20251101">Claude Opus 4.5 (Best)</option>
-                      <option value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5</option>
-                      <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (Fast)</option>
+                    <optgroup label="Anthropic Claude">
+                      <option value="claude-opus-4-8">Claude Opus 4.8 (Best)</option>
+                      <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
+                      <option value="claude-haiku-4-5">Claude Haiku 4.5 (Fast)</option>
                     </optgroup>
-                    <optgroup label="Anthropic Claude 4 (Legacy)">
-                      <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
-                    </optgroup>
-                    <optgroup label="Meta Llama">
-                      <option value="meta/llama-3.1-70b-instruct">Llama 3.1 70B</option>
-                      <option value="meta/llama-3.1-405b-instruct">Llama 3.1 405B</option>
+                    <optgroup label="NVIDIA NIM">
+                      <option value="deepseek-ai/deepseek-v4-flash">DeepSeek V4 Flash</option>
+                      <option value="qwen/qwen3-next-80b-a3b-instruct">Qwen3 Next 80B</option>
+                      <option value="nvidia/nemotron-3-super-120b-a12b">Nemotron 3 Super 120B</option>
                     </optgroup>
                     <optgroup label="OpenAI">
                       <option value="gpt-4o">GPT-4o</option>
-                      <option value="gpt-4-turbo">GPT-4 Turbo</option>
                     </optgroup>
                   </select>
                 </div>

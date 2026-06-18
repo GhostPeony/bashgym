@@ -14,7 +14,7 @@ Usage:
         strategy="sft",
         dataset_repo="username/my-dataset",
         output_repo="username/my-model",
-        base_model="Qwen/Qwen2.5-Coder-1.5B-Instruct",
+        base_model="",
         hardware="a10g-small",
     )
     script = generate_cloud_script(config)
@@ -56,7 +56,7 @@ class CloudScriptConfig:
     output_repo: str = ""
     """HuggingFace model repository to push results (e.g., 'username/my-model')."""
 
-    base_model: str = "Qwen/Qwen2.5-Coder-1.5B-Instruct"
+    base_model: str = ""
     """Base model to fine-tune."""
 
     hardware: str = "a10g-small"

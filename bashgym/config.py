@@ -279,7 +279,8 @@ class TrainingSettings:
 
     # Base model
     base_model: str = field(
-        default_factory=lambda: get_env("BASE_MODEL", "Qwen/Qwen2.5-Coder-1.5B-Instruct")
+        # No default model — the user chooses one (set BASE_MODEL or pass it per run).
+        default_factory=lambda: get_env("BASE_MODEL", "")
     )
     model_type: str = field(default_factory=lambda: get_env("MODEL_TYPE", "qwen"))
 
@@ -741,7 +742,7 @@ SANDBOX_NETWORK=none
 WORKSPACE_BASE=/tmp/bashgym_workspaces
 
 # Training Settings
-BASE_MODEL=Qwen/Qwen2.5-Coder-1.5B-Instruct
+# BASE_MODEL=    # Required to train: HuggingFace model ID to fine-tune (no default)
 MODEL_TYPE=qwen
 LEARNING_RATE=2e-5
 BATCH_SIZE=4

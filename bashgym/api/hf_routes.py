@@ -51,7 +51,7 @@ class JobSubmitRequest(BaseModel):
     dataset_repo: str = Field(description="HF repo containing training data")
     output_repo: str = Field(description="HF repo to push trained model")
     hardware: str = Field(default="a10g-small", description="Hardware tier")
-    base_model: str = Field(default="Qwen/Qwen2.5-Coder-1.5B-Instruct", description="Base model")
+    base_model: str = Field(default="", description="Base model to fine-tune (required)")
     num_epochs: int = Field(default=3, ge=1, le=100)
     learning_rate: float = Field(default=2e-5, gt=0)
     strategy: str = Field(default="sft", description="Training strategy: sft, dpo, distillation")
@@ -1030,8 +1030,8 @@ class CopyFilesRequest(BaseModel):
 @router.get("/buckets")
 async def list_buckets(request: Request, namespace: str | None = None):
     """List storage buckets for the authenticated user."""
-    from bashgym.integrations.huggingface.buckets import BucketManager
     from bashgym.integrations.huggingface import get_hf_client
+    from bashgym.integrations.huggingface.buckets import BucketManager
 
     client = get_hf_client()
     if not client.is_enabled:
@@ -1043,8 +1043,8 @@ async def list_buckets(request: Request, namespace: str | None = None):
 @router.post("/buckets")
 async def create_bucket(body: BucketCreateRequest, request: Request):
     """Create a storage bucket."""
-    from bashgym.integrations.huggingface.buckets import BucketManager
     from bashgym.integrations.huggingface import get_hf_client
+    from bashgym.integrations.huggingface.buckets import BucketManager
 
     client = get_hf_client()
     if not client.is_enabled:
@@ -1054,10 +1054,12 @@ async def create_bucket(body: BucketCreateRequest, request: Request):
 
 
 @router.get("/buckets/{bucket_id:path}/tree")
-async def list_bucket_tree(bucket_id: str, request: Request, prefix: str | None = None, recursive: bool = False):
+async def list_bucket_tree(
+    bucket_id: str, request: Request, prefix: str | None = None, recursive: bool = False
+):
     """List files in a storage bucket."""
-    from bashgym.integrations.huggingface.buckets import BucketManager
     from bashgym.integrations.huggingface import get_hf_client
+    from bashgym.integrations.huggingface.buckets import BucketManager
 
     client = get_hf_client()
     if not client.is_enabled:
@@ -1069,8 +1071,8 @@ async def list_bucket_tree(bucket_id: str, request: Request, prefix: str | None 
 @router.get("/buckets/{bucket_id:path}/info")
 async def get_bucket_info(bucket_id: str, request: Request):
     """Get bucket metadata."""
-    from bashgym.integrations.huggingface.buckets import BucketManager
     from bashgym.integrations.huggingface import get_hf_client
+    from bashgym.integrations.huggingface.buckets import BucketManager
 
     client = get_hf_client()
     if not client.is_enabled:
@@ -1082,8 +1084,8 @@ async def get_bucket_info(bucket_id: str, request: Request):
 @router.post("/buckets/sync")
 async def sync_bucket(body: BucketSyncRequest, request: Request):
     """Sync files between local dir and bucket (or bucket to bucket)."""
-    from bashgym.integrations.huggingface.buckets import BucketManager
     from bashgym.integrations.huggingface import get_hf_client
+    from bashgym.integrations.huggingface.buckets import BucketManager
 
     client = get_hf_client()
     if not client.is_enabled:
@@ -1095,8 +1097,8 @@ async def sync_bucket(body: BucketSyncRequest, request: Request):
 @router.delete("/buckets/{bucket_id:path}")
 async def delete_bucket(bucket_id: str, request: Request):
     """Delete a storage bucket."""
-    from bashgym.integrations.huggingface.buckets import BucketManager
     from bashgym.integrations.huggingface import get_hf_client
+    from bashgym.integrations.huggingface.buckets import BucketManager
 
     client = get_hf_client()
     if not client.is_enabled:
@@ -1109,8 +1111,8 @@ async def delete_bucket(bucket_id: str, request: Request):
 @router.post("/copy")
 async def copy_files_endpoint(body: CopyFilesRequest, request: Request):
     """Server-side instant copy between buckets/repos (zero bandwidth for Xet files)."""
-    from bashgym.integrations.huggingface.buckets import BucketManager
     from bashgym.integrations.huggingface import get_hf_client
+    from bashgym.integrations.huggingface.buckets import BucketManager
 
     client = get_hf_client()
     if not client.is_enabled:
@@ -1128,7 +1130,9 @@ async def copy_files_endpoint(body: CopyFilesRequest, request: Request):
 
 
 class TraceUploadRequest(BaseModel):
-    trace_dir: str = Field(description="Local path to trace directory (e.g., ~/.bashgym/gold_traces_local)")
+    trace_dir: str = Field(
+        description="Local path to trace directory (e.g., ~/.bashgym/gold_traces_local)"
+    )
     repo_id: str = Field(description="HF dataset repo ID (e.g., 'user/bashgym-gold-traces')")
     private: bool = Field(default=True)
 
@@ -1136,8 +1140,8 @@ class TraceUploadRequest(BaseModel):
 @router.post("/traces/upload")
 async def upload_traces(body: TraceUploadRequest, request: Request):
     """Upload bashgym agent traces to HuggingFace Hub as a dataset."""
-    from bashgym.integrations.huggingface.traces import TraceUploader
     from bashgym.integrations.huggingface import get_hf_client
+    from bashgym.integrations.huggingface.traces import TraceUploader
 
     client = get_hf_client()
     if not client.is_enabled:
@@ -1158,8 +1162,8 @@ async def upload_traces(body: TraceUploadRequest, request: Request):
 @router.get("/traces/datasets")
 async def list_trace_datasets(request: Request, prefix: str = "bashgym"):
     """List the user's trace datasets on HuggingFace Hub."""
-    from bashgym.integrations.huggingface.traces import TraceUploader
     from bashgym.integrations.huggingface import get_hf_client
+    from bashgym.integrations.huggingface.traces import TraceUploader
 
     client = get_hf_client()
     if not client.is_enabled:

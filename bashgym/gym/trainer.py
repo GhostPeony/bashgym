@@ -124,7 +124,9 @@ class TrainerConfig:
     """Configuration for the trainer."""
 
     # Model settings
-    base_model: str = "Qwen/Qwen2.5-Coder-1.5B-Instruct"
+    base_model: str = (
+        ""  # No default — an explicit base model is required (see _require_base_model)
+    )
     model_type: str = "qwen"  # llama, mistral, qwen, phi
 
     # Training settings
@@ -523,6 +525,19 @@ class Trainer:
         # Fallback to current Python
         return sys.executable
 
+    def _require_base_model(self) -> None:
+        """Fail fast when no base model is set.
+
+        There is no default base model; the user must choose one (set BASE_MODEL,
+        or pass base_model in the training request / TrainerConfig). This prevents
+        silently fine-tuning a stale hardcoded default.
+        """
+        if not (self.config.base_model or "").strip():
+            raise ValueError(
+                "No base model set. Choose a model to fine-tune — set BASE_MODEL in "
+                "your environment or pass base_model in the training request."
+            )
+
     def train_sft(
         self,
         dataset_path: Path,
@@ -545,6 +560,7 @@ class Trainer:
         Returns:
             TrainingRun with results
         """
+        self._require_base_model()
         run_id = run_id or self._generate_run_id()
         output_path = Path(self.config.output_dir) / run_id
 
@@ -810,6 +826,7 @@ class Trainer:
         Returns:
             TrainingRun with results
         """
+        self._require_base_model()
         run_id = run_id or self._generate_run_id()
         output_path = Path(self.config.output_dir) / run_id
 
@@ -1923,6 +1940,7 @@ if __name__ == "__main__":
         Returns:
             TrainingRun with results
         """
+        self._require_base_model()
         run_id = run_id or self._generate_run_id()
         output_path = Path(self.config.output_dir) / run_id
 
@@ -2803,6 +2821,7 @@ class GRPOTrainer(Trainer):
         Returns:
             TrainingRun with results
         """
+        self._require_base_model()
         run_id = run_id or self._generate_run_id()
         output_path = Path(self.config.output_dir) / run_id
 

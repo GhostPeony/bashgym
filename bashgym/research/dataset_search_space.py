@@ -11,6 +11,7 @@ Scope: SFT format only. Deterministic enumeration — no mutation, no
 crossover, no random sampling. The ABC's mutate() method is implemented as
 a cursor advance.
 """
+
 from __future__ import annotations
 
 import copy
@@ -33,6 +34,7 @@ class DatasetCandidate:
     - After materialization: train_path, val_path, num_rows_generated
     - After evaluation: eval_loss, final_loss (or error)
     """
+
     repo_id: str
     hf_score: float
     bashgym_format: str
@@ -53,6 +55,7 @@ def _get_data_designer():
     """Lazy import of DataDesignerPipeline. Raises ImportError if missing."""
     try:
         from bashgym.factory.data_designer import DataDesignerPipeline
+
         return DataDesignerPipeline
     except ImportError as e:
         raise ImportError(
@@ -65,6 +68,7 @@ def _get_trainer():
     """Lazy import of Trainer. Kept out of module top-level to avoid pulling
     in Unsloth / PyTorch at import time."""
     from bashgym.gym.trainer import Trainer
+
     return Trainer
 
 
@@ -113,9 +117,7 @@ class DatasetSearchSpace(SearchSpace):
         setattr(candidate_config, self._INDEX_ATTR, idx)
         return candidate_config
 
-    def evaluate(
-        self, config: Any, experiment_number: int, total_experiments: int
-    ) -> float:
+    def evaluate(self, config: Any, experiment_number: int, total_experiments: int) -> float:
         idx = getattr(config, self._INDEX_ATTR, None)
         if idx is None or not (0 <= idx < len(self.candidates)):
             logger.warning("evaluate called with invalid index %s", idx)
@@ -137,7 +139,9 @@ class DatasetSearchSpace(SearchSpace):
         candidate.final_loss = loss
         logger.info(
             "[DatasetSearchSpace] SIMULATE %s -> loss=%.3f (hf_score=%.2f)",
-            candidate.repo_id, loss, candidate.hf_score,
+            candidate.repo_id,
+            loss,
+            candidate.hf_score,
         )
         return loss
 
@@ -157,7 +161,7 @@ class DatasetSearchSpace(SearchSpace):
 
         # 1. Materialize via DataDesignerPipeline
         try:
-            DataDesignerPipeline = _get_data_designer()
+            DataDesignerPipeline = _get_data_designer()  # noqa: N806
             from bashgym.factory.data_designer import PipelineConfig
 
             pipeline = DataDesignerPipeline(
@@ -176,7 +180,8 @@ class DatasetSearchSpace(SearchSpace):
         except Exception as exc:
             logger.error(
                 "[DatasetSearchSpace] materialize failed for %s: %s",
-                candidate.repo_id, exc,
+                candidate.repo_id,
+                exc,
             )
             candidate.error = f"materialize: {exc}"
             return 5.0
@@ -195,7 +200,7 @@ class DatasetSearchSpace(SearchSpace):
         exp_config.output_dir = str(candidate_dir / "training")
 
         try:
-            Trainer = _get_trainer()
+            Trainer = _get_trainer()  # noqa: N806
             trainer = Trainer(exp_config)
             run = trainer.train_sft(
                 dataset_path=candidate.train_path,
@@ -204,7 +209,8 @@ class DatasetSearchSpace(SearchSpace):
         except Exception as exc:
             logger.error(
                 "[DatasetSearchSpace] training failed for %s: %s",
-                candidate.repo_id, exc,
+                candidate.repo_id,
+                exc,
             )
             candidate.error = f"train: {exc}"
             return 5.0
@@ -216,7 +222,10 @@ class DatasetSearchSpace(SearchSpace):
         metric = float(eval_loss) if eval_loss is not None else float(final_loss)
         logger.info(
             "[DatasetSearchSpace] REAL %s -> eval=%s final=%s metric=%.4f",
-            candidate.repo_id, eval_loss, final_loss, metric,
+            candidate.repo_id,
+            eval_loss,
+            final_loss,
+            metric,
         )
         return metric
 

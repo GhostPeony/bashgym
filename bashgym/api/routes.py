@@ -1516,12 +1516,12 @@ def create_app() -> FastAPI:
     # Registered BEFORE /api/training/{run_id} so literal paths win the match.
     # =========================================================================
 
-    _CHECKPOINT_ROOTS = (
+    _CHECKPOINT_ROOTS = (  # noqa: N806
         Path.home() / ".bashgym" / "cascade",
         Path.home() / ".bashgym" / "models",
     )
-    _MAX_TAIL_LINES = 5000
-    _MAX_FULL_LOG_BYTES = 50 * 1024 * 1024
+    _MAX_TAIL_LINES = 5000  # noqa: N806
+    _MAX_FULL_LOG_BYTES = 50 * 1024 * 1024  # noqa: N806
 
     def _resolve_training_log(run_id: str) -> Path | None:
         # Run layout is nested: <root>/<stage>/<run>/training.log. Match any depth.
@@ -4852,7 +4852,7 @@ def create_app() -> FastAPI:
         Studio, plus curated teacher models) instead of a hardcoded list. Falls
         back to a small curated set only if discovery is unavailable (offline).
         """
-        _PREFIXES = ("nim/", "ollama/", "lm_studio/", "hf/", "anthropic/", "openai/")
+        _PREFIXES = ("nim/", "ollama/", "lm_studio/", "hf/", "anthropic/", "openai/")  # noqa: N806
 
         def _bare(model_id: str) -> str:
             for p in _PREFIXES:

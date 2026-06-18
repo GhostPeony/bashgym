@@ -5,6 +5,7 @@ browsing, syncing, and deleting storage buckets. Buckets are mutable,
 non-versioned, S3-like object storage — designed for training checkpoints,
 logs, and processed data shards that change frequently.
 """
+
 from __future__ import annotations
 
 import logging
@@ -41,12 +42,16 @@ class BucketManager:
         """List all buckets for the authenticated user or a namespace."""
         buckets = []
         for b in self.api.list_buckets(namespace=namespace):
-            buckets.append({
-                "id": b.id,
-                "private": b.private,
-                "created_at": str(getattr(b, "created_at", None)),
-                "updated_at": str(getattr(b, "last_modified", None) or getattr(b, "updated_at", None)),
-            })
+            buckets.append(
+                {
+                    "id": b.id,
+                    "private": b.private,
+                    "created_at": str(getattr(b, "created_at", None)),
+                    "updated_at": str(
+                        getattr(b, "last_modified", None) or getattr(b, "updated_at", None)
+                    ),
+                }
+            )
         return buckets
 
     def list_tree(

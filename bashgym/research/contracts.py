@@ -94,45 +94,51 @@ SCHEMA_PATTERNS: list[tuple[frozenset[str], str]] = [
 # that looks prompt-like + any column that looks response-like. Lower confidence
 # than SCHEMA_PATTERNS, but catches idiomatic dataset layouts (mbpp's text+code,
 # SWE-bench's problem_statement+patch, humaneval-pro's raw_problem+raw_solution).
-PROMPT_LIKE_COLS: frozenset[str] = frozenset([
-    "prompt",
-    "instruction",
-    "input",
-    "question",
-    "task",
-    "text",
-    "problem",
-    "problem_statement",
-    "query",
-    "raw_problem",
-    "new_problem",
-    "source",
-    "context",
-])
+PROMPT_LIKE_COLS: frozenset[str] = frozenset(
+    [
+        "prompt",
+        "instruction",
+        "input",
+        "question",
+        "task",
+        "text",
+        "problem",
+        "problem_statement",
+        "query",
+        "raw_problem",
+        "new_problem",
+        "source",
+        "context",
+    ]
+)
 
-RESPONSE_LIKE_COLS: frozenset[str] = frozenset([
-    "completion",
-    "response",
-    "output",
-    "answer",
-    "code",
-    "solution",
-    "patch",
-    "raw_solution",
-    "new_solution",
-    "target",
-    "label",
-])
+RESPONSE_LIKE_COLS: frozenset[str] = frozenset(
+    [
+        "completion",
+        "response",
+        "output",
+        "answer",
+        "code",
+        "solution",
+        "patch",
+        "raw_solution",
+        "new_solution",
+        "target",
+        "label",
+    ]
+)
 
 # Columns that indicate a GRPO-compatible test/verification column.
-TEST_LIKE_COLS: frozenset[str] = frozenset([
-    "tests",
-    "test_cases",
-    "test_list",
-    "test_code",
-    "FAIL_TO_PASS",
-    "PASS_TO_PASS",
-])
+TEST_LIKE_COLS: frozenset[str] = frozenset(
+    [
+        "tests",
+        "test_cases",
+        "test_list",
+        "test_code",
+        "FAIL_TO_PASS",
+        "PASS_TO_PASS",
+    ]
+)
 
 # Columns that indicate a DPO-compatible preference structure.
 PREFERENCE_COLS: frozenset[str] = frozenset(["chosen", "rejected"])

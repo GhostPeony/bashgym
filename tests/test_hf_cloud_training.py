@@ -87,6 +87,7 @@ class TestCloudScriptConfig:
                 strategy=strategy,
                 dataset_repo="user/dataset",
                 output_repo="user/model",
+                base_model="Qwen/Qwen3-4B",
             )
             assert config.validate() == [], f"Strategy {strategy} should be valid"
 

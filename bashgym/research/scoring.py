@@ -1,4 +1,5 @@
 """Pure rule-based scoring for HF dataset candidates. No I/O, no network."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -29,6 +30,7 @@ from bashgym.research.contracts import (
 @dataclass
 class DatasetMetadata:
     """Plain-data summary of an HF dataset. All fields optional — HF Hub is inconsistent."""
+
     repo_id: str
     tags: list[str] = field(default_factory=list)
     license: str | None = None
@@ -200,28 +202,49 @@ def score_dataset(meta: DatasetMetadata) -> ScoredDataset:
     # --- Hard filters ---
     if meta.gated:
         return ScoredDataset(
-            repo_id=meta.repo_id, score=0.0, reasons=[], warnings=[],
-            bashgym_format=None, download_command="", metadata=meta,
-            rejected=True, rejection_reason="dataset is gated behind approval form",
+            repo_id=meta.repo_id,
+            score=0.0,
+            reasons=[],
+            warnings=[],
+            bashgym_format=None,
+            download_command="",
+            metadata=meta,
+            rejected=True,
+            rejection_reason="dataset is gated behind approval form",
         )
     if _license_blocked(meta.license):
         return ScoredDataset(
-            repo_id=meta.repo_id, score=0.0, reasons=[], warnings=[],
-            bashgym_format=None, download_command="", metadata=meta,
+            repo_id=meta.repo_id,
+            score=0.0,
+            reasons=[],
+            warnings=[],
+            bashgym_format=None,
+            download_command="",
+            metadata=meta,
             rejected=True,
             rejection_reason=f"license '{meta.license}' is non-commercial or unknown",
         )
     if meta.num_rows is not None and meta.num_rows < SIZE_MIN_HARD:
         return ScoredDataset(
-            repo_id=meta.repo_id, score=0.0, reasons=[], warnings=[],
-            bashgym_format=None, download_command="", metadata=meta,
+            repo_id=meta.repo_id,
+            score=0.0,
+            reasons=[],
+            warnings=[],
+            bashgym_format=None,
+            download_command="",
+            metadata=meta,
             rejected=True,
             rejection_reason=f"too small: {meta.num_rows} rows (min {SIZE_MIN_HARD})",
         )
     if meta.num_rows is not None and meta.num_rows > SIZE_MAX_HARD:
         return ScoredDataset(
-            repo_id=meta.repo_id, score=0.0, reasons=[], warnings=[],
-            bashgym_format=None, download_command="", metadata=meta,
+            repo_id=meta.repo_id,
+            score=0.0,
+            reasons=[],
+            warnings=[],
+            bashgym_format=None,
+            download_command="",
+            metadata=meta,
             rejected=True,
             rejection_reason=f"too large: {meta.num_rows} rows (max {SIZE_MAX_HARD})",
         )

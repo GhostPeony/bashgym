@@ -5,9 +5,7 @@ Uses a single model in memory with PEFT adapter toggle to switch between
 base and fine-tuned inference without doubling memory usage.
 """
 
-import json
 import logging
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -80,9 +78,7 @@ def load_models(
 
         # Format input
         if isinstance(prompt, list):
-            text = tokenizer.apply_chat_template(
-                prompt, tokenize=False, add_generation_prompt=True
-            )
+            text = tokenizer.apply_chat_template(prompt, tokenize=False, add_generation_prompt=True)
         else:
             messages = [{"role": "user", "content": prompt}]
             text = tokenizer.apply_chat_template(
@@ -118,9 +114,7 @@ def load_models(
             else:
                 model.disable_adapter_layers()
 
-        text = tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=False
-        )
+        text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
         inputs = tokenizer(
             text, return_tensors="pt", truncation=True, max_length=max_seq_length
         ).to(model.device)

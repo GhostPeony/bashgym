@@ -20,8 +20,6 @@ Tools: ``bash``, ``read_file``, ``write_file``, ``edit_file``, ``grep``,
 ``list_files``. File tools are path-confined to the workspace.
 """
 
-from __future__ import annotations
-
 import os
 import re
 import shutil

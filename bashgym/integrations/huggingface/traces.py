@@ -4,6 +4,7 @@ HF Hub (April 2026) auto-detects agent trace formats (Claude Code, Codex, Pi)
 and provides a specialized trace viewer. This module packages gold/failed
 traces from ~/.bashgym/ into JSONL and uploads them as HF datasets.
 """
+
 from __future__ import annotations
 
 import json
@@ -83,7 +84,9 @@ class TraceUploader:
         url = f"https://huggingface.co/datasets/{repo_id}"
         logger.info(
             "Uploaded %d traces (%d bytes) to %s",
-            len(trace_files), total_size, url,
+            len(trace_files),
+            total_size,
+            url,
         )
 
         return {
@@ -104,10 +107,14 @@ class TraceUploader:
 
         datasets = []
         for ds in self.api.list_datasets(author=username, search=prefix):
-            datasets.append({
-                "id": ds.id,
-                "private": getattr(ds, "private", None),
-                "downloads": getattr(ds, "downloads", 0),
-                "last_modified": str(getattr(ds, "lastModified", None) or getattr(ds, "last_modified", None)),
-            })
+            datasets.append(
+                {
+                    "id": ds.id,
+                    "private": getattr(ds, "private", None),
+                    "downloads": getattr(ds, "downloads", 0),
+                    "last_modified": str(
+                        getattr(ds, "lastModified", None) or getattr(ds, "last_modified", None)
+                    ),
+                }
+            )
         return datasets

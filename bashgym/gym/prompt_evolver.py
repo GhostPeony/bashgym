@@ -260,9 +260,7 @@ class TrainingTrigger:
         if not self._initialized:
             self._last_gold_count = self._count_gold_traces()
             self._initialized = True
-            logger.info(
-                "[TrainingTrigger] Initialized: %d gold traces", self._last_gold_count
-            )
+            logger.info("[TrainingTrigger] Initialized: %d gold traces", self._last_gold_count)
 
     def check_and_train(self) -> float | None:
         """If enough new gold traces accumulated, run micro-train, return delta loss.
@@ -783,9 +781,7 @@ class PromptEvolver:
                 try:
                     import asyncio
 
-                    delta_loss = await asyncio.to_thread(
-                        self._training_trigger.check_and_train
-                    )
+                    delta_loss = await asyncio.to_thread(self._training_trigger.check_and_train)
                     if delta_loss is not None:
                         variant.metrics["training_delta_loss"] = delta_loss
                         if delta_loss < 0:

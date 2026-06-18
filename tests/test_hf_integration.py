@@ -1048,11 +1048,13 @@ class TestHFJobRunner:
             script_path = f.name
 
         try:
-            job = runner.submit_training_job(
-                script_path,
-                repo_id="testuser/training-job",
-                config=HFJobConfig(hardware="a10g-small", timeout_minutes=60),
-            )
+            # Exercise the submit/tracking path without hitting the real `hf jobs` CLI.
+            with patch.object(HFJobRunner, "_submit_via_cli"):
+                job = runner.submit_training_job(
+                    script_path,
+                    repo_id="testuser/training-job",
+                    config=HFJobConfig(hardware="a10g-small", timeout_minutes=60),
+                )
 
             assert job.job_id is not None
             assert job.status == JobStatus.PENDING

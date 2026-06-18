@@ -3,7 +3,18 @@ from bashgym.config import OllamaSettings, Settings, SSHSettings
 
 
 class TestOllamaSettings:
-    def test_defaults(self):
+    def test_defaults(self, monkeypatch):
+        # Hermetic: ignore any ambient OLLAMA_* env (CI sets OLLAMA_ENABLED=false)
+        for _var in (
+            "OLLAMA_ENABLED",
+            "OLLAMA_BASE_URL",
+            "OLLAMA_MODEL",
+            "OLLAMA_AUTO_REGISTER",
+            "OLLAMA_HEALTH_INTERVAL",
+            "OLLAMA_TIMEOUT",
+            "OLLAMA_PREFER_CODE",
+        ):
+            monkeypatch.delenv(_var, raising=False)
         settings = OllamaSettings()
         assert settings.enabled is True
         assert settings.base_url == "http://localhost:11434"

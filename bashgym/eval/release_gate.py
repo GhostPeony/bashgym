@@ -182,7 +182,11 @@ def _world_model_quality_summary(evidence: dict[str, Any]) -> dict[str, Any]:
             for alias in aliases:
                 if alias not in source:
                     continue
-                number = _metric_delta(source[alias]) if canonical.endswith("_delta") else _metric_last(source[alias])
+                number = (
+                    _metric_delta(source[alias])
+                    if canonical.endswith("_delta")
+                    else _metric_last(source[alias])
+                )
                 if number is not None:
                     metrics[canonical] = number
                     break
@@ -319,9 +323,7 @@ def combine_release_gate_evidence(
         blocking_external_sections,
     ) = _external_benchmark_reasons(evidence)
     world_model_quality = _world_model_quality_summary(evidence)
-    world_model_sections = (
-        [WORLD_MODEL_QUALITY_SECTION] if world_model_quality["present"] else []
-    )
+    world_model_sections = [WORLD_MODEL_QUALITY_SECTION] if world_model_quality["present"] else []
 
     environment_ship = not environment_reasons
     external_benchmark_ship = not external_reasons

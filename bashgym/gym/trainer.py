@@ -331,21 +331,21 @@ class TrainerConfig:
             "grpo_group_size": self.effective_grpo_group_size(),
             "prompts_per_rollout_batch": self.prompts_per_rollout_batch,
             "max_tool_calls_per_episode": self.max_tool_calls_per_episode,
-            "token_level_loss": bool(self.token_level_loss)
-            if self.token_level_loss is not None
-            else False,
-            "filter_zero_std_groups": bool(self.filter_zero_std_groups)
-            if self.filter_zero_std_groups is not None
-            else False,
-            "active_sampling": bool(self.active_sampling)
-            if self.active_sampling is not None
-            else False,
-            "lm_head_fp32": bool(self.lm_head_fp32)
-            if self.lm_head_fp32 is not None
-            else False,
-            "interleaved_thinking": bool(self.interleaved_thinking)
-            if self.interleaved_thinking is not None
-            else False,
+            "token_level_loss": (
+                bool(self.token_level_loss) if self.token_level_loss is not None else False
+            ),
+            "filter_zero_std_groups": (
+                bool(self.filter_zero_std_groups)
+                if self.filter_zero_std_groups is not None
+                else False
+            ),
+            "active_sampling": (
+                bool(self.active_sampling) if self.active_sampling is not None else False
+            ),
+            "lm_head_fp32": bool(self.lm_head_fp32) if self.lm_head_fp32 is not None else False,
+            "interleaved_thinking": (
+                bool(self.interleaved_thinking) if self.interleaved_thinking is not None else False
+            ),
             "sft_warm_start_policy": self.sft_warm_start_policy
             or ("weak_models_only" if profile_enabled else "none"),
             "dppo_backend": self.dppo_backend,

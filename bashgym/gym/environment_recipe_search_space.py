@@ -76,10 +76,7 @@ def _normalize_weight_map(
     default: float = 1.0,
 ) -> dict[str, float]:
     values = dict(incoming or {})
-    return {
-        key: round(float(_clamp(float(values.get(key, default)), 0.0, 5.0)), 4)
-        for key in keys
-    }
+    return {key: round(float(_clamp(float(values.get(key, default)), 0.0, 5.0)), 4) for key in keys}
 
 
 class EnvironmentRecipeSearchSpace(SearchSpace):
@@ -188,11 +185,14 @@ class EnvironmentRecipeSearchSpace(SearchSpace):
 
         axis_weights = normalized["axis_weights"]
         weight_total = sum(weight for weight in axis_weights.values() if weight > 0) or 1.0
-        axis_loss = sum(
-            weight * (1.0 - _clamp(report.axis_balance.get(axis, 0.0), 0.0, 1.0))
-            for axis, weight in axis_weights.items()
-            if weight > 0
-        ) / weight_total
+        axis_loss = (
+            sum(
+                weight * (1.0 - _clamp(report.axis_balance.get(axis, 0.0), 0.0, 1.0))
+                for axis, weight in axis_weights.items()
+                if weight > 0
+            )
+            / weight_total
+        )
 
         verifier_values = [env.verifier.kind for env in selected]
         verifier_loss = 1.0 - balance_score(verifier_values, self.possible_verifier_kinds)
@@ -304,7 +304,9 @@ class EnvironmentRecipeSearchSpace(SearchSpace):
         verifier_keys = sorted(
             set(defaults["verifier_kind_weights"]) | set(self.possible_verifier_kinds)
         )
-        fixture_keys = sorted(set(defaults["fixture_kind_weights"]) | set(self.possible_fixture_kinds))
+        fixture_keys = sorted(
+            set(defaults["fixture_kind_weights"]) | set(self.possible_fixture_kinds)
+        )
 
         merged["axis_weights"] = _normalize_weight_map(merged.get("axis_weights"), RECIPE_AXES)
         merged["verifier_kind_weights"] = _normalize_weight_map(

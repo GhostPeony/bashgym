@@ -95,9 +95,9 @@ class EnvironmentPassKReport:
     def mean_success_rate(self) -> float:
         if not self.episodes:
             return 0.0
-        return sum((episode.c / episode.n) if episode.n else 0.0 for episode in self.episodes) / len(
-            self.episodes
-        )
+        return sum(
+            (episode.c / episode.n) if episode.n else 0.0 for episode in self.episodes
+        ) / len(self.episodes)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -197,16 +197,24 @@ def evaluate_environment_attempts(
     """Compute environment pass@k from already-collected attempt outcomes."""
     env_ids = [_environment_id(env) for env in environments]
     if not env_ids:
-        env_ids = sorted({_normalize_attempt(attempt, "", 0).environment_id for attempt in attempts})
+        env_ids = sorted(
+            {_normalize_attempt(attempt, "", 0).environment_id for attempt in attempts}
+        )
     if not all(env_ids):
         raise ValueError("all environments must have an id")
 
     normalized = [
-        attempt if isinstance(attempt, EnvironmentAttempt) else EnvironmentAttempt.from_dict(attempt)
+        (
+            attempt
+            if isinstance(attempt, EnvironmentAttempt)
+            else EnvironmentAttempt.from_dict(attempt)
+        )
         for attempt in attempts
     ]
     known = set(env_ids)
-    unknown = sorted({attempt.environment_id for attempt in normalized if attempt.environment_id not in known})
+    unknown = sorted(
+        {attempt.environment_id for attempt in normalized if attempt.environment_id not in known}
+    )
     if unknown:
         raise ValueError(f"attempts reference unknown environments: {unknown}")
 
@@ -221,7 +229,9 @@ def evaluate_environment_attempts(
     for attempt in normalized:
         key = (attempt.environment_id, attempt.attempt_index)
         if key in seen:
-            raise ValueError(f"duplicate attempt index for {attempt.environment_id}: {attempt.attempt_index}")
+            raise ValueError(
+                f"duplicate attempt index for {attempt.environment_id}: {attempt.attempt_index}"
+            )
         seen.add(key)
         by_env[attempt.environment_id].append(attempt)
 
@@ -234,7 +244,9 @@ def evaluate_environment_attempts(
                 f"environment {env_id!r} has {len(env_attempts)} attempts, needs at least {max_k}"
             )
         if len(env_attempts) < max_k:
-            warnings.append(f"{env_id} has fewer attempts ({len(env_attempts)}) than max k ({max_k})")
+            warnings.append(
+                f"{env_id} has fewer attempts ({len(env_attempts)}) than max k ({max_k})"
+            )
         episodes.append(EpisodeResult(env_id, [attempt.passed for attempt in env_attempts]))
         ordered_attempts.extend(env_attempts)
 
@@ -250,7 +262,9 @@ def evaluate_environment_attempts(
 
 def evaluate_environment_pass_at_k(
     environments: list[EnvironmentSpec | dict[str, Any] | str],
-    run_episode: Callable[[EnvironmentSpec | dict[str, Any] | str, int], bool | EnvironmentAttempt | dict[str, Any]],
+    run_episode: Callable[
+        [EnvironmentSpec | dict[str, Any] | str, int], bool | EnvironmentAttempt | dict[str, Any]
+    ],
     *,
     n_samples: int,
     k_values: list[int] | tuple[int, ...] = (1, 4, 8),

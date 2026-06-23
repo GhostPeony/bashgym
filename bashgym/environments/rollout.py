@@ -234,7 +234,9 @@ def build_environment_rollout_messages(
         },
     ]
     for observation in observations:
-        messages.append({"role": "assistant", "content": json.dumps({"command": observation.command})})
+        messages.append(
+            {"role": "assistant", "content": json.dumps({"command": observation.command})}
+        )
         output = "\n".join(
             part
             for part in [
@@ -481,8 +483,12 @@ def run_local_environment_attempt(
         verifier_observation = shell.run(plan.environment.verifier.command)
 
     passed = verifier_observation.exit_code == 0 and not tamper_detected
-    timeout = any(observation.timeout for observation in observations) or verifier_observation.timeout
-    blocked = any(observation.blocked for observation in observations) or verifier_observation.blocked
+    timeout = (
+        any(observation.timeout for observation in observations) or verifier_observation.timeout
+    )
+    blocked = (
+        any(observation.blocked for observation in observations) or verifier_observation.blocked
+    )
     action_text = "\n".join(observation.command for observation in observations)
     observation_text = "\n".join(
         f"{observation.stdout}\n{observation.stderr}" for observation in observations
@@ -609,8 +615,12 @@ def run_local_model_environment_attempt(
         verifier_observation = shell.run(plan.environment.verifier.command)
 
     passed = verifier_observation.exit_code == 0 and not tamper_detected
-    timeout = any(observation.timeout for observation in observations) or verifier_observation.timeout
-    blocked = any(observation.blocked for observation in observations) or verifier_observation.blocked
+    timeout = (
+        any(observation.timeout for observation in observations) or verifier_observation.timeout
+    )
+    blocked = (
+        any(observation.blocked for observation in observations) or verifier_observation.blocked
+    )
     action_text = "\n".join(observation.command for observation in observations)
     observation_text = "\n".join(
         f"{observation.stdout}\n{observation.stderr}" for observation in observations

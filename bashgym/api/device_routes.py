@@ -146,9 +146,7 @@ async def preflight_device(device_id: str):
     updated_device = device
     if result.ok:
         try:
-            updated_device = await _registry.update_capabilities(
-                device_id, result.capabilities()
-            )
+            updated_device = await _registry.update_capabilities(device_id, result.capabilities())
         except KeyError:
             pass  # device was removed between check and update — non-fatal
 

@@ -956,9 +956,7 @@ async def propose_environment_recipe(body: EnvironmentRecipeProposalRequest):
         "status": researcher.status,
         "source_count": len(envs),
         "best_metric": (
-            round(researcher.best_metric, 6)
-            if researcher.best_metric < float("inf")
-            else None
+            round(researcher.best_metric, 6) if researcher.best_metric < float("inf") else None
         ),
         "proposal": proposal,
         "experiments": [_experiment_payload(exp) for exp in researcher.experiments],

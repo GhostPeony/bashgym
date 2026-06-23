@@ -22,7 +22,11 @@ SPLIT_KEYS = {"domain", "source", "source_uri", "repo", "generator_seed", "task_
 def environment_hash(environment: EnvironmentSpec | dict[str, Any]) -> str:
     """Stable hash of executable environment content for leakage manifests."""
 
-    spec = environment if isinstance(environment, EnvironmentSpec) else EnvironmentSpec.from_dict(environment)
+    spec = (
+        environment
+        if isinstance(environment, EnvironmentSpec)
+        else EnvironmentSpec.from_dict(environment)
+    )
     payload = {
         "instruction": spec.instruction,
         "verifier": spec.verifier.to_dict(),
@@ -111,7 +115,11 @@ def make_environment_holdout_split(
     if fraction <= 0 or fraction >= 1:
         raise ValueError("holdout fraction must be between 0 and 1")
     specs = [
-        environment if isinstance(environment, EnvironmentSpec) else EnvironmentSpec.from_dict(environment)
+        (
+            environment
+            if isinstance(environment, EnvironmentSpec)
+            else EnvironmentSpec.from_dict(environment)
+        )
         for environment in environments
     ]
     groups: dict[str, list[EnvironmentSpec]] = {}
@@ -185,7 +193,11 @@ def evaluate_environment_holdout_gate(
     )
     holdout_ids = {env.id for env in split.holdout}
     holdout_attempts = [
-        attempt if isinstance(attempt, EnvironmentAttempt) else EnvironmentAttempt.from_dict(attempt)
+        (
+            attempt
+            if isinstance(attempt, EnvironmentAttempt)
+            else EnvironmentAttempt.from_dict(attempt)
+        )
         for attempt in attempts
         if _attempt_environment_id(attempt) in holdout_ids
     ]

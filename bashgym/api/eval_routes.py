@@ -216,7 +216,10 @@ class EnvironmentHoldoutGateRequest(BaseModel):
     model_id: str | None = Field(None, description="Optional model id to record the gate against")
     environments: list[dict[str, Any]] = Field(..., min_length=1)
     attempts: list[EnvironmentAttemptSpec] = Field(..., min_length=1)
-    split_by: str = Field("task_family", description="domain, source, source_uri, repo, generator_seed, or task_family")
+    split_by: str = Field(
+        "task_family",
+        description="domain, source, source_uri, repo, generator_seed, or task_family",
+    )
     holdout_fraction: float = Field(0.2, gt=0.0, lt=1.0)
     seed: int = 0
     k_values: list[int] = Field(default_factory=lambda: [1, 4, 8], min_length=1)
@@ -237,7 +240,10 @@ class EnvironmentHoldoutComparisonRequest(BaseModel):
     environments: list[dict[str, Any]] = Field(..., min_length=1)
     base_attempts: list[EnvironmentAttemptSpec] = Field(..., min_length=1)
     candidate_attempts: list[EnvironmentAttemptSpec] = Field(..., min_length=1)
-    split_by: str = Field("task_family", description="domain, source, source_uri, repo, generator_seed, or task_family")
+    split_by: str = Field(
+        "task_family",
+        description="domain, source, source_uri, repo, generator_seed, or task_family",
+    )
     cluster_by: str = Field("task_family", description="Bootstrap cluster key")
     holdout_fraction: float = Field(0.2, gt=0.0, lt=1.0)
     seed: int = 0
@@ -260,7 +266,10 @@ class EnvironmentSpuriousRewardControlRequest(BaseModel):
     environments: list[dict[str, Any]] = Field(..., min_length=1)
     attempts: list[EnvironmentAttemptSpec] = Field(..., min_length=1)
     control_attempts: list[EnvironmentAttemptSpec] | None = None
-    split_by: str = Field("task_family", description="domain, source, source_uri, repo, generator_seed, or task_family")
+    split_by: str = Field(
+        "task_family",
+        description="domain, source, source_uri, repo, generator_seed, or task_family",
+    )
     holdout_fraction: float = Field(0.2, gt=0.0, lt=1.0)
     seed: int = 0
     k_values: list[int] = Field(default_factory=lambda: [1, 4, 8], min_length=1)
@@ -682,9 +691,7 @@ async def environment_holdout_gate(req: EnvironmentHoldoutGateRequest):
         try:
             from bashgym.models import get_registry
 
-            recorded = service.record_environment_holdout_gate(
-                get_registry(), req.model_id, result
-            )
+            recorded = service.record_environment_holdout_gate(get_registry(), req.model_id, result)
         except Exception as e:  # noqa: BLE001 - recording is best-effort
             logger.warning("Could not record environment holdout gate for %s: %s", req.model_id, e)
     return EnvironmentHoldoutGateResponse(
@@ -807,9 +814,7 @@ async def environment_local_rollout_passk(req: EnvironmentRolloutPassKRequest):
 async def environment_reward_hacking_canaries(req: EnvironmentCanarySuiteRequest):
     """Run built-in adversarial canaries against environment rollout guardrails."""
 
-    workspace_root = req.workspace_root or str(
-        Path(tempfile.gettempdir()) / "bashgym_env_canaries"
-    )
+    workspace_root = req.workspace_root or str(Path(tempfile.gettempdir()) / "bashgym_env_canaries")
     categories = req.categories or None
     try:
         canaries, rollouts, summary = service.run_reward_hacking_canary_suite(
@@ -911,8 +916,7 @@ async def enrich_environment_dppo_replay(req: DPPOReplayEnrichRequest):
         key = (str(record.get("environment_id")), int(record.get("attempt_index") or 0))
         if key not in scored_by_attempt:
             raise ValueError(
-                "missing train logprobs for "
-                f"environment_id={key[0]!r} attempt_index={key[1]}"
+                "missing train logprobs for " f"environment_id={key[0]!r} attempt_index={key[1]}"
             )
         return scored_by_attempt[key]
 

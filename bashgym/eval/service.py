@@ -293,9 +293,7 @@ def ingest_external_benchmarks(
     )
 
 
-def record_external_benchmarks(
-    registry: Any, model_id: str, report: BenchmarkReport
-) -> list[str]:
+def record_external_benchmarks(registry: Any, model_id: str, report: BenchmarkReport) -> list[str]:
     """Write normalized external benchmark scores onto a model profile."""
 
     recorded: list[str] = []
@@ -455,7 +453,9 @@ def run_local_environment_rollout_passk(
         if env_id not in by_id:
             raise ValueError(f"unknown environment_id: {env_id}")
         commands = raw.get("commands") or []
-        if not isinstance(commands, list) or not all(isinstance(command, str) for command in commands):
+        if not isinstance(commands, list) or not all(
+            isinstance(command, str) for command in commands
+        ):
             raise ValueError(f"commands for {env_id} must be a list of strings")
         plans.append(
             RolloutCommandPlan(
@@ -516,8 +516,9 @@ def run_model_environment_rollout_passk(
     filter_zero_std_groups: bool = False,
     active_sampling: bool = False,
     target_prompt_groups: int | None = None,
-    complete_factory: Callable[[EndpointConfig], Callable[[list[dict[str, str]]], Any]]
-    | None = None,
+    complete_factory: (
+        Callable[[EndpointConfig], Callable[[list[dict[str, str]]], Any]] | None
+    ) = None,
 ) -> tuple[EnvironmentPassKReport, list[EnvironmentRolloutResult], dict[str, Any] | None]:
     """Run served-model environment attempts and compute verifier-backed pass@k."""
     if attempts_per_environment <= 0:
@@ -656,7 +657,9 @@ def _apply_active_sampling_to_rollouts(
     selected_ids = {group.prompt_id for group in result.selected}
     dropped_ids = [group.prompt_id for group in result.dropped]
     if not selected_ids:
-        raise ValueError("active sampling dropped every prompt group; reward signal has zero variance")
+        raise ValueError(
+            "active sampling dropped every prompt group; reward signal has zero variance"
+        )
 
     group_std = {group.prompt_id: group.std for group in result.selected}
     selected_specs = [spec for spec in specs if spec.id in selected_ids]
@@ -680,7 +683,9 @@ def _apply_active_sampling_to_rollouts(
     return selected_specs, selected_rollouts, telemetry
 
 
-def record_environment_passk(registry: Any, model_id: str, report: EnvironmentPassKReport) -> list[str]:
+def record_environment_passk(
+    registry: Any, model_id: str, report: EnvironmentPassKReport
+) -> list[str]:
     """Record environment pass@k means as model benchmark results."""
     recorded: list[str] = []
     report_dict = report.to_dict()

@@ -192,9 +192,7 @@ def build_dppo_smoke_launch_plan(
         "BASHGYM_DPPO_ECHO_LAMBDA": str(config.echo_aux_lambda),
         "BASHGYM_DPPO_RWML_ENABLED": "1" if config.rwml_enabled else "0",
         "BASHGYM_DPPO_RWML_DISTANCE_THRESHOLD": str(config.rwml_distance_threshold),
-        "BASHGYM_DPPO_RWML_EASY_PASS_RATE_THRESHOLD": str(
-            config.rwml_easy_pass_rate_threshold
-        ),
+        "BASHGYM_DPPO_RWML_EASY_PASS_RATE_THRESHOLD": str(config.rwml_easy_pass_rate_threshold),
         "BASHGYM_DPPO_RWML_EASY_KEEP_PROBABILITY": str(config.rwml_easy_keep_probability),
         "BASHGYM_DPPO_RWML_HISTORY_WINDOW": str(config.rwml_history_window),
         "BASHGYM_DPPO_RWML_EMBEDDING_MODEL": config.rwml_embedding_model,

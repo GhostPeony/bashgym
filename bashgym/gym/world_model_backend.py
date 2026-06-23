@@ -363,8 +363,7 @@ class WorldModelTrainerAdapter:
             if not self.settings.rwml_enabled:
                 return [None for _ in completions]
             predicted = [
-                (prediction_text_fn or completion_to_text)(completion)
-                for completion in completions
+                (prediction_text_fn or completion_to_text)(completion) for completion in completions
             ]
             actual = _coerce_string_sequence(kwargs.get(actual_states_key))
             if actual is None:

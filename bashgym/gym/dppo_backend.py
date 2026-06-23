@@ -74,7 +74,9 @@ def probe_dppo_backends(
     verl_available = bool(find_spec("verl") or verl_command or (verl_home and exists(verl_home)))
     skyrl_command = which("skyrl")
     skyrl_home = env_map.get("SKYRL_HOME", "")
-    skyrl_available = bool(find_spec("skyrl") or skyrl_command or (skyrl_home and exists(skyrl_home)))
+    skyrl_available = bool(
+        find_spec("skyrl") or skyrl_command or (skyrl_home and exists(skyrl_home))
+    )
     tmax_home = env_map.get("TMAX_OPEN_INSTRUCT_DIR") or env_map.get("OPEN_INSTRUCT_ROOT", "")
     tmax_available = bool(tmax_home and exists(tmax_home))
 

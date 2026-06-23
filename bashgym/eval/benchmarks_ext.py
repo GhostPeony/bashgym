@@ -549,7 +549,9 @@ def parse_swebench_results(name: str, data: dict) -> BenchmarkResult:
 
     repo_counts: dict[str, dict[str, int]] = {}
     if rows:
-        resolved_values = [value for row in rows if (value := _swe_instance_resolved(row)) is not None]
+        resolved_values = [
+            value for row in rows if (value := _swe_instance_resolved(row)) is not None
+        ]
         completed_values = [
             value for row in rows if (value := _swe_instance_completed(row)) is not None
         ]

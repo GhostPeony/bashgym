@@ -31,7 +31,11 @@ def _holdout_attempts(
     holdout_ids: set[str],
 ) -> list[EnvironmentAttempt]:
     return [
-        attempt if isinstance(attempt, EnvironmentAttempt) else EnvironmentAttempt.from_dict(attempt)
+        (
+            attempt
+            if isinstance(attempt, EnvironmentAttempt)
+            else EnvironmentAttempt.from_dict(attempt)
+        )
         for attempt in attempts
         if _attempt_environment_id(attempt) in holdout_ids
     ]

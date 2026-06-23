@@ -1292,24 +1292,16 @@ def create_app() -> FastAPI:
                     sft_warm_start_policy=getattr(request, "sft_warm_start_policy", None),
                     dppo_backend=getattr(request, "dppo_backend", "auto"),
                     dppo_divergence=getattr(request, "dppo_divergence", "binary_tv"),
-                    dppo_binary_tv_threshold=getattr(
-                        request, "dppo_binary_tv_threshold", 0.15
-                    ),
-                    dppo_binary_kl_threshold=getattr(
-                        request, "dppo_binary_kl_threshold", 0.05
-                    ),
+                    dppo_binary_tv_threshold=getattr(request, "dppo_binary_tv_threshold", 0.15),
+                    dppo_binary_kl_threshold=getattr(request, "dppo_binary_kl_threshold", 0.05),
                     echo_enabled=getattr(request, "echo_enabled", False),
                     echo_aux_lambda=getattr(request, "echo_aux_lambda", 0.05),
                     rwml_enabled=getattr(request, "rwml_enabled", False),
-                    rwml_distance_threshold=getattr(
-                        request, "rwml_distance_threshold", 0.2
-                    ),
+                    rwml_distance_threshold=getattr(request, "rwml_distance_threshold", 0.2),
                     rwml_easy_pass_rate_threshold=getattr(
                         request, "rwml_easy_pass_rate_threshold", 0.8
                     ),
-                    rwml_easy_keep_probability=getattr(
-                        request, "rwml_easy_keep_probability", 0.1
-                    ),
+                    rwml_easy_keep_probability=getattr(request, "rwml_easy_keep_probability", 0.1),
                     rwml_history_window=getattr(request, "rwml_history_window", 4),
                     rwml_embedding_model=getattr(request, "rwml_embedding_model", ""),
                     rwml_kl_beta=getattr(request, "rwml_kl_beta", 0.0),
@@ -1398,10 +1390,7 @@ def create_app() -> FastAPI:
                         app.state.trainer.config.terminal_rl_warnings()
                     )
                 world_model_settings = app.state.trainer.config.world_model_settings()
-                if (
-                    world_model_settings["echo_enabled"]
-                    or world_model_settings["rwml_enabled"]
-                ):
+                if world_model_settings["echo_enabled"] or world_model_settings["rwml_enabled"]:
                     training_metadata["world_model"] = world_model_settings
                 if dataset_path:
                     training_metadata["dataset_path"] = str(dataset_path)

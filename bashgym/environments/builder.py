@@ -122,7 +122,9 @@ def write_environment_manifest(spec: EnvironmentSpec, root: Path) -> Path:
         "protected_files": protected_files,
     }
     manifest_path = root / PROTECTED_MANIFEST_NAME
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     return manifest_path
 
 
@@ -183,7 +185,9 @@ def materialize_environment(
 
     files_written: list[Path] = []
     env_json = root / "env.json"
-    env_json.write_text(json.dumps(spec.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    env_json.write_text(
+        json.dumps(spec.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     files_written.append(env_json)
 
     for relative_path, content in sorted(spec.files.items()):
@@ -196,13 +200,17 @@ def materialize_environment(
         dockerfile = _safe_child(root, spec.build.dockerfile)
         if not dockerfile.exists():
             base = spec.build.base_image or "python:3.11-slim"
-            dockerfile.write_text(f"FROM {base}\nWORKDIR /workspace\nCOPY . /workspace\n", encoding="utf-8")
+            dockerfile.write_text(
+                f"FROM {base}\nWORKDIR /workspace\nCOPY . /workspace\n", encoding="utf-8"
+            )
             files_written.append(dockerfile)
 
     if spec.verifier.path and spec.verifier.path not in spec.files:
         verifier = _safe_child(root, spec.verifier.path)
         if not verifier.exists():
-            verifier.write_text("#!/usr/bin/env bash\nset -euo pipefail\nexit 1\n", encoding="utf-8")
+            verifier.write_text(
+                "#!/usr/bin/env bash\nset -euo pipefail\nexit 1\n", encoding="utf-8"
+            )
             files_written.append(verifier)
 
     manifest_path = write_environment_manifest(spec, root)

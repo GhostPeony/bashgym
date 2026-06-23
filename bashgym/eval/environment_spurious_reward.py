@@ -30,7 +30,11 @@ def _normalize_attempts(
     attempts: list[EnvironmentAttempt | dict[str, Any]],
 ) -> list[EnvironmentAttempt]:
     return [
-        attempt if isinstance(attempt, EnvironmentAttempt) else EnvironmentAttempt.from_dict(attempt)
+        (
+            attempt
+            if isinstance(attempt, EnvironmentAttempt)
+            else EnvironmentAttempt.from_dict(attempt)
+        )
         for attempt in attempts
     ]
 
@@ -72,10 +76,11 @@ def _summary(values: list[float]) -> dict[str, float]:
     }
 
 
-def _summarize_pass_at_k(rows: list[dict[str, float]], k_values: list[int]) -> dict[str, dict[str, float]]:
+def _summarize_pass_at_k(
+    rows: list[dict[str, float]], k_values: list[int]
+) -> dict[str, dict[str, float]]:
     return {
-        f"pass@{k}": _summary([float(row.get(f"pass@{k}", 0.0)) for row in rows])
-        for k in k_values
+        f"pass@{k}": _summary([float(row.get(f"pass@{k}", 0.0)) for row in rows]) for k in k_values
     }
 
 

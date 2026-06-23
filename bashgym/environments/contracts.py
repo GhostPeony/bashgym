@@ -13,7 +13,9 @@ def _clean_dict(data: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in data.items() if v is not None}
 
 
-def stable_environment_id(source: str, instruction: str, metadata: dict[str, Any] | None = None) -> str:
+def stable_environment_id(
+    source: str, instruction: str, metadata: dict[str, Any] | None = None
+) -> str:
     """Create a deterministic id from stable environment content."""
     payload = {
         "source": source or "",

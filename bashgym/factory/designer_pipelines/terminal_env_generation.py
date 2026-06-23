@@ -39,7 +39,9 @@ class TerminalEnvironmentDraft(BaseModel):
     verifier_path: str = Field(description="Relative path to the verifier script or test file")
     verifier_command: str = Field(description="Command that evaluates task success")
     setup_commands: list[str] = Field(description="Commands needed before rollout/evaluation")
-    expected_solution_shape: str = Field(description="What a correct agent likely changes or produces")
+    expected_solution_shape: str = Field(
+        description="What a correct agent likely changes or produces"
+    )
 
 
 def build_terminal_env_pipeline(config: PipelineConfig) -> dd.DataDesignerConfigBuilder:

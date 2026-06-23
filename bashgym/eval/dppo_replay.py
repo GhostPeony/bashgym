@@ -213,9 +213,7 @@ def summarize_world_model_payloads(records: list[dict[str, Any]]) -> dict[str, A
         "rwml_mean_transitions_per_record": (
             rwml_transitions / world_model_records if world_model_records else 0.0
         ),
-        "rwml_mean_prior_pairs": (
-            rwml_prior_pairs / rwml_transitions if rwml_transitions else 0.0
-        ),
+        "rwml_mean_prior_pairs": (rwml_prior_pairs / rwml_transitions if rwml_transitions else 0.0),
         "rwml_max_prior_pairs": rwml_max_prior_pairs,
         "echo_segments": echo_segments,
         "echo_action_chars": echo_action_chars,

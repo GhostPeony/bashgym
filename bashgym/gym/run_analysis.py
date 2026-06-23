@@ -76,9 +76,7 @@ def summarize_training_metrics(metrics: list[dict[str, Any]]) -> dict[str, Any]:
     loss = _summary(_series(metrics, "loss", "train_loss", "eval_loss"))
     reward = _summary(_series(metrics, "reward", "train_reward_mean", "valid_reward_mean"))
     reward_std = _summary(_series(metrics, "reward_std", "rewardStd"))
-    frac_reward_zero_std = _summary(
-        _series(metrics, "frac_reward_zero_std", "fracRewardZeroStd")
-    )
+    frac_reward_zero_std = _summary(_series(metrics, "frac_reward_zero_std", "fracRewardZeroStd"))
     pass_at_1 = _summary(
         _series(metrics, "pass@1", "pass_at_1", "heldout_pass@1", "heldout_pass_at_1")
     )
@@ -96,9 +94,7 @@ def summarize_training_metrics(metrics: list[dict[str, Any]]) -> dict[str, Any]:
         _series(metrics, "embedding_distance_p95", "rwml_embedding_distance_p95")
     )
     exit_code_accuracy = _summary(_series(metrics, "exit_code_accuracy", "exitCodeAccuracy"))
-    test_result_accuracy = _summary(
-        _series(metrics, "test_result_accuracy", "testResultAccuracy")
-    )
+    test_result_accuracy = _summary(_series(metrics, "test_result_accuracy", "testResultAccuracy"))
     grad_norm = _summary(_series(metrics, "grad_norm", "gradNorm"))
     learning_rate = _summary(_series(metrics, "learning_rate", "learningRate"))
 
@@ -415,7 +411,9 @@ def build_training_analysis(
             "level": level,
             "summary": {
                 "blocked": level == "blocked",
-                "has_heldout_signal": pass1 is not None or passk is not None or release_summary["present"],
+                "has_heldout_signal": pass1 is not None
+                or passk is not None
+                or release_summary["present"],
                 "has_world_model_coverage": bool(
                     replay_summary and replay_summary.get("world_model_records", 0) > 0
                 ),

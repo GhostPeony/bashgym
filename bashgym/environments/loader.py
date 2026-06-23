@@ -89,7 +89,12 @@ def _extract_verifier(record: dict[str, Any]) -> VerifierSpec:
         or record.get("checker_command")
         or "./verify.sh"
     )
-    kind = raw.get("kind") or record.get("verifier_kind") or record.get("reward_kind") or "exact_success"
+    kind = (
+        raw.get("kind")
+        or record.get("verifier_kind")
+        or record.get("reward_kind")
+        or "exact_success"
+    )
     return VerifierSpec.from_dict(
         {
             **raw,
@@ -104,7 +109,12 @@ def _extract_build(record: dict[str, Any]) -> BuildSpec:
     raw = record.get("build") or {}
     if not isinstance(raw, dict):
         raw = {}
-    dockerfile = raw.get("dockerfile") or record.get("dockerfile") or record.get("Dockerfile") or "Dockerfile"
+    dockerfile = (
+        raw.get("dockerfile")
+        or record.get("dockerfile")
+        or record.get("Dockerfile")
+        or "Dockerfile"
+    )
     base_image = raw.get("base_image") or record.get("base_image")
     compose_file = raw.get("compose_file") or record.get("compose_file")
     setup_commands = raw.get("setup_commands") or record.get("setup_commands") or []

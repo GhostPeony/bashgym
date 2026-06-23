@@ -275,8 +275,7 @@ def cmd_training_plan(args: argparse.Namespace) -> int:
         "starting_settings": recipe.starting_settings,
         "watch": recipe.watch,
         "docs": [
-            {"topic": topic, "path": str(REPO_ROOT / DOCS[topic]["path"])}
-            for topic in recipe.docs
+            {"topic": topic, "path": str(REPO_ROOT / DOCS[topic]["path"])} for topic in recipe.docs
         ],
         "next": [{"reason": reason, "command": command} for reason, command in _plan_next(recipe)],
     }
@@ -304,12 +303,21 @@ def _plan_next(recipe: TrainingRecipe) -> list[tuple[str, str]]:
     if recipe.strategy == "world-model":
         return [
             ("Inspect world-model docs.", "bashgym training docs --topic world-models --json"),
-            ("Summarize an enriched replay.", "bashgym replay summarize data/dppo_replay/latest.jsonl --json"),
+            (
+                "Summarize an enriched replay.",
+                "bashgym replay summarize data/dppo_replay/latest.jsonl --json",
+            ),
         ]
     if recipe.strategy == "grpo":
         return [
-            ("Check zero-std and pass@k diagnostics.", "bashgym training docs --topic metrics --json"),
-            ("Inspect world-model setup if using DPPO replay.", "bashgym training plan --strategy world-model --json"),
+            (
+                "Check zero-std and pass@k diagnostics.",
+                "bashgym training docs --topic metrics --json",
+            ),
+            (
+                "Inspect world-model setup if using DPPO replay.",
+                "bashgym training plan --strategy world-model --json",
+            ),
         ]
     return [("Review strategy details.", f"bashgym training docs --topic {recipe.docs[0]} --json")]
 
@@ -429,7 +437,9 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[json_parent],
     )
     analyze.add_argument("--run-id", help="Run id under --models-dir, usually data/models/<run-id>")
-    analyze.add_argument("--models-dir", default="data/models", help="Directory containing training runs")
+    analyze.add_argument(
+        "--models-dir", default="data/models", help="Directory containing training runs"
+    )
     analyze.add_argument("--metrics", help="Direct path to a metrics.jsonl artifact")
     analyze.add_argument("--replay", help="Optional DPPO replay JSONL artifact")
     analyze.add_argument("--release-evidence", help="Optional release-gate evidence JSON artifact")

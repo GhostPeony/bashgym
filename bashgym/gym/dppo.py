@@ -152,7 +152,9 @@ def dppo_mask_decision(
     update_moves_probability_up = train_probability > behavior_probability
     update_moves_probability_down = train_probability < behavior_probability
     positive_mask = token.advantage > 0 and update_moves_probability_up and score > active_threshold
-    negative_mask = token.advantage < 0 and update_moves_probability_down and score > active_threshold
+    negative_mask = (
+        token.advantage < 0 and update_moves_probability_down and score > active_threshold
+    )
     masked = positive_mask or negative_mask
     if positive_mask:
         reason = "positive_advantage_above_trust_region"

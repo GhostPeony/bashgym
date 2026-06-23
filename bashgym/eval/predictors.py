@@ -131,6 +131,8 @@ def openai_complete(
     max_tokens: int = 512,
     timeout: float = 60.0,
     tools: list | None = None,
+    logprobs: bool = False,
+    top_logprobs: int | None = None,
 ) -> Completer:
     """A ``complete`` callable hitting an OpenAI-compatible chat endpoint.
 
@@ -153,6 +155,10 @@ def openai_complete(
         }
         if tools:
             payload["tools"] = tools
+        if logprobs:
+            payload["logprobs"] = True
+            if top_logprobs is not None:
+                payload["top_logprobs"] = top_logprobs
         resp = httpx.post(url, json=payload, headers=headers, timeout=timeout)
         resp.raise_for_status()
         return resp.json()

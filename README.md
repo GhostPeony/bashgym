@@ -15,7 +15,9 @@ Every AI coding session is a chain-of-thought reasoning trace — step-by-step p
 ## Documentation
 
 - **[docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)** — install to first trained model, step by step.
+- **[docs/training/overview.md](docs/training/overview.md)** — training gym curriculum: how strategies, rewards, world models, and gates fit together.
 - **[docs/TRAINING_DATA_GUIDE.md](docs/TRAINING_DATA_GUIDE.md)** — trace format, quality tiers, and example generation.
+- **[docs/training/strategy-guide.md](docs/training/strategy-guide.md)** — concrete SFT, DPO, GRPO/RLVR, distillation, cascade, and DPPO starting recipes.
 - **[docs/API.md](docs/API.md)** — REST API reference.
 - **[docs/FRONTEND_DESIGN_GUIDELINES.md](docs/FRONTEND_DESIGN_GUIDELINES.md)** — design tokens, components, and layout patterns.
 
@@ -287,6 +289,7 @@ Automated loop: watch → import → classify → train.
 Built-in assistant with tool use and system context. Available in-app and as a standalone bot.
 
 - **In-app**: Chat panel in the dashboard — can import traces, trigger training, search HuggingFace, run commands
+- **CLI manifest**: `bashgym manifest --json` exposes machine-readable training docs, setup plans, and replay-analysis commands for coding agents
 - **Multi-platform**: Go binary (`picoclaw`) with adapters for Discord, Telegram, Slack, WhatsApp, DingTalk, LINE, Feishu, QQ, and OneBot
 
 ### Safety

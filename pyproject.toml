@@ -58,7 +58,7 @@ data-designer = [
 all = ["bashgym[training,dev]"]
 
 [project.scripts]
-bashgym = "main:main"
+bashgym = "bashgym.cli:main"
 
 # BashGym Data Designer plugins. Discovered by Data Designer's plugin manager
 # after `pip install -e .`; makes our gold-trace seed reader usable from the

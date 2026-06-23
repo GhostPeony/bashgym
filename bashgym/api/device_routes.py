@@ -131,7 +131,10 @@ async def preflight_device(device_id: str):
             remote_work_dir=device.work_dir,
         )
         trainer = RemoteTrainer(ssh_config)
-        result = await trainer.preflight_check()
+        # Unsloth is a soft requirement: plain-transformers backends (sm_121/GB10,
+        # e.g. ponyo) cannot load Unsloth, so a missing Unsloth is recorded as a
+        # capability/warning rather than failing the whole preflight.
+        result = await trainer.preflight_check(require_unsloth=False)
     except Exception as exc:
         logger.warning("Preflight failed for device %s: %s", device_id, exc)
         raise HTTPException(
@@ -139,41 +142,18 @@ async def preflight_device(device_id: str):
             detail=f"Connection or preflight error: {exc}",
         )
 
-    # Persist capabilities when the check succeeded
+    # Persist discovered capabilities (incl. unified-memory budget) when reachable
     updated_device = device
     if result.ok:
-        capabilities: dict[str, Any] = {}
-        if result.python_version is not None:
-            capabilities["python_version"] = result.python_version
-        if result.disk_free_gb is not None:
-            capabilities["disk_free_gb"] = result.disk_free_gb
-        if result.hostname is not None:
-            capabilities["hostname"] = result.hostname
-        if result.os_info is not None:
-            capabilities["os_info"] = result.os_info
-        if result.cuda_version is not None:
-            capabilities["cuda_version"] = result.cuda_version
-        if result.gpus is not None:
-            capabilities["gpus"] = result.gpus
-
         try:
-            updated_device = await _registry.update_capabilities(device_id, capabilities)
+            updated_device = await _registry.update_capabilities(
+                device_id, result.capabilities()
+            )
         except KeyError:
             pass  # device was removed between check and update — non-fatal
 
-    preflight_dict = {
-        "ok": result.ok,
-        "python_version": result.python_version,
-        "disk_free_gb": result.disk_free_gb,
-        "error": result.error,
-        "hostname": result.hostname,
-        "os_info": result.os_info,
-        "cuda_version": result.cuda_version,
-        "gpus": result.gpus,
-    }
-
     return {
-        "preflight": preflight_dict,
+        "preflight": result.to_dict(),
         "device": _device_to_response(updated_device).model_dump(),
     }
 

@@ -239,6 +239,9 @@ class ModelProfile:
     # Comparative base-vs-candidate ship/no-ship — distinct from the pass/fail
     # benchmarks and custom_evals above, hence its own field.
     heldout_evals: list[dict[str, Any]] = field(default_factory=list)
+    # BashGym executable environment holdout gates. These carry the split manifest,
+    # content-hash contamination list, pass@k report, and ship/hold verdict.
+    environment_holdout_evals: list[dict[str, Any]] = field(default_factory=list)
 
     # Operational
     model_size_bytes: int = 0
@@ -320,6 +323,7 @@ class ModelProfile:
             "custom_evals": {k: v.to_dict() for k, v in self.custom_evals.items()},
             "evaluation_history": [e.to_dict() for e in self.evaluation_history],
             "heldout_evals": self.heldout_evals,
+            "environment_holdout_evals": self.environment_holdout_evals,
             # Operational
             "model_size_bytes": self.model_size_bytes,
             "model_size_params": self.model_size_params,
@@ -373,6 +377,7 @@ class ModelProfile:
                 EvaluationRecord.from_dict(e) for e in data.get("evaluation_history", [])
             ],
             heldout_evals=data.get("heldout_evals", []),
+            environment_holdout_evals=data.get("environment_holdout_evals", []),
             # Operational
             model_size_bytes=data.get("model_size_bytes", 0),
             model_size_params=data.get("model_size_params"),
@@ -420,10 +425,25 @@ class ModelProfile:
         if keep and len(self.heldout_evals) > keep:
             self.heldout_evals = self.heldout_evals[-keep:]
 
+    def add_environment_holdout_eval(self, result: dict[str, Any], keep: int = 20) -> None:
+        """Record a BashGym environment holdout gate result.
+
+        Kept separate from trace held-out evals because this is an executable
+        environment split/gate with contamination evidence and pass@k telemetry.
+        """
+        self.environment_holdout_evals.append(result)
+        if keep and len(self.environment_holdout_evals) > keep:
+            self.environment_holdout_evals = self.environment_holdout_evals[-keep:]
+
     @property
     def latest_heldout_eval(self) -> dict[str, Any] | None:
         """The most recent held-out eval verdict, or None if never evaluated."""
         return self.heldout_evals[-1] if self.heldout_evals else None
+
+    @property
+    def latest_environment_holdout_eval(self) -> dict[str, Any] | None:
+        """The most recent environment holdout gate, or None if never evaluated."""
+        return self.environment_holdout_evals[-1] if self.environment_holdout_evals else None
 
     def _update_evaluation_history(self):
         """Add current evaluation state to history."""

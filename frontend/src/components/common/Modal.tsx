@@ -46,9 +46,9 @@ export function Modal({
 
   const sizes = {
     sm: 'max-w-sm',
-    md: 'max-w-lg',
-    lg: 'max-w-2xl',
-    xl: 'max-w-4xl'
+    md: 'max-w-xl',
+    lg: 'max-w-3xl',
+    xl: 'max-w-6xl'
   }
 
   return (
@@ -64,6 +64,7 @@ export function Modal({
       <div
         className={clsx(
           'relative w-full mx-4 bg-background-card overflow-hidden',
+          'max-h-[90vh]',
           'border-brutal border-border shadow-brutal rounded-brutal',
           sizes[size]
         )}
@@ -85,7 +86,7 @@ export function Modal({
         </div>
 
         {/* Content */}
-        <div className="px-6 py-4 max-h-[60vh] overflow-y-auto">{children}</div>
+        <div className="px-6 py-4 max-h-[70vh] overflow-y-auto">{children}</div>
 
         {/* Footer */}
         {footer && (

@@ -538,10 +538,23 @@ class SystemInfoService:
         self._cached_info = None
         self._cache_timestamp = 0
 
-    def get_model_recommendations(self) -> dict[str, Any]:
-        """Get model recommendations based on available VRAM."""
+    def get_model_recommendations(
+        self,
+        vram_gb: float | None = None,
+        *,
+        unified_memory: bool = False,
+    ) -> dict[str, Any]:
+        """Get model recommendations based on available VRAM.
+
+        ``vram_gb`` overrides the detected local VRAM — pass a remote SSH device's
+        discovered ``effective_vram_gb`` (e.g. a unified-memory DGX Spark) to get
+        recommendations for that machine instead of the local one. ``unified_memory``
+        is surfaced so the UI can explain a RAM-backed budget.
+        """
+        from bashgym.models.hardware_estimator import recommend_for_budget
+
         info = self.get_system_info()
-        max_vram = max((g.vram for g in info.gpus), default=0)
+        max_vram = vram_gb if vram_gb is not None else max((g.vram for g in info.gpus), default=0)
 
         recommendations = {
             "max_vram_gb": max_vram,
@@ -550,6 +563,10 @@ class SystemInfoService:
             "recommended_quantization": "4bit",
             "recommended_batch_size": 1,
             "warning": None,
+            # Estimator-driven: largest model (billions of params) per training/serve
+            # regime that fits this budget. Hardware-agnostic, computed from VRAM only.
+            "regime_capacities": recommend_for_budget(max_vram)["regime_capacities"],
+            "unified_memory": unified_memory,
         }
 
         if max_vram >= 80:

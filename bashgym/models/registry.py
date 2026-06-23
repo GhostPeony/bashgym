@@ -687,6 +687,19 @@ class ModelRegistry:
         self._save_index()
         return profile
 
+    def record_environment_holdout_eval(
+        self, model_id: str, result: dict[str, Any]
+    ) -> ModelProfile | None:
+        """Record an executable-environment holdout gate against a model."""
+        profile = self._profiles.get(model_id)
+        if not profile:
+            return None
+        profile.add_environment_holdout_eval(result)
+        profile.update_status()
+        profile.save()
+        self._save_index()
+        return profile
+
 
 # Singleton registry instance
 _registry: ModelRegistry | None = None

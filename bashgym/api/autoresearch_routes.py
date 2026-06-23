@@ -14,6 +14,7 @@ Trace research (data-centric):
 """
 
 import asyncio
+import json
 import logging
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from fastapi import APIRouter, HTTPException, Request
 from bashgym.api.schemas import (
     AutoResearchRequest,
     AutoResearchStatusResponse,
+    EnvironmentRecipeProposalRequest,
     ExperimentResultSchema,
     SchemaResearchRequest,
     TraceExperimentResultSchema,
@@ -29,12 +31,15 @@ from bashgym.api.schemas import (
     TraceResearchStatusResponse,
 )
 from bashgym.api.websocket import WSMessage, manager
+from bashgym.environments.contracts import EnvironmentSpec
+from bashgym.environments.tmax_importer import TMaxImporter
 from bashgym.gym.autoresearch import (
     AutoResearchConfig,
     AutoResearcher,
     AutoResearchStatus,
     ExperimentResult,
 )
+from bashgym.gym.environment_recipe_search_space import EnvironmentRecipeSearchSpace
 from bashgym.gym.trace_researcher import (
     DataPipelineConfig,
     TraceExperimentResult,
@@ -590,6 +595,79 @@ def _get_schema_researcher(request: Request) -> AutoResearcher | None:
 
 
 # =============================================================================
+# Environment Recipe Research Helpers
+# =============================================================================
+
+
+def _load_environment_recipe_environments(
+    body: EnvironmentRecipeProposalRequest,
+) -> tuple[list[EnvironmentSpec], list[dict]]:
+    """Load inline and/or local-file environments for recipe AutoResearch."""
+    envs: list[EnvironmentSpec] = []
+    errors: list[dict] = []
+
+    for idx, payload in enumerate(body.environments):
+        try:
+            env = EnvironmentSpec.from_dict(payload)
+        except (TypeError, ValueError) as exc:
+            errors.append({"index": idx, "error": str(exc)})
+            continue
+        validation_errors = env.validation_errors()
+        if validation_errors:
+            errors.append({"index": idx, "id": env.id, "validation_errors": validation_errors})
+        envs.append(env)
+
+    if body.environment_path:
+        path = Path(body.environment_path).expanduser()
+        if not path.exists():
+            raise HTTPException(status_code=400, detail=f"environment file not found: {path}")
+
+        importer = TMaxImporter(preserve_raw=True)
+        try:
+            suffix = path.suffix.lower()
+            if suffix in {".jsonl", ".ndjson"}:
+                file_envs = importer.from_jsonl(path, source=body.source)
+            elif suffix == ".json":
+                file_envs = importer.from_json(path, source=body.source)
+            else:
+                raise ValueError("supported formats are .json, .jsonl, and .ndjson")
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        start_idx = len(envs)
+        for offset, env in enumerate(file_envs):
+            validation_errors = env.validation_errors()
+            if validation_errors:
+                errors.append(
+                    {
+                        "index": start_idx + offset,
+                        "id": env.id,
+                        "validation_errors": validation_errors,
+                    }
+                )
+            envs.append(env)
+
+    if not envs:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide environments or environment_path for recipe proposal",
+        )
+
+    return envs, errors
+
+
+def _experiment_payload(result: ExperimentResult) -> dict:
+    return {
+        "experiment_id": result.experiment_id,
+        "config_snapshot": result.config_snapshot,
+        "metric_value": result.metric_value,
+        "improved": result.improved,
+        "duration_seconds": result.duration_seconds,
+        "timestamp": result.timestamp,
+    }
+
+
+# =============================================================================
 # Schema Research Endpoints (Data Designer schema evolution)
 # =============================================================================
 
@@ -820,4 +898,65 @@ async def get_schema_research_quality(request: Request):
             if hasattr(researcher, "search_space")
             else None
         ),
+    }
+
+
+# =============================================================================
+# Environment Recipe Research Endpoints
+# =============================================================================
+
+
+@router.post("/environment-recipe/propose")
+async def propose_environment_recipe(body: EnvironmentRecipeProposalRequest):
+    """Run bounded AutoResearch over environment recipe axes and export a proposal."""
+    envs, validation_errors = _load_environment_recipe_environments(body)
+    search_space = EnvironmentRecipeSearchSpace(
+        envs,
+        mutation_rate=body.mutation_rate,
+        mutation_scale=body.mutation_scale,
+    )
+    base_genome = EnvironmentRecipeSearchSpace.create_default_genome(
+        sample_size=min(body.sample_size, len(envs)),
+        pass_at_1_target=body.pass_at_1_target,
+        seed=body.seed,
+    )
+    ar_config = AutoResearchConfig(
+        search_params=["environment_recipe"],
+        max_experiments=body.max_experiments,
+        mode="simulate",
+        mutation_rate=body.mutation_rate,
+        mutation_scale=body.mutation_scale,
+        eval_metric="environment_recipe_loss",
+    )
+    researcher = AutoResearcher(
+        config=ar_config,
+        base_trainer_config=base_genome,
+        search_space=search_space,
+    )
+
+    await researcher.run_loop(Path("data/environments"))
+    proposal = search_space.proposal_for(researcher.best_config, metric=researcher.best_metric)
+
+    output_path = None
+    if body.output_path:
+        output = Path(body.output_path).expanduser()
+        try:
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(json.dumps(proposal, indent=2, sort_keys=True), encoding="utf-8")
+        except OSError as exc:
+            raise HTTPException(status_code=400, detail=f"could not write proposal: {exc}") from exc
+        output_path = str(output)
+
+    return {
+        "status": researcher.status,
+        "source_count": len(envs),
+        "best_metric": (
+            round(researcher.best_metric, 6)
+            if researcher.best_metric < float("inf")
+            else None
+        ),
+        "proposal": proposal,
+        "experiments": [_experiment_payload(exp) for exp in researcher.experiments],
+        "validation_errors": validation_errors,
+        "output_path": output_path,
     }

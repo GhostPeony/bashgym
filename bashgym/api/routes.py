@@ -34,6 +34,7 @@ from bashgym.api.autoresearch_routes import router as autoresearch_router  # noq
 from bashgym.api.cascade_routes import router as cascade_router  # noqa: E402
 from bashgym.api.device_routes import get_registry as get_device_registry  # noqa: E402
 from bashgym.api.device_routes import router as device_router  # noqa: E402
+from bashgym.api.environment_routes import router as environment_router  # noqa: E402
 from bashgym.api.eval_routes import router as eval_router  # noqa: E402
 from bashgym.api.factory_routes import router as factory_router  # noqa: E402
 from bashgym.api.hf_routes import router as hf_router  # noqa: E402
@@ -300,7 +301,7 @@ def create_app() -> FastAPI:
             print(f"Warning: Some components not available: {e}")
 
         # Start pipeline watcher
-        start_pipeline_watcher()
+        start_pipeline_watcher(app.state)
 
         # Auto-discover provider models and auto-select Student
         if app.state.provider_registry:
@@ -620,14 +621,76 @@ def create_app() -> FastAPI:
         ]
 
     @app.get("/api/system/recommendations", response_model=ModelRecommendations, tags=["System"])
-    async def get_model_recommendations():
-        """Get model recommendations based on detected hardware."""
+    async def get_model_recommendations(device_id: str | None = None):
+        """Get model recommendations based on detected hardware.
+
+        When ``device_id`` is supplied, recommendations target that registered SSH
+        device's discovered budget (its ``effective_vram_gb`` capability, which
+        falls back to RAM on unified-memory machines like a DGX Spark) instead of
+        the local GPU. Run the device's preflight first to populate capabilities.
+        """
         from bashgym.api.system_info import get_system_info_service
 
+        vram_gb: float | None = None
+        unified_memory = False
+        if device_id:
+            from bashgym.api.device_routes import get_registry as get_device_registry
+
+            device = await get_device_registry().get_device(device_id)
+            if device is None:
+                raise HTTPException(status_code=404, detail=f"Device '{device_id}' not found.")
+            caps = device.capabilities or {}
+            vram_gb = caps.get("effective_vram_gb")
+            unified_memory = bool(caps.get("unified_memory", False))
+
         service = get_system_info_service()
-        recommendations = service.get_model_recommendations()
+        recommendations = service.get_model_recommendations(
+            vram_gb=vram_gb, unified_memory=unified_memory
+        )
 
         return ModelRecommendations(**recommendations)
+
+    @app.get("/api/models/discover", tags=["Models"])
+    async def discover_open_models(
+        limit: int = 40,
+        device_id: str | None = None,
+    ):
+        """Live-discover open base models from HuggingFace for the fine-tuning directory.
+
+        Replaces the static base-model list so new releases (e.g. Qwen3.6) appear
+        automatically. When ``device_id`` is supplied, each model is annotated with
+        whether it fits that device's discovered VRAM budget per training regime.
+        Defensive: returns an empty list (never 5xx) when the Hub is unreachable.
+        """
+        from bashgym.models.hardware_estimator import recommend_for_budget
+        from bashgym.models.hf_catalog import discover_training_models
+
+        try:
+            models = discover_training_models()
+        except Exception as exc:  # noqa: BLE001 - discovery is best-effort
+            logger.warning("HF model discovery failed: %s", exc)
+            return {"models": [], "error": str(exc)}
+
+        if limit:
+            models = models[:limit]
+
+        budget_vram: float | None = None
+        if device_id:
+            from bashgym.api.device_routes import get_registry as get_device_registry
+
+            device = await get_device_registry().get_device(device_id)
+            if device is not None:
+                budget_vram = (device.capabilities or {}).get("effective_vram_gb")
+
+        if budget_vram:
+            fit = {
+                entry["id"]: entry
+                for entry in recommend_for_budget(budget_vram, candidates=models)["runnable"]
+            }
+            for model in models:
+                model["fit"] = fit.get(model["id"])
+
+        return {"models": models, "budget_vram_gb": budget_vram}
 
     # =========================================================================
     # Model Providers Endpoints
@@ -1217,6 +1280,39 @@ def create_app() -> FastAPI:
                     grpo_loss_type=getattr(request, "grpo_loss_type", "grpo"),
                     grpo_backend=getattr(request, "grpo_backend", "auto"),
                     grpo_use_vllm=getattr(request, "grpo_use_vllm", False),
+                    training_profile=getattr(request, "training_profile", "default"),
+                    grpo_group_size=getattr(request, "grpo_group_size", None),
+                    prompts_per_rollout_batch=getattr(request, "prompts_per_rollout_batch", 8),
+                    max_tool_calls_per_episode=getattr(request, "max_tool_calls_per_episode", 64),
+                    token_level_loss=getattr(request, "token_level_loss", None),
+                    filter_zero_std_groups=getattr(request, "filter_zero_std_groups", None),
+                    active_sampling=getattr(request, "active_sampling", None),
+                    lm_head_fp32=getattr(request, "lm_head_fp32", None),
+                    interleaved_thinking=getattr(request, "interleaved_thinking", None),
+                    sft_warm_start_policy=getattr(request, "sft_warm_start_policy", None),
+                    dppo_backend=getattr(request, "dppo_backend", "auto"),
+                    dppo_divergence=getattr(request, "dppo_divergence", "binary_tv"),
+                    dppo_binary_tv_threshold=getattr(
+                        request, "dppo_binary_tv_threshold", 0.15
+                    ),
+                    dppo_binary_kl_threshold=getattr(
+                        request, "dppo_binary_kl_threshold", 0.05
+                    ),
+                    echo_enabled=getattr(request, "echo_enabled", False),
+                    echo_aux_lambda=getattr(request, "echo_aux_lambda", 0.05),
+                    rwml_enabled=getattr(request, "rwml_enabled", False),
+                    rwml_distance_threshold=getattr(
+                        request, "rwml_distance_threshold", 0.2
+                    ),
+                    rwml_easy_pass_rate_threshold=getattr(
+                        request, "rwml_easy_pass_rate_threshold", 0.8
+                    ),
+                    rwml_easy_keep_probability=getattr(
+                        request, "rwml_easy_keep_probability", 0.1
+                    ),
+                    rwml_history_window=getattr(request, "rwml_history_window", 4),
+                    rwml_embedding_model=getattr(request, "rwml_embedding_model", ""),
+                    rwml_kl_beta=getattr(request, "rwml_kl_beta", 0.0),
                     sft_backend=getattr(request, "sft_backend", "auto"),
                     dpo_backend=getattr(request, "dpo_backend", "auto"),
                     use_liger=getattr(request, "use_liger", False),
@@ -1289,6 +1385,24 @@ def create_app() -> FastAPI:
                 training_metadata = {
                     "selected_repos": request.selected_repos or [],
                 }
+                terminal_rl_settings = app.state.trainer.config.terminal_rl_settings()
+                if (
+                    request.strategy.value in {"grpo", "rlvr"}
+                    or terminal_rl_settings["training_profile"] != "default"
+                ):
+                    training_metadata["terminal_rl"] = terminal_rl_settings
+                    training_metadata["dppo_backend_selection"] = (
+                        app.state.trainer.config.dppo_backend_selection()
+                    )
+                    training_metadata["terminal_rl_warnings"] = (
+                        app.state.trainer.config.terminal_rl_warnings()
+                    )
+                world_model_settings = app.state.trainer.config.world_model_settings()
+                if (
+                    world_model_settings["echo_enabled"]
+                    or world_model_settings["rwml_enabled"]
+                ):
+                    training_metadata["world_model"] = world_model_settings
                 if dataset_path:
                     training_metadata["dataset_path"] = str(dataset_path)
                 if val_dataset_path:
@@ -5214,6 +5328,9 @@ def create_app() -> FastAPI:
 
     # Include Research routes (HF dataset scanner + empirical ranking)
     app.include_router(research_router)
+
+    # Include executable environment import/curation routes
+    app.include_router(environment_router)
 
     # Experimental routes — desktop only (hidden in web mode)
     if not _settings.is_web_mode:

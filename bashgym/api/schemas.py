@@ -170,7 +170,7 @@ class TrainingRequest(BaseModel):
         0.1, description="DPO beta parameter (controls divergence penalty)", ge=0.01, le=1.0
     )
     grpo_num_generations: int = Field(
-        4, description="GRPO: number of generations per prompt", ge=2, le=16
+        4, description="GRPO: number of generations per prompt", ge=2, le=64
     )
     grpo_temperature: float = Field(0.7, description="GRPO: sampling temperature", ge=0.1, le=2.0)
     grpo_reward_mode: str = Field(
@@ -185,6 +185,105 @@ class TrainingRequest(BaseModel):
     )
     grpo_use_vllm: bool = Field(
         False, description="Use vLLM-backed generation for GRPO (requires vllm in the env)"
+    )
+    training_profile: str = Field(
+        "default",
+        description="Training recipe profile: default or terminal_rl_tmax_like",
+    )
+    grpo_group_size: int | None = Field(
+        None,
+        description="Terminal RL: completions per prompt group; defaults from training_profile",
+        ge=2,
+        le=64,
+    )
+    prompts_per_rollout_batch: int = Field(
+        8, description="Terminal RL: prompt groups targeted per rollout batch", ge=1, le=128
+    )
+    max_tool_calls_per_episode: int = Field(
+        64, description="Terminal RL: maximum shell/tool calls per episode", ge=1, le=512
+    )
+    token_level_loss: bool | None = Field(
+        None, description="Terminal RL: use token-level policy loss when supported"
+    )
+    filter_zero_std_groups: bool | None = Field(
+        None, description="Terminal RL: drop reward groups with zero standard deviation"
+    )
+    active_sampling: bool | None = Field(
+        None, description="Terminal RL: refill dropped zero-std groups with new samples"
+    )
+    lm_head_fp32: bool | None = Field(
+        None, description="Terminal RL: keep output head in fp32 for stability"
+    )
+    interleaved_thinking: bool | None = Field(
+        None, description="Terminal RL: include interleaved reasoning/action traces"
+    )
+    sft_warm_start_policy: str | None = Field(
+        None, description="Terminal RL: warm-start policy, e.g. none or weak_models_only"
+    )
+    dppo_backend: str = Field(
+        "auto",
+        description="DPPO backend: auto, verl, skyrl, tmax_open_instruct, or grpo_fallback",
+    )
+    dppo_divergence: str = Field(
+        "binary_tv",
+        description="DPPO trust-region divergence: binary_tv or binary_kl",
+    )
+    dppo_binary_tv_threshold: float = Field(
+        0.15,
+        description="DPPO Binary-TV mask threshold for sampled-token updates",
+        ge=0.0,
+        le=1.0,
+    )
+    dppo_binary_kl_threshold: float = Field(
+        0.05,
+        description="DPPO Binary-KL mask threshold for sampled-token updates",
+        ge=0.0,
+    )
+    echo_enabled: bool = Field(
+        False,
+        description="World model: add ECHO environment-observation prediction loss",
+    )
+    echo_aux_lambda: float = Field(
+        0.05,
+        description="World model: ECHO auxiliary loss weight",
+        ge=0.0,
+    )
+    rwml_enabled: bool = Field(
+        False,
+        description="World model: enable RWML embedding-space next-observation reward",
+    )
+    rwml_distance_threshold: float = Field(
+        0.2,
+        description="World model: cosine-distance threshold for a correct RWML prediction",
+        gt=0.0,
+        le=2.0,
+    )
+    rwml_easy_pass_rate_threshold: float = Field(
+        0.8,
+        description="World model: pass-rate threshold where RWML samples are considered easy",
+        ge=0.0,
+        le=1.0,
+    )
+    rwml_easy_keep_probability: float = Field(
+        0.1,
+        description="World model: probability of keeping easy RWML samples",
+        ge=0.0,
+        le=1.0,
+    )
+    rwml_history_window: int = Field(
+        4,
+        description="World model: prior command/observation pairs carried into RWML examples",
+        ge=0,
+        le=64,
+    )
+    rwml_embedding_model: str = Field(
+        "",
+        description="World model: embedding model id used for RWML reward scoring",
+    )
+    rwml_kl_beta: float = Field(
+        0.0,
+        description="World model: optional RWML KL penalty weight",
+        ge=0.0,
     )
     sft_backend: str = Field("auto", description="SFT training backend: auto, unsloth, plain")
     dpo_backend: str = Field("auto", description="DPO training backend: auto, unsloth, plain")
@@ -609,6 +708,14 @@ class ModelRecommendations(BaseModel):
     recommended_quantization: str = Field("4bit", description="Recommended quantization")
     recommended_batch_size: int = Field(1, description="Recommended batch size")
     warning: str | None = Field(None, description="Warning message if limitations exist")
+    regime_capacities: dict[str, float] = Field(
+        default_factory=dict,
+        description="Largest model (billions of params) that fits per regime "
+        "(inference/qlora/lora/full_finetune)",
+    )
+    unified_memory: bool = Field(
+        False, description="Whether the budget is unified memory (RAM-backed, e.g. DGX Spark)"
+    )
 
 
 # =============================================================================
@@ -1154,3 +1261,37 @@ class SchemaResearchRequest(BaseModel):
                 "mode": "simulate",
             }
         }
+
+
+class EnvironmentRecipeProposalRequest(BaseModel):
+    """Request to run AutoResearch over executable environment recipe axes."""
+
+    environments: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Inline EnvironmentSpec payloads to optimize over",
+    )
+    environment_path: str | None = Field(
+        None,
+        description="Optional local .json/.jsonl/.ndjson file containing environments",
+    )
+    source: str = Field("tmax", description="Source label used when importing environment_path")
+    max_experiments: int = Field(8, ge=1, le=200, description="Recipe mutations to evaluate")
+    sample_size: int = Field(64, ge=1, le=10000, description="Target selected environment count")
+    pass_at_1_target: float = Field(
+        0.35,
+        ge=0.0,
+        le=1.0,
+        description="Target moderate learnability band for selected tasks",
+    )
+    mutation_rate: float = Field(
+        0.35,
+        ge=0.0,
+        le=1.0,
+        description="Probability of mutating each recipe trait",
+    )
+    mutation_scale: float = Field(0.2, ge=0.0, le=1.0, description="Mutation magnitude")
+    seed: int = Field(0, ge=0, description="Deterministic proposal seed")
+    output_path: str | None = Field(
+        None,
+        description="Optional local path where the reproducible proposal JSON is written",
+    )

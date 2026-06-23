@@ -6,6 +6,7 @@ The held-out runner is exercised through injected stub predictors via the
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 import sys
 
@@ -29,6 +30,8 @@ def _example(session: str, tool: str = "read", path: str = "a.txt") -> dict:
 
 
 def _py(code: str) -> str:
+    if sys.platform != "win32":
+        return shlex.join([sys.executable, "-c", code])
     return subprocess.list2cmdline([sys.executable, "-c", code])
 
 

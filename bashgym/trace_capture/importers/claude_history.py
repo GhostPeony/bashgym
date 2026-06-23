@@ -370,6 +370,8 @@ class ClaudeSessionImporter:
 
         # Session-level accumulators
         models_used: set[str] = set()
+        # Per-model token totals, so cost is priced per model (not collapsed to one).
+        model_token_usage: dict[str, dict[str, int]] = {}
         tools_used: set[str] = set()
         meta: dict[str, Any] = {
             "user_initial_prompt": None,
@@ -432,15 +434,25 @@ class ClaudeSessionImporter:
                         usage = msg.get("usage", {})
                         timestamp = event.get("timestamp", datetime.now(timezone.utc).isoformat())
 
-                        # Accumulate model & token usage
+                        # Accumulate token usage per model and session-wide.
+                        in_tok = usage.get("input_tokens", 0)
+                        out_tok = usage.get("output_tokens", 0)
+                        cc_tok = usage.get("cache_creation_input_tokens", 0)
+                        cr_tok = usage.get("cache_read_input_tokens", 0)
                         if model:
                             models_used.add(model)
-                        meta["total_input_tokens"] += usage.get("input_tokens", 0)
-                        meta["total_output_tokens"] += usage.get("output_tokens", 0)
-                        meta["total_cache_creation_tokens"] += usage.get(
-                            "cache_creation_input_tokens", 0
-                        )
-                        meta["total_cache_read_tokens"] += usage.get("cache_read_input_tokens", 0)
+                            mu = model_token_usage.setdefault(
+                                model,
+                                {"input": 0, "output": 0, "cache_creation": 0, "cache_read": 0},
+                            )
+                            mu["input"] += in_tok
+                            mu["output"] += out_tok
+                            mu["cache_creation"] += cc_tok
+                            mu["cache_read"] += cr_tok
+                        meta["total_input_tokens"] += in_tok
+                        meta["total_output_tokens"] += out_tok
+                        meta["total_cache_creation_tokens"] += cc_tok
+                        meta["total_cache_read_tokens"] += cr_tok
 
                         # Walk content blocks: thinking/text precede tool_use
                         content = msg.get("content", [])
@@ -589,12 +601,14 @@ class ClaudeSessionImporter:
         meta["models_used"] = sorted(models_used)
         meta["tools_used"] = sorted(tools_used)
         meta["model"] = meta["models_used"][0] if meta["models_used"] else ""
-        meta["api_equivalent_cost_usd"] = estimate_cost_usd(
-            meta["model"],
-            meta["total_input_tokens"],
-            meta["total_output_tokens"],
-            meta["total_cache_creation_tokens"],
-            meta["total_cache_read_tokens"],
+        meta["model_token_usage"] = model_token_usage
+        # Cost = each model's own tokens priced at its own rate, summed across models.
+        meta["api_equivalent_cost_usd"] = round(
+            sum(
+                estimate_cost_usd(m, u["input"], u["output"], u["cache_creation"], u["cache_read"])
+                for m, u in model_token_usage.items()
+            ),
+            6,
         )
 
         return steps, meta

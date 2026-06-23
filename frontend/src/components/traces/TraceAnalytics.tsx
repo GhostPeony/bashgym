@@ -155,7 +155,7 @@ export function TraceAnalytics() {
         />
         <SummaryCard
           label="Est. Cost"
-          value={`$${data.cost_total_usd.toFixed(2)}`}
+          value={`$${data.cost_total_usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
           icon={<DollarSign className="w-4 h-4" />}
         />
       </div>

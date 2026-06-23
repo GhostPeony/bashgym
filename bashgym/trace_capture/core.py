@@ -295,28 +295,32 @@ def glob_pending_traces(directory: Path) -> list:
 # Cost estimation for Claude models
 # ---------------------------------------------------------------------------
 
-# Pricing per million tokens: (input, output, cache_creation, cache_read)
+# Pricing per million tokens: (input, output, cache_creation, cache_read).
+# Anthropic published list prices; cache write = 1.25x input, cache read = 0.1x input.
+# Longest-prefix match wins, so dated suffixes resolve to the right version.
 CLAUDE_PRICING: dict[str, dict[str, float]] = {
-    # Claude 4.6
-    "claude-opus-4-6": {
+    # Fable 5 / Mythos 5 — $10 / $50
+    "claude-fable-5": {"input": 10.0, "output": 50.0, "cache_creation": 12.5, "cache_read": 1.0},
+    "claude-mythos-5": {"input": 10.0, "output": 50.0, "cache_creation": 12.5, "cache_read": 1.0},
+    # Opus 4.5–4.8 — $5 / $25 (67% cut introduced with Opus 4.5)
+    "claude-opus-4-8": {"input": 5.0, "output": 25.0, "cache_creation": 6.25, "cache_read": 0.50},
+    "claude-opus-4-7": {"input": 5.0, "output": 25.0, "cache_creation": 6.25, "cache_read": 0.50},
+    "claude-opus-4-6": {"input": 5.0, "output": 25.0, "cache_creation": 6.25, "cache_read": 0.50},
+    "claude-opus-4-5": {"input": 5.0, "output": 25.0, "cache_creation": 6.25, "cache_read": 0.50},
+    # Opus 4 / 4.1 — $15 / $75 (original Opus rate, pre-4.5)
+    "claude-opus-4-1": {
         "input": 15.0,
         "output": 75.0,
         "cache_creation": 18.75,
         "cache_read": 1.875,
     },
-    "claude-sonnet-4-6": {"input": 3.0, "output": 15.0, "cache_creation": 3.75, "cache_read": 0.30},
-    # Claude 4.5
-    "claude-opus-4-5": {
-        "input": 15.0,
-        "output": 75.0,
-        "cache_creation": 18.75,
-        "cache_read": 1.875,
-    },
-    "claude-sonnet-4-5": {"input": 3.0, "output": 15.0, "cache_creation": 3.75, "cache_read": 0.30},
-    "claude-haiku-4-5": {"input": 0.80, "output": 4.0, "cache_creation": 1.0, "cache_read": 0.08},
-    # Claude 4
     "claude-opus-4": {"input": 15.0, "output": 75.0, "cache_creation": 18.75, "cache_read": 1.875},
+    # Sonnet 4.x — $3 / $15
+    "claude-sonnet-4-6": {"input": 3.0, "output": 15.0, "cache_creation": 3.75, "cache_read": 0.30},
+    "claude-sonnet-4-5": {"input": 3.0, "output": 15.0, "cache_creation": 3.75, "cache_read": 0.30},
     "claude-sonnet-4": {"input": 3.0, "output": 15.0, "cache_creation": 3.75, "cache_read": 0.30},
+    # Haiku 4.5 — $1 / $5
+    "claude-haiku-4-5": {"input": 1.0, "output": 5.0, "cache_creation": 1.25, "cache_read": 0.10},
 }
 
 

@@ -935,7 +935,12 @@ async def propose_environment_recipe(body: EnvironmentRecipeProposalRequest):
     )
 
     await researcher.run_loop(Path("data/environments"))
-    proposal = search_space.proposal_for(researcher.best_config, metric=researcher.best_metric)
+
+    # Treat the endpoint's sample_size as the exported proposal contract even though
+    # AutoResearch may mutate sample_size internally while searching the recipe space.
+    proposal_genome = dict(researcher.best_config)
+    proposal_genome["sample_size"] = min(body.sample_size, len(envs))
+    proposal = search_space.proposal_for(proposal_genome)
 
     output_path = None
     if body.output_path:

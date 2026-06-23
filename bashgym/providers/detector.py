@@ -326,6 +326,87 @@ async def get_nim_models() -> list[UnifiedModel]:
     return models
 
 
+async def get_anthropic_models() -> list[UnifiedModel]:
+    """Get the live Claude catalogue from the Anthropic Models API (if a key is set)."""
+    import httpx
+
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        return []
+    models = []
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                "https://api.anthropic.com/v1/models",
+                headers={"x-api-key": key, "anthropic-version": "2023-06-01"},
+            )
+            if response.status_code == 200:
+                for m in response.json().get("data", []):
+                    model_id = m.get("id")
+                    if not model_id:
+                        continue
+                    models.append(
+                        UnifiedModel(
+                            id=f"anthropic/{model_id}",
+                            name=m.get("display_name") or model_id,
+                            provider=ProviderType.ANTHROPIC,
+                            is_code_model=True,  # Claude models are strong coders
+                            is_local=False,
+                            supports_inference=True,
+                        )
+                    )
+    except Exception:
+        pass
+
+    return models
+
+
+async def get_openai_models() -> list[UnifiedModel]:
+    """Get chat-capable models served by OpenAI (if a key is set).
+
+    OpenAI's /v1/models lists embeddings, audio, image, and moderation models too;
+    filter to the chat/completion families so the catalogue stays usable.
+    """
+    import re
+
+    import httpx
+
+    key = os.environ.get("OPENAI_API_KEY")
+    if not key:
+        return []
+    chat_re = re.compile(r"^(gpt-|o[1-9]|chatgpt)", re.IGNORECASE)
+    skip_re = re.compile(
+        r"embedding|whisper|tts|dall-e|moderation|audio|realtime|image|transcribe|search",
+        re.IGNORECASE,
+    )
+    models = []
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                "https://api.openai.com/v1/models",
+                headers={"Authorization": f"Bearer {key}"},
+            )
+            if response.status_code == 200:
+                for m in response.json().get("data", []):
+                    model_id = m.get("id", "")
+                    if not model_id or not chat_re.search(model_id) or skip_re.search(model_id):
+                        continue
+                    models.append(
+                        UnifiedModel(
+                            id=f"openai/{model_id}",
+                            name=model_id,
+                            provider=ProviderType.OPENAI,
+                            is_code_model=True,
+                            is_local=False,
+                            supports_inference=True,
+                        )
+                    )
+    except Exception:
+        pass
+
+    return models
+
+
 # Curated list of recommended models for training
 RECOMMENDED_TRAINING_MODELS = [
     UnifiedModel(
@@ -468,9 +549,13 @@ async def get_available_models(
         result["inference"].extend(lm_models)
 
     if include_cloud:
-        # Live NVIDIA NIM catalog (served, OpenAI-compatible). HF/Unsloth weights
-        # appear here once served (NIM, or pulled into Ollama under "local").
-        result["inference"].extend(await get_nim_models())
+        # Live cloud catalogs in parallel: NVIDIA NIM, Anthropic, OpenAI (each only
+        # if its API key is set). HF/Unsloth weights appear once served (NIM, or
+        # pulled into Ollama under "local").
+        for batch in await asyncio.gather(
+            get_nim_models(), get_anthropic_models(), get_openai_models()
+        ):
+            result["inference"].extend(batch)
 
     if code_only:
         for key in result:

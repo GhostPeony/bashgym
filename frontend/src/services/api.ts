@@ -49,6 +49,29 @@ export interface TrainingRequest {
   grpo_loss_type?: string
   grpo_backend?: string
   grpo_use_vllm?: boolean
+  training_profile?: string
+  grpo_group_size?: number
+  prompts_per_rollout_batch?: number
+  max_tool_calls_per_episode?: number
+  token_level_loss?: boolean
+  filter_zero_std_groups?: boolean
+  active_sampling?: boolean
+  lm_head_fp32?: boolean
+  interleaved_thinking?: boolean
+  sft_warm_start_policy?: string
+  dppo_backend?: string
+  dppo_divergence?: string
+  dppo_binary_tv_threshold?: number
+  dppo_binary_kl_threshold?: number
+  echo_enabled?: boolean
+  echo_aux_lambda?: number
+  rwml_enabled?: boolean
+  rwml_distance_threshold?: number
+  rwml_easy_pass_rate_threshold?: number
+  rwml_easy_keep_probability?: number
+  rwml_history_window?: number
+  rwml_embedding_model?: string
+  rwml_kl_beta?: number
   sft_backend?: string
   dpo_backend?: string
   use_liger?: boolean
@@ -645,6 +668,161 @@ export const designerApi = {
     ),
 }
 
+// =============================================================================
+// Executable Environment API
+// =============================================================================
+
+export interface EnvironmentAxis {
+  name: string
+  value: string
+  source?: string
+  weight?: number | null
+  metadata?: Record<string, unknown>
+}
+
+export interface EnvironmentVerifier {
+  kind: string
+  command: string
+  path?: string | null
+  reward_type?: string
+  success_threshold?: number
+  timeout_sec?: number
+  metadata?: Record<string, unknown>
+}
+
+export interface EnvironmentBuildSpec {
+  context_dir?: string
+  dockerfile?: string | null
+  base_image?: string | null
+  compose_file?: string | null
+  setup_commands?: string[]
+  network_disabled?: boolean
+  metadata?: Record<string, unknown>
+}
+
+export interface EnvironmentRolloutSpec {
+  harness?: string
+  max_steps?: number
+  max_tool_calls?: number
+  timeout_sec?: number
+  bash_timeout_sec?: number
+  max_prompt_tokens?: number
+  max_response_tokens?: number
+  metadata?: Record<string, unknown>
+}
+
+export interface TerminalEnvironmentSpec {
+  id: string
+  instruction: string
+  source: string
+  domain: string
+  skills: string[]
+  axes: EnvironmentAxis[]
+  fixtures: Array<Record<string, unknown>>
+  verifier: EnvironmentVerifier
+  build: EnvironmentBuildSpec
+  rollout: EnvironmentRolloutSpec
+  files: Record<string, string>
+  source_uri?: string | null
+  license?: string | null
+  metadata?: Record<string, unknown>
+}
+
+export interface EnvironmentMixReport {
+  total: number
+  domain_distribution: Record<string, number>
+  skill_distribution: Record<string, number>
+  axis_balance: Record<string, number>
+  verifier_distribution: Record<string, number>
+  mean_pass_rates?: Record<string, number>
+}
+
+export interface EnvironmentImportError {
+  index: number
+  id?: string
+  error?: string
+  validation_errors?: string[]
+}
+
+export interface EnvironmentNormalizeResponse {
+  environments: TerminalEnvironmentSpec[]
+  report: EnvironmentMixReport
+  errors: EnvironmentImportError[]
+}
+
+export interface EnvironmentPipelineInfo {
+  name: string
+  available: boolean
+  description: string
+  outputs: string[]
+}
+
+export interface EnvironmentPipelinesResponse {
+  available: boolean
+  data_designer_available: boolean
+  pipelines: EnvironmentPipelineInfo[]
+  registered_pipelines: string[]
+  external_sources: Record<string, string>
+}
+
+export interface EnvironmentDecontaminateResponse {
+  environments: TerminalEnvironmentSpec[]
+  report: { kept: number; dropped: number; drop_reasons: Record<string, number> }
+  mix_report: EnvironmentMixReport
+}
+
+export interface EnvironmentMaterializeResponse {
+  build: {
+    env_id: string
+    path: string
+    files_written: string[]
+  }
+}
+
+export const environmentApi = {
+  pipelines: () =>
+    request<EnvironmentPipelinesResponse>('/environments/pipelines'),
+
+  normalize: (req: {
+    records: Record<string, unknown>[]
+    source?: string
+    source_uri?: string
+    preserve_raw?: boolean
+  }) =>
+    request<EnvironmentNormalizeResponse>('/environments/normalize', {
+      method: 'POST',
+      body: JSON.stringify({ source: 'external', preserve_raw: true, ...req }),
+    }),
+
+  importJsonl: (req: { path: string; source?: string; preserve_raw?: boolean }) =>
+    request<EnvironmentNormalizeResponse>('/environments/import-jsonl', {
+      method: 'POST',
+      body: JSON.stringify({ source: 'tmax', preserve_raw: true, ...req }),
+    }),
+
+  decontaminate: (req: {
+    environments: TerminalEnvironmentSpec[]
+    benchmark_texts: string[]
+    big_n?: number
+    small_n?: number
+    jaccard_threshold?: number
+  }) =>
+    request<EnvironmentDecontaminateResponse>('/environments/decontaminate', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
+
+  materialize: (req: {
+    environment: TerminalEnvironmentSpec
+    output_dir: string
+    overwrite?: boolean
+  }) =>
+    request<EnvironmentMaterializeResponse>('/environments/materialize', {
+      method: 'POST',
+      body: JSON.stringify({ overwrite: false, ...req }),
+    }),
+}
+
 // Legacy Models API (see modelsApi below for full implementation)
 
 // Evaluation types
@@ -705,8 +883,29 @@ export interface HeldoutEvalRequest {
   max_forgetting_drop?: number
   require_ci_excludes_zero?: boolean
   forgetting_drops?: Record<string, number>
+  environment_evidence?: HeldoutEnvironmentEvidence
   n_resamples?: number
   seed?: number
+}
+
+export interface HeldoutEnvironmentEvidence {
+  passk?: EnvironmentPassKReport | Record<string, unknown> | null
+  holdout_gate?: EnvironmentHoldoutGateResult | EnvironmentHoldoutGateResponse | Record<string, unknown> | null
+  holdout_comparison?:
+    | EnvironmentHoldoutComparisonResult
+    | EnvironmentHoldoutComparisonResponse
+    | Record<string, unknown>
+    | null
+  spurious_reward_control?:
+    | EnvironmentSpuriousRewardControlResult
+    | EnvironmentSpuriousRewardControlResponse
+    | Record<string, unknown>
+    | null
+  external_benchmarks?: ExternalBenchmarkIngestResponse | ExternalBenchmarkReport | Record<string, unknown> | null
+  world_model_quality?: Record<string, unknown> | null
+  external_benchmark_min_scores?: Record<string, number> | null
+  external_benchmarks_required?: boolean
+  required?: boolean
 }
 
 export interface HeldoutBootstrap {
@@ -716,6 +915,35 @@ export interface HeldoutBootstrap {
   significant: boolean
   better: boolean
   n_clusters: number
+}
+
+export interface HeldoutReleaseGate {
+  schema_version: string
+  ship: boolean
+  trace_ship: boolean
+  environment_ship: boolean
+  external_benchmark_ship?: boolean
+  world_model_quality_present?: boolean
+  world_model_quality_diagnostic_only?: boolean
+  world_model_quality_signal?: string
+  world_model_quality_findings?: string[]
+  world_model_quality?: {
+    present: boolean
+    diagnostic_only: boolean
+    signal: string
+    metrics: Record<string, number>
+    findings: string[]
+    coverage?: Record<string, unknown> | null
+  }
+  trace_reasons: string[]
+  environment_reasons: string[]
+  external_benchmark_reasons?: string[]
+  environment_required: boolean
+  environment_sections: string[]
+  blocking_environment_sections: string[]
+  external_benchmark_sections?: string[]
+  blocking_external_benchmark_sections?: string[]
+  world_model_quality_sections?: string[]
 }
 
 export interface HeldoutReport {
@@ -729,6 +957,8 @@ export interface HeldoutReport {
   forgetting_drops: Record<string, number>
   ship: boolean
   reasons: string[]
+  release_gate?: HeldoutReleaseGate
+  environment_evidence?: HeldoutEnvironmentEvidence
 }
 
 export interface HeldoutJobResponse {
@@ -746,6 +976,8 @@ export interface VerdictResponse {
   display_name: string
   latest_heldout_eval: HeldoutReport | null
   n_heldout_evals: number
+  latest_environment_holdout_eval: EnvironmentHoldoutGateResult | Record<string, unknown> | null
+  n_environment_holdout_evals: number
 }
 
 export interface BenchmarkIngestRequest {
@@ -753,6 +985,518 @@ export interface BenchmarkIngestRequest {
   base_results: Record<string, unknown>
   candidate_results: Record<string, unknown>
   max_forgetting_drop?: number
+}
+
+export interface NormalizedBenchmarkResult {
+  name: string
+  score: number
+  passed: number
+  total: number
+  metrics: Record<string, number>
+  error?: string | null
+}
+
+export interface ExternalBenchmarkReport {
+  scores: Record<string, number>
+  failures: string[]
+  results: NormalizedBenchmarkResult[]
+}
+
+export interface ExternalBenchmarkIngestRequest {
+  model_id: string
+  results: unknown
+  benchmark_name?: string | null
+  source?: string | null
+  record_to_registry?: boolean
+}
+
+export interface ExternalBenchmarkIngestResponse {
+  model_id: string
+  report: ExternalBenchmarkReport
+  recorded: string[]
+}
+
+export interface EnvironmentAttemptPayload {
+  environment_id: string
+  attempt_index: number
+  passed: boolean
+  reward?: number | null
+  verifier_status?: string | null
+  timeout?: boolean
+  tool_calls?: number | null
+  tokens?: number | null
+  action_tokens?: number | null
+  observation_tokens?: number | null
+  metadata?: Record<string, unknown>
+}
+
+export interface EnvironmentCommandAttemptPayload {
+  environment_id: string
+  attempt_index: number
+  commands: string[]
+  metadata?: Record<string, unknown>
+}
+
+export interface EnvironmentPassKRequest {
+  model_id?: string | null
+  environments: TerminalEnvironmentSpec[]
+  attempts: EnvironmentAttemptPayload[]
+  k_values?: number[]
+  record_to_registry?: boolean
+}
+
+export interface EnvironmentPassKReport {
+  k_values: number[]
+  n_environments: number
+  n_attempts: number
+  pass_at_k: Record<string, number>
+  mean_success_rate: number
+  per_environment: Record<string, Record<string, number>>
+  attempt_summary: {
+    timeout_rate: number
+    mean_tool_calls?: number | null
+    mean_tokens?: number | null
+    mean_action_tokens?: number | null
+    mean_observation_tokens?: number | null
+    verifier_status_distribution: Record<string, number>
+  }
+  warnings: string[]
+}
+
+export interface EnvironmentPassKResponse {
+  model_id?: string | null
+  report: EnvironmentPassKReport
+  recorded: string[]
+}
+
+export interface EnvironmentHoldoutGateRequest {
+  model_id?: string | null
+  environments: TerminalEnvironmentSpec[]
+  attempts: EnvironmentAttemptPayload[]
+  split_by?: string
+  holdout_fraction?: number
+  seed?: number
+  k_values?: number[]
+  min_pass_at_1?: number
+  max_timeout_rate?: number
+  max_tamper_rate?: number
+  require_no_contamination?: boolean
+  record_to_registry?: boolean
+}
+
+export interface EnvironmentHoldoutGateResult {
+  schema_version: string
+  split: {
+    schema_version: string
+    split_by: string
+    fraction: number
+    seed: number
+    n_train: number
+    n_holdout: number
+    train_ids: string[]
+    holdout_ids: string[]
+    train_hashes: string[]
+    holdout_hashes: string[]
+    train_group_keys: string[]
+    holdout_group_keys: string[]
+  }
+  contamination: string[]
+  report: EnvironmentPassKReport
+  gate: {
+    ship: boolean
+    reasons: string[]
+    thresholds: {
+      min_pass_at_1: number
+      max_timeout_rate: number
+      max_tamper_rate: number
+      require_no_contamination: boolean
+    }
+    observed: {
+      pass_at_1: number
+      timeout_rate: number
+      tamper_rate: number
+    }
+  }
+}
+
+export interface EnvironmentHoldoutGateResponse {
+  model_id?: string | null
+  result: EnvironmentHoldoutGateResult
+  recorded: string[]
+}
+
+export interface EnvironmentHoldoutComparisonRequest {
+  environments: TerminalEnvironmentSpec[]
+  base_attempts: EnvironmentAttemptPayload[]
+  candidate_attempts: EnvironmentAttemptPayload[]
+  split_by?: string
+  cluster_by?: string
+  holdout_fraction?: number
+  seed?: number
+  k_values?: number[]
+  compare_k?: number
+  min_delta?: number
+  min_candidate_pass_at_1?: number
+  require_ci_excludes_zero?: boolean
+  max_candidate_timeout_rate?: number
+  max_candidate_tamper_rate?: number
+  require_no_contamination?: boolean
+  n_resamples?: number
+}
+
+export interface EnvironmentHoldoutComparisonResult {
+  schema_version: string
+  split: EnvironmentHoldoutGateResult['split']
+  cluster_by: string
+  compare_metric: string
+  contamination: string[]
+  base_report: EnvironmentPassKReport
+  candidate_report: EnvironmentPassKReport
+  per_environment: Record<string, {
+    cluster: string
+    base: number
+    candidate: number
+    delta: number
+  }>
+  bootstrap: {
+    mean: number
+    ci_low: number
+    ci_high: number
+    significant: boolean
+    better: boolean
+    n: number
+    n_clusters: number
+  }
+  gate: {
+    ship: boolean
+    reasons: string[]
+    thresholds: {
+      min_delta: number
+      min_candidate_pass_at_1: number
+      require_ci_excludes_zero: boolean
+      max_candidate_timeout_rate: number
+      max_candidate_tamper_rate: number
+      require_no_contamination: boolean
+    }
+    observed: {
+      delta: number
+      ci_low: number
+      ci_high: number
+      candidate_pass_at_1: number
+      candidate_timeout_rate: number
+      candidate_tamper_rate: number
+    }
+  }
+}
+
+export interface EnvironmentHoldoutComparisonResponse {
+  result: EnvironmentHoldoutComparisonResult
+}
+
+export interface EnvironmentSpuriousRewardControlRequest {
+  environments: TerminalEnvironmentSpec[]
+  attempts: EnvironmentAttemptPayload[]
+  control_attempts?: EnvironmentAttemptPayload[] | null
+  split_by?: string
+  holdout_fraction?: number
+  seed?: number
+  k_values?: number[]
+  n_trials?: number
+  random_pass_probability?: number
+  min_observed_pass_at_1?: number
+  max_control_pass_at_1?: number
+  min_lift_over_control?: number
+  require_no_contamination?: boolean
+}
+
+export interface EnvironmentSpuriousRewardControlResult {
+  schema_version: string
+  split: EnvironmentHoldoutGateResult['split']
+  contamination: string[]
+  observed_report: EnvironmentPassKReport
+  control: {
+    mode: string
+    n_trials: number
+    random_pass_probability?: number | null
+    report?: EnvironmentPassKReport | null
+    pass_at_k_summary: Record<string, {
+      mean: number
+      p05: number
+      p50: number
+      p95: number
+      min: number
+      max: number
+    }>
+  }
+  gate: {
+    ship: boolean
+    reasons: string[]
+    thresholds: {
+      min_observed_pass_at_1: number
+      max_control_pass_at_1: number
+      min_lift_over_control: number
+      require_no_contamination: boolean
+    }
+    observed: {
+      observed_pass_at_1: number
+      control_pass_at_1: number
+      control_stat: string
+      lift_over_control: number
+    }
+  }
+}
+
+export interface EnvironmentSpuriousRewardControlResponse {
+  result: EnvironmentSpuriousRewardControlResult
+}
+
+export interface EnvironmentRolloutObservation {
+  command: string
+  cwd: string
+  exit_code: number
+  stdout: string
+  stderr: string
+  duration_sec: number
+  timeout: boolean
+  blocked: boolean
+}
+
+export interface EnvironmentRolloutResultPayload {
+  attempt: EnvironmentAttemptPayload
+  workspace: string
+  observations: EnvironmentRolloutObservation[]
+  verifier_observation?: EnvironmentRolloutObservation | null
+}
+
+export interface EnvironmentRolloutSamplingReport {
+  sampling_enabled: boolean
+  active_sampling_refills: number
+  zero_std_groups_dropped: number
+  all_zero_groups_dropped: number
+  all_one_groups_dropped: number
+  effective_prompt_groups: number
+  requested_prompt_groups: number
+  candidate_prompt_groups: number
+  maintained_batch: boolean
+  selected_environment_ids: string[]
+  dropped_environment_ids: string[]
+}
+
+export interface EnvironmentDppoReadinessReport {
+  attempts: number
+  attempts_with_behavior_logprobs: number
+  behavior_logprob_tokens: number
+  missing_behavior_logprob_attempts: number
+  attempts_with_train_logprobs: number
+  train_logprob_tokens: number
+  missing_train_logprob_attempts: number
+  rollout_logprobs_ready: boolean
+  optimizer_logprobs_ready: boolean
+  needs_train_logprob_replay: boolean
+}
+
+export interface EnvironmentDppoReplaySummary {
+  schema_version: string
+  records: number
+  environments: number
+  environment_ids: string[]
+  behavior_logprobs_ready_records: number
+  train_logprobs_ready_records: number
+  train_logprob_replay_required_records: number
+  world_model_records: number
+  world_model?: {
+    records: number
+    records_missing_world_model: number
+    rwml_transitions: number
+    rwml_mean_transitions_per_record: number
+    rwml_mean_prior_pairs: number
+    rwml_max_prior_pairs: number
+    echo_segments: number
+    echo_action_chars: number
+    echo_observation_chars: number
+    echo_observation_char_fraction: number
+  }
+  missing_behavior_logprob_records?: number
+  mismatched_train_logprob_records?: number
+  dppo?: {
+    n_tokens: number
+    masked_updates: number
+    masked_fraction: number
+    mean_binary_tv: number
+    max_binary_tv: number
+    mean_binary_kl: number
+    max_binary_kl: number
+    mean_abs_logprob_diff: number
+    max_abs_logprob_diff: number
+    mean_abs_policy_mismatch: number
+    max_abs_policy_mismatch: number
+    collapse_warning: boolean
+    divergence: string
+    threshold: number
+  }
+  path: string
+  input_path?: string
+  batch_id?: string | null
+}
+
+export interface DPPOTrainLogprobsSpec {
+  environment_id: string
+  attempt_index: number
+  token_logprobs: number[]
+  tokens?: string[] | null
+  model?: string | null
+  base_url?: string | null
+}
+
+export interface DPPOReplayEnrichRequest {
+  input_path: string
+  output_path: string
+  train_logprobs: DPPOTrainLogprobsSpec[]
+  divergence?: 'binary_tv' | 'binary_kl'
+  threshold?: number | null
+}
+
+export interface DPPOSmokeLaunchPlanRequest {
+  replay_path: string
+  output_dir: string
+  base_model: string
+  backend?: 'auto' | 'verl' | 'skyrl' | 'tmax_open_instruct' | 'grpo_fallback'
+  max_steps?: number
+  n_gpus_per_node?: number
+  write_script?: boolean
+  command_template?: string | null
+  echo_enabled?: boolean
+  echo_aux_lambda?: number
+  rwml_enabled?: boolean
+  rwml_distance_threshold?: number
+  rwml_easy_pass_rate_threshold?: number
+  rwml_easy_keep_probability?: number
+  rwml_history_window?: number
+  rwml_embedding_model?: string
+  rwml_kl_beta?: number
+}
+
+export interface DPPOSmokeLaunchPlan {
+  backend: string
+  requested_backend: string
+  available: boolean
+  fallback_to_grpo: boolean
+  runnable: boolean
+  reason: string
+  command: string[]
+  cwd?: string | null
+  env: Record<string, string>
+  warnings: string[]
+  script_path?: string | null
+  replay_path: string
+  output_dir: string
+  base_model: string
+  max_steps: number
+  n_gpus_per_node: number
+  world_model?: {
+    echo_enabled?: boolean
+    echo_aux_lambda?: number
+    rwml_enabled?: boolean
+    rwml_distance_threshold?: number
+    rwml_easy_pass_rate_threshold?: number
+    rwml_easy_keep_probability?: number
+    rwml_history_window?: number
+    rwml_embedding_model?: string
+    rwml_kl_beta?: number
+  }
+}
+
+export interface EnvironmentRolloutPassKRequest {
+  model_id?: string | null
+  environments: TerminalEnvironmentSpec[]
+  command_attempts: EnvironmentCommandAttemptPayload[]
+  k_values?: number[]
+  workspace_root?: string | null
+  keep_workspace?: boolean
+  allow_dangerous_commands?: boolean
+  stop_on_error?: boolean
+  record_to_registry?: boolean
+}
+
+export interface EnvironmentRolloutPassKResponse {
+  model_id?: string | null
+  report: EnvironmentPassKReport
+  attempts: EnvironmentAttemptPayload[]
+  rollouts: EnvironmentRolloutResultPayload[]
+  recorded: string[]
+  sampling_report?: EnvironmentRolloutSamplingReport | null
+  dppo_report?: EnvironmentDppoReadinessReport | null
+  dppo_replay?: EnvironmentDppoReplaySummary | null
+}
+
+export interface EnvironmentCanarySuiteRequest {
+  categories?: string[]
+  workspace_root?: string | null
+  keep_workspace?: boolean
+}
+
+export interface EnvironmentCanaryResult {
+  canary_id: string
+  category: string
+  name: string
+  guarded: boolean
+  expected_status: string
+  verifier_status: string
+  passed: boolean
+  tamper_detected: boolean
+  workspace?: string | null
+}
+
+export interface EnvironmentCanarySummary {
+  total: number
+  guarded: number
+  failed: number
+  guard_rate: number
+  categories: Record<string, number>
+  results: EnvironmentCanaryResult[]
+}
+
+export interface EnvironmentCanarySpec {
+  id: string
+  name: string
+  category: string
+  description: string
+  environment: TerminalEnvironmentSpec
+  attack_commands: string[]
+  expected_status: string
+}
+
+export interface EnvironmentCanarySuiteResponse {
+  summary: EnvironmentCanarySummary
+  canaries: EnvironmentCanarySpec[]
+  rollouts: EnvironmentRolloutResultPayload[]
+}
+
+export interface EnvironmentModelRolloutPassKRequest {
+  model_id?: string | null
+  endpoint: EvalEndpointSpec
+  environments: TerminalEnvironmentSpec[]
+  attempts_per_environment?: number
+  k_values?: number[]
+  workspace_root?: string | null
+  keep_workspace?: boolean
+  allow_dangerous_commands?: boolean
+  stop_on_error?: boolean
+  max_tool_calls?: number | null
+  max_observation_chars?: number
+  temperature?: number
+  max_tokens?: number
+  request_timeout?: number
+  use_tool_calling?: boolean
+  capture_logprobs?: boolean
+  top_logprobs?: number | null
+  filter_zero_std_groups?: boolean
+  active_sampling?: boolean
+  target_prompt_groups?: number | null
+  dppo_replay_output_path?: string | null
+  include_world_model_replay?: boolean
+  rwml_history_window?: number
+  record_to_registry?: boolean
 }
 
 export const evalAdvancedApi = {
@@ -787,6 +1531,66 @@ export const evalAdvancedApi = {
       forgetting_ok: boolean
       worst: [string, number] | null
     }>('/eval/benchmarks/ingest', {
+      method: 'POST',
+      body: JSON.stringify(req)
+    }),
+
+  ingestExternalBenchmarks: (req: ExternalBenchmarkIngestRequest) =>
+    request<ExternalBenchmarkIngestResponse>('/eval/benchmarks/external-ingest', {
+      method: 'POST',
+      body: JSON.stringify(req)
+    }),
+
+  environmentPassk: (req: EnvironmentPassKRequest) =>
+    request<EnvironmentPassKResponse>('/eval/environments/passk', {
+      method: 'POST',
+      body: JSON.stringify({ record_to_registry: false, ...req })
+    }),
+
+  environmentHoldoutGate: (req: EnvironmentHoldoutGateRequest) =>
+    request<EnvironmentHoldoutGateResponse>('/eval/environments/holdout-gate', {
+      method: 'POST',
+      body: JSON.stringify(req)
+    }),
+
+  environmentHoldoutComparison: (req: EnvironmentHoldoutComparisonRequest) =>
+    request<EnvironmentHoldoutComparisonResponse>('/eval/environments/holdout-comparison', {
+      method: 'POST',
+      body: JSON.stringify(req)
+    }),
+
+  environmentSpuriousRewardControl: (req: EnvironmentSpuriousRewardControlRequest) =>
+    request<EnvironmentSpuriousRewardControlResponse>('/eval/environments/spurious-reward-control', {
+      method: 'POST',
+      body: JSON.stringify(req)
+    }),
+
+  environmentLocalRolloutPassk: (req: EnvironmentRolloutPassKRequest) =>
+    request<EnvironmentRolloutPassKResponse>('/eval/environments/local-rollout-passk', {
+      method: 'POST',
+      body: JSON.stringify({ record_to_registry: false, keep_workspace: true, ...req })
+    }),
+
+  environmentModelRolloutPassk: (req: EnvironmentModelRolloutPassKRequest) =>
+    request<EnvironmentRolloutPassKResponse>('/eval/environments/model-rollout-passk', {
+      method: 'POST',
+      body: JSON.stringify({ record_to_registry: false, keep_workspace: true, ...req })
+    }),
+
+  environmentRewardHackingCanaries: (req: EnvironmentCanarySuiteRequest = {}) =>
+    request<EnvironmentCanarySuiteResponse>('/eval/environments/reward-hacking-canaries', {
+      method: 'POST',
+      body: JSON.stringify({ keep_workspace: true, ...req })
+    }),
+
+  enrichDppoReplay: (req: DPPOReplayEnrichRequest) =>
+    request<{ dppo_replay: EnvironmentDppoReplaySummary }>('/eval/environments/dppo-replay/enrich', {
+      method: 'POST',
+      body: JSON.stringify(req)
+    }),
+
+  planDppoSmoke: (req: DPPOSmokeLaunchPlanRequest) =>
+    request<{ plan: DPPOSmokeLaunchPlan }>('/eval/environments/dppo-replay/smoke-plan', {
       method: 'POST',
       body: JSON.stringify(req)
     })
@@ -1141,6 +1945,30 @@ export interface ModelRecommendations {
   recommended_quantization: string
   recommended_batch_size: number
   warning?: string
+  // Largest model (billions of params) that fits per regime, from the estimator.
+  regime_capacities?: Record<string, number>
+  // Budget is unified memory (RAM-backed, e.g. DGX Spark)
+  unified_memory?: boolean
+}
+
+export interface DiscoveredModelFit {
+  id: string
+  params_billions: number | null
+  can_infer: boolean | null
+  can_qlora: boolean | null
+  can_lora: boolean | null
+  can_full: boolean | null
+}
+
+export interface DiscoveredModel {
+  id: string
+  downloads: number
+  likes: number
+  tags: string[]
+  pipeline_tag?: string | null
+  params_billions: number | null
+  hf_url: string
+  fit?: DiscoveredModelFit | null
 }
 
 export const systemInfoApi = {
@@ -1150,8 +1978,18 @@ export const systemInfoApi = {
   getGpus: () =>
     request<GpuInfo[]>('/system/gpus'),
 
-  getRecommendations: () =>
-    request<ModelRecommendations>('/system/recommendations')
+  // Pass a registered SSH device_id to target that machine's discovered budget
+  // (e.g. a unified-memory DGX Spark) instead of the local GPU.
+  getRecommendations: (deviceId?: string) =>
+    request<ModelRecommendations>(
+      `/system/recommendations${deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : ''}`
+    ),
+
+  // Live-discover open base models from HuggingFace for the fine-tuning directory.
+  discoverModels: (deviceId?: string) =>
+    request<{ models: DiscoveredModel[]; budget_vram_gb?: number; error?: string }>(
+      `/models/discover${deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : ''}`
+    )
 }
 
 export const sshApi = {
@@ -2912,6 +3750,12 @@ export interface PipelineConfig {
   train_examples_threshold: number
   cascade_enabled: boolean
   cascade_gold_threshold: number
+  cascade_base_model: string
+  cascade_mode: 'simulate' | 'real'
+  cascade_train_steps_per_stage: number
+  cascade_min_domain_examples: number
+  cascade_use_remote_ssh: boolean
+  cascade_repo_domains_enabled: boolean
 }
 
 export interface PipelineStatus {
@@ -2920,6 +3764,7 @@ export interface PipelineStatus {
   gold_count: number
   pending_count: number
   failed_count: number
+  cascade_auto_trigger?: Record<string, unknown> | null
 }
 
 export const pipelineApi = {
@@ -2935,7 +3780,7 @@ export const pipelineApi = {
   getStatus: () =>
     request<PipelineStatus>('/pipeline/status'),
 
-  triggerStage: (stage: 'import' | 'classify') =>
+  triggerStage: (stage: 'import' | 'classify' | 'cascade') =>
     request<{ imported?: number; classified?: number; total?: number }>(
       `/pipeline/trigger/${stage}`,
       { method: 'POST' }
@@ -2997,6 +3842,56 @@ export interface AutoResearchStartConfig {
   batchSize: number
   maxSeqLength: number
   load4Bit: boolean
+}
+
+export interface EnvironmentRecipeProposalConfig {
+  environments?: TerminalEnvironmentSpec[]
+  environmentPath?: string
+  source?: string
+  maxExperiments?: number
+  sampleSize?: number
+  passAt1Target?: number
+  mutationRate?: number
+  mutationScale?: number
+  seed?: number
+  outputPath?: string
+}
+
+export interface EnvironmentRecipeExperiment {
+  experiment_id: number
+  config_snapshot: Record<string, unknown>
+  metric_value: number
+  improved: boolean
+  duration_seconds: number
+  timestamp: string
+}
+
+export interface EnvironmentRecipeProposal {
+  schema_version: string
+  source_count: number
+  selected_count: number
+  selected_environment_ids: string[]
+  recipe: Record<string, unknown>
+  metric: number
+  mix_report: EnvironmentMixReport
+  selected_environments: Array<{
+    id: string
+    domain: string
+    skills: string[]
+    verifier_kind: string
+    fixture_kinds: string[]
+    'pass@1'?: number | null
+  }>
+}
+
+export interface EnvironmentRecipeProposalResponse {
+  status: string
+  source_count: number
+  best_metric: number | null
+  proposal: EnvironmentRecipeProposal
+  experiments: EnvironmentRecipeExperiment[]
+  validation_errors: EnvironmentImportError[]
+  output_path?: string | null
 }
 
 // Research index — Firecrawl-grounded news feed + AutoResearch advice
@@ -3067,6 +3962,23 @@ export const autoresearchApi = {
 
   status: () =>
     request<any>('/autoresearch/status'),
+
+  proposeEnvironmentRecipe: (config: EnvironmentRecipeProposalConfig) =>
+    request<EnvironmentRecipeProposalResponse>('/autoresearch/environment-recipe/propose', {
+      method: 'POST',
+      body: JSON.stringify({
+        environments: config.environments || [],
+        environment_path: config.environmentPath || null,
+        source: config.source || 'tmax',
+        max_experiments: config.maxExperiments ?? 8,
+        sample_size: config.sampleSize ?? 64,
+        pass_at_1_target: config.passAt1Target ?? 0.35,
+        mutation_rate: config.mutationRate ?? 0.35,
+        mutation_scale: config.mutationScale ?? 0.2,
+        seed: config.seed ?? 0,
+        output_path: config.outputPath || null,
+      }),
+    }),
 
   // Trace research
   startTraceResearch: (config: { searchParams: string[]; maxExperiments: number; mutationRate: number; mutationScale: number }) =>

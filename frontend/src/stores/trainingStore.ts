@@ -3,6 +3,7 @@ import { trainingApi } from '../services/api'
 
 export type TrainingStrategy = 'sft' | 'dpo' | 'grpo' | 'distillation' | 'cascade'
 export type TrainingStatus = 'idle' | 'starting' | 'running' | 'paused' | 'completed' | 'failed'
+export type TrainingProfile = 'default' | 'terminal_rl_tmax_like'
 
 export interface TrainingMetrics {
   loss: number
@@ -41,6 +42,29 @@ export interface TrainingConfig {
   grpoLossType?: string  // grpo | gspo | dr_grpo | dapo | bnpo
   grpoBackend?: string   // auto | unsloth | plain | trl_vllm
   grpoUseVllm?: boolean
+  trainingProfile?: TrainingProfile
+  grpoGroupSize?: number
+  promptsPerRolloutBatch?: number
+  maxToolCallsPerEpisode?: number
+  tokenLevelLoss?: boolean
+  filterZeroStdGroups?: boolean
+  activeSampling?: boolean
+  lmHeadFp32?: boolean
+  interleavedThinking?: boolean
+  sftWarmStartPolicy?: string
+  dppoBackend?: string
+  dppoDivergence?: string
+  dppoBinaryTvThreshold?: number
+  dppoBinaryKlThreshold?: number
+  echoEnabled?: boolean
+  echoAuxLambda?: number
+  rwmlEnabled?: boolean
+  rwmlDistanceThreshold?: number
+  rwmlEasyPassRateThreshold?: number
+  rwmlEasyKeepProbability?: number
+  rwmlHistoryWindow?: number
+  rwmlEmbeddingModel?: string
+  rwmlKlBeta?: number
   useLiger?: boolean     // plain backend: Liger fused-linear-CE (262k-vocab OOM fix)
   // Knowledge Distillation
   teacherModel?: string
@@ -93,8 +117,20 @@ export interface GrpoMetric {
   rewardStd?: number
   fracRewardZeroStd?: number
   kl?: number
+  echoLoss?: number
+  rwmlPassRate?: number
+  embeddingDistanceMean?: number
+  embeddingDistanceP95?: number
+  exitCodeAccuracy?: number
+  testResultAccuracy?: number
   gradNorm?: number
   learningRate?: number
+  activeSamplingRefills?: number
+  zeroStdGroupsDropped?: number
+  effectivePromptGroups?: number
+  requestedPromptGroups?: number
+  candidatePromptGroups?: number
+  grpoGroupSize?: number
   timestamp: number
 }
 
@@ -136,14 +172,20 @@ interface TrainingState {
   getRun: (id: string) => TrainingRun | undefined
 }
 
-// TRL stats dicts look like: {'loss': 0.12, 'grad_norm': 0.4, 'learning_rate': 2e-5,
-//   'reward': 0.5, 'reward_std': 0.1, 'frac_reward_zero_std': 0.3, 'kl': 0.02,
-//   'epoch': 0.1, 'step': 42, ...}. We do a fast substring gate then regex-extract fields.
-const STATS_SIGNATURE_KEYS = ["'loss':", "'kl':"]
+// TRL/backend stats dicts look like: {'loss': 0.12, 'grad_norm': 0.4,
+//   'reward': 0.5, 'kl': 0.02, 'echo_loss': 1.1, 'rwml_pass_rate': 0.7,
+//   'step': 42, ...}. We do a fast substring gate then regex-extract fields.
+const STATS_SIGNATURE_KEYS = [
+  "'loss':",
+  "'reward':",
+  "'kl':",
+  "'echo_loss':",
+  "'rwml_pass_rate':",
+]
 const FIELD_RE = /'([a-z_]+)':\s*([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?|nan|inf|-inf)/g
 
 function parseStatsLine(line: string): GrpoMetric | null {
-  if (!STATS_SIGNATURE_KEYS.every((k) => line.includes(k))) return null
+  if (!STATS_SIGNATURE_KEYS.some((k) => line.includes(k))) return null
   const parsed: Record<string, number> = {}
   let match: RegExpExecArray | null
   FIELD_RE.lastIndex = 0
@@ -154,7 +196,12 @@ function parseStatsLine(line: string): GrpoMetric | null {
     const num = Number(raw)
     if (Number.isFinite(num)) parsed[key] = num
   }
-  if (!('loss' in parsed) && !('reward' in parsed)) return null
+  if (
+    !('loss' in parsed) &&
+    !('reward' in parsed) &&
+    !('echo_loss' in parsed) &&
+    !('rwml_pass_rate' in parsed)
+  ) return null
   const step = parsed.step ?? 0
   return {
     step,
@@ -163,8 +210,20 @@ function parseStatsLine(line: string): GrpoMetric | null {
     rewardStd: parsed.reward_std,
     fracRewardZeroStd: parsed.frac_reward_zero_std,
     kl: parsed.kl,
+    echoLoss: parsed.echo_loss,
+    rwmlPassRate: parsed.rwml_pass_rate,
+    embeddingDistanceMean: parsed.embedding_distance_mean ?? parsed.rwml_embedding_distance_mean,
+    embeddingDistanceP95: parsed.embedding_distance_p95 ?? parsed.rwml_embedding_distance_p95,
+    exitCodeAccuracy: parsed.exit_code_accuracy,
+    testResultAccuracy: parsed.test_result_accuracy,
     gradNorm: parsed.grad_norm,
     learningRate: parsed.learning_rate,
+    activeSamplingRefills: parsed.active_sampling_refills,
+    zeroStdGroupsDropped: parsed.zero_std_groups_dropped,
+    effectivePromptGroups: parsed.effective_prompt_groups,
+    requestedPromptGroups: parsed.requested_prompt_groups,
+    candidatePromptGroups: parsed.candidate_prompt_groups,
+    grpoGroupSize: parsed.grpo_group_size,
     timestamp: Date.now(),
   }
 }
@@ -223,6 +282,29 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
         grpo_loss_type: config.grpoLossType,
         grpo_backend: config.grpoBackend,
         grpo_use_vllm: config.grpoUseVllm,
+        training_profile: config.trainingProfile,
+        grpo_group_size: config.grpoGroupSize,
+        prompts_per_rollout_batch: config.promptsPerRolloutBatch,
+        max_tool_calls_per_episode: config.maxToolCallsPerEpisode,
+        token_level_loss: config.tokenLevelLoss,
+        filter_zero_std_groups: config.filterZeroStdGroups,
+        active_sampling: config.activeSampling,
+        lm_head_fp32: config.lmHeadFp32,
+        interleaved_thinking: config.interleavedThinking,
+        sft_warm_start_policy: config.sftWarmStartPolicy,
+        dppo_backend: config.dppoBackend,
+        dppo_divergence: config.dppoDivergence,
+        dppo_binary_tv_threshold: config.dppoBinaryTvThreshold,
+        dppo_binary_kl_threshold: config.dppoBinaryKlThreshold,
+        echo_enabled: config.echoEnabled,
+        echo_aux_lambda: config.echoAuxLambda,
+        rwml_enabled: config.rwmlEnabled,
+        rwml_distance_threshold: config.rwmlDistanceThreshold,
+        rwml_easy_pass_rate_threshold: config.rwmlEasyPassRateThreshold,
+        rwml_easy_keep_probability: config.rwmlEasyKeepProbability,
+        rwml_history_window: config.rwmlHistoryWindow,
+        rwml_embedding_model: config.rwmlEmbeddingModel,
+        rwml_kl_beta: config.rwmlKlBeta,
         use_liger: config.useLiger,
         // Knowledge Distillation
         teacher_model: config.teacherModel,

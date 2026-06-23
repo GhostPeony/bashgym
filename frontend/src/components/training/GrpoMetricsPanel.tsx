@@ -57,6 +57,11 @@ function formatNum(v: number | undefined): string {
   return v.toFixed(4)
 }
 
+function formatCount(v: number | undefined): string {
+  if (v === undefined || !Number.isFinite(v)) return '—'
+  return Math.round(v).toString()
+}
+
 export function GrpoMetricsPanel() {
   const grpoMetrics = useTrainingStore((s) => s.grpoMetrics)
 
@@ -77,6 +82,10 @@ export function GrpoMetricsPanel() {
   }))
 
   const latest: GrpoMetric | undefined = grpoMetrics[grpoMetrics.length - 1]
+  const hasSamplingTelemetry =
+    latest?.activeSamplingRefills !== undefined ||
+    latest?.zeroStdGroupsDropped !== undefined ||
+    latest?.effectivePromptGroups !== undefined
 
   return (
     <div className="card p-4">
@@ -92,6 +101,13 @@ export function GrpoMetricsPanel() {
             <span>step <span className="text-text-primary">{latest.step}</span></span>
             <span>kl <span className="text-text-primary">{formatNum(latest.kl)}</span></span>
             <span>reward <span className="text-text-primary">{formatNum(latest.reward)}</span></span>
+            {hasSamplingTelemetry ? (
+              <>
+                <span>refills <span className="text-text-primary">{formatCount(latest.activeSamplingRefills)}</span></span>
+                <span>dropped <span className="text-text-primary">{formatCount(latest.zeroStdGroupsDropped)}</span></span>
+                <span>groups <span className="text-text-primary">{formatCount(latest.effectivePromptGroups)}</span></span>
+              </>
+            ) : null}
           </div>
         )}
       </div>

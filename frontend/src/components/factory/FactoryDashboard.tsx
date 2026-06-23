@@ -19,13 +19,15 @@ import {
   Upload,
   Download,
   Wand2,
-  BookOpen
+  BookOpen,
+  Boxes
 } from 'lucide-react'
 import { SyntheticGenerator, SyntheticGeneratorState } from './SyntheticGenerator'
 import { SeedsPanel } from './SeedsPanel'
 import { SettingsPanel } from './SettingsPanel'
 import { DataDesignerTab } from './DataDesignerTab'
 import { DecisionDpoPanel } from './DecisionDpoPanel'
+import { EnvironmentLab } from './EnvironmentLab'
 import { GitBranch } from 'lucide-react'
 import { useTutorialComplete } from '../../hooks'
 import { clsx } from 'clsx'
@@ -315,7 +317,7 @@ export function FactoryDashboard() {
             )}
 
             {/* Advanced/Settings tab controls */}
-            {activeTab !== 'create' && activeTab !== 'quality' && (
+            {activeTab !== 'create' && activeTab !== 'quality' && activeTab !== 'environments' && (
               <>
                 <button
                   onClick={handleImportClick}
@@ -358,6 +360,7 @@ export function FactoryDashboard() {
           {[
             { id: 'create' as TabId, label: 'Create', icon: Wand2 },
             { id: 'designer' as TabId, label: 'Data Designer', icon: Sparkles },
+            { id: 'environments' as TabId, label: 'Environments', icon: Boxes },
             { id: 'quality' as TabId, label: 'Quality', icon: GitBranch },
             { id: 'seeds' as TabId, label: 'Seeds', icon: Layers, badge: config.seeds.length > 0 ? config.seeds.length : undefined },
             { id: 'settings' as TabId, label: 'Settings', icon: Settings },
@@ -893,6 +896,9 @@ export function FactoryDashboard() {
 
         {/* Quality Tab - decision-DPO mining + trace-quality toggles */}
         {activeTab === 'quality' && <DecisionDpoPanel />}
+
+        {/* Environments Tab - TMax-compatible executable environment curation */}
+        {activeTab === 'environments' && <EnvironmentLab />}
 
         {/* Seeds Tab */}
         {activeTab === 'seeds' && (

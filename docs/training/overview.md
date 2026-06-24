@@ -4,7 +4,8 @@ This guide explains the training gym from first principles: what data enters the
 system, what each training strategy is trying to teach, and which evidence proves
 that a trained model is actually better.
 
-For exact knobs and recipes, read [strategy-guide.md](strategy-guide.md). For
+For the full capability spread, read [capability-map.md](capability-map.md). For
+exact knobs and recipes, read [strategy-guide.md](strategy-guide.md). For
 world-model objectives, read [world-models.md](world-models.md). For diagnosis
 during and after a run, read [metrics-runbook.md](metrics-runbook.md).
 
@@ -127,6 +128,7 @@ gates by themselves.
 
 ## Read next
 
+- [capability-map.md](capability-map.md) - full training/eval capability map and stable vs backend-dependent status.
 - [strategy-guide.md](strategy-guide.md) - concrete starting settings and when to use each strategy.
 - [world-models.md](world-models.md) - ECHO/RWML contracts, defaults, replay telemetry, and boundaries.
 - [metrics-runbook.md](metrics-runbook.md) - how to diagnose flat pass@k, zero reward variance, timeouts, verifier errors, and tamper attempts.

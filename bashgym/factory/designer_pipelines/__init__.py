@@ -305,11 +305,15 @@ try:
     from bashgym.factory.designer_pipelines.from_external import build_external_pipeline
     from bashgym.factory.designer_pipelines.from_unstructured import build_unstructured_pipeline
     from bashgym.factory.designer_pipelines.mcp_tool_use import build_mcp_tool_use_pipeline
+    from bashgym.factory.designer_pipelines.terminal_env_generation import (
+        build_terminal_env_pipeline,
+    )
     from bashgym.factory.designer_pipelines.tool_use_sft import build_tool_use_pipeline
 
     PIPELINES["coding_agent_sft"] = build_sft_pipeline
     PIPELINES["coding_agent_dpo"] = build_dpo_pipeline
     PIPELINES["coding_agent_distill"] = build_distill_pipeline
+    PIPELINES["terminal_env_generation"] = build_terminal_env_pipeline
     PIPELINES["tool_use_sft"] = build_tool_use_pipeline
     PIPELINES["from_external"] = build_external_pipeline
     PIPELINES["from_unstructured"] = build_unstructured_pipeline

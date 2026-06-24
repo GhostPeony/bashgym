@@ -22,9 +22,22 @@ frontend.env.local
 
 # Internal config
 cleancontrol.json
+jepa_paper_extract.txt
 
 # Docs (internal reference, not for public repo)
 docs/
+!docs/
+docs/*
+!docs/TRAINING_SETUP.md
+!docs/training-config-guide.md
+!docs/training/
+docs/training/*
+!docs/training/overview.md
+!docs/training/strategy-guide.md
+!docs/training/world-models.md
+!docs/training/metrics-runbook.md
+!docs/training/glossary.md
+!docs/training/agent-cli.md
 
 # IDE
 .vscode/
@@ -54,9 +67,11 @@ node_modules/
 # Misc / stray artifacts
 nul
 =*
+bash.exe.stackdump
 output/
 # NeMo Data Designer create() default artifact output
 artifacts/
+frontend/test-results/
 # DataDesignerPipeline.export_nemo default output
 data/designer_output/
 

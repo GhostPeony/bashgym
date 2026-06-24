@@ -19,7 +19,8 @@ import {
   ChevronRight,
   Gauge,
   ScrollText,
-  Package
+  Package,
+  BookOpen
 } from 'lucide-react'
 import { useTrainingStore, useUIStore } from '../../stores'
 import { trainingApi, tracesApi, hfApi, RepoInfo, SystemInfo, ModelRecommendations } from '../../services/api'
@@ -32,11 +33,13 @@ import { TrainingLogs } from './TrainingLogs'
 import { RunComparison } from './RunComparison'
 import { DatasetInspector } from './DatasetInspector'
 import { GrpoMetricsPanel } from './GrpoMetricsPanel'
+import { WorldModelMetricsPanel } from './WorldModelMetricsPanel'
 import { TrainingLogViewer } from './TrainingLogViewer'
 import { CheckpointBrowser } from './CheckpointBrowser'
+import { TrainingGuidance } from './TrainingGuidance'
 import { clsx } from 'clsx'
 
-type TrainingTab = 'dashboard' | 'logs' | 'checkpoints'
+type TrainingTab = 'dashboard' | 'logs' | 'checkpoints' | 'guides'
 
 export function TrainingDashboard() {
   const { currentRun, lossHistory, startTraining, pauseTraining, resumeTraining, stopTraining, updateMetrics } =
@@ -151,9 +154,9 @@ export function TrainingDashboard() {
 
   return (
     <div className="h-full p-6 overflow-auto">
-      <div className="max-w-6xl mx-auto">
+      <div className="max-w-[1500px] mx-auto">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-6">
         <div>
           <div className="flex items-center gap-3">
             <h1 className="font-brand text-2xl text-text-primary">Training Monitor</h1>
@@ -170,7 +173,16 @@ export function TrainingDashboard() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            className="btn-secondary flex items-center gap-2"
+            title="Open training guides"
+            onClick={() => setActiveTab('guides')}
+          >
+            <BookOpen className="w-4 h-4" />
+            Guides
+          </button>
           {!currentRun ? (
             <button
               onClick={() => setShowConfig(true)}
@@ -226,6 +238,7 @@ export function TrainingDashboard() {
           { id: 'dashboard' as TrainingTab, label: 'Dashboard', icon: Gauge },
           { id: 'logs' as TrainingTab, label: 'Logs', icon: ScrollText },
           { id: 'checkpoints' as TrainingTab, label: 'Checkpoints', icon: Package },
+          { id: 'guides' as TrainingTab, label: 'Guides', icon: BookOpen },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -245,12 +258,13 @@ export function TrainingDashboard() {
 
       {activeTab === 'logs' && <TrainingLogViewer />}
       {activeTab === 'checkpoints' && <CheckpointBrowser />}
+      {activeTab === 'guides' && <TrainingGuidance />}
 
       {/* Main Grid */}
       {activeTab === 'dashboard' && (
-      <div className="grid grid-cols-12 gap-4">
+      <div className="grid grid-cols-12 gap-5">
         {/* Loss Curve - Main Chart */}
-        <div className="col-span-8 card p-4">
+        <div className="col-span-12 xl:col-span-8 card p-4">
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-brand text-xl text-text-primary">Loss Curve</h2>
             {lossHistory.length > 0 && (
@@ -277,7 +291,7 @@ export function TrainingDashboard() {
         </div>
 
         {/* Epoch Progress */}
-        <div className="col-span-4 card p-4">
+        <div className="col-span-12 md:col-span-6 xl:col-span-4 card p-4">
           <h2 className="font-brand text-xl text-text-primary mb-4">Progress</h2>
           <EpochProgress
             currentEpoch={metrics?.epoch ?? 0}
@@ -301,6 +315,10 @@ export function TrainingDashboard() {
         {/* GRPO per-step metrics (only renders when grpoMetrics.length > 0) */}
         <div className="col-span-12">
           <GrpoMetricsPanel />
+        </div>
+
+        <div className="col-span-12">
+          <WorldModelMetricsPanel />
         </div>
 
         {/* Training Logs */}
@@ -327,7 +345,7 @@ export function TrainingDashboard() {
 
         {/* Training Config Card */}
         {currentRun && (
-          <div className="col-span-6 card p-4">
+          <div className="col-span-12 xl:col-span-6 card p-4">
             <h2 className="font-brand text-xl text-text-primary mb-4">Configuration</h2>
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div className="card p-4">
@@ -379,7 +397,7 @@ export function TrainingDashboard() {
         )}
 
         {/* System Stats */}
-        <div className={clsx('card p-4', currentRun ? 'col-span-6' : 'col-span-6')}>
+        <div className={clsx('card p-4 col-span-12', currentRun ? 'xl:col-span-6' : 'xl:col-span-5')}>
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-brand text-xl text-text-primary">System Resources</h2>
             {currentRun && (
@@ -398,8 +416,8 @@ export function TrainingDashboard() {
 
         {/* Getting Started Section - Show when no training */}
         {!currentRun && (
-          <div className="col-span-6 card p-6">
-            <div className="flex items-start gap-6">
+          <div className="col-span-12 xl:col-span-7 card p-6">
+            <div className="flex flex-col 2xl:flex-row items-start gap-6">
               {/* Left - Info */}
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-3">
@@ -452,22 +470,32 @@ export function TrainingDashboard() {
                   </div>
                 </div>
 
-                <button
-                  onClick={() => setShowConfig(true)}
-                  disabled={goldTraceCount === 0}
-                  className={clsx(
-                    'mt-6 flex items-center gap-2',
-                    goldTraceCount > 0 ? 'btn-primary' : 'btn-secondary opacity-50 cursor-not-allowed'
-                  )}
-                >
-                  <Play className="w-4 h-4" />
-                  Configure Training
-                  <ArrowRight className="w-4 h-4" />
-                </button>
+                <div className="mt-6 flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={() => setShowConfig(true)}
+                    disabled={goldTraceCount === 0}
+                    className={clsx(
+                      'flex items-center gap-2',
+                      goldTraceCount > 0 ? 'btn-primary' : 'btn-secondary opacity-50 cursor-not-allowed'
+                    )}
+                  >
+                    <Play className="w-4 h-4" />
+                    Configure Training
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('guides')}
+                    className="btn-secondary flex items-center gap-2"
+                  >
+                    <BookOpen className="w-4 h-4" />
+                    Guides
+                  </button>
+                </div>
               </div>
 
               {/* Right - Repo Summary */}
-              <div className="w-64 card p-4">
+              <div className="w-full 2xl:w-64 card p-4">
                 <div className="flex items-center gap-2 mb-3">
                   <FolderGit2 className="w-4 h-4 text-text-muted" />
                   <span className="font-mono text-xs uppercase tracking-widest text-text-primary">Available Data</span>
@@ -502,7 +530,7 @@ export function TrainingDashboard() {
         {/* Export Section */}
         {!currentRun && goldTraceCount > 0 && (
           <div className="col-span-12 card p-4 space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <h2 className="font-brand text-xl text-text-primary">Export Training Data</h2>
                 <p className="font-mono text-xs uppercase tracking-widest text-text-muted mt-1">
@@ -518,7 +546,7 @@ export function TrainingDashboard() {
                   <p className="font-mono text-xs text-status-error mt-2">{exportError}</p>
                 )}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   onClick={handleExportAndDownload}
                   disabled={exporting}
@@ -549,7 +577,7 @@ export function TrainingDashboard() {
             {/* Push to HuggingFace Hub */}
             {exportResult && (
               <div className="border-t border-border pt-4">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                   <div>
                     <h3 className="font-brand text-lg text-text-primary flex items-center gap-2">
                       <Cloud className="w-4 h-4" />
@@ -619,6 +647,10 @@ export function TrainingDashboard() {
       {showConfig && (
         <TrainingConfig
           onClose={() => setShowConfig(false)}
+          onOpenGuides={() => {
+            setShowConfig(false)
+            setActiveTab('guides')
+          }}
           onStart={(config) => {
             startTraining(config)
             setShowConfig(false)

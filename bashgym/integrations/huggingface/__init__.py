@@ -38,6 +38,8 @@ Usage:
     response = inference.generate(model="meta-llama/Llama-3.1-8B-Instruct", prompt="Hello")
 """
 
+import importlib
+
 from .client import (
     HF_HUB_AVAILABLE,
     HFAuthError,
@@ -143,4 +145,17 @@ __all__ = [
     "HFModelManager",
     "HFModelInfo",
     "get_model_manager",
+    # Submodules used by tests and monkeypatch callers
+    "buckets",
+    "traces",
 ]
+
+
+def __getattr__(name: str):
+    """Lazily expose optional submodules for monkeypatch and direct imports."""
+
+    if name in {"buckets", "traces"}:
+        module = importlib.import_module(f"{__name__}.{name}")
+        globals()[name] = module
+        return module
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

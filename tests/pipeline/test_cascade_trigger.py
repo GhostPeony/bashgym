@@ -3,6 +3,9 @@
 import json
 from unittest import mock
 
+import pytest
+
+from bashgym.api.pipeline_routes import build_cascade_start_payload
 from bashgym.pipeline.config import PipelineConfig
 from bashgym.pipeline.orchestrator import Pipeline
 from bashgym.pipeline.threshold_monitor import ThresholdMonitor
@@ -47,9 +50,60 @@ class TestShouldCascade:
         assert m.should_cascade(g) is True
 
     def test_config_field_roundtrips(self):
-        cfg = PipelineConfig(cascade_enabled=True, cascade_gold_threshold=300)
+        cfg = PipelineConfig(
+            cascade_enabled=True,
+            cascade_gold_threshold=300,
+            cascade_base_model="Qwen/Qwen3-8B",
+            cascade_mode="real",
+            cascade_train_steps_per_stage=64,
+            cascade_min_domain_examples=3,
+            cascade_use_remote_ssh=True,
+            cascade_repo_domains_enabled=True,
+        )
         restored = PipelineConfig.from_dict(cfg.to_dict())
-        assert restored.cascade_enabled is True and restored.cascade_gold_threshold == 300
+        assert restored.cascade_enabled is True
+        assert restored.cascade_gold_threshold == 300
+        assert restored.cascade_base_model == "Qwen/Qwen3-8B"
+        assert restored.cascade_mode == "real"
+        assert restored.cascade_train_steps_per_stage == 64
+        assert restored.cascade_min_domain_examples == 3
+        assert restored.cascade_use_remote_ssh is True
+        assert restored.cascade_repo_domains_enabled is True
+
+    def test_build_cascade_start_payload(self, tmp_path):
+        gold = _gold(tmp_path, 12)
+        cfg = PipelineConfig(
+            cascade_gold_threshold=10,
+            cascade_base_model="Qwen/Qwen3-8B",
+            cascade_mode="real",
+            cascade_train_steps_per_stage=32,
+            cascade_min_domain_examples=2,
+            cascade_use_remote_ssh=True,
+            cascade_repo_domains_enabled=True,
+        )
+
+        payload = build_cascade_start_payload(cfg, gold, gold_count=12)
+
+        assert payload["base_model"] == "Qwen/Qwen3-8B"
+        assert payload["dataset_path"] == str(gold)
+        assert payload["mode"] == "real"
+        assert payload["train_steps_per_stage"] == 32
+        assert payload["min_domain_examples"] == 2
+        assert payload["use_remote_ssh"] is True
+        assert payload["repo_domains_enabled"] is True
+        assert payload["repo_domains_dir"] == str(gold)
+        assert payload["trigger"] == {
+            "source": "pipeline",
+            "gold_count": 12,
+            "gold_threshold": 10,
+        }
+
+    def test_real_cascade_requires_base_model(self, tmp_path):
+        gold = _gold(tmp_path, 1)
+        cfg = PipelineConfig(cascade_mode="real", cascade_base_model="")
+
+        with pytest.raises(ValueError, match="cascade_base_model"):
+            build_cascade_start_payload(cfg, gold, gold_count=1)
 
 
 def _isolated_pipeline(tmp_path, cfg, on_event=None):
@@ -94,8 +148,7 @@ class TestOrchestratorCascadeWiring:
         for i in range(3):  # pre-fill above threshold
             (gold / f"g{i}.json").write_text("{}")
 
-        triggered = []
-        pipeline.cascade_trigger = lambda n: triggered.append(n)
+        pipeline.cascade_trigger = lambda n: {"status": "queued", "gold_count": n}
 
         dest = _gold_trace_dest(tmp_path, "trace_s1.json")
         fake = ImportResult(
@@ -115,7 +168,8 @@ class TestOrchestratorCascadeWiring:
         ]
         assert len(cascade_evts) == 1
         assert cascade_evts[0]["gold_count"] >= 1
-        assert len(triggered) == 1  # callback received the gold count
+        triggered_evts = [p for t, p in events if t == "pipeline:cascade_triggered"]
+        assert triggered_evts == [{"status": "queued", "gold_count": cascade_evts[0]["gold_count"]}]
 
     def test_cascade_disabled_no_trigger(self, tmp_path):
         events = []

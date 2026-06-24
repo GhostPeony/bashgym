@@ -537,15 +537,29 @@ class ObservabilitySettings:
 class LoggingSettings:
     """Logging and monitoring settings."""
 
+    DEFAULT_LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    JSON_LOG_FORMAT = (
+        '{"timestamp":"%(asctime)s","logger":"%(name)s",'
+        '"level":"%(levelname)s","message":"%(message)s"}'
+    )
+
     log_level: str = field(default_factory=lambda: get_env("LOG_LEVEL", "INFO"))
     log_format: str = field(
-        default_factory=lambda: get_env(
-            "LOG_FORMAT", "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        )
+        default_factory=lambda: get_env("LOG_FORMAT", LoggingSettings.DEFAULT_LOG_FORMAT)
     )
     log_file: str = field(default_factory=lambda: get_env("LOG_FILE", ""))
     enable_metrics: bool = field(default_factory=lambda: get_env_bool("ENABLE_METRICS", True))
     metrics_port: int = field(default_factory=lambda: get_env_int("METRICS_PORT", 9090))
+
+    def resolved_log_format(self) -> str:
+        """Return a concrete logging format for named presets and raw formats."""
+
+        preset = self.log_format.strip().lower()
+        if preset == "json":
+            return self.JSON_LOG_FORMAT
+        if preset in {"default", "text"}:
+            return self.DEFAULT_LOG_FORMAT
+        return self.log_format
 
 
 @dataclass
@@ -657,7 +671,11 @@ class Settings:
         if self.logging.log_file:
             handlers.append(logging.FileHandler(self.logging.log_file))
 
-        logging.basicConfig(level=level, format=self.logging.log_format, handlers=handlers)
+        logging.basicConfig(
+            level=level,
+            format=self.logging.resolved_log_format(),
+            handlers=handlers,
+        )
 
 
 # Global settings instance

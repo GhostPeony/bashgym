@@ -132,7 +132,16 @@ class Pipeline:
             trigger = getattr(self, "cascade_trigger", None)
             if callable(trigger):
                 try:
-                    trigger(gold_count)
+                    trigger_result = trigger(gold_count)
+                    if trigger_result is not None:
+                        self._emit(
+                            "pipeline:cascade_triggered",
+                            (
+                                trigger_result
+                                if isinstance(trigger_result, dict)
+                                else {"result": trigger_result}
+                            ),
+                        )
                 except Exception as exc:
                     self._emit("pipeline:cascade_error", {"error": str(exc)})
 

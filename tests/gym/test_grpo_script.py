@@ -139,3 +139,44 @@ class TestGRPOLossType:
         for backend in ("plain", "unsloth"):
             script = _generate_script(TrainerConfig(grpo_backend=backend, grpo_loss_type="gspo"))
             ast.parse(script)
+
+
+class TestTerminalRLProfile:
+    def test_tmax_like_profile_threads_into_both_backends(self):
+        import ast
+
+        for backend in ("plain", "unsloth"):
+            script = _generate_script(
+                TrainerConfig(
+                    grpo_backend=backend,
+                    training_profile="terminal_rl_tmax_like",
+                )
+            )
+            assert "TRAINING_PROFILE = 'terminal_rl_tmax_like'" in script
+            assert "GRPO_GROUP_SIZE = 32" in script
+            assert "NUM_GENERATIONS = GRPO_GROUP_SIZE" in script
+            assert "TOKEN_LEVEL_LOSS = True" in script
+            assert "FILTER_ZERO_STD_GROUPS = True" in script
+            assert "ACTIVE_SAMPLING = True" in script
+            assert "LM_HEAD_FP32 = True" in script
+            assert "DPPO_BACKEND = 'auto'" in script
+            assert "DPPO_DIVERGENCE = 'binary_tv'" in script
+            assert "DPPO_BINARY_TV_THRESHOLD = 0.15" in script
+            assert "DPPO_BINARY_KL_THRESHOLD = 0.05" in script
+            assert "num_generations=GRPO_GROUP_SIZE" in script
+            assert 'loss_type="dapo"' in script
+            assert "configure_terminal_rl_model(model)" in script
+            ast.parse(script)
+
+    def test_tmax_like_profile_allows_group_size_override(self):
+        script = _generate_script(
+            TrainerConfig(
+                grpo_backend="plain",
+                training_profile="terminal_rl_tmax_like",
+                grpo_group_size=20,
+                active_sampling=False,
+            )
+        )
+        assert "GRPO_GROUP_SIZE = 20" in script
+        assert "ACTIVE_SAMPLING = False" in script
+        assert "active sampling is disabled" in script

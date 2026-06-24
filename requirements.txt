@@ -6,6 +6,7 @@
 anthropic>=0.20.0          # Claude API client
 httpx>=0.26.0              # Async HTTP client
 python-dotenv>=1.0.0       # Environment variable loading
+psutil>=5.9.0              # Local CPU/RAM/GPU process/system inspection
 
 # Docker Integration (optional - for sandbox mode)
 docker>=7.0.0              # Docker SDK for Python

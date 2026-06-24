@@ -12,7 +12,15 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from huggingface_hub import HfApi, copy_files
+from huggingface_hub import HfApi
+
+try:
+    from huggingface_hub import copy_files
+except ImportError:  # pragma: no cover - exercised only with older hub clients
+
+    def copy_files(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("huggingface_hub.copy_files requires huggingface_hub>=1.10.0")
+
 
 logger = logging.getLogger(__name__)
 

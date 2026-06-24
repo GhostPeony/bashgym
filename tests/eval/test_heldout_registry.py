@@ -55,6 +55,22 @@ class TestProfileHeldout:
         loaded = ModelProfile.load(path)
         assert loaded.latest_heldout_eval == {"ship": True, "trace_delta": 0.4}
 
+    def test_environment_holdout_roundtrip_and_trim(self, tmp_path):
+        p = ModelProfile(
+            model_id="m1", run_id="r1", display_name="M1", model_dir=str(tmp_path / "m1")
+        )
+        assert p.latest_environment_holdout_eval is None
+        for i in range(25):
+            p.add_environment_holdout_eval({"gate": {"ship": i % 2 == 0}, "i": i}, keep=20)
+
+        assert len(p.environment_holdout_evals) == 20
+        assert p.environment_holdout_evals[0]["i"] == 5
+        assert p.latest_environment_holdout_eval["i"] == 24
+
+        path = p.save()
+        loaded = ModelProfile.load(path)
+        assert loaded.latest_environment_holdout_eval["i"] == 24
+
 
 class TestRegistryRecord:
     def test_record_heldout_eval(self, tmp_path):
@@ -75,6 +91,27 @@ class TestRegistryRecord:
         reloaded = ModelProfile.load(tmp_path / "m1" / "model_profile.json")
         assert reloaded.latest_heldout_eval["trace_delta"] == report["trace_delta"]
 
+    def test_record_environment_holdout_eval(self, tmp_path):
+        reg = ModelRegistry(models_dir=str(tmp_path))
+        profile = ModelProfile(
+            model_id="m1", run_id="r1", display_name="M1", model_dir=str(tmp_path / "m1")
+        )
+        reg._profiles["m1"] = profile
+
+        result = {
+            "gate": {"ship": True, "reasons": []},
+            "contamination": [],
+            "split": {"holdout_ids": ["env_a"]},
+        }
+        out = reg.record_environment_holdout_eval("m1", result)
+
+        assert out is not None
+        assert out.latest_environment_holdout_eval["gate"]["ship"] is True
+
+        reloaded = ModelProfile.load(tmp_path / "m1" / "model_profile.json")
+        assert reloaded.latest_environment_holdout_eval["split"]["holdout_ids"] == ["env_a"]
+
     def test_record_unknown_model_returns_none(self, tmp_path):
         reg = ModelRegistry(models_dir=str(tmp_path))
         assert reg.record_heldout_eval("nope", {"ship": True}) is None
+        assert reg.record_environment_holdout_eval("nope", {"gate": {"ship": True}}) is None

@@ -138,6 +138,27 @@ class InferenceProvider(ABC):
         """List available models from this provider."""
         ...
 
+    @property
+    def supports_embeddings(self) -> bool:
+        """Whether this provider implements ``embed``.
+
+        Non-abstract so existing providers default to ``False`` without
+        having to declare anything. Providers that override ``embed`` set
+        this to ``True``.
+        """
+        return False
+
+    async def embed(self, texts: list[str], *, model: str | None = None) -> list[list[float]]:
+        """Embed each text into a dense vector.
+
+        Returns one vector per input text, in input order. This is a
+        non-abstract default that raises ``NotImplementedError`` so that
+        existing providers keep working without implementing embeddings.
+        Providers with embedding support override this method (and set
+        ``supports_embeddings``).
+        """
+        raise NotImplementedError(f"{self.provider_type!r} provider does not support embeddings")
+
     async def warm_up(self, model: str | None = None) -> bool:
         """
         Warm up the provider, optionally loading a specific model.

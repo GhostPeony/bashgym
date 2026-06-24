@@ -130,7 +130,7 @@ export function PipelineDashboard() {
     if (result.ok && result.data) setConfig(result.data)
   }
 
-  const triggerStage = async (stage: 'import' | 'classify') => {
+  const triggerStage = async (stage: 'import' | 'classify' | 'cascade') => {
     setTriggeringStage(stage)
     await pipelineApi.triggerStage(stage)
     await fetchData()
@@ -252,14 +252,110 @@ export function PipelineDashboard() {
             icon={<Layers className="w-5 h-5" />}
             enabled={config.cascade_enabled}
             onToggle={(v) => updateConfig({ cascade_enabled: v })}
-            count={0}
+            count={status.gold_count}
             threshold={config.cascade_gold_threshold}
             onThresholdChange={(v) => updateConfig({ cascade_gold_threshold: v })}
             description="Auto-trigger a domain Cascade RL run when new gold traces reach threshold"
             color="text-violet-500"
             showThreshold
+            triggerable
+            onTrigger={() => triggerStage('cascade')}
+            isTriggering={triggeringStage === 'cascade'}
           />
         </div>
+
+        {config.cascade_enabled && (
+          <div className="mt-6 border-brutal rounded-brutal p-4 bg-background-card shadow-brutal-sm">
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <div>
+                <h3 className="font-brand text-lg text-text-primary">Cascade trigger recipe</h3>
+                <p className="text-xs text-text-muted">
+                  The watcher queues this request when gold traces cross the Cascade RL threshold.
+                </p>
+              </div>
+              {status.cascade_auto_trigger ? (
+                <span className="font-mono text-xs uppercase tracking-widest text-accent">
+                  Last trigger recorded
+                </span>
+              ) : null}
+            </div>
+
+            <div className="grid grid-cols-4 gap-3">
+              <div className="col-span-2">
+                <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">
+                  Base model
+                </label>
+                <input
+                  className="input w-full text-sm font-mono"
+                  value={config.cascade_base_model}
+                  onChange={(e) => updateConfig({ cascade_base_model: e.target.value })}
+                  placeholder="Qwen/Qwen3-8B"
+                />
+              </div>
+              <div>
+                <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">
+                  Mode
+                </label>
+                <select
+                  className="input w-full text-sm"
+                  value={config.cascade_mode}
+                  onChange={(e) =>
+                    updateConfig({ cascade_mode: e.target.value as PipelineConfig['cascade_mode'] })
+                  }
+                >
+                  <option value="simulate">Simulate</option>
+                  <option value="real">Real</option>
+                </select>
+              </div>
+              <div>
+                <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">
+                  Stage steps
+                </label>
+                <input
+                  type="number"
+                  min={10}
+                  max={5000}
+                  className="input w-full text-sm font-mono"
+                  value={config.cascade_train_steps_per_stage}
+                  onChange={(e) =>
+                    updateConfig({ cascade_train_steps_per_stage: parseInt(e.target.value) || 10 })
+                  }
+                />
+              </div>
+              <div>
+                <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-1">
+                  Min examples
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={1000}
+                  className="input w-full text-sm font-mono"
+                  value={config.cascade_min_domain_examples}
+                  onChange={(e) =>
+                    updateConfig({ cascade_min_domain_examples: parseInt(e.target.value) || 1 })
+                  }
+                />
+              </div>
+              <label className="flex items-center gap-2 font-mono text-xs uppercase tracking-widest text-text-secondary">
+                <input
+                  type="checkbox"
+                  checked={config.cascade_use_remote_ssh}
+                  onChange={(e) => updateConfig({ cascade_use_remote_ssh: e.target.checked })}
+                />
+                Remote SSH
+              </label>
+              <label className="flex items-center gap-2 font-mono text-xs uppercase tracking-widest text-text-secondary">
+                <input
+                  type="checkbox"
+                  checked={config.cascade_repo_domains_enabled}
+                  onChange={(e) => updateConfig({ cascade_repo_domains_enabled: e.target.checked })}
+                />
+                Repo domains
+              </label>
+            </div>
+          </div>
+        )}
 
         {/* Stats summary */}
         <div className="mt-8 grid grid-cols-3 gap-4">

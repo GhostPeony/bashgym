@@ -35,6 +35,12 @@ class PipelineConfig:
     # Stage 5: Cascade RL (auto-trigger a domain cascade when enough gold accumulates)
     cascade_enabled: bool = False
     cascade_gold_threshold: int = 200
+    cascade_base_model: str = ""
+    cascade_mode: str = "simulate"
+    cascade_train_steps_per_stage: int = 200
+    cascade_min_domain_examples: int = 10
+    cascade_use_remote_ssh: bool = False
+    cascade_repo_domains_enabled: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

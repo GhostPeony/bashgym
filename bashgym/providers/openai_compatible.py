@@ -14,6 +14,7 @@ from typing import Any
 import httpx
 
 from .base import HealthStatus, InferenceProvider, ProviderModel, ProviderResponse
+from .embeddings import parse_embeddings_response
 
 # Known OpenAI-compatible platforms -> base URL. Pass any other base_url directly.
 PRESETS: dict[str, str] = {
@@ -93,6 +94,10 @@ class OpenAICompatibleProvider(InferenceProvider):
     def is_local(self) -> bool:
         return self._is_local
 
+    @property
+    def supports_embeddings(self) -> bool:
+        return True
+
     def _headers(self) -> dict[str, str]:
         h = {"Content-Type": "application/json"}
         if self._api_key:
@@ -160,6 +165,23 @@ class OpenAICompatibleProvider(InferenceProvider):
                 success=False,
                 error=str(exc),
             )
+
+    async def embed(self, texts: list[str], *, model: str | None = None) -> list[list[float]]:
+        """Embed texts via the OpenAI-compatible ``POST /v1/embeddings`` endpoint.
+
+        The embedding model is not hardcoded: it falls back to
+        ``default_model`` when ``model`` is None, so the caller selects an
+        embedding model from the live catalog.
+        """
+        resolved_model = model or self._default_model
+        response = await self._client.post(
+            f"{self._base_url}/embeddings",
+            headers=self._headers(),
+            json={"model": resolved_model, "input": list(texts)},
+        )
+        if response.status_code != 200:
+            raise RuntimeError(f"embeddings API error: {response.status_code} - {response.text}")
+        return parse_embeddings_response(response.json())
 
     async def health_check(self) -> HealthStatus:
         start = time.perf_counter()

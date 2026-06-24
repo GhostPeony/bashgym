@@ -17,6 +17,7 @@ from urllib.parse import urlparse
 import httpx
 
 from bashgym.providers.base import HealthStatus, InferenceProvider, ProviderModel, ProviderResponse
+from bashgym.providers.embeddings import parse_ollama_embeddings_response
 
 
 @dataclass
@@ -98,6 +99,10 @@ class OllamaProvider(InferenceProvider):
     @property
     def is_local(self) -> bool:
         return not self.is_remote
+
+    @property
+    def supports_embeddings(self) -> bool:
+        return True
 
     @property
     def is_remote(self) -> bool:
@@ -407,6 +412,21 @@ class OllamaProvider(InferenceProvider):
             )
             for m in ollama_models
         ]
+
+    async def embed(self, texts: list[str], *, model: str | None = None) -> list[list[float]]:
+        """Embed texts via Ollama's ``POST /api/embed`` endpoint.
+
+        The embedding model is not hardcoded: the caller passes a model name
+        (an embedding-capable Ollama model from the live catalog). Returns one
+        vector per input text, in input order.
+        """
+        response = await self.client.post(
+            "/api/embed",
+            json={"model": model, "input": list(texts)},
+        )
+        if response.status_code != 200:
+            raise RuntimeError(f"Ollama embeddings error: {response.status_code} - {response.text}")
+        return parse_ollama_embeddings_response(response.json())
 
     async def warm_up(self, model: str | None = None) -> bool:
         """Warm up a model by sending a minimal chat request."""

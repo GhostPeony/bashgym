@@ -19,6 +19,7 @@ export type { FileNode } from './fileStore'
 export { useTrainingStore } from './trainingStore'
 export type {
   TrainingStrategy,
+  TrainingProfile,
   TrainingStatus,
   TrainingMetrics,
   TrainingConfig,

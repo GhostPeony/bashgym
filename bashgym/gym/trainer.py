@@ -21,6 +21,22 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from bashgym.gym.dppo import DPPO_BINARY_KL_THRESHOLD, DPPO_BINARY_TV_THRESHOLD
+from bashgym.gym.dppo_backend import VALID_DPPO_BACKENDS, select_dppo_backend
+from bashgym.gym.echo import ECHO_DEFAULT_LAMBDA
+from bashgym.gym.rwml import (
+    RWML_DEFAULT_DISTANCE_THRESHOLD,
+    RWML_DEFAULT_EASY_KEEP_PROBABILITY,
+    RWML_DEFAULT_EASY_PASS_RATE_THRESHOLD,
+    RWML_DEFAULT_HISTORY_WINDOW,
+)
+from bashgym.gym.terminal_rl import (
+    DEFAULT_TRAINING_PROFILE,
+    TERMINAL_RL_TMAX_LIKE_PROFILE,
+    TMAX_LIKE_DEFAULTS,
+    normalize_training_profile,
+)
+
 # Model profile integration
 try:
     from bashgym.models import ModelProfile, get_registry
@@ -178,6 +194,38 @@ class TrainerConfig:
     # sequences/MoE); "dr_grpo" = Dr. GRPO. Default "grpo" matches TRL's default.
     grpo_loss_type: str = "grpo"
 
+    # Terminal-agent RL profile settings. `terminal_rl_tmax_like` applies the
+    # defaults exposed by bashgym.gym.terminal_rl while leaving direct overrides
+    # available for experiments.
+    training_profile: str = DEFAULT_TRAINING_PROFILE
+    grpo_group_size: int | None = None
+    prompts_per_rollout_batch: int = 8
+    max_tool_calls_per_episode: int = 64
+    token_level_loss: bool | None = None
+    filter_zero_std_groups: bool | None = None
+    active_sampling: bool | None = None
+    lm_head_fp32: bool | None = None
+    interleaved_thinking: bool | None = None
+    sft_warm_start_policy: str | None = None
+    dppo_backend: str = "auto"
+    dppo_divergence: str = "binary_tv"
+    dppo_binary_tv_threshold: float = DPPO_BINARY_TV_THRESHOLD
+    dppo_binary_kl_threshold: float = DPPO_BINARY_KL_THRESHOLD
+
+    # World-model objectives for terminal-RL (consumed by the rollout/terminal-RL
+    # backend, not the single-turn code-gen GRPO script). See bashgym.gym.echo
+    # (ECHO observation-prediction auxiliary loss, arXiv:2605.24517) and
+    # bashgym.gym.rwml (embedding-space world-model reward, arXiv:2602.05842).
+    echo_enabled: bool = False
+    echo_aux_lambda: float = ECHO_DEFAULT_LAMBDA
+    rwml_enabled: bool = False
+    rwml_distance_threshold: float = RWML_DEFAULT_DISTANCE_THRESHOLD
+    rwml_easy_pass_rate_threshold: float = RWML_DEFAULT_EASY_PASS_RATE_THRESHOLD
+    rwml_easy_keep_probability: float = RWML_DEFAULT_EASY_KEEP_PROBABILITY
+    rwml_history_window: int = RWML_DEFAULT_HISTORY_WINDOW
+    rwml_embedding_model: str = ""
+    rwml_kl_beta: float = 0.0
+
     # Knowledge Distillation settings
     teacher_model: str = "claude-sonnet-4-6"  # Teacher model for distillation
     teacher_temperature: float = 0.7
@@ -226,6 +274,136 @@ class TrainerConfig:
     task_domain: str | None = None  # Domain name for cascade stage (e.g., "file_operations")
     cascade_stage: int | None = None  # Stage number in cascade sequence
     cascade_run_id: str | None = None  # Parent cascade run ID for linking stages
+
+    def __post_init__(self) -> None:
+        """Resolve named recipe defaults after dataclass construction."""
+
+        self.training_profile = normalize_training_profile(self.training_profile)
+        self.dppo_backend = (self.dppo_backend or "auto").strip().lower()
+        if self.dppo_backend not in VALID_DPPO_BACKENDS:
+            raise ValueError(
+                f"dppo_backend={self.dppo_backend!r} must be one of {list(VALID_DPPO_BACKENDS)}"
+            )
+        self.dppo_divergence = (self.dppo_divergence or "binary_tv").strip().lower()
+        if self.dppo_divergence not in {"binary_tv", "binary_kl"}:
+            raise ValueError("dppo_divergence must be binary_tv or binary_kl")
+        if self.dppo_binary_tv_threshold < 0 or self.dppo_binary_kl_threshold < 0:
+            raise ValueError("DPPO thresholds must be non-negative")
+        self._validate_world_model_settings()
+        if self.training_profile != TERMINAL_RL_TMAX_LIKE_PROFILE:
+            if self.grpo_group_size is None:
+                self.grpo_group_size = self.grpo_num_generations
+            return
+
+        defaults = TMAX_LIKE_DEFAULTS
+        if self.grpo_group_size is None:
+            if self.grpo_num_generations == 4:
+                self.grpo_group_size = defaults.grpo_group_size
+            else:
+                self.grpo_group_size = self.grpo_num_generations
+        self.grpo_num_generations = self.grpo_group_size
+        if self.grpo_loss_type == "grpo":
+            self.grpo_loss_type = defaults.grpo_loss_type
+        if self.token_level_loss is None:
+            self.token_level_loss = defaults.token_level_loss
+        if self.filter_zero_std_groups is None:
+            self.filter_zero_std_groups = defaults.filter_zero_std_groups
+        if self.active_sampling is None:
+            self.active_sampling = defaults.active_sampling
+        if self.lm_head_fp32 is None:
+            self.lm_head_fp32 = defaults.lm_head_fp32
+        if self.interleaved_thinking is None:
+            self.interleaved_thinking = defaults.interleaved_thinking
+        if self.sft_warm_start_policy is None:
+            self.sft_warm_start_policy = defaults.sft_warm_start_policy
+
+    def effective_grpo_group_size(self) -> int:
+        """Group size used for GRPO completions per prompt."""
+
+        return self.grpo_group_size or self.grpo_num_generations
+
+    def terminal_rl_settings(self) -> dict[str, Any]:
+        """Resolved terminal-RL knobs for scripts, logs, and tests."""
+
+        profile_enabled = self.training_profile == TERMINAL_RL_TMAX_LIKE_PROFILE
+        return {
+            "training_profile": self.training_profile,
+            "grpo_group_size": self.effective_grpo_group_size(),
+            "prompts_per_rollout_batch": self.prompts_per_rollout_batch,
+            "max_tool_calls_per_episode": self.max_tool_calls_per_episode,
+            "token_level_loss": (
+                bool(self.token_level_loss) if self.token_level_loss is not None else False
+            ),
+            "filter_zero_std_groups": (
+                bool(self.filter_zero_std_groups)
+                if self.filter_zero_std_groups is not None
+                else False
+            ),
+            "active_sampling": (
+                bool(self.active_sampling) if self.active_sampling is not None else False
+            ),
+            "lm_head_fp32": bool(self.lm_head_fp32) if self.lm_head_fp32 is not None else False,
+            "interleaved_thinking": (
+                bool(self.interleaved_thinking) if self.interleaved_thinking is not None else False
+            ),
+            "sft_warm_start_policy": self.sft_warm_start_policy
+            or ("weak_models_only" if profile_enabled else "none"),
+            "dppo_backend": self.dppo_backend,
+            "dppo_divergence": self.dppo_divergence,
+            "dppo_binary_tv_threshold": self.dppo_binary_tv_threshold,
+            "dppo_binary_kl_threshold": self.dppo_binary_kl_threshold,
+        }
+
+    def dppo_backend_selection(self) -> dict:
+        """Resolved DPPO backend capability status."""
+
+        return select_dppo_backend(self.dppo_backend).to_dict()
+
+    def _validate_world_model_settings(self) -> None:
+        """Validate ECHO/RWML world-model objective knobs."""
+
+        if self.echo_aux_lambda < 0:
+            raise ValueError("echo_aux_lambda must be non-negative")
+        if not 0.0 < self.rwml_distance_threshold <= 2.0:
+            raise ValueError("rwml_distance_threshold must be in (0, 2] (cosine distance)")
+        if not 0.0 <= self.rwml_easy_pass_rate_threshold <= 1.0:
+            raise ValueError("rwml_easy_pass_rate_threshold must be a probability in [0, 1]")
+        if not 0.0 <= self.rwml_easy_keep_probability <= 1.0:
+            raise ValueError("rwml_easy_keep_probability must be a probability in [0, 1]")
+        if self.rwml_history_window < 0:
+            raise ValueError("rwml_history_window must be non-negative")
+
+    def world_model_settings(self) -> dict[str, Any]:
+        """Resolved ECHO + RWML world-model objective knobs for scripts/logs/tests."""
+
+        return {
+            "echo_enabled": bool(self.echo_enabled),
+            "echo_aux_lambda": self.echo_aux_lambda,
+            "rwml_enabled": bool(self.rwml_enabled),
+            "rwml_distance_threshold": self.rwml_distance_threshold,
+            "rwml_easy_pass_rate_threshold": self.rwml_easy_pass_rate_threshold,
+            "rwml_easy_keep_probability": self.rwml_easy_keep_probability,
+            "rwml_history_window": self.rwml_history_window,
+            "rwml_embedding_model": self.rwml_embedding_model,
+            "rwml_kl_beta": self.rwml_kl_beta,
+        }
+
+    def terminal_rl_warnings(self) -> list[str]:
+        """Warnings for GRPO/RLVR settings likely to produce weak terminal RL."""
+
+        settings = self.terminal_rl_settings()
+        warnings: list[str] = []
+        if self.training_profile == DEFAULT_TRAINING_PROFILE:
+            return warnings
+        if settings["grpo_group_size"] < 16:
+            warnings.append("terminal RL profile works best with grpo_group_size >= 16")
+        if not settings["filter_zero_std_groups"]:
+            warnings.append("zero-std reward groups are not filtered")
+        if not settings["active_sampling"]:
+            warnings.append("active sampling is disabled, so zero-std filtering can shrink batches")
+        if not settings["token_level_loss"]:
+            warnings.append("token-level loss is disabled; long terminal rollouts may be unstable")
+        return warnings
 
 
 @dataclass
@@ -3103,6 +3281,68 @@ class GRPOTrainer(Trainer):
             return self._generate_grpo_script_plain(run, profile)
         return self._generate_grpo_script_unsloth(run, profile)
 
+    def _terminal_rl_config_src(self) -> str:
+        """Generated-script constants for terminal-agent RL recipe settings."""
+
+        settings = self.config.terminal_rl_settings()
+        warnings = self.config.terminal_rl_warnings()
+        return f'''# Configuration
+REWARD_MODE = "{self.config.grpo_reward_mode}"
+TRAINING_PROFILE = {settings["training_profile"]!r}
+GRPO_GROUP_SIZE = {settings["grpo_group_size"]}
+NUM_GENERATIONS = GRPO_GROUP_SIZE
+PROMPTS_PER_ROLLOUT_BATCH = {settings["prompts_per_rollout_batch"]}
+MAX_TOOL_CALLS_PER_EPISODE = {settings["max_tool_calls_per_episode"]}
+TOKEN_LEVEL_LOSS = {settings["token_level_loss"]}
+FILTER_ZERO_STD_GROUPS = {settings["filter_zero_std_groups"]}
+ACTIVE_SAMPLING = {settings["active_sampling"]}
+LM_HEAD_FP32 = {settings["lm_head_fp32"]}
+INTERLEAVED_THINKING = {settings["interleaved_thinking"]}
+SFT_WARM_START_POLICY = {settings["sft_warm_start_policy"]!r}
+DPPO_BACKEND = {settings["dppo_backend"]!r}
+DPPO_DIVERGENCE = {settings["dppo_divergence"]!r}
+DPPO_BINARY_TV_THRESHOLD = {settings["dppo_binary_tv_threshold"]}
+DPPO_BINARY_KL_THRESHOLD = {settings["dppo_binary_kl_threshold"]}
+TERMINAL_RL_WARNINGS = {warnings!r}
+
+
+def configure_terminal_rl_model(model):
+    """Apply terminal-RL stabilization settings that are backend-local."""
+    if not LM_HEAD_FP32:
+        return model
+    output_head = getattr(model, "lm_head", None)
+    if output_head is None and hasattr(model, "get_output_embeddings"):
+        output_head = model.get_output_embeddings()
+    if output_head is not None and hasattr(output_head, "to"):
+        output_head.to(torch.float32)
+        print("[TerminalRL] lm_head/output embeddings kept in fp32")
+    else:
+        print("[TerminalRL] warning: LM_HEAD_FP32 requested but output head was not found")
+    return model
+
+
+def log_terminal_rl_config():
+    """Print recipe settings once so run logs capture the active contract."""
+    print(
+        "[TerminalRL] "
+        f"profile={{TRAINING_PROFILE}} group_size={{GRPO_GROUP_SIZE}} "
+        f"prompts_per_rollout_batch={{PROMPTS_PER_ROLLOUT_BATCH}} "
+        f"max_tool_calls={{MAX_TOOL_CALLS_PER_EPISODE}} "
+        f"loss_type={self.config.grpo_loss_type} token_level_loss={{TOKEN_LEVEL_LOSS}} "
+        f"filter_zero_std={{FILTER_ZERO_STD_GROUPS}} active_sampling={{ACTIVE_SAMPLING}} "
+        f"interleaved_thinking={{INTERLEAVED_THINKING}} "
+        f"sft_warm_start={{SFT_WARM_START_POLICY}} "
+        f"dppo_backend={{DPPO_BACKEND}} dppo_divergence={{DPPO_DIVERGENCE}}"
+    )
+    if FILTER_ZERO_STD_GROUPS or ACTIVE_SAMPLING:
+        print(
+            "[TerminalRL] zero-std filtering/active sampling contract is enabled; "
+            "standard TRL backends expose diagnostics, while external rollout "
+            "trainers should enforce filtering and refills."
+        )
+    for warning in TERMINAL_RL_WARNINGS:
+        print(f"[TerminalRL] warning: {{warning}}")'''
+
     def _grpo_reward_functions_src(self) -> str:
         """Shared generated-script source: reward-mode config + tiered reward functions.
 
@@ -3111,10 +3351,7 @@ class GRPOTrainer(Trainer):
         generator. The Unsloth generator keeps an inline copy (de-dup is a tracked
         follow-up gated on a byte-identity check).
         """
-        return f'''# Configuration
-REWARD_MODE = "{self.config.grpo_reward_mode}"
-NUM_GENERATIONS = {self.config.grpo_num_generations}
-
+        return f'''{self._terminal_rl_config_src()}
 
 # --- Reward helpers ---
 
@@ -3230,7 +3467,8 @@ Generated: {datetime.now(timezone.utc).isoformat()}
 
 GRPO: Group Relative Policy Optimization with tiered rewards
 - Reward mode: {self.config.grpo_reward_mode}
-- Generations per prompt: {self.config.grpo_num_generations}
+- Generations per prompt: {self.config.effective_grpo_group_size()}
+- Training profile: {self.config.training_profile}
 - Quantization: load_in_4bit={self.config.load_in_4bit} (GB10/sm_121 trains in bf16)
 - Family: {profile.family}; patches: {list(profile.patches)}
 
@@ -3266,6 +3504,7 @@ if __name__ == "__main__":
         torch.cuda.empty_cache()
 
     MODEL_NAME = "{self.config.base_model}"
+    log_terminal_rl_config()
     print(f"Loading {{MODEL_NAME}} with plain transformers (no Unsloth)...")
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
@@ -3279,6 +3518,7 @@ if __name__ == "__main__":
         attn_implementation="{profile.attn_implementation}",
         device_map="cuda:0",
     )
+    model = configure_terminal_rl_model(model)
     model.config.use_cache = False  # required for gradient checkpointing
     model.gradient_checkpointing_enable()
 
@@ -3298,7 +3538,7 @@ if __name__ == "__main__":
 
     grpo_config = GRPOConfig(
         output_dir="{output_path}",
-        num_generations=NUM_GENERATIONS,
+        num_generations=GRPO_GROUP_SIZE,
         per_device_train_batch_size={self.config.batch_size},
         gradient_accumulation_steps={self.config.gradient_accumulation_steps},
         num_train_epochs={self.config.num_epochs},
@@ -3351,7 +3591,8 @@ Generated: {datetime.now(timezone.utc).isoformat()}
 
 GRPO: Group Relative Policy Optimization with tiered rewards
 - Reward mode: {self.config.grpo_reward_mode}
-- Generations per prompt: {self.config.grpo_num_generations}
+- Generations per prompt: {self.config.effective_grpo_group_size()}
+- Training profile: {self.config.training_profile}
 
 Uses Unsloth to patch TRL imports (fixes vLLM crash on DGX Spark sm_121).
 """
@@ -3455,9 +3696,7 @@ def _install_gc_compat(model):
     model.gradient_checkpointing_enable = _compat
     return model
 
-# Configuration
-REWARD_MODE = "{self.config.grpo_reward_mode}"
-NUM_GENERATIONS = {self.config.grpo_num_generations}
+{self._terminal_rl_config_src()}
 
 
 # --- Reward helpers ---
@@ -3565,6 +3804,7 @@ if __name__ == "__main__":
         torch.cuda.empty_cache()
 
     MODEL_NAME = "{self.config.base_model}"
+    log_terminal_rl_config()
     print(f"Loading {{MODEL_NAME}} via Unsloth...")
 
     model, tokenizer = FastLanguageModel.from_pretrained(
@@ -3574,6 +3814,7 @@ if __name__ == "__main__":
         load_in_4bit={str(self.config.load_in_4bit)},
         device_map="sequential",
     )
+    model = configure_terminal_rl_model(model)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "left"  # GRPO needs left padding for generation
@@ -3605,7 +3846,7 @@ if __name__ == "__main__":
     # at the end of the run.
     grpo_config = GRPOConfig(
         output_dir="{output_path}",
-        num_generations=NUM_GENERATIONS,
+        num_generations=GRPO_GROUP_SIZE,
         per_device_train_batch_size={self.config.batch_size},
         gradient_accumulation_steps={self.config.gradient_accumulation_steps},
         num_train_epochs={self.config.num_epochs},

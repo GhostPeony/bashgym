@@ -14,10 +14,11 @@ import {
 } from 'lucide-react'
 import { clsx } from 'clsx'
 
-type GuideSectionId = 'start' | 'strategies' | 'metrics' | 'world-models' | 'sources'
+type GuideSectionId = 'start' | 'capabilities' | 'strategies' | 'metrics' | 'world-models' | 'sources'
 
 const guideSections: { id: GuideSectionId; label: string; icon: typeof BookOpen }[] = [
   { id: 'start', label: 'Start', icon: ClipboardCheck },
+  { id: 'capabilities', label: 'Status', icon: ShieldCheck },
   { id: 'strategies', label: 'Strategies', icon: GitCompare },
   { id: 'metrics', label: 'Metrics', icon: Gauge },
   { id: 'world-models', label: 'World Models', icon: Network },
@@ -44,6 +45,45 @@ const setupCards = [
     title: 'Keep release gates separate',
     body: 'ECHO/RWML, reward, and loss curves are diagnostics. Shipping confidence still comes from held-out pass@k, contamination checks, tamper checks, and benchmark evidence.',
     icon: ShieldCheck,
+  },
+]
+
+const capabilityRows = [
+  {
+    capability: 'SFT',
+    status: 'Ready',
+    promise: 'Train a first local student from gold traces using Unsloth or plain Transformers scripts.',
+    proof: 'Eval loss, held-out trace behavior, and environment pass@k.',
+  },
+  {
+    capability: 'DPO',
+    status: 'Ready',
+    promise: 'Refine an SFT checkpoint from chosen/rejected pairs for the same prompt.',
+    proof: 'Preference accuracy, reward margin, and no held-out regression.',
+  },
+  {
+    capability: 'GRPO / RLVR',
+    status: 'Ready with verifier evidence',
+    promise: 'Optimize terminal behavior when executable rewards have non-zero contrast.',
+    proof: 'reward_std, frac_reward_zero_std, pass@k, timeout, tamper, and holdout gates.',
+  },
+  {
+    capability: 'DPPO',
+    status: 'Requires backend smoke',
+    promise: 'Replay/logprob/trust-region plumbing exists for backend-driven rollout optimization.',
+    proof: 'One installed verl, SkyRL, or OpenRLHF smoke with saved mask telemetry and pass@k evidence.',
+  },
+  {
+    capability: 'ECHO / RWML',
+    status: 'Requires backend smoke',
+    promise: 'World-model config, replay payloads, adapter hooks, and dashboards are wired.',
+    proof: 'Backend-emitted ECHO loss, RWML quality metrics, and correlation with held-out behavior.',
+  },
+  {
+    capability: 'Release gates',
+    status: 'Ready',
+    promise: 'Combine trace, environment, safety, and external benchmark evidence before promotion.',
+    proof: 'Heldout verdict, holdout comparison, spurious controls, tamper canaries, benchmark manifests.',
   },
 ]
 
@@ -308,6 +348,28 @@ export function TrainingGuidance() {
                     </p>
                   </div>
                 </div>
+              </div>
+            </>
+          )}
+
+          {activeSection === 'capabilities' && (
+            <>
+              <SectionHeader
+                eyebrow="Capability status"
+                title="What is ready, and what still needs backend proof"
+                body="BashGym should be clear about the difference between stable training paths, experimental adapters, and diagnostics. This table is the product promise boundary."
+              />
+              <GuideTable
+                headers={['Capability', 'Status', 'User promise', 'Proof needed']}
+                rows={capabilityRows.map((row) => [row.capability, row.status, row.promise, row.proof])}
+              />
+              <div className="border-brutal border-border rounded-brutal bg-background-secondary p-4">
+                <p className="font-mono text-xs uppercase tracking-widest text-text-primary">Truth boundary</p>
+                <p className="mt-2 text-sm leading-relaxed text-text-secondary">
+                  DPPO and ECHO/RWML are real platform contracts, not empty labels. They should still be presented as
+                  backend-dependent until an installed trainer run produces artifacts. World-model quality remains
+                  diagnostic release evidence until it predicts held-out pass@k and safety outcomes.
+                </p>
               </div>
             </>
           )}

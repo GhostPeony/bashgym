@@ -37,6 +37,10 @@ DOCS = {
         "path": "docs/training/overview.md",
         "summary": "Training mental model, data sources, strategy overview, and world-model placement.",
     },
+    "capabilities": {
+        "path": "docs/training/capability-map.md",
+        "summary": "Full training/eval capability map with ready, backend-dependent, and diagnostic surfaces.",
+    },
     "strategy": {
         "path": "docs/training/strategy-guide.md",
         "summary": "Starting settings for SFT, DPO, GRPO/RLVR, distillation, cascade, and DPPO.",

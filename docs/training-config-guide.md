@@ -2,7 +2,8 @@
 
 A practical reference for every option in Bash Gym's Training Configuration panel.
 For the broader operator curriculum, start with
-[training/overview.md](training/overview.md), then use
+[training/overview.md](training/overview.md) and
+[training/capability-map.md](training/capability-map.md), then use
 [training/strategy-guide.md](training/strategy-guide.md) and
 [training/metrics-runbook.md](training/metrics-runbook.md) while configuring and
 diagnosing runs.

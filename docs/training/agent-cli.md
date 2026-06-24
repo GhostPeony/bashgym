@@ -22,6 +22,7 @@ Use this first when an agent needs to know what BashGym can do. It returns:
 ```bash
 bashgym training docs --json
 bashgym training docs --topic overview --json
+bashgym training docs --topic capabilities --json
 bashgym training docs --topic strategy --json
 bashgym training docs --topic metrics --json
 bashgym training docs --topic world-models --json
@@ -108,14 +109,15 @@ The wrapper accepts `--host`, `--port`, `--reload`, `--workers`,
 
 1. `bashgym manifest --json`
 2. `bashgym training docs --topic overview --json`
-3. `bashgym training plan --strategy sft --json`
-4. Set up or inspect the run in the UI/API.
-5. Evaluate with pass@k and heldout gates.
-6. If using terminal RL or DPPO, export replay and run
+3. `bashgym training docs --topic capabilities --json`
+4. `bashgym training plan --strategy sft --json`
+5. Set up or inspect the run in the UI/API.
+6. Evaluate with pass@k and heldout gates.
+7. If using terminal RL or DPPO, export replay and run
    `bashgym replay summarize <path> --json`.
-7. Run `bashgym training analyze --run-id <run> --json` or pass explicit
+8. Run `bashgym training analyze --run-id <run> --json` or pass explicit
    `--metrics`, `--replay`, and `--release-evidence` paths.
-8. Read `metrics-runbook.md` when behavior does not improve.
+9. Read `metrics-runbook.md` when behavior does not improve.
 
 ## Exit-code expectations
 
@@ -126,6 +128,7 @@ The wrapper accepts `--host`, `--port`, `--reload`, `--workers`,
 ## Read next
 
 - [overview.md](overview.md)
+- [capability-map.md](capability-map.md)
 - [strategy-guide.md](strategy-guide.md)
 - [world-models.md](world-models.md)
 - [metrics-runbook.md](metrics-runbook.md)

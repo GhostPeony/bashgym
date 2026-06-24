@@ -18,6 +18,7 @@ def test_manifest_json_is_agent_readable(capsys):
     assert payload["ok"] is True
     assert "training plan" in payload["commands"]
     assert "training analyze" in payload["commands"]
+    assert any(doc["topic"] == "capabilities" for doc in payload["docs"])
     assert any(doc["topic"] == "world-models" for doc in payload["docs"])
     assert all(isinstance(doc["exists"], bool) for doc in payload["docs"])
     assert payload["next"][0]["command"].startswith("bashgym ")
@@ -30,6 +31,17 @@ def test_training_docs_topic_returns_content_in_json(capsys):
     assert payload["ok"] is True
     assert payload["topic"] == "glossary"
     assert "Training Glossary" in payload["content"]
+
+
+def test_training_docs_capabilities_topic_maps_full_spread(capsys):
+    assert main(["training", "docs", "--topic", "capabilities", "--json"]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    assert payload["topic"] == "capabilities"
+    assert "Training Capability Map" in payload["content"]
+    assert "DPPO replay" in payload["content"]
+    assert "ECHO" in payload["content"]
 
 
 def test_training_plan_world_model_contains_echo_rwml_defaults(capsys):

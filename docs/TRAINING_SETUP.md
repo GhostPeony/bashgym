@@ -5,8 +5,10 @@ tiers, the model families, the six training strategies, the data-generation
 factory, the provider/serving layer, and the remote-training flow. For the exact
 hyperparameter values and quick-start recipes see
 [training-config-guide.md](training-config-guide.md); for the beginner/operator
-curriculum see [training/overview.md](training/overview.md); for how a session
-becomes training data see [TRAINING_DATA_GUIDE.md](TRAINING_DATA_GUIDE.md).
+curriculum see [training/overview.md](training/overview.md); for the stable,
+backend-dependent, and diagnostic capability map see
+[training/capability-map.md](training/capability-map.md); for how a session becomes
+training data see [TRAINING_DATA_GUIDE.md](TRAINING_DATA_GUIDE.md).
 
 ---
 
@@ -267,6 +269,7 @@ next training set.
 ## Read next
 
 - [training/overview.md](training/overview.md) — how the training gym works from first principles.
+- [training/capability-map.md](training/capability-map.md) — full training/eval spread and stable vs backend-dependent status.
 - [training/strategy-guide.md](training/strategy-guide.md) — concrete starting settings and strategy selection.
 - [training/agent-cli.md](training/agent-cli.md) — machine-readable CLI commands for agents setting up runs and analyzing replay artifacts.
 - [training/world-models.md](training/world-models.md) — ECHO/RWML contracts, replay payloads, backend integration, and telemetry boundaries.

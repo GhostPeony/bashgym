@@ -4,6 +4,29 @@
  */
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8002/api'
+const BACKEND_START_COMMAND = 'bashgym serve --host 127.0.0.1 --port 8002'
+
+function normalizeApiError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error || 'Unknown API error')
+  const lower = raw.toLowerCase()
+  const looksOffline =
+    lower.includes('failed to fetch') ||
+    lower.includes('fetch failed') ||
+    lower.includes('networkerror') ||
+    lower.includes('err_connection_refused') ||
+    lower.includes('load failed')
+
+  if (!looksOffline) {
+    return raw
+  }
+
+  return [
+    `Backend API is not reachable at ${API_BASE}.`,
+    `Start it with: ${BACKEND_START_COMMAND}`,
+    'If the backend is already running on another port, set VITE_API_URL to that /api URL.',
+    `Original error: ${raw}`,
+  ].join(' ')
+}
 
 // Types matching backend schemas
 export interface TaskRequest {
@@ -371,7 +394,11 @@ async function request<T>(
     // Use Electron IPC proxy if available (avoids CORS in dev)
     if (window.bashgym?.api) {
       const result = await window.bashgym.api.fetch(`${API_BASE}${endpoint}`, options)
-      return result as ApiResponse<T>
+      const apiResult = result as ApiResponse<T>
+      if (!apiResult.ok && apiResult.error) {
+        return { ...apiResult, error: normalizeApiError(apiResult.error) }
+      }
+      return apiResult
     }
 
     // Direct fetch fallback
@@ -394,7 +421,7 @@ async function request<T>(
       return { ok: false, error: text || `HTTP ${response.status}` }
     }
   } catch (error) {
-    return { ok: false, error: String(error) }
+    return { ok: false, error: normalizeApiError(error) }
   }
 }
 

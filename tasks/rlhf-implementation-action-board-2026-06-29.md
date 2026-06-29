@@ -106,12 +106,14 @@ Already in place:
 - Hugging Face-backed source fetch orchestration through CLI/API/Factory UI/Data
   Designer, writing capped local `source_records.jsonl` files and
   `source_fetch_report.json` before adapter conversion.
+- Source fetch policy now records request fingerprints, reuses matching local
+  fetch caches, supports force refresh, and requires an approval reason before
+  larger-than-default Hugging Face pulls across helper/API/CLI/UI/Data Designer.
 
 Actionable next items:
 
 - Expand source-specific schema mapping for each newly approved public source
   instead of relying only on generic JSONL field inference.
-- Add remote fetch approval and cache policy for larger/billable data pulls.
 - Source Library UI handoff for prepared artifacts is now in Factory. Next,
   expand public-source policy and source expansion priorities.
 - Keep RewardBench, CUARewardBench, BFCL, tau-bench, Terminal-Bench, and
@@ -396,8 +398,7 @@ Status: completed for local/fixture JSON/JSONL inputs.
 - Added tests proving eval-only sources cannot export training artifacts by
   default.
 
-Remaining: network/Hugging Face download orchestration and public-source
-expansion policy.
+Remaining: source-specific schema mappings and public-source expansion policy.
 
 ### Ticket 2: CLI/API/Data Designer Adapter Wiring
 

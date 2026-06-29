@@ -889,6 +889,8 @@ export interface SourcePrepareRequest {
   subset?: string
   revision?: string
   limit?: number
+  fetch_approval_reason?: string
+  force_refresh?: boolean
   allow_eval_only?: boolean
   override_reason?: string
 }
@@ -899,6 +901,8 @@ export interface SourceFetchRequest {
   subset?: string
   revision?: string
   limit?: number
+  approval_reason?: string
+  force_refresh?: boolean
 }
 
 export interface SourceFetchReport {
@@ -916,6 +920,14 @@ export interface SourceFetchReport {
   report_path?: string
   record_count: number
   truncated: boolean
+  request?: Record<string, unknown>
+  cache_enabled?: boolean
+  cache_hit?: boolean
+  force_refresh?: boolean
+  approval_policy?: Record<string, unknown>
+  approval_required?: boolean
+  approval_granted?: boolean
+  approval_reason?: string | null
   warnings: string[]
   errors: string[]
 }

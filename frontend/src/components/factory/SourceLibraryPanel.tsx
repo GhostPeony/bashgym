@@ -34,6 +34,7 @@ const SOURCE_GOALS: Array<{ value: SourceUse; label: string; detail: string }> =
 ]
 
 const EMPTY_SOURCE_CARDS: SourceCard[] = []
+const SOURCE_FETCH_APPROVAL_LIMIT = 1000
 
 type CatalogState =
   | { status: 'loading' }
@@ -250,6 +251,8 @@ export function SourceLibraryPanel() {
   const [revisionInput, setRevisionInput] = useState('')
   const [outputDir, setOutputDir] = useState('')
   const [limitInput, setLimitInput] = useState('')
+  const [fetchApprovalReason, setFetchApprovalReason] = useState('')
+  const [forceRefresh, setForceRefresh] = useState(false)
   const [allowEvalOnly, setAllowEvalOnly] = useState(false)
   const [overrideReason, setOverrideReason] = useState('')
   const setDatasetPathOverride = useTrainingStore((state) => state.setDatasetPathOverride)
@@ -331,6 +334,18 @@ export function SourceLibraryPanel() {
       setPrepareState({ status: 'error', error: 'Limit must be a positive number.' })
       return
     }
+    if (
+      fetchRemote &&
+      limit !== undefined &&
+      limit > SOURCE_FETCH_APPROVAL_LIMIT &&
+      !fetchApprovalReason.trim()
+    ) {
+      setPrepareState({
+        status: 'error',
+        error: `Fetching more than ${SOURCE_FETCH_APPROVAL_LIMIT} records requires an approval reason.`,
+      })
+      return
+    }
     setPrepareState({ status: 'loading' })
     const response = await sourcesApi.prepare(selectedSourceId, {
       goal,
@@ -341,6 +356,8 @@ export function SourceLibraryPanel() {
       subset: fetchRemote ? subsetInput.trim() || undefined : undefined,
       revision: fetchRemote ? revisionInput.trim() || undefined : undefined,
       limit,
+      fetch_approval_reason: fetchRemote ? fetchApprovalReason.trim() || undefined : undefined,
+      force_refresh: fetchRemote ? forceRefresh : undefined,
       allow_eval_only: allowEvalOnly,
       override_reason: allowEvalOnly ? overrideReason.trim() || undefined : undefined,
     })
@@ -363,6 +380,8 @@ export function SourceLibraryPanel() {
     splitInput,
     subsetInput,
     revisionInput,
+    fetchApprovalReason,
+    forceRefresh,
     allowEvalOnly,
     overrideReason,
   ])
@@ -384,6 +403,12 @@ export function SourceLibraryPanel() {
     goal !== 'evaluation' &&
     goal !== 'raw_reference' &&
     !allowEvalOnly
+  const parsedLimit = Number(limitInput.trim())
+  const largeRemoteFetchSelected =
+    fetchRemote &&
+    limitInput.trim() !== '' &&
+    Number.isFinite(parsedLimit) &&
+    parsedLimit > SOURCE_FETCH_APPROVAL_LIMIT
 
   if (catalogState.status === 'loading') {
     return (
@@ -560,43 +585,81 @@ export function SourceLibraryPanel() {
               </button>
 
               {fetchRemote ? (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <label className="block">
+                      <span className="block font-mono text-[11px] uppercase text-text-muted mb-1">
+                        Split
+                      </span>
+                      <input
+                        value={splitInput}
+                        onChange={(event) => setSplitInput(event.target.value)}
+                        placeholder="train"
+                        className="input w-full font-mono text-xs"
+                      />
+                    </label>
+
+                    <label className="block">
+                      <span className="block font-mono text-[11px] uppercase text-text-muted mb-1">
+                        Subset
+                      </span>
+                      <input
+                        value={subsetInput}
+                        onChange={(event) => setSubsetInput(event.target.value)}
+                        placeholder="Optional"
+                        className="input w-full font-mono text-xs"
+                      />
+                    </label>
+
+                    <label className="block">
+                      <span className="block font-mono text-[11px] uppercase text-text-muted mb-1">
+                        Revision
+                      </span>
+                      <input
+                        value={revisionInput}
+                        onChange={(event) => setRevisionInput(event.target.value)}
+                        placeholder="Optional"
+                        className="input w-full font-mono text-xs"
+                      />
+                    </label>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setForceRefresh((current) => !current)}
+                    className={clsx(
+                      'w-full flex items-center justify-center gap-2 px-3 py-2 border-2 transition-press font-mono text-[11px] uppercase tracking-[0.12em]',
+                      forceRefresh
+                        ? 'border-status-warning bg-status-warning/10 text-status-warning'
+                        : 'border-border text-text-secondary bg-background-card'
+                    )}
+                    title="Bypass a matching local source fetch cache"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    Cache {forceRefresh ? 'refresh' : 'reuse'}
+                  </button>
+
                   <label className="block">
-                    <span className="block font-mono text-[11px] uppercase text-text-muted mb-1">
-                      Split
+                    <span className="block font-mono text-[11px] uppercase tracking-[0.15em] text-text-muted mb-1">
+                      Fetch approval reason
                     </span>
-                    <input
-                      value={splitInput}
-                      onChange={(event) => setSplitInput(event.target.value)}
-                      placeholder="train"
-                      className="input w-full font-mono text-xs"
+                    <textarea
+                      value={fetchApprovalReason}
+                      onChange={(event) => setFetchApprovalReason(event.target.value)}
+                      className="input w-full min-h-20 text-sm"
+                      placeholder={`Required above ${SOURCE_FETCH_APPROVAL_LIMIT} records`}
                     />
                   </label>
 
-                  <label className="block">
-                    <span className="block font-mono text-[11px] uppercase text-text-muted mb-1">
-                      Subset
-                    </span>
-                    <input
-                      value={subsetInput}
-                      onChange={(event) => setSubsetInput(event.target.value)}
-                      placeholder="Optional"
-                      className="input w-full font-mono text-xs"
-                    />
-                  </label>
-
-                  <label className="block">
-                    <span className="block font-mono text-[11px] uppercase text-text-muted mb-1">
-                      Revision
-                    </span>
-                    <input
-                      value={revisionInput}
-                      onChange={(event) => setRevisionInput(event.target.value)}
-                      placeholder="Optional"
-                      className="input w-full font-mono text-xs"
-                    />
-                  </label>
-                </div>
+                  {largeRemoteFetchSelected && !fetchApprovalReason.trim() ? (
+                    <div className="border-2 border-status-warning bg-status-warning/10 p-3">
+                      <p className="font-mono text-xs text-status-warning flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4" />
+                        Larger source fetches need an approval reason.
+                      </p>
+                    </div>
+                  ) : null}
+                </>
               ) : (
                 <label className="block">
                   <span className="block font-mono text-[11px] uppercase tracking-[0.15em] text-text-muted mb-1">
@@ -723,6 +786,15 @@ export function SourceLibraryPanel() {
                 ) : null}
                 {prepareState.report.fetch_report?.report_path ? (
                   <p>Fetch report: {prepareState.report.fetch_report.report_path}</p>
+                ) : null}
+                {prepareState.report.fetch_report?.cache_hit !== undefined ? (
+                  <p>Fetch cache: {prepareState.report.fetch_report.cache_hit ? 'hit' : 'miss'}</p>
+                ) : null}
+                {prepareState.report.fetch_report?.approval_required ? (
+                  <p>
+                    Fetch approval:{' '}
+                    {prepareState.report.fetch_report.approval_granted ? 'recorded' : 'required'}
+                  </p>
                 ) : null}
                 {prepareState.report.report_path ? <p>Report: {prepareState.report.report_path}</p> : null}
                 {prepareState.report.manifest_path ? <p>Manifest: {prepareState.report.manifest_path}</p> : null}

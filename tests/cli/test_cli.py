@@ -129,7 +129,17 @@ def test_sources_cli_prepares_local_input_artifacts(tmp_path, capsys):
 
 
 def test_sources_cli_fetches_and_prepares_remote_source(tmp_path, capsys, monkeypatch):
-    def fake_fetch(card, *, output_dir, split, subset=None, revision=None, limit=None):
+    def fake_fetch(
+        card,
+        *,
+        output_dir,
+        split,
+        subset=None,
+        revision=None,
+        limit=None,
+        approval_reason=None,
+        force_refresh=False,
+    ):
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
         records_path = output_path / "source_records.jsonl"
@@ -161,6 +171,11 @@ def test_sources_cli_fetches_and_prepares_remote_source(tmp_path, capsys, monkey
             "report_path": str(output_path / "source_fetch_report.json"),
             "record_count": 1,
             "truncated": False,
+            "cache_hit": False,
+            "force_refresh": force_refresh,
+            "approval_required": limit is None or limit > 1000,
+            "approval_granted": True,
+            "approval_reason": approval_reason,
             "warnings": [],
             "errors": [],
         }
@@ -179,6 +194,7 @@ def test_sources_cli_fetches_and_prepares_remote_source(tmp_path, capsys, monkey
                 "train_prefs",
                 "--limit",
                 "1",
+                "--force-refresh",
                 "--json",
             ]
         )
@@ -187,6 +203,7 @@ def test_sources_cli_fetches_and_prepares_remote_source(tmp_path, capsys, monkey
     fetch_payload = json.loads(capsys.readouterr().out)
     assert fetch_payload["ok"] is True
     assert fetch_payload["schema_version"] == "bashgym.source_fetch.v1"
+    assert fetch_payload["force_refresh"] is True
 
     assert (
         main(
@@ -201,6 +218,8 @@ def test_sources_cli_fetches_and_prepares_remote_source(tmp_path, capsys, monkey
                 str(tmp_path / "prepare"),
                 "--limit",
                 "1",
+                "--fetch-approval-reason",
+                "fixture fetch",
                 "--json",
             ]
         )
@@ -209,8 +228,33 @@ def test_sources_cli_fetches_and_prepares_remote_source(tmp_path, capsys, monkey
     prepare_payload = json.loads(capsys.readouterr().out)
     assert prepare_payload["ok"] is True
     assert prepare_payload["fetch_report"]["schema_version"] == "bashgym.source_fetch.v1"
+    assert prepare_payload["fetch_report"]["approval_reason"] == "fixture fetch"
     assert prepare_payload["artifacts"][0]["artifact_type"] == "dpo_pairs"
     assert (tmp_path / "prepare" / "dpo_pairs.jsonl").exists()
+
+
+def test_sources_cli_fetch_requires_approval_for_large_limit(tmp_path, capsys):
+    assert (
+        main(
+            [
+                "sources",
+                "fetch",
+                "ultrafeedback_binarized",
+                "--output-dir",
+                str(tmp_path / "fetch"),
+                "--limit",
+                "1001",
+                "--json",
+            ]
+        )
+        == 2
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["approval_required"] is True
+    assert "remote_fetch_approval_required" in payload["errors"]
+    assert not tmp_path.joinpath("fetch", "source_records.jsonl").exists()
 
 
 def test_compute_cli_lists_preflights_and_dry_runs_launch(capsys):

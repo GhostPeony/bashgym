@@ -39,9 +39,10 @@ Archive: `tasks/archived-completed-before-2026-06-22.md` contains completed item
 - [x] Add local/fixture Source Library adapters that convert JSON/JSONL source-card records into SFT, DPO, reward, process-reward, eval-manifest, or environment-spec artifacts through CLI/API/Data Designer while preserving source metadata and eval-only guardrails
 - [x] Add Factory Source Library UI for source recommendations, eval-only guardrails, local artifact preparation, and Training handoff
 - [x] Add Hugging Face-backed source fetch orchestration through Source Library CLI/API/UI/Data Designer, capped local `source_records.jsonl` outputs, fetch reports, and fetch-to-artifact conversion
+- [x] Add Source Library remote-fetch approval and cache policy for larger Hugging Face pulls across helper/API/CLI/UI/Data Designer
 - [x] Add Training RunCard Evidence UI/API for local RunCard discovery, promotion validation, claim-tier blockers, and artifact presence
 - [x] Add compact RunCard promotion explanations with failed gates and next actions across CLI/API/UI
-- [ ] Human decision: choose eval-only override policy, first installed backend, first cloud launcher priority, first public-source expansion set, remote/billable approval boundary, and claim-tier thresholds (`tasks/human-decisions-source-compute-2026-06-29.md`)
+- [ ] Human decision: choose eval-only override policy, first installed backend, first cloud launcher priority, first public-source expansion set, remote/billable compute approval boundary, and claim-tier thresholds (`tasks/human-decisions-source-compute-2026-06-29.md`)
 
 ## Active — Dashboard UI/UX quality pass (2026-06-24)
 - [x] Map dashboard routes, shared components, and current design primitives

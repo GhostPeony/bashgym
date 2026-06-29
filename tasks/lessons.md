@@ -106,3 +106,21 @@ permissions, while ignoring it can lose useful handoff material.
 - Promote durable scratchpad content into tracked `tasks/` or `docs/` files.
 - Keep local permission/config changes out of product commits unless they are
   explicitly part of the repo contract.
+
+## 2026-06-29 — Translate research docs into shipped behavior
+
+**Correction:** The user asked how much of the documentation work was actually
+translating into BashGym code.
+
+**Why it matters:** Research docs and action boards are useful only if they drive
+software, tests, or explicit human decisions. Otherwise the repo can start to
+look complete while the product still lacks the promised workflows.
+
+**How to apply:**
+- For each roadmap pass, pick at least one item that becomes backend/API/CLI/UI
+  behavior unless the item is genuinely blocked by GX10/runtime access or a
+  human policy decision.
+- When updating docs, mark whether the item is code-backed, runtime-blocked, or
+  awaiting a human choice.
+- Keep verification attached to the software surface, not only to the document
+  that describes it.

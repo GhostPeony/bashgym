@@ -2279,6 +2279,8 @@ def cmd_sources_fetch(args: argparse.Namespace) -> int:
             subset=args.subset,
             revision=args.revision,
             limit=args.limit,
+            approval_reason=args.approval_reason,
+            force_refresh=args.force_refresh,
         ),
     }
     if not payload["ok"]:
@@ -2311,6 +2313,8 @@ def cmd_sources_prepare(args: argparse.Namespace) -> int:
             subset=args.subset,
             revision=args.revision,
             limit=args.limit if args.limit is not None else DEFAULT_SOURCE_FETCH_LIMIT,
+            approval_reason=args.fetch_approval_reason,
+            force_refresh=args.force_refresh,
         )
         if not fetch_report["ok"]:
             payload = {"title": "BashGym Source Fetch", **fetch_report}
@@ -2802,6 +2806,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_SOURCE_FETCH_LIMIT,
         help="Maximum number of source records to fetch",
     )
+    sources_fetch.add_argument(
+        "--approval-reason",
+        help="Required when fetching more than the default capped source record limit",
+    )
+    sources_fetch.add_argument(
+        "--force-refresh",
+        action="store_true",
+        help="Ignore a matching cached source_fetch_report/source_records pair",
+    )
     sources_fetch.set_defaults(func=cmd_sources_fetch)
 
     sources_prepare = sources_sub.add_parser(
@@ -2832,6 +2845,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--limit",
         type=int,
         help="Maximum number of local or fetched source records to convert",
+    )
+    sources_prepare.add_argument(
+        "--fetch-approval-reason",
+        help="Required with --fetch when fetching more than the default capped source record limit",
+    )
+    sources_prepare.add_argument(
+        "--force-refresh",
+        action="store_true",
+        help="With --fetch, ignore a matching cached source_fetch_report/source_records pair",
     )
     sources_prepare.add_argument(
         "--allow-eval-only",

@@ -470,6 +470,8 @@ class DataDesignerPipeline:
         subset: str | None = None,
         revision: str | None = None,
         limit: int | None = None,
+        fetch_approval_reason: str | None = None,
+        force_refresh: bool = False,
         allow_eval_only: bool = False,
         override_reason: str | None = None,
     ) -> dict[str, Any]:
@@ -501,6 +503,8 @@ class DataDesignerPipeline:
                 subset=subset,
                 revision=revision,
                 limit=limit if limit is not None else DEFAULT_SOURCE_FETCH_LIMIT,
+                approval_reason=fetch_approval_reason,
+                force_refresh=force_refresh,
             )
             if not fetch_report["ok"]:
                 raise ValueError(

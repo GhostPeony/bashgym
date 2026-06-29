@@ -12,8 +12,45 @@ from bashgym.sources.catalog import SourceCard
 
 SOURCE_FETCH_SCHEMA_VERSION = "bashgym.source_fetch.v1"
 DEFAULT_SOURCE_FETCH_LIMIT = 1000
+SOURCE_FETCH_APPROVAL_LIMIT = DEFAULT_SOURCE_FETCH_LIMIT
 
 DatasetLoader = Callable[..., Iterable[Any]]
+
+
+def source_fetch_approval_policy() -> dict[str, Any]:
+    """Return the fail-closed policy for larger Hugging Face source pulls."""
+
+    return {
+        "default_limit": DEFAULT_SOURCE_FETCH_LIMIT,
+        "approval_limit": SOURCE_FETCH_APPROVAL_LIMIT,
+        "requires_reason_when": "limit is omitted/unbounded or greater than approval_limit",
+        "reason": (
+            "Large public-source fetches can take time, consume quota, or pull more data "
+            "than intended. Provide an approval reason to record why the larger pull is safe."
+        ),
+    }
+
+
+def _fetch_requires_approval(limit: int | None) -> bool:
+    return limit is None or limit > SOURCE_FETCH_APPROVAL_LIMIT
+
+
+def _fetch_request(
+    card: SourceCard,
+    *,
+    split: str,
+    subset: str | None,
+    revision: str | None,
+    limit: int | None,
+) -> dict[str, Any]:
+    return {
+        "source_id": card.id,
+        "huggingface_id": card.huggingface_id,
+        "split": split,
+        "subset": subset,
+        "revision": revision,
+        "limit": limit,
+    }
 
 
 def _load_huggingface_dataset(
@@ -125,6 +162,31 @@ def _write_report(path: Path, report: dict[str, Any]) -> None:
     path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
 
 
+def _read_cached_report(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _cached_report_matches(
+    report: dict[str, Any] | None,
+    *,
+    request: dict[str, Any],
+    records_path: Path,
+) -> bool:
+    if not report or not report.get("ok"):
+        return False
+    if report.get("schema_version") != SOURCE_FETCH_SCHEMA_VERSION:
+        return False
+    if report.get("request") != request:
+        return False
+    return records_path.exists()
+
+
 def fetch_source_records(
     card: SourceCard,
     *,
@@ -133,6 +195,8 @@ def fetch_source_records(
     limit: int | None = DEFAULT_SOURCE_FETCH_LIMIT,
     subset: str | None = None,
     revision: str | None = None,
+    approval_reason: str | None = None,
+    force_refresh: bool = False,
     loader: DatasetLoader | None = None,
 ) -> dict[str, Any]:
     """Fetch a Hugging Face-backed source card into local JSONL records.
@@ -146,6 +210,15 @@ def fetch_source_records(
     output_path.mkdir(parents=True, exist_ok=True)
     records_path = output_path / "source_records.jsonl"
     report_path = output_path / "source_fetch_report.json"
+    request = _fetch_request(
+        card,
+        split=split,
+        subset=subset,
+        revision=revision,
+        limit=limit,
+    )
+    approval_required = _fetch_requires_approval(limit)
+    approval_reason_clean = approval_reason.strip() if approval_reason else None
     report: dict[str, Any] = {
         "schema_version": SOURCE_FETCH_SCHEMA_VERSION,
         "ok": True,
@@ -160,6 +233,14 @@ def fetch_source_records(
         "records_path": str(records_path),
         "record_count": 0,
         "truncated": False,
+        "request": request,
+        "cache_enabled": True,
+        "cache_hit": False,
+        "force_refresh": force_refresh,
+        "approval_policy": source_fetch_approval_policy(),
+        "approval_required": approval_required,
+        "approval_granted": not approval_required or bool(approval_reason_clean),
+        "approval_reason": approval_reason_clean,
         "warnings": [],
         "errors": [],
     }
@@ -168,6 +249,39 @@ def fetch_source_records(
         report["errors"].append("source_has_no_huggingface_id")
         _write_report(report_path, report)
         return report
+
+    if approval_required and not approval_reason_clean:
+        report["ok"] = False
+        report["errors"].append("remote_fetch_approval_required")
+        report["warnings"].append(
+            f"Set an approval reason to fetch more than {SOURCE_FETCH_APPROVAL_LIMIT} records."
+        )
+        _write_report(report_path, report)
+        return report
+
+    if not force_refresh:
+        cached_report = _read_cached_report(report_path)
+        if _cached_report_matches(cached_report, request=request, records_path=records_path):
+            cached = dict(cached_report or {})
+            cached.update(
+                {
+                    "cache_enabled": True,
+                    "cache_hit": True,
+                    "force_refresh": False,
+                    "approval_policy": source_fetch_approval_policy(),
+                    "approval_required": approval_required,
+                    "approval_granted": True,
+                    "approval_reason": approval_reason_clean or cached.get("approval_reason"),
+                    "request": request,
+                    "output_dir": str(output_path),
+                    "records_path": str(records_path),
+                }
+            )
+            _write_report(report_path, cached)
+            return cached
+
+    if limit is None:
+        report["warnings"].append("unbounded_source_fetch")
 
     load = loader or _load_huggingface_dataset
     try:

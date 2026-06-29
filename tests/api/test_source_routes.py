@@ -94,7 +94,17 @@ def test_source_routes_prepare_local_input_artifacts(tmp_path):
 
 
 def test_source_routes_fetch_huggingface_source_records(tmp_path, monkeypatch):
-    def fake_fetch(card, *, output_dir, split, subset=None, revision=None, limit=None):
+    def fake_fetch(
+        card,
+        *,
+        output_dir,
+        split,
+        subset=None,
+        revision=None,
+        limit=None,
+        approval_reason=None,
+        force_refresh=False,
+    ):
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
         records_path = output_path / "source_records.jsonl"
@@ -126,6 +136,11 @@ def test_source_routes_fetch_huggingface_source_records(tmp_path, monkeypatch):
             "report_path": str(report_path),
             "record_count": 1,
             "truncated": False,
+            "cache_hit": False,
+            "force_refresh": force_refresh,
+            "approval_required": False,
+            "approval_granted": True,
+            "approval_reason": approval_reason,
             "warnings": [],
             "errors": [],
         }
@@ -142,11 +157,36 @@ def test_source_routes_fetch_huggingface_source_records(tmp_path, monkeypatch):
     assert payload["ok"] is True
     assert payload["schema_version"] == "bashgym.source_fetch.v1"
     assert payload["split"] == "train_prefs"
+    assert payload["cache_hit"] is False
     assert Path(payload["records_path"]).exists()
 
 
+def test_source_routes_fetch_requires_approval_for_large_limit(tmp_path):
+    response = client.post(
+        "/api/sources/ultrafeedback_binarized/fetch",
+        json={"output_dir": str(tmp_path / "fetch"), "limit": 1001},
+    )
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert detail["approval_required"] is True
+    assert detail["approval_granted"] is False
+    assert "remote_fetch_approval_required" in detail["errors"]
+    assert not tmp_path.joinpath("fetch", "source_records.jsonl").exists()
+
+
 def test_source_routes_prepare_can_fetch_then_convert(tmp_path, monkeypatch):
-    def fake_fetch(card, *, output_dir, split, subset=None, revision=None, limit=None):
+    def fake_fetch(
+        card,
+        *,
+        output_dir,
+        split,
+        subset=None,
+        revision=None,
+        limit=None,
+        approval_reason=None,
+        force_refresh=False,
+    ):
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
         records_path = output_path / "source_records.jsonl"
@@ -178,6 +218,11 @@ def test_source_routes_prepare_can_fetch_then_convert(tmp_path, monkeypatch):
             "report_path": str(output_path / "source_fetch_report.json"),
             "record_count": 1,
             "truncated": False,
+            "cache_hit": False,
+            "force_refresh": force_refresh,
+            "approval_required": limit is None or limit > 1000,
+            "approval_granted": True,
+            "approval_reason": approval_reason,
             "warnings": [],
             "errors": [],
         }
@@ -192,6 +237,8 @@ def test_source_routes_prepare_can_fetch_then_convert(tmp_path, monkeypatch):
             "output_dir": str(tmp_path / "out"),
             "split": "train_prefs",
             "limit": 1,
+            "fetch_approval_reason": "fixture fetch",
+            "force_refresh": True,
         },
     )
 
@@ -199,5 +246,7 @@ def test_source_routes_prepare_can_fetch_then_convert(tmp_path, monkeypatch):
     payload = response.json()
     assert payload["ok"] is True
     assert payload["fetch_report"]["schema_version"] == "bashgym.source_fetch.v1"
+    assert payload["fetch_report"]["approval_reason"] == "fixture fetch"
+    assert payload["fetch_report"]["force_refresh"] is True
     assert payload["artifacts"][0]["artifact_type"] == "dpo_pairs"
     assert tmp_path.joinpath("out", "dpo_pairs.jsonl").exists()

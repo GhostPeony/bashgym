@@ -255,7 +255,17 @@ class TestDataDesignerPipelineInit:
         assert tmp_path.joinpath("out", "dpo_pairs.jsonl").exists()
 
     def test_prepare_source_can_fetch_then_convert_artifacts(self, tmp_path, monkeypatch):
-        def fake_fetch(card, *, output_dir, split, subset=None, revision=None, limit=None):
+        def fake_fetch(
+            card,
+            *,
+            output_dir,
+            split,
+            subset=None,
+            revision=None,
+            limit=None,
+            approval_reason=None,
+            force_refresh=False,
+        ):
             output_path = Path(output_dir)
             output_path.mkdir(parents=True, exist_ok=True)
             records_path = output_path / "source_records.jsonl"
@@ -287,6 +297,11 @@ class TestDataDesignerPipelineInit:
                 "report_path": str(output_path / "source_fetch_report.json"),
                 "record_count": 1,
                 "truncated": False,
+                "cache_hit": False,
+                "force_refresh": force_refresh,
+                "approval_required": limit is None or limit > 1000,
+                "approval_granted": True,
+                "approval_reason": approval_reason,
                 "warnings": [],
                 "errors": [],
             }
@@ -299,9 +314,13 @@ class TestDataDesignerPipelineInit:
             goal="dpo",
             fetch=True,
             limit=1,
+            fetch_approval_reason="fixture fetch",
+            force_refresh=True,
         )
 
         assert prepared["fetch_report"]["schema_version"] == "bashgym.source_fetch.v1"
+        assert prepared["fetch_report"]["approval_reason"] == "fixture fetch"
+        assert prepared["fetch_report"]["force_refresh"] is True
         assert prepared["dataset_card"]["source_records_path"].endswith("source_records.jsonl")
         assert prepared["artifact_report"]["ok"] is True
         assert tmp_path.joinpath("out", "dpo_pairs.jsonl").exists()

@@ -15,8 +15,10 @@ from bashgym.sources.catalog import (
 )
 from bashgym.sources.fetch import (
     DEFAULT_SOURCE_FETCH_LIMIT,
+    SOURCE_FETCH_APPROVAL_LIMIT,
     SOURCE_FETCH_SCHEMA_VERSION,
     fetch_source_records,
+    source_fetch_approval_policy,
 )
 
 SOURCE_ARTIFACT_PREPARE_SCHEMA_VERSION = "bashgym.source_artifact_prepare.v1"
@@ -33,6 +35,7 @@ __all__ = [
     "SOURCE_ARTIFACT_PREPARE_SCHEMA_VERSION",
     "SOURCE_FETCH_SCHEMA_VERSION",
     "DEFAULT_SOURCE_FETCH_LIMIT",
+    "SOURCE_FETCH_APPROVAL_LIMIT",
     "SourceArtifactType",
     "SourceCard",
     "SourceRisk",
@@ -42,6 +45,7 @@ __all__ = [
     "prepare_source_manifest",
     "prepare_source_artifacts",
     "fetch_source_records",
+    "source_fetch_approval_policy",
     "recommend_sources",
     "validate_source_use",
 ]

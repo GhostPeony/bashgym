@@ -43,6 +43,8 @@ class SourcePrepareRequest(BaseModel):
     subset: str | None = Field(default=None, max_length=200)
     revision: str | None = Field(default=None, max_length=200)
     limit: int | None = Field(default=None, ge=1, le=100000)
+    fetch_approval_reason: str | None = Field(default=None, max_length=500)
+    force_refresh: bool = False
     allow_eval_only: bool = False
     override_reason: str | None = Field(default=None, max_length=500)
 
@@ -53,6 +55,8 @@ class SourceFetchRequest(BaseModel):
     subset: str | None = Field(default=None, max_length=200)
     revision: str | None = Field(default=None, max_length=200)
     limit: int | None = Field(default=DEFAULT_SOURCE_FETCH_LIMIT, ge=1, le=100000)
+    approval_reason: str | None = Field(default=None, max_length=500)
+    force_refresh: bool = False
 
 
 @router.get("")
@@ -117,6 +121,8 @@ async def fetch_source(source_id: str, body: SourceFetchRequest) -> dict[str, An
         subset=body.subset,
         revision=body.revision,
         limit=body.limit,
+        approval_reason=body.approval_reason,
+        force_refresh=body.force_refresh,
     )
     if not fetch_report["ok"]:
         raise HTTPException(status_code=400, detail=fetch_report)
@@ -148,6 +154,8 @@ async def prepare_source(source_id: str, body: SourcePrepareRequest) -> dict[str
             subset=body.subset,
             revision=body.revision,
             limit=body.limit if body.limit is not None else DEFAULT_SOURCE_FETCH_LIMIT,
+            approval_reason=body.fetch_approval_reason,
+            force_refresh=body.force_refresh,
         )
         if not fetch_report["ok"]:
             raise HTTPException(status_code=400, detail=fetch_report)

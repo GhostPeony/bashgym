@@ -73,3 +73,65 @@ class TestDatasetInspect:
         data = resp.json()
         assert data["total"] == 1
         assert data["examples"][0]["warnings"] == []
+
+
+class TestRunCardEvidence:
+    def test_list_and_validate_run_cards_surfaces_promotion_blockers(
+        self, client, tmp_path, monkeypatch
+    ):
+        from bashgym import config as bashgym_config
+
+        settings = bashgym_config.get_settings()
+        monkeypatch.setattr(settings.data, "data_dir", str(tmp_path))
+        run_card = {
+            "schema_version": "bashgym.run_card.v1",
+            "run_id": "run-ui",
+            "training_method": "dpo",
+            "base_model": "Qwen/Qwen3-Coder",
+            "compute_target_id": "local_cpu_or_gpu",
+            "training_plan_path": "plans/dpo.json",
+            "source_manifest_path": "data/source_manifest.json",
+            "preference_pairs_path": None,
+            "reward_examples_path": None,
+            "reward_eval_path": None,
+            "dataset_card_path": None,
+            "backend": None,
+            "git_commit": None,
+            "branch": None,
+            "metrics_path": None,
+            "release_evidence_path": None,
+            "smoke_bundle_path": None,
+            "claim_tier": "narrow_routing",
+            "thresholds": {},
+            "outputs": [],
+            "known_limitations": [],
+            "decision": "pending",
+            "created_at": "2026-06-29T00:00:00+00:00",
+        }
+        path = tmp_path / "run_card.json"
+        path.write_text(json.dumps(run_card), encoding="utf-8")
+
+        listed = client.get("/api/training/runcards")
+        assert listed.status_code == 200
+        cards = listed.json()["run_cards"]
+        assert any(card["run_id"] == "run-ui" for card in cards)
+
+        validated = client.get(
+            "/api/training/runcards/validate",
+            params={"path": str(path), "promotion": "true"},
+        )
+        assert validated.status_code == 200
+        payload = validated.json()
+        assert payload["ok"] is False
+        codes = {finding["code"] for finding in payload["findings"]}
+        assert "missing_metrics_path" in codes
+        assert "missing_release_evidence_path" in codes
+        assert "missing_preference_pairs_path" in codes
+
+    def test_validate_run_card_rejects_paths_outside_allowed_roots(self, client):
+        resp = client.get(
+            "/api/training/runcards/validate",
+            params={"path": "C:/Windows/System32/drivers/etc/hosts"},
+        )
+
+        assert resp.status_code == 400

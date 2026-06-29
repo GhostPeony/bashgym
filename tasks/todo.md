@@ -2,7 +2,7 @@
 
 Master plan: `tasks/roadmap-2026-06-15-model-agnostic-pipeline.md` (9 segments).
 Reviews: `tasks/status-review-2026-06-11.md`, `tasks/eval-and-data-strategy-2026-06-11.md`.
-Archive: `tasks/archived-completed-before-2026-06-22.md` contains completed items older than one week that were cleared from this live tracker.
+Archive: `tasks/archived-completed-before-2026-06-22.md` contains completed items before/through 2026-06-22 that were cleared from this live tracker.
 
 ## Active — RLHF Handbook comparison and BashGym gap plan (2026-06-28)
 - [x] Crawl `natolambert/rlhf-book` and extract RLHF/post-training lessons
@@ -39,6 +39,7 @@ Archive: `tasks/archived-completed-before-2026-06-22.md` contains completed item
 - [x] Add local/fixture Source Library adapters that convert JSON/JSONL source-card records into SFT, DPO, reward, process-reward, eval-manifest, or environment-spec artifacts through CLI/API/Data Designer while preserving source metadata and eval-only guardrails
 - [x] Add Factory Source Library UI for source recommendations, eval-only guardrails, local artifact preparation, and Training handoff
 - [x] Add Hugging Face-backed source fetch orchestration through Source Library CLI/API/UI/Data Designer, capped local `source_records.jsonl` outputs, fetch reports, and fetch-to-artifact conversion
+- [x] Add Training RunCard Evidence UI/API for local RunCard discovery, promotion validation, claim-tier blockers, and artifact presence
 - [ ] Human decision: choose eval-only override policy, first installed backend, first cloud launcher priority, first public-source expansion set, remote/billable approval boundary, and claim-tier thresholds (`tasks/human-decisions-source-compute-2026-06-29.md`)
 
 ## Active — Dashboard UI/UX quality pass (2026-06-24)
@@ -102,106 +103,19 @@ Archive: `tasks/archived-completed-before-2026-06-22.md` contains completed item
   - [x] Connect the guidance to source-backed platform patterns from HF TRL, Unsloth, OpenAI RFT, verl, and SkyRL
   - [x] Run focused frontend verification (`npm run typecheck`, `npm run lint` -> clean; Playwright smoke rendered Guides and Sources subtabs with screenshots in `artifacts/training-guides-*-smoke.png`)
 
-## Active — TMax → BashGym action plan (2026-06-22)
-- [x] Read Lambert Substack, TMax paper/blog/repo, and referenced RL papers
-- [x] Map research takeaways onto current BashGym architecture and roadmap
-- [x] Write a concrete implementation action plan with priorities and verification gates (`tasks/tmax-bashgym-action-plan-2026-06-22.md`)
-- [~] Implement Phase 0/1 foundation: first-class terminal environment contracts, TMax-style import, metrics, decontamination, and materialization helpers
-  - [x] Add `bashgym/environments/` package and tests
-  - [x] Add fixture-backed TMax/Harbor-like importer tests
-  - [x] Register `terminal_env_generation` Data Designer pipeline skeleton
-  - [x] Add `/api/environments/*` routes for pipeline metadata, normalize/import, decontamination, and materialization
-  - [x] Add Factory → Environment Lab UI for importing, inspecting, filtering, and materializing executable terminal environments
-  - [x] Run focused environment/Data Designer suite (`python -m pytest tests/environments tests/factory/test_data_designer.py -q -o addopts=` → 100 passed)
-  - [x] Run API/environment/Data Designer verification (`python -m pytest tests/api/test_environment_routes.py tests/environments tests/factory/test_data_designer.py -q -o addopts=` → 106 passed)
-  - [x] Run frontend checks (`npm run typecheck`, `npm run lint` → clean)
-- [~] Wire environment pass@k into eval service and Factory workflows
-  - [x] Add `bashgym/eval/environment_passk.py` with attempt records, pass@k reports, timeout/status/token telemetry
-  - [x] Add `POST /api/eval/environments/passk` and optional model-registry benchmark recording
-  - [x] Add Environment Lab pass@k panel for pasted/JSONL rollout attempts and failed-baseline smoke reports
-  - [x] Run focused eval/API/environment verification (`python -m pytest tests/eval/test_environment_passk.py tests/eval/test_passk.py tests/api/test_eval_routes.py tests/api/test_environment_routes.py tests/environments -q -o addopts=` → 50 passed)
-  - [x] Add local persistent-shell command-script rollouts that materialize an `EnvironmentSpec`, execute commands, run the verifier, and emit pass@k-ready telemetry
-  - [x] Add `POST /api/eval/environments/local-rollout-passk` plus Environment Lab local rollout controls
-  - [x] Run focused rollout/API/frontend verification (`python -m pytest tests/environments/test_rollout.py tests/eval/test_environment_passk.py tests/api/test_eval_routes.py -q -o addopts=`, `npm run typecheck`, `npm run lint` → clean)
-  - [x] Run broad relevant gate (`python -m pytest tests/environments tests/eval/test_environment_passk.py tests/eval/test_passk.py tests/api/test_eval_routes.py tests/api/test_environment_routes.py tests/factory/test_data_designer.py -q -o addopts=` → 142 passed)
-  - [x] Connect served-model policy rollouts to the local rollout/pass@k harness through `POST /api/eval/environments/model-rollout-passk`
-  - [x] Add Environment Lab model rollout controls for endpoint, model, attempts, tool-call mode, and verifier-backed pass@k output
-  - [x] Run served-model rollout verification (`python -m pytest tests/environments/test_rollout.py tests/eval/test_service.py tests/api/test_eval_routes.py -q -o addopts=` → 44 passed; `npm run typecheck`, `npm run lint` → clean)
-  - [x] Run broad served-rollout gate (`python -m pytest tests/environments tests/eval/test_environment_passk.py tests/eval/test_passk.py tests/eval/test_service.py tests/api/test_eval_routes.py tests/api/test_environment_routes.py tests/factory/test_data_designer.py -q -o addopts=` → 166 passed)
-  - [x] Add protected-file manifest checksums for verifier scripts, tests, private fixtures, and `env.json`
-  - [x] Audit local/model rollout workspaces before verification and surface tamper status in Environment Lab
-  - [x] Run tamper guardrail verification (`python -m pytest tests/environments/test_builder.py tests/environments/test_rollout.py -q -o addopts=` → 17 passed; broader environment/DPPO gate → 142 passed; frontend checks → clean)
-  - [x] Expose served-rollout observation prompt budget in API metadata and Environment Lab while preserving raw rollout logs
-  - [x] Run observation-budget verification (`python -m pytest tests/eval/test_service.py tests/api/test_eval_routes.py -q -o addopts=` → 41 passed; broader environment/DPPO gate → 143 passed; Ruff/frontend checks → clean)
-  - [x] Add built-in reward-hacking canary suite for verifier, tests, private fixture, and task-manifest tamper attempts
-  - [x] Add `/api/eval/environments/reward-hacking-canaries` and Environment Lab Guardrail Canaries panel
-  - [x] Run canary verification (`python -m pytest tests/environments/test_canaries.py tests/environments/test_builder.py tests/environments/test_rollout.py tests/api/test_eval_routes.py -q -o addopts=` → 43 passed; broader environment/DPPO gate → 149 passed; Ruff/frontend checks → clean)
-  - [x] Add deterministic environment holdout splits with content-hash contamination manifests and release-gate thresholds
-  - [x] Add `/api/eval/environments/holdout-gate` and Environment Lab Holdout Gate controls for grouped split, pass@k, leakage, timeout, and tamper verdicts
-  - [x] Run focused holdout-gate verification (`python -m pytest tests/eval/test_environment_holdout.py tests/eval/test_environment_passk.py tests/api/test_eval_routes.py -q -o addopts=` → 34 passed; Ruff/frontend checks → clean)
-  - [x] Run broad environment/eval/API/DPPO gate with holdout coverage (`python -m pytest tests/environments tests/eval/test_environment_passk.py tests/eval/test_environment_holdout.py tests/eval/test_passk.py tests/eval/test_service.py tests/eval/test_dppo_replay.py tests/api/test_eval_routes.py tests/api/test_environment_routes.py tests/gym/test_terminal_rl_profile.py tests/gym/test_grpo_script.py tests/gym/test_dppo.py tests/gym/test_dppo_backend.py tests/gym/test_dppo_launcher.py tests/api/test_training_schema.py -q -o addopts=` → 157 passed; `git diff --check` → clean)
-  - [x] Smoke Environment Lab in Chrome against local backend/frontend; Holdout Gate panel rendered (`artifacts/environment-holdout-gate-smoke.png`, ignored)
-  - [x] Store environment holdout gate manifests/verdicts on model profiles and expose latest environment holdout verdict through `/api/eval/verdict/{model_id}`
-  - [x] Add Environment Lab registry controls for recording holdout gates against a model id
-  - [x] Add Harbor-native Terminal-Bench command generation alongside legacy `tb run`
-  - [x] Run registry/Harbor gate verification (`python -m pytest tests/environments tests/eval/test_environment_passk.py tests/eval/test_environment_holdout.py tests/eval/test_passk.py tests/eval/test_service.py tests/eval/test_dppo_replay.py tests/eval/test_heldout_registry.py tests/eval/test_benchmarks_ext.py tests/api/test_eval_routes.py tests/api/test_environment_routes.py tests/gym/test_terminal_rl_profile.py tests/gym/test_grpo_script.py tests/gym/test_dppo.py tests/gym/test_dppo_backend.py tests/gym/test_dppo_launcher.py tests/api/test_training_schema.py -q -o addopts=` → 177 passed; Ruff/frontend checks → clean; `git diff --check` → clean)
-  - [x] Smoke Environment Lab in Chrome; Holdout Gate registry controls rendered with no console errors (`artifacts/environment-holdout-registry-controls-smoke.png`, ignored)
-  - [x] Add Olmo-style spurious-reward negative-control audit for environment holdouts (`bashgym/eval/environment_spurious_reward.py`, `/api/eval/environments/spurious-reward-control`, Environment Lab panel)
-  - [x] Run spurious-control verification (`python -m pytest tests/eval/test_environment_spurious_reward.py tests/api/test_eval_routes.py -q -o addopts=` → 32 passed; broader environment/eval/API/DPPO gate → 184 passed; Ruff/frontend checks and `git diff --check` → clean)
-  - [x] Smoke Environment Lab in Chrome; Spurious Reward Control panel rendered with no console errors (`artifacts/environment-spurious-reward-control-smoke.png`, ignored), stubbed UI action flow completed (`artifacts/environment-spurious-reward-control-action-smoke.png`, ignored), and live backend endpoint returned `bashgym.environment_spurious_reward_control.v1`
-  - [x] Add paired-bootstrap base-vs-candidate environment holdout comparison gate (`bashgym/eval/environment_holdout_comparison.py`, `/api/eval/environments/holdout-comparison`, Environment Lab panel)
-  - [x] Run holdout-comparison verification (`python -m pytest tests/eval/test_environment_holdout_comparison.py tests/api/test_eval_routes.py -q -o addopts=` → 33 passed; broader environment/eval/API/DPPO gate → 190 passed; Ruff/frontend checks and `git diff --check` → clean)
-  - [x] Smoke Environment Lab in Chrome; Holdout Comparison action flow completed with no console errors (`artifacts/environment-holdout-comparison-action-smoke.png`, ignored) and live backend endpoint returned `bashgym.environment_holdout_comparison.v1`
-  - [x] Fold precomputed environment evidence into `/api/eval/heldout` release verdicts (`bashgym/eval/release_gate.py`), including holdout, holdout-comparison, and spurious-reward gates plus optional pass@k support
-  - [x] Run unified release-gate verification (`python -m pytest tests/eval/test_release_gate.py tests/api/test_eval_routes.py -q -o addopts=` → 35 passed; broader environment/eval/API/DPPO gate → 196 passed; Ruff and `git diff --check` → clean)
-  - [x] Add Evaluator → Held-out Gate release-evidence UI for attaching environment pass@k, holdout, holdout-comparison, and spurious-control JSON to `/api/eval/heldout`
-  - [x] Verify release-evidence UI (`npm run typecheck`, `npm run lint` → clean; Chrome smoke rendered `Release evidence` with no console errors and saved `artifacts/evaluator-release-evidence-smoke.png`; focused backend release-gate tests → 35 passed)
-  - [x] Add standalone external benchmark result ingest for Harbor/Terminal-Bench, BFCL, SWE-bench, and other public harness JSON (`/api/eval/benchmarks/external-ingest`) with tolerant score/pass-rate/trial-reward normalization and model-registry recording
-  - [x] Add Evaluator → Held-out Gate external benchmark ingest UI for recording pasted public harness results after command execution
-  - [x] Verify external benchmark ingest (`python -m pytest tests/eval/test_benchmarks_ext.py tests/eval/test_service.py tests/api/test_eval_routes.py -q -o addopts=` → 69 passed; broader environment/eval/API/DPPO gate → 201 passed; Ruff clean; `npm run typecheck`, `npm run lint` → clean; live backend route returned normalized `harbor_terminal_bench`; Chrome smoke rendered and posted sample Harbor-style trial JSON with no console errors; `git diff --check` → clean)
-  - [x] Fold external benchmark reports/manifests into `/api/eval/heldout` release verdicts with optional minimum-score thresholds and explicit external pass/hold status
-  - [x] Add Evaluator release-evidence field for normalized external benchmark reports
-  - [x] Verify external benchmark release evidence (`python -m pytest tests/eval/test_release_gate.py tests/api/test_eval_routes.py -q -o addopts=` → 40 passed; broader environment/eval/API/DPPO gate → 205 passed; Ruff/frontend checks → clean; Chrome smoke rendered `External benchmarks` release-evidence field with no console errors; `git diff --check` → clean)
-- [~] Implement Phase 2 training stability profile: `terminal_rl_tmax_like`, active sampling, zero-std filtering, group-size gates, and UI telemetry
-  - [x] Add pure terminal-RL profile and active-sampling helpers
-  - [x] Thread profile settings through `TrainerConfig`, API schema, generated GRPO scripts, and run metadata
-  - [x] Add Training Config controls and GRPO telemetry parsing/display hooks
-  - [x] Run focused backend/frontend verification
-  - [x] Wire active-sampling enforcement into served-model environment rollout batches with API/UI telemetry
-  - [x] Add served-rollout behavior logprob capture plumbing for future DPPO validation
-  - [x] Add unit-tested DPPO Binary-TV/Binary-KL mask math and readiness telemetry
-  - [x] Add DPPO backend capability probe/config and explicit GRPO fallback reporting
-  - [~] Feed sampled non-zero-std rollout batches into the DPPO optimizer loop
-    - [x] Export sampled served-model rollouts as DPPO replay JSONL artifacts for train-logprob replay
-    - [x] Add train-policy logprob replay enrichment with DPPO mask telemetry and API/UI adapter
-    - [x] Add backend-specific launcher/script planner for `verl`/SkyRL/TMax smoke training
-    - [x] Add local `bashgym training smoke-bundle` readiness report for replay/logprob/world-model/backend launch artifacts
-    - [ ] Run a real backend smoke on an installed DPPO stack and record saved artifacts
-- [~] Fold JEPA/ECHO/RWML world-model learning into the training platform
-  - [x] Record Claude-session ECHO/RWML handoff (`tasks/jepa-worldmodel-hardware-handoff-2026-06-23.md`)
-  - [x] Dispatch focused JEPA, Yann LeCun, BashGym-world-model, and HF/Unsloth settings research
-  - [x] Thread ECHO/RWML settings through training API and frontend run config
-  - [x] Add in-product setup guidance for SFT, terminal RL, and world-model metrics/settings
-  - [x] Expose world-model DPPO replay export and smoke-launch config plumbing
-  - [x] Write JEPA/BashGym action plan (`tasks/jepa-bashgym-action-plan-2026-06-23.md`)
-  - [x] Verify schema, frontend type safety, and lint gates
-  - [x] Add replay-level ECHO/RWML coverage telemetry to DPPO summaries and Environment Lab
-  - [x] Add concrete training curriculum docs for how the gym works and operator best practices
-    - [x] Create `docs/training/` docs covering overview, strategy selection, world models, metrics/runbook, and glossary
-    - [x] Add agent-facing CLI guide for machine-readable setup and replay analysis
-    - [x] Link the new docs from README and existing training docs
-    - [x] Verify markdown links and source-backed defaults
-  - [x] Add dependency-free `bashgym` CLI entrypoint for manifest, training docs, training plans, replay summaries, and server launch
-    - [x] Fix `bashgym serve --host/--port/--log-level` forwarding and backend startup under `LOG_FORMAT=json`
-  - [x] Add agent-facing `bashgym training analyze` for metrics, replay, release-evidence, and world-model coverage diagnostics
-  - [x] Add backend-facing adapter utilities for ECHO masks and RWML reward inputs from DPPO replay payloads
-  - [x] Add trainer-facing backend adapter hooks for ECHO `compute_loss` and RWML reward functions
-  - [x] Add local backend probe that tokenizes ECHO spans, counts RWML targets, and writes launch env artifacts
-  - [ ] Wire/test those hooks inside an installed DPPO/GRPO backend checkout
-  - [x] Add world-model quality metrics to dashboards and release evidence
-    - [x] Add diagnostic `world_model_quality` release-evidence lane for ECHO/RWML metrics
-    - [x] Add Training Monitor world-model quality panel for backend-emitted ECHO/RWML stats
-    - [x] Keep world-model quality diagnostic-only until correlated with heldout pass@k and safety
+## Active — TMax / JEPA carry-forward (2026-06-22)
+Archived completed 2026-06-22 TMax terminal-RL and JEPA platform details to
+`tasks/archived-completed-before-2026-06-22.md`; the detailed technical record
+also remains in `tasks/tmax-bashgym-action-plan-2026-06-22.md` and
+`tasks/jepa-bashgym-action-plan-2026-06-23.md`.
+
+- [~] DPPO optimizer/backend proof
+  - [x] Local terminal-RL, rollout, pass@k, holdout, canary, spurious-control, paired-comparison, release-evidence, replay/logprob, backend-plan, and smoke-bundle foundations are implemented and archived
+  - [ ] Run a real backend smoke on an installed DPPO stack and record saved artifacts
+- [~] JEPA/ECHO/RWML world-model proof
+  - [x] Local ECHO/RWML config, replay telemetry, guidance docs, diagnostics, release-evidence lane, and launch-probe plumbing are implemented and archived
+  - [ ] Wire/test ECHO/RWML hooks inside an installed DPPO/GRPO backend checkout
+  - [x] Keep world-model quality diagnostic-only until correlated with heldout pass@k and safety
 
 ## Carry-forward branch and GX10 follow-ups
 - [ ] **Promote `integration/unify-2026-06-15` → `feat/...` + push** (unifies desktop + GX10 on one branch) — *needs user go (affects shared remote)*

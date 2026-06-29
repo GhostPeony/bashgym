@@ -1,4 +1,4 @@
-# Archived Completed Tasks Before 2026-06-22
+# Archived Completed Tasks Before And Through 2026-06-22
 
 Archived on 2026-06-29 from `tasks/todo.md` to keep the active tracker focused.
 
@@ -27,3 +27,25 @@ Completed 2026-06-15.
 - [x] Add Pipeline config/API/UI fields for cascade base model, mode, stage steps, min examples, remote SSH, and repo-domain triggers
 - [x] Keep Hermes SQLite `~/.hermes/state.db` importer fixture-backed and aligned with current Hermes session storage
 - [x] Let AutoResearch mutate environment recipe axes and export reproducible proposals
+
+## TMax Terminal-RL And JEPA Platform Work
+
+Archived on 2026-06-29 from `tasks/todo.md` after the detailed 2026-06-22
+TMax block became historical context rather than active work. Full technical
+details remain in `tasks/tmax-bashgym-action-plan-2026-06-22.md` and
+`tasks/jepa-bashgym-action-plan-2026-06-23.md`.
+
+Completed foundations:
+
+- [x] Read Lambert Substack, TMax paper/blog/repo, and referenced RL papers
+- [x] Map research takeaways onto current BashGym architecture and roadmap
+- [x] Write the TMax BashGym implementation action plan
+- [x] Implement first-class terminal environment contracts, TMax/Harbor-like import fixtures, decontamination, materialization, and Factory Environment Lab import/inspect/materialize workflows
+- [x] Wire environment pass@k through eval service and Factory workflows for pasted attempts, local rollouts, served-model rollouts, and registry recording
+- [x] Add environment holdout gates, content-hash contamination manifests, tamper checks, reward-hacking canaries, spurious-reward controls, paired holdout comparison, and release-gate evidence integration
+- [x] Add external benchmark command generation, result ingest, and release-evidence handling for Harbor/Terminal-Bench, BFCL, SWE-bench, and related harnesses
+- [x] Implement terminal-RL stability plumbing: active sampling, zero-std filtering, DPPO Binary-TV/KL mask math, behavior/train logprob replay, backend launch planners, and local smoke-bundle readiness artifacts
+- [x] Record the Claude-session JEPA/ECHO/RWML handoff and research synthesis
+- [x] Thread ECHO/RWML settings through training API and frontend run config
+- [x] Add replay-level ECHO/RWML coverage telemetry, backend-facing ECHO/RWML adapter utilities, trainer hook shims, local backend probes, world-model quality dashboards, and diagnostic release-evidence surfacing
+- [x] Add in-product training guidance and docs for SFT, terminal RL, world models, metrics, runbooks, and glossary material

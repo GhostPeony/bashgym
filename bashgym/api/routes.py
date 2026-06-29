@@ -1587,6 +1587,94 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail=f"No metrics for run {run_id}")
         return {"run_id": run_id, "metrics": points}
 
+    def _run_card_roots() -> list[Path]:
+        from bashgym.config import get_settings
+
+        settings = get_settings()
+        roots = [
+            _models_dir(),
+            Path(settings.data.data_dir),
+            Path("data"),
+            Path.home() / ".bashgym",
+        ]
+        unique: list[Path] = []
+        seen: set[Path] = set()
+        for root in roots:
+            resolved = root.resolve()
+            if resolved not in seen:
+                unique.append(resolved)
+                seen.add(resolved)
+        return unique
+
+    def _resolve_run_card_path(raw_path: str) -> Path:
+        if not raw_path.strip():
+            raise HTTPException(status_code=400, detail="path is required")
+        target = Path(raw_path)
+        resolved = target.resolve()
+        allowed_roots = _run_card_roots()
+        if not any(resolved.is_relative_to(root) for root in allowed_roots):
+            raise HTTPException(status_code=400, detail="RunCard path outside allowed directories")
+        if not resolved.exists():
+            raise HTTPException(status_code=404, detail=f"RunCard not found: {resolved}")
+        if not resolved.is_file():
+            raise HTTPException(status_code=400, detail="RunCard path must be a file")
+        return resolved
+
+    def _run_card_summary(path: Path) -> dict[str, Any] | None:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            stat = path.stat()
+        except (OSError, json.JSONDecodeError):
+            return None
+        if not isinstance(payload, dict) or payload.get("schema_version") != "bashgym.run_card.v1":
+            return None
+        return {
+            "run_id": payload.get("run_id"),
+            "path": str(path),
+            "training_method": payload.get("training_method"),
+            "base_model": payload.get("base_model"),
+            "claim_tier": payload.get("claim_tier"),
+            "decision": payload.get("decision"),
+            "modified": stat.st_mtime,
+        }
+
+    @app.get("/api/training/runcards", tags=["Training"])
+    async def list_run_cards(limit: int = 20):
+        """List recent RunCards under local BashGym data/model directories."""
+
+        candidates: dict[Path, float] = {}
+        for root in _run_card_roots():
+            if not root.exists():
+                continue
+            try:
+                for pattern in ("run_card*.json", "*run_card*.json"):
+                    for path in root.rglob(pattern):
+                        if path.is_file():
+                            candidates[path.resolve()] = path.stat().st_mtime
+            except OSError:
+                continue
+        summaries: list[dict[str, Any]] = []
+        for path, _mtime in sorted(candidates.items(), key=lambda item: item[1], reverse=True):
+            summary = _run_card_summary(path)
+            if summary:
+                summaries.append(summary)
+            if len(summaries) >= max(1, min(limit, 100)):
+                break
+        return {"schema_version": "bashgym.run_card_list.v1", "run_cards": summaries}
+
+    @app.get("/api/training/runcards/validate", tags=["Training"])
+    async def validate_run_card(path: str = Query(...), promotion: bool = True):
+        """Validate one RunCard and surface promotion blockers for the UI."""
+
+        from bashgym.run_cards import validate_run_card_file
+
+        resolved = _resolve_run_card_path(path)
+        try:
+            validation = validate_run_card_file(resolved, promotion=promotion)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"schema_version": "bashgym.run_card_validation.v1", **validation}
+
     @app.get("/api/training/dataset/inspect", tags=["Training"])
     async def inspect_training_dataset(path: str = "", offset: int = 0, limit: int = 20):
         """Inspect exported training examples with chat-template validation warnings.

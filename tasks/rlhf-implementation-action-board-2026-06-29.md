@@ -67,12 +67,14 @@ Already in place:
 - Claim-tier scaffolding for local smoke, narrow routing, and broad public
   claim.
 - Learned-reward evidence is surfaced as diagnostic release evidence.
+- Training UI now lists local RunCards, validates selected cards for promotion,
+  and surfaces claim-tier blockers, warnings, diagnostics, and artifact
+  presence in-product.
 
 Actionable next items:
 
 - Choose numeric/default thresholds for local smoke, narrow routing, and broad
   public claim.
-- Surface RunCard promotion blockers in product UI, not only CLI/API.
 - Add a compact "why this run cannot be promoted" explanation per failed gate.
 
 Definition of done:

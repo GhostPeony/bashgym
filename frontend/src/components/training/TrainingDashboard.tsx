@@ -37,6 +37,7 @@ import { WorldModelMetricsPanel } from './WorldModelMetricsPanel'
 import { TrainingLogViewer } from './TrainingLogViewer'
 import { CheckpointBrowser } from './CheckpointBrowser'
 import { TrainingGuidance } from './TrainingGuidance'
+import { RunCardEvidencePanel } from './RunCardEvidencePanel'
 import { clsx } from 'clsx'
 
 type TrainingTab = 'dashboard' | 'logs' | 'checkpoints' | 'guides'
@@ -331,6 +332,10 @@ export function TrainingDashboard() {
         {/* Run Comparison — overlay persisted loss curves across runs */}
         <div className="col-span-12">
           <RunComparison />
+        </div>
+
+        <div className="col-span-12">
+          <RunCardEvidencePanel />
         </div>
 
         {/* Dataset Inspector — chat-template validation of exported examples */}

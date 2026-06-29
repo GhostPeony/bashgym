@@ -470,6 +470,47 @@ export interface TrainingRunSummary {
   has_final: boolean
 }
 
+export interface RunCardSummary {
+  run_id?: string | null
+  path: string
+  training_method?: string | null
+  base_model?: string | null
+  claim_tier?: string | null
+  decision?: string | null
+  modified: number
+}
+
+export interface RunCardFinding {
+  code: string
+  level: 'fail' | 'warn' | 'diagnostic' | string
+  message: string
+  field?: string
+  path?: string
+}
+
+export interface RunCardArtifactStatus {
+  field: string
+  path: string
+  resolved_path: string
+  present: boolean
+}
+
+export interface RunCardValidationResponse {
+  schema_version: string
+  path: string
+  ok: boolean
+  run_card: {
+    run_id: string
+    training_method: string
+    base_model: string
+    claim_tier: string
+    decision: string
+    [key: string]: unknown
+  }
+  findings: RunCardFinding[]
+  artifact_status: RunCardArtifactStatus[]
+}
+
 export interface RunMetricPoint {
   step: number
   loss: number
@@ -547,6 +588,16 @@ export const trainingApi = {
   // Persisted run history (metrics.jsonl written next to checkpoints)
   listRuns: () =>
     request<{ runs: TrainingRunSummary[] }>('/training/runs'),
+
+  listRunCards: (limit = 20) =>
+    request<{ schema_version: string; run_cards: RunCardSummary[] }>(
+      `/training/runcards?limit=${limit}`
+    ),
+
+  validateRunCard: (path: string, promotion = true) =>
+    request<RunCardValidationResponse>(
+      `/training/runcards/validate?path=${encodeURIComponent(path)}&promotion=${promotion}`
+    ),
 
   getRunMetrics: (runId: string) =>
     request<{ run_id: string; metrics: RunMetricPoint[] }>(

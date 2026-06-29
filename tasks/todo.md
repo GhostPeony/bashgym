@@ -148,5 +148,5 @@ also remains in `tasks/tmax-bashgym-action-plan-2026-06-22.md` and
 - [ ] **S8** DGX env consolidation *(APPROVAL-GATED)*
 
 ## Future (from research; not yet scheduled)
-- [ ] Explicit agent-status protocol to replace regex terminal parsing; session replay scrubber over trace events
+- [x] Explicit agent-status protocol to replace regex terminal parsing; session replay scrubber over trace events
 - [ ] OpenPipe-style relabel/prune ops; Fireworks-style token-level loss-mask rendering (needs tokenizer in backend)

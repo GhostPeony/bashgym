@@ -50,7 +50,8 @@ What belongs here:
 
 - Live and historical capture from Claude Code, Codex, Gemini, OpenCode,
   Copilot CLI, and similar tools.
-- Trace normalization, quality scoring, PII scrubbing, and failure labeling.
+- Trace normalization, structured agent-status events, replay scrubbing, quality
+  scoring, PII scrubbing, and failure labeling.
 - SFT examples from gold traces.
 - DPO pairs from same-prompt better/worse behavior.
 - Heldout trace eval and conservative routing.

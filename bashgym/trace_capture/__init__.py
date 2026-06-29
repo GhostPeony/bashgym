@@ -28,6 +28,18 @@ from .schema import (
     validate_session,
 )
 from .setup import setup_trace_capture, uninstall_trace_capture
+from .status_protocol import (
+    AGENT_STATUS_MARKER,
+    AGENT_STATUS_SCHEMA_VERSION,
+    ALLOWED_AGENT_STATUSES,
+    REPLAY_SCRUB_SCHEMA_VERSION,
+    agent_status_to_event,
+    format_agent_status_marker,
+    normalize_agent_status,
+    parse_agent_status_markers,
+    scrub_trace_replay,
+    scrub_trace_replay_file,
+)
 
 __all__ = [
     "TraceCapture",
@@ -44,6 +56,16 @@ __all__ = [
     "validate_event",
     "validate_session",
     "trace_step_to_events",
+    "AGENT_STATUS_MARKER",
+    "AGENT_STATUS_SCHEMA_VERSION",
+    "ALLOWED_AGENT_STATUSES",
+    "REPLAY_SCRUB_SCHEMA_VERSION",
+    "normalize_agent_status",
+    "format_agent_status_marker",
+    "parse_agent_status_markers",
+    "agent_status_to_event",
+    "scrub_trace_replay",
+    "scrub_trace_replay_file",
     # Detection & setup
     "detect_tools",
     "get_tool_status",

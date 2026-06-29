@@ -26,6 +26,7 @@ def test_manifest_json_is_agent_readable(capsys):
     assert "training reward-eval" in payload["commands"]
     assert "sources list" in payload["commands"]
     assert "compute targets" in payload["commands"]
+    assert "replay scrub" in payload["commands"]
     assert any(doc["topic"] == "capabilities" for doc in payload["docs"])
     assert any(doc["topic"] == "methods-reference" for doc in payload["docs"])
     assert any(doc["topic"] == "external-review" for doc in payload["docs"])
@@ -35,6 +36,49 @@ def test_manifest_json_is_agent_readable(capsys):
     assert any(doc["topic"] == "world-models" for doc in payload["docs"])
     assert all(isinstance(doc["exists"], bool) for doc in payload["docs"])
     assert payload["next"][0]["command"].startswith("bashgym ")
+
+
+def test_replay_scrub_cli_redacts_and_writes_output(tmp_path, capsys):
+    source = tmp_path / "trace.json"
+    output = tmp_path / "trace.scrubbed.json"
+    source.write_text(
+        json.dumps(
+            {
+                "trace": [
+                    {
+                        "stdout": "OPENAI_API_KEY=sk-1234567890abcdefghijklmnop",
+                        "stderr": "x" * 100,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "replay",
+                "scrub",
+                str(source),
+                "--output",
+                str(output),
+                "--max-output-chars",
+                "64",
+                "--json",
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    scrubbed = json.loads(output.read_text(encoding="utf-8"))
+
+    assert payload["ok"] is True
+    assert payload["stats"]["redactions"] == 1
+    assert payload["stats"]["truncations"] == 1
+    assert "sk-1234567890abcdefghijklmnop" not in output.read_text(encoding="utf-8")
+    assert "[truncated" in scrubbed["trace"][0]["stderr"]
 
 
 def test_sources_cli_lists_inspects_recommends_and_prepares(tmp_path, capsys):

@@ -146,6 +146,18 @@ This reports DPPO replay readiness and world-model replay coverage:
 Coverage is not prediction quality. For model quality, run a backend smoke that
 logs ECHO loss or RWML prediction reward and compare against heldout pass@k.
 
+## Scrub trace replay
+
+```bash
+bashgym replay scrub data/traces/session.json --output data/traces/session.scrubbed.json --json
+bashgym replay scrub data/dppo_replay/latest.jsonl --output data/dppo_replay/latest.scrubbed.jsonl --json
+```
+
+Use this before sharing traces, reviewing public examples, or handing replay
+artifacts into training-data QA. The scrubber preserves JSON/JSONL shape while
+redacting common API tokens/secrets and summarizing long `stdout`, `stderr`,
+`output`, and transcript fields.
+
 ## Prepare a backend smoke bundle
 
 ```bash

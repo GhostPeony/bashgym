@@ -44,6 +44,9 @@ BashGym's current direction matches that sequence:
   ingest, and learned-reward evidence cover the missing reward-model lane.
 - TMax/DPPO work keeps terminal-agent RL tied to executable environments,
   rollouts, verifier rewards, pass@k, and backend replay contracts.
+- Trace capture now has an explicit agent-status marker protocol and replay
+  scrubber, so training-data curation can use structured events instead of
+  brittle terminal-log status guesses.
 - JEPA/ECHO/RWML work is correctly diagnostic for now: useful for auxiliary
   learning, curriculum, and insight, but not a release blocker until correlated
   with heldout pass@k and safety.

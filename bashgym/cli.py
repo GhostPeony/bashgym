@@ -53,6 +53,7 @@ from bashgym.sources import (
     recommend_sources,
 )
 from bashgym.sources.catalog import validate_catalog
+from bashgym.trace_capture.status_protocol import scrub_trace_replay_file
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TRAINING_DOCS_DIR = REPO_ROOT / "docs" / "training"
@@ -1810,6 +1811,7 @@ def cmd_manifest(args: argparse.Namespace) -> int:
             "compute preflight": "Run non-invasive compute target readiness checks.",
             "compute launch": "Generate a dry-run provider launch plan.",
             "replay summarize": "Summarize DPPO replay JSONL, including world-model coverage.",
+            "replay scrub": "Redact secrets and summarize long stdout/stderr in trace replay files.",
             "serve": "Start the existing BashGym FastAPI backend.",
         },
         "docs": _doc_entries(),
@@ -2418,6 +2420,41 @@ def cmd_replay_summarize(args: argparse.Namespace) -> int:
     return _emit(payload, as_json=args.json)
 
 
+def cmd_replay_scrub(args: argparse.Namespace) -> int:
+    try:
+        report = scrub_trace_replay_file(
+            args.path,
+            output_path=args.output,
+            max_output_chars=args.max_output_chars,
+        )
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        payload = {
+            "title": "BashGym Replay Scrub",
+            "ok": False,
+            "error": str(exc),
+            "next": [
+                {
+                    "reason": "Pass a JSON or JSONL trace/replay file.",
+                    "command": "bashgym replay scrub trace.json --output trace.scrubbed.json --json",
+                }
+            ],
+        }
+        _emit(payload, as_json=args.json)
+        return 2
+
+    payload = {
+        "title": "BashGym Replay Scrub",
+        **report,
+        "next": [
+            {
+                "reason": "Use scrubbed traces for review, public examples, and training data QA.",
+                "command": "bashgym training docs --topic overview --json",
+            }
+        ],
+    }
+    return _emit(payload, as_json=args.json)
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     from bashgym.main import main as serve_main
 
@@ -2908,6 +2945,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     replay_summary.add_argument("path")
     replay_summary.set_defaults(func=cmd_replay_summarize)
+    replay_scrub = replay_sub.add_parser(
+        "scrub",
+        help="Redact secrets and summarize long trace replay output",
+        parents=[json_parent],
+    )
+    replay_scrub.add_argument("path")
+    replay_scrub.add_argument("--output", help="Optional JSON/JSONL path for scrubbed payload")
+    replay_scrub.add_argument("--max-output-chars", type=int, default=2000)
+    replay_scrub.set_defaults(func=cmd_replay_scrub)
 
     serve = subparsers.add_parser(
         "serve",

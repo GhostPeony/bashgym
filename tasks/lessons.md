@@ -91,3 +91,18 @@ it.
   education.
 - Keep world-model and reward metrics framed by their role in the loop, not as
   standalone proof of model quality.
+
+## 2026-06-29 — Audit dirty files before committing session leftovers
+
+**Correction:** The user asked to go through dirty files because they came from
+the earlier session and still needed to be handled.
+
+**Why it matters:** Session dirt can mix durable product context with local
+tooling state. Committing it blindly can leak machine-specific paths or editor
+permissions, while ignoring it can lose useful handoff material.
+
+**How to apply:**
+- Inspect every dirty and untracked file before staging.
+- Promote durable scratchpad content into tracked `tasks/` or `docs/` files.
+- Keep local permission/config changes out of product commits unless they are
+  explicitly part of the repo contract.

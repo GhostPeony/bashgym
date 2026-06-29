@@ -66,6 +66,7 @@ Archive: `tasks/archived-completed-before-2026-06-22.md` contains completed item
 - [x] Inventory current BashGym training/eval/config/docs surfaces
 - [x] Research current open-model training stacks and JEPA/world-model implications
 - [x] Write consolidated plan: `tasks/training-platform-button-up-plan-2026-06-23.md`
+- [x] Promote JEPA/training education scratchpad context into tracked handoff docs (`tasks/jepa-training-docs-handoff-2026-06-23.md`)
 - [x] Add stable/experimental/requires-backend capability status to docs and UI
 - [x] Add backend-health affordance for frontend "failed to fetch" states
 - [x] Add public training capability map and agent-readable CLI docs topic

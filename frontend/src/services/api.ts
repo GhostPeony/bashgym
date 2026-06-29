@@ -932,6 +932,16 @@ export interface SourceFetchReport {
   errors: string[]
 }
 
+export interface SourceSchemaMappingReport {
+  schema_version: string
+  source_id: string
+  mapper: string
+  input_records: number
+  consumed_records?: number
+  normalized_records: number
+  dropped_records: number
+}
+
 export interface SourcePreparedArtifact {
   artifact_type: SourceArtifactType
   path: string
@@ -959,6 +969,7 @@ export interface SourcePrepareResponse {
   source_manifest?: SourceManifest
   record_count?: number
   converted_count?: number
+  source_schema_mapping?: SourceSchemaMappingReport
   artifacts?: SourcePreparedArtifact[]
   fetch_report?: SourceFetchReport
   warnings?: string[]

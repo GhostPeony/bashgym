@@ -109,11 +109,13 @@ Already in place:
 - Source fetch policy now records request fingerprints, reuses matching local
   fetch caches, supports force refresh, and requires an approval reason before
   larger-than-default Hugging Face pulls across helper/API/CLI/UI/Data Designer.
+- Source-specific P0 mappers now normalize UltraFeedback Binarized and
+  HelpSteer2 into BashGym DPO/reward artifacts, including HelpSteer2
+  `response_1`/`response_2` preference rows and paired scored-response rows,
+  with mapper reports surfaced in Source Library output.
 
 Actionable next items:
 
-- Expand source-specific schema mapping for each newly approved public source
-  instead of relying only on generic JSONL field inference.
 - Source Library UI handoff for prepared artifacts is now in Factory. Next,
   expand public-source policy and source expansion priorities.
 - Keep RewardBench, CUARewardBench, BFCL, tau-bench, Terminal-Bench, and
@@ -398,7 +400,8 @@ Status: completed for local/fixture JSON/JSONL inputs.
 - Added tests proving eval-only sources cannot export training artifacts by
   default.
 
-Remaining: source-specific schema mappings and public-source expansion policy.
+Remaining: public-source expansion policy and new source-specific mappings for
+whatever source family is approved next.
 
 ### Ticket 2: CLI/API/Data Designer Adapter Wiring
 

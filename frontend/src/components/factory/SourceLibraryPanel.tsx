@@ -807,6 +807,12 @@ export function SourceLibraryPanel() {
                     {prepareState.report.converted_count ?? 0}
                   </p>
                 ) : null}
+                {prepareState.report.source_schema_mapping ? (
+                  <p>
+                    Schema mapper: {prepareState.report.source_schema_mapping.mapper} / normalized:{' '}
+                    {prepareState.report.source_schema_mapping.normalized_records}
+                  </p>
+                ) : null}
               </div>
 
               {prepareState.report.artifacts && prepareState.report.artifacts.length > 0 ? (

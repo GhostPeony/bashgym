@@ -25,6 +25,8 @@ from bashgym.sources.catalog import (
 )
 
 SOURCE_ARTIFACT_PREPARE_SCHEMA_VERSION = "bashgym.source_artifact_prepare.v1"
+SOURCE_SCHEMA_MAPPING_VERSION = "bashgym.source_schema_mapping.v1"
+HELPSTEER2_SCORE_AXES = ("helpfulness", "correctness", "coherence", "complexity", "verbosity")
 
 
 def _text(record: dict[str, Any], *keys: str) -> str:
@@ -46,6 +48,52 @@ def _metadata_value(metadata: dict[str, Any], *keys: str) -> Any:
         if value not in (None, "", [], {}):
             return value
     return None
+
+
+def _numeric(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str) and value.strip():
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _score_axes(record: dict[str, Any], *, prefix: str = "") -> dict[str, float]:
+    axes: dict[str, float] = {}
+    for axis in HELPSTEER2_SCORE_AXES:
+        value = _numeric(record.get(f"{prefix}{axis}"))
+        if value is not None:
+            axes[axis] = value
+    return axes
+
+
+def _aggregate_score(record: dict[str, Any], *, prefix: str = "") -> float | None:
+    axes = _score_axes(record, prefix=prefix)
+    if axes:
+        return sum(axes.values()) / len(axes)
+    for key in (
+        f"{prefix}score",
+        f"{prefix}reward",
+        f"{prefix}rating",
+        f"{prefix}quality",
+        f"{prefix}preference_score",
+    ):
+        value = _numeric(record.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def _quality_from_score(score: float | int | str | None, *, scale_max: float = 4.0) -> float:
+    value = _numeric(score)
+    if value is None:
+        return 1.0
+    return max(0.0, min(1.0, value / scale_max))
 
 
 def _record_id(record: dict[str, Any], index: int) -> str:
@@ -162,6 +210,259 @@ def _score(record: dict[str, Any], default: float | None = None) -> float | int 
     if numeric_axes:
         return sum(numeric_axes) / len(numeric_axes)
     return default
+
+
+def _with_mapping_metadata(
+    record: dict[str, Any],
+    *,
+    source_schema: str,
+    updates: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = dict(record)
+    metadata = _metadata(payload)
+    metadata.setdefault("source_schema", source_schema)
+    if updates:
+        metadata.update({key: value for key, value in updates.items() if value not in (None, "", [], {})})
+    payload["metadata"] = metadata
+    return payload
+
+
+def _normalize_ultrafeedback_record(record: dict[str, Any]) -> dict[str, Any]:
+    chosen_score = _numeric(record.get("chosen_score"))
+    rejected_score = _numeric(record.get("rejected_score"))
+    metadata_updates = {
+        "source_schema": "ultrafeedback_binarized",
+        "preference_source": "ultrafeedback_binarized",
+        "pair_generation_method": "ultrafeedback_binarized_preference",
+    }
+    if chosen_score is not None:
+        metadata_updates["chosen_quality_score"] = _quality_from_score(chosen_score)
+    if rejected_score is not None:
+        metadata_updates["rejected_quality_score"] = _quality_from_score(rejected_score)
+    if chosen_score is not None and rejected_score is not None:
+        metadata_updates["score_delta"] = chosen_score - rejected_score
+    return _with_mapping_metadata(
+        record,
+        source_schema="ultrafeedback_binarized",
+        updates=metadata_updates,
+    )
+
+
+def _helpsteer2_axis_metadata(record: dict[str, Any]) -> dict[str, Any]:
+    axes = _score_axes(record)
+    aggregate = _aggregate_score(record)
+    updates: dict[str, Any] = {
+        "source_schema": "helpsteer2_scored_response",
+        "score_axes": axes,
+        "reward_scale": "likert_0_to_4",
+        "score_scale": "likert_0_to_4",
+        "label_schema": "helpfulness_correctness_coherence_complexity_verbosity_mean",
+    }
+    if aggregate is not None:
+        updates["aggregate_score"] = aggregate
+        updates["quality_score"] = _quality_from_score(aggregate)
+    return updates
+
+
+def _normalize_helpsteer2_reward_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for record in records:
+        normalized.append(
+            _with_mapping_metadata(
+                record,
+                source_schema="helpsteer2_scored_response",
+                updates=_helpsteer2_axis_metadata(record),
+            )
+        )
+    return normalized
+
+
+def _helpsteer2_preference_pairs(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    pairs: list[dict[str, Any]] = []
+    for index, record in enumerate(records):
+        prompt = _prompt(record)
+        response_1 = _stringify_response(record.get("response_1"))
+        response_2 = _stringify_response(record.get("response_2"))
+        strength = _numeric(record.get("preference_strength"))
+        if not (prompt and response_1 and response_2) or strength in (None, 0.0, -100.0):
+            continue
+        if strength < 0:
+            chosen = response_1
+            rejected = response_2
+            preferred = "response_1"
+        else:
+            chosen = response_2
+            rejected = response_1
+            preferred = "response_2"
+        pair_id = _text(record, "pair_id", "id", "example_id") or f"helpsteer2-pref-{index + 1:06d}"
+        prompt_hash = _text(record, "prompt_hash") or _prompt_hash(prompt)
+        metadata = _metadata(record)
+        metadata.update(
+            {
+                "source_schema": "helpsteer2_preference",
+                "pair_id": pair_id,
+                "prompt_hash": prompt_hash,
+                "preference_strength": strength,
+                "preference_outcome": preferred,
+                "pair_generation_method": "helpsteer2_human_preference",
+                "label_strength": f"{preferred}_better_by_{abs(int(strength))}",
+                "chosen_quality_score": 1.0,
+                "rejected_quality_score": 0.0,
+                "score_delta": abs(strength),
+                "reward_scale": "preference_strength_-3_to_3",
+                "label_schema": "negative=response_1_preferred,positive=response_2_preferred,-100=invalid",
+            }
+        )
+        pairs.append(
+            {
+                "id": pair_id,
+                "pair_id": pair_id,
+                "prompt": prompt,
+                "prompt_hash": prompt_hash,
+                "chosen": chosen,
+                "rejected": rejected,
+                "chosen_score": 1.0,
+                "rejected_score": 0.0,
+                "metadata": metadata,
+            }
+        )
+    return pairs
+
+
+def _helpsteer2_scored_response_pairs(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[str, list[tuple[int, dict[str, Any], float]]] = {}
+    for index, record in enumerate(records):
+        prompt = _prompt(record)
+        response = _response(record)
+        score = _aggregate_score(record)
+        if prompt and response and score is not None:
+            grouped.setdefault(prompt, []).append((index, record, score))
+
+    pairs: list[dict[str, Any]] = []
+    for prompt, candidates in grouped.items():
+        candidates = sorted(candidates, key=lambda item: item[0])
+        for pair_index in range(0, len(candidates) - 1, 2):
+            left_index, left, left_score = candidates[pair_index]
+            right_index, right, right_score = candidates[pair_index + 1]
+            if left_score == right_score:
+                continue
+            if left_score > right_score:
+                chosen_record, chosen_score = left, left_score
+                rejected_record, rejected_score = right, right_score
+                chosen_index, rejected_index = left_index, right_index
+            else:
+                chosen_record, chosen_score = right, right_score
+                rejected_record, rejected_score = left, left_score
+                chosen_index, rejected_index = right_index, left_index
+            prompt_hash = _prompt_hash(prompt)
+            pair_id = f"helpsteer2-score-{prompt_hash}-{pair_index // 2 + 1:03d}"
+            metadata = dict(_metadata(chosen_record))
+            metadata.update(
+                {
+                    "source_schema": "helpsteer2_scored_response_pair",
+                    "pair_id": pair_id,
+                    "prompt_hash": prompt_hash,
+                    "pair_generation_method": "helpsteer2_score_delta_pair",
+                    "label_strength": "higher_aggregate_score_preferred",
+                    "chosen_quality_score": _quality_from_score(chosen_score),
+                    "rejected_quality_score": _quality_from_score(rejected_score),
+                    "chosen_score": chosen_score,
+                    "rejected_score": rejected_score,
+                    "score_delta": chosen_score - rejected_score,
+                    "chosen_source_record_index": chosen_index,
+                    "rejected_source_record_index": rejected_index,
+                    "reward_scale": "likert_0_to_4",
+                    "label_schema": "higher_mean_axis_score_preferred",
+                }
+            )
+            pairs.append(
+                {
+                    "id": pair_id,
+                    "pair_id": pair_id,
+                    "prompt": prompt,
+                    "prompt_hash": prompt_hash,
+                    "chosen": _response(chosen_record),
+                    "rejected": _response(rejected_record),
+                    "chosen_score": chosen_score,
+                    "rejected_score": rejected_score,
+                    "metadata": metadata,
+                }
+            )
+    return pairs
+
+
+def _normalize_helpsteer2_records(
+    records: list[dict[str, Any]],
+    *,
+    goal: SourceUse,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    has_preference_rows = any(
+        record.get("response_1") not in (None, "")
+        and record.get("response_2") not in (None, "")
+        and record.get("preference_strength") not in (None, "")
+        for record in records
+    )
+    if goal == SourceUse.DPO:
+        normalized = (
+            _helpsteer2_preference_pairs(records)
+            if has_preference_rows
+            else _helpsteer2_scored_response_pairs(records)
+        )
+        mapper = "helpsteer2_preference_pairs" if has_preference_rows else "helpsteer2_scored_response_pairs"
+        if has_preference_rows:
+            consumed_records = len(normalized)
+        else:
+            consumed_indexes: set[int] = set()
+            for pair in normalized:
+                metadata = _metadata(pair)
+                for key in ("chosen_source_record_index", "rejected_source_record_index"):
+                    value = metadata.get(key)
+                    if isinstance(value, int):
+                        consumed_indexes.add(value)
+            consumed_records = len(consumed_indexes)
+    else:
+        normalized = _normalize_helpsteer2_reward_records(records)
+        mapper = "helpsteer2_scored_response"
+        consumed_records = len(normalized)
+    return normalized, {
+        "schema_version": SOURCE_SCHEMA_MAPPING_VERSION,
+        "source_id": "helpsteer2",
+        "mapper": mapper,
+        "input_records": len(records),
+        "consumed_records": consumed_records,
+        "normalized_records": len(normalized),
+        "dropped_records": max(0, len(records) - consumed_records),
+    }
+
+
+def _normalize_source_records(
+    card: SourceCard,
+    records: list[dict[str, Any]],
+    *,
+    goal: SourceUse,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    if card.id == "helpsteer2":
+        return _normalize_helpsteer2_records(records, goal=goal)
+    if card.id == "ultrafeedback_binarized":
+        normalized = [_normalize_ultrafeedback_record(record) for record in records]
+        return normalized, {
+            "schema_version": SOURCE_SCHEMA_MAPPING_VERSION,
+            "source_id": card.id,
+            "mapper": "ultrafeedback_binarized",
+            "input_records": len(records),
+            "consumed_records": len(normalized),
+            "normalized_records": len(normalized),
+            "dropped_records": 0,
+        }
+    return records, {
+        "schema_version": SOURCE_SCHEMA_MAPPING_VERSION,
+        "source_id": card.id,
+        "mapper": "generic_json_or_jsonl",
+        "input_records": len(records),
+        "consumed_records": len(records),
+        "normalized_records": len(records),
+        "dropped_records": 0,
+    }
 
 
 def _base_metadata(
@@ -321,7 +622,13 @@ def _to_reward_examples(
         reward_type = "process_reward" if process else str(record.get("reward_type") or "preference_reward")
 
         if prompt and pair_chosen and pair_rejected and not process:
-            for label, response, score in (("chosen", pair_chosen, 1.0), ("rejected", pair_rejected, 0.0)):
+            chosen_score = _numeric(record.get("chosen_score"))
+            rejected_score = _numeric(record.get("rejected_score"))
+            pair_items = (
+                ("chosen", pair_chosen, 1.0 if chosen_score is None else chosen_score),
+                ("rejected", pair_rejected, 0.0 if rejected_score is None else rejected_score),
+            )
+            for label, response, score in pair_items:
                 example_id = f"{pair_id}-{label}"
                 example_metadata = dict(metadata)
                 example_metadata.update(
@@ -330,8 +637,8 @@ def _to_reward_examples(
                         "pair_id": pair_id,
                         "prompt_hash": str(metadata.get("prompt_hash") or _prompt_hash(prompt)),
                         "reward_type": "preference_reward",
-                        "reward_scale": "0_to_1",
-                        "label_schema": "chosen=1,rejected=0",
+                        "reward_scale": metadata.get("reward_scale") or "0_to_1",
+                        "label_schema": metadata.get("label_schema") or "chosen=1,rejected=0",
                         "preference_outcome": label,
                     }
                 )
@@ -476,8 +783,12 @@ def prepare_source_artifacts(
         report["errors"].extend(manifest["use_verdict"]["blocking_codes"])
         return report
 
-    records = _load_records(input_path, limit=limit)
-    report["record_count"] = len(records)
+    loaded_records = _load_records(input_path, limit=limit)
+    report["record_count"] = len(loaded_records)
+    records, mapping_report = _normalize_source_records(card, loaded_records, goal=source_use)
+    report["source_schema_mapping"] = mapping_report
+    if mapping_report.get("dropped_records", 0):
+        report["warnings"].append("source_schema_mapping_dropped_records")
     input_source = Path(input_path)
 
     def add_artifact(

@@ -40,6 +40,7 @@ Archive: `tasks/archived-completed-before-2026-06-22.md` contains completed item
 - [x] Add Factory Source Library UI for source recommendations, eval-only guardrails, local artifact preparation, and Training handoff
 - [x] Add Hugging Face-backed source fetch orchestration through Source Library CLI/API/UI/Data Designer, capped local `source_records.jsonl` outputs, fetch reports, and fetch-to-artifact conversion
 - [x] Add Source Library remote-fetch approval and cache policy for larger Hugging Face pulls across helper/API/CLI/UI/Data Designer
+- [x] Add source-specific schema mapping for existing P0 preference/reward source cards (UltraFeedback Binarized and HelpSteer2) with mapper reports surfaced in Source Library output
 - [x] Add Training RunCard Evidence UI/API for local RunCard discovery, promotion validation, claim-tier blockers, and artifact presence
 - [x] Add compact RunCard promotion explanations with failed gates and next actions across CLI/API/UI
 - [ ] Human decision: choose eval-only override policy, first installed backend, first cloud launcher priority, first public-source expansion set, remote/billable compute approval boundary, and claim-tier thresholds (`tasks/human-decisions-source-compute-2026-06-29.md`)

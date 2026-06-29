@@ -9,6 +9,7 @@ The core pattern (mutate -> evaluate -> keep if better) is generic.
 Strategy-specific behavior is encapsulated in SearchSpace subclasses:
 - HyperparamSearchSpace: mutates TrainerConfig fields (learning_rate, lora_r, etc.)
 - SchemaSearchSpace: (future) mutates Data Designer pipeline configs
+- DataRecipeSearchSpace: mutates source/domain/quality mixes
 """
 
 import asyncio
@@ -41,6 +42,7 @@ class SearchSpace(ABC):
     AutoResearcher uses this to support different optimization targets:
     - HyperparamSearchSpace: mutates TrainerConfig fields (learning_rate, lora_r, etc.)
     - SchemaSearchSpace: mutates Data Designer pipeline configs (temperatures, columns, judges)
+    - DataRecipeSearchSpace: mutates source/domain/quality mixes
     """
 
     @abstractmethod

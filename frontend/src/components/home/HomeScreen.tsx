@@ -91,7 +91,7 @@ export function HomeScreen() {
           <div className="flex items-center gap-3">
             <button
               onClick={() => openOverlay('traces')}
-              className="card flex items-center gap-2 px-3 py-1.5 hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all"
+              className="card flex items-center gap-2 px-3 py-1.5 hover:border-accent active:translate-x-[1px] active:translate-y-[1px] active:shadow-brutal-pressed transition-press"
             >
               <Database className="w-3.5 h-3.5 text-accent" />
               <span className="font-mono text-xs text-text-primary">{stats.traces}</span>
@@ -99,7 +99,7 @@ export function HomeScreen() {
             </button>
             <button
               onClick={() => openOverlay('achievements')}
-              className="card flex items-center gap-2 px-3 py-1.5 hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all"
+              className="card flex items-center gap-2 px-3 py-1.5 hover:border-accent active:translate-x-[1px] active:translate-y-[1px] active:shadow-brutal-pressed transition-press"
             >
               <Trophy className="w-3.5 h-3.5 text-status-warning" />
               <span className="font-mono text-xs text-text-primary">{earnedCount}/{totalCount}</span>

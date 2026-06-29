@@ -215,7 +215,7 @@ export function SyntheticGenerator({ onStateChange }: SyntheticGeneratorProps) {
           <div className="relative flex-1">
             <button
               onClick={() => setRepoDropdownOpen(!repoDropdownOpen)}
-              className="w-full flex items-center justify-between px-3 py-2 bg-background-secondary border-brutal border-border rounded-brutal text-sm text-text-primary hover:shadow-brutal-sm transition-shadow"
+              className="w-full flex items-center justify-between px-3 py-2 bg-background-secondary border-brutal border-border rounded-brutal text-sm text-text-primary hover:border-accent transition-colors"
             >
               <span className="font-mono">{getRepoLabel()}</span>
               <ChevronDown className={clsx('w-4 h-4 text-text-muted transition-transform', repoDropdownOpen && 'rotate-180')} />

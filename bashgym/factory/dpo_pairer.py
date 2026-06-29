@@ -31,6 +31,16 @@ def _extract_repo_name(trace: dict[str, Any]) -> str:
     return ""
 
 
+def _extract_trace_id(trace: dict[str, Any]) -> str:
+    """Extract a stable trace id when one is present."""
+
+    meta = trace.get("metadata", {})
+    for value in (trace.get("trace_id"), trace.get("id"), meta.get("trace_id"), meta.get("id")):
+        if isinstance(value, str) and value.strip():
+            return value
+    return ""
+
+
 def _extract_prompt(trace: dict[str, Any]) -> str:
     """Extract the user prompt from a trace."""
     meta = trace.get("metadata", {})
@@ -183,6 +193,7 @@ def pair_failures_for_dpo(
         rejected = _serialize_trace_response(failed_trace)
 
         example_id = hashlib.sha256(f"{prompt}{chosen}{rejected}".encode()).hexdigest()[:16]
+        prompt_hash = hashlib.sha256(prompt.encode()).hexdigest()[:16]
 
         pairs.append(
             DPOExample(
@@ -191,9 +202,20 @@ def pair_failures_for_dpo(
                 chosen=chosen,
                 rejected=rejected,
                 metadata={
+                    "pair_id": example_id,
+                    "prompt_hash": prompt_hash,
+                    "chosen_trace_id": _extract_trace_id(gold_trace),
+                    "rejected_trace_id": _extract_trace_id(failed_trace),
                     "gold_repo": _extract_repo_name(gold_trace),
                     "failed_repo": _extract_repo_name(failed_trace),
                     "similarity": round(best_score, 4),
+                    "pair_generation_method": "embedding_similarity_trace_pair",
+                    "label_strength": "gold_vs_failed_trace",
+                    "label_source": "trace_verifier_plus_similarity",
+                    "chosen_length_chars": len(chosen),
+                    "rejected_length_chars": len(rejected),
+                    "domain": "terminal_agent",
+                    "task_family": "failure_recovery",
                 },
             )
         )

@@ -35,7 +35,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       ghost:
         'btn-ghost',
       danger:
-        'bg-status-error text-white border-brutal border-border box-shadow-brutal-sm hover:translate-x-0.5 hover:translate-y-0.5',
+        'bg-status-error text-white border-brutal border-border shadow-brutal-sm hover:brightness-95 active:translate-x-0.5 active:translate-y-0.5 active:shadow-brutal-pressed',
       icon:
         'btn-icon',
       cta:

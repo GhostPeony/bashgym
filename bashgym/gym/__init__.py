@@ -42,6 +42,7 @@ from bashgym.gym.echo_trainer import (
 from bashgym.gym.echo_trainer import (
     environment_prediction_loss_from_logits,
 )
+from bashgym.gym.data_recipe_search_space import DataRecipeSearchSpace
 from bashgym.gym.environment import (
     Action,
     ActionType,
@@ -144,6 +145,7 @@ __all__ = [
     "ActionType",
     "Observation",
     "BatchGymEnv",
+    "DataRecipeSearchSpace",
     "EnvironmentRecipeSearchSpace",
     # Router
     "ModelRouter",

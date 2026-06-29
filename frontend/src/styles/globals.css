@@ -180,17 +180,16 @@
     box-shadow: var(--shadow-sm);
     border-radius: var(--radius);
     position: relative;
-    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
   }
 
-  /* Containers must NOT move on hover — a subtle shadow change cues hover.
-     The press/translate effect is reserved for buttons on :active (clicks). */
+  /* Containers keep their physical depth on hover. Pressed depth belongs to :active only. */
   .card:hover {
-    box-shadow: var(--shadow);
+    box-shadow: var(--shadow-sm);
   }
 
   .dark .card:hover {
-    box-shadow: 0 0 8px hsla(var(--accent-hue), 20%, 60%, 0.08);
+    box-shadow: var(--shadow-sm);
   }
 
   .card-elevated {
@@ -198,11 +197,11 @@
   }
 
   .card-elevated:hover {
-    box-shadow: 3px 3px 0px var(--shadow-color);
+    box-shadow: var(--shadow);
   }
 
   .dark .card-elevated:hover {
-    box-shadow: 0 0 12px hsla(var(--accent-hue), 20%, 60%, 0.1);
+    box-shadow: var(--shadow);
   }
 
   /* Card triangular corner accent */
@@ -266,7 +265,12 @@
   }
 
   .btn-primary:hover::before {
+    background: var(--accent-dark);
     transform: skewX(-4deg);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .btn-primary:active::before {
     box-shadow: 1px 1px 0px var(--shadow-color);
   }
 
@@ -276,6 +280,11 @@
   }
 
   .dark .btn-primary:hover::before {
+    transform: none;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .dark .btn-primary:active::before {
     box-shadow: 1px 1px 0px var(--shadow-color);
   }
 
@@ -288,7 +297,8 @@
   }
 
   .btn-secondary:hover {
-    box-shadow: 3px 3px 0px var(--shadow-color);
+    background: var(--bg-secondary);
+    box-shadow: var(--shadow-sm);
   }
 
   .btn-secondary:active {
@@ -326,7 +336,8 @@
   }
 
   .btn-icon:hover {
-    box-shadow: 2px 2px 0px var(--shadow-color);
+    background: var(--bg-secondary);
+    box-shadow: var(--shadow-sm);
   }
 
   .btn-icon:active {
@@ -339,7 +350,11 @@
   }
 
   .dark .btn-icon:hover {
-    box-shadow: 0 0 8px hsla(var(--accent-hue), 20%, 60%, 0.1);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .dark .btn-icon:active {
+    box-shadow: 1px 1px 0px var(--shadow-color);
   }
 
   /* CTA / Directional — rectangle with triangle arrow */
@@ -363,7 +378,8 @@
   }
 
   .btn-cta:hover {
-    box-shadow: 3px 3px 0px var(--shadow-color);
+    background: var(--bg-secondary);
+    box-shadow: var(--shadow-sm);
   }
 
   .btn-cta:active {
@@ -374,13 +390,14 @@
   /* ── Inputs ── */
   .input {
     padding: 8px 12px;
+    min-height: 40px;
     background: var(--bg-card);
     border: var(--border-weight) solid var(--border-color);
     border-radius: var(--radius);
     color: var(--text-primary);
     font-family: 'Inter', sans-serif;
     font-size: 0.9rem;
-    transition: border-color 0.15s ease, border-width 0.15s ease;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
   }
 
   .input::placeholder {
@@ -390,8 +407,7 @@
   .input:focus {
     outline: none;
     border-color: var(--accent);
-    border-width: 3px;
-    padding: 7px 11px; /* compensate for thicker border */
+    box-shadow: 0 0 0 2px hsla(var(--accent-hue), 35%, 66%, 0.28);
   }
 
   /* ── Tags / Badges — skewed monospace ── */
@@ -668,12 +684,20 @@
     transition: transform 0.15s ease, box-shadow 0.15s ease;
   }
 
-  /* Press-in hover helper */
+  /* Press-in helper: hover is visual only; movement waits for an actual press. */
   .hover-press:hover {
+    transform: none;
+  }
+
+  .hover-press:active {
     transform: translate(2px, 2px);
   }
 
   .dark .hover-press:hover {
+    transform: none;
+  }
+
+  .dark .hover-press:active {
     transform: translate(1px, 1px);
   }
 }

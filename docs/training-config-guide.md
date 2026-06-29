@@ -6,7 +6,9 @@ For the broader operator curriculum, start with
 [training/capability-map.md](training/capability-map.md), then use
 [training/strategy-guide.md](training/strategy-guide.md) and
 [training/metrics-runbook.md](training/metrics-runbook.md) while configuring and
-diagnosing runs.
+diagnosing runs. For terminal RL, use
+[training/tmax-terminal-rl-recipe.md](training/tmax-terminal-rl-recipe.md); before
+GX10 backend work, use [training/gx10-eval-checklist.md](training/gx10-eval-checklist.md).
 
 ---
 

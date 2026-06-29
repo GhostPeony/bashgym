@@ -316,6 +316,7 @@ try:
     PIPELINES["terminal_env_generation"] = build_terminal_env_pipeline
     PIPELINES["tool_use_sft"] = build_tool_use_pipeline
     PIPELINES["from_external"] = build_external_pipeline
+    PIPELINES["from_source"] = build_external_pipeline
     PIPELINES["from_unstructured"] = build_unstructured_pipeline
     if HAS_MCP:
         # Real tool-use pipeline only registers when MCP (ToolConfig) is available.

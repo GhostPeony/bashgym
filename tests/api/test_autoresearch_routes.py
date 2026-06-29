@@ -76,20 +76,33 @@ def _environment_payloads() -> list[dict]:
 
 @pytest.fixture(autouse=True)
 def _clear_schema_researcher():
-    """Clear schema_researcher from app state before each test."""
-    if hasattr(app.state, "schema_researcher"):
-        # Stop any running researcher first
-        researcher = app.state.schema_researcher
-        if hasattr(researcher, "stop"):
-            researcher.stop()
-        delattr(app.state, "schema_researcher")
+    """Clear AutoResearch route state before each test."""
+    for attr in (
+        "schema_researcher",
+        "data_recipe_researcher",
+        "data_recipe_proposal",
+        "data_recipe_output_path",
+        "data_recipe_metadata",
+    ):
+        if hasattr(app.state, attr):
+            value = getattr(app.state, attr)
+            if hasattr(value, "stop"):
+                value.stop()
+            delattr(app.state, attr)
     yield
     # Cleanup after test too
-    if hasattr(app.state, "schema_researcher"):
-        researcher = app.state.schema_researcher
-        if hasattr(researcher, "stop"):
-            researcher.stop()
-        delattr(app.state, "schema_researcher")
+    for attr in (
+        "schema_researcher",
+        "data_recipe_researcher",
+        "data_recipe_proposal",
+        "data_recipe_output_path",
+        "data_recipe_metadata",
+    ):
+        if hasattr(app.state, attr):
+            value = getattr(app.state, attr)
+            if hasattr(value, "stop"):
+                value.stop()
+            delattr(app.state, attr)
 
 
 class TestSchemaResearchStart:
@@ -215,6 +228,173 @@ class TestHyperparamResearchStatus:
 
         response = client.post("/api/autoresearch/pause")
         assert response.status_code == 404
+
+
+class TestDataRecipeProposal:
+    def test_status_when_idle(self):
+        response = client.get("/api/autoresearch/data-recipe/status")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "idle"
+        assert data["total_experiments"] == 0
+        assert data["completed_experiments"] == 0
+        assert data["proposal"] is None
+
+    def test_propose_from_training_sources(self):
+        response = client.post(
+            "/api/autoresearch/data-recipe/propose",
+            json={
+                "goal": "dpo",
+                "source_ids": ["ultrafeedback_binarized", "helpsteer2"],
+                "max_experiments": 3,
+                "sample_size": 128,
+                "mutation_rate": 0.0,
+                "seed": 7,
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "completed"
+        assert data["goal"] == "dpo"
+        assert data["source_count"] == 2
+        assert data["excluded_sources"] == []
+        assert data["best_metric"] is not None
+        assert len(data["experiments"]) == 3
+        assert data["proposal"]["schema_version"] == "bashgym.data_recipe_proposal.v1"
+        assert data["proposal"]["goal"] == "dpo"
+        assert data["proposal"]["data_designer"]["pipeline"] == "from_source"
+        assert data["proposal"]["data_designer"]["sample_size"] == 128
+        assert {source["id"] for source in data["proposal"]["sources"]} == {
+            "ultrafeedback_binarized",
+            "helpsteer2",
+        }
+
+    def test_status_tracks_latest_proposal(self):
+        propose_response = client.post(
+            "/api/autoresearch/data-recipe/propose",
+            json={
+                "goal": "dpo",
+                "source_ids": ["ultrafeedback_binarized", "helpsteer2"],
+                "max_experiments": 2,
+                "mutation_rate": 0.0,
+                "seed": 11,
+            },
+        )
+        assert propose_response.status_code == 200
+
+        response = client.get("/api/autoresearch/data-recipe/status")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "completed"
+        assert data["goal"] == "dpo"
+        assert data["source_count"] == 2
+        assert data["completed_experiments"] == 2
+        assert data["proposal"]["schema_version"] == "bashgym.data_recipe_proposal.v1"
+        assert data["best_config"]["source_weights"]
+
+    def test_propose_blocks_eval_only_training_source_by_default(self):
+        response = client.post(
+            "/api/autoresearch/data-recipe/propose",
+            json={
+                "goal": "sft",
+                "source_ids": ["harbor_terminal_bench"],
+                "max_experiments": 2,
+            },
+        )
+
+        assert response.status_code == 400
+        detail = response.json()["detail"]
+        assert detail["message"] == "No source cards remain after data-recipe filters"
+        assert detail["excluded"] == [
+            {"id": "harbor_terminal_bench", "reason": "eval_only_excluded"}
+        ]
+
+    def test_propose_writes_data_recipe_export_file(self, tmp_path):
+        output_path = tmp_path / "data-recipe-proposal.json"
+        response = client.post(
+            "/api/autoresearch/data-recipe/propose",
+            json={
+                "goal": "reward_model",
+                "source_ids": ["ultrafeedback_binarized", "helpsteer2"],
+                "max_experiments": 2,
+                "mutation_rate": 0.0,
+                "output_path": str(output_path),
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["output_path"] == str(output_path)
+        exported = json.loads(output_path.read_text(encoding="utf-8"))
+        assert exported["schema_version"] == "bashgym.data_recipe_proposal.v1"
+        assert exported["sources"] == data["proposal"]["sources"]
+
+    def test_export_latest_data_recipe_proposal(self, tmp_path):
+        propose_response = client.post(
+            "/api/autoresearch/data-recipe/propose",
+            json={
+                "goal": "dpo",
+                "source_ids": ["ultrafeedback_binarized", "helpsteer2"],
+                "max_experiments": 2,
+                "mutation_rate": 0.0,
+            },
+        )
+        assert propose_response.status_code == 200
+
+        output_path = tmp_path / "latest-data-recipe.json"
+        response = client.post(
+            "/api/autoresearch/data-recipe/export",
+            json={"output_path": str(output_path)},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "exported"
+        assert data["output_path"] == str(output_path)
+        exported = json.loads(output_path.read_text(encoding="utf-8"))
+        assert exported == data["proposal"]
+
+    def test_export_without_proposal_returns_404(self):
+        response = client.post(
+            "/api/autoresearch/data-recipe/export",
+            json={"output_path": "unused.json"},
+        )
+
+        assert response.status_code == 404
+
+    def test_stop_without_session_returns_404(self):
+        response = client.post("/api/autoresearch/data-recipe/stop")
+
+        assert response.status_code == 404
+
+    def test_stop_completed_session_returns_conflict(self):
+        propose_response = client.post(
+            "/api/autoresearch/data-recipe/propose",
+            json={
+                "goal": "dpo",
+                "source_ids": ["ultrafeedback_binarized", "helpsteer2"],
+                "max_experiments": 1,
+                "mutation_rate": 0.0,
+            },
+        )
+        assert propose_response.status_code == 200
+
+        response = client.post("/api/autoresearch/data-recipe/stop")
+
+        assert response.status_code == 409
+        assert "not running" in response.json()["detail"]
+
+    def test_propose_rejects_unknown_goal(self):
+        response = client.post(
+            "/api/autoresearch/data-recipe/propose",
+            json={"goal": "latest_magic", "max_experiments": 2},
+        )
+
+        assert response.status_code == 400
+        assert "unknown goal" in response.json()["detail"]
 
 
 class TestEnvironmentRecipeProposal:

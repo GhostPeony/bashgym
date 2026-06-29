@@ -85,7 +85,7 @@ export function StudentModelPicker({
                 'flex items-center gap-2 p-2 border-brutal rounded-brutal transition-press',
                 isActive
                   ? 'border-accent bg-accent-light/30 shadow-brutal-sm'
-                  : 'border-border bg-background-card hover:shadow-brutal-sm'
+                  : 'border-border bg-background-card hover:border-accent'
               )}
             >
               <div className={clsx(

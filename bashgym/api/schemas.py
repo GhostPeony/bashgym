@@ -1295,3 +1295,41 @@ class EnvironmentRecipeProposalRequest(BaseModel):
         None,
         description="Optional local path where the reproducible proposal JSON is written",
     )
+
+
+class DataRecipeProposalRequest(BaseModel):
+    """Request to propose a public-source data recipe through AutoResearch."""
+
+    goal: str = Field("sft", description="Target use: sft, dpo, reward_model, etc.")
+    source_ids: list[str] = Field(
+        default_factory=list,
+        description="Optional curated source ids. Empty means use safe catalog candidates.",
+    )
+    domain: str | None = Field(None, description="Optional source domain filter")
+    include_eval_only: bool = Field(
+        False,
+        description="Include eval-only sources in candidate recipes",
+    )
+    max_experiments: int = Field(8, ge=1, le=200, description="Recipe mutations to evaluate")
+    sample_size: int = Field(1000, ge=1, le=1_000_000)
+    quality_threshold: float = Field(0.7, ge=0.0, le=1.0)
+    synthetic_multiplier: float = Field(1.0, ge=0.0, le=10.0)
+    decontam_jaccard_threshold: float = Field(0.7, ge=0.0, le=1.0)
+    cost_budget_usd: float = Field(25.0, ge=0.0, le=10000.0)
+    eval_target: str = Field("heldout_pass@k")
+    mutation_rate: float = Field(0.35, ge=0.0, le=1.0)
+    mutation_scale: float = Field(0.2, ge=0.0, le=1.0)
+    seed: int = Field(0, ge=0)
+    output_path: str | None = Field(
+        None,
+        description="Optional local path where the proposal JSON is written",
+    )
+
+
+class DataRecipeExportRequest(BaseModel):
+    """Request to export the latest data-recipe AutoResearch proposal."""
+
+    output_path: str = Field(
+        ...,
+        description="Local path where the latest data-recipe proposal JSON is written",
+    )

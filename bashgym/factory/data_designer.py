@@ -458,6 +458,134 @@ class DataDesignerPipeline:
         num = num_records or self.config.num_records
         return self.designer.create(builder, num_records=num).load_dataset()
 
+    def prepare_source(
+        self,
+        source_id: str,
+        *,
+        goal: str = "sft",
+        output_dir: str | Path | None = None,
+        input_path: str | Path | None = None,
+        limit: int | None = None,
+        allow_eval_only: bool = False,
+        override_reason: str | None = None,
+    ) -> dict[str, Any]:
+        """Prepare source and dataset cards for a curated public source.
+
+        This is the Data Designer bridge for the BashGym Source Library. It
+        writes source provenance before any generation or download work starts.
+        """
+
+        from bashgym.sources import get_source, prepare_source_artifacts, prepare_source_manifest
+
+        card = get_source(source_id)
+        target_dir = Path(output_dir) if output_dir else self.config.output_dir
+        manifest = prepare_source_manifest(
+            card,
+            goal=goal,
+            output_dir=target_dir,
+            allow_eval_only=allow_eval_only,
+            override_reason=override_reason,
+        )
+        if not manifest["use_verdict"]["ok"]:
+            codes = ", ".join(manifest["use_verdict"]["blocking_codes"])
+            raise ValueError(f"source {source_id!r} cannot be used for {goal!r}: {codes}")
+
+        dataset_card = {
+            "schema_version": "bashgym.dataset_card.v1",
+            "source_id": card.id,
+            "source_name": card.name,
+            "goal": goal,
+            "adapter": card.adapter,
+            "artifact_types": [artifact.value for artifact in card.artifact_types],
+            "training_eligible": card.training_eligible,
+            "eval_only": card.eval_only,
+            "license": card.license,
+            "split_policy": card.split_policy,
+            "decontam_notes": card.decontam_notes,
+            "source_manifest_path": manifest.get("manifest_path"),
+            "quality_notes": card.source_quality_notes,
+        }
+        artifact_report = None
+        if input_path is not None:
+            artifact_report = prepare_source_artifacts(
+                card,
+                goal=goal,
+                input_path=input_path,
+                output_dir=target_dir,
+                allow_eval_only=allow_eval_only,
+                override_reason=override_reason,
+                limit=limit,
+            )
+            if not artifact_report["ok"]:
+                raise ValueError(
+                    f"source {source_id!r} adapter failed for {goal!r}: "
+                    f"{', '.join(artifact_report['errors'])}"
+                )
+            dataset_card["artifact_report_path"] = artifact_report.get("report_path")
+            dataset_card["artifacts"] = artifact_report.get("artifacts", [])
+        target_dir.mkdir(parents=True, exist_ok=True)
+        dataset_card_path = target_dir / "dataset_card.json"
+        dataset_card_path.write_text(
+            json.dumps(dataset_card, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        return {
+            "source_manifest": manifest,
+            "dataset_card": dataset_card,
+            "dataset_card_path": str(dataset_card_path),
+            "artifact_report": artifact_report,
+        }
+
+    def from_source(
+        self,
+        source_id: str,
+        *,
+        goal: str = "sft",
+        num_records: int | None = None,
+        output_dir: str | Path | None = None,
+        input_path: str | Path | None = None,
+        allow_eval_only: bool = False,
+        override_reason: str | None = None,
+    ) -> "pd.DataFrame":
+        """Generate data from a curated source card.
+
+        The first source integration path uses Hugging Face-backed source cards
+        or an explicit ``PipelineConfig.seed_source`` override, then delegates to
+        ``from_dataset`` after writing source/dataset cards.
+        """
+
+        from bashgym.sources import get_source
+
+        prepared = self.prepare_source(
+            source_id,
+            goal=goal,
+            output_dir=output_dir,
+            input_path=input_path,
+            limit=num_records,
+            allow_eval_only=allow_eval_only,
+            override_reason=override_reason,
+        )
+        card = get_source(source_id)
+        seed_source = (
+            str(input_path)
+            if input_path is not None
+            else card.huggingface_id or self.config.seed_source
+        )
+        if not seed_source:
+            raise ValueError(
+                f"source {source_id!r} does not define a Hugging Face dataset. "
+                "Set PipelineConfig.seed_source to a local seed file for this adapter."
+            )
+        if output_dir:
+            self.config.output_dir = Path(output_dir)
+        logger.info(
+            "Prepared source %s for %s with dataset card %s",
+            source_id,
+            goal,
+            prepared["dataset_card_path"],
+        )
+        return self.from_dataset(seed_source, num_records=num_records)
+
     @staticmethod
     def _read_tabular(path: Path) -> "pd.DataFrame":
         """Read a local CSV/Parquet/JSON/JSONL file into a DataFrame."""

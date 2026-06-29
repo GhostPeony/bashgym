@@ -930,6 +930,7 @@ export interface HeldoutEnvironmentEvidence {
     | null
   external_benchmarks?: ExternalBenchmarkIngestResponse | ExternalBenchmarkReport | Record<string, unknown> | null
   world_model_quality?: Record<string, unknown> | null
+  learned_reward_evidence?: Record<string, unknown> | null
   external_benchmark_min_scores?: Record<string, number> | null
   external_benchmarks_required?: boolean
   required?: boolean
@@ -962,6 +963,17 @@ export interface HeldoutReleaseGate {
     findings: string[]
     coverage?: Record<string, unknown> | null
   }
+  learned_reward_evidence_present?: boolean
+  learned_reward_evidence_diagnostic_only?: boolean
+  learned_reward_evidence_signal?: string
+  learned_reward_evidence_findings?: string[]
+  learned_reward_evidence?: {
+    present: boolean
+    diagnostic_only: boolean
+    signal: string
+    metrics: Record<string, number>
+    findings: string[]
+  }
   trace_reasons: string[]
   environment_reasons: string[]
   external_benchmark_reasons?: string[]
@@ -971,6 +983,7 @@ export interface HeldoutReleaseGate {
   external_benchmark_sections?: string[]
   blocking_external_benchmark_sections?: string[]
   world_model_quality_sections?: string[]
+  learned_reward_evidence_sections?: string[]
 }
 
 export interface HeldoutReport {
@@ -3921,6 +3934,90 @@ export interface EnvironmentRecipeProposalResponse {
   output_path?: string | null
 }
 
+export interface DataRecipeProposalConfig {
+  goal?: string
+  sourceIds?: string[]
+  domain?: string
+  includeEvalOnly?: boolean
+  maxExperiments?: number
+  sampleSize?: number
+  qualityThreshold?: number
+  syntheticMultiplier?: number
+  decontamJaccardThreshold?: number
+  costBudgetUsd?: number
+  evalTarget?: string
+  mutationRate?: number
+  mutationScale?: number
+  seed?: number
+  outputPath?: string
+}
+
+export interface DataRecipeExperiment {
+  experiment_id: number
+  config_snapshot: Record<string, unknown>
+  metric_value: number
+  improved: boolean
+  duration_seconds: number
+  timestamp: string
+}
+
+export interface DataRecipeProposal {
+  schema_version: string
+  goal: string
+  genome: {
+    sample_size: number
+    seed: number
+    quality_threshold: number
+    synthetic_multiplier: number
+    decontam_jaccard_threshold: number
+    cost_budget_usd: number
+    eval_target: string
+    source_weights: Record<string, number>
+    domain_weights: Record<string, number>
+  }
+  sources: Array<{
+    id: string
+    domain: string
+    weight: number
+    adapter: string
+    artifact_types: string[]
+    training_eligible: boolean
+    eval_only: boolean
+  }>
+  guardrails: Record<string, unknown>
+  data_designer: {
+    pipeline: string
+    synthetic_multiplier: number
+    sample_size: number
+  }
+}
+
+export interface DataRecipeProposalResponse {
+  status: string
+  goal: string
+  source_count: number
+  excluded_sources: Array<{ id: string; reason: string }>
+  best_metric: number | null
+  proposal: DataRecipeProposal
+  experiments: DataRecipeExperiment[]
+  output_path?: string | null
+}
+
+export interface DataRecipeStatusResponse {
+  status: string
+  total_experiments: number
+  completed_experiments: number
+  best_metric: number | null
+  best_config: Record<string, unknown>
+  search_params: string[]
+  experiments: DataRecipeExperiment[]
+  proposal?: DataRecipeProposal | null
+  output_path?: string | null
+  goal?: string
+  source_count?: number
+  excluded_sources?: Array<{ id: string; reason: string }>
+}
+
 // Research index — Firecrawl-grounded news feed + AutoResearch advice
 export interface ResearchNewsItem {
   kind: 'github' | 'paper'
@@ -4006,6 +4103,43 @@ export const autoresearchApi = {
         output_path: config.outputPath || null,
       }),
     }),
+
+  proposeDataRecipe: (config: DataRecipeProposalConfig) =>
+    request<DataRecipeProposalResponse>('/autoresearch/data-recipe/propose', {
+      method: 'POST',
+      body: JSON.stringify({
+        goal: config.goal || 'dpo',
+        source_ids: config.sourceIds || [],
+        domain: config.domain || null,
+        include_eval_only: config.includeEvalOnly ?? false,
+        max_experiments: config.maxExperiments ?? 8,
+        sample_size: config.sampleSize ?? 1000,
+        quality_threshold: config.qualityThreshold ?? 0.7,
+        synthetic_multiplier: config.syntheticMultiplier ?? 1.0,
+        decontam_jaccard_threshold: config.decontamJaccardThreshold ?? 0.7,
+        cost_budget_usd: config.costBudgetUsd ?? 25.0,
+        eval_target: config.evalTarget || 'heldout_pass@k',
+        mutation_rate: config.mutationRate ?? 0.35,
+        mutation_scale: config.mutationScale ?? 0.2,
+        seed: config.seed ?? 0,
+        output_path: config.outputPath || null,
+      }),
+    }),
+
+  getDataRecipeStatus: () =>
+    request<DataRecipeStatusResponse>('/autoresearch/data-recipe/status'),
+
+  stopDataRecipe: () =>
+    request<{ status: string }>('/autoresearch/data-recipe/stop', { method: 'POST' }),
+
+  exportDataRecipe: (outputPath: string) =>
+    request<{ status: string; output_path: string; proposal: DataRecipeProposal }>(
+      '/autoresearch/data-recipe/export',
+      {
+        method: 'POST',
+        body: JSON.stringify({ output_path: outputPath }),
+      }
+    ),
 
   // Trace research
   startTraceResearch: (config: { searchParams: string[]; maxExperiments: number; mutationRate: number; mutationScale: number }) =>

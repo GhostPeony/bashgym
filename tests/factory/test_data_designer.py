@@ -206,6 +206,54 @@ class TestDataDesignerPipelineInit:
             with pytest.raises(ImportError, match="data-designer"):
                 _ = pipeline.designer
 
+    def test_prepare_source_writes_source_and_dataset_cards(self, tmp_path):
+        pipeline = DataDesignerPipeline(PipelineConfig(output_dir=tmp_path))
+
+        prepared = pipeline.prepare_source("helpsteer2", goal="reward_model")
+
+        assert prepared["source_manifest"]["source"]["id"] == "helpsteer2"
+        assert prepared["dataset_card"]["schema_version"] == "bashgym.dataset_card.v1"
+        assert prepared["dataset_card"]["source_id"] == "helpsteer2"
+        assert tmp_path.joinpath("source_manifest.json").exists()
+        assert tmp_path.joinpath("dataset_card.json").exists()
+
+    def test_prepare_source_blocks_eval_only_training_use(self, tmp_path):
+        pipeline = DataDesignerPipeline(PipelineConfig(output_dir=tmp_path))
+
+        with pytest.raises(ValueError, match="eval_only_source_for_training"):
+            pipeline.prepare_source("harbor_terminal_bench", goal="sft")
+
+    def test_prepare_source_can_convert_local_input_artifacts(self, tmp_path):
+        source_path = tmp_path / "source.jsonl"
+        source_path.write_text(
+            json.dumps(
+                {
+                    "id": "uf-1",
+                    "prompt": "Fix a failing test.",
+                    "chosen": "Run pytest and patch the failing function.",
+                    "rejected": "Claim success without running tests.",
+                    "metadata": {
+                        "quality_score": 0.9,
+                        "label_source": "fixture",
+                        "decontamination_status": "checked",
+                    },
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        pipeline = DataDesignerPipeline(PipelineConfig(output_dir=tmp_path / "out"))
+
+        prepared = pipeline.prepare_source(
+            "ultrafeedback_binarized",
+            goal="dpo",
+            input_path=source_path,
+        )
+
+        assert prepared["artifact_report"]["ok"] is True
+        assert prepared["dataset_card"]["artifacts"][0]["artifact_type"] == "dpo_pairs"
+        assert tmp_path.joinpath("out", "dpo_pairs.jsonl").exists()
+
 
 # =========================================================================
 # _extract_seeds_from_traces
@@ -734,6 +782,7 @@ class TestRealPipelineConstruction:
             "coding_agent_distill",
             "tool_use_sft",
             "from_external",
+            "from_source",
             "from_unstructured",
         ],
     )

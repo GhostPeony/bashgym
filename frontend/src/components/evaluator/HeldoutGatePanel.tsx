@@ -22,6 +22,7 @@ import {
   type HeldoutReport,
   type NormalizedBenchmarkResult,
 } from '../../services/api'
+import { ModelSelect } from '../common/ModelSelect'
 
 const METRICS = [
   { id: 'exact_match', name: 'Exact match', hint: 'Tool name + every argument identical' },
@@ -45,6 +46,7 @@ type EvidenceFieldId =
   | 'spurious_reward_control'
   | 'external_benchmarks'
   | 'world_model_quality'
+  | 'learned_reward_evidence'
 
 const EVIDENCE_FIELDS: Array<{ id: EvidenceFieldId; label: string; placeholder: string }> = [
   {
@@ -77,6 +79,11 @@ const EVIDENCE_FIELDS: Array<{ id: EvidenceFieldId; label: string; placeholder: 
     label: 'World-model quality',
     placeholder: '{"metrics":{"echo_loss":{"first":1.2,"last":0.8},"rwml_pass_rate":0.72}}',
   },
+  {
+    id: 'learned_reward_evidence',
+    label: 'Learned reward',
+    placeholder: '{"metrics":{"heldout_pair_accuracy":0.82,"calibration_error":0.08},"findings":[]}',
+  },
 ]
 
 const EMPTY_EVIDENCE_JSON: Record<EvidenceFieldId, string> = {
@@ -86,6 +93,7 @@ const EMPTY_EVIDENCE_JSON: Record<EvidenceFieldId, string> = {
   spurious_reward_control: '',
   external_benchmarks: '',
   world_model_quality: '',
+  learned_reward_evidence: '',
 }
 
 interface ParsedEvidence {
@@ -156,11 +164,11 @@ function EndpointFields({
         value={value.base_url}
         onChange={(e) => onChange({ ...value, base_url: e.target.value })}
       />
-      <input
+      <ModelSelect
         className="input text-sm w-full"
-        placeholder="Model name to request"
+        placeholder="Select endpoint model..."
         value={value.model}
-        onChange={(e) => onChange({ ...value, model: e.target.value })}
+        onChange={(model) => onChange({ ...value, model })}
       />
     </div>
   )
@@ -313,6 +321,7 @@ function ReleaseGateSummary({ report }: { report: HeldoutReport }) {
       ...gate.environment_sections,
       ...(gate.external_benchmark_sections || []),
       ...(gate.world_model_quality_sections || []),
+      ...(gate.learned_reward_evidence_sections || []),
     ]
     return allSections.length > 0 ? allSections.join(', ') : 'none'
   }, [gate])
@@ -322,13 +331,18 @@ function ReleaseGateSummary({ report }: { report: HeldoutReport }) {
       ? 'WATCH'
       : 'DIAG'
     : 'NONE'
+  const learnedRewardStatus = gate.learned_reward_evidence_present
+    ? gate.learned_reward_evidence_signal === 'needs_attention'
+      ? 'WATCH'
+      : 'DIAG'
+    : 'NONE'
 
   return (
     <div className="p-3 border-brutal border-border-subtle rounded-brutal bg-background-secondary space-y-2">
       <p className="font-mono text-xs uppercase tracking-widest text-text-secondary">
         Combined release gate
       </p>
-      <div className="grid grid-cols-5 gap-2">
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2">
         <div>
           <p className="font-mono text-[10px] uppercase tracking-widest text-text-muted">Trace</p>
           <p
@@ -385,6 +399,23 @@ function ReleaseGateSummary({ report }: { report: HeldoutReport }) {
         </div>
         <div>
           <p className="font-mono text-[10px] uppercase tracking-widest text-text-muted">
+            Reward
+          </p>
+          <p
+            className={clsx(
+              'font-mono text-sm',
+              gate.learned_reward_evidence_present
+                ? gate.learned_reward_evidence_signal === 'needs_attention'
+                  ? 'text-status-warning'
+                  : 'text-status-success'
+                : 'text-text-muted'
+            )}
+          >
+            {learnedRewardStatus}
+          </p>
+        </div>
+        <div>
+          <p className="font-mono text-[10px] uppercase tracking-widest text-text-muted">
             Evidence
           </p>
           <p className="font-mono text-sm text-text-primary break-words">{sections}</p>
@@ -411,6 +442,15 @@ function ReleaseGateSummary({ report }: { report: HeldoutReport }) {
       {(gate.world_model_quality_findings || []).length > 0 ? (
         <ul className="space-y-0.5 list-disc list-inside">
           {(gate.world_model_quality_findings || []).map((reason) => (
+            <li key={reason} className="font-mono text-xs text-text-primary">
+              {reason}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {(gate.learned_reward_evidence_findings || []).length > 0 ? (
+        <ul className="space-y-0.5 list-disc list-inside">
+          {(gate.learned_reward_evidence_findings || []).map((reason) => (
             <li key={reason} className="font-mono text-xs text-text-primary">
               {reason}
             </li>
@@ -708,6 +748,10 @@ export function HeldoutGatePanel() {
     () => parseEvidenceObject('World-model quality', evidenceJson.world_model_quality),
     [evidenceJson.world_model_quality]
   )
+  const parsedLearnedRewardEvidence = useMemo(
+    () => parseEvidenceObject('Learned reward', evidenceJson.learned_reward_evidence),
+    [evidenceJson.learned_reward_evidence]
+  )
   const parsedEvidence = useMemo(
     () => ({
       passk: parsedPasskEvidence,
@@ -716,11 +760,13 @@ export function HeldoutGatePanel() {
       spurious_reward_control: parsedSpuriousRewardEvidence,
       external_benchmarks: parsedExternalBenchmarkEvidence,
       world_model_quality: parsedWorldModelQualityEvidence,
+      learned_reward_evidence: parsedLearnedRewardEvidence,
     }),
     [
       parsedExternalBenchmarkEvidence,
       parsedHoldoutComparisonEvidence,
       parsedHoldoutGateEvidence,
+      parsedLearnedRewardEvidence,
       parsedPasskEvidence,
       parsedSpuriousRewardEvidence,
       parsedWorldModelQualityEvidence,
@@ -758,6 +804,9 @@ export function HeldoutGatePanel() {
     if (parsedWorldModelQualityEvidence.value) {
       payload.world_model_quality = parsedWorldModelQualityEvidence.value
     }
+    if (parsedLearnedRewardEvidence.value) {
+      payload.learned_reward_evidence = parsedLearnedRewardEvidence.value
+    }
     return payload
   }, [
     environmentEvidenceEnabled,
@@ -766,6 +815,7 @@ export function HeldoutGatePanel() {
     parsedExternalBenchmarkEvidence,
     parsedHoldoutComparisonEvidence,
     parsedHoldoutGateEvidence,
+    parsedLearnedRewardEvidence,
     parsedPasskEvidence,
     parsedSpuriousRewardEvidence,
     parsedWorldModelQualityEvidence,

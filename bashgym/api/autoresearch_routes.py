@@ -16,6 +16,7 @@ Trace research (data-centric):
 import asyncio
 import json
 import logging
+import random
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
@@ -23,6 +24,8 @@ from fastapi import APIRouter, HTTPException, Request
 from bashgym.api.schemas import (
     AutoResearchRequest,
     AutoResearchStatusResponse,
+    DataRecipeExportRequest,
+    DataRecipeProposalRequest,
     EnvironmentRecipeProposalRequest,
     ExperimentResultSchema,
     SchemaResearchRequest,
@@ -39,6 +42,7 @@ from bashgym.gym.autoresearch import (
     AutoResearchStatus,
     ExperimentResult,
 )
+from bashgym.gym.data_recipe_search_space import DataRecipeSearchSpace
 from bashgym.gym.environment_recipe_search_space import EnvironmentRecipeSearchSpace
 from bashgym.gym.trace_researcher import (
     DataPipelineConfig,
@@ -48,6 +52,8 @@ from bashgym.gym.trace_researcher import (
     TraceResearchStatus,
 )
 from bashgym.gym.trainer import TrainerConfig
+from bashgym.sources import SourceUse, get_source, list_sources
+from bashgym.sources.catalog import TRAINING_USES, supports_goal
 
 logger = logging.getLogger(__name__)
 
@@ -594,6 +600,11 @@ def _get_schema_researcher(request: Request) -> AutoResearcher | None:
     return getattr(request.app.state, "schema_researcher", None)
 
 
+def _get_data_recipe_researcher(request: Request) -> AutoResearcher | None:
+    """Retrieve the latest data-recipe AutoResearcher from app state, if any."""
+    return getattr(request.app.state, "data_recipe_researcher", None)
+
+
 # =============================================================================
 # Environment Recipe Research Helpers
 # =============================================================================
@@ -664,6 +675,85 @@ def _experiment_payload(result: ExperimentResult) -> dict:
         "improved": result.improved,
         "duration_seconds": result.duration_seconds,
         "timestamp": result.timestamp,
+    }
+
+
+def _load_data_recipe_sources(body: DataRecipeProposalRequest):
+    """Resolve source cards for data-recipe AutoResearch."""
+
+    try:
+        goal = SourceUse(body.goal)
+    except ValueError as exc:
+        valid = ", ".join(use.value for use in SourceUse)
+        raise HTTPException(status_code=400, detail=f"unknown goal {body.goal!r}; choose {valid}") from exc
+
+    if body.source_ids:
+        try:
+            candidates = [get_source(source_id) for source_id in body.source_ids]
+        except KeyError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    else:
+        candidates = list_sources()
+
+    filtered = []
+    excluded = []
+    for source in candidates:
+        reason = None
+        if body.domain and source.domain != body.domain:
+            reason = "domain_mismatch"
+        elif goal in TRAINING_USES and source.eval_only and not body.include_eval_only:
+            reason = "eval_only_excluded"
+        elif not supports_goal(source, goal):
+            reason = "unsupported_goal"
+
+        if reason:
+            excluded.append({"id": source.id, "reason": reason})
+        else:
+            filtered.append(source)
+
+    if not filtered:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "No source cards remain after data-recipe filters",
+                "excluded": excluded,
+            },
+        )
+    return goal, filtered, excluded
+
+
+def _data_recipe_status_payload(request: Request) -> dict:
+    researcher = _get_data_recipe_researcher(request)
+    proposal = getattr(request.app.state, "data_recipe_proposal", None)
+    metadata = getattr(request.app.state, "data_recipe_metadata", {})
+    output_path = getattr(request.app.state, "data_recipe_output_path", None)
+    if not researcher:
+        return {
+            "status": AutoResearchStatus.IDLE,
+            "total_experiments": 0,
+            "completed_experiments": 0,
+            "best_metric": None,
+            "best_config": {},
+            "search_params": [],
+            "experiments": [],
+            "proposal": proposal,
+            "output_path": output_path,
+            **metadata,
+        }
+
+    return {
+        "status": researcher.status,
+        "total_experiments": researcher.config.max_experiments,
+        "completed_experiments": len(researcher.experiments),
+        "best_metric": (
+            round(researcher.best_metric, 6) if researcher.best_metric < float("inf") else None
+        ),
+        "best_config": researcher.search_space.get_config_snapshot(researcher.best_config),
+        "search_params": researcher.config.search_params,
+        "experiments": [_experiment_payload(exp) for exp in researcher.experiments],
+        "proposal": proposal,
+        "output_path": output_path,
+        **metadata,
     }
 
 
@@ -904,6 +994,121 @@ async def get_schema_research_quality(request: Request):
 # =============================================================================
 # Environment Recipe Research Endpoints
 # =============================================================================
+
+
+@router.post("/data-recipe/propose")
+async def propose_data_recipe(body: DataRecipeProposalRequest, request: Request):
+    """Run bounded AutoResearch over public-source data recipe axes."""
+    goal, sources, excluded_sources = _load_data_recipe_sources(body)
+    random.seed(body.seed)
+
+    search_space = DataRecipeSearchSpace(
+        sources,
+        goal=goal,
+        mutation_rate=body.mutation_rate,
+        mutation_scale=body.mutation_scale,
+    )
+    base_genome = DataRecipeSearchSpace.create_default_genome(
+        search_space.source_ids,
+        search_space.domains,
+        sample_size=body.sample_size,
+        quality_threshold=body.quality_threshold,
+        synthetic_multiplier=body.synthetic_multiplier,
+        decontam_jaccard_threshold=body.decontam_jaccard_threshold,
+        cost_budget_usd=body.cost_budget_usd,
+        eval_target=body.eval_target,
+        seed=body.seed,
+    )
+    ar_config = AutoResearchConfig(
+        search_params=["data_recipe"],
+        max_experiments=body.max_experiments,
+        mode="simulate",
+        mutation_rate=body.mutation_rate,
+        mutation_scale=body.mutation_scale,
+        eval_metric="data_recipe_loss",
+    )
+    researcher = AutoResearcher(
+        config=ar_config,
+        base_trainer_config=base_genome,
+        search_space=search_space,
+    )
+    request.app.state.data_recipe_researcher = researcher
+    request.app.state.data_recipe_proposal = None
+    request.app.state.data_recipe_output_path = None
+    request.app.state.data_recipe_metadata = {
+        "goal": goal.value,
+        "source_count": len(sources),
+        "excluded_sources": excluded_sources,
+    }
+
+    await researcher.run_loop(Path("data/sources"))
+    proposal = search_space.proposal_for(researcher.best_config)
+    request.app.state.data_recipe_proposal = proposal
+
+    output_path = None
+    if body.output_path:
+        output = Path(body.output_path).expanduser()
+        try:
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(json.dumps(proposal, indent=2, sort_keys=True), encoding="utf-8")
+        except OSError as exc:
+            raise HTTPException(status_code=400, detail=f"could not write proposal: {exc}") from exc
+        output_path = str(output)
+        request.app.state.data_recipe_output_path = output_path
+
+    return {
+        "status": researcher.status,
+        "goal": goal.value,
+        "source_count": len(sources),
+        "excluded_sources": excluded_sources,
+        "best_metric": (
+            round(researcher.best_metric, 6) if researcher.best_metric < float("inf") else None
+        ),
+        "proposal": proposal,
+        "experiments": [_experiment_payload(exp) for exp in researcher.experiments],
+        "output_path": output_path,
+    }
+
+
+@router.get("/data-recipe/status")
+async def get_data_recipe_status(request: Request):
+    """Return status and the latest proposal for data-recipe AutoResearch."""
+    return _data_recipe_status_payload(request)
+
+
+@router.post("/data-recipe/stop")
+async def stop_data_recipe_research(request: Request):
+    """Stop a running data-recipe AutoResearch session."""
+    researcher = _get_data_recipe_researcher(request)
+    if not researcher:
+        raise HTTPException(status_code=404, detail="No data-recipe session found")
+
+    if researcher.status not in (AutoResearchStatus.RUNNING, AutoResearchStatus.PAUSED):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Data-recipe AutoResearch is not running (status: {researcher.status})",
+        )
+
+    researcher.stop()
+    return {"status": "stopping", "completed_experiments": len(researcher.experiments)}
+
+
+@router.post("/data-recipe/export")
+async def export_data_recipe(body: DataRecipeExportRequest, request: Request):
+    """Export the latest data-recipe proposal to a local JSON file."""
+    proposal = getattr(request.app.state, "data_recipe_proposal", None)
+    if not proposal:
+        raise HTTPException(status_code=404, detail="No data-recipe proposal available")
+
+    output = Path(body.output_path).expanduser()
+    try:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(proposal, indent=2, sort_keys=True), encoding="utf-8")
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail=f"could not write proposal: {exc}") from exc
+
+    request.app.state.data_recipe_output_path = str(output)
+    return {"status": "exported", "output_path": str(output), "proposal": proposal}
 
 
 @router.post("/environment-recipe/propose")

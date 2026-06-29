@@ -34,6 +34,12 @@ docs/*
 docs/training/*
 !docs/training/overview.md
 !docs/training/strategy-guide.md
+!docs/training/training-methods-reference.md
+!docs/training/external-review-packet.md
+!docs/training/rlhf-handbook-comparison.md
+!docs/training/tmax-terminal-rl-recipe.md
+!docs/training/gx10-eval-checklist.md
+!docs/training/platform-flywheels.md
 !docs/training/world-models.md
 !docs/training/metrics-runbook.md
 !docs/training/glossary.md

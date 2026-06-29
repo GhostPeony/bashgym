@@ -627,7 +627,7 @@ export function TrainingDashboard() {
         <div className="col-span-12">
           <button
             onClick={() => openOverlay('autoresearch')}
-            className="card w-full p-4 flex items-center justify-between hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all shadow-brutal-sm"
+            className="card w-full p-4 flex items-center justify-between hover:border-accent shadow-brutal-sm"
           >
             <div className="flex items-center gap-3">
               <Zap className="w-5 h-5 text-accent" />

@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { providersApi, ProviderStatus, OllamaModel } from '../../services/api'
 import { StudentModelPicker } from './StudentModelPicker'
+import { ModelSelect } from '../common/ModelSelect'
 import { clsx } from 'clsx'
 
 // Popular models for quick download
@@ -275,11 +276,11 @@ export function ModelsSection() {
               </div>
               <div>
                 <label className="block font-mono text-[10px] uppercase tracking-widest text-text-muted mb-1">Default Model</label>
-                <input
+                <ModelSelect
                   value={connectModel}
-                  onChange={(e) => setConnectModel(e.target.value)}
+                  onChange={setConnectModel}
                   className="input w-full text-xs"
-                  placeholder="Qwen/Qwen2.5-Coder-32B-Instruct"
+                  placeholder="Select a default model..."
                 />
               </div>
             </div>
@@ -398,7 +399,7 @@ export function ModelsSection() {
                           key={model.name}
                           onClick={() => handlePullModel(model.name)}
                           disabled={!!isPulling}
-                          className="w-full flex items-center gap-2 p-1.5 border-brutal border-border rounded-brutal bg-background-card hover:shadow-brutal-sm transition-press text-left disabled:opacity-50"
+                          className="w-full flex items-center gap-2 p-1.5 border-brutal border-border rounded-brutal bg-background-card hover:border-accent transition-press text-left disabled:opacity-50"
                         >
                           {isPulling === model.name ? (
                             <Loader2 className="w-3.5 h-3.5 animate-spin text-accent flex-shrink-0" />

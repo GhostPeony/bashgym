@@ -272,6 +272,8 @@ next training set.
 - [training/capability-map.md](training/capability-map.md) — full training/eval spread and stable vs backend-dependent status.
 - [training/strategy-guide.md](training/strategy-guide.md) — concrete starting settings and strategy selection.
 - [training/agent-cli.md](training/agent-cli.md) — machine-readable CLI commands for agents setting up runs and analyzing replay artifacts.
+- [training/tmax-terminal-rl-recipe.md](training/tmax-terminal-rl-recipe.md) — TMax-style terminal RL path from environments to backend smoke and release gates.
+- [training/gx10-eval-checklist.md](training/gx10-eval-checklist.md) — GX10 backend-smoke and eval checklist.
 - [training/world-models.md](training/world-models.md) — ECHO/RWML contracts, replay payloads, backend integration, and telemetry boundaries.
 - [training/metrics-runbook.md](training/metrics-runbook.md) — diagnose flat pass@k, zero reward variance, timeouts, and verifier failures.
 - [training-config-guide.md](training-config-guide.md) — exact hyperparameters, LoRA/QLoRA settings, and quick-start recipes.

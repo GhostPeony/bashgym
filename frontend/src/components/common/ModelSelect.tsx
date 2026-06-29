@@ -1,7 +1,17 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { providersApi } from '../../services/api'
 
 const PROVIDER_PREFIXES = ['anthropic/', 'openai/', 'nim/', 'hf/', 'ollama/', 'gemini/']
+
+const FALLBACK_MODEL_OPTIONS = [
+  { value: 'claude-opus-4-5-20251101', label: 'Claude Opus 4.5' },
+  { value: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5' },
+  { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5' },
+  { value: 'Qwen/Qwen2.5-Coder-32B-Instruct', label: 'Qwen2.5 Coder 32B' },
+  { value: 'Qwen/Qwen2.5-72B-Instruct', label: 'Qwen2.5 72B' },
+  { value: 'meta-llama/Llama-3.1-70B-Instruct', label: 'Llama 3.1 70B' },
+  { value: 'deepseek-ai/DeepSeek-Coder-V2-Instruct', label: 'DeepSeek Coder V2' },
+]
 
 // The live catalog ids are provider-prefixed (e.g. "nim/deepseek-ai/...",
 // "anthropic/claude-..."); the backends expect the bare id. Strip the prefix.
@@ -25,8 +35,18 @@ interface Props {
  * free-text fallback for any model id. Replaces raw text inputs.
  */
 export function ModelSelect({ value, onChange, placeholder, className }: Props) {
-  const listId = useId()
   const [options, setOptions] = useState<{ value: string; label: string }[]>([])
+  const mergedOptions = useMemo(() => {
+    const merged = [...FALLBACK_MODEL_OPTIONS]
+    for (const option of options) {
+      if (!merged.some((existing) => existing.value === option.value)) {
+        merged.push(option)
+      }
+    }
+    return merged
+  }, [options])
+  const isKnown = mergedOptions.some((o) => o.value === value)
+  const [custom, setCustom] = useState<boolean>(!!value && !isKnown)
 
   useEffect(() => {
     let cancelled = false
@@ -53,24 +73,46 @@ export function ModelSelect({ value, onChange, placeholder, className }: Props) 
     }
   }, [])
 
+  useEffect(() => {
+    if (!value) {
+      setCustom(false)
+      return
+    }
+    setCustom(!mergedOptions.some((o) => o.value === value))
+  }, [mergedOptions, value])
+
   return (
-    <>
-      <input
-        list={listId}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder ?? 'Select or type a model…'}
+    <div className="flex flex-col gap-2">
+      <select
+        value={custom ? '__custom__' : value}
+        onChange={(e) => {
+          if (e.target.value === '__custom__') {
+            setCustom(true)
+          } else {
+            setCustom(false)
+            onChange(e.target.value)
+          }
+        }}
         className={className ?? 'input w-full text-sm'}
-        spellCheck={false}
-        autoComplete="off"
-      />
-      <datalist id={listId}>
-        {options.map((o) => (
+      >
+        <option value="">{placeholder ?? 'Select a model…'}</option>
+        {mergedOptions.map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}
           </option>
         ))}
-      </datalist>
-    </>
+        <option value="__custom__">Custom model…</option>
+      </select>
+      {custom && (
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Provider model id"
+          className={className ?? 'input w-full text-sm'}
+          spellCheck={false}
+          autoComplete="off"
+        />
+      )}
+    </div>
   )
 }

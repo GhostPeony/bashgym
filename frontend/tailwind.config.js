@@ -73,7 +73,7 @@ export default {
       boxShadow: {
         'brutal': 'var(--shadow)',
         'brutal-sm': 'var(--shadow-sm)',
-        'brutal-hover': '2px 2px 0px var(--shadow-color)',
+        'brutal-hover': 'var(--shadow-sm)',
         'brutal-pressed': '1px 1px 0px var(--shadow-color)',
         'soft': 'var(--shadow-soft)',
         'soft-lg': 'var(--shadow-soft-lg)',

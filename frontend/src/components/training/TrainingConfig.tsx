@@ -8,6 +8,8 @@ import { clsx } from 'clsx'
 import { DeviceManager } from './DeviceManager'
 import { useDeviceStore } from '../../stores/deviceStore'
 import { useCascadeStore } from '../../stores/cascadeStore'
+import { BaseModelSelect } from '../common/BaseModelSelect'
+import { ModelSelect } from '../common/ModelSelect'
 
 type TrainingScope = 'all' | 'selected' | 'single'
 type TrainingBackend = 'local' | 'remote_ssh' | 'nemo' | 'managed'
@@ -47,6 +49,14 @@ const WORLD_MODEL_DEFAULTS = {
   rwmlEmbeddingModel: '',
   rwmlKlBeta: 0,
 } satisfies Partial<TrainingConfigType>
+
+const RWML_EMBEDDING_MODEL_OPTIONS = [
+  { value: 'qwen3-embedding', label: 'Qwen3 Embedding' },
+  { value: 'nomic-embed-text', label: 'Nomic Embed Text' },
+  { value: 'mxbai-embed-large', label: 'MxBai Embed Large' },
+  { value: 'text-embedding-3-large', label: 'OpenAI Text Embedding 3 Large' },
+  { value: 'text-embedding-3-small', label: 'OpenAI Text Embedding 3 Small' },
+]
 
 const TRAINING_GUIDANCE: Record<TrainingStrategy, {
   fit: string
@@ -132,8 +142,7 @@ export function TrainingConfig({ onClose, onStart, onOpenGuides }: TrainingConfi
   const [dataSource, setDataSource] = useState<DataSource>('traces')
   const [securityDatasets, setSecurityDatasets] = useState<SecurityDatasetInfo[]>([])
   const [ollamaModels, setOllamaModels] = useState<OllamaModel[]>([])
-  const [customModelInput, setCustomModelInput] = useState('')
-  const [showCustomModel, setShowCustomModel] = useState(false)
+  const [showCustomEmbeddingModel, setShowCustomEmbeddingModel] = useState(false)
   const { complete: completeTutorialStep } = useTutorialComplete()
   const { defaultDeviceId, fetchDevices } = useDeviceStore()
 
@@ -842,68 +851,11 @@ export function TrainingConfig({ onClose, onStart, onOpenGuides }: TrainingConfi
             <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-3">
               Base Model
             </label>
-            <select
-              value={showCustomModel ? '__custom__' : config.baseModel}
-              onChange={(e) => {
-                if (e.target.value === '__custom__') {
-                  setShowCustomModel(true)
-                } else {
-                  setShowCustomModel(false)
-                  setConfig({ ...config, baseModel: e.target.value })
-                }
-              }}
+            <BaseModelSelect
+              value={config.baseModel}
+              onChange={(baseModel) => setConfig({ ...config, baseModel })}
               className="input w-full"
-            >
-              <optgroup label="Gemma 4 (Apr 2026)">
-                <option value="google/gemma-4-31B-it">Gemma 4 31B Dense (#3 open model, DGX Spark)</option>
-                <option value="google/gemma-4-26B-A4B-it">Gemma 4 26B MoE (4B active, efficient)</option>
-                <option value="google/gemma-4-E4B-it">Gemma 4 E4B (edge/device)</option>
-                <option value="google/gemma-4-E2B-it">Gemma 4 E2B (edge/device)</option>
-              </optgroup>
-              <optgroup label="Qwen 3.5 (Feb 2026)">
-                <option value="Qwen/Qwen3.5-0.8B">Qwen3.5-0.8B (dense)</option>
-                <option value="Qwen/Qwen3.5-4B">Qwen3.5-4B (dense)</option>
-                <option value="Qwen/Qwen3.5-9B">Qwen3.5-9B (dense)</option>
-                <option value="Qwen/Qwen3.5-27B">Qwen3.5-27B (dense)</option>
-                <option value="Qwen/Qwen3.5-35B-A3B">Qwen3.5-35B-A3B (MoE, ~74GB VRAM)</option>
-              </optgroup>
-              <optgroup label="Llama">
-                <option value="meta-llama/Llama-3.2-1B-Instruct">Llama-3.2-1B-Instruct</option>
-                <option value="meta-llama/Llama-3.2-3B-Instruct">Llama-3.2-3B-Instruct</option>
-                <option value="meta-llama/Llama-3.1-8B-Instruct">Llama-3.1-8B-Instruct</option>
-              </optgroup>
-              <optgroup label="DeepSeek">
-                <option value="deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct">DeepSeek-Coder-V2-Lite</option>
-                <option value="deepseek-ai/deepseek-coder-6.7b-instruct">DeepSeek-Coder-6.7B</option>
-              </optgroup>
-              <optgroup label="Nemotron (NVIDIA)">
-                <option value="nvidia/Nemotron-Cascade-2-30B-A3B">Nemotron-Cascade-2-30B-A3B (MoE, DGX Spark)</option>
-                <option value="nvidia/Nemotron-3-Nano-4B-Instruct">Nemotron-3-Nano-4B</option>
-                <option value="nvidia/Nemotron-Mini-4B-Instruct">Nemotron-Mini-4B</option>
-              </optgroup>
-              <optgroup label="Other">
-                <option value="mistralai/Mistral-7B-Instruct-v0.3">Mistral-7B-Instruct</option>
-                <option value="google/gemma-2-9b-it">Gemma-2-9B-IT</option>
-              </optgroup>
-              <option value="__custom__">Custom model...</option>
-            </select>
-
-            {/* Custom model input */}
-            {showCustomModel && (
-              <div className="flex gap-2 mt-2">
-                <input
-                  type="text"
-                  value={customModelInput}
-                  onChange={(e) => {
-                    setCustomModelInput(e.target.value)
-                    setConfig({ ...config, baseModel: e.target.value })
-                  }}
-                  className="input flex-1"
-                  placeholder="org/model-name (HuggingFace ID or Ollama tag)"
-                  autoFocus
-                />
-              </div>
-            )}
+            />
 
             <p className="font-mono text-xs text-text-muted mt-2">
               Select a HuggingFace model to fine-tune, or enter a custom model ID.
@@ -1430,13 +1382,45 @@ export function TrainingConfig({ onClose, onStart, onOpenGuides }: TrainingConfi
                     <FieldLabel hint="RWML compares predicted and observed next states in embedding space. Keep this stable across runs so distances are comparable.">
                       Embedding Model
                     </FieldLabel>
-                    <input
-                      type="text"
-                      value={config.rwmlEmbeddingModel ?? ''}
-                      onChange={(e) => setConfig({ ...config, rwmlEmbeddingModel: e.target.value })}
+                    <select
+                      value={
+                        showCustomEmbeddingModel ||
+                        ((config.rwmlEmbeddingModel ?? '') !== '' &&
+                          !RWML_EMBEDDING_MODEL_OPTIONS.some((model) => model.value === config.rwmlEmbeddingModel))
+                          ? '__custom__'
+                          : config.rwmlEmbeddingModel ?? ''
+                      }
+                      onChange={(e) => {
+                        if (e.target.value === '__custom__') {
+                          setShowCustomEmbeddingModel(true)
+                        } else {
+                          setShowCustomEmbeddingModel(false)
+                          setConfig({ ...config, rwmlEmbeddingModel: e.target.value })
+                        }
+                      }}
                       className="input w-full"
-                      placeholder="qwen3-embedding"
-                    />
+                    >
+                      <option value="">Backend default</option>
+                      {RWML_EMBEDDING_MODEL_OPTIONS.map((model) => (
+                        <option key={model.value} value={model.value}>
+                          {model.label}
+                        </option>
+                      ))}
+                      <option value="__custom__">Custom embedding model...</option>
+                    </select>
+                    {(showCustomEmbeddingModel ||
+                      ((config.rwmlEmbeddingModel ?? '') !== '' &&
+                        !RWML_EMBEDDING_MODEL_OPTIONS.some((model) => model.value === config.rwmlEmbeddingModel))) && (
+                      <input
+                        type="text"
+                        value={config.rwmlEmbeddingModel ?? ''}
+                        onChange={(e) => setConfig({ ...config, rwmlEmbeddingModel: e.target.value })}
+                        className="input w-full mt-2"
+                        placeholder="provider/model-or-local-tag"
+                        spellCheck={false}
+                        autoComplete="off"
+                      />
+                    )}
                   </div>
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
@@ -1542,30 +1526,12 @@ export function TrainingConfig({ onClose, onStart, onOpenGuides }: TrainingConfi
               <div className="space-y-4">
                 <div>
                   <label className="block font-mono text-xs text-text-muted mb-2">Teacher Model</label>
-                  <select
-                    value={config.teacherModel}
-                    onChange={(e) => setConfig({ ...config, teacherModel: e.target.value })}
+                  <ModelSelect
+                    value={config.teacherModel ?? ''}
+                    onChange={(teacherModel) => setConfig({ ...config, teacherModel })}
+                    placeholder="Select a teacher model..."
                     className="input w-full"
-                  >
-                    <optgroup label="Large Language Models">
-                      <option value="meta-llama/Llama-3.1-70B-Instruct">Llama-3.1-70B-Instruct</option>
-                      <option value="meta-llama/Llama-3.1-405B-Instruct">Llama-3.1-405B-Instruct</option>
-                      <option value="Qwen/Qwen2.5-72B-Instruct">Qwen2.5-72B-Instruct</option>
-                    </optgroup>
-                    <optgroup label="Code Models">
-                      <option value="Qwen/Qwen2.5-Coder-32B-Instruct">Qwen2.5-Coder-32B-Instruct</option>
-                      <option value="deepseek-ai/DeepSeek-Coder-V2-Instruct">DeepSeek-Coder-V2</option>
-                    </optgroup>
-                    <optgroup label="Anthropic Claude 4.5 (requires ANTHROPIC_API_KEY)">
-                      <option value="claude-opus-4-5-20251101">Claude Opus 4.5 (Best)</option>
-                      <option value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5</option>
-                      <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (Fast)</option>
-                    </optgroup>
-                    <optgroup label="Anthropic Claude 4 (Legacy)">
-                      <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
-                      <option value="claude-opus-4-20250514">Claude Opus 4</option>
-                    </optgroup>
-                  </select>
+                  />
                   <p className="font-mono text-xs text-text-muted mt-1">
                     The larger model to distill knowledge from
                   </p>

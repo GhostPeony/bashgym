@@ -100,6 +100,7 @@ from bashgym.api.schemas import (  # noqa: E402
 )
 from bashgym.api.security_routes import router as security_router  # noqa: E402
 from bashgym.api.settings_routes import router as settings_router  # noqa: E402
+from bashgym.api.source_routes import router as source_router  # noqa: E402
 from bashgym.api.training_monitor import OrphanedTrainingMonitor  # noqa: E402
 from bashgym.api.training_state import (  # noqa: E402
     TrainingRunState,
@@ -5303,6 +5304,9 @@ def create_app() -> FastAPI:
 
     # Include Settings routes (env/API key management)
     app.include_router(settings_router)
+
+    # Include curated public source library routes
+    app.include_router(source_router)
 
     # Include AutoResearch routes (hyperparameter search)
     app.include_router(autoresearch_router)

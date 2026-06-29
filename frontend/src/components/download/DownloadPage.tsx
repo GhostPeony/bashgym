@@ -143,7 +143,7 @@ export function DownloadPage() {
               return url ? (
                 <a
                   href={url}
-                  className="inline-flex items-center gap-3 px-8 py-4 bg-accent text-white font-mono font-semibold text-lg border-brutal border-border rounded-brutal shadow-brutal hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all"
+                  className="inline-flex items-center gap-3 px-8 py-4 bg-accent text-white font-mono font-semibold text-lg border-brutal border-border rounded-brutal shadow-brutal hover:brightness-95 active:translate-x-[2px] active:translate-y-[2px] active:shadow-brutal-pressed transition-press"
                 >
                   <Download className="w-6 h-6" />
                   Download for {info.label}

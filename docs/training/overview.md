@@ -5,9 +5,10 @@ system, what each training strategy is trying to teach, and which evidence prove
 that a trained model is actually better.
 
 For the full capability spread, read [capability-map.md](capability-map.md). For
-exact knobs and recipes, read [strategy-guide.md](strategy-guide.md). For
-world-model objectives, read [world-models.md](world-models.md). For diagnosis
-during and after a run, read [metrics-runbook.md](metrics-runbook.md).
+exact knobs and recipes, read [strategy-guide.md](strategy-guide.md) and
+[tmax-terminal-rl-recipe.md](tmax-terminal-rl-recipe.md). For world-model
+objectives, read [world-models.md](world-models.md). For diagnosis during and
+after a run, read [metrics-runbook.md](metrics-runbook.md).
 
 ---
 
@@ -28,6 +29,12 @@ capture/import -> classify -> generate examples -> train -> evaluate -> deploy
        |                                                        v
        +---------------------- collect new traces <-------------+
 ```
+
+This trace-to-training loop is the core BashGym flywheel. Source discovery,
+reward modeling, terminal RL, JEPA-style diagnostics, AutoResearch, compute
+targets, and education are supporting flywheels around it, not replacements for
+it. Use [platform-flywheels.md](platform-flywheels.md) when explaining how these
+loops fit together without blurring their jobs.
 
 The key rule is simple: loss curves are not release evidence. Verifiers, tests,
 pass@k, holdout gates, tamper checks, and external benchmarks decide whether the
@@ -104,6 +111,55 @@ RL improves outcomes only after the model can produce attempts worth comparing.
 
 ---
 
+## First-run tutorial
+
+For a new operator, use this order before changing advanced knobs:
+
+1. Read the plan, not just the settings.
+
+   ```bash
+   bashgym training plan --strategy sft --hardware local_24gb --json
+   ```
+
+   Start with `starting_settings`, then read `settings_help`, `metric_guide`,
+   `readiness_ladder`, and `adjustment_rules`.
+
+2. Make one small SFT baseline.
+
+   Keep the first run short. The goal is to prove data loading, chat template,
+   loss masking, metrics logging, and checkpoint writing.
+
+3. Analyze the run.
+
+   ```bash
+   bashgym training analyze --run-id <run-id> --json
+   ```
+
+   Fix missing metrics, truncation, OOM, or verifier issues before trying RL.
+
+4. Attach behavior evidence.
+
+   Run heldout trace eval or executable environment pass@k. Do not use loss as
+   the only success signal.
+
+5. Move to GRPO/DPPO only when the baseline can produce attempts worth scoring.
+
+   For terminal RL, the first question is whether reward groups have contrast.
+   If `reward_std` is zero or pass@k is all zero, improve curriculum or SFT
+   before scaling RL.
+
+6. Use ECHO/RWML as auxiliary diagnostics.
+
+   World-model quality metrics are useful for curriculum and platform learning,
+   but they are not release gates until correlated with pass@k and safety.
+
+7. Save the GX10 step for finalization.
+
+   Generate a smoke bundle locally first. Then run the installed-backend GX10
+   smoke only after replay, logprobs, and backend-launch artifacts are ready.
+
+---
+
 ## Where world models fit
 
 BashGym's JEPA-style world-model work is about predicting useful latent terminal
@@ -129,7 +185,13 @@ gates by themselves.
 ## Read next
 
 - [capability-map.md](capability-map.md) - full training/eval capability map and stable vs backend-dependent status.
+- [platform-flywheels.md](platform-flywheels.md) - segmented product flywheels from coding traces to training, eval, rewards, source library, compute, and education.
+- [training-methods-reference.md](training-methods-reference.md) - method-by-method training reference for operators and AI/ML reviewers.
+- [external-review-packet.md](external-review-packet.md) - shareable reviewer packet with capabilities, limits, risks, and feedback questions.
+- [rlhf-handbook-comparison.md](rlhf-handbook-comparison.md) - RLHF Book comparison with BashGym strengths, gaps, answered reviewer questions, and action plan.
 - [strategy-guide.md](strategy-guide.md) - concrete starting settings and when to use each strategy.
+- [tmax-terminal-rl-recipe.md](tmax-terminal-rl-recipe.md) - environment-to-replay-to-backend recipe for terminal RL.
+- [gx10-eval-checklist.md](gx10-eval-checklist.md) - GX10 backend-smoke and eval checklist.
 - [world-models.md](world-models.md) - ECHO/RWML contracts, defaults, replay telemetry, and boundaries.
 - [metrics-runbook.md](metrics-runbook.md) - how to diagnose flat pass@k, zero reward variance, timeouts, verifier errors, and tamper attempts.
 - [glossary.md](glossary.md) - compact definitions for the training vocabulary.

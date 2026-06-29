@@ -352,8 +352,25 @@ def _is_swebench_name(name: str | None) -> bool:
     return "swebench" in normalized.replace("_", "")
 
 
+def _is_cua_rewardbench_name(name: str | None) -> bool:
+    normalized = _normalize_name(name)
+    compact = normalized.replace("_", "")
+    return "cuarewardbench" in compact or ("cua" in normalized and "rewardbench" in compact)
+
+
+def _is_rewardbench_name(name: str | None) -> bool:
+    normalized = _normalize_name(name)
+    compact = normalized.replace("_", "")
+    return "rewardbench" in compact and not _is_cua_rewardbench_name(normalized)
+
+
 def _is_first_class_external_name(name: str | None) -> bool:
-    return _is_bfcl_name(name) or _is_swebench_name(name)
+    return (
+        _is_bfcl_name(name)
+        or _is_swebench_name(name)
+        or _is_rewardbench_name(name)
+        or _is_cua_rewardbench_name(name)
+    )
 
 
 def _candidate_mappings(data: Mapping[str, Any], keys: tuple[str, ...]) -> list[dict[str, Any]]:
@@ -614,6 +631,340 @@ def parse_swebench_results(name: str, data: dict) -> BenchmarkResult:
     )
 
 
+_REWARDBENCH_CONTAINER_KEYS = (
+    "subsets",
+    "subset_scores",
+    "sections",
+    "section_scores",
+    "categories",
+    "category_scores",
+    "breakdown",
+    "results",
+)
+_REWARDBENCH_TOTAL_KEYS = (
+    *_TOTAL_KEYS,
+    "num_examples",
+    "n_examples",
+    "examples",
+    "num_prompts",
+)
+_REWARDBENCH_COUNT_KEYS = (
+    "num_correct",
+    "n_correct",
+    "correct_count",
+    "correct",
+    "passed",
+    "success",
+)
+_REWARDBENCH_ROW_RESULT_KEYS = ("is_correct", "result", "results", "passed", "success")
+
+
+def _direct_count(data: Mapping[str, Any], keys: tuple[str, ...]) -> int | None:
+    value = _value_by_normalized_key(data, keys)
+    if value is None:
+        return None
+    return _count_value(value)
+
+
+def _direct_fraction(data: Mapping[str, Any], keys: tuple[str, ...]) -> float | None:
+    value = _value_by_normalized_key(data, keys)
+    if value is None:
+        return None
+    return _fraction(value)
+
+
+def _rewardbench_subset_name(row: Mapping[str, Any]) -> str:
+    for key in ("subset", "section", "category", "split", "task_family", "task_type"):
+        value = _value_by_normalized_key(row, (key,))
+        if isinstance(value, str) and value.strip():
+            return _metric_name(value, fallback="unknown_subset")
+    return "overall"
+
+
+def _rewardbench_rows(data: Mapping[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for key in _REWARDBENCH_CONTAINER_KEYS:
+        value = _value_by_normalized_key(data, (key,))
+        if _is_sequence(value):
+            rows.extend(dict(row) for row in value if _is_mapping(row))
+        elif _is_mapping(value):
+            for subset, detail in value.items():
+                subset_name = str(subset)
+                if _is_mapping(detail):
+                    row = {"subset": subset_name, **dict(detail)}
+                else:
+                    row = {"subset": subset_name, "accuracy": detail}
+                rows.append(row)
+    if rows:
+        return rows
+    if any(_value_by_normalized_key(data, (key,)) is not None for key in _SCORE_KEYS):
+        return [dict(data)]
+    if _direct_count(data, _REWARDBENCH_COUNT_KEYS) is not None:
+        return [dict(data)]
+    return []
+
+
+def _rewardbench_row_counts(row: Mapping[str, Any]) -> tuple[int | None, int | None]:
+    total = _direct_count(row, _REWARDBENCH_TOTAL_KEYS)
+    count = _direct_count(row, _REWARDBENCH_COUNT_KEYS)
+    if count is not None and total:
+        return count, total
+
+    for key in _REWARDBENCH_ROW_RESULT_KEYS:
+        value = _value_by_normalized_key(row, (key,))
+        if value is None:
+            continue
+        if isinstance(value, bool):
+            return int(value), total or 1
+        status = _truthy_status(value)
+        if status is not None:
+            return int(status), total or 1
+        score = _fraction(value)
+        if score is not None:
+            return int(score >= 0.5), total or 1
+
+    if count is not None and count in {0, 1} and total is None:
+        return count, 1
+    return count, total
+
+
+def _rewardbench_row_score(row: Mapping[str, Any]) -> float | None:
+    count, total = _rewardbench_row_counts(row)
+    if count is not None and total:
+        return count / total
+    for key in ("accuracy", "acc", "score", "overall", "overall_accuracy"):
+        score = _direct_fraction(row, (key,))
+        if score is not None:
+            return score
+    return _find_score(row)
+
+
+def parse_rewardbench_results(name: str, data: dict) -> BenchmarkResult:
+    """RewardBench/RewardBench 2 subset summaries or per-example result rows."""
+    normalized_name = _normalize_name(name)
+    score = _find_score(data)
+    passed = _direct_count(data, _REWARDBENCH_COUNT_KEYS)
+    total = _direct_count(data, _REWARDBENCH_TOTAL_KEYS)
+    if score is None and passed is not None and total:
+        score = passed / total
+
+    rows = _rewardbench_rows(data)
+    subset_scores: dict[str, list[float]] = {}
+    subset_counts: dict[str, dict[str, int]] = {}
+    row_scores: list[float] = []
+    row_passed = 0
+    row_total = 0
+
+    for row in rows:
+        subset = _rewardbench_subset_name(row)
+        row_score = _rewardbench_row_score(row)
+        if row_score is not None:
+            row_scores.append(row_score)
+            subset_scores.setdefault(subset, []).append(row_score)
+        row_count, row_count_total = _rewardbench_row_counts(row)
+        if row_count is not None and row_count_total:
+            row_passed += row_count
+            row_total += row_count_total
+            counts = subset_counts.setdefault(subset, {"passed": 0, "total": 0})
+            counts["passed"] += row_count
+            counts["total"] += row_count_total
+
+    if passed is None and row_total:
+        passed = row_passed
+    if total is None and row_total:
+        total = row_total
+
+    final_subset_scores: dict[str, float] = {}
+    for subset, values in subset_scores.items():
+        counts = subset_counts.get(subset)
+        if counts and counts["total"]:
+            final_subset_scores[subset] = counts["passed"] / counts["total"]
+        elif values:
+            final_subset_scores[subset] = sum(values) / len(values)
+
+    if score is None and final_subset_scores:
+        score = sum(final_subset_scores.values()) / len(final_subset_scores)
+    if score is None and row_scores:
+        score = sum(row_scores) / len(row_scores)
+    if score is None:
+        return BenchmarkResult(
+            name=normalized_name,
+            score=0.0,
+            passed=passed or 0,
+            total=total or 0,
+            error="no RewardBench accuracy, subset scores, or correct/total count found",
+        )
+
+    metrics = _flatten_numeric_metrics(data)
+    metrics["accuracy"] = score
+    if passed is not None:
+        metrics["num_correct"] = float(passed)
+    if total is not None:
+        metrics["num_examples"] = float(total)
+    metrics["rewardbench_subset_count"] = float(len(final_subset_scores))
+    for subset, subset_score in final_subset_scores.items():
+        metrics[f"subset.{subset}"] = subset_score
+        counts = subset_counts.get(subset)
+        if counts:
+            metrics[f"subset.{subset}.num_correct"] = float(counts["passed"])
+            metrics[f"subset.{subset}.num_examples"] = float(counts["total"])
+
+    return BenchmarkResult(
+        name=normalized_name,
+        score=score,
+        passed=passed or (int(round(score * total)) if total else 0),
+        total=total or 0,
+        metrics=metrics,
+    )
+
+
+_CUA_METRIC_SECTIONS = (
+    ("trajectory", "trajectory_reward_metrics", "trajectory_metrics", "orm_metrics"),
+    ("action", "action_reward_metrics", "action_metrics", "prm_metrics"),
+)
+_CUA_ACCURACY_KEYS = (
+    "overall_accuracy",
+    "overall accuracy",
+    "accuracy",
+    "acc",
+    "score",
+)
+_CUA_OVERALL_KEYS = ("overall", "summary", "aggregate", "metrics")
+_CUA_BREAKDOWN_KEYS = (
+    "by_task_type",
+    "by_model_setting",
+    "by_step_num",
+    "by_reward_type",
+    "by_category",
+    "by_domain",
+)
+
+
+def _cua_confusion_counts(data: Mapping[str, Any]) -> tuple[int | None, int | None]:
+    tp = _find_count(data, ("tp", "true_positive", "true_positives"))
+    tn = _find_count(data, ("tn", "true_negative", "true_negatives"))
+    fp = _find_count(data, ("fp", "false_positive", "false_positives"))
+    fn = _find_count(data, ("fn", "false_negative", "false_negatives"))
+    if None in {tp, tn, fp, fn}:
+        return None, None
+    passed = int(tp or 0) + int(tn or 0)
+    total = passed + int(fp or 0) + int(fn or 0)
+    return passed, total
+
+
+def _cua_accuracy(data: Mapping[str, Any]) -> float | None:
+    for key in _CUA_ACCURACY_KEYS:
+        score = _direct_fraction(data, (key,))
+        if score is not None:
+            return score
+    return _find_score(data)
+
+
+def _cua_rows(data: Mapping[str, Any]) -> list[dict[str, Any]]:
+    for key in ("results", "examples", "records", "trajectories", "actions"):
+        value = _value_by_normalized_key(data, (key,))
+        if _is_sequence(value):
+            return [dict(row) for row in value if _is_mapping(row)]
+    return []
+
+
+def _add_cua_breakdown_metrics(
+    metrics: dict[str, float],
+    section_prefix: str,
+    section: Mapping[str, Any],
+) -> None:
+    for breakdown_key in _CUA_BREAKDOWN_KEYS:
+        breakdown = _value_by_normalized_key(section, (breakdown_key,))
+        if not _is_mapping(breakdown):
+            continue
+        normalized_breakdown = _metric_name(breakdown_key)
+        for raw_name, detail in breakdown.items():
+            group_name = _metric_name(str(raw_name), fallback="unknown_group")
+            metric_prefix = f"{section_prefix}.{normalized_breakdown}.{group_name}"
+            if _is_mapping(detail):
+                group = dict(detail)
+                accuracy = _cua_accuracy(group)
+                if accuracy is not None:
+                    metrics[f"{metric_prefix}.overall_accuracy"] = accuracy
+                metrics.update(_flatten_numeric_metrics(group, prefix=metric_prefix))
+            else:
+                accuracy = _fraction(detail)
+                if accuracy is not None:
+                    metrics[f"{metric_prefix}.overall_accuracy"] = accuracy
+
+
+def parse_cua_rewardbench_results(name: str, data: dict) -> BenchmarkResult:
+    """CUARewardBench metrics JSON with trajectory/action reward breakdowns."""
+    normalized_name = _normalize_name(name)
+    score = _find_score(data)
+    passed = _find_count(data, _PASSED_KEYS)
+    total = _find_count(data, _TOTAL_KEYS)
+    metrics = _flatten_numeric_metrics(data)
+
+    for section_label, *section_keys in _CUA_METRIC_SECTIONS:
+        section = _value_by_normalized_key(data, tuple(section_keys))
+        if not _is_mapping(section):
+            continue
+        section_map = dict(section)
+        overall = next(
+            (
+                dict(value)
+                for key in _CUA_OVERALL_KEYS
+                if _is_mapping(value := _value_by_normalized_key(section_map, (key,)))
+            ),
+            section_map,
+        )
+        accuracy = _cua_accuracy(overall)
+        if accuracy is not None:
+            metrics[f"{section_label}_overall_accuracy"] = accuracy
+            if score is None or section_label == "trajectory":
+                score = accuracy
+        count_passed, count_total = _cua_confusion_counts(overall)
+        if section_label == "trajectory" and count_total:
+            passed = count_passed
+            total = count_total
+        elif passed is None and count_total:
+            passed = count_passed
+            total = count_total
+        metrics.update(_flatten_numeric_metrics(overall, prefix=f"{section_label}.overall"))
+        _add_cua_breakdown_metrics(metrics, section_label, section_map)
+
+    rows = _cua_rows(data)
+    row_scores: list[float] = []
+    for row in rows:
+        row_score = _cua_accuracy(row)
+        if row_score is None:
+            status = _truthy_status(
+                _value_by_normalized_key(row, ("correct", "passed", "success", "result"))
+            )
+            if status is not None:
+                row_score = float(status)
+        if row_score is not None:
+            row_scores.append(row_score)
+    if score is None and row_scores:
+        score = sum(row_scores) / len(row_scores)
+        passed = sum(1 for value in row_scores if value >= 0.5)
+        total = len(row_scores)
+
+    if score is None:
+        return BenchmarkResult(
+            name=normalized_name,
+            score=0.0,
+            passed=passed or 0,
+            total=total or 0,
+            error="no CUARewardBench overall accuracy, action/trajectory accuracy, or row scores found",
+        )
+
+    metrics["accuracy"] = score
+    return BenchmarkResult(
+        name=normalized_name,
+        score=score,
+        passed=passed or (int(round(score * total)) if total else 0),
+        total=total or 0,
+        metrics=metrics,
+    )
+
+
 def _find_trial_score(record: Any) -> float | None:
     if _is_mapping(record):
         for key in ("reward", "score", "passed", "success"):
@@ -651,6 +1002,14 @@ def _aggregate_trial_results(name: str, rows: Sequence[Any]) -> BenchmarkResult:
 
 def _parse_external_result(name: str, payload: Any) -> BenchmarkResult:
     normalized_name = _normalize_name(name)
+    if _is_cua_rewardbench_name(normalized_name):
+        data = {"results": list(payload)} if _is_sequence(payload) else payload
+        if _is_mapping(data):
+            return parse_cua_rewardbench_results(normalized_name, dict(data))
+    if _is_rewardbench_name(normalized_name):
+        data = {"results": list(payload)} if _is_sequence(payload) else payload
+        if _is_mapping(data):
+            return parse_rewardbench_results(normalized_name, dict(data))
     if _is_bfcl_name(normalized_name):
         data = {"data_overall": list(payload)} if _is_sequence(payload) else payload
         if _is_mapping(data):

@@ -201,3 +201,68 @@ def test_combine_release_gate_world_model_quality_warning_is_not_a_ship_blocker(
         "RWML pass rate is below the suggested smoke threshold",
         "mean RWML embedding distance is above the starter threshold",
     ]
+
+
+def test_combine_release_gate_carries_learned_reward_evidence_diagnostics():
+    report = combine_release_gate_evidence(
+        _heldout_report(ship=True),
+        {
+            "learned_reward_evidence": {
+                "schema_version": "bashgym.reward_model_eval.v1",
+                "ok": True,
+                "metrics": {
+                    "heldout_pair_accuracy": 0.82,
+                    "calibration_error": 0.08,
+                    "reward_margin": 0.4,
+                    "reward_variance": 0.05,
+                    "eval_only_leakage_count": 0,
+                    "pair_count": 12,
+                },
+                "findings": [],
+            }
+        },
+    )
+
+    reward = report["release_gate"]["learned_reward_evidence"]
+    assert report["ship"] is True
+    assert report["reasons"] == []
+    assert report["release_gate"]["learned_reward_evidence_present"] is True
+    assert report["release_gate"]["learned_reward_evidence_sections"] == [
+        "learned_reward_evidence"
+    ]
+    assert reward["diagnostic_only"] is True
+    assert reward["signal"] == "healthy"
+    assert reward["metrics"]["heldout_pair_accuracy"] == 0.82
+
+
+def test_combine_release_gate_learned_reward_warning_is_not_a_ship_blocker():
+    report = combine_release_gate_evidence(
+        _heldout_report(ship=True),
+        {
+            "learned_reward_evidence": {
+                "ok": False,
+                "metrics": {
+                    "heldout_pair_accuracy": 0.5,
+                    "calibration_error": 0.31,
+                    "eval_only_leakage_count": 1,
+                    "reward_variance": 0.0,
+                },
+                "findings": [
+                    {
+                        "code": "eval_only_leakage",
+                        "message": "eval-only sources appear in reward eval",
+                    }
+                ],
+            }
+        },
+    )
+
+    reward = report["release_gate"]["learned_reward_evidence"]
+    assert report["ship"] is True
+    assert report["reasons"] == []
+    assert reward["signal"] == "needs_attention"
+    assert "learned reward evidence reports ok=false" in reward["findings"]
+    assert "learned reward evidence reports eval-only leakage" in reward["findings"]
+    assert "learned reward heldout pair accuracy is below the starter threshold" in reward[
+        "findings"
+    ]

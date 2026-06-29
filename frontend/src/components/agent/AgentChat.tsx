@@ -410,7 +410,7 @@ I can help you with your training pipeline — from traces to fine-tuned models.
                 className={clsx(
                   'w-9 h-9 flex items-center justify-center border-brutal border-accent/40 rounded-brutal transition-all shrink-0',
                   input.trim() && !isLoading
-                    ? 'bg-accent text-white shadow-brutal-sm hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none'
+                    ? 'bg-accent text-white shadow-brutal-sm hover:brightness-95 active:translate-x-[2px] active:translate-y-[2px] active:shadow-brutal-pressed'
                     : 'bg-background-tertiary text-text-muted cursor-not-allowed'
                 )}
               >

@@ -4,7 +4,20 @@
  */
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8002/api'
-const BACKEND_START_COMMAND = 'bashgym serve --host 127.0.0.1 --port 8002'
+
+function backendStartCommand(apiBase: string): string {
+  try {
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost'
+    const url = new URL(apiBase, origin)
+    const host = url.hostname === 'localhost' ? '127.0.0.1' : url.hostname
+    const port = url.port || (url.protocol === 'https:' ? '443' : '80')
+    return `bashgym serve --host ${host} --port ${port}`
+  } catch {
+    return 'bashgym serve --host 127.0.0.1 --port 8002'
+  }
+}
+
+const BACKEND_START_COMMAND = backendStartCommand(API_BASE)
 
 function normalizeApiError(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error || 'Unknown API error')
@@ -693,6 +706,169 @@ export const designerApi = {
     request<{ models: DesignerModel[]; provider_models: string[]; available: boolean }>(
       `/factory/designer/models?code_only=${codeOnly}`
     ),
+}
+
+// =============================================================================
+// Source Library API
+// =============================================================================
+
+export type SourceUse =
+  | 'sft'
+  | 'dpo'
+  | 'reward_model'
+  | 'process_reward'
+  | 'terminal_rl'
+  | 'evaluation'
+  | 'raw_reference'
+
+export type SourceArtifactType =
+  | 'sft_examples'
+  | 'dpo_pairs'
+  | 'reward_examples'
+  | 'process_reward_examples'
+  | 'environment_specs'
+  | 'eval_manifest'
+  | 'raw_corpus'
+
+export interface SourceCard {
+  id: string
+  name: string
+  homepage: string
+  domain: string
+  task_family: string
+  artifact_types: SourceArtifactType[]
+  training_eligible: boolean
+  eval_only: boolean
+  license: string
+  input_format: string
+  adapter: string
+  recommended_uses: SourceUse[]
+  not_recommended_for: SourceUse[]
+  known_risks: string[]
+  decontam_notes: string
+  split_policy: string
+  source_quality_notes: string
+  repo?: string | null
+  huggingface_id?: string | null
+  data_size?: string | null
+  metadata: Record<string, unknown>
+}
+
+export interface SourceUseVerdict {
+  ok: boolean
+  source_id: string
+  goal: SourceUse
+  blocking_codes: string[]
+  warnings: string[]
+  requires_override_reason: boolean
+  override_reason?: string | null
+}
+
+export interface SourceManifest {
+  schema_version: string
+  source: SourceCard
+  goal: SourceUse
+  use_verdict: SourceUseVerdict
+  adapter: string
+  next_artifacts: SourceArtifactType[]
+  manifest_path?: string
+}
+
+export interface SourceCatalogResponse {
+  ok: boolean
+  schema_version: string
+  count: number
+  sources: SourceCard[]
+  validation_errors: Record<string, string[]>
+}
+
+export interface SourceInspectResponse {
+  ok: boolean
+  schema_version: string
+  source: SourceCard
+  validation_errors: string[]
+}
+
+export interface SourceRecommendation {
+  score: number
+  reasons: string[]
+  source: SourceCard
+}
+
+export interface SourceRecommendRequest {
+  domain?: string
+  goal?: SourceUse
+  include_eval_only?: boolean
+}
+
+export interface SourceRecommendResponse {
+  ok: boolean
+  schema_version: string
+  domain?: string | null
+  goal?: SourceUse | null
+  recommendations: SourceRecommendation[]
+}
+
+export interface SourcePrepareRequest {
+  goal: SourceUse
+  output_dir?: string
+  input_path?: string
+  limit?: number
+  allow_eval_only?: boolean
+  override_reason?: string
+}
+
+export interface SourcePreparedArtifact {
+  artifact_type: SourceArtifactType
+  path: string
+  record_count: number
+  validation?: {
+    ok?: boolean
+    errors?: string[]
+    warnings?: string[]
+    [key: string]: unknown
+  }
+}
+
+export interface SourcePrepareResponse {
+  ok: boolean
+  schema_version?: string
+  source?: SourceCard
+  goal?: SourceUse
+  use_verdict?: SourceUseVerdict
+  adapter?: string
+  next_artifacts?: SourceArtifactType[]
+  manifest_path?: string
+  source_id?: string
+  input_path?: string
+  output_dir?: string
+  source_manifest?: SourceManifest
+  record_count?: number
+  converted_count?: number
+  artifacts?: SourcePreparedArtifact[]
+  warnings?: string[]
+  errors?: string[]
+  report_path?: string
+}
+
+export const sourcesApi = {
+  list: () =>
+    request<SourceCatalogResponse>('/sources'),
+
+  inspect: (sourceId: string) =>
+    request<SourceInspectResponse>(`/sources/${encodeURIComponent(sourceId)}`),
+
+  recommend: (req: SourceRecommendRequest) =>
+    request<SourceRecommendResponse>('/sources/recommend', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
+
+  prepare: (sourceId: string, req: SourcePrepareRequest) =>
+    request<SourcePrepareResponse>(`/sources/${encodeURIComponent(sourceId)}/prepare`, {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
 }
 
 // =============================================================================

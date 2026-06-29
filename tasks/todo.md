@@ -37,6 +37,7 @@ Archive: `tasks/archived-completed-before-2026-06-22.md` contains completed item
 - [x] Surface learned-reward evidence in Held-out Gate release review as diagnostic evidence
 - [x] Add RunCard claim-tier scaffolding for local smoke, narrow routing, and broad public claim evidence checks
 - [x] Add local/fixture Source Library adapters that convert JSON/JSONL source-card records into SFT, DPO, reward, process-reward, eval-manifest, or environment-spec artifacts through CLI/API/Data Designer while preserving source metadata and eval-only guardrails
+- [x] Add Factory Source Library UI for source recommendations, eval-only guardrails, local artifact preparation, and Training handoff
 - [ ] Human decision: choose eval-only override policy, first installed backend, first cloud launcher priority, first public-source expansion set, remote/billable approval boundary, and claim-tier thresholds (`tasks/human-decisions-source-compute-2026-06-29.md`)
 
 ## Active — Dashboard UI/UX quality pass (2026-06-24)

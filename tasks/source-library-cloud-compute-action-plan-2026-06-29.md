@@ -184,8 +184,10 @@ Status, 2026-06-29:
   `process_reward_examples.jsonl`, `eval_manifest.json`, or
   `environment_specs.jsonl`, preserve source metadata, and run strict
   DPO/reward/environment validators where applicable.
-- Remaining: network/Hugging Face download orchestration, Source Library UI
-  handoff, and broader public-source expansion policy.
+- Remaining: network/Hugging Face download orchestration and broader
+  public-source expansion policy. The Factory Source Library now covers source
+  recommendations, eval-only guardrails, local artifact preparation, and
+  Training path handoff for prepared artifacts.
 
 ---
 

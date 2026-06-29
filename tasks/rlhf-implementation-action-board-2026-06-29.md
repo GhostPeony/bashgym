@@ -105,7 +105,8 @@ Actionable next items:
 
 - Add network/Hugging Face source download orchestration on top of the local
   adapter contract.
-- Add Source Library UI handoff for prepared artifacts.
+- Source Library UI handoff for prepared artifacts is now in Factory. Next,
+  expand network/Hugging Face source orchestration and public-source policy.
 - Keep RewardBench, CUARewardBench, BFCL, tau-bench, Terminal-Bench, and
   SWE-bench eval-only by default.
 
@@ -388,8 +389,8 @@ Status: completed for local/fixture JSON/JSONL inputs.
 - Added tests proving eval-only sources cannot export training artifacts by
   default.
 
-Remaining: network/Hugging Face download orchestration and Source Library UI
-handoff.
+Remaining: network/Hugging Face download orchestration and public-source
+expansion policy.
 
 ### Ticket 2: CLI/API/Data Designer Adapter Wiring
 

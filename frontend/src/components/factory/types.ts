@@ -16,6 +16,7 @@ export type TabId =
   | 'settings'
   | 'jobs'
   | 'designer'
+  | 'sources'
   | 'quality'
   | 'environments'
 

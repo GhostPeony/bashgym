@@ -1,5 +1,6 @@
 import json
 import sys
+from pathlib import Path
 
 from bashgym.cli import main
 from bashgym.environments.contracts import EnvironmentSpec
@@ -125,6 +126,91 @@ def test_sources_cli_prepares_local_input_artifacts(tmp_path, capsys):
     assert payload["ok"] is True
     assert payload["artifacts"][0]["artifact_type"] == "dpo_pairs"
     assert (tmp_path / "out" / "dpo_pairs.jsonl").exists()
+
+
+def test_sources_cli_fetches_and_prepares_remote_source(tmp_path, capsys, monkeypatch):
+    def fake_fetch(card, *, output_dir, split, subset=None, revision=None, limit=None):
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        records_path = output_path / "source_records.jsonl"
+        records_path.write_text(
+            json.dumps(
+                {
+                    "id": "uf-1",
+                    "prompt": "Fix a failing test.",
+                    "chosen": "Run pytest and patch the failing function.",
+                    "rejected": "Claim success without running tests.",
+                    "metadata": {"decontamination_status": "checked"},
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return {
+            "schema_version": "bashgym.source_fetch.v1",
+            "ok": True,
+            "source_id": card.id,
+            "source_name": card.name,
+            "huggingface_id": card.huggingface_id,
+            "split": split,
+            "subset": subset,
+            "revision": revision,
+            "limit": limit,
+            "output_dir": str(output_path),
+            "records_path": str(records_path),
+            "report_path": str(output_path / "source_fetch_report.json"),
+            "record_count": 1,
+            "truncated": False,
+            "warnings": [],
+            "errors": [],
+        }
+
+    monkeypatch.setattr("bashgym.cli.fetch_source_records", fake_fetch)
+
+    assert (
+        main(
+            [
+                "sources",
+                "fetch",
+                "ultrafeedback_binarized",
+                "--output-dir",
+                str(tmp_path / "fetch"),
+                "--split",
+                "train_prefs",
+                "--limit",
+                "1",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    fetch_payload = json.loads(capsys.readouterr().out)
+    assert fetch_payload["ok"] is True
+    assert fetch_payload["schema_version"] == "bashgym.source_fetch.v1"
+
+    assert (
+        main(
+            [
+                "sources",
+                "prepare",
+                "ultrafeedback_binarized",
+                "--goal",
+                "dpo",
+                "--fetch",
+                "--output-dir",
+                str(tmp_path / "prepare"),
+                "--limit",
+                "1",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    prepare_payload = json.loads(capsys.readouterr().out)
+    assert prepare_payload["ok"] is True
+    assert prepare_payload["fetch_report"]["schema_version"] == "bashgym.source_fetch.v1"
+    assert prepare_payload["artifacts"][0]["artifact_type"] == "dpo_pairs"
+    assert (tmp_path / "prepare" / "dpo_pairs.jsonl").exists()
 
 
 def test_compute_cli_lists_preflights_and_dry_runs_launch(capsys):

@@ -813,9 +813,40 @@ export interface SourcePrepareRequest {
   goal: SourceUse
   output_dir?: string
   input_path?: string
+  fetch?: boolean
+  split?: string
+  subset?: string
+  revision?: string
   limit?: number
   allow_eval_only?: boolean
   override_reason?: string
+}
+
+export interface SourceFetchRequest {
+  output_dir: string
+  split?: string
+  subset?: string
+  revision?: string
+  limit?: number
+}
+
+export interface SourceFetchReport {
+  ok: boolean
+  schema_version: string
+  source_id: string
+  source_name: string
+  huggingface_id?: string | null
+  split: string
+  subset?: string | null
+  revision?: string | null
+  limit?: number | null
+  output_dir: string
+  records_path: string
+  report_path?: string
+  record_count: number
+  truncated: boolean
+  warnings: string[]
+  errors: string[]
 }
 
 export interface SourcePreparedArtifact {
@@ -846,6 +877,7 @@ export interface SourcePrepareResponse {
   record_count?: number
   converted_count?: number
   artifacts?: SourcePreparedArtifact[]
+  fetch_report?: SourceFetchReport
   warnings?: string[]
   errors?: string[]
   report_path?: string
@@ -866,6 +898,12 @@ export const sourcesApi = {
 
   prepare: (sourceId: string, req: SourcePrepareRequest) =>
     request<SourcePrepareResponse>(`/sources/${encodeURIComponent(sourceId)}/prepare`, {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
+
+  fetch: (sourceId: string, req: SourceFetchRequest) =>
+    request<SourceFetchReport>(`/sources/${encodeURIComponent(sourceId)}/fetch`, {
       method: 'POST',
       body: JSON.stringify(req),
     }),

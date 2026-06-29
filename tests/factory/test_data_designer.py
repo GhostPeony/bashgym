@@ -254,6 +254,58 @@ class TestDataDesignerPipelineInit:
         assert prepared["dataset_card"]["artifacts"][0]["artifact_type"] == "dpo_pairs"
         assert tmp_path.joinpath("out", "dpo_pairs.jsonl").exists()
 
+    def test_prepare_source_can_fetch_then_convert_artifacts(self, tmp_path, monkeypatch):
+        def fake_fetch(card, *, output_dir, split, subset=None, revision=None, limit=None):
+            output_path = Path(output_dir)
+            output_path.mkdir(parents=True, exist_ok=True)
+            records_path = output_path / "source_records.jsonl"
+            records_path.write_text(
+                json.dumps(
+                    {
+                        "id": "uf-1",
+                        "prompt": "Fix a failing test.",
+                        "chosen": "Run pytest and patch the failing function.",
+                        "rejected": "Claim success without running tests.",
+                        "metadata": {"decontamination_status": "checked"},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            return {
+                "schema_version": "bashgym.source_fetch.v1",
+                "ok": True,
+                "source_id": card.id,
+                "source_name": card.name,
+                "huggingface_id": card.huggingface_id,
+                "split": split,
+                "subset": subset,
+                "revision": revision,
+                "limit": limit,
+                "output_dir": str(output_path),
+                "records_path": str(records_path),
+                "report_path": str(output_path / "source_fetch_report.json"),
+                "record_count": 1,
+                "truncated": False,
+                "warnings": [],
+                "errors": [],
+            }
+
+        monkeypatch.setattr("bashgym.sources.fetch_source_records", fake_fetch)
+        pipeline = DataDesignerPipeline(PipelineConfig(output_dir=tmp_path / "out"))
+
+        prepared = pipeline.prepare_source(
+            "ultrafeedback_binarized",
+            goal="dpo",
+            fetch=True,
+            limit=1,
+        )
+
+        assert prepared["fetch_report"]["schema_version"] == "bashgym.source_fetch.v1"
+        assert prepared["dataset_card"]["source_records_path"].endswith("source_records.jsonl")
+        assert prepared["artifact_report"]["ok"] is True
+        assert tmp_path.joinpath("out", "dpo_pairs.jsonl").exists()
+
 
 # =========================================================================
 # _extract_seeds_from_traces

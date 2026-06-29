@@ -100,13 +100,17 @@ Already in place:
 - Local JSON/JSONL source adapters for SFT examples, DPO pairs, reward examples,
   process-reward examples, eval manifests, and environment specs through
   CLI/API/Data Designer.
+- Hugging Face-backed source fetch orchestration through CLI/API/Factory UI/Data
+  Designer, writing capped local `source_records.jsonl` files and
+  `source_fetch_report.json` before adapter conversion.
 
 Actionable next items:
 
-- Add network/Hugging Face source download orchestration on top of the local
-  adapter contract.
+- Expand source-specific schema mapping for each newly approved public source
+  instead of relying only on generic JSONL field inference.
+- Add remote fetch approval and cache policy for larger/billable data pulls.
 - Source Library UI handoff for prepared artifacts is now in Factory. Next,
-  expand network/Hugging Face source orchestration and public-source policy.
+  expand public-source policy and source expansion priorities.
 - Keep RewardBench, CUARewardBench, BFCL, tau-bench, Terminal-Bench, and
   SWE-bench eval-only by default.
 

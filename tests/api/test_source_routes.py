@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -89,4 +90,114 @@ def test_source_routes_prepare_local_input_artifacts(tmp_path):
     assert payload["ok"] is True
     assert payload["schema_version"] == "bashgym.source_artifact_prepare.v1"
     assert payload["artifacts"][0]["validation"]["ok"] is True
+    assert tmp_path.joinpath("out", "dpo_pairs.jsonl").exists()
+
+
+def test_source_routes_fetch_huggingface_source_records(tmp_path, monkeypatch):
+    def fake_fetch(card, *, output_dir, split, subset=None, revision=None, limit=None):
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        records_path = output_path / "source_records.jsonl"
+        records_path.write_text(
+            json.dumps(
+                {
+                    "id": "uf-1",
+                    "prompt": "Fix a failing test.",
+                    "chosen": "Run pytest and patch the failing function.",
+                    "rejected": "Claim success without running tests.",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        report_path = output_path / "source_fetch_report.json"
+        return {
+            "schema_version": "bashgym.source_fetch.v1",
+            "ok": True,
+            "source_id": card.id,
+            "source_name": card.name,
+            "huggingface_id": card.huggingface_id,
+            "split": split,
+            "subset": subset,
+            "revision": revision,
+            "limit": limit,
+            "output_dir": str(output_path),
+            "records_path": str(records_path),
+            "report_path": str(report_path),
+            "record_count": 1,
+            "truncated": False,
+            "warnings": [],
+            "errors": [],
+        }
+
+    monkeypatch.setattr("bashgym.api.source_routes.fetch_source_records", fake_fetch)
+
+    response = client.post(
+        "/api/sources/ultrafeedback_binarized/fetch",
+        json={"output_dir": str(tmp_path / "fetch"), "split": "train_prefs", "limit": 1},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["schema_version"] == "bashgym.source_fetch.v1"
+    assert payload["split"] == "train_prefs"
+    assert Path(payload["records_path"]).exists()
+
+
+def test_source_routes_prepare_can_fetch_then_convert(tmp_path, monkeypatch):
+    def fake_fetch(card, *, output_dir, split, subset=None, revision=None, limit=None):
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        records_path = output_path / "source_records.jsonl"
+        records_path.write_text(
+            json.dumps(
+                {
+                    "id": "uf-1",
+                    "prompt": "Fix a failing test.",
+                    "chosen": "Run pytest and patch the failing function.",
+                    "rejected": "Claim success without running tests.",
+                    "metadata": {"decontamination_status": "checked"},
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return {
+            "schema_version": "bashgym.source_fetch.v1",
+            "ok": True,
+            "source_id": card.id,
+            "source_name": card.name,
+            "huggingface_id": card.huggingface_id,
+            "split": split,
+            "subset": subset,
+            "revision": revision,
+            "limit": limit,
+            "output_dir": str(output_path),
+            "records_path": str(records_path),
+            "report_path": str(output_path / "source_fetch_report.json"),
+            "record_count": 1,
+            "truncated": False,
+            "warnings": [],
+            "errors": [],
+        }
+
+    monkeypatch.setattr("bashgym.api.source_routes.fetch_source_records", fake_fetch)
+
+    response = client.post(
+        "/api/sources/ultrafeedback_binarized/prepare",
+        json={
+            "goal": "dpo",
+            "fetch": True,
+            "output_dir": str(tmp_path / "out"),
+            "split": "train_prefs",
+            "limit": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["fetch_report"]["schema_version"] == "bashgym.source_fetch.v1"
+    assert payload["artifacts"][0]["artifact_type"] == "dpo_pairs"
     assert tmp_path.joinpath("out", "dpo_pairs.jsonl").exists()

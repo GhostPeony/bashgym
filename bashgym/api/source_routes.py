@@ -8,7 +8,9 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from bashgym.sources import (
+    DEFAULT_SOURCE_FETCH_LIMIT,
     SourceUse,
+    fetch_source_records,
     get_source,
     list_sources,
     prepare_source_artifacts,
@@ -33,9 +35,24 @@ class SourcePrepareRequest(BaseModel):
         default=None,
         description="Optional local JSON/JSONL source records to convert into artifacts.",
     )
+    fetch: bool = Field(
+        default=False,
+        description="Fetch Hugging Face source records into output_dir before artifact conversion.",
+    )
+    split: str = Field(default="train", max_length=100)
+    subset: str | None = Field(default=None, max_length=200)
+    revision: str | None = Field(default=None, max_length=200)
     limit: int | None = Field(default=None, ge=1, le=100000)
     allow_eval_only: bool = False
     override_reason: str | None = Field(default=None, max_length=500)
+
+
+class SourceFetchRequest(BaseModel):
+    output_dir: str
+    split: str = Field(default="train", max_length=100)
+    subset: str | None = Field(default=None, max_length=200)
+    revision: str | None = Field(default=None, max_length=200)
+    limit: int | None = Field(default=DEFAULT_SOURCE_FETCH_LIMIT, ge=1, le=100000)
 
 
 @router.get("")
@@ -85,6 +102,27 @@ async def recommend_source_cards(body: SourceRecommendRequest) -> dict[str, Any]
     }
 
 
+@router.post("/{source_id}/fetch")
+async def fetch_source(source_id: str, body: SourceFetchRequest) -> dict[str, Any]:
+    """Fetch Hugging Face-backed source records into local JSONL."""
+
+    try:
+        card = get_source(source_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"unknown source {source_id!r}") from exc
+    fetch_report = fetch_source_records(
+        card,
+        output_dir=body.output_dir,
+        split=body.split,
+        subset=body.subset,
+        revision=body.revision,
+        limit=body.limit,
+    )
+    if not fetch_report["ok"]:
+        raise HTTPException(status_code=400, detail=fetch_report)
+    return fetch_report
+
+
 @router.post("/{source_id}/prepare")
 async def prepare_source(source_id: str, body: SourcePrepareRequest) -> dict[str, Any]:
     """Prepare a source manifest or local converted source artifacts."""
@@ -93,7 +131,29 @@ async def prepare_source(source_id: str, body: SourcePrepareRequest) -> dict[str
         card = get_source(source_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=f"unknown source {source_id!r}") from exc
-    if body.input_path:
+    input_path = body.input_path
+    fetch_report = None
+    if body.fetch:
+        if input_path:
+            raise HTTPException(
+                status_code=400,
+                detail="fetch cannot be combined with input_path; choose remote fetch or local input",
+            )
+        if not body.output_dir:
+            raise HTTPException(status_code=400, detail="fetch requires output_dir")
+        fetch_report = fetch_source_records(
+            card,
+            output_dir=body.output_dir,
+            split=body.split,
+            subset=body.subset,
+            revision=body.revision,
+            limit=body.limit if body.limit is not None else DEFAULT_SOURCE_FETCH_LIMIT,
+        )
+        if not fetch_report["ok"]:
+            raise HTTPException(status_code=400, detail=fetch_report)
+        input_path = fetch_report["records_path"]
+
+    if input_path:
         if not body.output_dir:
             raise HTTPException(
                 status_code=400,
@@ -102,12 +162,14 @@ async def prepare_source(source_id: str, body: SourcePrepareRequest) -> dict[str
         artifact_report = prepare_source_artifacts(
             card,
             goal=body.goal,
-            input_path=body.input_path,
+            input_path=input_path,
             output_dir=body.output_dir,
             allow_eval_only=body.allow_eval_only,
             override_reason=body.override_reason,
             limit=body.limit,
         )
+        if fetch_report:
+            artifact_report["fetch_report"] = fetch_report
         if not artifact_report["ok"]:
             raise HTTPException(status_code=400, detail=artifact_report)
         return artifact_report

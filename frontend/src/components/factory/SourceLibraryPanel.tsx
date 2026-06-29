@@ -3,6 +3,7 @@ import {
   AlertCircle,
   ArrowRight,
   CheckCircle2,
+  CloudDownload,
   Database,
   ExternalLink,
   FileJson,
@@ -243,6 +244,10 @@ export function SourceLibraryPanel() {
   const [domainFilter, setDomainFilter] = useState('')
   const [includeEvalOnly, setIncludeEvalOnly] = useState(false)
   const [inputPath, setInputPath] = useState('')
+  const [fetchRemote, setFetchRemote] = useState(false)
+  const [splitInput, setSplitInput] = useState('train')
+  const [subsetInput, setSubsetInput] = useState('')
+  const [revisionInput, setRevisionInput] = useState('')
   const [outputDir, setOutputDir] = useState('')
   const [limitInput, setLimitInput] = useState('')
   const [allowEvalOnly, setAllowEvalOnly] = useState(false)
@@ -277,10 +282,15 @@ export function SourceLibraryPanel() {
     () => sources.find((source) => source.id === selectedSourceId) ?? null,
     [selectedSourceId, sources]
   )
+  const canFetchRemote = selectedSource?.huggingface_id !== null && selectedSource?.huggingface_id !== undefined
 
   useEffect(() => {
     if (selectedSourceId) setOutputDir(defaultOutputDir(selectedSourceId, goal))
   }, [selectedSourceId, goal])
+
+  useEffect(() => {
+    if (!canFetchRemote) setFetchRemote(false)
+  }, [canFetchRemote])
 
   const loadRecommendations = useCallback(async () => {
     setRecommendationState({ status: 'loading' })
@@ -325,7 +335,11 @@ export function SourceLibraryPanel() {
     const response = await sourcesApi.prepare(selectedSourceId, {
       goal,
       output_dir: outputDir.trim() || undefined,
-      input_path: inputPath.trim() || undefined,
+      input_path: fetchRemote ? undefined : inputPath.trim() || undefined,
+      fetch: fetchRemote,
+      split: fetchRemote ? splitInput.trim() || 'train' : undefined,
+      subset: fetchRemote ? subsetInput.trim() || undefined : undefined,
+      revision: fetchRemote ? revisionInput.trim() || undefined : undefined,
       limit,
       allow_eval_only: allowEvalOnly,
       override_reason: allowEvalOnly ? overrideReason.trim() || undefined : undefined,
@@ -345,6 +359,10 @@ export function SourceLibraryPanel() {
     goal,
     outputDir,
     inputPath,
+    fetchRemote,
+    splitInput,
+    subsetInput,
+    revisionInput,
     allowEvalOnly,
     overrideReason,
   ])
@@ -516,17 +534,82 @@ export function SourceLibraryPanel() {
             </div>
 
             <div className="space-y-4">
-              <label className="block">
-                <span className="block font-mono text-[11px] uppercase tracking-[0.15em] text-text-muted mb-1">
-                  Local JSON/JSONL input
-                </span>
-                <input
-                  value={inputPath}
-                  onChange={(event) => setInputPath(event.target.value)}
-                  placeholder="Optional path to source records"
-                  className="input w-full font-mono text-xs"
-                />
-              </label>
+              <button
+                type="button"
+                onClick={() => setFetchRemote((current) => !current)}
+                disabled={!canFetchRemote}
+                className={clsx(
+                  'w-full flex items-center justify-center gap-2 px-3 py-2 border-2 transition-press font-mono text-[11px] uppercase',
+                  fetchRemote
+                    ? 'border-accent bg-accent-light text-accent-dark'
+                    : 'border-border text-text-secondary bg-background-card',
+                  !canFetchRemote ? 'opacity-60 cursor-not-allowed' : ''
+                )}
+                title={
+                  canFetchRemote
+                    ? 'Fetch Hugging Face source records before preparing artifacts'
+                    : 'This source card does not define a Hugging Face dataset'
+                }
+              >
+                {fetchRemote ? (
+                  <CloudDownload className="w-4 h-4" />
+                ) : (
+                  <FileJson className="w-4 h-4" />
+                )}
+                {fetchRemote ? 'Hugging Face fetch on' : canFetchRemote ? 'Use local input' : 'Local input only'}
+              </button>
+
+              {fetchRemote ? (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <label className="block">
+                    <span className="block font-mono text-[11px] uppercase text-text-muted mb-1">
+                      Split
+                    </span>
+                    <input
+                      value={splitInput}
+                      onChange={(event) => setSplitInput(event.target.value)}
+                      placeholder="train"
+                      className="input w-full font-mono text-xs"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="block font-mono text-[11px] uppercase text-text-muted mb-1">
+                      Subset
+                    </span>
+                    <input
+                      value={subsetInput}
+                      onChange={(event) => setSubsetInput(event.target.value)}
+                      placeholder="Optional"
+                      className="input w-full font-mono text-xs"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="block font-mono text-[11px] uppercase text-text-muted mb-1">
+                      Revision
+                    </span>
+                    <input
+                      value={revisionInput}
+                      onChange={(event) => setRevisionInput(event.target.value)}
+                      placeholder="Optional"
+                      className="input w-full font-mono text-xs"
+                    />
+                  </label>
+                </div>
+              ) : (
+                <label className="block">
+                  <span className="block font-mono text-[11px] uppercase tracking-[0.15em] text-text-muted mb-1">
+                    Local JSON/JSONL input
+                  </span>
+                  <input
+                    value={inputPath}
+                    onChange={(event) => setInputPath(event.target.value)}
+                    placeholder="Optional path to source records"
+                    className="input w-full font-mono text-xs"
+                  />
+                </label>
+              )}
 
               <label className="block">
                 <span className="block font-mono text-[11px] uppercase tracking-[0.15em] text-text-muted mb-1">
@@ -605,7 +688,7 @@ export function SourceLibraryPanel() {
                 ) : (
                   <FileJson className="w-4 h-4" />
                 )}
-                Prepare {inputPath.trim() ? 'Artifacts' : 'Manifest'}
+                Prepare {fetchRemote ? 'Remote Artifacts' : inputPath.trim() ? 'Artifacts' : 'Manifest'}
               </button>
             </div>
           </div>
@@ -635,6 +718,12 @@ export function SourceLibraryPanel() {
 
               <div className="space-y-2 font-mono text-xs text-text-secondary">
                 {prepareState.report.output_dir ? <p>Output: {prepareState.report.output_dir}</p> : null}
+                {prepareState.report.fetch_report ? (
+                  <p>Fetched: {prepareState.report.fetch_report.records_path}</p>
+                ) : null}
+                {prepareState.report.fetch_report?.report_path ? (
+                  <p>Fetch report: {prepareState.report.fetch_report.report_path}</p>
+                ) : null}
                 {prepareState.report.report_path ? <p>Report: {prepareState.report.report_path}</p> : null}
                 {prepareState.report.manifest_path ? <p>Manifest: {prepareState.report.manifest_path}</p> : null}
                 {prepareState.report.source_manifest?.manifest_path ? (

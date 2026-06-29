@@ -465,6 +465,10 @@ class DataDesignerPipeline:
         goal: str = "sft",
         output_dir: str | Path | None = None,
         input_path: str | Path | None = None,
+        fetch: bool = False,
+        split: str = "train",
+        subset: str | None = None,
+        revision: str | None = None,
         limit: int | None = None,
         allow_eval_only: bool = False,
         override_reason: str | None = None,
@@ -475,10 +479,34 @@ class DataDesignerPipeline:
         writes source provenance before any generation or download work starts.
         """
 
-        from bashgym.sources import get_source, prepare_source_artifacts, prepare_source_manifest
+        from bashgym.sources import (
+            DEFAULT_SOURCE_FETCH_LIMIT,
+            fetch_source_records,
+            get_source,
+            prepare_source_artifacts,
+            prepare_source_manifest,
+        )
 
         card = get_source(source_id)
         target_dir = Path(output_dir) if output_dir else self.config.output_dir
+        artifact_input_path = input_path
+        fetch_report = None
+        if fetch:
+            if input_path is not None:
+                raise ValueError("source fetch cannot be combined with explicit input_path")
+            fetch_report = fetch_source_records(
+                card,
+                output_dir=target_dir,
+                split=split,
+                subset=subset,
+                revision=revision,
+                limit=limit if limit is not None else DEFAULT_SOURCE_FETCH_LIMIT,
+            )
+            if not fetch_report["ok"]:
+                raise ValueError(
+                    f"source {source_id!r} fetch failed: {', '.join(fetch_report['errors'])}"
+                )
+            artifact_input_path = fetch_report["records_path"]
         manifest = prepare_source_manifest(
             card,
             goal=goal,
@@ -505,12 +533,15 @@ class DataDesignerPipeline:
             "source_manifest_path": manifest.get("manifest_path"),
             "quality_notes": card.source_quality_notes,
         }
+        if fetch_report is not None:
+            dataset_card["fetch_report_path"] = fetch_report.get("report_path")
+            dataset_card["source_records_path"] = fetch_report.get("records_path")
         artifact_report = None
-        if input_path is not None:
+        if artifact_input_path is not None:
             artifact_report = prepare_source_artifacts(
                 card,
                 goal=goal,
-                input_path=input_path,
+                input_path=artifact_input_path,
                 output_dir=target_dir,
                 allow_eval_only=allow_eval_only,
                 override_reason=override_reason,
@@ -533,6 +564,7 @@ class DataDesignerPipeline:
             "source_manifest": manifest,
             "dataset_card": dataset_card,
             "dataset_card_path": str(dataset_card_path),
+            "fetch_report": fetch_report,
             "artifact_report": artifact_report,
         }
 
@@ -544,6 +576,10 @@ class DataDesignerPipeline:
         num_records: int | None = None,
         output_dir: str | Path | None = None,
         input_path: str | Path | None = None,
+        fetch: bool = False,
+        split: str = "train",
+        subset: str | None = None,
+        revision: str | None = None,
         allow_eval_only: bool = False,
         override_reason: str | None = None,
     ) -> "pd.DataFrame":
@@ -561,16 +597,22 @@ class DataDesignerPipeline:
             goal=goal,
             output_dir=output_dir,
             input_path=input_path,
+            fetch=fetch,
+            split=split,
+            subset=subset,
+            revision=revision,
             limit=num_records,
             allow_eval_only=allow_eval_only,
             override_reason=override_reason,
         )
         card = get_source(source_id)
-        seed_source = (
-            str(input_path)
-            if input_path is not None
-            else card.huggingface_id or self.config.seed_source
-        )
+        fetch_report = prepared["fetch_report"]
+        if input_path is not None:
+            seed_source = str(input_path)
+        elif fetch_report is not None:
+            seed_source = str(fetch_report["records_path"])
+        else:
+            seed_source = card.huggingface_id or self.config.seed_source
         if not seed_source:
             raise ValueError(
                 f"source {source_id!r} does not define a Hugging Face dataset. "

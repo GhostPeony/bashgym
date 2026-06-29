@@ -42,7 +42,9 @@ from bashgym.run_cards import (
     write_run_card,
 )
 from bashgym.sources import (
+    DEFAULT_SOURCE_FETCH_LIMIT,
     SourceUse,
+    fetch_source_records,
     get_source,
     list_sources,
     prepare_source_artifacts,
@@ -1801,7 +1803,8 @@ def cmd_manifest(args: argparse.Namespace) -> int:
             "sources list": "List curated public training/eval sources.",
             "sources inspect": "Inspect one source card and its guardrails.",
             "sources recommend": "Recommend sources for a domain and training/eval goal.",
-            "sources prepare": "Write a dry-run source manifest for downstream adapters.",
+            "sources fetch": "Fetch Hugging Face-backed source records into local JSONL.",
+            "sources prepare": "Write a source manifest or convert local/fetched records into artifacts.",
             "compute targets": "List local, SSH/GX10, and cloud GPU dry-run targets.",
             "compute preflight": "Run non-invasive compute target readiness checks.",
             "compute launch": "Generate a dry-run provider launch plan.",
@@ -2244,12 +2247,59 @@ def cmd_sources_recommend(args: argparse.Namespace) -> int:
     return _emit(payload, as_json=args.json)
 
 
+def cmd_sources_fetch(args: argparse.Namespace) -> int:
+    try:
+        card = get_source(args.source_id)
+    except KeyError as exc:
+        raise SystemExit(f"unknown source {args.source_id!r}") from exc
+    payload = {
+        "title": "BashGym Source Fetch",
+        **fetch_source_records(
+            card,
+            output_dir=args.output_dir,
+            split=args.split,
+            subset=args.subset,
+            revision=args.revision,
+            limit=args.limit,
+        ),
+    }
+    if not payload["ok"]:
+        payload["next"] = [
+            {
+                "reason": "Use local JSON/JSONL records when a source card has no Hugging Face dataset.",
+                "command": "bashgym sources prepare SOURCE_ID --input records.jsonl --output-dir data/sources/out --json",
+            }
+        ]
+    _emit(payload, as_json=args.json)
+    return 0 if payload["ok"] else 2
+
+
 def cmd_sources_prepare(args: argparse.Namespace) -> int:
     try:
         card = get_source(args.source_id)
     except KeyError as exc:
         raise SystemExit(f"unknown source {args.source_id!r}") from exc
-    if args.input:
+    input_path = args.input
+    fetch_report = None
+    if args.fetch:
+        if args.input:
+            raise SystemExit("sources prepare --fetch cannot be combined with --input")
+        if not args.output_dir:
+            raise SystemExit("sources prepare --fetch requires --output-dir")
+        fetch_report = fetch_source_records(
+            card,
+            output_dir=args.output_dir,
+            split=args.split,
+            subset=args.subset,
+            revision=args.revision,
+            limit=args.limit if args.limit is not None else DEFAULT_SOURCE_FETCH_LIMIT,
+        )
+        if not fetch_report["ok"]:
+            payload = {"title": "BashGym Source Fetch", **fetch_report}
+            _emit(payload, as_json=args.json)
+            return 2
+        input_path = fetch_report["records_path"]
+    if input_path:
         if not args.output_dir:
             raise SystemExit("sources prepare --input requires --output-dir")
         payload = {
@@ -2257,13 +2307,15 @@ def cmd_sources_prepare(args: argparse.Namespace) -> int:
             **prepare_source_artifacts(
                 card,
                 goal=args.goal,
-                input_path=args.input,
+                input_path=input_path,
                 output_dir=args.output_dir,
                 allow_eval_only=args.allow_eval_only,
                 override_reason=args.override_reason,
                 limit=args.limit,
             ),
         }
+        if fetch_report:
+            payload["fetch_report"] = fetch_report
     else:
         manifest = prepare_source_manifest(
             card,
@@ -2716,9 +2768,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sources_recommend.set_defaults(func=cmd_sources_recommend)
 
+    sources_fetch = sources_sub.add_parser(
+        "fetch",
+        help="Fetch Hugging Face-backed source records into local JSONL",
+        parents=[json_parent],
+    )
+    sources_fetch.add_argument("source_id")
+    sources_fetch.add_argument("--output-dir", required=True, help="Directory for source_records.jsonl")
+    sources_fetch.add_argument("--split", default="train", help="Dataset split to fetch")
+    sources_fetch.add_argument("--subset", help="Optional Hugging Face dataset config/subset")
+    sources_fetch.add_argument("--revision", help="Optional Hugging Face dataset revision")
+    sources_fetch.add_argument(
+        "--limit",
+        type=int,
+        default=DEFAULT_SOURCE_FETCH_LIMIT,
+        help="Maximum number of source records to fetch",
+    )
+    sources_fetch.set_defaults(func=cmd_sources_fetch)
+
     sources_prepare = sources_sub.add_parser(
         "prepare",
-        help="Write a dry-run source manifest for downstream adapters",
+        help="Write a source manifest or convert local/fetched records into artifacts",
         parents=[json_parent],
     )
     sources_prepare.add_argument("source_id")
@@ -2733,9 +2803,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Local JSON/JSONL source records to convert into BashGym artifacts",
     )
     sources_prepare.add_argument(
+        "--fetch",
+        action="store_true",
+        help="Fetch Hugging Face source records before converting artifacts",
+    )
+    sources_prepare.add_argument("--split", default="train", help="Dataset split for --fetch")
+    sources_prepare.add_argument("--subset", help="Optional Hugging Face dataset config/subset")
+    sources_prepare.add_argument("--revision", help="Optional Hugging Face dataset revision")
+    sources_prepare.add_argument(
         "--limit",
         type=int,
-        help="Maximum number of local source records to convert",
+        help="Maximum number of local or fetched source records to convert",
     )
     sources_prepare.add_argument(
         "--allow-eval-only",

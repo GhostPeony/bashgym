@@ -220,6 +220,14 @@ def test_validate_run_card_file_fails_closed_on_missing_promotion_artifacts(tmp_
         "missing_metrics_path_file",
         "missing_release_evidence_path_file",
     } <= codes
+    explanation = validation["promotion_explanation"]
+    assert explanation["ok"] is False
+    assert "run-demo is not promotable" in explanation["headline"]
+    assert explanation["blocker_count"] >= 4
+    gates = {gate["gate"] for gate in explanation["failed_gates"]}
+    assert "training plan evidence" in gates
+    assert "metrics evidence" in gates
+    assert explanation["next_actions"]
 
 
 def test_validate_run_card_file_blocks_non_shipping_release_evidence(tmp_path):

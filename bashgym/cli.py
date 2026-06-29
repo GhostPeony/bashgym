@@ -36,6 +36,7 @@ from bashgym.preferences import (
 from bashgym.run_cards import (
     attach_run_card_evidence,
     create_run_card,
+    explain_run_card_promotion,
     parse_thresholds,
     read_run_card,
     validate_run_card_file,
@@ -2002,7 +2003,14 @@ def cmd_training_runcard_create(args: argparse.Namespace) -> int:
     validation = (
         validate_run_card_file(written["path"], promotion=True)
         if args.promotion
-        else {"findings": card.validation_findings(), "artifact_status": []}
+        else {
+            "findings": card.validation_findings(),
+            "artifact_status": [],
+            "promotion_explanation": explain_run_card_promotion(
+                card,
+                card.validation_findings(),
+            ),
+        }
     )
     findings = validation["findings"]
     payload = {
@@ -2012,6 +2020,7 @@ def cmd_training_runcard_create(args: argparse.Namespace) -> int:
         **written,
         "findings": findings,
         "artifact_status": validation["artifact_status"],
+        "promotion_explanation": validation["promotion_explanation"],
     }
     return _emit(payload, as_json=args.json)
 
@@ -2027,6 +2036,7 @@ def cmd_training_runcard_validate(args: argparse.Namespace) -> int:
         "run_card": validation["run_card"],
         "findings": findings,
         "artifact_status": validation["artifact_status"],
+        "promotion_explanation": validation["promotion_explanation"],
     }
     _emit(payload, as_json=args.json)
     return 0 if payload["ok"] else 2
@@ -2048,7 +2058,14 @@ def cmd_training_runcard_attach_evidence(args: argparse.Namespace) -> int:
     validation = (
         validate_run_card_file(written["path"], promotion=True)
         if args.promotion
-        else {"findings": card.validation_findings(), "artifact_status": []}
+        else {
+            "findings": card.validation_findings(),
+            "artifact_status": [],
+            "promotion_explanation": explain_run_card_promotion(
+                card,
+                card.validation_findings(),
+            ),
+        }
     )
     findings = validation["findings"]
     payload = {
@@ -2058,6 +2075,7 @@ def cmd_training_runcard_attach_evidence(args: argparse.Namespace) -> int:
         **written,
         "findings": findings,
         "artifact_status": validation["artifact_status"],
+        "promotion_explanation": validation["promotion_explanation"],
     }
     return _emit(payload, as_json=args.json)
 

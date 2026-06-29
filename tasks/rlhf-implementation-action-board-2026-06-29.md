@@ -70,12 +70,13 @@ Already in place:
 - Training UI now lists local RunCards, validates selected cards for promotion,
   and surfaces claim-tier blockers, warnings, diagnostics, and artifact
   presence in-product.
+- RunCard validation now includes a compact promotion explanation with failed
+  gates and next actions, reused by CLI/API/UI.
 
 Actionable next items:
 
 - Choose numeric/default thresholds for local smoke, narrow routing, and broad
   public claim.
-- Add a compact "why this run cannot be promoted" explanation per failed gate.
 
 Definition of done:
 

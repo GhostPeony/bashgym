@@ -700,6 +700,135 @@ def _validate_reward_eval(
     return findings
 
 
+def _promotion_gate_for_finding(finding: dict[str, str]) -> str:
+    code = finding.get("code", "")
+    field = finding.get("field", "")
+    if code.startswith("preference_pairs_") or field == "preference_pairs_path":
+        return "DPO preference-pair evidence"
+    if code.startswith("reward_examples_") or field == "reward_examples_path":
+        return "reward-example evidence"
+    if code.startswith("reward_eval_") or field == "reward_eval_path":
+        return "reward-model eval evidence"
+    if code.startswith("source_manifest_") or field == "source_manifest_path":
+        return "source policy evidence"
+    if code.startswith("release_evidence_") or code.startswith("release_gate_"):
+        return "release evidence"
+    if code.startswith("claim_tier_") or field == "claim_tier":
+        return "claim-tier evidence"
+    if code.startswith("world_model_quality_"):
+        return "world-model diagnostics"
+    if "metrics" in code or field == "metrics_path":
+        return "metrics evidence"
+    if "training_plan" in code or field == "training_plan_path":
+        return "training plan evidence"
+    if "artifact" in code or "file" in code:
+        return "artifact files"
+    return "run-card metadata"
+
+
+def _promotion_next_action(gate: str) -> str:
+    actions = {
+        "DPO preference-pair evidence": (
+            "Attach strict DPO preference pairs with prompt hashes, chosen/rejected trace ids, "
+            "quality scores, split, and decontamination metadata."
+        ),
+        "reward-example evidence": (
+            "Attach strict reward examples with reward scale, label source, split, "
+            "quality, and decontamination metadata."
+        ),
+        "reward-model eval evidence": (
+            "Attach a passing reward_eval.json with heldout accuracy or calibration metrics "
+            "and no eval-only leakage."
+        ),
+        "source policy evidence": (
+            "Attach a source_manifest.json whose use_verdict is ok, or record a valid "
+            "eval-only override reason when policy permits it."
+        ),
+        "release evidence": (
+            "Run heldout/release gates and attach release_evidence.json with ship=true."
+        ),
+        "claim-tier evidence": (
+            "Attach the behavior evidence required by the selected claim tier, or lower "
+            "the claim tier to match the evidence that exists."
+        ),
+        "world-model diagnostics": (
+            "Treat ECHO/RWML quality as diagnostic until it is correlated with behavior gates."
+        ),
+        "metrics evidence": "Attach a non-empty metrics artifact from the completed training run.",
+        "training plan evidence": "Attach the training plan used for the run.",
+        "artifact files": "Fix missing or unreadable artifact paths in the RunCard.",
+        "run-card metadata": "Fix required RunCard metadata before promotion review.",
+    }
+    return actions.get(gate, "Resolve the listed findings before promotion review.")
+
+
+def explain_run_card_promotion(
+    card: RunCard,
+    findings: list[dict[str, str]],
+) -> dict[str, Any]:
+    """Summarize why a RunCard can or cannot be promoted."""
+
+    blockers = [finding for finding in findings if finding.get("level") == "fail"]
+    warnings = [finding for finding in findings if finding.get("level") == "warn"]
+    diagnostics = [finding for finding in findings if finding.get("level") == "diagnostic"]
+    gates: dict[str, dict[str, Any]] = {}
+    for finding in blockers:
+        gate = _promotion_gate_for_finding(finding)
+        item = gates.setdefault(
+            gate,
+            {
+                "gate": gate,
+                "blocker_count": 0,
+                "codes": [],
+                "summary": "",
+                "next_action": _promotion_next_action(gate),
+            },
+        )
+        item["blocker_count"] += 1
+        code = finding.get("code", "unknown_finding")
+        if code not in item["codes"]:
+            item["codes"].append(code)
+
+    failed_gates = sorted(
+        gates.values(),
+        key=lambda item: (-int(item["blocker_count"]), str(item["gate"])),
+    )
+    for gate in failed_gates:
+        codes = ", ".join(str(code) for code in gate["codes"][:4])
+        extra = "" if len(gate["codes"]) <= 4 else f" and {len(gate['codes']) - 4} more"
+        gate["summary"] = f"{gate['gate']} has {gate['blocker_count']} blocker(s): {codes}{extra}."
+
+    next_actions = [str(gate["next_action"]) for gate in failed_gates[:5]]
+    if not blockers and warnings:
+        next_actions.append("Review warnings before making a stronger public claim.")
+    if not blockers and diagnostics:
+        next_actions.append("Keep diagnostic evidence separate from promotion blockers.")
+
+    if blockers:
+        headline = (
+            f"{card.run_id} is not promotable for {card.claim_tier}: "
+            f"{len(blockers)} blocker(s) across {len(failed_gates)} gate(s)."
+        )
+    elif warnings:
+        headline = (
+            f"{card.run_id} clears promotion blockers for {card.claim_tier}, "
+            f"with {len(warnings)} warning(s) to review."
+        )
+    else:
+        headline = f"{card.run_id} clears promotion blockers for {card.claim_tier}."
+
+    return {
+        "schema_version": "bashgym.run_card_promotion_explanation.v1",
+        "ok": not blockers,
+        "headline": headline,
+        "blocker_count": len(blockers),
+        "warning_count": len(warnings),
+        "diagnostic_count": len(diagnostics),
+        "failed_gates": failed_gates,
+        "next_actions": next_actions,
+    }
+
+
 def validate_run_card_file(
     path: str | Path,
     *,
@@ -817,5 +946,6 @@ def validate_run_card_file(
         "run_card": card.to_dict(),
         "findings": findings,
         "artifact_status": artifact_status,
+        "promotion_explanation": explain_run_card_promotion(card, findings),
         "ok": not any(finding["level"] == "fail" for finding in findings),
     }

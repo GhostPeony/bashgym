@@ -123,6 +123,9 @@ class TestRunCardEvidence:
         assert validated.status_code == 200
         payload = validated.json()
         assert payload["ok"] is False
+        assert payload["promotion_explanation"]["ok"] is False
+        assert "run-ui is not promotable" in payload["promotion_explanation"]["headline"]
+        assert payload["promotion_explanation"]["next_actions"]
         codes = {finding["code"] for finding in payload["findings"]}
         assert "missing_metrics_path" in codes
         assert "missing_release_evidence_path" in codes

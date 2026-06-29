@@ -495,6 +495,25 @@ export interface RunCardArtifactStatus {
   present: boolean
 }
 
+export interface RunCardFailedGate {
+  gate: string
+  blocker_count: number
+  codes: string[]
+  summary: string
+  next_action: string
+}
+
+export interface RunCardPromotionExplanation {
+  schema_version: string
+  ok: boolean
+  headline: string
+  blocker_count: number
+  warning_count: number
+  diagnostic_count: number
+  failed_gates: RunCardFailedGate[]
+  next_actions: string[]
+}
+
 export interface RunCardValidationResponse {
   schema_version: string
   path: string
@@ -509,6 +528,7 @@ export interface RunCardValidationResponse {
   }
   findings: RunCardFinding[]
   artifact_status: RunCardArtifactStatus[]
+  promotion_explanation: RunCardPromotionExplanation
 }
 
 export interface RunMetricPoint {

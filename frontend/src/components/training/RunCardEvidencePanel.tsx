@@ -98,6 +98,8 @@ export function RunCardEvidencePanel() {
   const warningCount = counts.warn ?? 0
   const diagnosticCount = counts.diagnostic ?? 0
   const recentCards = cardsState.status === 'ready' ? cardsState.cards : []
+  const explanation =
+    validationState.status === 'ready' ? validationState.validation.promotion_explanation : null
 
   return (
     <div className="card p-4">
@@ -209,6 +211,51 @@ export function RunCardEvidencePanel() {
               {diagnosticCount > 0 ? <span className="text-accent-dark">{diagnosticCount} diag</span> : null}
             </div>
           </div>
+
+          {explanation !== null ? (
+            <div
+              className={clsx(
+                'mt-4 border-2 p-3',
+                explanation.ok
+                  ? 'border-status-success bg-status-success/10'
+                  : 'border-status-error bg-status-error/10'
+              )}
+            >
+              <p
+                className={clsx(
+                  'font-mono text-xs',
+                  explanation.ok ? 'text-status-success' : 'text-status-error'
+                )}
+              >
+                {explanation.headline}
+              </p>
+              {explanation.failed_gates.length > 0 ? (
+                <div className="mt-3 space-y-2">
+                  {explanation.failed_gates.slice(0, 4).map((gate) => (
+                    <div key={gate.gate} className="text-sm text-text-secondary">
+                      <p className="font-mono text-[11px] uppercase text-text-primary">
+                        {gate.gate}
+                      </p>
+                      <p>{gate.summary}</p>
+                      <p className="text-xs text-text-muted mt-1">{gate.next_action}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {explanation.next_actions.length > 0 ? (
+                <div className="mt-3 border-t-2 border-border pt-3">
+                  <p className="font-mono text-[11px] uppercase tracking-[0.15em] text-text-muted mb-2">
+                    Next actions
+                  </p>
+                  <ul className="space-y-1 text-sm text-text-secondary">
+                    {explanation.next_actions.slice(0, 5).map((action) => (
+                      <li key={action}>{action}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
 
           {findings.length > 0 ? (
             <ul className="mt-4 space-y-2">

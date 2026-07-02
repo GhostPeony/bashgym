@@ -1,7 +1,7 @@
 """
 Remote training execution via SSH.
 
-Uploads training scripts and datasets to a remote machine (e.g. DGX Spark),
+Uploads training scripts and datasets to a private compute target,
 executes training over SSH, streams logs back in real-time, and downloads
 model artifacts on completion.
 """
@@ -35,7 +35,7 @@ def _mib_to_gb(value: str) -> float | None:
 def parse_nvidia_smi_gpus(stdout: str) -> list[dict[str, Any]]:
     """Parse `nvidia-smi --query-gpu=name,memory.total,memory.free` CSV rows.
 
-    Unified-memory devices (e.g. GB10/DGX Spark) report VRAM as `[N/A]`; those
+    Unified-memory devices can report VRAM as `[N/A]`; those
     become `None` so the caller can fall back to system RAM as the budget.
     """
     gpus: list[dict[str, Any]] = []
@@ -182,7 +182,7 @@ class RemoteTrainer:
         """Verify the remote machine is ready for training.
 
         ``require_unsloth`` defaults to True for the Unsloth backend. Set it False
-        for plain-transformers backends (e.g. sm_121/GB10 like ponyo, where Unsloth
+        for plain-transformers backends on newer compute architectures where Unsloth
         cannot load) so a missing Unsloth is reported as a warning, not a failure.
         """
         try:
@@ -432,6 +432,7 @@ class RemoteTrainer:
         log_callback: Callable[[str], None] | None = None,
         pid_callback: Callable[[int], None] | None = None,
         script_name: str = "train_sft.py",
+        require_unsloth: bool = True,
     ) -> dict[str, Any]:
         """Full remote training orchestration.
 
@@ -446,13 +447,16 @@ class RemoteTrainer:
             log_callback: Optional callback invoked with each log line.
             pid_callback: Optional callback invoked with the remote PID once training starts.
             script_name: Name of the training script to execute on remote.
+            require_unsloth: Gate the run on a remote Unsloth install. Set False
+                for plain-transformers backends (e.g. Session Distillation) on
+                compute targets where Unsloth cannot load.
 
         Returns:
             Dict with 'success' bool plus 'remote_pid'/'run_id' on success
             or 'error' string on failure.
         """
         # Pre-flight
-        preflight = await self.preflight_check()
+        preflight = await self.preflight_check(require_unsloth=require_unsloth)
         if not preflight.ok:
             return {"success": False, "error": preflight.error}
 

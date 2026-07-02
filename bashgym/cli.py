@@ -114,10 +114,18 @@ DOCS = {
         "path": "docs/training/tmax-terminal-rl-recipe.md",
         "summary": "TMax-style terminal RL recipe from environment pool to release gate.",
     },
-    "gx10-checklist": {
-        "path": "docs/training/gx10-eval-checklist.md",
-        "summary": "GX10 backend-smoke and eval checklist for DPPO/ECHO/RWML handoff.",
+    "session-distillation": {
+        "path": "docs/training/session-distillation.md",
+        "summary": "Hint-injected self-distillation method, artifact contract, defaults, and feasibility sources.",
     },
+    "private-compute-checklist": {
+        "path": "docs/training/private-compute-eval-checklist.md",
+        "summary": "Private compute-target backend-smoke and eval checklist for DPPO/ECHO/RWML handoff.",
+    },
+}
+
+DOC_ALIASES = {
+    "gx10-checklist": "private-compute-checklist",
 }
 
 
@@ -271,6 +279,36 @@ SETTING_GUIDANCE: dict[str, dict[str, str]] = {
         "means": "Whether reward examples must include a heldout split before training claims are trusted.",
         "start_here": "Require it for reward-model, ORM, and PRM runs.",
         "adjust_when": "Do not disable it for anything beyond local fixture experiments.",
+    },
+    "session_distillation_alpha": {
+        "means": "Blend between hinted-context KL and hard-label CE on the same target action.",
+        "start_here": "Start at 0.7 so the hint guides the target while CE anchors the exact action.",
+        "adjust_when": "Lower it if hinted behavior overfits or ordinary action quality regresses.",
+    },
+    "session_distillation_temperature": {
+        "means": "Softness for the hinted-context distribution used in KL.",
+        "start_here": "Start at 1.0 until run-level calibration evidence exists.",
+        "adjust_when": "Increase cautiously for softer targets; lower if the objective gets too diffuse.",
+    },
+    "session_distillation_min_confidence": {
+        "means": "Reader-confidence floor for accepting a failed-span hint.",
+        "start_here": "Start at 0.6 to keep obvious local mistakes and skip weak guesses.",
+        "adjust_when": "Raise it when hints are noisy; lower only for audited fixture experiments.",
+    },
+    "session_distillation_mask_policy": {
+        "means": "Which tokens receive loss in the generated trainer script.",
+        "start_here": "Use target_span_only so unrelated transcript context is not updated.",
+        "adjust_when": "Do not widen until heldout behavior shows target-only masking is too narrow.",
+    },
+    "session_distillation_context_mode": {
+        "means": "How the corrective hint is inserted into the context.",
+        "start_here": "Use hint_injected to match the one-rollout self-distillation mechanism.",
+        "adjust_when": "Keep fixed until alternate context construction has explicit tests and evals.",
+    },
+    "session_distillation_reader": {
+        "means": "The reader that proposes local hints for failed spans.",
+        "start_here": "Use heuristic for deterministic, auditable first runs.",
+        "adjust_when": "Use model only as an audited reader after comparing hint quality on heldout traces.",
     },
 }
 
@@ -426,6 +464,48 @@ METRIC_GUIDANCE: dict[str, dict[str, str]] = {
         "watch_for": "Any leakage invalidates public benchmark or broad model-performance claims.",
         "action": "Block training export, rebuild the artifact, and preserve the manifest evidence.",
     },
+    "session_distillation_loss": {
+        "role": "session_distillation_health",
+        "means": "Combined masked hinted-context KL and hard-label CE.",
+        "watch_for": "Loss should move only with nonzero masked target tokens and cleaner heldout decisions.",
+        "action": "If it falls without behavior gain, inspect hints and rebuild records around clearer spans.",
+    },
+    "session_distillation_kl": {
+        "role": "session_distillation_health",
+        "means": "KL between original-context predictions and hinted-context predictions on the target span.",
+        "watch_for": "Large or unstable KL can mean noisy hints or too much alpha pressure.",
+        "action": "Audit hint quality, lower alpha, or raise min confidence.",
+    },
+    "session_distillation_ce": {
+        "role": "session_distillation_health",
+        "means": "Hard-label CE on the original target action tokens.",
+        "watch_for": "CE guards the exact action; rising CE can mean the KL target is pulling too hard.",
+        "action": "Lower alpha or filter records where the target action is not the desired repair.",
+    },
+    "session_distillation_masked_tokens": {
+        "role": "setup_check",
+        "means": "Number of target tokens that actually receive Session Distillation loss.",
+        "watch_for": "Zero masked tokens means the run is not training the intended span.",
+        "action": "Rebuild records so target_text and target_span align before trusting loss metrics.",
+    },
+    "reader_confidence": {
+        "role": "data_quality",
+        "means": "Confidence assigned by the heuristic or model reader to the proposed local hint.",
+        "watch_for": "Low confidence means the reader may be guessing instead of identifying a real recovery span.",
+        "action": "Raise the threshold, inspect hints, or require model-reader audit before training.",
+    },
+    "heldout_recovery_accuracy": {
+        "role": "behavior_evidence",
+        "means": "How often the trained model chooses the correct recovery action on heldout failed-span cases.",
+        "watch_for": "This should improve before treating Session Distillation loss as useful.",
+        "action": "If flat, rebuild records from clearer failure/recovery pairs or move broader failures to DPO/GRPO.",
+    },
+    "tool_call_validity": {
+        "role": "behavior_evidence",
+        "means": "Whether generated tool calls or shell commands remain syntactically and schema valid.",
+        "watch_for": "A repair objective should not break basic command/tool formatting.",
+        "action": "Block promotion and mix in clean SFT/format examples if validity regresses.",
+    },
 }
 
 
@@ -433,6 +513,11 @@ def _recipe(strategy: str, hardware: str, data: str) -> TrainingRecipe:
     strategy = strategy.lower().replace("_", "-")
     if strategy in {"rm", "preference-rm", "preference-reward-model", "orm", "prm"}:
         strategy = "reward-model"
+    if strategy in {"session", "session-distill", "session-distillation"}:
+        strategy = "session-distillation"
+    hardware = hardware.lower().replace("-", "_")
+    if hardware in {"dgx", "gx10", "remote", "remote_gpu"}:
+        hardware = "private_compute"
     base: dict[str, TrainingRecipe] = {
         "sft": TrainingRecipe(
             strategy="sft",
@@ -446,7 +531,7 @@ def _recipe(strategy: str, hardware: str, data: str) -> TrainingRecipe:
                 "use_lora": True,
                 "lora_rank": 16,
                 "lora_alpha": 32,
-                "load_in_4bit": hardware != "dgx",
+                "load_in_4bit": hardware != "private_compute",
             },
             watch=["train_loss", "eval_loss", "grad_norm", "truncation", "heldout_pass@k"],
             next_steps=[
@@ -464,7 +549,7 @@ def _recipe(strategy: str, hardware: str, data: str) -> TrainingRecipe:
                 "epochs": 1,
                 "max_seq_length": 4096 if hardware != "local_12gb" else 2048,
                 "use_lora": True,
-                "load_in_4bit": hardware != "dgx",
+                "load_in_4bit": hardware != "private_compute",
             },
             watch=[
                 "rewards/chosen",
@@ -484,7 +569,7 @@ def _recipe(strategy: str, hardware: str, data: str) -> TrainingRecipe:
             when_to_use="Verifier-backed RL when sampled attempts sometimes pass and sometimes fail.",
             starting_settings={
                 "training_profile": "terminal_rl_tmax_like",
-                "grpo_group_size": 32 if hardware in {"dgx", "cloud"} else 8,
+                "grpo_group_size": 32 if hardware in {"private_compute", "cloud"} else 8,
                 "grpo_loss_type": "dapo",
                 "filter_zero_std_groups": True,
                 "active_sampling": True,
@@ -555,7 +640,7 @@ def _recipe(strategy: str, hardware: str, data: str) -> TrainingRecipe:
                 "gradient_accumulation_steps": 8,
                 "max_seq_length": 4096 if hardware != "local_12gb" else 2048,
                 "use_lora": True,
-                "load_in_4bit": hardware != "dgx",
+                "load_in_4bit": hardware != "private_compute",
                 "eval_split_required": True,
             },
             watch=[
@@ -573,6 +658,47 @@ def _recipe(strategy: str, hardware: str, data: str) -> TrainingRecipe:
                 "Use the reward model first for audits, best-of-N, or rejection sampling with matched controls.",
             ],
             docs=["methods-reference", "metrics", "strategy", "rlhf-handbook-comparison"],
+        ),
+        "session-distillation": TrainingRecipe(
+            strategy="session-distillation",
+            when_to_use=(
+                "Failed trace spans contain local mistakes, retries, or recovery pivots "
+                "that should be repaired without rewriting the full trajectory."
+            ),
+            starting_settings={
+                "artifact": "session_distillation_records.jsonl",
+                "session_distillation_alpha": 0.7,
+                "session_distillation_temperature": 1.0,
+                "session_distillation_min_confidence": 0.6,
+                "session_distillation_mask_policy": "target_span_only",
+                "session_distillation_context_mode": "hint_injected",
+                "session_distillation_reader": "heuristic",
+                "max_seq_length": 4096 if hardware != "local_12gb" else 2048,
+                "batch_size": 1,
+                "gradient_accumulation_steps": 8,
+                "use_lora": True,
+                "load_in_4bit": hardware != "private_compute",
+            },
+            watch=[
+                "session_distillation_loss",
+                "session_distillation_kl",
+                "session_distillation_ce",
+                "session_distillation_masked_tokens",
+                "reader_confidence",
+                "heldout_recovery_accuracy",
+                "tool_call_validity",
+            ],
+            next_steps=[
+                "Build and validate session_distillation_records.jsonl from failed or recovery-rich traces.",
+                "Inspect reader hints before training; noisy hints should be filtered or regenerated.",
+                "Compare heldout recovery decisions against SFT and teacher-distillation baselines.",
+            ],
+            docs=[
+                "session-distillation",
+                "strategy",
+                "metrics",
+                "methods-reference",
+            ],
         ),
     }
     if strategy in {"rlvr", "dppo"}:
@@ -655,6 +781,24 @@ def _readiness_ladder(recipe: TrainingRecipe) -> list[dict[str, str]]:
                 "promote_when": "Quality improves on heldout transitions and correlates with pass@k or fewer failures.",
             },
         ]
+    if recipe.strategy == "session-distillation":
+        return [
+            {
+                "stage": "record_contract",
+                "evidence": "session_distillation_records.jsonl validates with original/hinted contexts, target text, target_span_only mask, verifier outcome, and provenance.",
+                "promote_when": "Reader hints are inspectable, confidence-filtered, and tied to real failed/recovery spans.",
+            },
+            {
+                "stage": "masked_loss_smoke",
+                "evidence": "A short run writes session_distillation_loss, KL, CE, and masked-token metrics.",
+                "promote_when": "Masked loss moves without zero masked tokens, loader errors, or hint leakage into original contexts.",
+            },
+            {
+                "stage": "behavior_gate",
+                "evidence": "Heldout recovery-decision checks and executable task behavior compare against SFT or teacher-distillation baselines.",
+                "promote_when": "Recovery decisions improve without tool-format, timeout, verifier, or pass@k regression.",
+            },
+        ]
     return [
         {
             "stage": "rollout_contrast",
@@ -668,7 +812,7 @@ def _readiness_ladder(recipe: TrainingRecipe) -> list[dict[str, str]]:
         },
         {
             "stage": "backend_smoke",
-            "evidence": "training smoke-bundle writes readiness artifacts and a one-step backend run starts on GX10/backend.",
+            "evidence": "training smoke-bundle writes readiness artifacts and a one-step backend run starts on a private compute target/backend.",
             "promote_when": "contract_ready=true, optimizer_ready=true for DPPO, and backend logs metrics/output.",
         },
         {
@@ -738,6 +882,21 @@ def _adjustment_rules(recipe: TrainingRecipe) -> list[dict[str, str]]:
                 "action": "Tighten the distance threshold or mine high-error transitions for curriculum data.",
             },
         ]
+    if recipe.strategy == "session-distillation":
+        return rules + [
+            {
+                "signal": "masked tokens are zero or missing",
+                "action": "Rebuild records so target_text and target_span point to the exact command/tool tokens being trained.",
+            },
+            {
+                "signal": "reader confidence is low or hints are noisy",
+                "action": "Raise min confidence, inspect failed spans, or switch to a model-reader audit before training.",
+            },
+            {
+                "signal": "masked loss improves but heldout recovery decisions are flat",
+                "action": "Use clearer failure/recovery spans or move broader mistakes to DPO/GRPO instead of increasing alpha.",
+            },
+        ]
     return rules + [
         {
             "signal": "reward_std is zero or frac_reward_zero_std is near 1.0",
@@ -745,7 +904,7 @@ def _adjustment_rules(recipe: TrainingRecipe) -> list[dict[str, str]]:
         },
         {
             "signal": "smoke bundle has contract_ready=false",
-            "action": "Fix replay/logprob/world-model coverage locally before spending GX10 time.",
+            "action": "Fix replay/logprob/world-model coverage locally before spending private compute time.",
         },
     ]
 
@@ -762,13 +921,25 @@ def _metric_catalog() -> list[dict[str, Any]]:
                 "optimizer_ready",
                 "world_model_records",
             ],
-            "decision": "Fix before training or before spending GX10/backend time.",
+            "decision": "Fix before training or before spending private compute/backend time.",
         },
         {
             "id": "optimization_health",
             "role": "training_health",
             "metrics": ["train_loss", "eval_loss", "grad_norm", "learning_rate", "kl", "entropy"],
             "decision": "Tune LR, warmup, epochs, sequence length, and loss weights.",
+        },
+        {
+            "id": "session_distillation_health",
+            "role": "training_health",
+            "metrics": [
+                "session_distillation_loss",
+                "session_distillation_kl",
+                "session_distillation_ce",
+                "session_distillation_masked_tokens",
+                "reader_confidence",
+            ],
+            "decision": "Trust only when masked loss aligns with heldout recovery decisions and tool validity.",
         },
         {
             "id": "preference_health",
@@ -852,7 +1023,7 @@ def _metric_catalog() -> list[dict[str, Any]]:
                 "oom_count",
                 "backend_import_status",
             ],
-            "decision": "Use to size batch, sequence length, backend choice, and GX10 readiness.",
+            "decision": "Use to size batch, sequence length, backend choice, and compute-target readiness.",
         },
     ]
 
@@ -925,14 +1096,19 @@ def _education_path() -> list[dict[str, str]]:
             "goal": "Follow the environment-to-replay-to-backend sequence without skipping eval gates.",
         },
         {
+            "id": "session_distillation",
+            "read": "docs/training/session-distillation.md",
+            "goal": "Understand one-rollout hint insertion, target-span masking, and when to use the method.",
+        },
+        {
             "id": "world_models",
             "read": "docs/training/world-models.md",
             "goal": "Use ECHO/RWML as diagnostics until correlated with heldout pass@k and safety.",
         },
         {
-            "id": "gx10_finalization",
-            "read": "docs/training/gx10-eval-checklist.md",
-            "goal": "Run GX10 evals/backend smokes only after local smoke artifacts are complete.",
+            "id": "private_compute_finalization",
+            "read": "docs/training/private-compute-eval-checklist.md",
+            "goal": "Run private compute evals/backend smokes only after local smoke artifacts are complete.",
         },
     ]
 
@@ -954,7 +1130,7 @@ def _capability_matrix() -> dict[str, Any]:
             },
             {
                 "stage": "build_data",
-                "can_do": "Convert traces, custom JSONL, decision pairs, security data, and terminal environments into artifacts.",
+                "can_do": "Convert traces, custom JSONL, decision pairs, failed-span Session Distillation records, security data, and terminal environments into artifacts.",
                 "surfaces": ["Trace import", "Data Designer", "Decision DPO", "Environment Lab"],
                 "evidence": [
                     "dataset manifests",
@@ -965,7 +1141,7 @@ def _capability_matrix() -> dict[str, Any]:
             },
             {
                 "stage": "train",
-                "can_do": "Run or plan SFT, DPO, GRPO/RLVR, distillation, cascade RL, DPPO, and ECHO/RWML objectives.",
+                "can_do": "Run or plan SFT, DPO, GRPO/RLVR, distillation, Session Distillation, cascade RL, DPPO, and ECHO/RWML objectives.",
                 "surfaces": [
                     "Training Config",
                     "Training Dashboard",
@@ -1020,7 +1196,7 @@ def _capability_matrix() -> dict[str, Any]:
                 "best_for": [
                     "new-session handoff",
                     "agent automation",
-                    "GX10 artifact preparation",
+                    "compute-target artifact preparation",
                     "post-run diagnosis",
                 ],
             },
@@ -1076,7 +1252,7 @@ def _capability_matrix() -> dict[str, Any]:
             },
             {
                 "id": "device_and_hardware_api",
-                "role": "Discover, register, preflight, and select remote SSH/GX10 devices before large runs.",
+                "role": "Discover, register, preflight, and select private compute targets before large runs.",
                 "endpoints": [
                     "GET /api/devices",
                     "POST /api/devices",
@@ -1089,7 +1265,11 @@ def _capability_matrix() -> dict[str, Any]:
                     "GET /api/system/recommendations",
                     "GET /api/models/discover",
                 ],
-                "best_for": ["GX10 readiness", "remote SSH training", "model fit checks"],
+                "best_for": [
+                    "compute-target readiness",
+                    "private compute training",
+                    "model fit checks",
+                ],
             },
             {
                 "id": "ui_surfaces",
@@ -1103,7 +1283,7 @@ def _capability_matrix() -> dict[str, Any]:
                     "Evaluator -> Held-out Gate",
                     "Evaluator -> External benchmark ingest",
                     "Models -> profile, leaderboard, comparison, trends",
-                    "Settings/Devices for remote SSH and model providers",
+                    "Settings/Devices for private compute targets and model providers",
                 ],
                 "best_for": [
                     "operator education",
@@ -1164,6 +1344,13 @@ def _capability_matrix() -> dict[str, Any]:
                 ],
                 "best_for": ["coverage expansion", "schema evolution", "environment generation"],
                 "quality_gate": "Keep seed/source manifest, validator status, and decontamination metadata.",
+            },
+            {
+                "id": "session_distillation_records",
+                "status": "ready_with_evidence",
+                "produces": ["hint-injected contexts", "target spans", "masked loss records"],
+                "best_for": ["local failed-action repair", "recovery pivots", "retry-loop cleanup"],
+                "quality_gate": "Original context must stay hint-free, hinted context must contain the hint tag, and target_span_only masks must align to target_text.",
             },
             {
                 "id": "terminal_environments",
@@ -1235,6 +1422,26 @@ def _capability_matrix() -> dict[str, Any]:
                 ],
             },
             {
+                "id": "session_distillation_records_jsonl",
+                "owner_stage": "build_data",
+                "used_by": [
+                    "Session Distillation",
+                    "Data Designer reader audit",
+                    "RunCard promotion evidence",
+                ],
+                "must_preserve": [
+                    "original_context",
+                    "hinted_context",
+                    "hint_text",
+                    "target_text",
+                    "target_span",
+                    "loss_mask",
+                    "reader_confidence",
+                    "verifier_outcome",
+                    "source_metadata",
+                ],
+            },
+            {
                 "id": "environment_spec",
                 "owner_stage": "build_data",
                 "used_by": ["environment rollouts", "pass@k", "holdout gates", "terminal RL"],
@@ -1274,7 +1481,11 @@ def _capability_matrix() -> dict[str, Any]:
             {
                 "id": "backend_smoke_bundle",
                 "owner_stage": "prepare_backend_smoke",
-                "used_by": ["GX10 preflight", "installed-backend smoke", "training analyze"],
+                "used_by": [
+                    "compute-target preflight",
+                    "installed-backend smoke",
+                    "training analyze",
+                ],
                 "must_preserve": [
                     "backend_smoke_readiness.json",
                     "dppo_replay_summary.json",
@@ -1306,7 +1517,7 @@ def _capability_matrix() -> dict[str, Any]:
                 ],
                 "best_fit": [
                     "small local specialists",
-                    "larger DGX runs",
+                    "larger GPU runs",
                     "MoE targets when hardware allows",
                 ],
             },
@@ -1369,7 +1580,7 @@ def _capability_matrix() -> dict[str, Any]:
                 "watch": ["eval loss", "adapter overfit", "checkpoint size"],
             },
             {
-                "id": "dgx_spark_gx10",
+                "id": "private_compute_target",
                 "best_for": [
                     "larger dense/MoE targets",
                     "full or longer-context fine-tunes",
@@ -1507,11 +1718,36 @@ def _capability_matrix() -> dict[str, Any]:
                 "plan_command": "bashgym training docs --topic strategy --json",
             },
             {
+                "id": "session_distillation",
+                "name": "Session Distillation",
+                "status": "ready_with_evidence",
+                "use_when": "Failed trace spans show local mistakes that can be repaired with a short hint without replacing the trajectory.",
+                "knobs": [
+                    "session_distillation_alpha",
+                    "session_distillation_temperature",
+                    "session_distillation_min_confidence",
+                    "target_span_only mask",
+                    "reader",
+                ],
+                "evidence": [
+                    "valid session_distillation_records.jsonl",
+                    "masked KL/CE metrics",
+                    "heldout recovery-decision accuracy",
+                    "tool-call validity",
+                ],
+                "plan_command": "bashgym training plan --strategy session-distillation --json",
+            },
+            {
                 "id": "cascade_rl",
                 "name": "Cascade RL",
                 "status": "ready_with_evidence",
                 "use_when": "You need staged domain learning and final generalist behavior.",
-                "knobs": ["domain stages", "stage steps", "remote SSH", "MOPD settings"],
+                "knobs": [
+                    "domain stages",
+                    "stage steps",
+                    "private compute target",
+                    "MOPD settings",
+                ],
                 "evidence": ["per-domain holdouts", "stage forgetting", "final generalist holdout"],
                 "plan_command": "bashgym training docs --topic capabilities --json",
             },
@@ -1711,6 +1947,7 @@ def _capability_matrix() -> dict[str, Any]:
             "base-vs-candidate comparison passes when available",
             "spurious-reward controls and tamper canaries stay clear",
             "reward-model runs attach strict reward examples plus heldout accuracy, calibration, and bias checks",
+            "Session Distillation runs attach valid records, masked-loss metrics, and heldout recovery behavior",
             "external benchmark evidence is attached for broad claims",
             "DPPO/ECHO/RWML runs preserve smoke readiness and backend logs",
             "world-model quality remains diagnostic until correlated with pass@k and safety",
@@ -1807,7 +2044,7 @@ def cmd_manifest(args: argparse.Namespace) -> int:
             "sources recommend": "Recommend sources for a domain and training/eval goal.",
             "sources fetch": "Fetch Hugging Face-backed source records into local JSONL.",
             "sources prepare": "Write a source manifest or convert local/fetched records into artifacts.",
-            "compute targets": "List local, SSH/GX10, and cloud GPU dry-run targets.",
+            "compute targets": "List local, private, and cloud GPU dry-run targets.",
             "compute preflight": "Run non-invasive compute target readiness checks.",
             "compute launch": "Generate a dry-run provider launch plan.",
             "replay summarize": "Summarize DPPO replay JSONL, including world-model coverage.",
@@ -1859,15 +2096,18 @@ def cmd_training_capabilities(args: argparse.Namespace) -> int:
 
 def cmd_training_docs(args: argparse.Namespace) -> int:
     if args.topic:
-        if args.topic not in DOCS:
-            raise SystemExit(f"unknown topic {args.topic!r}; choose {', '.join(DOCS)}")
-        meta = DOCS[args.topic]
+        topic = DOC_ALIASES.get(args.topic, args.topic)
+        if topic not in DOCS:
+            choices = sorted([*DOCS, *DOC_ALIASES])
+            raise SystemExit(f"unknown topic {args.topic!r}; choose {', '.join(choices)}")
+        meta = DOCS[topic]
         path = REPO_ROOT / meta["path"]
         text = path.read_text(encoding="utf-8") if path.exists() else ""
         payload = {
-            "title": f"BashGym Training Docs: {args.topic}",
+            "title": f"BashGym Training Docs: {topic}",
             "ok": path.exists(),
-            "topic": args.topic,
+            "topic": topic,
+            "requested_topic": args.topic,
             "path": str(path),
             "summary": meta["summary"],
             "content": text if args.include_content or args.json else "",
@@ -1978,6 +2218,38 @@ def cmd_training_smoke_bundle(args: argparse.Namespace) -> int:
     return _emit(payload, as_json=args.json)
 
 
+def cmd_training_session_records_build(args: argparse.Namespace) -> int:
+    from bashgym.factory.session_distillation import (
+        build_session_distillation_records_from_traces,
+        save_session_distillation_records,
+        validate_session_distillation_records,
+    )
+
+    records = build_session_distillation_records_from_traces(
+        args.traces_dir,
+        min_confidence=args.min_confidence,
+        source_split=args.split or "",
+        limit=args.limit,
+    )
+    payloads = [record.to_dict() for record in records]
+    validation_errors = validate_session_distillation_records(payloads)
+
+    written = None
+    if records and not validation_errors:
+        written = str(save_session_distillation_records(records, args.out))
+
+    payload = {
+        "title": "BashGym Session Distillation Records",
+        "ok": bool(records) and not validation_errors,
+        "traces_dir": str(args.traces_dir),
+        "record_count": len(records),
+        "output_path": written,
+        "min_confidence": args.min_confidence,
+        "validation_errors": validation_errors,
+    }
+    return _emit(payload, as_json=args.json)
+
+
 def cmd_training_runcard_create(args: argparse.Namespace) -> int:
     card = create_run_card(
         run_id=args.run_id,
@@ -1994,6 +2266,13 @@ def cmd_training_runcard_create(args: argparse.Namespace) -> int:
         metrics_path=args.metrics,
         release_evidence_path=args.release_evidence,
         smoke_bundle_path=args.smoke_bundle,
+        session_distillation_records_path=args.session_distillation_records,
+        session_distillation_metrics_path=args.session_distillation_metrics,
+        session_distillation_reader_model=args.reader_model,
+        session_distillation_confidence_threshold=args.confidence_threshold,
+        session_distillation_hint_policy=args.hint_policy,
+        session_distillation_mask_policy=args.mask_policy,
+        session_distillation_target_token_count=args.target_token_count,
         claim_tier=args.claim_tier,
         thresholds=parse_thresholds(args.threshold),
         outputs=args.output_artifact or [],
@@ -2053,6 +2332,8 @@ def cmd_training_runcard_attach_evidence(args: argparse.Namespace) -> int:
         reward_examples_path=args.reward_examples,
         reward_eval_path=args.reward_eval,
         smoke_bundle_path=args.smoke_bundle,
+        session_distillation_records_path=args.session_distillation_records,
+        session_distillation_metrics_path=args.session_distillation_metrics,
         claim_tier=args.claim_tier,
         output_path=args.output,
     )
@@ -2178,7 +2459,7 @@ def cmd_compute_targets(args: argparse.Namespace) -> int:
         "next": [
             {
                 "reason": "Run a non-invasive preflight before launching.",
-                "command": "bashgym compute preflight --target gx10_ssh --json",
+                "command": "bashgym compute preflight --target private_gpu --json",
             }
         ],
     }
@@ -2516,7 +2797,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="List or read training docs",
         parents=[json_parent],
     )
-    docs.add_argument("--topic", choices=sorted(DOCS), help="Doc topic to read")
+    docs.add_argument("--topic", choices=sorted([*DOCS, *DOC_ALIASES]), help="Doc topic to read")
     docs.add_argument(
         "--include-content",
         action="store_true",
@@ -2552,12 +2833,25 @@ def build_parser() -> argparse.ArgumentParser:
             "orm",
             "prm",
             "world-model",
+            "session",
+            "session-distill",
+            "session-distillation",
         ],
     )
     plan.add_argument(
         "--hardware",
         default="local_12gb",
-        choices=["local_12gb", "local_24gb", "dgx", "cloud"],
+        choices=[
+            "local_12gb",
+            "local_24gb",
+            "private_compute",
+            "private-compute",
+            "remote",
+            "remote_gpu",
+            "dgx",
+            "gx10",
+            "cloud",
+        ],
     )
     plan.add_argument(
         "--data",
@@ -2638,6 +2932,13 @@ def build_parser() -> argparse.ArgumentParser:
     runcard_create.add_argument("--metrics")
     runcard_create.add_argument("--release-evidence")
     runcard_create.add_argument("--smoke-bundle")
+    runcard_create.add_argument("--session-distillation-records")
+    runcard_create.add_argument("--session-distillation-metrics")
+    runcard_create.add_argument("--reader-model")
+    runcard_create.add_argument("--confidence-threshold", type=float)
+    runcard_create.add_argument("--hint-policy")
+    runcard_create.add_argument("--mask-policy")
+    runcard_create.add_argument("--target-token-count", type=int)
     runcard_create.add_argument(
         "--claim-tier",
         default="local_smoke",
@@ -2678,6 +2979,8 @@ def build_parser() -> argparse.ArgumentParser:
     runcard_attach.add_argument("--reward-examples")
     runcard_attach.add_argument("--reward-eval")
     runcard_attach.add_argument("--smoke-bundle")
+    runcard_attach.add_argument("--session-distillation-records")
+    runcard_attach.add_argument("--session-distillation-metrics")
     runcard_attach.add_argument(
         "--claim-tier",
         choices=["local_smoke", "narrow_routing", "broad_public_claim"],
@@ -2685,6 +2988,45 @@ def build_parser() -> argparse.ArgumentParser:
     runcard_attach.add_argument("--output")
     runcard_attach.add_argument("--promotion", action="store_true")
     runcard_attach.set_defaults(func=cmd_training_runcard_attach_evidence)
+
+    session_records = training_sub.add_parser(
+        "session-records",
+        help="Build Session Distillation records from trace files",
+        parents=[json_parent],
+    )
+    session_records_sub = session_records.add_subparsers(
+        dest="session_records_command",
+        required=True,
+    )
+    session_records_build = session_records_sub.add_parser(
+        "build",
+        help="Build session_distillation_records.jsonl from a traces directory",
+        parents=[json_parent],
+    )
+    session_records_build.add_argument("traces_dir")
+    session_records_build.add_argument(
+        "--out",
+        default="data/session_distillation/records.jsonl",
+        help="Output JSONL path (default: data/session_distillation/records.jsonl)",
+    )
+    session_records_build.add_argument(
+        "--min-confidence",
+        type=float,
+        default=0.6,
+        help="Drop reader hints below this confidence (default: 0.6)",
+    )
+    session_records_build.add_argument(
+        "--split",
+        default="",
+        help="Record a split label in source_metadata (e.g. train/val/heldout)",
+    )
+    session_records_build.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Stop after this many records (useful for a small smoke set)",
+    )
+    session_records_build.set_defaults(func=cmd_training_session_records_build)
 
     dpo_pairs = training_sub.add_parser(
         "dpo-pairs",
@@ -2833,7 +3175,9 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[json_parent],
     )
     sources_fetch.add_argument("source_id")
-    sources_fetch.add_argument("--output-dir", required=True, help="Directory for source_records.jsonl")
+    sources_fetch.add_argument(
+        "--output-dir", required=True, help="Directory for source_records.jsonl"
+    )
     sources_fetch.add_argument("--split", default="train", help="Dataset split to fetch")
     sources_fetch.add_argument("--subset", help="Optional Hugging Face dataset config/subset")
     sources_fetch.add_argument("--revision", help="Optional Hugging Face dataset revision")
@@ -2902,7 +3246,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     compute = subparsers.add_parser(
         "compute",
-        help="Local, SSH/GX10, and cloud GPU dry-run target helpers",
+        help="Local, private, and cloud GPU dry-run target helpers",
         parents=[json_parent],
     )
     compute_sub = compute.add_subparsers(dest="compute_command", required=True)

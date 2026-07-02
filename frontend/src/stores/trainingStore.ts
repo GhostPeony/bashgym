@@ -1,7 +1,13 @@
 import { create } from 'zustand'
 import { trainingApi } from '../services/api'
 
-export type TrainingStrategy = 'sft' | 'dpo' | 'grpo' | 'distillation' | 'cascade'
+export type TrainingStrategy =
+  | 'sft'
+  | 'dpo'
+  | 'grpo'
+  | 'distillation'
+  | 'session_distillation'
+  | 'cascade'
 export type TrainingStatus = 'idle' | 'starting' | 'running' | 'paused' | 'completed' | 'failed'
 export type TrainingProfile = 'default' | 'terminal_rl_tmax_like'
 
@@ -15,6 +21,16 @@ export interface TrainingMetrics {
   eta?: string
   simulation?: boolean  // True when running in simulation mode (no GPU/trainer)
   timestamp: number
+  // Richer per-step metrics the trainer emits (forwarded from training:progress).
+  evalLoss?: number
+  samplesProcessed?: number
+  tokensPerSecond?: number
+  gpuMemoryGb?: number
+  gpuUtilization?: number
+  sessionDistillationLoss?: number
+  sessionDistillationKl?: number
+  sessionDistillationCe?: number
+  sessionDistillationMaskedTokens?: number
 }
 
 export type DataSource = 'traces' | 'dataset_path' | 'security_dataset'
@@ -70,6 +86,13 @@ export interface TrainingConfig {
   teacherModel?: string
   teacherTemperature?: number
   distillationAlpha?: number
+  // Session Distillation
+  sessionDistillationAlpha?: number
+  sessionDistillationTemperature?: number
+  sessionDistillationMinConfidence?: number
+  sessionDistillationMaskPolicy?: string
+  sessionDistillationContextMode?: string
+  sessionDistillationReader?: string
   // Repo selection
   selectedRepos?: string[]  // Repos to include in training (empty = all)
   // Training backend
@@ -140,7 +163,7 @@ interface TrainingState {
   runs: TrainingRun[]
 
   // Metrics streaming
-  lossHistory: Array<{ step: number; loss: number }>
+  lossHistory: Array<{ step: number; loss: number; evalLoss?: number }>
   isConnected: boolean
 
   // Training logs
@@ -310,6 +333,12 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
         teacher_model: config.teacherModel,
         teacher_temperature: config.teacherTemperature,
         distillation_alpha: config.distillationAlpha,
+        session_distillation_alpha: config.sessionDistillationAlpha,
+        session_distillation_temperature: config.sessionDistillationTemperature,
+        session_distillation_min_confidence: config.sessionDistillationMinConfidence,
+        session_distillation_mask_policy: config.sessionDistillationMaskPolicy,
+        session_distillation_context_mode: config.sessionDistillationContextMode,
+        session_distillation_reader: config.sessionDistillationReader,
         // Backend & repos
         selected_repos: config.selectedRepos,
         use_nemo_gym: config.useNemoGym,
@@ -416,7 +445,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
 
       const newLossHistory = [
         ...state.lossHistory,
-        { step: metrics.step, loss: metrics.loss }
+        { step: metrics.step, loss: metrics.loss, evalLoss: metrics.evalLoss }
       ].slice(-500) // Keep last 500 points
 
       return {

@@ -16,7 +16,7 @@ from pathlib import Path
 
 import torch
 
-MODEL_PATH = "/home/ponyo/.unsloth/studio/exports/unsloth_gemma-4-E4B-it_1775455644/checkpoint-153"
+MODEL_PATH = "/home/user/.unsloth/studio/exports/unsloth_gemma-4-E4B-it_1775455644/checkpoint-153"
 VAL_PATH = Path.home() / "bashgym-training" / "data-pipeline-fixed" / "val.jsonl"
 
 

@@ -1,11 +1,19 @@
 import json
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from bashgym.api.routes import app
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _allow_tmp_source_roots(tmp_path, monkeypatch):
+    # Source routes confine output_dir/input_path to allowed roots; opt each
+    # test's tmp_path in (as an operator with a custom data dir would).
+    monkeypatch.setenv("BASHGYM_SOURCE_ROOTS", str(tmp_path))
 
 
 def test_source_routes_list_and_inspect_catalog():

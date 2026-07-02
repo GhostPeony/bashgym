@@ -309,6 +309,23 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
+# Per-step metrics the trainer emits beyond the always-present core fields.
+# Forwarded to the WS payload and persisted to metrics.jsonl when present, so the
+# dashboard and run-analysis health gates see eval-loss, throughput, resource
+# use, and session-distillation series instead of them being dropped in transit.
+_OPTIONAL_PROGRESS_KEYS = (
+    "eval_loss",
+    "samples_processed",
+    "tokens_per_second",
+    "gpu_memory_gb",
+    "gpu_utilization",
+    "session_distillation_loss",
+    "session_distillation_kl",
+    "session_distillation_ce",
+    "session_distillation_masked_tokens",
+)
+
+
 class TrainingProgressCallback:
     """
     Callback for training progress that broadcasts via WebSocket.
@@ -335,20 +352,25 @@ class TrainingProgressCallback:
 
     async def on_progress(self, metrics: dict[str, Any]) -> None:
         """Called on each training step/epoch."""
-        message = WSMessage(
-            type=MessageType.TRAINING_PROGRESS,
-            payload={
-                "run_id": self.run_id,
-                "epoch": metrics.get("epoch"),
-                "total_epochs": metrics.get("total_epochs"),
-                "step": metrics.get("step", 0),
-                "total_steps": metrics.get("total_steps", 0),
-                "loss": metrics.get("loss"),
-                "learning_rate": metrics.get("learning_rate"),
-                "grad_norm": metrics.get("grad_norm", 0),
-                "eta": metrics.get("eta"),
-            },
-        )
+        payload = {
+            "run_id": self.run_id,
+            "epoch": metrics.get("epoch"),
+            "total_epochs": metrics.get("total_epochs"),
+            "step": metrics.get("step", 0),
+            "total_steps": metrics.get("total_steps", 0),
+            "loss": metrics.get("loss"),
+            "learning_rate": metrics.get("learning_rate"),
+            "grad_norm": metrics.get("grad_norm", 0),
+            "eta": metrics.get("eta"),
+        }
+        # Forward the richer per-step metrics the trainer emits (eval-loss,
+        # throughput, resource use, session-distillation) instead of dropping
+        # them here — only the ones actually present, to avoid null noise.
+        for key in _OPTIONAL_PROGRESS_KEYS:
+            if metrics.get(key) is not None:
+                payload[key] = metrics[key]
+
+        message = WSMessage(type=MessageType.TRAINING_PROGRESS, payload=payload)
         await manager.broadcast(message)
 
         step = metrics.get("step")
@@ -362,17 +384,18 @@ class TrainingProgressCallback:
             self._last_recorded_step = step
             from bashgym.gym.run_metrics import record_run_metric
 
-            record_run_metric(
-                self.output_dir,
-                {
-                    "step": step,
-                    "loss": loss,
-                    "epoch": metrics.get("epoch"),
-                    "learning_rate": metrics.get("learning_rate"),
-                    "grad_norm": metrics.get("grad_norm"),
-                    "eval_loss": metrics.get("eval_loss"),
-                },
-            )
+            point = {
+                "step": step,
+                "loss": loss,
+                "epoch": metrics.get("epoch"),
+                "learning_rate": metrics.get("learning_rate"),
+                "grad_norm": metrics.get("grad_norm"),
+                "eval_loss": metrics.get("eval_loss"),
+            }
+            for key in _OPTIONAL_PROGRESS_KEYS:
+                if metrics.get(key) is not None:
+                    point[key] = metrics[key]
+            record_run_metric(self.output_dir, point)
 
     def on_progress_sync(self, metrics: dict[str, Any]) -> None:
         """Synchronous version for non-async training loops."""

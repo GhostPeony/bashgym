@@ -283,7 +283,7 @@ BASHGYM_DPPO_TRL_RWML_REWARD_FACTORY
 BASHGYM_DPPO_VERL_RWML_REWARD_FACTORY
 ```
 
-Before moving this to GX10 or another GPU box, produce the local smoke bundle:
+Before moving this to a private or cloud GPU target, produce the local smoke bundle:
 
 ```bash
 bashgym training smoke-bundle \

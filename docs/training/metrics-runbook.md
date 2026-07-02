@@ -50,11 +50,11 @@ settings or promoting a model.
 | Behavior evidence | pass@1/pass@k, heldout trace score, holdout comparison, external benchmark scores. | Decide whether the candidate is better. |
 | Safety/release gates | Tamper status, spurious-reward controls, reward-hacking canaries, verifier-error patterns. | Block routing until cleared. |
 | Diagnostic context | ECHO/RWML quality, embedding-distance distribution, command-count change. | Explain behavior and mine curriculum; do not ship from these alone. |
-| Operational health | Tokens/sec, peak GPU memory, OOM count, backend import status. | Right-size batch, sequence length, backend, and GX10 readiness. |
+| Operational health | Tokens/sec, peak GPU memory, OOM count, backend import status. | Right-size batch, sequence length, backend, and compute-target readiness. |
 
 Good training review starts at the bottom of the compute stack: setup checks,
 then training health, then signal quality, then behavior and safety. Do not spend
-GX10 time on a run with failed setup checks.
+private/cloud compute time on a run with failed setup checks.
 
 ---
 
@@ -73,7 +73,7 @@ as universal pass/fail laws.
 | Tamper attempts | Zero for release candidates. | Treat as a release blocker and inspect protected-file coverage. |
 | OOM count | Zero for serious smoke or train runs. | Lower batch, sequence length, or full-finetune memory pressure. |
 | KL/entropy | Stable relative to the chosen algorithm; no universal threshold. | Use backend-specific ranges; do not promote or block from these alone. |
-| DPPO smoke bundle | `contract_ready=true`; `optimizer_ready=true` for optimizer updates. | Fix replay/logprob/world-model coverage locally before GX10. |
+| DPPO smoke bundle | `contract_ready=true`; `optimizer_ready=true` for optimizer updates. | Fix replay/logprob/world-model coverage locally before private/cloud compute. |
 | ECHO/RWML quality | Improves on heldout transitions and does not hurt pass@k. | Keep diagnostic, mine outliers, and avoid release-gating on it. |
 
 ---
@@ -113,6 +113,7 @@ environment, safety, and external benchmark gates.
 | DPO | Chosen/rejected rewards, reward margin, preference accuracy, chosen/rejected logprobs. | Heldout trace eval and task behavior against the SFT baseline. |
 | Reward model / ORM / PRM | Heldout pair accuracy, calibration error, reward margin, length bias, task-family breakdown, reward variance. | Reward-model evidence plus selected-vs-random controls before using the scorer for training claims. |
 | GRPO/RLVR | Reward, `reward_std`, `frac_reward_zero_std`, KL, entropy, verifier status, timeouts. | pass@1/pass@k, holdout gate, spurious-reward control, tamper canaries. |
+| Session Distillation | `session_distillation_loss`, `session_distillation_kl`, `session_distillation_ce`, masked token count, reader confidence. | Heldout recovery-decision accuracy, tool-call validity, executable pass@k where environments exist. |
 | DPPO | Behavior logprobs ready, train logprobs ready, replay-required records, trust-region mask telemetry. | Backend smoke artifacts plus pass@k before/after. |
 | ECHO/RWML | Replay coverage, ECHO loss, RWML pass rate, embedding-distance distribution, exit-code/test-result prediction accuracy. | Diagnostic release evidence only until correlated with heldout pass@k and safety. |
 | Cascade | Per-stage loss/reward, per-domain pass@k, stage-to-stage forgetting. | Domain holdouts and final generalist holdout. |
@@ -365,7 +366,7 @@ Done when:
 
 ---
 
-## Symptom: smoke bundle blocks GX10 work
+## Symptom: smoke bundle blocks private/cloud compute work
 
 Likely causes:
 
@@ -378,7 +379,7 @@ Likely causes:
 Actions:
 
 1. Inspect `backend_smoke_readiness.json`.
-2. Fix every failed check before syncing to GX10.
+2. Fix every failed check before syncing to a compute target.
 3. Regenerate replay with `include_world_model_replay=true` for ECHO/RWML.
 4. Enable response logprobs during served-model rollouts.
 5. Run train-policy logprob enrichment before real DPPO optimizer updates.
@@ -396,20 +397,20 @@ Done when:
 
 Likely causes:
 
-- verl, SkyRL, or open-instruct is installed only on GX10, not locally.
+- verl, SkyRL, or open-instruct is installed only on the compute target, not locally.
 - The backend is in a custom conda/uv environment that local probing cannot see.
 - A project-specific command wrapper is required.
 
 Actions:
 
 1. Treat `contract_ready=true` as proof that replay handoff is shaped correctly.
-2. Use `docs/training/gx10-eval-checklist.md` to move artifacts to GX10.
+2. Use `docs/training/private-compute-eval-checklist.md` to move artifacts to the compute target.
 3. Provide `--command-template` if the backend launcher is custom.
 4. Keep `max_steps=1` until the backend reads replay and logs metrics cleanly.
 
 Done when:
 
-- The GX10 one-step backend smoke writes logs, metrics, and an output directory.
+- The one-step backend smoke writes logs, metrics, and an output directory.
 
 ---
 
@@ -424,7 +425,7 @@ Before routing real traffic to a trained student:
 - Spurious-reward controls do not pass by chance.
 - Reward-hacking canaries are guarded.
 - External benchmark evidence is attached for broad capability claims.
-- Backend-smoke readiness and GX10 logs are preserved when DPPO/ECHO/RWML was used.
+- Backend-smoke readiness and private/cloud compute logs are preserved when DPPO/ECHO/RWML was used.
 - World-model quality evidence is attached when ECHO/RWML was enabled, and it is
   interpreted as diagnostic context.
 - No unresolved verifier-error or tamper pattern remains.

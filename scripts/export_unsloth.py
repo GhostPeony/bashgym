@@ -245,7 +245,7 @@ def convert_file(input_path: Path, output_dir: Path, formats: list[str]) -> dict
 
 def main():
     parser = argparse.ArgumentParser(description="Export bashgym traces for Unsloth Studio")
-    parser.add_argument("--input-dir", type=Path, default=Path("/home/ponyo/bashgym-training/data"),
+    parser.add_argument("--input-dir", type=Path, default=Path("/home/user/bashgym-training/data"),
                         help="Directory containing train.jsonl and val.jsonl")
     parser.add_argument("--output-dir", type=Path, default=None,
                         help="Output directory (default: input_dir/unsloth)")

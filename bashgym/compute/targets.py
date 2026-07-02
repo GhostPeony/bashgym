@@ -68,18 +68,20 @@ DEFAULT_TARGETS: tuple[ComputeTarget, ...] = (
         metadata={"description": "Current workstation using the active Python environment."},
     ),
     ComputeTarget(
-        id="gx10_ssh",
-        provider="ssh",
+        id="private_gpu",
+        provider="private",
         launcher=ComputeLauncher.SSH,
-        gpu_type="NVIDIA GB10/GX10",
+        gpu_type="user-managed GPU",
         gpu_count=1,
         disk_gb=200,
-        env_vars=("BASHGYM_GX10_HOST", "BASHGYM_GX10_WORKDIR"),
+        env_vars=("BASHGYM_PRIVATE_GPU_HOST", "BASHGYM_PRIVATE_GPU_WORKDIR"),
         preflight_command="python -m bashgym.cli training smoke-bundle --help",
         metadata={
-            "description": "User-managed GX10 or remote SSH training host.",
-            "host_env": "BASHGYM_GX10_HOST",
-            "workdir_env": "BASHGYM_GX10_WORKDIR",
+            "description": "User-managed private compute target for larger local-network training jobs.",
+            "host_env": "BASHGYM_PRIVATE_GPU_HOST",
+            "workdir_env": "BASHGYM_PRIVATE_GPU_WORKDIR",
+            "legacy_host_env": "BASHGYM_GX10_HOST",
+            "legacy_workdir_env": "BASHGYM_GX10_WORKDIR",
         },
     ),
     ComputeTarget(
@@ -109,15 +111,32 @@ DEFAULT_TARGETS: tuple[ComputeTarget, ...] = (
 )
 
 
+TARGET_ALIASES = {
+    "gx10_ssh": "private_gpu",
+}
+
+
 def list_compute_targets() -> list[ComputeTarget]:
     return list(DEFAULT_TARGETS)
 
 
 def get_compute_target(target_id: str) -> ComputeTarget:
+    target_id = TARGET_ALIASES.get(target_id, target_id)
     for target in DEFAULT_TARGETS:
         if target.id == target_id:
             return target
     raise KeyError(target_id)
+
+
+def _env_value(primary: str, legacy: str | None = None) -> tuple[str, str | None]:
+    value = os.environ.get(primary, "")
+    if value:
+        return value, primary
+    if legacy:
+        legacy_value = os.environ.get(legacy, "")
+        if legacy_value:
+            return legacy_value, legacy
+    return "", None
 
 
 def preflight_compute_target(target: ComputeTarget) -> dict[str, Any]:
@@ -137,12 +156,17 @@ def preflight_compute_target(target: ComputeTarget) -> dict[str, Any]:
         )
     elif target.launcher == ComputeLauncher.SSH:
         host_env = target.metadata.get("host_env", "")
-        host = os.environ.get(host_env, "")
+        legacy_host_env = target.metadata.get("legacy_host_env")
+        host, configured_env = _env_value(host_env, legacy_host_env)
         checks.append(
             {
-                "code": "ssh_host_configured",
+                "code": "private_compute_target_configured",
                 "status": "pass" if host else "needs_config",
-                "message": f"{host_env} is set" if host else f"Set {host_env} before SSH preflight.",
+                "message": (
+                    f"{configured_env} is set"
+                    if configured_env
+                    else f"Set {host_env} before private compute preflight."
+                ),
             }
         )
     elif target.launcher == ComputeLauncher.SKYPILOT:
@@ -190,9 +214,13 @@ def launch_plan(target: ComputeTarget, *, plan_path: str | Path | None = None) -
     elif target.launcher == ComputeLauncher.SSH:
         host_env = target.metadata.get("host_env", "BASHGYM_REMOTE_HOST")
         workdir_env = target.metadata.get("workdir_env", "BASHGYM_REMOTE_WORKDIR")
+        legacy_host_env = target.metadata.get("legacy_host_env")
+        legacy_workdir_env = target.metadata.get("legacy_workdir_env")
         provider_config = {
             "host_env": host_env,
             "workdir_env": workdir_env,
+            "legacy_host_env": legacy_host_env,
+            "legacy_workdir_env": legacy_workdir_env,
             "command": f"ssh ${host_env} 'cd ${{{workdir_env}:-~/ghostwork}} && {command}'",
         }
     elif target.launcher == ComputeLauncher.SKYPILOT:

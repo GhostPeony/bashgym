@@ -625,10 +625,10 @@ def create_app() -> FastAPI:
     async def get_model_recommendations(device_id: str | None = None):
         """Get model recommendations based on detected hardware.
 
-        When ``device_id`` is supplied, recommendations target that registered SSH
+        When ``device_id`` is supplied, recommendations target that registered private
         device's discovered budget (its ``effective_vram_gb`` capability, which
-        falls back to RAM on unified-memory machines like a DGX Spark) instead of
-        the local GPU. Run the device's preflight first to populate capabilities.
+        can fall back to RAM on unified-memory machines) instead of the local GPU.
+        Run the device's preflight first to populate capabilities.
         """
         from bashgym.api.system_info import get_system_info_service
 
@@ -1313,6 +1313,22 @@ def create_app() -> FastAPI:
                     teacher_model=request.teacher_model or "claude-sonnet-4-6",
                     teacher_temperature=request.teacher_temperature,
                     distillation_alpha=request.distillation_alpha,
+                    session_distillation_alpha=getattr(request, "session_distillation_alpha", 0.7),
+                    session_distillation_temperature=getattr(
+                        request, "session_distillation_temperature", 1.0
+                    ),
+                    session_distillation_min_confidence=getattr(
+                        request, "session_distillation_min_confidence", 0.6
+                    ),
+                    session_distillation_mask_policy=getattr(
+                        request, "session_distillation_mask_policy", "target_span_only"
+                    ),
+                    session_distillation_context_mode=getattr(
+                        request, "session_distillation_context_mode", "hint_injected"
+                    ),
+                    session_distillation_reader=getattr(
+                        request, "session_distillation_reader", "heuristic"
+                    ),
                     # Export & backend
                     auto_export_gguf=request.auto_export_gguf,
                     gguf_quantization=request.gguf_quantization,
@@ -1327,7 +1343,7 @@ def create_app() -> FastAPI:
 
                 app.state.trainer.config = config
 
-                # Resolve device for remote SSH training
+                # Resolve device for private compute training
                 if config.use_remote_ssh:
                     ssh_config = None
                     device_id_to_use = getattr(request, "device_id", None)
@@ -1421,6 +1437,10 @@ def create_app() -> FastAPI:
                     training_metadata["teacher_model"] = (
                         request.teacher_model or "claude-sonnet-4-6"
                     )
+                if request.strategy == TrainingStrategy.SESSION_DISTILLATION:
+                    training_metadata["session_distillation"] = (
+                        app.state.trainer.config.session_distillation_settings()
+                    )
 
                 if request.strategy == TrainingStrategy.SFT:
                     run = app.state.trainer.train_sft(
@@ -1442,6 +1462,15 @@ def create_app() -> FastAPI:
                     )
                 elif request.strategy == TrainingStrategy.DISTILLATION:
                     run = app.state.trainer.train_distillation(
+                        dataset_path=dataset_path,
+                        run_id=run_id,
+                        callback=callback.on_progress_sync,
+                        log_callback=callback.on_log_sync,
+                        pid_callback=_on_pid,
+                        training_metadata=training_metadata,
+                    )
+                elif request.strategy == TrainingStrategy.SESSION_DISTILLATION:
+                    run = app.state.trainer.train_session_distillation(
                         dataset_path=dataset_path,
                         run_id=run_id,
                         callback=callback.on_progress_sync,
@@ -1586,6 +1615,21 @@ def create_app() -> FastAPI:
         if points is None:
             raise HTTPException(status_code=404, detail=f"No metrics for run {run_id}")
         return {"run_id": run_id, "metrics": points}
+
+    @app.get("/api/training/runs/{run_id}/analysis", tags=["Training"])
+    async def get_training_run_analysis(run_id: str):
+        """Health analysis for one run: verdict + findings (loss trend, grad
+        spikes, OOM, zero-masked-tokens, etc.) computed from its metrics.jsonl."""
+        from bashgym.gym.run_analysis import build_training_analysis
+        from bashgym.gym.run_metrics import read_run_metrics
+
+        try:
+            points = read_run_metrics(run_id, models_dir=_models_dir())
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid run_id: {run_id}")
+        if points is None:
+            raise HTTPException(status_code=404, detail=f"No metrics for run {run_id}")
+        return build_training_analysis(metrics=points, run_id=run_id)
 
     def _run_card_roots() -> list[Path]:
         from bashgym.config import get_settings

@@ -24,7 +24,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Use our fine-tuned merged model as the base
-FT_MODEL_PATH = "/home/ponyo/.unsloth/studio/exports/unsloth_gemma-4-E4B-it_1775455644/checkpoint-153"
+FT_MODEL_PATH = "/home/user/.unsloth/studio/exports/unsloth_gemma-4-E4B-it_1775455644/checkpoint-153"
 
 # Test with Qwen to isolate Gemma 4 multimodal issues from bashgym pipeline issues
 QWEN_TEST_MODEL = "Qwen/Qwen2.5-Coder-1.5B-Instruct"

@@ -26,6 +26,7 @@ import {
   Zap
 } from 'lucide-react'
 import { useUIStore, useTrainingStore } from '../../stores'
+import { useTutorialStore } from '../../stores/tutorialStore'
 import { hooksApi, systemApi } from '../../services/api'
 import { clsx } from 'clsx'
 import { isElectron, isWeb } from '../../utils/platform'
@@ -84,15 +85,13 @@ interface CollapsibleSectionProps {
 }
 
 function CollapsibleSection({ title, items, defaultExpanded = false }: CollapsibleSectionProps) {
-  const { overlayView, openOverlay, setSidebarOpen: _setSidebarOpen } = useUIStore()
+  const { overlayView, openOverlay } = useUIStore()
+  const { dismissTooltip } = useTutorialStore()
   const [isExpanded, setIsExpanded] = useState(defaultExpanded)
 
   const handleClick = (id: SecondaryViewId) => {
-    if (overlayView === id) {
-      openOverlay('home')
-    } else {
-      openOverlay(id)
-    }
+    dismissTooltip()
+    if (overlayView !== id) openOverlay(id)
   }
 
   const hasActiveItem = items.some(item => overlayView === item.id)
@@ -182,6 +181,7 @@ function SecondarySections() {
 export function Sidebar() {
   const { isSidebarOpen, setSidebarOpen, overlayView, openOverlay, closeOverlay, setSettingsOpen } = useUIStore()
   const { currentRun } = useTrainingStore()
+  const { dismissTooltip } = useTutorialStore()
 
   // Status state
   const [hooksInstalled, setHooksInstalled] = useState<boolean | null>(null)
@@ -209,10 +209,9 @@ export function Sidebar() {
   }, [isSidebarOpen])
 
   const handleNavClick = (view: 'home' | 'training' | 'factory' | null) => {
+    dismissTooltip()
     if (view === null) {
       closeOverlay() // Go to workspace (terminals)
-    } else if (overlayView === view) {
-      closeOverlay() // Toggle off
     } else {
       openOverlay(view)
     }
@@ -221,7 +220,7 @@ export function Sidebar() {
   if (!isSidebarOpen) return null
 
   return (
-      <aside className="w-64 min-w-[16rem] bg-background-card border-r border-border overflow-y-auto flex-shrink-0">
+      <aside className="relative z-30 w-64 min-w-[16rem] bg-background-card border-r border-border overflow-y-auto flex-shrink-0">
         <div className="p-4">
           {/* Header - Clickable to go home */}
           <button

@@ -12,8 +12,8 @@ from bashgym.factory.designer_pipelines import (
 
 class TestProviderPresets:
     def test_ollama_spec_normalizes_endpoint(self):
-        spec = ollama_provider_spec(["text-model"], endpoint="http://192.168.50.173:11434")
-        assert spec.endpoint == "http://192.168.50.173:11434/v1"
+        spec = ollama_provider_spec(["text-model"], endpoint="http://192.0.2.10:11434")
+        assert spec.endpoint == "http://192.0.2.10:11434/v1"
         assert spec.api_key == "ollama"  # non-empty, ignored by Ollama
         assert spec.models == ["text-model"]
         assert spec.name == "ollama"

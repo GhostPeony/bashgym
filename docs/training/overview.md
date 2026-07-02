@@ -7,7 +7,9 @@ that a trained model is actually better.
 For the full capability spread, read [capability-map.md](capability-map.md). For
 exact knobs and recipes, read [strategy-guide.md](strategy-guide.md) and
 [tmax-terminal-rl-recipe.md](tmax-terminal-rl-recipe.md). For world-model
-objectives, read [world-models.md](world-models.md). For diagnosis during and
+objectives, read [world-models.md](world-models.md). For targeted
+self-distillation from failed trace spans, read
+[session-distillation.md](session-distillation.md). For diagnosis during and
 after a run, read [metrics-runbook.md](metrics-runbook.md).
 
 ---
@@ -66,6 +68,7 @@ repo, and verifier.
 | DPO | Preference: choose the better response for the same prompt. | Chosen/rejected pairs. | Preference accuracy, reward margin, heldout behavior. |
 | GRPO/RLVR | Outcome optimization: improve completions using verifier rewards. | Reward variation across sampled attempts. | Reward, reward_std, pass@1/pass@k, verifier status. |
 | Distillation | Compression: move teacher behavior into a smaller student. | Teacher outputs or teacher-on-policy budget. | Student pass@k and quality against teacher baseline. |
+| Session Distillation | Local repair: train the original context toward the same action rescored under a targeted hint. | `session_distillation_records.jsonl` with failed spans and target masks. | Masked KL/CE plus heldout decision and terminal-task behavior. |
 | Cascade RL | Curriculum: train domain specialists in stages, then merge or distill. | Enough examples per domain. | Per-domain gates and final generalist holdout. |
 | DPPO replay | Terminal rollout optimization with behavior/train logprob replay and trust-region masks. | Served-model rollouts with logprobs and a backend such as verl/SkyRL/open-instruct. | Mask telemetry, reward, pass@k, backend smoke artifacts. |
 
@@ -94,7 +97,7 @@ RL improves outcomes only after the model can produce attempts worth comparing.
 
 4. Train the first student with SFT.
 
-   Use QLoRA on small/local hardware. Use the remote device or cloud path for
+   Use QLoRA on small/local hardware. Use a private compute target or cloud path for
    larger models, longer sequences, or full fine-tunes.
 
 5. Evaluate before routing.
@@ -153,10 +156,11 @@ For a new operator, use this order before changing advanced knobs:
    World-model quality metrics are useful for curriculum and platform learning,
    but they are not release gates until correlated with pass@k and safety.
 
-7. Save the GX10 step for finalization.
+7. Save the private compute step for finalization.
 
-   Generate a smoke bundle locally first. Then run the installed-backend GX10
-   smoke only after replay, logprobs, and backend-launch artifacts are ready.
+   Generate a smoke bundle locally first. Then run the installed-backend
+   compute-target smoke only after replay, logprobs, and backend-launch artifacts
+   are ready.
 
 ---
 
@@ -190,8 +194,9 @@ gates by themselves.
 - [external-review-packet.md](external-review-packet.md) - shareable reviewer packet with capabilities, limits, risks, and feedback questions.
 - [rlhf-handbook-comparison.md](rlhf-handbook-comparison.md) - RLHF Book comparison with BashGym strengths, gaps, answered reviewer questions, and action plan.
 - [strategy-guide.md](strategy-guide.md) - concrete starting settings and when to use each strategy.
+- [session-distillation.md](session-distillation.md) - targeted self-distillation from failed trace spans.
 - [tmax-terminal-rl-recipe.md](tmax-terminal-rl-recipe.md) - environment-to-replay-to-backend recipe for terminal RL.
-- [gx10-eval-checklist.md](gx10-eval-checklist.md) - GX10 backend-smoke and eval checklist.
+- [private-compute-eval-checklist.md](private-compute-eval-checklist.md) - private/cloud compute backend-smoke and eval checklist.
 - [world-models.md](world-models.md) - ECHO/RWML contracts, defaults, replay telemetry, and boundaries.
 - [metrics-runbook.md](metrics-runbook.md) - how to diagnose flat pass@k, zero reward variance, timeouts, verifier errors, and tamper attempts.
 - [glossary.md](glossary.md) - compact definitions for the training vocabulary.

@@ -206,7 +206,17 @@ class WebSocketService {
           totalSteps: payload.total_steps || 0,
           eta: payload.eta,
           simulation: payload.simulation || false,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          // Richer metrics forwarded from the backend (present only when emitted).
+          evalLoss: payload.eval_loss,
+          samplesProcessed: payload.samples_processed,
+          tokensPerSecond: payload.tokens_per_second,
+          gpuMemoryGb: payload.gpu_memory_gb,
+          gpuUtilization: payload.gpu_utilization,
+          sessionDistillationLoss: payload.session_distillation_loss,
+          sessionDistillationKl: payload.session_distillation_kl,
+          sessionDistillationCe: payload.session_distillation_ce,
+          sessionDistillationMaskedTokens: payload.session_distillation_masked_tokens
         }
         const store = useTrainingStore.getState()
         if (!store.currentRun && payload.run_id) {
@@ -234,6 +244,26 @@ class WebSocketService {
           level: payload.level || 'info'
         })
         break
+
+      // Cloud (HuggingFace/managed) job metrics — map the provider's fields into
+      // the same live metrics stream as local runs so the loss curve populates.
+      case MessageTypes.HF_JOB_METRICS: {
+        const m = payload.metrics || {}
+        const store = useTrainingStore.getState()
+        if (store.currentRun && m.loss !== undefined) {
+          store.updateMetrics({
+            loss: m.loss,
+            learningRate: m.learning_rate ?? 0,
+            gradNorm: m.grad_norm ?? 0,
+            epoch: m.epoch ?? 0,
+            step: m.step ?? 0,
+            totalSteps: m.total_steps ?? 0,
+            evalLoss: m.eval_loss,
+            timestamp: Date.now()
+          })
+        }
+        break
+      }
 
       // Task events
       case MessageTypes.TASK_STATUS:

@@ -32,7 +32,8 @@ def test_manifest_json_is_agent_readable(capsys):
     assert any(doc["topic"] == "external-review" for doc in payload["docs"])
     assert any(doc["topic"] == "rlhf-handbook-comparison" for doc in payload["docs"])
     assert any(doc["topic"] == "terminal-rl-recipe" for doc in payload["docs"])
-    assert any(doc["topic"] == "gx10-checklist" for doc in payload["docs"])
+    assert any(doc["topic"] == "private-compute-checklist" for doc in payload["docs"])
+    assert any(doc["topic"] == "session-distillation" for doc in payload["docs"])
     assert any(doc["topic"] == "world-models" for doc in payload["docs"])
     assert all(isinstance(doc["exists"], bool) for doc in payload["docs"])
     assert payload["next"][0]["command"].startswith("bashgym ")
@@ -305,12 +306,14 @@ def test_compute_cli_lists_preflights_and_dry_runs_launch(capsys):
     assert main(["compute", "targets", "--json"]) == 0
     targets = json.loads(capsys.readouterr().out)
     ids = {target["id"] for target in targets["targets"]}
-    assert {"local_cpu_or_gpu", "gx10_ssh", "skypilot_a10g", "dstack_a10g"} <= ids
+    assert {"local_cpu_or_gpu", "private_gpu", "skypilot_a10g", "dstack_a10g"} <= ids
 
-    assert main(["compute", "preflight", "--target", "gx10_ssh", "--json"]) == 0
+    assert main(["compute", "preflight", "--target", "private_gpu", "--json"]) == 0
     preflight = json.loads(capsys.readouterr().out)
     assert preflight["schema_version"] == "bashgym.compute_preflight.v1"
-    assert any(check["code"] == "ssh_host_configured" for check in preflight["checks"])
+    assert any(
+        check["code"] == "private_compute_target_configured" for check in preflight["checks"]
+    )
 
     assert (
         main(
@@ -1120,7 +1123,7 @@ def test_training_capabilities_matrix_maps_full_training_and_eval_spread(capsys)
         "release_evidence_json",
     } <= artifact_ids
     assert {"gemma4", "qwen3", "qwen2.5", "llama3", "generic_hf_causal_lm"} <= family_ids
-    assert {"local_12gb", "local_24gb", "dgx_spark_gx10", "cloud_backend"} <= hardware_ids
+    assert {"local_12gb", "local_24gb", "private_compute_target", "cloud_backend"} <= hardware_ids
     assert {
         "data_scope",
         "adapter_mode",
@@ -1158,9 +1161,14 @@ def test_training_capabilities_matrix_maps_full_training_and_eval_spread(capsys)
         "backend_smoke",
         "route_or_iterate",
     } <= recipe_stage_ids
-    assert {"mental_model", "settings", "metrics", "terminal_rl_recipe", "gx10_finalization"} <= (
-        education_ids
-    )
+    assert {
+        "mental_model",
+        "settings",
+        "metrics",
+        "terminal_rl_recipe",
+        "session_distillation",
+        "private_compute_finalization",
+    } <= (education_ids)
     qwen3 = next(item for item in payload["model_family_support"] if item["id"] == "qwen3")
     assert "Qwen3.6" in qwen3["display_name"]
     assert "newest compatible Qwen3.6" in qwen3["checkpoint_guidance"]
@@ -1175,18 +1183,36 @@ def test_training_capabilities_matrix_maps_full_training_and_eval_spread(capsys)
     assert payload["next"][0]["command"].startswith("bashgym training plan")
 
 
-def test_training_docs_terminal_recipe_and_gx10_checklist_are_readable(capsys):
+def test_training_docs_terminal_recipe_and_private_compute_checklist_are_readable(capsys):
     assert main(["training", "docs", "--topic", "terminal-rl-recipe", "--json"]) == 0
     recipe = json.loads(capsys.readouterr().out)
     assert recipe["ok"] is True
     assert "TMax-Style Terminal RL Recipe" in recipe["content"]
     assert "smoke bundle" in recipe["content"]
 
-    assert main(["training", "docs", "--topic", "gx10-checklist", "--json"]) == 0
+    assert main(["training", "docs", "--topic", "private-compute-checklist", "--json"]) == 0
     checklist = json.loads(capsys.readouterr().out)
     assert checklist["ok"] is True
-    assert "GX10 Eval And Backend Smoke Checklist" in checklist["content"]
+    assert "Private Compute Eval And Backend Smoke Checklist" in checklist["content"]
     assert "backend_smoke_readiness.json" in checklist["content"]
+
+    assert main(["training", "docs", "--topic", "gx10-checklist", "--json"]) == 0
+    alias = json.loads(capsys.readouterr().out)
+    assert alias["ok"] is True
+    assert alias["topic"] == "private-compute-checklist"
+    assert alias["requested_topic"] == "gx10-checklist"
+
+
+def test_training_plan_session_distillation_defaults(capsys):
+    assert main(["training", "plan", "--strategy", "session-distillation", "--json"]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    settings = payload["starting_settings"]
+    assert payload["strategy"] == "session-distillation"
+    assert settings["session_distillation_alpha"] == 0.7
+    assert settings["session_distillation_mask_policy"] == "target_span_only"
+    assert "session_distillation_loss" in payload["watch"]
+    assert any(doc["topic"] == "session-distillation" for doc in payload["docs"])
 
 
 def test_training_plan_world_model_contains_echo_rwml_defaults(capsys):
@@ -1501,6 +1527,39 @@ def test_training_analyze_combines_metrics_replay_and_release_evidence(tmp_path,
     assert "release_gate_blocked" in codes
 
 
+def test_training_analyze_reports_session_distillation_metrics(tmp_path, capsys):
+    metrics_path = tmp_path / "metrics.jsonl"
+    metrics_path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "step": 1,
+                        "session_distillation_loss": 0.4,
+                        "session_distillation_kl": 0.2,
+                        "session_distillation_ce": 0.6,
+                        "session_distillation_masked_tokens": 0,
+                    }
+                ),
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert main(["training", "analyze", "--metrics", str(metrics_path), "--json"]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    codes = {finding["code"] for finding in payload["findings"]}
+    doc_topics = {doc["topic"] for doc in payload["docs"]}
+    assert payload["training_metrics"]["session_distillation_loss"]["last"] == 0.4
+    assert payload["training_metrics"]["session_distillation_kl"]["last"] == 0.2
+    assert payload["training_metrics"]["session_distillation_ce"]["last"] == 0.6
+    assert payload["training_metrics"]["session_distillation_masked_tokens"]["last"] == 0.0
+    assert "session_distillation_zero_masked_tokens" in codes
+    assert "session-distillation" in doc_topics
+
+
 def test_training_analyze_reads_run_id_from_models_dir(tmp_path, capsys):
     run_dir = tmp_path / "run-001"
     run_dir.mkdir()
@@ -1768,3 +1827,94 @@ def test_serve_forwards_server_arguments(monkeypatch):
         "--workers",
         "1",
     ]
+
+
+def test_training_session_records_build_cli(tmp_path, capsys):
+    traces = tmp_path / "traces"
+    traces.mkdir()
+    (traces / "failed.json").write_text(
+        json.dumps(
+            {
+                "session_id": "s1",
+                "metadata": {"user_initial_prompt": "Do it."},
+                "primary_repo": {"name": "ghostwork"},
+                "trace": [
+                    {
+                        "tool_name": "Bash",
+                        "command": "python x.py",
+                        "output": "ModuleNotFoundError: No module named 'x'",
+                        "success": False,
+                        "exit_code": 1,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    out = tmp_path / "records.jsonl"
+
+    assert (
+        main(["training", "session-records", "build", str(traces), "--out", str(out), "--json"])
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    assert payload["record_count"] == 1
+    assert payload["validation_errors"] == []
+    rows = [json.loads(line) for line in out.read_text(encoding="utf-8").splitlines()]
+    assert len(rows) == 1
+    assert rows[0]["trace_id"] == "failed"
+
+
+def test_training_runcard_cli_accepts_session_distillation_evidence(tmp_path, capsys):
+    path = tmp_path / "sd_card.json"
+    assert (
+        main(
+            [
+                "training",
+                "runcard",
+                "create",
+                "--run-id",
+                "sd-cli",
+                "--training-method",
+                "session_distillation",
+                "--base-model",
+                "tiny-local-model",
+                "--compute-target",
+                "local_cpu_or_gpu",
+                "--session-distillation-records",
+                "data/session_distillation/records.jsonl",
+                "--session-distillation-metrics",
+                "data/models/sd/metrics.jsonl",
+                "--reader-model",
+                "heuristic-session-distillation-reader-v1",
+                "--confidence-threshold",
+                "0.6",
+                "--hint-policy",
+                "heuristic",
+                "--mask-policy",
+                "target_span_only",
+                "--target-token-count",
+                "128",
+                "--output",
+                str(path),
+                "--no-git",
+                "--promotion",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    created = json.loads(capsys.readouterr().out)
+    card = created["run_card"]
+    assert card["session_distillation_records_path"] == "data/session_distillation/records.jsonl"
+    assert card["session_distillation_reader_model"] == "heuristic-session-distillation-reader-v1"
+    assert card["session_distillation_mask_policy"] == "target_span_only"
+    assert card["session_distillation_target_token_count"] == 128
+    # The evidence flags plumbed through, so the fields are no longer reported as
+    # missing-entirely (the remaining findings are only "file does not exist",
+    # since these test paths are not created on disk).
+    codes = {finding["code"] for finding in created["findings"]}
+    assert "missing_session_distillation_records_path" not in codes
+    assert "missing_session_distillation_reader_model" not in codes
+    assert "missing_session_distillation_mask_policy" not in codes

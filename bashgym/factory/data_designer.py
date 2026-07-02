@@ -223,7 +223,7 @@ class PipelineConfig:
 
         Substitutes an available model when a configured one isn't served (so the
         defaults are preferences, not hardcoded requirements). Works against any
-        OpenAI-compatible provider (NVIDIA NIM, Ollama/DGX, vLLM, ...). Best-effort:
+        OpenAI-compatible provider (NVIDIA NIM, Ollama/private compute, vLLM, ...). Best-effort:
         no-ops if discovery returns nothing (offline / unknown provider). Returns
         self for chaining; mutate then build/generate.
         """

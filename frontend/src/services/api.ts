@@ -61,7 +61,7 @@ export interface TaskResponse {
 }
 
 export interface TrainingRequest {
-  strategy?: 'sft' | 'dpo' | 'grpo' | 'distillation' | 'cascade'
+  strategy?: 'sft' | 'dpo' | 'grpo' | 'distillation' | 'session_distillation' | 'cascade'
   dataset_path?: string
   base_model?: string
   model_type?: string
@@ -115,6 +115,13 @@ export interface TrainingRequest {
   teacher_model?: string
   teacher_temperature?: number
   distillation_alpha?: number
+  // Session Distillation
+  session_distillation_alpha?: number
+  session_distillation_temperature?: number
+  session_distillation_min_confidence?: number
+  session_distillation_mask_policy?: string
+  session_distillation_context_mode?: string
+  session_distillation_reader?: string
   // Export
   auto_export_gguf?: boolean
   gguf_quantization?: string
@@ -560,6 +567,22 @@ export interface DatasetInspectReport {
   with_warnings_in_slice: number
 }
 
+export interface TrainingRunFinding {
+  severity: string
+  code: string
+  message: string
+  evidence?: Record<string, unknown>
+  next?: string
+}
+
+export interface TrainingRunAnalysis {
+  ok: boolean
+  run_id?: string
+  verdict: { level: string; summary?: Record<string, unknown> }
+  findings: TrainingRunFinding[]
+  training_metrics?: { points?: number } & Record<string, unknown>
+}
+
 export const trainingApi = {
   start: (config: TrainingRequest) =>
     request<TrainingResponse>('/training/start', {
@@ -578,6 +601,10 @@ export const trainingApi = {
 
   getStatus: (runId: string) =>
     request<TrainingResponse>(`/training/${runId}`),
+
+  // Health analysis (verdict + findings) for a run, computed from its metrics.jsonl.
+  getRunAnalysis: (runId: string) =>
+    request<TrainingRunAnalysis>(`/training/runs/${encodeURIComponent(runId)}/analysis`),
 
   pause: (runId: string) =>
     request<{ success: boolean; message: string }>(`/training/${runId}/pause`, { method: 'POST' }),
@@ -2295,7 +2322,7 @@ export interface ModelRecommendations {
   warning?: string
   // Largest model (billions of params) that fits per regime, from the estimator.
   regime_capacities?: Record<string, number>
-  // Budget is unified memory (RAM-backed, e.g. DGX Spark)
+  // Budget is unified memory or RAM-backed.
   unified_memory?: boolean
 }
 
@@ -2326,8 +2353,8 @@ export const systemInfoApi = {
   getGpus: () =>
     request<GpuInfo[]>('/system/gpus'),
 
-  // Pass a registered SSH device_id to target that machine's discovered budget
-  // (e.g. a unified-memory DGX Spark) instead of the local GPU.
+  // Pass a registered private compute target to use that machine's discovered
+  // budget instead of the local GPU.
   getRecommendations: (deviceId?: string) =>
     request<ModelRecommendations>(
       `/system/recommendations${deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : ''}`
@@ -3216,7 +3243,7 @@ export interface HFJobSubmitRequest {
   base_model?: string
   num_epochs?: number
   learning_rate?: number
-  strategy?: 'sft' | 'dpo' | 'distillation'
+  strategy?: 'sft' | 'dpo' | 'distillation' | 'session_distillation'
   batch_size?: number
   lora_r?: number
   lora_alpha?: number

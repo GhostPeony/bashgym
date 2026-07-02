@@ -272,7 +272,7 @@ export function DeviceManager() {
                 value={formName}
                 onChange={(e) => setFormName(e.target.value)}
                 className="input w-full"
-                placeholder="DGX Spark"
+                placeholder="Private GPU"
                 required
               />
             </div>

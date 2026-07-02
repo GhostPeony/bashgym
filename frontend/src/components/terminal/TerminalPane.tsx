@@ -368,6 +368,9 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
           return
         }
         setExitedCode(null)
+        if (result.cwd) {
+          updateSession(id, { cwd: result.cwd })
+        }
         // Re-attached to a live PTY: replay retained scrollback
         if (result.attached && result.buffer) {
           terminal.write(result.buffer)

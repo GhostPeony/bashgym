@@ -1,14 +1,15 @@
-# GX10 Eval And Backend Smoke Checklist
+# Private Compute Eval And Backend Smoke Checklist
 
 Use this checklist when moving a BashGym training/eval run from local contract
-proof to the GX10 machine. The goal is to collect enough evidence to know whether
-the external backend path works, without spending a long training run first.
+proof to a private compute target or cloud GPU backend. The goal is to collect
+enough evidence to know whether the external backend path works, without spending
+a long training run first.
 
 ---
 
 ## Preconditions
 
-Do not start GX10 work until the local bundle exists:
+Do not start private or cloud compute work until the local bundle exists:
 
 ```bash
 bashgym training smoke-bundle \
@@ -26,8 +27,8 @@ Required local state:
 - `world_model_probe.batch.rwml_transitions > 0` when RWML is enabled
 - `dppo_launch_env.json` is saved
 
-If `backend_launch_ready=false`, that is acceptable for local work. GX10 may have
-the backend installed even when the desktop does not.
+If `backend_launch_ready=false`, that is acceptable for local work. The private
+or cloud target may have the backend installed even when the desktop does not.
 
 ---
 
@@ -59,9 +60,9 @@ Recommended remote layout:
 
 ---
 
-## GX10 Environment Preflight
+## Compute Target Environment Preflight
 
-On GX10, capture:
+On the target machine, capture:
 
 ```bash
 python --version
@@ -79,21 +80,22 @@ python -c "import skyrl; print('skyrl ok')" || true
 test -d "$TMAX_OPEN_INSTRUCT_DIR" && echo "open-instruct checkout ok" || true
 ```
 
-Recommended SSH command group from a local operator session:
+If your target is reached through an operator-managed shell, capture the same
+checks with your configured host alias:
 
 ```bash
-ssh ponyo "set -e; hostname; python --version; nvidia-smi || true; free -h || true; df -h ."
-ssh ponyo "cd ~/bashgym-smokes/<run-id> && git rev-parse HEAD || true"
-ssh ponyo "python -c 'import verl; print(\"verl ok\")' || true"
-ssh ponyo "python -c 'import skyrl; print(\"skyrl ok\")' || true"
+ssh <compute-target> "set -e; hostname; python --version; nvidia-smi || true; free -h || true; df -h ."
+ssh <compute-target> "cd ~/bashgym-smokes/<run-id> && git rev-parse HEAD || true"
+ssh <compute-target> "python -c 'import verl; print(\"verl ok\")' || true"
+ssh <compute-target> "python -c 'import skyrl; print(\"skyrl ok\")' || true"
 ```
 
 Capture stdout/stderr. A failed backend import is not a BashGym replay failure by
 itself; it means the installed backend environment is missing or not activated.
 
 If the backend is installed in a custom environment, use
-`--command-template` locally or edit the launch script on GX10 while preserving
-the exported `BASHGYM_DPPO_*` variables.
+`--command-template` locally or edit the launch script on the target while
+preserving the exported `BASHGYM_DPPO_*` variables.
 
 ---
 
@@ -129,21 +131,21 @@ Keep the smoke small until these are true:
 
 ---
 
-## Remote Decision Log
+## Compute Decision Log
 
-Save a short text or JSON note with each GX10 attempt:
+Save a short text or JSON note with each private/cloud compute attempt:
 
 | Field | Example |
 |---|---|
 | `run_id` | `dppo-smoke-2026-06-24-001` |
 | `local_commit` | Git SHA that produced the replay and smoke bundle. |
-| `remote_commit` | Git SHA checked out on GX10, if BashGym code is used there. |
+| `target_commit` | Git SHA checked out on the target, if BashGym code is used there. |
 | `backend_env` | Conda/uv/venv name or module path used for verl/SkyRL/open-instruct. |
 | `command` | Exact one-step smoke command or command template. |
 | `verdict` | `passed`, `backend_missing`, `contract_failed`, or `runtime_failed`. |
 | `next_action` | The smallest fix before another remote attempt. |
 
-This note keeps the run useful even when it fails. The goal of the first GX10
+This note keeps the run useful even when it fails. The goal of the first compute
 attempt is to locate the exact runtime boundary, not to produce a strong model.
 
 ---
@@ -194,5 +196,6 @@ Stop and fix before scaling when:
 - Verifier, timeout, or tamper signals regress.
 - World-model metrics improve but pass@k or safety gets worse.
 
-The first successful GX10 smoke is a contract proof, not a production training
-result. The next step after a clean smoke is a small before/after pass@k run.
+The first successful private/cloud compute smoke is a contract proof, not a
+production training result. The next step after a clean smoke is a small
+before/after pass@k run.

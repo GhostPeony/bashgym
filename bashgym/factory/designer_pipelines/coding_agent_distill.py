@@ -21,7 +21,7 @@ example via:
 Model aliases reuse the shared base config (``text-model`` for digesting,
 ``code-model`` for the SFT record, ``judge-model`` for scoring). For a true
 distillation run, point all three at a strong teacher (e.g.
-``nvidia/nemotron-3-super-120b-a12b`` or a DGX-served model) via PipelineConfig.
+``nvidia/nemotron-3-super-120b-a12b`` or a private compute-served model) via PipelineConfig.
 """
 
 from __future__ import annotations

@@ -25,9 +25,9 @@
   {
     "id": "dgx-spark-01",
     "name": "DGX Spark",
-    "host": "192.168.50.173",
+    "host": "192.0.2.10",
     "port": 22,
-    "username": "ponyo",
+    "username": "remote-user",
     "key_path": "~/.ssh/id_ed25519",
     "work_dir": "~/bashgym-training",
     "is_default": true,
@@ -117,8 +117,8 @@ Parses `~/.ssh/config` (standard OpenSSH format) to find candidate devices.
   "candidates": [
     {
       "ssh_alias": "dgx-spark",
-      "host": "192.168.50.173",
-      "username": "ponyo",
+      "host": "192.0.2.10",
+      "username": "remote-user",
       "port": 22,
       "key_path": "~/.ssh/id_ed25519",
       "already_added": true,
@@ -202,7 +202,7 @@ Replaces the hardcoded "DGX Spark" button area in TrainingConfig. Contains:
 ### 4b. Device card display
 
 Each device card shows:
-- **Name + host** (e.g., "DGX Spark — 192.168.50.173")
+- **Name + host** (e.g., "DGX Spark — 192.0.2.10")
 - **GPU summary** (e.g., "GH200 96GB, CUDA 12.4") or "No GPU info" if not scanned
 - **Disk free** (e.g., "473 GB free")
 - **Connection status** — green/yellow/red dot based on last preflight result

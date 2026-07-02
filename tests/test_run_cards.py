@@ -1,5 +1,6 @@
 import json
 
+from bashgym.factory.session_distillation import build_session_distillation_records
 from bashgym.run_cards import (
     attach_run_card_evidence,
     create_run_card,
@@ -80,6 +81,25 @@ def _reward_eval_artifact(*, ok=True):
     }
 
 
+def _session_distillation_record():
+    records = build_session_distillation_records(
+        [
+            {
+                "tool": "Bash",
+                "command": "pytest tests/missing.py",
+                "output": "ERROR: file or directory not found: tests/missing.py",
+                "success": False,
+                "exit_code": 4,
+            }
+        ],
+        task_prompt="Run focused tests.",
+        trace_id="trace-session-distill",
+        session_id="session-session-distill",
+        source_metadata={"split": "train"},
+    )
+    return records[0].to_dict()
+
+
 def _write_promotion_artifacts(
     tmp_path,
     *,
@@ -88,6 +108,7 @@ def _write_promotion_artifacts(
     dpo_pairs=False,
     reward_examples=False,
     reward_eval=False,
+    session_distillation_records=False,
 ):
     tmp_path.joinpath("plan.json").write_text("{}", encoding="utf-8")
     tmp_path.joinpath("source_manifest.json").write_text(
@@ -142,6 +163,11 @@ def _write_promotion_artifacts(
             json.dumps(_reward_eval_artifact()),
             encoding="utf-8",
         )
+    if session_distillation_records:
+        tmp_path.joinpath("session_distillation_records.jsonl").write_text(
+            json.dumps(_session_distillation_record()) + "\n",
+            encoding="utf-8",
+        )
 
 
 def test_run_card_create_validate_and_read(tmp_path):
@@ -173,7 +199,7 @@ def test_attach_run_card_evidence(tmp_path):
         run_id="run-demo",
         training_method="dpo",
         base_model="Qwen/Qwen3-Coder",
-        compute_target_id="gx10_ssh",
+        compute_target_id="private_gpu",
         training_plan_path="plans/dpo.json",
         source_manifest_path="data/source_manifest.json",
         include_git=False,
@@ -508,6 +534,73 @@ def test_validate_run_card_file_blocks_weak_dpo_preference_pairs(tmp_path):
     codes = {finding["code"] for finding in validation["findings"]}
     assert "preference_pairs_identical_chosen_rejected" in codes
     assert "preference_pairs_missing_decontamination_metadata" in codes
+
+
+def test_validate_run_card_file_requires_session_distillation_evidence_for_promotion(tmp_path):
+    _write_promotion_artifacts(tmp_path, ship=True)
+    card = create_run_card(
+        run_id="run-session-distill",
+        training_method="session_distillation",
+        base_model="Qwen/Qwen3-Coder",
+        compute_target_id="local_cpu_or_gpu",
+        training_plan_path="plan.json",
+        source_manifest_path="source_manifest.json",
+        metrics_path="metrics.jsonl",
+        release_evidence_path="release_evidence.json",
+        include_git=False,
+    )
+    path = tmp_path / "run_card.json"
+    write_run_card(card, path)
+
+    validation = validate_run_card_file(path, promotion=True)
+
+    assert validation["ok"] is False
+    codes = {finding["code"] for finding in validation["findings"]}
+    assert "missing_session_distillation_records_path" in codes
+    assert "missing_session_distillation_reader_model" in codes
+    assert "missing_session_distillation_confidence_threshold" in codes
+    assert "missing_session_distillation_mask_policy" in codes
+    assert "session_distillation_metrics_missing_masked_loss" in codes
+
+
+def test_validate_run_card_file_accepts_session_distillation_evidence(tmp_path):
+    _write_promotion_artifacts(tmp_path, ship=True, session_distillation_records=True)
+    tmp_path.joinpath("metrics.jsonl").write_text(
+        json.dumps(
+            {
+                "step": 1,
+                "session_distillation_loss": 0.31,
+                "session_distillation_kl": 0.2,
+                "session_distillation_ce": 0.56,
+                "session_distillation_masked_tokens": 14,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    card = create_run_card(
+        run_id="run-session-distill",
+        training_method="session_distillation",
+        base_model="Qwen/Qwen3-Coder",
+        compute_target_id="local_cpu_or_gpu",
+        training_plan_path="plan.json",
+        source_manifest_path="source_manifest.json",
+        metrics_path="metrics.jsonl",
+        release_evidence_path="release_evidence.json",
+        session_distillation_records_path="session_distillation_records.jsonl",
+        session_distillation_reader_model="heuristic-session-distillation-reader-v1",
+        session_distillation_confidence_threshold=0.6,
+        session_distillation_hint_policy="hint_injected",
+        session_distillation_mask_policy="target_span_only",
+        session_distillation_target_token_count=14,
+        include_git=False,
+    )
+    path = tmp_path / "run_card.json"
+    write_run_card(card, path)
+
+    validation = validate_run_card_file(path, promotion=True)
+
+    assert validation["ok"] is True
 
 
 def test_validate_run_card_file_requires_reward_examples_for_reward_model_promotion(tmp_path):

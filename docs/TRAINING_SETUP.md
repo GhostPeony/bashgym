@@ -1,8 +1,8 @@
 # BashGym — Training Setup
 
 This document describes the training stack in technical detail: the hardware
-tiers, the model families, the six training strategies, the data-generation
-factory, the provider/serving layer, and the remote-training flow. For the exact
+tiers, the model families, the training strategies, the data-generation
+factory, the provider/serving layer, and the private/cloud compute flow. For the exact
 hyperparameter values and quick-start recipes see
 [training-config-guide.md](training-config-guide.md); for the beginner/operator
 curriculum see [training/overview.md](training/overview.md); for the stable,
@@ -14,8 +14,9 @@ training data see [TRAINING_DATA_GUIDE.md](TRAINING_DATA_GUIDE.md).
 
 ## 1. Hardware tiers
 
-Training runs across two tiers from the same workflow. The trainer abstracts the
-backend; the operator picks where a run executes.
+Training runs across local, private, and cloud compute targets from the same
+workflow. The trainer abstracts the backend; the operator picks where a run
+executes.
 
 ### Local — consumer GPU
 - **NVIDIA GeForce RTX 3080 Ti, 12 GB VRAM.**
@@ -25,13 +26,13 @@ backend; the operator picks where a run executes.
   VRAM at the loss layer regardless of LoRA's parameter savings.
 - Used for fast iteration, smoke tests, and 1.5 B specialist fine-tunes.
 
-### Remote — datacenter-class unified memory
-- **NVIDIA DGX Spark (GB10 Blackwell), 128 GB unified memory, CUDA 13.0.**
-- Unified memory removes the discrete-VRAM ceiling, so larger and full
-  (non-LoRA) fine-tunes, MoE models, and longer-context runs are feasible here.
-- Also hosts Ollama for local student inference, so the same box trains and
-  serves — train, export GGUF, deploy to Ollama on the same machine.
-- Reached over SSH (see §6). All serious training runs here.
+### Private or cloud compute target
+- Larger GPU memory or managed accelerators for dense models, MoE variants,
+  longer-context runs, and installed-backend smokes.
+- The target can train, export GGUF, and optionally serve the student locally if
+  the operator has an inference runtime such as Ollama available there.
+- Use this tier only after local contracts and smoke artifacts are clean enough
+  to justify the run.
 
 ### Runtime requirements
 - Training requires **Python 3.12 with CUDA-enabled PyTorch** (Python 3.14 lacks
@@ -56,16 +57,16 @@ continuously; as of mid-2026 it spans, among others:
 - **Mistral** (Small, Devstral) and **Phi-4**
 
 Smaller models (a few billion parameters) fine-tune on the consumer GPU; larger
-and mixture-of-experts targets run on the DGX Spark, where unified memory makes
-them viable. These are examples, not requirements — set `BASE_MODEL` to whatever
-you choose. For the current supported list see the
+and mixture-of-experts targets need larger local, private, or cloud GPUs. These
+are examples, not requirements — set `BASE_MODEL` to whatever you choose. For the
+current supported list see the
 [Unsloth model catalog](https://unsloth.ai/docs/get-started/unsloth-model-catalog).
 
 ---
 
 ## 3. Training strategies
 
-Six strategies are integrated, selected per run. Each maps to a trainer path in
+Training strategies are integrated, selected per run. Each maps to a trainer path in
 `bashgym/gym/trainer.py` (`TrainingStrategy` enum) and a generated training
 script.
 
@@ -76,6 +77,7 @@ script.
 | **GRPO** | Group relative policy optimization — on-policy RL against a reward signal (syntax validity, execution success, or test verification). | Optimize for verifiable outcomes, not just imitation. |
 | **RLVR** | RL from verifiable rewards — the verification result is the reward. | Tasks with a hard pass/fail gate. |
 | **Distillation** | Knowledge distillation from a teacher (Claude) into the student base model. | Transfer teacher capability into a deployable open-weight model. |
+| **Session Distillation** | Hint-injected self-distillation over failed trace spans with masked KL/CE on the same target tokens. | Repair local mistakes, retry loops, and recovery pivots without replacing the trajectory. |
 | **Cascade RL** | Sequential domain-specialist training with multi-objective policy distillation (see §5). | Build a generalist by composing specialists. |
 
 Fine-tuning uses **LoRA / QLoRA** adapters (4-bit quantization where the hardware
@@ -163,16 +165,16 @@ base ──▶ stage 1 (file ops) ──▶ stage 2 (bash) ──▶ stage 3 (se
 
 ---
 
-## 6. Remote training over SSH
+## 6. Private compute training
 
-Remote runs execute on the DGX Spark and stream back to the dashboard
-(`bashgym/gym/remote_trainer.py`):
+Private compute runs execute on the configured target and stream back to the
+dashboard (`bashgym/gym/remote_trainer.py`):
 
 ```
 generate training script locally
         │  SFTP upload
         ▼
-remote host: ssh exec under nohup  ──▶ training runs
+compute target: launch under nohup  ──▶ training runs
         │                                   │
         │  stream stdout (→ WebSocket)      │
         ▼                                   ▼
@@ -183,12 +185,23 @@ dashboard log view              SFTP download artifacts (checkpoints, merged, GG
   `SIGSTOP` / `SIGCONT` / `SIGTERM` on the remote process.
 - **Orphan recovery:** if the backend restarts, it reconnects to in-flight remote
   runs from persisted state rather than losing them.
-- **Configuration** via `SSH_REMOTE_*` environment variables (host, user, port,
-  key path, working directory). A `GET /api/ssh/preflight` check verifies the
-  remote machine is ready (Python, disk, network) before a run starts.
+- **Configuration** via private compute environment variables or saved device
+  settings (host, user, port, key path, working directory). A preflight check
+  verifies the target is ready (Python, disk, network) before a run starts.
 
 Training artifacts land under `~/.bashgym/models/{run_id}/`: intermediate
 `checkpoint-*`, `final/`, `merged/` (LoRA merged into base), and the GGUF export.
+
+- **Remote venv contract:** the target must provide a training venv at
+  `{SSH_REMOTE_WORK_DIR}/venv`; preflight and the uploaded script both
+  activate it.
+- **Remote path contract:** generated scripts run inside the uploaded run
+  directory, load the dataset by bare filename, and write artifacts to
+  `./final` and `./merged` — the locations the artifact download expects.
+
+For the GX10/DGX Spark target specifically — environment inventory, launch
+steps, smoke-test procedure, and current dependency issues — see the
+[GX10 environment runbook](training/gx10-environment-runbook.md).
 
 ---
 
@@ -202,7 +215,7 @@ monitoring health.
 |----------|--------|------|-------|
 | **Anthropic (Claude)** | No | Teacher | Frontier model for distillation and router fallback. |
 | **NVIDIA NIM** | No | Cloud student inference | OpenAI-compatible; 100+ served models. |
-| **Ollama** | Yes | Local student inference | Serves GGUF on the DGX Spark; warm-up + VRAM tracking. |
+| **Ollama** | Yes | Local student inference | Serves GGUF on a local or private compute target; warm-up + VRAM tracking. |
 
 **Live model discovery:** both the Anthropic and NIM providers query their
 `/v1/models` endpoints at runtime so the catalog reflects what is actually served,
@@ -251,7 +264,8 @@ model is gated on evaluation before deployment.
 
 ## 10. The closed local inference loop
 
-The training and serving tiers compose into a continuous loop on the DGX Spark:
+The training and serving tiers compose into a continuous loop on any target that
+can both train and serve the exported student:
 
 ```
 Train (remote) ──▶ GGUF export ──▶ deploy to Ollama ──▶ set as router Student
@@ -273,7 +287,8 @@ next training set.
 - [training/strategy-guide.md](training/strategy-guide.md) — concrete starting settings and strategy selection.
 - [training/agent-cli.md](training/agent-cli.md) — machine-readable CLI commands for agents setting up runs and analyzing replay artifacts.
 - [training/tmax-terminal-rl-recipe.md](training/tmax-terminal-rl-recipe.md) — TMax-style terminal RL path from environments to backend smoke and release gates.
-- [training/gx10-eval-checklist.md](training/gx10-eval-checklist.md) — GX10 backend-smoke and eval checklist.
+- [training/private-compute-eval-checklist.md](training/private-compute-eval-checklist.md) — private/cloud compute backend-smoke and eval checklist.
+- [training/gx10-environment-runbook.md](training/gx10-environment-runbook.md) — GX10/DGX Spark services, venv inventory, launch steps, and open dependency issues.
 - [training/world-models.md](training/world-models.md) — ECHO/RWML contracts, replay payloads, backend integration, and telemetry boundaries.
 - [training/metrics-runbook.md](training/metrics-runbook.md) — diagnose flat pass@k, zero reward variance, timeouts, and verifier failures.
 - [training-config-guide.md](training-config-guide.md) — exact hyperparameters, LoRA/QLoRA settings, and quick-start recipes.

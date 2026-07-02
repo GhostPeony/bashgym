@@ -28,7 +28,7 @@ export const BASE_MODEL_GROUPS: BaseModelGroup[] = [
       { value: 'google/gemma-4-E2B-it', label: 'Gemma 4 E2B (trains on a consumer GPU)' },
       { value: 'google/gemma-4-E4B-it', label: 'Gemma 4 E4B' },
       { value: 'google/gemma-4-26B-A4B-it', label: 'Gemma 4 26B MoE (4B active)' },
-      { value: 'google/gemma-4-31B-it', label: 'Gemma 4 31B Dense (DGX Spark)' },
+      { value: 'google/gemma-4-31B-it', label: 'Gemma 4 31B Dense (large GPU)' },
     ],
   },
   {
@@ -36,8 +36,8 @@ export const BASE_MODEL_GROUPS: BaseModelGroup[] = [
     models: [
       { value: 'Qwen/Qwen3.5-4B', label: 'Qwen3.5 4B (dense)' },
       { value: 'Qwen/Qwen3.5-9B', label: 'Qwen3.5 9B (dense)' },
-      { value: 'Qwen/Qwen3.5-27B', label: 'Qwen3.5 27B (dense, DGX Spark)' },
-      { value: 'Qwen/Qwen3.5-35B-A3B', label: 'Qwen3.5 35B-A3B (MoE, DGX Spark)' },
+      { value: 'Qwen/Qwen3.5-27B', label: 'Qwen3.5 27B (dense, large GPU)' },
+      { value: 'Qwen/Qwen3.5-35B-A3B', label: 'Qwen3.5 35B-A3B (MoE, large GPU)' },
     ],
   },
   {

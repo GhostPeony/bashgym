@@ -1,5 +1,5 @@
 """
-Device Registry — JSON-backed storage for SSH training devices.
+Device Registry — JSON-backed storage for private compute training devices.
 
 Devices are persisted to ~/.bashgym/devices.json. The registry is safe for
 concurrent async use via an asyncio.Lock.
@@ -57,7 +57,7 @@ def _get_devices_path() -> Path:
 
 @dataclass
 class Device:
-    """Represents a remote SSH training device."""
+    """Represents a private compute training device."""
 
     id: str
     name: str
@@ -82,7 +82,7 @@ class Device:
 
 
 class DeviceRegistry:
-    """JSON-backed registry for SSH training devices.
+    """JSON-backed registry for private compute training devices.
 
     All mutating methods acquire ``self._lock`` to prevent concurrent
     read-modify-write races in an async context.

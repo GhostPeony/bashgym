@@ -105,6 +105,12 @@ def summarize_training_metrics(metrics: list[dict[str, Any]]) -> dict[str, Any]:
     reward_margin = _summary(
         _series(metrics, "reward_margin", "chosen_reward_margin", "rewards/margins")
     )
+    session_distillation_loss = _summary(_series(metrics, "session_distillation_loss"))
+    session_distillation_kl = _summary(_series(metrics, "session_distillation_kl"))
+    session_distillation_ce = _summary(_series(metrics, "session_distillation_ce"))
+    session_distillation_masked_tokens = _summary(
+        _series(metrics, "session_distillation_masked_tokens")
+    )
     verifier_error_rate = _summary(_series(metrics, "verifier_error_rate", "verifierErrorRate"))
     tool_calls = _summary(_series(metrics, "tool_calls", "toolCalls", "command_count"))
     tokens_per_second = _summary(
@@ -145,6 +151,10 @@ def summarize_training_metrics(metrics: list[dict[str, Any]]) -> dict[str, Any]:
         "entropy": entropy,
         "preference_accuracy": preference_accuracy,
         "reward_margin": reward_margin,
+        "session_distillation_loss": session_distillation_loss,
+        "session_distillation_kl": session_distillation_kl,
+        "session_distillation_ce": session_distillation_ce,
+        "session_distillation_masked_tokens": session_distillation_masked_tokens,
         "verifier_error_rate": verifier_error_rate,
         "tool_calls": tool_calls,
         "tokens_per_second": tokens_per_second,
@@ -320,6 +330,18 @@ def build_training_analysis(
                 )
             )
 
+        session_masked_tokens_last = metric_summary["session_distillation_masked_tokens"]["last"]
+        if session_masked_tokens_last is not None and session_masked_tokens_last <= 0.0:
+            findings.append(
+                _finding(
+                    "blocker",
+                    "session_distillation_zero_masked_tokens",
+                    "Session Distillation metrics report zero masked target tokens.",
+                    evidence={"session_distillation_masked_tokens": session_masked_tokens_last},
+                    next_step="Rebuild records so target_text and target_span align before trusting masked KL/CE loss.",
+                )
+            )
+
         zero_std_last = metric_summary["frac_reward_zero_std"]["last"]
         if zero_std_last is not None and zero_std_last >= 0.5:
             findings.append(
@@ -421,7 +443,7 @@ def build_training_analysis(
                     },
                     next_step=(
                         "Fix the failed smoke-bundle checks, then regenerate "
-                        "`bashgym training smoke-bundle` before GX10 work."
+                        "`bashgym training smoke-bundle` before private compute work."
                     ),
                 )
             )
@@ -442,7 +464,7 @@ def build_training_analysis(
                     "smoke_bundle_needs_backend",
                     "Smoke bundle is shaped correctly, but no runnable backend launch plan is ready.",
                     evidence={"verdict": smoke_bundle_summary["verdict"]},
-                    next_step="Install/configure verl, SkyRL, or TMax/open-instruct on GX10, or provide a command template.",
+                    next_step="Install/configure verl, SkyRL, or TMax/open-instruct on the private compute target, or provide a command template.",
                 )
             )
 
@@ -534,9 +556,29 @@ def build_training_analysis(
     ]
     if replay_summary is not None:
         docs.append({"topic": "world-models", "path": "docs/training/world-models.md"})
+    if any(
+        metric_summary[key]["count"] > 0
+        for key in (
+            "session_distillation_loss",
+            "session_distillation_kl",
+            "session_distillation_ce",
+            "session_distillation_masked_tokens",
+        )
+    ):
+        docs.append(
+            {
+                "topic": "session-distillation",
+                "path": "docs/training/session-distillation.md",
+            }
+        )
     if smoke_bundle_summary["present"]:
         docs.append({"topic": "agent-cli", "path": "docs/training/agent-cli.md"})
-        docs.append({"topic": "gx10-checklist", "path": "docs/training/gx10-eval-checklist.md"})
+        docs.append(
+            {
+                "topic": "private-compute-checklist",
+                "path": "docs/training/private-compute-eval-checklist.md",
+            }
+        )
 
     level = _verdict_level(findings)
     return {

@@ -46,6 +46,7 @@ bashgym training docs --json
 bashgym training docs --topic overview --json
 bashgym training docs --topic capabilities --json
 bashgym training docs --topic methods-reference --json
+bashgym training docs --topic session-distillation --json
 bashgym training docs --topic external-review --json
 bashgym training docs --topic strategy --json
 bashgym training docs --topic metrics --json
@@ -62,7 +63,8 @@ read it without scraping files manually.
 bashgym training plan --strategy sft --json
 bashgym training plan --strategy dpo --hardware local_24gb --json
 bashgym training plan --strategy reward-model --json
-bashgym training plan --strategy grpo --hardware dgx --data terminal_envs --json
+bashgym training plan --strategy session-distillation --json
+bashgym training plan --strategy grpo --hardware private_compute --data terminal_envs --json
 bashgym training plan --strategy world-model --json
 ```
 
@@ -178,9 +180,10 @@ This creates local readiness artifacts for the DPPO plus ECHO/RWML backend hando
 - `dppo_launch_env.json` - exact env vars the external backend consumes.
 - `launch_dppo_smoke.sh` - only when an installed backend or command template is runnable.
 
-Use this before GX10 or DGX work. A `contract_ready=true` bundle means the replay
-and world-model payloads are shaped correctly. `backend_launch_ready=false` means
-the next step is backend installation/configuration, not more replay plumbing.
+Use this before private/cloud compute work. A `contract_ready=true` bundle means
+the replay and world-model payloads are shaped correctly.
+`backend_launch_ready=false` means the next step is backend
+installation/configuration, not more replay plumbing.
 
 ## Analyze a training run
 
@@ -236,7 +239,7 @@ The wrapper accepts `--host`, `--port`, `--reload`, `--workers`,
 10. Run `bashgym training analyze --run-id <run> --json` or pass explicit
    `--metrics`, `--replay`, `--smoke-bundle`, and `--release-evidence` paths.
 11. Read `tmax-terminal-rl-recipe.md` before a real terminal-RL run.
-12. Read `gx10-eval-checklist.md` before moving artifacts to GX10.
+12. Read `private-compute-eval-checklist.md` before moving artifacts to private/cloud compute.
 13. Read `metrics-runbook.md` when behavior does not improve.
 
 ## Exit-code expectations
@@ -255,5 +258,6 @@ The wrapper accepts `--host`, `--port`, `--reload`, `--workers`,
 - [world-models.md](world-models.md)
 - [metrics-runbook.md](metrics-runbook.md)
 - [tmax-terminal-rl-recipe.md](tmax-terminal-rl-recipe.md)
-- [gx10-eval-checklist.md](gx10-eval-checklist.md)
+- [session-distillation.md](session-distillation.md)
+- [private-compute-eval-checklist.md](private-compute-eval-checklist.md)
 - [glossary.md](glossary.md)

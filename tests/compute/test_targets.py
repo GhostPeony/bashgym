@@ -1,15 +1,22 @@
 from bashgym.compute import get_compute_target, launch_plan, preflight_compute_target
 
 
-def test_gx10_preflight_reports_missing_host_env(monkeypatch):
+def test_private_gpu_preflight_reports_missing_host_env(monkeypatch):
+    monkeypatch.delenv("BASHGYM_PRIVATE_GPU_HOST", raising=False)
     monkeypatch.delenv("BASHGYM_GX10_HOST", raising=False)
-    target = get_compute_target("gx10_ssh")
+    target = get_compute_target("private_gpu")
 
     report = preflight_compute_target(target)
 
     assert report["schema_version"] == "bashgym.compute_preflight.v1"
     assert report["level"] == "needs_setup"
-    assert any(check["code"] == "ssh_host_configured" for check in report["checks"])
+    assert any(check["code"] == "private_compute_target_configured" for check in report["checks"])
+
+
+def test_private_gpu_accepts_legacy_target_alias():
+    target = get_compute_target("gx10_ssh")
+
+    assert target.id == "private_gpu"
 
 
 def test_skypilot_launch_plan_generates_yaml_without_secrets():
@@ -32,6 +39,7 @@ def test_dstack_launch_plan_generates_task_yaml():
 
     assert plan["provider_config"]["filename"] == ".dstack.yml"
     assert "gpu: A10G:1" in plan["provider_config"]["content"]
-    assert "python scripts/train_model.py --config runs/demo/plan.json" in plan["provider_config"][
-        "content"
-    ]
+    assert (
+        "python scripts/train_model.py --config runs/demo/plan.json"
+        in plan["provider_config"]["content"]
+    )

@@ -19,7 +19,8 @@ For platform surfaces and release gates, read
 [capability-map.md](capability-map.md). For diagnosis, read
 [metrics-runbook.md](metrics-runbook.md). For terminal RL, read
 [tmax-terminal-rl-recipe.md](tmax-terminal-rl-recipe.md). For ECHO/RWML, read
-[world-models.md](world-models.md).
+[world-models.md](world-models.md). For targeted self-distillation from failed
+trace spans, read [session-distillation.md](session-distillation.md).
 
 ---
 
@@ -31,7 +32,7 @@ For platform surfaces and release gates, read
 | Ready with evidence | The method is usable, but only when the user supplies valid data, verifiers, or release evidence. |
 | Backend-dependent | BashGym has contracts, adapters, replay, or launch planning, but an installed external backend must still prove execution. |
 | Diagnostic | Useful for investigation, curriculum, or auxiliary training, but not enough to approve routing by itself. |
-| GX10-gated | Local contracts exist; the remaining proof requires a configured GX10/remote backend run. |
+| Compute-gated | Local contracts exist; the remaining proof requires a configured private/cloud backend run. |
 
 ---
 
@@ -45,6 +46,7 @@ Start with the least exotic method that can teach the missing behavior.
 | You have same-prompt better/worse examples. | DPO | It sharpens preferences after SFT without needing an executable reward. |
 | The student cannot solve tasks at all. | SFT or distillation | RL needs attempts worth scoring; all-zero pass@k is usually not ready for RL. |
 | Executable tasks sometimes pass and sometimes fail. | GRPO/RLVR | Reward groups have contrast, so verifier-backed RL can learn. |
+| Failed traces contain a local mistake and later recovery. | Session Distillation | It repairs the same target action under a hint without replacing the trajectory. |
 | You have multi-step terminal rollouts with logprobs. | DPPO replay/backend path | Replay and trust-region masks can hand terminal trajectories to an RL backend. |
 | You want terminal-dynamics diagnostics or curriculum mining. | ECHO/RWML | World-model signals can explain or mine failures, but remain diagnostic. |
 | A broad run forgets domains. | Cascade/domain-staged training | Per-domain stages can isolate regressions and later distill/merge. |
@@ -453,6 +455,75 @@ smaller routable model for narrow domains.
 
 ---
 
+## Session Distillation
+
+**What it optimizes:** a masked objective over the student's own target action
+tokens. BashGym inserts a short local hint before a failed span, scores the same
+tokens under original and hinted context, and trains the original context toward
+the hinted distribution while preserving hard-label CE.
+
+**BashGym role:** repair lane for trace-local mistakes. It sits between SFT/DPO
+and verifier-backed RL: narrower than whole-answer preference learning, but more
+behavioral than plain imitation.
+
+**Inputs and artifacts:**
+
+- Failed or recovery-rich coding traces.
+- `session_distillation_records.jsonl`.
+- Original context without hints.
+- Hinted context with `[Session Distillation Hint]`.
+- Exact target action text and `target_span_only` loss mask.
+- Reader confidence, verifier outcome, and source metadata.
+
+**BashGym capability:** Ready with evidence.
+
+- The factory can build and validate records from failed trace steps.
+- A heuristic reader creates auditable hints and skips clean traces.
+- Training API, schema, frontend config, Data Designer pipeline registration,
+  and trainer script generation include `session_distillation`.
+- RunCards require records, reader/mask metadata, masked-loss metrics, and
+  release evidence before promotion.
+
+**Key settings:**
+
+| Setting | Meaning | Starter |
+|---|---|---|
+| `session_distillation_alpha` | Weight on hinted-context KL versus hard-label CE. | `0.7` |
+| `session_distillation_temperature` | Softness for the hinted-context distribution. | `1.0` |
+| `session_distillation_min_confidence` | Minimum reader confidence for accepted records. | `0.6` |
+| `session_distillation_mask_policy` | Which tokens receive loss. | `target_span_only` |
+| `session_distillation_context_mode` | How hints enter the context. | `hint_injected` |
+| `session_distillation_reader` | Heuristic or model reader for hint generation. | `heuristic` |
+
+**Metrics to watch:**
+
+- `session_distillation_loss`
+- `session_distillation_kl`
+- `session_distillation_ce`
+- `session_distillation_masked_tokens`
+- Reader confidence distribution.
+- Heldout recovery-decision accuracy.
+- Tool-call validity and executable pass@k where environments exist.
+
+**Risks:**
+
+- Noisy hints can teach the wrong local correction.
+- Loss can fall without recovery behavior improving.
+- Overweighting the hinted distribution can weaken ordinary action quality.
+- Public trajectory datasets need source manifests and decontamination before
+  use; they are fixture/eval resources before they are training defaults.
+
+**Reviewer questions:**
+
+- Should a model reader replace or audit the heuristic reader after the first
+  local smoke?
+- What heldout recovery-decision threshold should promote a Session
+  Distillation run?
+- Should target spans include only command/tool tokens, or also brief
+  surrounding rationale when the model family emits explicit reasoning tags?
+
+---
+
 ## Cascade / Domain-Staged Training
 
 **What it optimizes:** staged capability acquisition across domains, followed by
@@ -513,7 +584,7 @@ and train-policy logprobs with trust-region masks.
 - Optional ECHO/RWML payload.
 - `backend_smoke_readiness.json`.
 
-**BashGym capability:** Backend-dependent and GX10-gated.
+**BashGym capability:** Backend-dependent and compute-gated.
 
 - Replay schema exists.
 - Replay summary exists.

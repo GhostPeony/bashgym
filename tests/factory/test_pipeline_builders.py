@@ -279,6 +279,11 @@ class TestPipelineRegistry:
         for name, builder_fn in PIPELINES.items():
             assert callable(builder_fn), f"Pipeline '{name}' is not callable"
 
+    def test_session_distillation_pipeline_is_registered(self):
+        from bashgym.factory.designer_pipelines import PIPELINES
+
+        assert "session_distillation_records" in PIPELINES
+
 
 # =========================================================================
 # register_pipeline decorator

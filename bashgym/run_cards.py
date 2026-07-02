@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from bashgym.factory.session_distillation import validate_session_distillation_records
 from bashgym.preferences import (
     REWARD_MODEL_EVAL_SCHEMA_VERSION,
     validate_preference_pairs_file,
@@ -27,6 +28,7 @@ REWARD_TRAINING_METHODS = {
     "process_reward",
     "process_reward_model",
 }
+SESSION_DISTILLATION_METHODS = {"session_distillation", "opsd", "opd", "targeted_opsd"}
 
 
 def _finding(
@@ -56,6 +58,13 @@ class RunCard:
     preference_pairs_path: str | None = None
     reward_examples_path: str | None = None
     reward_eval_path: str | None = None
+    session_distillation_records_path: str | None = None
+    session_distillation_metrics_path: str | None = None
+    session_distillation_reader_model: str | None = None
+    session_distillation_confidence_threshold: float | None = None
+    session_distillation_hint_policy: str | None = None
+    session_distillation_mask_policy: str | None = None
+    session_distillation_target_token_count: int | None = None
     dataset_card_path: str | None = None
     backend: str | None = None
     git_commit: str | None = None
@@ -96,6 +105,21 @@ class RunCard:
             if self.training_method.lower() in REWARD_TRAINING_METHODS:
                 required["reward_examples_path"] = self.reward_examples_path
                 required["reward_eval_path"] = self.reward_eval_path
+            if self.training_method.lower() in SESSION_DISTILLATION_METHODS:
+                required["session_distillation_records_path"] = (
+                    self.session_distillation_records_path
+                )
+                required["session_distillation_reader_model"] = (
+                    self.session_distillation_reader_model
+                )
+                required["session_distillation_confidence_threshold"] = (
+                    self.session_distillation_confidence_threshold
+                )
+                required["session_distillation_hint_policy"] = self.session_distillation_hint_policy
+                required["session_distillation_mask_policy"] = self.session_distillation_mask_policy
+                required["session_distillation_target_token_count"] = (
+                    self.session_distillation_target_token_count
+                )
         for field_name, value in required.items():
             if not value:
                 findings.append(
@@ -124,6 +148,43 @@ class RunCard:
                     field="claim_tier",
                 )
             )
+        if self.training_method.lower() in SESSION_DISTILLATION_METHODS:
+            if (
+                self.session_distillation_confidence_threshold is not None
+                and not 0 <= float(self.session_distillation_confidence_threshold) <= 1
+            ):
+                findings.append(
+                    _finding(
+                        "invalid_session_distillation_confidence_threshold",
+                        "fail",
+                        "session_distillation_confidence_threshold must be between 0 and 1",
+                        field="session_distillation_confidence_threshold",
+                    )
+                )
+            if (
+                self.session_distillation_mask_policy is not None
+                and self.session_distillation_mask_policy != "target_span_only"
+            ):
+                findings.append(
+                    _finding(
+                        "invalid_session_distillation_mask_policy",
+                        "fail",
+                        "Session Distillation promotion currently requires target_span_only masking",
+                        field="session_distillation_mask_policy",
+                    )
+                )
+            if (
+                self.session_distillation_target_token_count is not None
+                and self.session_distillation_target_token_count <= 0
+            ):
+                findings.append(
+                    _finding(
+                        "invalid_session_distillation_target_token_count",
+                        "fail",
+                        "session_distillation_target_token_count must be positive",
+                        field="session_distillation_target_token_count",
+                    )
+                )
         return findings
 
 
@@ -163,6 +224,13 @@ def create_run_card(
     preference_pairs_path: str | None = None,
     reward_examples_path: str | None = None,
     reward_eval_path: str | None = None,
+    session_distillation_records_path: str | None = None,
+    session_distillation_metrics_path: str | None = None,
+    session_distillation_reader_model: str | None = None,
+    session_distillation_confidence_threshold: float | None = None,
+    session_distillation_hint_policy: str | None = None,
+    session_distillation_mask_policy: str | None = None,
+    session_distillation_target_token_count: int | None = None,
     dataset_card_path: str | None = None,
     backend: str | None = None,
     metrics_path: str | None = None,
@@ -185,6 +253,13 @@ def create_run_card(
         preference_pairs_path=preference_pairs_path,
         reward_examples_path=reward_examples_path,
         reward_eval_path=reward_eval_path,
+        session_distillation_records_path=session_distillation_records_path,
+        session_distillation_metrics_path=session_distillation_metrics_path,
+        session_distillation_reader_model=session_distillation_reader_model,
+        session_distillation_confidence_threshold=session_distillation_confidence_threshold,
+        session_distillation_hint_policy=session_distillation_hint_policy,
+        session_distillation_mask_policy=session_distillation_mask_policy,
+        session_distillation_target_token_count=session_distillation_target_token_count,
         dataset_card_path=dataset_card_path,
         backend=backend,
         git_commit=current_git_commit() if include_git else None,
@@ -224,6 +299,8 @@ def attach_run_card_evidence(
     preference_pairs_path: str | None = None,
     reward_examples_path: str | None = None,
     reward_eval_path: str | None = None,
+    session_distillation_records_path: str | None = None,
+    session_distillation_metrics_path: str | None = None,
     smoke_bundle_path: str | None = None,
     claim_tier: str | None = None,
     output_path: str | Path | None = None,
@@ -239,6 +316,10 @@ def attach_run_card_evidence(
         card.reward_examples_path = reward_examples_path
     if reward_eval_path:
         card.reward_eval_path = reward_eval_path
+    if session_distillation_records_path:
+        card.session_distillation_records_path = session_distillation_records_path
+    if session_distillation_metrics_path:
+        card.session_distillation_metrics_path = session_distillation_metrics_path
     if smoke_bundle_path:
         card.smoke_bundle_path = smoke_bundle_path
     if claim_tier:
@@ -700,9 +781,102 @@ def _validate_reward_eval(
     return findings
 
 
+def _read_jsonl_artifact(path: Path) -> tuple[list[dict[str, Any]] | None, str | None]:
+    records: list[dict[str, Any]] = []
+    try:
+        for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            if not line.strip():
+                continue
+            payload = json.loads(line)
+            if not isinstance(payload, dict):
+                return None, f"line {line_number}: expected a JSON object"
+            records.append(payload)
+    except OSError as exc:
+        return None, str(exc)
+    except json.JSONDecodeError as exc:
+        return None, f"invalid JSONL: {exc}"
+    return records, None
+
+
+def _validate_session_distillation_records_file(
+    path: Path,
+    *,
+    raw_path: str,
+) -> list[dict[str, str]]:
+    records, error = _read_jsonl_artifact(path)
+    if error or records is None:
+        return [
+            _finding(
+                "invalid_session_distillation_records_artifact",
+                "fail",
+                f"session distillation records could not be read: {error}",
+                field="session_distillation_records_path",
+                path=raw_path,
+            )
+        ]
+    if not records:
+        return [
+            _finding(
+                "session_distillation_records_empty",
+                "fail",
+                "session_distillation_records.jsonl must contain at least one record",
+                field="session_distillation_records_path",
+                path=raw_path,
+            )
+        ]
+
+    findings: list[dict[str, str]] = []
+    for error in validate_session_distillation_records(records):
+        findings.append(
+            _finding(
+                "session_distillation_record_invalid",
+                "fail",
+                error,
+                field="session_distillation_records_path",
+                path=raw_path,
+            )
+        )
+    return findings
+
+
+def _validate_session_distillation_metrics(
+    path: Path,
+    *,
+    raw_path: str,
+) -> list[dict[str, str]]:
+    records, error = _read_jsonl_artifact(path)
+    if error or records is None:
+        return [
+            _finding(
+                "invalid_session_distillation_metrics",
+                "fail",
+                f"session distillation metrics could not be read: {error}",
+                field="metrics_path",
+                path=raw_path,
+            )
+        ]
+    has_loss = any(
+        "session_distillation_loss" in record and "session_distillation_masked_tokens" in record
+        for record in records
+    )
+    if not has_loss:
+        return [
+            _finding(
+                "session_distillation_metrics_missing_masked_loss",
+                "fail",
+                "metrics must include session_distillation_loss and session_distillation_masked_tokens",
+                field="metrics_path",
+                path=raw_path,
+            )
+        ]
+    return []
+
+
 def _promotion_gate_for_finding(finding: dict[str, str]) -> str:
     code = finding.get("code", "")
     field = finding.get("field", "")
+    if code.startswith("session_distillation_") or field.startswith("session_distillation_"):
+        return "Session Distillation evidence"
     if code.startswith("preference_pairs_") or field == "preference_pairs_path":
         return "DPO preference-pair evidence"
     if code.startswith("reward_examples_") or field == "reward_examples_path":
@@ -728,6 +902,10 @@ def _promotion_gate_for_finding(finding: dict[str, str]) -> str:
 
 def _promotion_next_action(gate: str) -> str:
     actions = {
+        "Session Distillation evidence": (
+            "Attach valid session_distillation_records.jsonl, reader/mask metadata, "
+            "masked-loss metrics, and heldout release evidence before promotion."
+        ),
         "DPO preference-pair evidence": (
             "Attach strict DPO preference pairs with prompt hashes, chosen/rejected trace ids, "
             "quality scores, split, and decontamination metadata."
@@ -854,6 +1032,10 @@ def validate_run_card_file(
             required_artifacts = (*required_artifacts, "preference_pairs_path")
         if card.training_method.lower() in REWARD_TRAINING_METHODS:
             required_artifacts = (*required_artifacts, "reward_examples_path", "reward_eval_path")
+        if card.training_method.lower() in SESSION_DISTILLATION_METHODS:
+            required_artifacts = (*required_artifacts, "session_distillation_records_path")
+            if card.session_distillation_metrics_path:
+                required_artifacts = (*required_artifacts, "session_distillation_metrics_path")
         optional_artifacts = ("dataset_card_path", "smoke_bundle_path")
         for field_name in (*required_artifacts, *optional_artifacts):
             raw_path = getattr(card, field_name)
@@ -890,6 +1072,18 @@ def validate_run_card_file(
                         field=field_name,
                         path=raw_path,
                     )
+                )
+            if (
+                field_name == "metrics_path"
+                and card.training_method.lower() in SESSION_DISTILLATION_METHODS
+                and not card.session_distillation_metrics_path
+            ):
+                findings.extend(_validate_session_distillation_metrics(resolved, raw_path=raw_path))
+            if field_name == "session_distillation_metrics_path":
+                findings.extend(_validate_session_distillation_metrics(resolved, raw_path=raw_path))
+            if field_name == "session_distillation_records_path":
+                findings.extend(
+                    _validate_session_distillation_records_file(resolved, raw_path=raw_path)
                 )
             if field_name == "source_manifest_path":
                 payload, error = _read_json_artifact(resolved)

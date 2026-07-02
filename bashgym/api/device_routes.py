@@ -131,8 +131,8 @@ async def preflight_device(device_id: str):
             remote_work_dir=device.work_dir,
         )
         trainer = RemoteTrainer(ssh_config)
-        # Unsloth is a soft requirement: plain-transformers backends (sm_121/GB10,
-        # e.g. ponyo) cannot load Unsloth, so a missing Unsloth is recorded as a
+        # Unsloth is a soft requirement: some plain-transformers private targets
+        # cannot load Unsloth, so a missing Unsloth is recorded as a
         # capability/warning rather than failing the whole preflight.
         result = await trainer.preflight_check(require_unsloth=False)
     except Exception as exc:

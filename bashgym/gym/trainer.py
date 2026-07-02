@@ -9,11 +9,13 @@ Module 4: Training (The "Gym")
 
 import asyncio
 import copy
+import json
 import logging
 import os
 import re
 import subprocess
 import sys
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -56,6 +58,212 @@ except ImportError:
     NeMoClientConfig = None
 
 logger = logging.getLogger(__name__)
+
+
+_SESSION_DISTILLATION_METRIC_KEYS = (
+    "session_distillation_loss",
+    "session_distillation_kl",
+    "session_distillation_ce",
+    "session_distillation_masked_tokens",
+)
+
+
+_BASHGYM_METRICS_MARKER = "[bashgym-metrics]"
+_BASHGYM_METRICS_KEYS = ("tokens_per_second", "gpu_memory_gb", "gpu_utilization")
+
+# Source of a transformers TrainerCallback injected into generated training
+# scripts. On each logging step it emits a parseable "[bashgym-metrics]" line
+# with live tokens/sec (from state.num_input_tokens_seen deltas), peak VRAM
+# (torch.cuda), and GPU utilization (nvidia-ml-py / pynvml). Every device read
+# is guarded so CPU smokes and unified-memory GB10 (where NVML is unsupported)
+# degrade to omitting that metric instead of crashing. Requires `torch` already
+# imported in the host script. Braces are single — this is interpolated as a
+# value into the generated f-string, not parsed as f-string syntax.
+_THROUGHPUT_CALLBACK_SRC = '''
+import time as _bg_time
+import json as _bg_json
+from transformers import TrainerCallback as _BGTrainerCallback
+
+try:
+    import pynvml as _bg_pynvml  # pip install nvidia-ml-py (import name: pynvml)
+
+    _bg_pynvml.nvmlInit()
+    _BG_NVML = _bg_pynvml.nvmlDeviceGetHandleByIndex(
+        torch.cuda.current_device() if torch.cuda.is_available() else 0
+    )
+except Exception:
+    _bg_pynvml = None
+    _BG_NVML = None
+
+
+class BashGymThroughputCallback(_BGTrainerCallback):
+    """Emit per-step tokens/sec, VRAM, and GPU utilization for the dashboard."""
+
+    def on_train_begin(self, args, state, control, **kwargs):
+        self._bg_t = _bg_time.perf_counter()
+        self._bg_tok = 0
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        if not logs or "loss" not in logs:
+            return
+        now = _bg_time.perf_counter()
+        dt = max(now - getattr(self, "_bg_t", now), 1e-6)
+        tok = int(getattr(state, "num_input_tokens_seen", 0) or 0)
+        payload = {"step": int(state.global_step)}
+        if tok > getattr(self, "_bg_tok", 0):
+            payload["tokens_per_second"] = round((tok - self._bg_tok) / dt, 1)
+        self._bg_t, self._bg_tok = now, tok
+        if torch.cuda.is_available():
+            payload["gpu_memory_gb"] = round(torch.cuda.max_memory_allocated() / 1e9, 3)
+            torch.cuda.reset_peak_memory_stats()
+        if _BG_NVML is not None:
+            try:
+                payload["gpu_utilization"] = float(
+                    _bg_pynvml.nvmlDeviceGetUtilizationRates(_BG_NVML).gpu
+                )
+            except Exception:
+                pass
+        print("[bashgym-metrics] " + _bg_json.dumps(payload), flush=True)
+'''
+
+
+def _parse_bashgym_metrics_line(line: str) -> dict[str, float]:
+    """Extract live throughput/GPU metrics from a ``[bashgym-metrics]`` line.
+
+    The generated training scripts emit a marker line with a JSON object of
+    per-step resource metrics (tokens/sec, VRAM, GPU utilization). Parsing a
+    dedicated marker line is more robust than regex-scraping HF's log dicts.
+    """
+
+    idx = line.find(_BASHGYM_METRICS_MARKER)
+    if idx == -1:
+        return {}
+    payload = line[idx + len(_BASHGYM_METRICS_MARKER) :].strip()
+    try:
+        # raw_decode parses the leading JSON object and ignores any trailing text.
+        data, _ = json.JSONDecoder().raw_decode(payload)
+    except (json.JSONDecodeError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    metrics: dict[str, float] = {}
+    for key in _BASHGYM_METRICS_KEYS:
+        value = data.get(key)
+        if isinstance(value, (int, float)):
+            metrics[key] = value
+    return metrics
+
+
+class _ProgressLineParser:
+    """Parse a training stdout line into a structured progress payload.
+
+    Holds running state across lines (last loss/step/grad-norm, ETA baseline,
+    accumulated resource/session-distillation metrics). Shared by the local
+    subprocess loop and the remote SSH log stream so both feed the same
+    ``training:progress`` broadcast and metrics.jsonl. ``feed`` returns a payload
+    dict when a line carried a metric, else ``None``; ``had_loss`` reports whether
+    the most recent line matched a loss value (so callers add loss-curve points
+    only on loss lines, matching the original behavior).
+    """
+
+    def __init__(self, *, batch_size: int, num_epochs: int, learning_rate: float):
+        self.batch_size = batch_size
+        self.num_epochs = num_epochs
+        self.learning_rate = learning_rate
+        self.last_loss: float | None = None
+        self.last_epoch = 0
+        self.last_step = 0
+        self.last_grad_norm: float | None = None
+        self.samples_processed = 0
+        self.estimated_total_steps = 1000
+        self.extra: dict[str, float] = {}
+        self.had_loss = False
+        self._start: float | None = None
+
+    def _eta(self, now: float) -> str | None:
+        if self.last_step <= 0 or self.estimated_total_steps <= 0 or self._start is None:
+            return None
+        steps_remaining = self.estimated_total_steps - self.last_step
+        if steps_remaining <= 0:
+            return None
+        eta_seconds = steps_remaining * ((now - self._start) / self.last_step)
+        if eta_seconds < 60:
+            return f"{int(eta_seconds)}s"
+        if eta_seconds < 3600:
+            return f"{int(eta_seconds / 60)}m"
+        return f"{int(eta_seconds / 3600)}h {int((eta_seconds % 3600) / 60)}m"
+
+    def feed(self, line: str, *, now: float | None = None) -> dict[str, Any] | None:
+        now = time.monotonic() if now is None else now
+        if self._start is None:
+            self._start = now
+
+        loss_match = re.search(r"'loss':\s*([\d.]+)", line)
+        epoch_match = re.search(r"'epoch':\s*([\d.]+)", line)
+        step_match = re.search(r"'step':\s*(\d+)", line)
+        grad_norm_match = re.search(r"'grad_norm':\s*([\d.]+)", line)
+        progress_match = re.search(r"(\d+)%\|[^|]*\|\s*(\d+)/(\d+)", line)
+        unsloth_steps_match = re.search(r"Total steps\s*=\s*(\d+)", line)
+
+        self.had_loss = bool(loss_match)
+        if loss_match:
+            self.last_loss = float(loss_match.group(1))
+        if epoch_match:
+            self.last_epoch = int(float(epoch_match.group(1)))
+        if step_match:
+            self.last_step = int(step_match.group(1))
+            self.samples_processed = self.last_step * self.batch_size
+        if grad_norm_match:
+            self.last_grad_norm = float(grad_norm_match.group(1))
+        sd_metrics = _parse_session_distillation_metrics(line)
+        if sd_metrics:
+            self.extra.update(sd_metrics)
+        resource_metrics = _parse_bashgym_metrics_line(line)
+        if resource_metrics:
+            self.extra.update(resource_metrics)
+        if unsloth_steps_match:
+            self.estimated_total_steps = int(unsloth_steps_match.group(1))
+        if progress_match:
+            self.last_step = int(progress_match.group(2))
+            self.estimated_total_steps = int(progress_match.group(3))
+            self.samples_processed = self.last_step * self.batch_size
+
+        if not (progress_match or loss_match or sd_metrics or resource_metrics):
+            return None
+
+        return {
+            "epoch": self.last_epoch,
+            "total_epochs": self.num_epochs,
+            "step": self.last_step,
+            "total_steps": self.estimated_total_steps,
+            "loss": self.last_loss,
+            "learning_rate": self.learning_rate,
+            "grad_norm": self.last_grad_norm,
+            "eta": self._eta(now),
+            "samples_processed": self.samples_processed,
+            **self.extra,
+        }
+
+
+def _parse_session_distillation_metrics(line: str) -> dict[str, float]:
+    """Extract Session Distillation metrics from a stdout log line.
+
+    The generated trainer logs ``session_distillation_loss/kl/ce/masked_tokens``
+    via ``self.log(...)``. Parsing them here lets the per-step metrics reach the
+    callback (and metrics.jsonl), so run-analysis safety gates such as the
+    zero-masked-tokens check see real data instead of never firing.
+    """
+
+    metrics: dict[str, float] = {}
+    for key in _SESSION_DISTILLATION_METRIC_KEYS:
+        match = re.search(rf"'{key}':\s*([\d.eE+-]+)", line)
+        if not match:
+            continue
+        raw = match.group(1)
+        metrics[key] = int(raw) if key.endswith("masked_tokens") else float(raw)
+    return metrics
 
 
 def _parse_trl_stats(text: str) -> dict[str, float] | None:
@@ -133,6 +341,7 @@ class TrainingStrategy(Enum):
     GRPO = "grpo"  # Group Relative Policy Optimization
     RLVR = "rlvr"  # RL with Verifiable Rewards
     DISTILLATION = "distillation"  # Knowledge Distillation from larger model
+    SESSION_DISTILLATION = "session_distillation"  # Hint-injected self-distillation
 
 
 @dataclass
@@ -231,6 +440,12 @@ class TrainerConfig:
     teacher_temperature: float = 0.7
     distillation_alpha: float = 0.5  # Balance between hard and soft labels
     on_policy_distillation: bool = False  # Use on-policy distillation (Oct 2025+)
+    session_distillation_alpha: float = 0.7
+    session_distillation_temperature: float = 1.0
+    session_distillation_min_confidence: float = 0.6
+    session_distillation_mask_policy: str = "target_span_only"
+    session_distillation_context_mode: str = "hint_injected"
+    session_distillation_reader: str = "heuristic"
 
     # Output settings
     output_dir: str = "data/models"
@@ -267,7 +482,7 @@ class TrainerConfig:
     nemo_gym_endpoint: str = "http://localhost:8080"
     nemo_api_key: str | None = None
 
-    # Remote SSH settings (DGX Spark)
+    # Private compute target settings
     use_remote_ssh: bool = False
 
     # Cascade RL settings
@@ -289,6 +504,7 @@ class TrainerConfig:
             raise ValueError("dppo_divergence must be binary_tv or binary_kl")
         if self.dppo_binary_tv_threshold < 0 or self.dppo_binary_kl_threshold < 0:
             raise ValueError("DPPO thresholds must be non-negative")
+        self._validate_session_distillation_settings()
         self._validate_world_model_settings()
         if self.training_profile != TERMINAL_RL_TMAX_LIKE_PROFILE:
             if self.grpo_group_size is None:
@@ -372,6 +588,34 @@ class TrainerConfig:
             raise ValueError("rwml_easy_keep_probability must be a probability in [0, 1]")
         if self.rwml_history_window < 0:
             raise ValueError("rwml_history_window must be non-negative")
+
+    def _validate_session_distillation_settings(self) -> None:
+        """Validate Session Distillation objective knobs."""
+
+        if not 0 <= self.session_distillation_alpha <= 1:
+            raise ValueError("session_distillation_alpha must be between 0 and 1")
+        if self.session_distillation_temperature <= 0:
+            raise ValueError("session_distillation_temperature must be positive")
+        if not 0 <= self.session_distillation_min_confidence <= 1:
+            raise ValueError("session_distillation_min_confidence must be between 0 and 1")
+        if self.session_distillation_mask_policy != "target_span_only":
+            raise ValueError("session_distillation_mask_policy must be target_span_only")
+        if self.session_distillation_context_mode != "hint_injected":
+            raise ValueError("session_distillation_context_mode must be hint_injected")
+        if self.session_distillation_reader not in {"heuristic", "model"}:
+            raise ValueError("session_distillation_reader must be heuristic or model")
+
+    def session_distillation_settings(self) -> dict[str, Any]:
+        """Resolved Session Distillation knobs for metadata and scripts."""
+
+        return {
+            "session_distillation_alpha": self.session_distillation_alpha,
+            "session_distillation_temperature": self.session_distillation_temperature,
+            "session_distillation_min_confidence": self.session_distillation_min_confidence,
+            "session_distillation_mask_policy": self.session_distillation_mask_policy,
+            "session_distillation_context_mode": self.session_distillation_context_mode,
+            "session_distillation_reader": self.session_distillation_reader,
+        }
 
     def world_model_settings(self) -> dict[str, Any]:
         """Resolved ECHO + RWML world-model objective knobs for scripts/logs/tests."""
@@ -597,6 +841,8 @@ class Trainer:
                     "stage": self.config.cascade_stage,
                     "cascade_run_id": self.config.cascade_run_id,
                 }
+            if run.strategy == TrainingStrategy.SESSION_DISTILLATION:
+                config_dict["session_distillation"] = self.config.session_distillation_settings()
 
             # Extract enrichment data from training_metadata
             meta = run.training_metadata or {}
@@ -689,6 +935,13 @@ class Trainer:
         """
         import platform
 
+        override = os.getenv("BASHGYM_TRAINING_PYTHON")
+        if override:
+            override_path = Path(override).expanduser()
+            if override_path.exists():
+                return str(override_path)
+            logger.warning("BASHGYM_TRAINING_PYTHON points to a missing executable: %s", override)
+
         if platform.system() == "Windows":
             # Prefer Python 3.12 with CUDA support on Windows
             py312_paths = [
@@ -702,6 +955,16 @@ class Trainer:
 
         # Fallback to current Python
         return sys.executable
+
+    def _training_subprocess_env(self) -> dict[str, str]:
+        """Return a sanitized environment for generated training scripts."""
+
+        env = os.environ.copy()
+        for key in ("HF_HOME", "HF_HUB_CACHE", "HF_DATASETS_CACHE", "TRANSFORMERS_CACHE"):
+            value = env.get(key)
+            if value and len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+                env[key] = value[1:-1]
+        return env
 
     def _require_base_model(self) -> None:
         """Fail fast when no base model is set.
@@ -1056,7 +1319,7 @@ class Trainer:
         script_content = self._generate_sft_script(run)
         script_path = run.output_path / "train_sft.py"
         run.output_path.mkdir(parents=True, exist_ok=True)
-        script_path.write_text(script_content)
+        script_path.write_text(script_content, encoding="utf-8")
 
         # Execute training
         python_exe = self._get_training_python()
@@ -1285,6 +1548,7 @@ class Trainer:
         dataset_path = str(run.dataset_path).replace("\\", "/")
         output_path = str(run.output_path).replace("\\", "/")
         val_path = str(run.val_dataset_path).replace("\\", "/") if run.val_dataset_path else ""
+        throughput_callback_src = _THROUGHPUT_CALLBACK_SRC
 
         return f'''#!/usr/bin/env python3
 """
@@ -1337,6 +1601,7 @@ def _sanitize_messages(messages):
         out.append(m)
     return out
 
+{throughput_callback_src}
 
 if __name__ == "__main__":
     MODEL_NAME = "{self.config.base_model}"
@@ -1409,9 +1674,10 @@ if __name__ == "__main__":
         load_best_model_at_end=True if val_dataset is not None else False,
         metric_for_best_model="eval_loss" if val_dataset is not None else None,
         greater_is_better=False if val_dataset is not None else None,
+        include_num_input_tokens_seen=True,
     )
 
-    callbacks = []
+    callbacks = [BashGymThroughputCallback()]
     if val_dataset is not None and {self.config.early_stopping_patience} > 0:
         callbacks.append(
             EarlyStoppingCallback(early_stopping_patience={self.config.early_stopping_patience})
@@ -1913,7 +2179,7 @@ if __name__ == "__main__":
         script_content = self._generate_dpo_script(run)
         script_path = run.output_path / "train_dpo.py"
         run.output_path.mkdir(parents=True, exist_ok=True)
-        script_path.write_text(script_content)
+        script_path.write_text(script_content, encoding="utf-8")
 
         python_exe = self._get_training_python()
         logger.info(f"Starting DPO training run: {run.run_id}")
@@ -2158,6 +2424,54 @@ if __name__ == "__main__":
 
         return run
 
+    def train_session_distillation(
+        self,
+        dataset_path: Path,
+        run_id: str | None = None,
+        callback: Callable[[dict[str, Any]], None] | None = None,
+        log_callback: Callable[[str], None] | None = None,
+        pid_callback: Callable[[int, "TrainingRun"], None] | None = None,
+        training_metadata: dict[str, Any] | None = None,
+    ) -> TrainingRun:
+        """Run Session Distillation over hint-injected self-distillation records."""
+
+        self._require_base_model()
+        run_id = run_id or self._generate_run_id()
+        output_path = Path(self.config.output_dir) / run_id
+
+        run = TrainingRun(
+            run_id=run_id,
+            strategy=TrainingStrategy.SESSION_DISTILLATION,
+            base_model=self.config.base_model,
+            dataset_path=Path(dataset_path),
+            output_path=output_path,
+            status="running",
+            started_at=datetime.now(timezone.utc).isoformat(),
+        )
+        self.active_runs[run_id] = run
+        run.training_metadata = dict(training_metadata or {})
+        run.training_metadata["session_distillation"] = self.config.session_distillation_settings()
+
+        try:
+            if self.config.use_remote_ssh:
+                self._train_with_remote_ssh(run, callback, log_callback, pid_callback)
+            else:
+                self._train_with_distillation(run, callback, log_callback, pid_callback)
+            run.status = "completed"
+            run.completed_at = datetime.now(timezone.utc).isoformat()
+            self._save_model_profile(run)
+
+            if self.config.auto_export_gguf:
+                print(f"Auto-exporting to GGUF ({self.config.gguf_quantization})...")
+                self.export_model(run_id, "gguf", self.config.gguf_quantization)
+
+        except Exception as e:
+            run.status = "failed"
+            run.error_message = str(e)
+            run.completed_at = datetime.now(timezone.utc).isoformat()
+
+        return run
+
     def _train_with_distillation(
         self,
         run: TrainingRun,
@@ -2166,16 +2480,24 @@ if __name__ == "__main__":
         pid_callback: Callable[[int, "TrainingRun"], None] | None = None,
     ) -> None:
         """Train using knowledge distillation (offline — teacher traces as training data)."""
-        import re
-
-        script_content = self._generate_distillation_script(run)
-        script_path = run.output_path / "train_distillation.py"
+        is_session_distillation = run.strategy == TrainingStrategy.SESSION_DISTILLATION
+        if is_session_distillation:
+            script_content = self._generate_session_distillation_script(run)
+            script_path = run.output_path / "train_session_distillation.py"
+            display_name = "Session Distillation"
+            log_prefix = "SessionDistillation"
+        else:
+            script_content = self._generate_distillation_script(run)
+            script_path = run.output_path / "train_distillation.py"
+            display_name = "Distillation"
+            log_prefix = "Distillation"
         run.output_path.mkdir(parents=True, exist_ok=True)
-        script_path.write_text(script_content)
+        script_path.write_text(script_content, encoding="utf-8")
 
         python_exe = self._get_training_python()
-        logger.info(f"Starting Distillation run: {run.run_id}")
-        logger.info(f"Teacher: {self.config.teacher_model}")
+        logger.info(f"Starting {display_name} run: {run.run_id}")
+        if not is_session_distillation:
+            logger.info(f"Teacher: {self.config.teacher_model}")
         logger.info(f"Student: {self.config.base_model}")
         logger.info(f"Dataset: {run.dataset_path}")
         logger.info(f"Output: {run.output_path}")
@@ -2190,10 +2512,11 @@ if __name__ == "__main__":
                 text=True,
                 bufsize=1,
                 cwd=str(Path.cwd()),
+                env=self._training_subprocess_env(),
             )
 
             run.pid = process.pid
-            logger.info(f"Distillation subprocess started with PID {process.pid}")
+            logger.info(f"{display_name} subprocess started with PID {process.pid}")
 
             if pid_callback:
                 try:
@@ -2201,18 +2524,16 @@ if __name__ == "__main__":
                 except Exception as e:
                     logger.warning(f"pid_callback error: {e}")
 
-            last_loss = None
-            last_epoch = 0
-            last_step = 0
-            last_grad_norm = None
-            samples_processed = 0
-            start_time = datetime.now(timezone.utc)
-            estimated_total_steps = 1000
+            parser = _ProgressLineParser(
+                batch_size=self.config.batch_size,
+                num_epochs=self.config.num_epochs,
+                learning_rate=self.config.learning_rate,
+            )
 
             for line in process.stdout:
                 line = line.strip()
                 if line:
-                    logger.info(f"[Distillation] {line}")
+                    logger.info(f"[{log_prefix}] {line}")
 
                     if log_callback:
                         try:
@@ -2220,86 +2541,45 @@ if __name__ == "__main__":
                         except Exception as e:
                             logger.warning(f"Log callback error: {e}")
 
-                    loss_match = re.search(r"'loss':\s*([\d.]+)", line)
-                    epoch_match = re.search(r"'epoch':\s*([\d.]+)", line)
-                    step_match = re.search(r"'step':\s*(\d+)", line)
-                    grad_norm_match = re.search(r"'grad_norm':\s*([\d.]+)", line)
-                    progress_match = re.search(r"(\d+)%\|[^|]*\|\s*(\d+)/(\d+)", line)
-                    unsloth_steps_match = re.search(r"Total steps\s*=\s*(\d+)", line)
-
-                    if loss_match:
-                        last_loss = float(loss_match.group(1))
-                    if epoch_match:
-                        last_epoch = int(float(epoch_match.group(1)))
-                    if step_match:
-                        last_step = int(step_match.group(1))
-                        samples_processed = last_step * self.config.batch_size
-                    if grad_norm_match:
-                        last_grad_norm = float(grad_norm_match.group(1))
-                    if unsloth_steps_match:
-                        estimated_total_steps = int(unsloth_steps_match.group(1))
-                    if progress_match:
-                        last_step = int(progress_match.group(2))
-                        estimated_total_steps = int(progress_match.group(3))
-                        samples_processed = last_step * self.config.batch_size
-
-                    eta = None
-                    if last_step > 0 and estimated_total_steps > 0:
-                        elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
-                        steps_remaining = estimated_total_steps - last_step
-                        if steps_remaining > 0:
-                            time_per_step = elapsed / last_step
-                            eta_seconds = steps_remaining * time_per_step
-                            if eta_seconds < 60:
-                                eta = f"{int(eta_seconds)}s"
-                            elif eta_seconds < 3600:
-                                eta = f"{int(eta_seconds / 60)}m"
-                            else:
-                                eta = (
-                                    f"{int(eta_seconds / 3600)}h {int((eta_seconds % 3600) / 60)}m"
-                                )
-
-                    if callback and (progress_match or loss_match):
-                        callback(
-                            {
-                                "epoch": last_epoch,
-                                "total_epochs": self.config.num_epochs,
-                                "step": last_step,
-                                "total_steps": estimated_total_steps,
-                                "loss": last_loss,
-                                "learning_rate": self.config.learning_rate,
-                                "grad_norm": last_grad_norm,
-                                "eta": eta,
-                                "samples_processed": samples_processed,
-                            }
-                        )
-
-                    if loss_match and last_loss is not None and last_step > 0:
-                        run.add_loss_point(
-                            step=last_step,
-                            loss=last_loss,
-                            epoch=last_epoch,
-                            learning_rate=self.config.learning_rate,
-                        )
+                    payload = parser.feed(line)
+                    if payload is not None:
+                        if callback:
+                            callback(payload)
+                        if (
+                            parser.had_loss
+                            and parser.last_loss is not None
+                            and parser.last_step > 0
+                        ):
+                            run.add_loss_point(
+                                step=parser.last_step,
+                                loss=parser.last_loss,
+                                epoch=parser.last_epoch,
+                                learning_rate=self.config.learning_rate,
+                            )
 
             return_code = process.wait()
 
             if return_code != 0:
-                raise RuntimeError(f"Distillation script exited with code {return_code}")
+                raise RuntimeError(f"{display_name} script exited with code {return_code}")
 
             run.metrics = {
-                "final_loss": last_loss or 0.0,
+                "final_loss": parser.last_loss or 0.0,
                 "epochs_completed": self.config.num_epochs,
-                "samples_processed": samples_processed,
-                "teacher_model": self.config.teacher_model,
+                "samples_processed": parser.samples_processed,
+                "strategy": run.strategy.value,
             }
+            if is_session_distillation:
+                run.metrics.update(self.config.session_distillation_settings())
+                run.metrics.update(parser.extra)
+            else:
+                run.metrics["teacher_model"] = self.config.teacher_model
 
-            logger.info(f"Distillation completed. Model saved to: {run.output_path}")
+            logger.info(f"{display_name} completed. Model saved to: {run.output_path}")
 
         except FileNotFoundError as e:
             raise RuntimeError(f"Python interpreter not found: {e}")
         except Exception as e:
-            logger.error(f"Distillation training failed: {e}")
+            logger.error(f"{display_name} training failed: {e}")
             raise
 
     def train_rlvr(
@@ -2468,6 +2748,276 @@ if {self.config.auto_export_gguf}:
 
 print("Knowledge distillation complete!")
 print(f"Student model saved to: {output_path}/final")
+'''
+
+    def _generate_session_distillation_script(self, run: TrainingRun, remote: bool = False) -> str:
+        """Generate Session Distillation training script with masked hinted-context KL.
+
+        When ``remote`` is True the dataset and output are emitted as
+        remote-relative names (the dataset is uploaded next to the script and the
+        model is written under the remote working directory), so the script runs
+        on a Linux compute target without local absolute paths baked in.
+        """
+
+        import json
+
+        model_name = str(self.config.base_model).replace("\\", "/")
+        if not model_name or not re.fullmatch(r"[A-Za-z0-9_./:@ -]+", model_name):
+            raise ValueError(
+                f"Unsafe base_model for script generation: {self.config.base_model!r}. "
+                "Model references may contain only letters, digits, and _./:@- characters."
+            )
+        model_literal = json.dumps(model_name)
+        if remote:
+            dataset_literal = json.dumps(Path(str(run.dataset_path)).name)
+            output_literal = json.dumps(".")
+        else:
+            dataset_literal = json.dumps(str(run.dataset_path).replace("\\", "/"))
+            output_literal = json.dumps(str(run.output_path).replace("\\", "/"))
+        use_lora = bool(self.config.use_lora)
+        lora_target_modules = list(self.config.lora_target_modules)
+        throughput_callback_src = _THROUGHPUT_CALLBACK_SRC
+
+        return f'''#!/usr/bin/env python3
+"""
+Auto-generated Session Distillation Script for BashGym
+Run ID: {run.run_id}
+Generated: {datetime.now(timezone.utc).isoformat()}
+
+Session Distillation:
+- Student: {model_name}
+- Alpha: {self.config.session_distillation_alpha} (KL vs hard-label CE)
+- Temperature: {self.config.session_distillation_temperature}
+- Mask policy: {self.config.session_distillation_mask_policy}
+"""
+
+from datasets import load_dataset
+from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
+import torch
+import torch.nn.functional as F
+
+
+MODEL_NAME = {model_literal}
+DATASET_PATH = {dataset_literal}
+OUTPUT_DIR = {output_literal}
+ALPHA = {self.config.session_distillation_alpha}
+TEMPERATURE = {self.config.session_distillation_temperature}
+MIN_CONFIDENCE = {self.config.session_distillation_min_confidence}
+MASK_POLICY = "{self.config.session_distillation_mask_policy}"
+CONTEXT_MODE = "{self.config.session_distillation_context_mode}"
+USE_LORA = {use_lora}
+
+USE_CUDA = torch.cuda.is_available()
+
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+if tokenizer.pad_token is None:
+    tokenizer.pad_token = tokenizer.eos_token
+
+# bf16 on CUDA (fp16 weights + fp16 AMP crash with "unscale FP16 gradients");
+# fp32 on CPU for tiny local smokes.
+model = AutoModelForCausalLM.from_pretrained(
+    MODEL_NAME,
+    dtype=torch.bfloat16 if USE_CUDA else torch.float32,
+    device_map="auto" if USE_CUDA else None,
+)
+
+if USE_LORA:
+    from peft import LoraConfig, get_peft_model
+
+    lora_config = LoraConfig(
+        r={self.config.lora_r},
+        lora_alpha={self.config.lora_alpha},
+        lora_dropout={self.config.lora_dropout},
+        target_modules={lora_target_modules!r},
+        bias="none",
+        task_type="CAUSAL_LM",
+    )
+    model = get_peft_model(model, lora_config)
+    model.print_trainable_parameters()
+    if USE_CUDA:
+        model.enable_input_require_grads()
+
+raw_dataset = load_dataset("json", data_files=DATASET_PATH, split="train")
+raw_dataset = raw_dataset.filter(
+    lambda row: float(row.get("reader_confidence", 0.0)) >= MIN_CONFIDENCE
+)
+
+
+def encode_context_target(context, target):
+    # Render the context in the chat/tool-call serving format when the tokenizer
+    # provides a template, so re-scoring matches the distribution the policy acts
+    # in. Fall back to plain text otherwise (e.g. tiny local smoke models). The
+    # target is always tokenized separately so its token ids are identical
+    # between the original and hinted contexts (mask alignment invariant).
+    if getattr(tokenizer, "chat_template", None):
+        context_ids = tokenizer.apply_chat_template(
+            [{{"role": "user", "content": context}}],
+            add_generation_prompt=True,
+            tokenize=True,
+        )
+    else:
+        context_ids = tokenizer(context, add_special_tokens=False)["input_ids"]
+    target_ids = tokenizer(target, add_special_tokens=False)["input_ids"]
+    input_ids = context_ids + target_ids
+    target_mask = [0] * len(context_ids) + [1] * len(target_ids)
+    labels = [-100] * len(context_ids) + target_ids
+    return input_ids, target_mask, labels
+
+
+def preprocess(row):
+    target_text = str(row["target_text"])
+    original_ids, original_target_mask, original_labels = encode_context_target(
+        str(row["original_context"]),
+        target_text,
+    )
+    hinted_ids, hinted_target_mask, hinted_labels = encode_context_target(
+        str(row["hinted_context"]),
+        target_text,
+    )
+    target_token_count = sum(original_target_mask)
+    return {{
+        "original_input_ids": original_ids[:{self.config.max_seq_length}],
+        "original_attention_mask": [1] * min(len(original_ids), {self.config.max_seq_length}),
+        "original_labels": original_labels[:{self.config.max_seq_length}],
+        "original_target_mask": original_target_mask[:{self.config.max_seq_length}],
+        "hinted_input_ids": hinted_ids[:{self.config.max_seq_length}],
+        "hinted_attention_mask": [1] * min(len(hinted_ids), {self.config.max_seq_length}),
+        "hinted_labels": hinted_labels[:{self.config.max_seq_length}],
+        "hinted_target_mask": hinted_target_mask[:{self.config.max_seq_length}],
+        "target_token_count": min(target_token_count, {self.config.max_seq_length}),
+    }}
+
+
+tokenized = raw_dataset.map(preprocess, remove_columns=raw_dataset.column_names)
+
+
+class SessionDistillationCollator:
+    def __init__(self, pad_token_id):
+        self.pad_token_id = pad_token_id
+
+    def __call__(self, examples):
+        batch = dict()
+        pad_values = {{
+            "original_input_ids": self.pad_token_id,
+            "original_attention_mask": 0,
+            "original_labels": -100,
+            "original_target_mask": 0,
+            "hinted_input_ids": self.pad_token_id,
+            "hinted_attention_mask": 0,
+            "hinted_labels": -100,
+            "hinted_target_mask": 0,
+        }}
+        for key, pad_value in pad_values.items():
+            max_len = max(len(example[key]) for example in examples)
+            rows = []
+            for example in examples:
+                values = list(example[key])
+                rows.append(values + [pad_value] * (max_len - len(values)))
+            batch[key] = torch.tensor(rows, dtype=torch.long)
+        batch["target_token_count"] = torch.tensor(
+            [int(example["target_token_count"]) for example in examples],
+            dtype=torch.long,
+        )
+        return batch
+
+
+class SessionDistillationTrainer(Trainer):
+    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+        original_input_ids = inputs["original_input_ids"]
+        original_attention_mask = inputs["original_attention_mask"]
+        original_labels = inputs["original_labels"]
+        original_target_mask = inputs["original_target_mask"].bool()
+        hinted_input_ids = inputs["hinted_input_ids"]
+        hinted_attention_mask = inputs["hinted_attention_mask"]
+        hinted_target_mask = inputs["hinted_target_mask"].bool()
+
+        original_outputs = model(
+            input_ids=original_input_ids,
+            attention_mask=original_attention_mask,
+        )
+        with torch.no_grad():
+            teacher_outputs = model(
+                input_ids=hinted_input_ids,
+                attention_mask=hinted_attention_mask,
+            )
+            teacher_logits = teacher_outputs.logits.detach()
+
+        student_logits = original_outputs.logits
+        student_shift_logits = student_logits[:, :-1, :].contiguous()
+        teacher_shift_logits = teacher_logits[:, :-1, :].contiguous()
+        student_shift_labels = original_labels[:, 1:].contiguous()
+        student_shift_mask = original_target_mask[:, 1:].contiguous()
+        teacher_shift_mask = hinted_target_mask[:, 1:].contiguous()
+
+        student_target_logits = student_shift_logits[student_shift_mask]
+        teacher_target_logits = teacher_shift_logits[teacher_shift_mask]
+        hard_labels = student_shift_labels[student_shift_mask]
+        token_count = min(student_target_logits.shape[0], teacher_target_logits.shape[0])
+
+        if MASK_POLICY != "target_span_only":
+            raise ValueError("Session Distillation only supports target_span_only masking")
+        if token_count == 0:
+            session_distillation_loss = student_logits.sum() * 0.0
+            return (session_distillation_loss, original_outputs) if return_outputs else session_distillation_loss
+
+        student_target_logits = student_target_logits[:token_count]
+        teacher_target_logits = teacher_target_logits[:token_count]
+        hard_labels = hard_labels[:token_count]
+
+        student_logprobs = F.log_softmax(student_target_logits / TEMPERATURE, dim=-1)
+        hinted_probs = F.softmax(teacher_target_logits / TEMPERATURE, dim=-1)
+        kl_loss = F.kl_div(student_logprobs, hinted_probs, reduction="batchmean") * (
+            TEMPERATURE ** 2
+        )
+        hard_ce_loss = F.cross_entropy(student_target_logits, hard_labels, ignore_index=-100)
+        session_distillation_loss = ALPHA * kl_loss + (1 - ALPHA) * hard_ce_loss
+
+        self.log(
+            {{
+                "session_distillation_loss": float(session_distillation_loss.detach().cpu()),
+                "session_distillation_kl": float(kl_loss.detach().cpu()),
+                "session_distillation_ce": float(hard_ce_loss.detach().cpu()),
+                "session_distillation_masked_tokens": int(token_count),
+            }}
+        )
+        return (session_distillation_loss, original_outputs) if return_outputs else session_distillation_loss
+
+{throughput_callback_src}
+
+training_args = TrainingArguments(
+    output_dir=OUTPUT_DIR,
+    per_device_train_batch_size={self.config.batch_size},
+    gradient_accumulation_steps={self.config.gradient_accumulation_steps},
+    warmup_ratio={self.config.warmup_ratio},
+    num_train_epochs={self.config.num_epochs},
+    learning_rate={self.config.learning_rate},
+    bf16=USE_CUDA,
+    fp16=False,
+    logging_steps={self.config.logging_steps},
+    save_steps={self.config.save_steps},
+    save_total_limit=3,
+    report_to=[],
+    seed=42,
+    remove_unused_columns=False,
+    include_num_input_tokens_seen=True,
+)
+
+trainer = SessionDistillationTrainer(
+    model=model,
+    args=training_args,
+    train_dataset=tokenized,
+    data_collator=SessionDistillationCollator(tokenizer.pad_token_id),
+    callbacks=[BashGymThroughputCallback()],
+)
+
+print("Starting Session Distillation training...")
+print("Records accepted:", len(tokenized))
+trainer.train()
+
+print("Saving Session Distillation model...")
+model.save_pretrained(OUTPUT_DIR + "/final")
+tokenizer.save_pretrained(OUTPUT_DIR + "/final")
+print("Session Distillation complete!")
 '''
 
     def _generate_unsloth_dpo_script(self, run: TrainingRun) -> str:
@@ -2655,26 +3205,59 @@ print("DPO training complete!")
         # Generate the correct script based on strategy
         run.output_path.mkdir(parents=True, exist_ok=True)
 
-        if run.strategy == TrainingStrategy.DISTILLATION:
-            script_content = self._generate_distillation_script(run)
-            script_path = run.output_path / "train_distillation.py"
-        elif run.strategy == TrainingStrategy.DPO:
-            script_content = self._generate_dpo_script(run)
-            script_path = run.output_path / "train_dpo.py"
-        elif run.strategy in (TrainingStrategy.GRPO, TrainingStrategy.RLVR):
-            grpo_trainer = GRPOTrainer(self.config)
-            script_content = grpo_trainer._generate_grpo_script(run)
-            script_path = run.output_path / "train_grpo.py"
-        else:
-            script_content = self._generate_sft_script(run)
-            script_path = run.output_path / "train_sft.py"
+        # Remote scripts execute inside the uploaded run directory, so the
+        # generated script must reference the dataset by bare filename and
+        # write artifacts to "." (final/, merged/) — the locations
+        # _upload_files and _download_artifacts use. The validation file is
+        # not uploaded, so it is dropped from the generated script.
+        local_dataset_path = run.dataset_path
+        local_output_path = run.output_path
+        local_val_path = run.val_dataset_path
+        run.dataset_path = Path(Path(str(local_dataset_path)).name)
+        run.output_path = Path(".")
+        run.val_dataset_path = None
+        try:
+            script_content, script_filename, require_unsloth = self._remote_launch_spec(run)
+        finally:
+            run.dataset_path = local_dataset_path
+            run.output_path = local_output_path
+            run.val_dataset_path = local_val_path
 
-        script_path.write_text(script_content)
+        script_path = run.output_path / script_filename
+        script_path.write_text(script_content, encoding="utf-8")
 
         def _pid_cb(remote_pid):
             run.pid = remote_pid
             if pid_callback:
                 pid_callback(remote_pid, run)
+
+        # Parse the remote log stream into the same structured progress payloads
+        # as local runs, so the dashboard (loss curve, resource tiles, health
+        # banner) and metrics.jsonl populate for remote/DGX training too — the
+        # remote path previously forwarded raw log text only.
+        parser = _ProgressLineParser(
+            batch_size=self.config.batch_size,
+            num_epochs=self.config.num_epochs,
+            learning_rate=self.config.learning_rate,
+        )
+
+        def _stream_and_parse(line: str) -> None:
+            try:
+                payload = parser.feed(line)
+                if payload is not None:
+                    if callback:
+                        callback(payload)
+                    if parser.had_loss and parser.last_loss is not None and parser.last_step > 0:
+                        run.add_loss_point(
+                            step=parser.last_step,
+                            loss=parser.last_loss,
+                            epoch=parser.last_epoch,
+                            learning_rate=self.config.learning_rate,
+                        )
+            except Exception as exc:
+                logger.warning(f"Remote metric parse error: {exc}")
+            if log_callback:
+                log_callback(line)
 
         result = asyncio.run(
             trainer.train_remote(
@@ -2682,13 +3265,38 @@ print("DPO training complete!")
                 script_path=script_path,
                 dataset_path=Path(run.dataset_path),
                 local_output_dir=run.output_path,
-                log_callback=log_callback,
+                log_callback=_stream_and_parse,
                 pid_callback=_pid_cb,
+                script_name=script_filename,
+                require_unsloth=require_unsloth,
             )
         )
 
         if not result["success"]:
             raise RuntimeError(f"Remote training failed: {result.get('error')}")
+
+    def _remote_launch_spec(self, run: TrainingRun) -> tuple[str, str, bool]:
+        """Resolve the remote training script for a run.
+
+        Returns ``(script_content, script_filename, require_unsloth)``. The
+        filename is what the remote executes, so it must match the uploaded
+        script. Session Distillation uses the plain-transformers backend, so it
+        is generated with remote-relative paths and must NOT gate on Unsloth
+        (Unsloth import is broken on some aarch64/unified-memory GPUs).
+        """
+        if run.strategy == TrainingStrategy.SESSION_DISTILLATION:
+            return (
+                self._generate_session_distillation_script(run, remote=True),
+                "train_session_distillation.py",
+                False,
+            )
+        if run.strategy == TrainingStrategy.DISTILLATION:
+            return (self._generate_distillation_script(run), "train_distillation.py", True)
+        if run.strategy == TrainingStrategy.DPO:
+            return (self._generate_dpo_script(run), "train_dpo.py", True)
+        if run.strategy in (TrainingStrategy.GRPO, TrainingStrategy.RLVR):
+            return (GRPOTrainer(self.config)._generate_grpo_script(run), "train_grpo.py", True)
+        return (self._generate_sft_script(run), "train_sft.py", True)
 
     def _train_with_nemo_gym(
         self, run: TrainingRun, callback: Callable[[dict[str, Any]], None] | None = None
@@ -2921,7 +3529,7 @@ if __name__ == "__main__":
     export_to_gguf()
 '''
             script_path = export_path / "export_gguf.py"
-            script_path.write_text(script)
+            script_path.write_text(script, encoding="utf-8")
 
             # Also create a simple batch script
             batch_script = f"""#!/bin/bash
@@ -2933,7 +3541,7 @@ python export_gguf.py
 echo "GGUF export complete!"
 echo "Output: {export_path}/model-{quantization}.gguf"
 """
-            (export_path / "export.sh").write_text(batch_script)
+            (export_path / "export.sh").write_text(batch_script, encoding="utf-8")
 
             print(f"GGUF export scripts generated in: {export_path}")
             print(f"  Run: python {script_path}")
@@ -2957,7 +3565,7 @@ tokenizer.save_pretrained("{export_path}")
 print("Exported to safetensors format")
 """
             script_path = export_path / "export_safetensors.py"
-            script_path.write_text(script)
+            script_path.write_text(script, encoding="utf-8")
             print(f"Safetensors export script generated: {script_path}")
 
         return export_path
@@ -3060,7 +3668,7 @@ class GRPOTrainer(Trainer):
         script_content = self._generate_grpo_script(run)
         script_path = run.output_path / "train_grpo.py"
         run.output_path.mkdir(parents=True, exist_ok=True)
-        script_path.write_text(script_content)
+        script_path.write_text(script_content, encoding="utf-8")
 
         python_exe = self._get_training_python()
         logger.info(f"Starting GRPO training run: {run.run_id}")
@@ -3069,7 +3677,7 @@ class GRPOTrainer(Trainer):
         logger.info(f"Script: {script_path}")
         logger.info(f"Python: {python_exe}")
 
-        # DGX Spark / GB10 (sm_121) Triton fix:
+        # GB10/sm_121 Triton compatibility fix:
         # Triton ships with ptxas from CUDA 12.8 which doesn't recognize sm_121a.
         # Point it at the system CUDA 13 ptxas which has full sm_121 support.
         # See: https://github.com/triton-lang/triton/issues/9181
@@ -3594,7 +4202,7 @@ GRPO: Group Relative Policy Optimization with tiered rewards
 - Generations per prompt: {self.config.effective_grpo_group_size()}
 - Training profile: {self.config.training_profile}
 
-Uses Unsloth to patch TRL imports (fixes vLLM crash on DGX Spark sm_121).
+Uses Unsloth to patch TRL imports, with compatibility handling for newer CUDA architectures.
 """
 
 from unsloth import FastLanguageModel

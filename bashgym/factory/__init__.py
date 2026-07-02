@@ -42,6 +42,18 @@ from bashgym.factory.security_ingester import (
     SecurityDomain,
     SecurityIngester,
 )
+from bashgym.factory.session_distillation import (
+    SESSION_DISTILLATION_HINT_TAG,
+    HeuristicSessionDistillationReader,
+    SessionDistillationHint,
+    SessionDistillationRecord,
+    build_session_distillation_records,
+    build_session_distillation_records_from_traces,
+    inject_session_distillation_hint,
+    save_session_distillation_records,
+    validate_session_distillation_record,
+    validate_session_distillation_records,
+)
 from bashgym.factory.synthetic_generator import (
     PRESETS,
     GenerationPreset,
@@ -103,4 +115,15 @@ __all__ = [
     "EmbeddingDeduplicator",
     "DedupConfig",
     "DedupResult",
+    # Session Distillation
+    "SESSION_DISTILLATION_HINT_TAG",
+    "SessionDistillationHint",
+    "SessionDistillationRecord",
+    "HeuristicSessionDistillationReader",
+    "build_session_distillation_records",
+    "build_session_distillation_records_from_traces",
+    "inject_session_distillation_hint",
+    "save_session_distillation_records",
+    "validate_session_distillation_record",
+    "validate_session_distillation_records",
 ]

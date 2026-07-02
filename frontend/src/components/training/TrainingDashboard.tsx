@@ -25,8 +25,11 @@ import {
 import { useTrainingStore, useUIStore } from '../../stores'
 import { trainingApi, tracesApi, hfApi, RepoInfo, SystemInfo, ModelRecommendations } from '../../services/api'
 import { LossCurve } from './LossCurve'
+import { HealthBanner } from './HealthBanner'
 import { EpochProgress } from './EpochProgress'
 import { MetricsGrid } from './MetricsGrid'
+import { ResourceTiles } from './ResourceTiles'
+import { TrainingInternalsPanel } from './TrainingInternalsPanel'
 import { TrainingConfig } from './TrainingConfig'
 import { SystemInfoPanel } from './SystemInfoPanel'
 import { TrainingLogs } from './TrainingLogs'
@@ -49,6 +52,7 @@ export function TrainingDashboard() {
   const [activeTab, setActiveTab] = useState<TrainingTab>('dashboard')
   const [showConfig, setShowConfig] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [smoothLoss, setSmoothLoss] = useState(true)
   const [availableRepos, setAvailableRepos] = useState<RepoInfo[]>([])
   const [goldTraceCount, setGoldTraceCount] = useState(0)
   const [_systemInfo, setSystemInfo] = useState<SystemInfo | null>(null)
@@ -261,6 +265,9 @@ export function TrainingDashboard() {
       {activeTab === 'checkpoints' && <CheckpointBrowser />}
       {activeTab === 'guides' && <TrainingGuidance />}
 
+      {/* Run health verdict (loss trend, grad spikes, OOM, zero-masked-tokens) */}
+      {activeTab === 'dashboard' && <HealthBanner runId={currentRun?.id} isRunning={isRunning} />}
+
       {/* Main Grid */}
       {activeTab === 'dashboard' && (
       <div className="grid grid-cols-12 gap-5">
@@ -269,19 +276,33 @@ export function TrainingDashboard() {
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-brand text-xl text-text-primary">Loss Curve</h2>
             {lossHistory.length > 0 && (
-              <button
-                className="btn-icon flex items-center justify-center"
-                onClick={handleRefreshLossData}
-                disabled={isRefreshing}
-                title="Refresh data"
-              >
-                <RefreshCw className={clsx('w-4 h-4', isRefreshing && 'animate-spin')} />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  className={clsx(
+                    'font-mono text-xs uppercase tracking-widest px-2 py-1 border-brutal rounded-brutal transition-all',
+                    smoothLoss
+                      ? 'bg-accent-light text-accent-dark border-border'
+                      : 'bg-transparent text-text-secondary border-border hover:text-text-primary'
+                  )}
+                  onClick={() => setSmoothLoss((s) => !s)}
+                  title="Toggle EMA smoothing"
+                >
+                  {smoothLoss ? 'Smoothed' : 'Raw'}
+                </button>
+                <button
+                  className="btn-icon flex items-center justify-center"
+                  onClick={handleRefreshLossData}
+                  disabled={isRefreshing}
+                  title="Refresh data"
+                >
+                  <RefreshCw className={clsx('w-4 h-4', isRefreshing && 'animate-spin')} />
+                </button>
+              </div>
             )}
           </div>
           <div className="h-64">
             {lossHistory.length > 0 ? (
-              <LossCurve data={lossHistory} />
+              <LossCurve data={lossHistory} smoothed={smoothLoss} />
             ) : (
               <div className="h-full flex flex-col items-center justify-center text-text-muted">
                 <BarChart3 className="w-12 h-12 mb-3 opacity-30" />
@@ -311,6 +332,21 @@ export function TrainingDashboard() {
             eta={metrics?.eta}
             isWaiting={!isRunning && !isPaused}
           />
+        </div>
+
+        {/* Resource tiles: live throughput + GPU (tokens/sec, VRAM, utilization) */}
+        <div className="col-span-12">
+          <ResourceTiles
+            tokensPerSecond={metrics?.tokensPerSecond}
+            gpuMemoryGb={metrics?.gpuMemoryGb}
+            gpuUtilization={metrics?.gpuUtilization}
+            isWaiting={!isRunning && !isPaused}
+          />
+        </div>
+
+        {/* LR schedule + gradient-norm history (renders once ≥2 steps recorded) */}
+        <div className="col-span-12">
+          <TrainingInternalsPanel data={currentRun?.metricsHistory ?? []} />
         </div>
 
         {/* GRPO per-step metrics (only renders when grpoMetrics.length > 0) */}

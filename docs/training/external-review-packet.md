@@ -11,7 +11,8 @@ Companion docs:
 - [tmax-terminal-rl-recipe.md](tmax-terminal-rl-recipe.md)
 - [world-models.md](world-models.md)
 - [metrics-runbook.md](metrics-runbook.md)
-- [gx10-eval-checklist.md](gx10-eval-checklist.md)
+- [session-distillation.md](session-distillation.md)
+- [private-compute-eval-checklist.md](private-compute-eval-checklist.md)
 
 ---
 
@@ -103,13 +104,14 @@ fine-tune followed by subjective acceptance.
 | DPO | Chosen/rejected pair training after SFT. | Ready |
 | GRPO/RLVR | Verifier-backed terminal RL with reward groups, pass@k, active sampling, and zero-std filtering. | Ready with evidence |
 | Distillation | Teacher-to-student behavior transfer when the student is too weak for RL. | Ready |
+| Session Distillation | Hint-injected self-distillation over failed trace spans with masked KL/CE. | Ready with evidence |
 | Cascade/domain-staged training | Domain-staged curriculum training with later merge/distillation path. | Ready with evidence |
-| DPPO replay | Terminal rollout replay with behavior/train logprobs and trust-region mask planning for external backends. | Backend-dependent, GX10-gated |
+| DPPO replay | Terminal rollout replay with behavior/train logprobs and trust-region mask planning for external backends. | Backend-dependent, compute-gated |
 | ECHO/RWML | JEPA-style terminal world-model contracts, replay payloads, and adapter hooks. | Backend-dependent, diagnostic |
 | Heldout/eval gates | Heldout trace eval, environment pass@k, holdout gate, base-vs-candidate comparison. | Ready |
 | Safety/eval controls | Spurious-reward controls, reward-hacking canaries, tamper/protected-file checks. | Ready |
 | External benchmark ingest | Public benchmark evidence ingestion and release-manifest attachment. | Ready with evidence |
-| GX10/backend smoke | Local smoke bundle and launch contract exist; installed-backend proof is pending. | Partially proven |
+| Private/cloud backend smoke | Local smoke bundle and launch contract exist; installed-backend proof is pending. | Partially proven |
 
 Status meanings:
 
@@ -119,8 +121,8 @@ Status meanings:
 - **Backend-dependent:** contracts/adapters/plans exist, but a real backend must
   prove execution.
 - **Diagnostic:** useful for analysis/curriculum, not a release gate alone.
-- **GX10-gated:** local artifacts can be prepared; final proof requires remote
-  hardware/backend execution.
+- **Compute-gated:** local artifacts can be prepared; final proof requires
+  private/cloud backend execution.
 
 ---
 
@@ -156,7 +158,8 @@ checkpoint.
 | `EnvironmentSpec` | Executable task contract: instruction, workspace/files, verifier, rollout limits, protected files. |
 | `metrics.jsonl` | Training/run telemetry: loss, reward, pass@k, timeout/tamper, world-model metrics, hardware health. |
 | `dppo_replay.jsonl` | Terminal rollout trajectories with reward, behavior/train logprobs, and optional world-model payloads. |
-| `backend_smoke_readiness.json` | Local DPPO/ECHO/RWML handoff status before GX10/backend work. |
+| `session_distillation_records.jsonl` | Original/hinted contexts, target span, loss mask, reader confidence, verifier outcome, and provenance. |
+| `backend_smoke_readiness.json` | Local DPPO/ECHO/RWML handoff status before private/cloud backend work. |
 | `release_evidence.json` | Heldout verdict, environment gates, external benchmarks, and diagnostic world-model quality. |
 
 Recommended addition before serious external review:
@@ -234,7 +237,7 @@ Minimum promotion package:
 | Training API | Start, monitor, pause/resume/stop, export, inspect runs, managed submit. |
 | Environment API | Import/materialize terminal environments, local/model rollout, pass@k, holdouts, DPPO replay. |
 | Eval API | Heldout eval, verdicts, external benchmark ingest, reward-hacking controls, DPPO smoke planning. |
-| Device/hardware API | SSH/GX10 readiness, GPU/system/model-fit checks. |
+| Device/hardware API | Private compute readiness, GPU/system/model-fit checks. |
 | UI | Training Config, Training Monitor, Training Guides, World-Model Quality panel, Environment Lab, Evaluator, Models, Settings/Devices. |
 
 ---
@@ -256,7 +259,10 @@ The honest current state:
 - SFT and DPO workflows are ready.
 - GRPO/RLVR is ready when executable tasks and reward contrast exist.
 - Evaluator/release gates are strong and implemented.
-- DPPO/ECHO/RWML contracts are implemented, but need installed-backend/GX10 proof.
+- Session Distillation contracts are implemented, but need local runtime and
+  heldout recovery-decision proof.
+- DPPO/ECHO/RWML contracts are implemented, but need installed-backend
+  private/cloud proof.
 - The expert-facing weak spot is proof and reproducibility packaging, not the
   basic architecture.
 
@@ -266,7 +272,7 @@ The honest current state:
 
 | Priority | Risk | Recommended fix before broad claims |
 |---|---|---|
-| P0 | GX10/backend proof is still pending for DPPO/ECHO/RWML. | Run one tiny installed-backend smoke with saved logs, metrics, launch env, and output listing. |
+| P0 | Private/cloud backend proof is still pending for DPPO/ECHO/RWML. | Run one tiny installed-backend smoke with saved logs, metrics, launch env, and output listing. |
 | P0 | No canonical run card ties config, data, commit, hardware, thresholds, and outputs together. | Add run-card schema and require it for serious runs. |
 | P0 | ECHO/RWML claims could be overread as proven world-model gains. | Keep wording conservative: contracts/adapters implemented; behavior correlation pending. |
 | P1 | Eval rigor needs claim-tier thresholds. | Define local-smoke, narrow-routing, and broad-claim evidence tiers. |
@@ -295,7 +301,7 @@ The honest current state:
 ### For Infra Engineers
 
 1. Is the replay/artifact contract sufficient for external trainer backends?
-2. Are smoke-bundle and launch-env artifacts enough to debug GX10/backend
+2. Are smoke-bundle and launch-env artifacts enough to debug private/cloud backend
    failures?
 3. What operational metrics should be mandatory before scaling a run?
 4. Are there reproducibility gaps in config snapshots, data manifests, backend
@@ -322,7 +328,7 @@ The honest current state:
 1. What is the strongest part of BashGym's approach?
 2. What is the weakest technical assumption?
 3. What should be removed or de-scoped?
-4. What should be proven before longer GX10 runs?
+4. What should be proven before longer private/cloud runs?
 5. What would make this credible to open-source ML contributors?
 6. What is the most important missing artifact for reproducibility?
 
@@ -342,7 +348,7 @@ world-model framing, and evaluation gates.
 
 We are not asking you to validate broad performance claims. We are specifically
 asking whether the platform contract and evidence ladder are technically sound
-enough to justify deeper backend/GX10 runs and broader open-source
+enough to justify deeper backend/compute runs and broader open-source
 collaboration.
 ```
 
@@ -359,12 +365,14 @@ Attach or link:
 - [metrics-runbook.md](metrics-runbook.md)
 - [world-models.md](world-models.md)
 - [tmax-terminal-rl-recipe.md](tmax-terminal-rl-recipe.md)
-- [gx10-eval-checklist.md](gx10-eval-checklist.md)
+- [session-distillation.md](session-distillation.md)
+- [private-compute-eval-checklist.md](private-compute-eval-checklist.md)
 - Example `bashgym training capabilities --json`
 - Example `bashgym training plan --strategy sft --json`
-- Example `bashgym training plan --strategy grpo --data terminal_envs --hardware dgx --json`
+- Example `bashgym training plan --strategy session-distillation --json`
+- Example `bashgym training plan --strategy grpo --data terminal_envs --hardware private_compute --json`
 - Example `bashgym training analyze --json`
-- Example smoke-bundle output after the GX10/backend smoke succeeds
+- Example smoke-bundle output after the private/cloud backend smoke succeeds
 
 ---
 

@@ -132,7 +132,8 @@ function createWindow() {
 
   // Load the app
   if (isDev) {
-    mainWindow.loadURL('http://localhost:5173')
+    const devServerUrl = process.env.BASHGYM_DEV_SERVER_URL || 'http://localhost:5190'
+    mainWindow.loadURL(devServerUrl)
     mainWindow.webContents.openDevTools() // TEMP: debug black screen
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
@@ -245,6 +246,15 @@ function getFreshEnv(): Record<string, string> {
   return env
 }
 
+function resolveTerminalCwd(cwd?: string): string {
+  const requested = cwd?.trim()
+  if (!requested || requested === '~') return os.homedir()
+  if (requested.startsWith('~/') || requested.startsWith('~\\')) {
+    return path.join(os.homedir(), requested.slice(2))
+  }
+  return requested
+}
+
 // Terminal management — create-or-attach: a live PTY for this id is re-attached
 // (with scrollback replay) instead of respawned, so renderer remounts never
 // orphan or kill the underlying process.
@@ -275,7 +285,7 @@ ipcMain.handle('terminal:create', async (_, id: string, cwd?: string) => {
       ? ['-NoLogo']
       : []
 
-    const resolvedCwd = cwd || process.env.HOME || process.cwd()
+    const resolvedCwd = resolveTerminalCwd(cwd)
 
     const ptyProcess = pty.spawn(shell, shellArgs, {
       name: 'xterm-256color',
@@ -310,7 +320,7 @@ ipcMain.handle('terminal:create', async (_, id: string, cwd?: string) => {
       // it is dropped on explicit kill or recreate.
     })
 
-    return { success: true, id, attached: false }
+    return { success: true, id, attached: false, cwd: resolvedCwd }
   } catch (error) {
     console.error('Failed to create terminal:', error)
     return { success: false, error: String(error) }

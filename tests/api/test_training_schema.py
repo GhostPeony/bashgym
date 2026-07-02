@@ -53,3 +53,23 @@ def test_training_request_accepts_world_model_objectives():
     assert request.rwml_history_window == 6
     assert request.rwml_embedding_model == "qwen3-embedding"
     assert request.rwml_kl_beta == 0.03
+
+
+def test_training_request_accepts_session_distillation_settings():
+    request = TrainingRequest(
+        strategy="session_distillation",
+        session_distillation_alpha=0.8,
+        session_distillation_temperature=1.5,
+        session_distillation_min_confidence=0.7,
+        session_distillation_mask_policy="target_span_only",
+        session_distillation_context_mode="hint_injected",
+        session_distillation_reader="heuristic",
+    )
+
+    assert request.strategy == "session_distillation"
+    assert request.session_distillation_alpha == 0.8
+    assert request.session_distillation_temperature == 1.5
+    assert request.session_distillation_min_confidence == 0.7
+    assert request.session_distillation_mask_policy == "target_span_only"
+    assert request.session_distillation_context_mode == "hint_injected"
+    assert request.session_distillation_reader == "heuristic"

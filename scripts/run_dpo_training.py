@@ -13,7 +13,7 @@ Usage:
   python scripts/run_dpo_training.py \\
     --dataset data/dpo_real/train.jsonl \\
     --val-dataset data/dpo_real/val.jsonl \\
-    --base-model /home/ponyo/.unsloth/studio/exports/unsloth_gemma-4-E4B-it_1775455644/checkpoint-153 \\
+    --base-model /home/user/.unsloth/studio/exports/unsloth_gemma-4-E4B-it_1775455644/checkpoint-153 \\
     --output-dir data/dpo_runs/smoke1 \\
     --max-steps 10
 """
@@ -40,7 +40,7 @@ def main():
     parser.add_argument(
         "--base-model",
         type=str,
-        default="/home/ponyo/.unsloth/studio/exports/unsloth_gemma-4-E4B-it_1775455644/checkpoint-153",
+        default="/home/user/.unsloth/studio/exports/unsloth_gemma-4-E4B-it_1775455644/checkpoint-153",
         help="Path to base model (your fine-tuned Gemma 4)",
     )
     parser.add_argument("--output-dir", type=Path, required=True)

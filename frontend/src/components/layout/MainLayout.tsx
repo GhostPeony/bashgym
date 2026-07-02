@@ -69,7 +69,7 @@ export function MainLayout() {
         <Sidebar />
 
         {/* Workspace Area */}
-        <main className="flex-1 flex flex-col">
+        <main className="relative z-0 min-w-0 flex-1 flex flex-col">
           {/* Home Screen */}
           {showHome && (
             <div className="flex-1 overflow-auto">

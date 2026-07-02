@@ -2,7 +2,7 @@
 """
 Post-process Data Designer DPO output into clean train/val DPO JSONL.
 
-Reads /home/ponyo/bashgym/data/dpo_synthetic/raw_designer_output.parquet
+Reads /home/user/bashgym/data/dpo_synthetic/raw_designer_output.parquet
 and produces train.jsonl + val.jsonl in DPO format.
 """
 

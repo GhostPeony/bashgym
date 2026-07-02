@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -20,6 +22,64 @@ from bashgym.sources import (
 from bashgym.sources.catalog import validate_catalog
 
 router = APIRouter(prefix="/api/sources", tags=["sources"])
+
+
+def _source_allowed_roots() -> list[Path]:
+    """Directories a source fetch/prepare may write to or read from.
+
+    Defaults to the project ``data/`` and ``.bashgym/`` dirs plus ``~/.bashgym``.
+    Extra roots can be added via the ``BASHGYM_SOURCE_ROOTS`` env var (os.pathsep
+    separated) — used by tests and by operators with non-default data layouts.
+    """
+
+    roots = [
+        Path("data").resolve(),
+        Path(".bashgym").resolve(),
+        (Path.home() / ".bashgym").resolve(),
+    ]
+    for entry in os.environ.get("BASHGYM_SOURCE_ROOTS", "").split(os.pathsep):
+        if entry.strip():
+            roots.append(Path(entry).expanduser().resolve())
+    return roots
+
+
+def _within_allowed_roots(resolved: Path) -> bool:
+    return any(
+        resolved == root or resolved.is_relative_to(root) for root in _source_allowed_roots()
+    )
+
+
+def _resolve_source_output_dir(raw: str | None) -> Path:
+    """Resolve a caller-supplied output directory, confined to allowed roots.
+
+    Prevents an unauthenticated caller from writing source_records.jsonl (and
+    creating directories) anywhere on the host. The directory need not exist yet
+    (fetch creates it), so existence is not required — only containment.
+    """
+
+    if not raw or not str(raw).strip():
+        raise HTTPException(status_code=400, detail="output_dir is required")
+    resolved = Path(str(raw)).expanduser().resolve()
+    if not _within_allowed_roots(resolved):
+        raise HTTPException(
+            status_code=400,
+            detail="output_dir is outside allowed directories (data/, .bashgym/)",
+        )
+    return resolved
+
+
+def _resolve_source_input_path(raw: str) -> Path:
+    """Resolve a caller-supplied input file, confined to allowed roots."""
+
+    resolved = Path(str(raw)).expanduser().resolve()
+    if not _within_allowed_roots(resolved):
+        raise HTTPException(
+            status_code=400,
+            detail="input_path is outside allowed directories (data/, .bashgym/)",
+        )
+    if not resolved.exists() or not resolved.is_file():
+        raise HTTPException(status_code=400, detail="input_path must be an existing file")
+    return resolved
 
 
 class SourceRecommendRequest(BaseModel):
@@ -114,9 +174,10 @@ async def fetch_source(source_id: str, body: SourceFetchRequest) -> dict[str, An
         card = get_source(source_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=f"unknown source {source_id!r}") from exc
+    output_dir = str(_resolve_source_output_dir(body.output_dir))
     fetch_report = fetch_source_records(
         card,
-        output_dir=body.output_dir,
+        output_dir=output_dir,
         split=body.split,
         subset=body.subset,
         revision=body.revision,
@@ -138,6 +199,8 @@ async def prepare_source(source_id: str, body: SourcePrepareRequest) -> dict[str
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=f"unknown source {source_id!r}") from exc
     input_path = body.input_path
+    if input_path:
+        input_path = str(_resolve_source_input_path(input_path))
     fetch_report = None
     if body.fetch:
         if input_path:
@@ -145,11 +208,10 @@ async def prepare_source(source_id: str, body: SourcePrepareRequest) -> dict[str
                 status_code=400,
                 detail="fetch cannot be combined with input_path; choose remote fetch or local input",
             )
-        if not body.output_dir:
-            raise HTTPException(status_code=400, detail="fetch requires output_dir")
+        output_dir = str(_resolve_source_output_dir(body.output_dir))
         fetch_report = fetch_source_records(
             card,
-            output_dir=body.output_dir,
+            output_dir=output_dir,
             split=body.split,
             subset=body.subset,
             revision=body.revision,
@@ -162,16 +224,12 @@ async def prepare_source(source_id: str, body: SourcePrepareRequest) -> dict[str
         input_path = fetch_report["records_path"]
 
     if input_path:
-        if not body.output_dir:
-            raise HTTPException(
-                status_code=400,
-                detail="input_path artifact conversion requires output_dir",
-            )
+        output_dir = str(_resolve_source_output_dir(body.output_dir))
         artifact_report = prepare_source_artifacts(
             card,
             goal=body.goal,
             input_path=input_path,
-            output_dir=body.output_dir,
+            output_dir=output_dir,
             allow_eval_only=body.allow_eval_only,
             override_reason=body.override_reason,
             limit=body.limit,
@@ -181,10 +239,13 @@ async def prepare_source(source_id: str, body: SourcePrepareRequest) -> dict[str
         if not artifact_report["ok"]:
             raise HTTPException(status_code=400, detail=artifact_report)
         return artifact_report
+    manifest_output_dir = (
+        str(_resolve_source_output_dir(body.output_dir)) if body.output_dir else None
+    )
     manifest = prepare_source_manifest(
         card,
         goal=body.goal,
-        output_dir=body.output_dir,
+        output_dir=manifest_output_dir,
         allow_eval_only=body.allow_eval_only,
         override_reason=body.override_reason,
     )

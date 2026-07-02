@@ -15,6 +15,7 @@ has the data and reward signal it needs.
 | You need a learned scorer for selection or audits | Reward model / ORM / PRM | Validate `reward_examples.jsonl`, train a small scorer, evaluate heldout accuracy and calibration. | Heldout pair accuracy, calibration error, length bias. |
 | You have executable verifiers and sampled attempts differ | GRPO/RLVR | Terminal RL profile, group size 8-32, DAPO, active sampling. | Reward, reward_std, `frac_reward_zero_std`, pass@k. |
 | Model cannot pass any terminal tasks yet | SFT or distillation before RL | Teacher distillation or easier curriculum, then re-evaluate. | pass@k moves above zero. |
+| Failed traces contain local recovery pivots | Session Distillation | Build `session_distillation_records.jsonl`, use target-span masking, start alpha at `0.7`. | Masked KL/CE, reader confidence, heldout recovery decisions. |
 | You need domain specialists | Cascade RL | Short staged runs by domain, then MOPD distillation. | Per-domain pass@k and final holdout. |
 | You have DPPO backend + rollout replay | DPPO smoke/replay path | Export scored replay JSONL, pick backend, run tiny smoke first. | Behavior/train logprobs, mask telemetry, pass@k. |
 
@@ -23,8 +24,8 @@ the same reward, group-relative RL has little policy-gradient signal.
 
 For the end-to-end terminal-agent recipe, read
 [tmax-terminal-rl-recipe.md](tmax-terminal-rl-recipe.md). It walks from
-environment pool to rollout, DPPO replay, smoke bundle, GX10 backend smoke, and
-release evidence.
+environment pool to rollout, DPPO replay, smoke bundle, private/cloud backend
+smoke, and release evidence.
 
 ---
 
@@ -337,6 +338,52 @@ Watch:
 
 ---
 
+## Session Distillation
+
+Session Distillation is for local mistakes inside otherwise useful traces. It is
+not teacher distillation: no stronger model rewrites the whole answer. BashGym
+inserts a short hint before the failed action, scores the same target tokens
+under original and hinted context, and trains only the target span.
+
+Use Session Distillation when:
+
+- A command failed and the recovery step reveals the missing path, flag, or file.
+- Tests failed and the next step shows the local correction.
+- The model repeated a nearly identical action before pivoting.
+- The mistake is too local for DPO and too sparse for GRPO/RLVR.
+
+Start with:
+
+```text
+strategy=session_distillation
+session_distillation_alpha=0.7
+session_distillation_temperature=1.0
+session_distillation_min_confidence=0.6
+session_distillation_mask_policy=target_span_only
+session_distillation_context_mode=hint_injected
+session_distillation_reader=heuristic
+```
+
+Watch:
+
+- `session_distillation_loss`
+- `session_distillation_kl`
+- `session_distillation_ce`
+- `session_distillation_masked_tokens`
+- heldout recovery-decision accuracy
+- tool-call validity and executable pass@k where environments exist
+
+Stop or adjust when:
+
+- Hints are noisy: raise `session_distillation_min_confidence` or inspect the
+  reader output.
+- Loss falls but recovery behavior does not improve: rebuild records around
+  clearer failed spans, or move to DPO/GRPO if the issue is broader.
+- The model overfits hinted behavior: lower alpha and require heldout recovery
+  decisions before promotion.
+
+---
+
 ## Cascade RL
 
 Cascade RL trains domain stages in order, such as file operations, bash commands,
@@ -394,10 +441,11 @@ Watch:
 World-model replay enrichment is optional and additive. It does not change the
 base `bashgym.dppo_replay.v1` record semantics.
 
-Do not move DPPO work to GX10 until the local smoke bundle explains the state of
-the replay. `contract_ready=false` means fix the replay. `optimizer_ready=false`
-means train-policy logprob replay is still missing. `backend_launch_ready=false`
-alone can be acceptable on the desktop when the backend exists only on GX10.
+Do not move DPPO work to private/cloud compute until the local smoke bundle
+explains the state of the replay. `contract_ready=false` means fix the replay.
+`optimizer_ready=false` means train-policy logprob replay is still missing.
+`backend_launch_ready=false` alone can be acceptable on the desktop when the
+backend exists only on the target.
 
 ---
 

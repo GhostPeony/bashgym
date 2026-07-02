@@ -28,7 +28,7 @@ Local BashGym sources reviewed:
 - [strategy-guide.md](strategy-guide.md)
 - [metrics-runbook.md](metrics-runbook.md)
 - [world-models.md](world-models.md)
-- [gx10-eval-checklist.md](gx10-eval-checklist.md)
+- [private-compute-eval-checklist.md](private-compute-eval-checklist.md)
 - [external-review-packet.md](external-review-packet.md)
 - `bashgym/cli.py`
 - `bashgym/gym/trainer.py`
@@ -64,7 +64,7 @@ The main gaps are:
    length-ratio contracts should be stricter before scaling preference tuning.
 3. Reward modeling: BashGym lacks first-class Preference RM, ORM, and PRM
    workflows comparable to the RLHF Book and TRL/OpenRLHF.
-4. Backend proof: DPPO/ECHO/RWML contracts exist, but installed-backend GX10
+4. Backend proof: DPPO/ECHO/RWML contracts exist, but installed-backend private/cloud compute
    proof is still pending.
 5. Education: BashGym has good docs, but not enough guided "reader experiment
    path" material with expected metrics, failure modes, and matched controls.
@@ -299,7 +299,7 @@ trainer.
    DPO pairs should not be just `prompt/chosen/rejected`. They need provenance,
    comparability, quality, and contamination metadata.
 
-3. **GX10 installed-backend proof**
+3. **Private/cloud compute installed-backend proof**
 
    DPPO/ECHO/RWML should not be claimed beyond contracts until one real backend
    smoke consumes replay, logs mask/world-model metrics, writes outputs, and is
@@ -422,7 +422,7 @@ trainer.
    Promotion should explicitly report missing required sections instead of
    silently treating absent evidence as unknown.
 
-4. **Run one GX10 backend smoke.**
+4. **Run one private/cloud backend smoke.**
 
    Use a tiny DPPO replay with `include_world_model=true`, pick SkyRL or verl,
    preserve logs/config/output listings, and follow with a small before/after
@@ -464,7 +464,7 @@ trainer.
    - DPO preference refinement
    - GRPO/RLVR terminal RL
    - rejection sampling
-   - DPPO/GX10 backend proof
+   - DPPO private/cloud backend proof
    - ECHO/RWML diagnostic-only world-model pass
 
 ### P2: Make Learning Safer And Easier
@@ -484,12 +484,12 @@ Recommended next engineering sequence:
 1. Run card schema + CLI generator.
 2. Release-evidence fail-closed validation.
 3. Strict preference-pair validator.
-4. GX10 backend smoke using existing smoke-bundle path.
+4. Private/cloud backend smoke using existing smoke-bundle path.
 5. Reward-model lane design spec.
 6. Rejection-sampling workflow.
 7. Direct-alignment recipe variants.
 8. Reliability evals and failure labs.
 
-The first three are local and should not require GX10. The fourth turns the
+The first three are local and should not require private/cloud compute. The fourth turns the
 current DPPO/ECHO/RWML work from a contract into evidence. The later items close
 method and education gaps surfaced by RLHF Book.

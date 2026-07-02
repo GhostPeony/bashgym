@@ -162,7 +162,7 @@ Key risks:
 
 Implementation actions:
 
-- Pick the first installed backend for GX10 proof.
+- Pick the first installed backend for private/cloud compute proof.
 - Run one tiny DPPO smoke with saved replay, logs, metrics, output listing, and
   RunCard evidence.
 - Keep environment pass@k and safety gates as the behavior proof.
@@ -264,7 +264,7 @@ This flywheel makes real training reproducible.
 training plan
   -> compute target preflight
   -> dry-run launch config
-  -> local, GX10, or cloud run
+  -> local, private compute, or cloud run
   -> metrics, logs, checkpoints, and artifacts
   -> RunCard validation
   -> release or iterate
@@ -273,7 +273,7 @@ training plan
 Use this when:
 
 - A run moves beyond local fixture smoke.
-- GX10 or cloud GPUs are involved.
+- Private or cloud GPUs are involved.
 - A model claim needs to be reviewed or reproduced.
 
 Boundary:

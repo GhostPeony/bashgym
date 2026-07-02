@@ -19,7 +19,7 @@ environment pool
   -> DPPO replay JSONL
   -> train-logprob enrichment
   -> backend smoke bundle
-  -> GX10/backend one-step smoke
+  -> private/cloud backend one-step smoke
   -> release evidence
 ```
 
@@ -50,7 +50,7 @@ evidence at each stage.
 | Behavior baseline | Base/SFT pass@k or heldout trace behavior is recorded before RL/DPPO changes. | There is no baseline to compare against. |
 | RL signal check | `reward_std` is non-zero for useful groups and `frac_reward_zero_std` is not dominating. | All attempts fail/pass, verifier errors are high, or reward can be hacked. |
 | Backend handoff | `bashgym training smoke-bundle` reports `contract_ready=true`; DPPO has train logprobs when needed. | Replay/logprob/world-model coverage is incomplete. |
-| GX10 smoke | A one-step installed-backend run saves logs, metrics, and launch env artifacts. | Backend imports fail, CUDA/Triton mismatch appears, or artifacts cannot be synced back. |
+| Backend smoke | A one-step installed-backend run saves logs, metrics, and launch env artifacts. | Backend imports fail, CUDA/Triton mismatch appears, or artifacts cannot be synced back. |
 | Release evidence | Heldout, pass@k, holdout comparison, spurious controls, tamper canaries, and relevant public benchmarks are attached. | Loss/reward improved but behavior gates did not. |
 
 ---
@@ -163,14 +163,15 @@ Interpretation:
 | `backend_launch_ready` | A backend command/script is runnable from the current environment. |
 
 If `contract_ready=false`, fix replay. If `optimizer_ready=false`, enrich
-train-policy logprobs. If only `backend_launch_ready=false`, move to backend/GX10
-setup.
+train-policy logprobs. If only `backend_launch_ready=false`, move to backend or
+compute-target setup.
 
 ---
 
 ## 6. Run One Tiny Backend Smoke
 
-Use GX10/DGX only after the local bundle is clean enough to justify the run.
+Use private/cloud compute only after the local bundle is clean enough to justify
+the run.
 
 The first backend smoke should be tiny:
 
@@ -239,11 +240,11 @@ The defaults are starting points. The release gate decides whether they worked.
 
 ---
 
-## When To Spend GX10 Time
+## When To Spend Private Or Cloud Compute
 
-Use GX10 only when the cheap evidence is already clean:
+Use larger compute only when the cheap evidence is already clean:
 
-| Evidence | Required before GX10 |
+| Evidence | Required before private/cloud compute |
 |---|---|
 | Environment pool | Materialization and verifier-only checks pass. |
 | Rollout contrast | Served attempts include both passing and failing groups, or the run is explicitly a contract-only smoke. |
@@ -252,6 +253,6 @@ Use GX10 only when the cheap evidence is already clean:
 | World-model payloads | ECHO observation chars and RWML transitions are non-zero when enabled. |
 | Smoke bundle | `contract_ready=true`; `optimizer_ready=true` for real DPPO optimizer updates. |
 
-If only `backend_launch_ready=false`, GX10 may still be the right next step
-because the backend can be installed there. If `contract_ready=false`, fix the
-local artifact first.
+If only `backend_launch_ready=false`, the private/cloud target may still be the
+right next step because the backend can be installed there. If
+`contract_ready=false`, fix the local artifact first.

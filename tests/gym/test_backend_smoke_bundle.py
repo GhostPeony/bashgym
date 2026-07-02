@@ -99,7 +99,7 @@ def test_backend_smoke_bundle_materializes_ready_contract(tmp_path):
         BackendSmokeBundleConfig(
             replay_path=replay_path,
             output_dir=tmp_path / "bundle",
-            base_model="Qwen/Qwen2.5-Coder-1.5B-Instruct",
+            base_model="tiny-local-model",
             backend="verl",
             rwml_embedding_model="qwen3-embedding",
         ),

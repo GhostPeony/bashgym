@@ -18,7 +18,8 @@ For concrete starting knobs, read [strategy-guide.md](strategy-guide.md). For th
 end-to-end terminal RL recipe, read
 [tmax-terminal-rl-recipe.md](tmax-terminal-rl-recipe.md). For run diagnosis, read
 [metrics-runbook.md](metrics-runbook.md). For ECHO/RWML and JEPA-style world
-models, read [world-models.md](world-models.md).
+models, read [world-models.md](world-models.md). For targeted self-distillation
+from failed trace spans, read [session-distillation.md](session-distillation.md).
 
 Source review date: 2026-06-24. The structured capability command includes
 `source_refs` for the primary docs used to ground stack claims.
@@ -40,12 +41,12 @@ Source review date: 2026-06-24. The structured capability command includes
 
 | Stage | What users can do | Main surfaces | Evidence to keep |
 |---|---|---|---|
-| Learn and plan | Read the training curriculum, inspect settings, generate starter plans, and decide whether SFT, DPO, reward modeling, GRPO, distillation, cascade, DPPO, or world-model objectives fit the data. | Training Guides UI, `docs/training/*`, `bashgym manifest`, `bashgym training plan`. | The plan JSON, selected docs, and explicit reason for the chosen strategy. |
-| Build data | Convert gold traces, failed traces, custom JSONL, security datasets, synthetic tool-use data, decision-DPO pairs, reward examples, and executable terminal environments into trainable artifacts. | Trace import, Data Designer, Decision DPO, Environment Lab, AutoResearch environment recipe proposals. | Dataset manifests, source split, quality labels, contamination checks, and verifier metadata. |
-| Train | Run SFT, DPO, GRPO/RLVR, distillation, cascade RL, remote SSH training, managed fine-tunes, local Unsloth/plain scripts, and backend-planned DPPO/world-model smoke jobs. | Training Config, Training Dashboard, trainer API, generated scripts, remote device settings. | Config snapshots, generated scripts, logs, metrics JSONL, checkpoints, adapter/backend version. |
+| Learn and plan | Read the training curriculum, inspect settings, generate starter plans, and decide whether SFT, DPO, reward modeling, GRPO, distillation, Session Distillation, cascade, DPPO, or world-model objectives fit the data. | Training Guides UI, `docs/training/*`, `bashgym manifest`, `bashgym training plan`. | The plan JSON, selected docs, and explicit reason for the chosen strategy. |
+| Build data | Convert gold traces, failed traces, custom JSONL, security datasets, synthetic tool-use data, decision-DPO pairs, Session Distillation records, reward examples, and executable terminal environments into trainable artifacts. | Trace import, Data Designer, Decision DPO, Environment Lab, AutoResearch environment recipe proposals. | Dataset manifests, source split, quality labels, contamination checks, verifier metadata, and target masks. |
+| Train | Run SFT, DPO, GRPO/RLVR, distillation, Session Distillation, cascade RL, private compute training, managed fine-tunes, local Unsloth/plain scripts, and backend-planned DPPO/world-model smoke jobs. | Training Config, Training Dashboard, trainer API, generated scripts, private compute target settings. | Config snapshots, generated scripts, logs, metrics JSONL, checkpoints, adapter/backend version. |
 | Evaluate | Run heldout trace eval, local/model environment rollouts, pass@k, holdout gates, base-vs-candidate comparison, spurious-reward controls, tamper canaries, and public benchmark ingest. | Evaluator, Environment Lab, `/api/eval/*`, model registry. | Release verdict JSON, pass@k reports, holdout manifests, canary results, benchmark manifests. |
 | Analyze | Combine metrics, DPPO replay, release evidence, and world-model coverage into conservative findings. | `bashgym training analyze`, Training Monitor, World-Model Quality panel. | Analysis JSON, findings, unresolved blockers, and next action. |
-| Prepare backend smoke | Prove local DPPO/ECHO/RWML handoff readiness before GX10 or DGX work. | `bashgym training smoke-bundle`, GX10 checklist. | Readiness JSON, launch env, world-model probe, launch script/logs. |
+| Prepare backend smoke | Prove local DPPO/ECHO/RWML handoff readiness before private or cloud GPU work. | `bashgym training smoke-bundle`, private compute checklist. | Readiness JSON, launch env, world-model probe, launch script/logs. |
 | Promote | Route a student only where it is proven better or good enough, with fallback to teacher/frontier models for weak domains. | Model registry, router, release gate verdicts. | Combined release gate, external benchmark evidence for broad claims, rollback path. |
 
 ---
@@ -56,11 +57,11 @@ Use this table to decide whether a task belongs in the CLI, API, or UI.
 
 | Surface | Use it for | Key entrypoints |
 |---|---|---|
-| Agent CLI | New-session handoff, agent automation, GX10 artifact preparation, and post-run diagnosis. | `bashgym manifest --json`, `bashgym training capabilities --json`, `bashgym training plan --strategy <strategy> --json`, `bashgym replay summarize <path> --json`, `bashgym training smoke-bundle --replay <path> --output-dir <dir> --json`, `bashgym training analyze ... --json`. |
+| Agent CLI | New-session handoff, agent automation, compute-target artifact preparation, and post-run diagnosis. | `bashgym manifest --json`, `bashgym training capabilities --json`, `bashgym training plan --strategy <strategy> --json`, `bashgym replay summarize <path> --json`, `bashgym training smoke-bundle --replay <path> --output-dir <dir> --json`, `bashgym training analyze ... --json`. |
 | Training API | Starting, monitoring, pausing/resuming/stopping, exporting, and inspecting runs. | `POST /api/training/start`, `GET /api/training/{run_id}`, `GET /api/training/runs`, `GET /api/training/runs/{run_id}/metrics`, `POST /api/training/export`, `POST /api/training/managed/submit`. |
 | Environment API | TMax-style environment import, materialization, rollouts, pass@k, holdouts, spurious controls, and tamper canaries. | `POST /api/environments/import-jsonl`, `POST /api/environments/materialize`, `POST /api/eval/environments/passk`, `POST /api/eval/environments/local-rollout-passk`, `POST /api/eval/environments/model-rollout-passk`, `POST /api/eval/environments/holdout-gate`, `POST /api/eval/environments/holdout-comparison`. |
 | Eval API | Heldout trace jobs, public benchmark ingest, release verdicts, and DPPO handoff planning. | `POST /api/eval/heldout`, `GET /api/eval/verdict/{model_id}`, `GET /api/eval/benchmark-commands`, `POST /api/eval/benchmarks/external-ingest`, `POST /api/eval/environments/dppo-replay/enrich`, `POST /api/eval/environments/dppo-replay/smoke-plan`. |
-| Device and hardware API | GX10/remote SSH readiness and model fit checks before large runs. | `GET /api/devices`, `POST /api/devices/discover`, `POST /api/devices/{device_id}/preflight`, `GET /api/ssh/preflight`, `GET /api/system/info`, `GET /api/system/gpus`, `GET /api/system/recommendations`, `GET /api/models/discover`. |
+| Device and hardware API | Private compute target readiness and model fit checks before large runs. | `GET /api/devices`, `POST /api/devices/discover`, `POST /api/devices/{device_id}/preflight`, `GET /api/ssh/preflight`, `GET /api/system/info`, `GET /api/system/gpus`, `GET /api/system/recommendations`, `GET /api/models/discover`. |
 | UI surfaces | Human operator education, guided configuration, manual evidence attachment, and model promotion review. | Training Monitor, Training Configuration, Training Guides, World-Model Quality panel, Factory -> Environment Lab, Evaluator -> Held-out Gate, Evaluator -> External benchmark ingest, Models -> profile/leaderboard/comparison/trends, Settings/Devices. |
 
 ---
@@ -73,14 +74,15 @@ this as `metric_catalog`.
 
 | Catalog | Metrics | Decision rule |
 |---|---|---|
-| Setup contracts | Dataset size, truncation, `contract_ready`, `optimizer_ready`, `world_model_records`. | Fix before training or before spending GX10/backend time. |
+| Setup contracts | Dataset size, truncation, `contract_ready`, `optimizer_ready`, `world_model_records`. | Fix before training or before spending private compute/backend time. |
 | Optimization health | Train/eval loss, grad norm, learning rate, KL, entropy. | Tune LR, warmup, epochs, sequence length, and loss weights. |
+| Session Distillation health | `session_distillation_loss`, `session_distillation_kl`, `session_distillation_ce`, `session_distillation_masked_tokens`, reader confidence. | Trust only when masked loss aligns with heldout decision behavior. |
 | Preference health | Chosen/rejected rewards, reward margin, preference accuracy. | Trust only when heldout behavior does not regress against the SFT base. |
 | RL signal quality | Reward, `reward_std`, `frac_reward_zero_std`, verifier error rate, timeout rate. | Scale RL only when reward groups have contrast and verifier errors are low. |
 | Behavior evidence | pass@1/pass@k, heldout trace delta, holdout comparison, external benchmark score. | Use these to decide whether the model is actually better. |
 | Safety/release | Tamper rate, spurious controls, canary failures, verifier error rate. | Any tamper or reward-hacking signal blocks promotion. |
 | World-model diagnostics | ECHO loss, RWML pass rate, embedding distance, exit-code/test-result accuracy. | Use for curriculum and diagnosis until correlated with pass@k and safety. |
-| Hardware efficiency | Tokens/sec, peak GPU memory, OOM count, backend import status. | Use to size batch, sequence length, backend choice, and GX10 readiness. |
+| Hardware efficiency | Tokens/sec, peak GPU memory, OOM count, backend import status. | Use to size batch, sequence length, backend choice, and compute-target readiness. |
 
 The recipe stages are:
 
@@ -106,7 +108,8 @@ The recipe stages are:
 | Reward model / ORM / PRM | Ready with evidence | You need a learned scorer for reward audits, best-of-N, rejection sampling, trajectory scoring, or later RL. | `reward_artifact`, `reward_type`, `reward_loss`, reward scale, train/eval split, LoRA/QLoRA settings for real backends. | Strict reward examples, fixture smoke artifacts, heldout pair accuracy, calibration, length-bias and task-family checks. |
 | GRPO/RLVR | Ready with evidence | You have executable verifiers and sampled attempts sometimes pass and sometimes fail. | `training_profile=terminal_rl_tmax_like`, `grpo_group_size`, DAPO/Dr. GRPO loss, active sampling, zero-std filtering, temperature. | Reward, `reward_std`, `frac_reward_zero_std`, pass@1/pass@k, timeout, tamper, verifier status. |
 | Distillation | Ready | A smaller model is too weak for RL or you want to compress teacher behavior. | Teacher model, teacher temperature, distillation alpha, on-policy distillation. | Student pass@k, quality against teacher baseline, no tool-format regression. |
-| Cascade RL | Ready with evidence | You need staged domain learning from easier terminal skills to harder multi-step tasks. | Domain stages, stage steps, base model, min examples, mode, remote SSH, MOPD settings. | Per-domain holdouts, stage-to-stage forgetting, final generalist holdout. |
+| Session Distillation | Ready with evidence | Failed trace spans show local mistakes that can be corrected with a hint without replacing the trajectory. | `session_distillation_alpha`, temperature, min confidence, reader, `target_span_only` mask. | Valid records, masked KL/CE metrics, heldout decision accuracy, tool/command validity, pass@k where available. |
+| Cascade RL | Ready with evidence | You need staged domain learning from easier terminal skills to harder multi-step tasks. | Domain stages, stage steps, base model, min examples, mode, private compute target, MOPD settings. | Per-domain holdouts, stage-to-stage forgetting, final generalist holdout. |
 | DPPO replay | Backend-dependent | You have served-model terminal rollouts, behavior/train logprobs, and a backend such as verl, SkyRL, or OpenRLHF. | Backend, Binary-TV/KL threshold, replay path, train-logprob enrichment, `bashgym training smoke-bundle`. | One local readiness bundle, then one installed-backend smoke with mask telemetry, reward, pass@k, and saved artifacts. |
 | ECHO | Backend-dependent, diagnostic | You want an auxiliary observation-prediction loss over terminal outputs. | `echo_enabled`, `echo_aux_lambda`, action/observation masks, backend loss hook. | ECHO loss trend, observation coverage, heldout correlation. |
 | RWML | Backend-dependent, diagnostic | You want an embedding-space next-state reward or curriculum signal. | `rwml_enabled`, distance threshold, easy-pass threshold, easy keep probability, history window, embedding model. | RWML pass rate, distance mean/p95, prediction outliers, heldout correlation. |
@@ -131,10 +134,11 @@ Key artifacts to preserve through the loop:
 - `dpo_pairs.jsonl`: prompt identity, chosen/rejected outputs, pair source, quality labels.
 - `reward_examples.jsonl`: reward type, prompt/trajectory, reward values or step rewards, label source, reward scale, split/decontamination metadata.
 - `reward_eval.json`: heldout pair accuracy, calibration, reward margin, length bias, task-family breakdown, reward variance, and eval-only leakage checks.
+- `session_distillation_records.jsonl`: original context, hinted context, hint, target text, target span, loss mask, reader confidence, verifier outcome, and provenance.
 - `EnvironmentSpec`: id, instruction, workspace/build hints, verifier, protected-file manifest.
 - `metrics.jsonl`: step, loss/reward, reward variance, pass@k, timeout/tamper, world-model metrics.
 - `dppo_replay.jsonl`: environment, trajectory, reward, behavior/train logprobs, optional `world_model`.
-- `backend_smoke_readiness.json`: local DPPO/ECHO/RWML handoff status before GX10/backend work.
+- `backend_smoke_readiness.json`: local DPPO/ECHO/RWML handoff status before private compute/backend work.
 - `release_evidence.json`: heldout verdict, environment gates, external benchmarks, diagnostic world-model quality, and diagnostic learned-reward evidence.
 
 ---
@@ -159,7 +163,7 @@ Hardware choices:
 |---|---|---|
 | Local 12 GB GPU | Fast iteration, smoke tests, small LoRA/QLoRA specialists. | OOM, truncation, large-vocab loss memory. |
 | Local 24 GB GPU | Larger local adapters and longer traces. | Eval loss, adapter overfit, checkpoint size. |
-| DGX Spark / GX10 | Larger dense/MoE targets, longer-context runs, DPPO/ECHO/RWML backend smoke. | Backend imports, CUDA/Triton compatibility, artifact sync. |
+| Private compute target | Larger dense/MoE targets, longer-context runs, DPPO/ECHO/RWML backend smoke. | Backend imports, CUDA/Triton compatibility, artifact sync. |
 | Cloud backend | Managed fine-tunes, large batch experiments, external trainer backends. | Data egress, benchmark leakage, reproducibility. |
 
 Config axes to decide before a run:
@@ -292,7 +296,7 @@ Before a trained open model is routed to real work:
 - Spurious-reward controls stay clear.
 - Reward-hacking canaries fail closed.
 - External benchmark evidence is attached for broad claims.
-- Backend-smoke readiness and GX10 logs are preserved when DPPO/ECHO/RWML was used.
+- Backend-smoke readiness and private/cloud compute logs are preserved when DPPO/ECHO/RWML was used.
 - World-model quality, if present, is attached as diagnostic context only.
 - Dataset, environment, and benchmark manifests are preserved.
 

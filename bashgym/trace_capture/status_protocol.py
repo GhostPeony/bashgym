@@ -397,7 +397,9 @@ def _scrub_text(
 
     if field_name in _OUTPUT_FIELD_NAMES and len(scrubbed) > max_output_chars:
         omitted = len(scrubbed) - max_output_chars
-        scrubbed = f"{scrubbed[:max_output_chars]}\n[truncated {omitted} chars by BashGym replay scrubber]"
+        scrubbed = (
+            f"{scrubbed[:max_output_chars]}\n[truncated {omitted} chars by BashGym replay scrubber]"
+        )
         stats.truncations += 1
         stats.truncated_fields.add(field_path)
 

@@ -8,7 +8,7 @@ from collections import Counter
 from typing import Any
 
 from bashgym.gym.autoresearch import SearchSpace
-from bashgym.sources import SourceArtifactType, SourceCard, SourceRisk, SourceUse
+from bashgym.sources import SourceCard, SourceUse
 from bashgym.sources.catalog import TRAINING_USES, supports_goal
 
 DATA_RECIPE_SCHEMA_VERSION = "bashgym.data_recipe_proposal.v1"

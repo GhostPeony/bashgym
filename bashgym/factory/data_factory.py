@@ -856,7 +856,9 @@ Generate {num_variations} variations in JSON format:
             gold_metadata.get("trace_id") or gold_trace.get("trace_id") or gold_trace_path.stem
         )
         failed_trace_id = str(
-            failed_metadata.get("trace_id") or failed_trace.get("trace_id") or failed_trace_path.stem
+            failed_metadata.get("trace_id")
+            or failed_trace.get("trace_id")
+            or failed_trace_path.stem
         )
 
         return DPOExample(

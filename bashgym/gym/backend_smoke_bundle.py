@@ -438,7 +438,9 @@ def _next_actions(
         if check["status"] in {"fail", "warn"} and check["next_step"] not in actions:
             actions.append(check["next_step"])
     if optimizer_ready and not backend_launch_ready:
-        actions.append("Copy the launch env/script to the private compute target after installing the selected backend.")
+        actions.append(
+            "Copy the launch env/script to the private compute target after installing the selected backend."
+        )
     if optimizer_ready and backend_launch_ready:
         actions.append("Run the materialized launch script on the target GPU machine.")
     return actions

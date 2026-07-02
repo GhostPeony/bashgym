@@ -685,7 +685,9 @@ def _load_data_recipe_sources(body: DataRecipeProposalRequest):
         goal = SourceUse(body.goal)
     except ValueError as exc:
         valid = ", ".join(use.value for use in SourceUse)
-        raise HTTPException(status_code=400, detail=f"unknown goal {body.goal!r}; choose {valid}") from exc
+        raise HTTPException(
+            status_code=400, detail=f"unknown goal {body.goal!r}; choose {valid}"
+        ) from exc
 
     if body.source_ids:
         try:

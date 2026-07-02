@@ -158,25 +158,26 @@ class TestTrainRemote:
         )
         return RemoteTrainer(config)
 
-    def test_train_remote_orchestrates_full_flow(self, trainer, tmp_path):
-        """Verify train_remote calls preflight, upload, execute, stream, download."""
-        calls = []
+    def _wire_mocks(self, trainer, calls, exit_code="0"):
+        """Wire stage mocks onto the trainer, recording call order in `calls`."""
 
         async def mock_preflight(require_unsloth=True):
             calls.append("preflight")
             return PreflightResult(ok=True, python_version="3.12")
 
-        async def mock_upload(conn, run_id, script_path, dataset_path):
+        async def mock_upload(conn, run_id, script_path, dataset_path, work_dir=None):
             calls.append("upload")
 
-        async def mock_start(conn, run_id, script_name="train_sft.py"):
+        async def mock_start(conn, run_id, script_name="train_sft.py", work_dir=None):
             calls.append("start")
             return 99999
 
-        async def mock_stream(conn, run_id, pid, log_callback=None, poll_interval=None):
+        async def mock_stream(
+            conn, run_id, pid, log_callback=None, poll_interval=None, work_dir=None
+        ):
             calls.append("stream")
 
-        async def mock_download(conn, run_id, local_dir):
+        async def mock_download(conn, run_id, local_dir, work_dir=None):
             calls.append("download")
 
         trainer.preflight_check = mock_preflight
@@ -184,7 +185,15 @@ class TestTrainRemote:
         trainer._start_remote_training = mock_start
         trainer._stream_logs = mock_stream
         trainer._download_artifacts = mock_download
-        trainer._connect = AsyncMock(return_value=AsyncMock())
+
+        conn = AsyncMock()
+        conn.run = AsyncMock(return_value=MagicMock(stdout=f"{exit_code}\n"))
+        trainer._connect = AsyncMock(return_value=conn)
+
+    def test_train_remote_orchestrates_full_flow(self, trainer, tmp_path):
+        """Verify train_remote calls preflight, upload, execute, stream, download."""
+        calls = []
+        self._wire_mocks(trainer, calls, exit_code="0")
 
         script = tmp_path / "train_sft.py"
         script.write_text("print('hello')")
@@ -203,6 +212,47 @@ class TestTrainRemote:
         assert result["success"] is True
         assert result["remote_pid"] == 99999
         assert calls == ["preflight", "upload", "start", "stream", "download"]
+
+    def test_train_remote_fails_on_nonzero_exit_code(self, trainer, tmp_path):
+        """A remote script that crashed must be reported as a failure, not success."""
+        calls = []
+        self._wire_mocks(trainer, calls, exit_code="1")
+
+        script = tmp_path / "train_sft.py"
+        script.write_text("print('hello')")
+        dataset = tmp_path / "train.jsonl"
+        dataset.write_text("{}")
+
+        result = asyncio.run(
+            trainer.train_remote(
+                run_id="run_crash",
+                script_path=script,
+                dataset_path=dataset,
+                local_output_dir=tmp_path / "output",
+            )
+        )
+
+        assert result["success"] is False
+        assert "exited with code 1" in result["error"]
+        assert "download" not in calls
+
+    def test_resolve_work_dir_expands_tilde(self, trainer):
+        """SFTP treats ~ literally, so the work dir must expand to $HOME."""
+        conn = AsyncMock()
+        conn.run = AsyncMock(return_value=MagicMock(stdout="/home/remote-user"))
+
+        resolved = asyncio.run(trainer._resolve_work_dir(conn))
+
+        assert resolved == "/home/remote-user/bashgym-training"
+
+    def test_resolve_work_dir_keeps_absolute_paths(self, trainer):
+        trainer.config.remote_work_dir = "/data/training"
+        conn = AsyncMock()
+
+        resolved = asyncio.run(trainer._resolve_work_dir(conn))
+
+        assert resolved == "/data/training"
+        conn.run.assert_not_called()
 
     def test_train_remote_fails_on_preflight(self, trainer, tmp_path):
         async def mock_preflight(require_unsloth=True):

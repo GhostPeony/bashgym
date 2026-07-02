@@ -372,7 +372,9 @@ def validate_source_use(
         "goal": source_use.value,
         "blocking_codes": blocking,
         "warnings": warnings,
-        "requires_override_reason": bool(allow_eval_only and card.eval_only and not override_reason),
+        "requires_override_reason": bool(
+            allow_eval_only and card.eval_only and not override_reason
+        ),
         "override_reason": override_reason,
     }
 

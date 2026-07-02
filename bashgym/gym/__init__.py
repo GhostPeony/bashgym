@@ -1,5 +1,6 @@
 """Gym - Training Layer"""
 
+from bashgym.gym.data_recipe_search_space import DataRecipeSearchSpace
 from bashgym.gym.dppo import (
     DPPO_BINARY_KL_THRESHOLD,
     DPPO_BINARY_TV_THRESHOLD,
@@ -42,7 +43,6 @@ from bashgym.gym.echo_trainer import (
 from bashgym.gym.echo_trainer import (
     environment_prediction_loss_from_logits,
 )
-from bashgym.gym.data_recipe_search_space import DataRecipeSearchSpace
 from bashgym.gym.environment import (
     Action,
     ActionType,

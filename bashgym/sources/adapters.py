@@ -98,9 +98,8 @@ def _quality_from_score(score: float | int | str | None, *, scale_max: float = 4
 
 def _record_id(record: dict[str, Any], index: int) -> str:
     metadata = _metadata(record)
-    raw = (
-        _text(record, "source_record_id", "record_id", "id", "example_id", "pair_id")
-        or str(_metadata_value(metadata, "source_record_id", "record_id", "id", "example_id") or "")
+    raw = _text(record, "source_record_id", "record_id", "id", "example_id", "pair_id") or str(
+        _metadata_value(metadata, "source_record_id", "record_id", "id", "example_id") or ""
     )
     return raw or f"record-{index + 1:06d}"
 
@@ -152,7 +151,9 @@ def _stringify_response(value: Any) -> str:
         return value.strip()
     messages = _messages(value)
     if messages:
-        return _last_message_text(messages, "assistant", "gpt", "model") or _message_text(messages[-1])
+        return _last_message_text(messages, "assistant", "gpt", "model") or _message_text(
+            messages[-1]
+        )
     if isinstance(value, dict):
         for key in ("content", "text", "response", "answer"):
             nested = value.get(key)
@@ -222,7 +223,9 @@ def _with_mapping_metadata(
     metadata = _metadata(payload)
     metadata.setdefault("source_schema", source_schema)
     if updates:
-        metadata.update({key: value for key, value in updates.items() if value not in (None, "", [], {})})
+        metadata.update(
+            {key: value for key, value in updates.items() if value not in (None, "", [], {})}
+        )
     payload["metadata"] = metadata
     return payload
 
@@ -408,7 +411,11 @@ def _normalize_helpsteer2_records(
             if has_preference_rows
             else _helpsteer2_scored_response_pairs(records)
         )
-        mapper = "helpsteer2_preference_pairs" if has_preference_rows else "helpsteer2_scored_response_pairs"
+        mapper = (
+            "helpsteer2_preference_pairs"
+            if has_preference_rows
+            else "helpsteer2_scored_response_pairs"
+        )
         if has_preference_rows:
             consumed_records = len(normalized)
         else:
@@ -489,9 +496,11 @@ def _base_metadata(
             "decontamination_status": metadata.get("decontamination_status")
             or record.get("decontamination_status")
             or "source_card_policy_recorded_not_checked",
-            "quality_score": metadata.get("quality_score")
-            if metadata.get("quality_score") is not None
-            else record.get("quality_score", 1.0),
+            "quality_score": (
+                metadata.get("quality_score")
+                if metadata.get("quality_score") is not None
+                else record.get("quality_score", 1.0)
+            ),
             "label_source": metadata.get("label_source")
             or record.get("label_source")
             or card.adapter,
@@ -553,7 +562,10 @@ def _to_sft_examples(
             prompt = _prompt(record)
             response = _response(record)
             if prompt and response:
-                messages = [{"role": "user", "content": prompt}, {"role": "assistant", "content": response}]
+                messages = [
+                    {"role": "user", "content": prompt},
+                    {"role": "assistant", "content": response},
+                ]
         if not messages:
             continue
         metadata = _base_metadata(card, record, index=index, manifest=manifest)
@@ -576,17 +588,21 @@ def _to_dpo_pairs(
             continue
         metadata = _base_metadata(card, record, index=index, manifest=manifest)
         pair_id = _text(record, "pair_id", "id", "example_id") or f"{card.id}-pair-{index + 1:06d}"
-        prompt_hash = _text(record, "prompt_hash") or str(metadata.get("prompt_hash") or _prompt_hash(prompt))
+        prompt_hash = _text(record, "prompt_hash") or str(
+            metadata.get("prompt_hash") or _prompt_hash(prompt)
+        )
         source_record_id = str(metadata["source_record_id"])
         metadata.update(
             {
                 "pair_id": pair_id,
                 "prompt_hash": prompt_hash,
                 "chosen_trace_id": metadata.get("chosen_trace_id") or f"{source_record_id}:chosen",
-                "rejected_trace_id": metadata.get("rejected_trace_id") or f"{source_record_id}:rejected",
+                "rejected_trace_id": metadata.get("rejected_trace_id")
+                or f"{source_record_id}:rejected",
                 "pair_generation_method": metadata.get("pair_generation_method")
                 or "source_preference_pair",
-                "label_strength": metadata.get("label_strength") or "source_preferred_over_rejected",
+                "label_strength": metadata.get("label_strength")
+                or "source_preferred_over_rejected",
                 "chosen_quality_score": metadata.get("chosen_quality_score", 1.0),
                 "rejected_quality_score": metadata.get("rejected_quality_score", 0.0),
             }
@@ -617,9 +633,13 @@ def _to_reward_examples(
         prompt = _prompt(record)
         metadata = _base_metadata(card, record, index=index, manifest=manifest)
         pair_chosen = _pair_text(record, "chosen", "chosen_response", "chosen_text", "accepted")
-        pair_rejected = _pair_text(record, "rejected", "rejected_response", "rejected_text", "declined")
+        pair_rejected = _pair_text(
+            record, "rejected", "rejected_response", "rejected_text", "declined"
+        )
         pair_id = _text(record, "pair_id", "id", "example_id") or f"{card.id}-pair-{index + 1:06d}"
-        reward_type = "process_reward" if process else str(record.get("reward_type") or "preference_reward")
+        reward_type = (
+            "process_reward" if process else str(record.get("reward_type") or "preference_reward")
+        )
 
         if prompt and pair_chosen and pair_rejected and not process:
             chosen_score = _numeric(record.get("chosen_score"))
@@ -686,7 +706,9 @@ def _to_reward_examples(
     return examples
 
 
-def _eval_manifest(card: SourceCard, records: list[dict[str, Any]], *, input_path: Path) -> dict[str, Any]:
+def _eval_manifest(
+    card: SourceCard, records: list[dict[str, Any]], *, input_path: Path
+) -> dict[str, Any]:
     return {
         "schema_version": "bashgym.source_eval_manifest.v1",
         "source_id": card.id,
@@ -814,7 +836,9 @@ def prepare_source_artifacts(
         examples = _to_sft_examples(card, records, manifest=manifest)
         artifact_path = output_path / "training_examples.jsonl"
         _write_jsonl(artifact_path, examples)
-        add_artifact(artifact_type="sft_examples", path=artifact_path, records_written=len(examples))
+        add_artifact(
+            artifact_type="sft_examples", path=artifact_path, records_written=len(examples)
+        )
     elif source_use == SourceUse.DPO:
         pairs = _to_dpo_pairs(card, records, manifest=manifest)
         artifact_path = output_path / "dpo_pairs.jsonl"

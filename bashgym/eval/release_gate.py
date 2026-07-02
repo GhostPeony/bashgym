@@ -294,9 +294,7 @@ def _learned_reward_summary(evidence: dict[str, Any]) -> dict[str, Any]:
                 code = item.get("code")
                 message = item.get("message")
                 if message:
-                    normalized_findings.append(
-                        f"learned reward {code or 'finding'}: {message}"
-                    )
+                    normalized_findings.append(f"learned reward {code or 'finding'}: {message}")
                 continue
             text = str(item)
             if text:
@@ -311,10 +309,14 @@ def _learned_reward_summary(evidence: dict[str, Any]) -> dict[str, Any]:
         normalized_findings.append("learned reward evidence reports eval-only leakage")
     calibration = metrics.get("calibration_error")
     if calibration is not None and calibration > 0.2:
-        normalized_findings.append("learned reward calibration error is above the starter threshold")
+        normalized_findings.append(
+            "learned reward calibration error is above the starter threshold"
+        )
     pair_accuracy = metrics.get("heldout_pair_accuracy")
     if pair_accuracy is not None and pair_accuracy < 0.6:
-        normalized_findings.append("learned reward heldout pair accuracy is below the starter threshold")
+        normalized_findings.append(
+            "learned reward heldout pair accuracy is below the starter threshold"
+        )
     reward_variance = metrics.get("reward_variance")
     if reward_variance is not None and reward_variance == 0.0:
         normalized_findings.append("learned reward predictions have zero variance")

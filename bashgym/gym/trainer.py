@@ -200,10 +200,12 @@ class _ProgressLineParser:
         if self._start is None:
             self._start = now
 
-        loss_match = re.search(r"'loss':\s*([\d.]+)", line)
-        epoch_match = re.search(r"'epoch':\s*([\d.]+)", line)
-        step_match = re.search(r"'step':\s*(\d+)", line)
-        grad_norm_match = re.search(r"'grad_norm':\s*([\d.]+)", line)
+        # TRL prints metric dicts with bare numbers locally, but the remote
+        # log stream carries them as quoted strings — accept both.
+        loss_match = re.search(r"'loss':\s*'?([\d.]+)", line)
+        epoch_match = re.search(r"'epoch':\s*'?([\d.]+)", line)
+        step_match = re.search(r"'step':\s*'?(\d+)", line)
+        grad_norm_match = re.search(r"'grad_norm':\s*'?([\d.]+)", line)
         progress_match = re.search(r"(\d+)%\|[^|]*\|\s*(\d+)/(\d+)", line)
         unsloth_steps_match = re.search(r"Total steps\s*=\s*(\d+)", line)
 

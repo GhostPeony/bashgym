@@ -347,9 +347,7 @@ def train_reward_model_fixture_file(
     token_counts: Counter[str] = Counter()
     for record in train_records:
         token_counts.update(_features(record).keys())
-    vocabulary = {
-        token for token, _ in token_counts.most_common(max(1, int(max_features)))
-    }
+    vocabulary = {token for token, _ in token_counts.most_common(max(1, int(max_features)))}
     weights = {token: 0.0 for token in vocabulary}
     mean_target = sum(typed_train_targets) / len(typed_train_targets)
     bias = math.log((mean_target + 1e-3) / (1.0 - mean_target + 1e-3))
@@ -371,7 +369,9 @@ def train_reward_model_fixture_file(
                 "train_loss": _mean_loss(
                     train_records, typed_train_targets, weights, bias, vocabulary
                 ),
-                "eval_loss": _mean_loss(eval_records, typed_eval_targets, weights, bias, vocabulary),
+                "eval_loss": _mean_loss(
+                    eval_records, typed_eval_targets, weights, bias, vocabulary
+                ),
                 "learning_rate": learning_rate,
                 "train_records": len(train_records),
                 "eval_records": len(eval_records),

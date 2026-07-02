@@ -31,6 +31,7 @@ def prepare_source_artifacts(*args: Any, **kwargs: Any) -> dict[str, Any]:
 
     return _prepare_source_artifacts(*args, **kwargs)
 
+
 __all__ = [
     "SOURCE_ARTIFACT_PREPARE_SCHEMA_VERSION",
     "SOURCE_FETCH_SCHEMA_VERSION",

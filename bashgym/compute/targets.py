@@ -151,7 +151,9 @@ def preflight_compute_target(target: ComputeTarget) -> dict[str, Any]:
             {
                 "code": "python_available",
                 "status": "pass" if shutil.which("python") else "fail",
-                "message": "python is available on PATH" if shutil.which("python") else "python not found",
+                "message": (
+                    "python is available on PATH" if shutil.which("python") else "python not found"
+                ),
             }
         )
     elif target.launcher == ComputeLauncher.SSH:
@@ -174,7 +176,9 @@ def preflight_compute_target(target: ComputeTarget) -> dict[str, Any]:
             {
                 "code": "skypilot_cli",
                 "status": "pass" if shutil.which("sky") else "needs_install",
-                "message": "sky CLI found" if shutil.which("sky") else "Install SkyPilot CLI for launch.",
+                "message": (
+                    "sky CLI found" if shutil.which("sky") else "Install SkyPilot CLI for launch."
+                ),
             }
         )
     elif target.launcher == ComputeLauncher.DSTACK:
@@ -182,7 +186,11 @@ def preflight_compute_target(target: ComputeTarget) -> dict[str, Any]:
             {
                 "code": "dstack_cli",
                 "status": "pass" if shutil.which("dstack") else "needs_install",
-                "message": "dstack CLI found" if shutil.which("dstack") else "Install dstack CLI for launch.",
+                "message": (
+                    "dstack CLI found"
+                    if shutil.which("dstack")
+                    else "Install dstack CLI for launch."
+                ),
             }
         )
 

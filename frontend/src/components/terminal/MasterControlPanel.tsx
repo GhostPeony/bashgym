@@ -151,10 +151,10 @@ export const MasterControlPanel = memo(function MasterControlPanel({
         </span>
         <button
           onClick={togglePanelCollapsed}
-          className="p-1 hover:bg-background-tertiary text-text-muted hover:text-text-secondary transition-press"
+          className="node-btn"
           title="Collapse"
         >
-          <ChevronUp className="w-3.5 h-3.5" />
+          <ChevronUp className="w-3 h-3" />
         </button>
       </div>
 
@@ -279,7 +279,7 @@ export const MasterControlPanel = memo(function MasterControlPanel({
           <div className="flex items-center gap-1 flex-1">
             <button
               onClick={onZoomOut}
-              className="btn-icon !w-5 !h-5 !border-1"
+              className="node-btn"
               title="Zoom out"
             >
               <Minus className="w-3 h-3" />
@@ -289,14 +289,14 @@ export const MasterControlPanel = memo(function MasterControlPanel({
             </span>
             <button
               onClick={onZoomIn}
-              className="btn-icon !w-5 !h-5 !border-1"
+              className="node-btn"
               title="Zoom in"
             >
               <Plus className="w-3 h-3" />
             </button>
             <button
               onClick={onFitView}
-              className="btn-icon !w-5 !h-5 !border-1 ml-1"
+              className="node-btn node-btn-accent ml-1"
               title="Fit view"
             >
               <Maximize className="w-3 h-3" />
@@ -410,14 +410,14 @@ export const MasterControlPanel = memo(function MasterControlPanel({
             </select>
             <button
               onClick={handleOpenPreset}
-              className="btn-icon !w-6 !h-6 !border-1"
+              className="node-btn node-btn-accent"
               title="Open this layout"
             >
               <FolderOpen className="w-3 h-3" />
             </button>
             <button
               onClick={handleSavePreset}
-              className="btn-icon !w-6 !h-6 !border-1"
+              className="node-btn"
               title="Save current canvas as a layout"
             >
               <Save className="w-3 h-3" />

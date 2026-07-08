@@ -565,6 +565,29 @@ async def designer_create(
     )
 
 
+@router.get("/designer/jobs", response_model=list[DesignerJobResponse])
+async def list_designer_jobs(limit: int = 20):
+    """List recent DataDesigner jobs, newest first."""
+    jobs: list[DesignerJobResponse] = []
+    for job_id in reversed(list(designer_jobs.keys())):
+        job = designer_jobs[job_id]
+        jobs.append(
+            DesignerJobResponse(
+                job_id=job_id,
+                status=job["status"],
+                pipeline=job["pipeline"],
+                num_records=job["num_records"],
+                progress=job.get("progress"),
+                output_dir=job.get("output_dir"),
+                export_result=job.get("export_result"),
+                error=job.get("error"),
+            )
+        )
+        if len(jobs) >= limit:
+            break
+    return jobs
+
+
 @router.get("/designer/jobs/{job_id}", response_model=DesignerJobResponse)
 async def designer_job_status(job_id: str):
     """Get DataDesigner generation job progress."""

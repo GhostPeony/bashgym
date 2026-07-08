@@ -264,7 +264,7 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: NodeP
             </span>
           </div>
         )}
-        <div className="flex items-center gap-0.5">
+        <div className="flex items-center gap-1 nodrag">
           {hasConnections && (
             <div
               className="flex items-center gap-0.5 px-1 py-0.5 border-brutal border-accent/60 bg-accent/10 rounded-brutal text-accent"
@@ -276,28 +276,25 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: NodeP
           {onTogglePause && (
             <button
               onClick={handleTogglePause}
-              className={clsx(
-                'p-1 text-text-muted transition-press',
-                isPaused ? 'hover:text-status-success' : 'hover:text-status-warning'
-              )}
+              className={clsx('node-btn', isPaused ? 'node-btn-success' : 'node-btn-warning')}
               title={isPaused ? 'Resume' : 'Pause'}
             >
-              {isPaused ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
+              {isPaused ? <Play className="w-3 h-3" /> : <Pause className="w-3 h-3" />}
             </button>
           )}
           <button
             onClick={handleFocus}
-            className="p-1 hover:bg-background-tertiary text-text-muted hover:text-text-secondary transition-press"
+            className="node-btn node-btn-accent"
             title="Focus panel"
           >
-            <Maximize2 className="w-3.5 h-3.5" />
+            <Maximize2 className="w-3 h-3" />
           </button>
           <button
             onClick={handleClose}
-            className="p-1 hover:bg-status-error/20 text-text-muted hover:text-status-error transition-press"
+            className="node-btn node-btn-danger"
             title="Close"
           >
-            <X className="w-3.5 h-3.5" />
+            <X className="w-3 h-3" />
           </button>
         </div>
       </div>

@@ -152,7 +152,7 @@ export const TrainingRunNode = memo(function TrainingRunNode({ data, selected }:
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); void pauseTraining() }}
-                className="btn-secondary !py-1 !px-2 !text-[10px] flex-1"
+                className="node-btn node-btn-wide node-btn-warning flex-1 text-status-warning"
               >
                 <Pause className="w-3 h-3" /> Pause
               </button>
@@ -161,7 +161,7 @@ export const TrainingRunNode = memo(function TrainingRunNode({ data, selected }:
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); void resumeTraining() }}
-                className="btn-secondary !py-1 !px-2 !text-[10px] flex-1"
+                className="node-btn node-btn-wide node-btn-success flex-1 text-status-success"
               >
                 <Play className="w-3 h-3" /> Resume
               </button>
@@ -170,7 +170,7 @@ export const TrainingRunNode = memo(function TrainingRunNode({ data, selected }:
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); void stopTraining() }}
-                className="btn-secondary !py-1 !px-2 !text-[10px] flex-1 hover:!text-status-error"
+                className="node-btn node-btn-wide node-btn-danger flex-1 text-status-error"
               >
                 <Square className="w-3 h-3" /> Stop
               </button>

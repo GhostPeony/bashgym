@@ -94,7 +94,7 @@ export const DataNodeShell = memo(function DataNodeShell({
           {title}
         </span>
         {headerRight}
-        <div className="flex items-center gap-0.5 nodrag">
+        <div className="flex items-center gap-1 nodrag">
           {hasConnections && (
             <div
               className="flex items-center gap-0.5 px-1 py-0.5 border-brutal border-accent/60 bg-accent/10 rounded-brutal text-accent"
@@ -108,19 +108,19 @@ export const DataNodeShell = memo(function DataNodeShell({
               type="button"
               onClick={handleSend}
               disabled={sending}
-              className="p-1 text-text-muted hover:text-accent transition-press"
+              className="node-btn node-btn-accent"
               title="Send context to linked terminals"
             >
-              {sending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+              {sending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
             </button>
           )}
           <button
             type="button"
             onClick={handleClose}
-            className="p-1 hover:bg-status-error/20 text-text-muted hover:text-status-error transition-press"
+            className="node-btn node-btn-danger"
             title="Close"
           >
-            <X className="w-3.5 h-3.5" />
+            <X className="w-3 h-3" />
           </button>
         </div>
       </div>

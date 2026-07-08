@@ -357,6 +357,77 @@
     box-shadow: 1px 1px 0px var(--shadow-color);
   }
 
+  /* Node action — compact square icon button for canvas cards */
+  .node-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    flex-shrink: 0;
+    background: var(--bg-card);
+    color: var(--text-secondary);
+    border: 1.5px solid var(--border-color);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease,
+      background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .node-btn:hover {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+  }
+
+  .node-btn:active {
+    transform: translate(1px, 1px);
+    box-shadow: 1px 1px 0px var(--shadow-color);
+  }
+
+  .node-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .node-btn-accent:hover {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #ffffff;
+  }
+
+  .node-btn-danger:hover {
+    background: var(--status-error);
+    border-color: var(--status-error);
+    color: #ffffff;
+  }
+
+  .node-btn-warning:hover {
+    background: var(--status-warning);
+    border-color: var(--status-warning);
+    color: #ffffff;
+  }
+
+  .node-btn-success:hover {
+    background: var(--status-success);
+    border-color: var(--status-success);
+    color: #ffffff;
+  }
+
+  /* Wide labeled variant for card action rows (pause/resume/stop) */
+  .node-btn-wide {
+    width: auto;
+    height: auto;
+    padding: 5px 10px;
+    gap: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
   /* CTA / Directional — rectangle with triangle arrow */
   .btn-cta {
     padding: 10px 40px 10px 24px;

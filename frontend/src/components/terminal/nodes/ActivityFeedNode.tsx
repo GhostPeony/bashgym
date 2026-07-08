@@ -68,8 +68,8 @@ export const ActivityFeedNode = memo(function ActivityFeedNode({ data, selected 
             className={clsx(
               'px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-wider border-brutal rounded-brutal transition-press',
               filter === f
-                ? 'border-accent bg-accent/10 text-accent'
-                : 'border-border text-text-muted hover:text-text-secondary'
+                ? 'border-accent bg-accent/10 text-accent shadow-brutal-sm'
+                : 'border-border bg-background-card text-text-muted hover:text-text-secondary hover:border-border'
             )}
           >
             {f}

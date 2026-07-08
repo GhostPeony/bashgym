@@ -374,6 +374,14 @@ Dockerfile.web           # Full-stack container
 docker-compose.yml       # Production stack
 ```
 
+### Workspace Canvas (Electron)
+
+The Workspace canvas (`frontend/src/components/terminal/CanvasView.tsx`, React Flow) hosts:
+- **Terminal nodes** — PTY sessions with agent detection (Claude Code / Codex badges from banner output); quick-launch buttons in the Master Control Panel type `claude` / `codex` into a fresh PTY.
+- **Data nodes** (`frontend/src/components/terminal/nodes/`): `TrainingRunNode` (live `useTrainingStore` metrics + pause/resume/stop), `EvalNode` (polls `GET /api/eval/heldout`), `DataDesignerNode` (polls `GET /api/factory/designer/jobs`), `ActivityFeedNode` (WebSocket activity feed). All share `DataNodeShell`; registry in `nodes/dataPanels.ts`.
+- **Edge routing** — connect any data node to a terminal and press Send to write a markdown context file path into the agent's input (`utils/edgeRouting.ts`).
+- Non-terminal panels persist across reloads via `bashgym_saved_panels`; canvas hotkeys live in `hooks/useCanvasHotkeys.ts`.
+
 ---
 
 ## Runtime Configuration

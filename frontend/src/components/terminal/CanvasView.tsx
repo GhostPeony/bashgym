@@ -37,6 +37,7 @@ import './nodes/adapters/context'
 import './nodes/adapters/neon'
 import './nodes/adapters/vercel'
 import { MasterControlPanel } from './MasterControlPanel'
+import { useCanvasHotkeys } from '../../hooks/useCanvasHotkeys'
 import { AlertCircle } from 'lucide-react'
 
 const VIEWPORT_KEY = 'bashgym_canvas_viewport'
@@ -358,6 +359,9 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
     fitView({ padding: 0.2 })
     setTimeout(() => setCurrentZoom(getZoom()), 100)
   }, [fitView, getZoom])
+
+  // Canvas keyboard shortcuts (1-9 focus, Tab cycle, F fit, G grid, M minimap, Space pause)
+  useCanvasHotkeys({ enabled: true, onFitView: handleFitView, onFocusPanel })
 
   const handleAutoArrange = useCallback(() => {
     // Auto-arrange nodes in a grid

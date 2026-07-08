@@ -268,14 +268,14 @@ export function AutoResearchPanel() {
     })
   }, [traceSelectedParams, traceMaxExperiments, traceMutationRate, traceMutationScale, startTraceResearch])
 
-  // Experiment log auto-scroll
-  const logEndRef = useRef<HTMLDivElement>(null)
+  // Experiment log auto-scroll. Scroll only the log container — scrollIntoView
+  // would also scroll every ancestor, yanking the page down.
   const logContainerRef = useRef<HTMLDivElement>(null)
   const [autoScroll, setAutoScroll] = useState(true)
 
   useEffect(() => {
-    if (autoScroll && logEndRef.current) {
-      logEndRef.current.scrollIntoView({ behavior: 'smooth' })
+    if (autoScroll && logContainerRef.current) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight
     }
   }, [experiments, autoScroll])
 
@@ -1130,7 +1130,6 @@ export function AutoResearchPanel() {
                       </span>
                     </div>
                   ))}
-                  <div ref={logEndRef} />
                 </div>
               </div>
               {!autoScroll && (isHyperparam ? experiments : traceExperiments).length > 6 && (
@@ -1138,7 +1137,10 @@ export function AutoResearchPanel() {
                   className="absolute bottom-2 right-4 tag cursor-pointer"
                   onClick={() => {
                     setAutoScroll(true)
-                    logEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+                    logContainerRef.current?.scrollTo({
+                      top: logContainerRef.current.scrollHeight,
+                      behavior: 'smooth'
+                    })
                   }}
                 >
                   <span>Scroll to bottom</span>

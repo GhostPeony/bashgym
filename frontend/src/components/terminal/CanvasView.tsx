@@ -26,7 +26,9 @@ import { TerminalNode, type TerminalNodeData } from './TerminalNode'
 import { PreviewNode, type PreviewNodeData } from './PreviewNode'
 import { BrowserNode, type BrowserNodeData } from './BrowserNode'
 import { IntegrationNode } from './nodes/IntegrationNode'
-import type { IntegrationNodeData } from './nodes/types'
+import { ActivityFeedNode } from './nodes/ActivityFeedNode'
+import { DATA_NODE_TYPES } from './nodes/dataPanels'
+import type { IntegrationNodeData, DataNodeData } from './nodes/types'
 // Import adapters to trigger registration side effects
 import './nodes/adapters/context'
 import './nodes/adapters/neon'
@@ -37,7 +39,7 @@ import { AlertCircle } from 'lucide-react'
 const VIEWPORT_KEY = 'bashgym_canvas_viewport'
 
 // Union of all node data shapes rendered on the canvas
-type CanvasNodeData = TerminalNodeData | PreviewNodeData | BrowserNodeData | IntegrationNodeData
+type CanvasNodeData = TerminalNodeData | PreviewNodeData | BrowserNodeData | IntegrationNodeData | DataNodeData
 type CanvasFlowNode = Node<CanvasNodeData>
 
 // Load saved viewport
@@ -70,6 +72,7 @@ const nodeTypes = {
   context: IntegrationNode,
   neon: IntegrationNode,
   vercel: IntegrationNode,
+  activity: ActivityFeedNode,
 }
 
 export interface CanvasViewProps {
@@ -84,7 +87,7 @@ function buildNodeData(
   onFocus: (id: string) => void,
   onClose: (id: string) => void,
   canvasEdges: CanvasEdge[] = []
-): TerminalNodeData | PreviewNodeData | BrowserNodeData | IntegrationNodeData {
+): TerminalNodeData | PreviewNodeData | BrowserNodeData | IntegrationNodeData | DataNodeData {
   const session = panel.terminalId ? sessions.get(panel.terminalId) : undefined
   const hasConnections = canvasEdges.some(e => e.source === panel.id || e.target === panel.id)
 
@@ -98,6 +101,14 @@ function buildNodeData(
       onFocus,
       onClose,
     } as IntegrationNodeData
+  } else if (DATA_NODE_TYPES.includes(panel.type)) {
+    return {
+      panelId: panel.id,
+      title: panel.title,
+      hasConnections,
+      onFocus,
+      onClose,
+    } as DataNodeData
   } else if (panel.type === 'preview') {
     return {
       panelId: panel.id,
@@ -228,7 +239,8 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
           const integrationTypes = ['context', 'neon', 'vercel'] as const
           const nodeType = panel.type === 'preview' ? 'preview' :
                            panel.type === 'browser' ? 'browser' :
-                           integrationTypes.includes(panel.type as any) ? panel.type : 'terminal'
+                           integrationTypes.includes(panel.type as any) ? panel.type :
+                           DATA_NODE_TYPES.includes(panel.type) ? panel.type : 'terminal'
           return {
             id: panel.id,
             type: nodeType,
@@ -375,6 +387,11 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
     addPanel({ type, title, adapterConfig: {} })
   }, [])
 
+  const addDataPanel = useCallback((type: Panel['type'], title: string) => {
+    const { addPanel } = useTerminalStore.getState()
+    addPanel({ type, title })
+  }, [])
+
   return (
     <div className="h-full w-full relative">
       <ReactFlow
@@ -445,6 +462,7 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
         onAddContext={() => addIntegrationPanel('context', 'Context')}
         onAddNeon={() => addIntegrationPanel('neon', 'Neon DB')}
         onAddVercel={() => addIntegrationPanel('vercel', 'Vercel')}
+        onAddDataPanel={addDataPanel}
       />
     </div>
   )

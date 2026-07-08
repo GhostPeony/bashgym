@@ -2,7 +2,7 @@ import { create } from 'zustand'
 // persist and createJSONStorage available if needed for future state persistence
 // import { persist, createJSONStorage } from 'zustand/middleware'
 
-export type PanelType = 'terminal' | 'preview' | 'browser' | 'files' | 'context' | 'neon' | 'vercel'
+export type PanelType = 'terminal' | 'preview' | 'browser' | 'files' | 'context' | 'neon' | 'vercel' | 'activity'
 export type AttentionState = 'none' | 'waiting' | 'success' | 'error'
 export type ViewMode = 'grid' | 'single' | 'canvas'
 export type AgentStatus = 'running' | 'idle' | 'waiting_input' | 'tool_calling'

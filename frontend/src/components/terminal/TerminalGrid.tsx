@@ -6,6 +6,7 @@ import { PreviewPane } from './PreviewPane'
 import { BrowserPane } from './BrowserPane'
 import { FileBrowser } from '../files/FileBrowser'
 import { CanvasViewWrapper } from './CanvasView'
+import { DATA_PANEL_DEFS, DATA_NODE_TYPES } from './nodes/dataPanels'
 import { clsx } from 'clsx'
 
 export function TerminalGrid() {
@@ -57,8 +58,8 @@ export function TerminalGrid() {
   const handleFocusPanel = useCallback((panelId: string) => {
     setActivePanel(panelId)
     const panel = useTerminalStore.getState().panels.find(p => p.id === panelId)
-    const integrationTypes = ['context', 'neon', 'vercel']
-    if (panel && integrationTypes.includes(panel.type)) return
+    const inlineTypes = ['context', 'neon', 'vercel', ...DATA_NODE_TYPES]
+    if (panel && inlineTypes.includes(panel.type)) return
     setCanvasPopupPanelId(panelId)
   }, [setActivePanel])
 
@@ -97,8 +98,14 @@ export function TerminalGrid() {
         return <FileText className="w-3.5 h-3.5 flex-shrink-0" />
       case 'files':
         return <FolderTree className="w-3.5 h-3.5 flex-shrink-0" />
-      default:
+      default: {
+        const def = DATA_PANEL_DEFS.find((d) => d.type === type)
+        if (def) {
+          const DefIcon = def.icon
+          return <DefIcon className="w-3.5 h-3.5 flex-shrink-0" />
+        }
         return <Terminal className="w-3.5 h-3.5 flex-shrink-0" />
+      }
     }
   }
 
@@ -214,6 +221,15 @@ export function TerminalGrid() {
           title={panel.title}
           isActive={isActive}
         />
+      )
+    }
+    if (DATA_NODE_TYPES.includes(panel.type)) {
+      return (
+        <div className="h-full flex items-center justify-center bg-background-secondary">
+          <span className="text-xs font-mono text-text-muted px-4 text-center">
+            "{panel.title}" is a canvas node — switch to Canvas view
+          </span>
+        </div>
       )
     }
     return null

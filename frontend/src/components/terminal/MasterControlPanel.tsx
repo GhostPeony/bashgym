@@ -21,6 +21,8 @@ import {
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useCanvasControlStore, useTerminalStore } from '../../stores'
+import { DATA_PANEL_DEFS } from './nodes/dataPanels'
+import type { PanelType } from '../../stores/terminalStore'
 
 export interface MasterControlPanelProps {
   onZoomIn?: () => void
@@ -33,6 +35,7 @@ export interface MasterControlPanelProps {
   onAddContext?: () => void
   onAddNeon?: () => void
   onAddVercel?: () => void
+  onAddDataPanel?: (type: PanelType, title: string) => void
   currentZoom?: number
 }
 
@@ -47,6 +50,7 @@ export const MasterControlPanel = memo(function MasterControlPanel({
   onAddContext,
   onAddNeon,
   onAddVercel,
+  onAddDataPanel,
   currentZoom = 1
 }: MasterControlPanelProps) {
   const {
@@ -339,6 +343,23 @@ export const MasterControlPanel = memo(function MasterControlPanel({
                 Vercel
               </button>
             )}
+          </div>
+        )}
+        {onAddDataPanel && (
+          <div className="flex items-center gap-2 mt-2 flex-wrap">
+            {DATA_PANEL_DEFS.map((def) => {
+              const DefIcon = def.icon
+              return (
+                <button
+                  key={def.type}
+                  onClick={() => onAddDataPanel(def.type, def.title)}
+                  className="btn-secondary !py-1.5 !px-3 !text-xs flex-1"
+                >
+                  <DefIcon className="w-3 h-3" />
+                  {def.title}
+                </button>
+              )
+            })}
           </div>
         )}
       </div>

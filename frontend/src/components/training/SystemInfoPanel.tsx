@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { RefreshCw, Cpu, HardDrive, AlertCircle, CheckCircle2, XCircle, Server, Wifi } from 'lucide-react'
 import { systemInfoApi, providersApi, sshApi, SystemInfo, ModelRecommendations, OllamaModel } from '../../services/api'
+import { MaskedHost } from '../common'
 import { clsx } from 'clsx'
 
 interface SystemInfoPanelProps {
@@ -260,7 +261,7 @@ export function SystemInfoPanel({ onSystemInfo, onRecommendations, compact = fal
                 <span className="text-sm font-medium text-text-primary">Private target connected</span>
               </div>
               <p className="font-mono text-xs text-text-muted">
-                {sshStatus.username}@{sshStatus.host}
+                <MaskedHost username={sshStatus.username} host={sshStatus.host ?? ''} />
               </p>
               <p className="font-mono text-xs text-text-muted">
                 {sshStatus.python_version}

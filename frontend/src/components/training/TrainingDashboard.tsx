@@ -172,7 +172,7 @@ export function TrainingDashboard() {
           </div>
           <p className="text-sm text-text-secondary mt-1">
             {currentRun
-              ? `Run: ${currentRun.id} - ${currentRun.config.strategy.toUpperCase()}`
+              ? `Run: ${currentRun.id}${currentRun.config.strategy ? ` - ${currentRun.config.strategy.toUpperCase()}` : ''}`
               : 'No active training run'}
             {metrics?.simulation && ' (No GPU/trainer available)'}
           </p>

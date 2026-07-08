@@ -119,6 +119,8 @@ interface TerminalState {
   requestCloseTerminal: (id: string) => boolean
   /** Re-adopt live PTY sessions from the main process (call once on startup). Returns count restored. */
   restoreSessions: () => Promise<number>
+  /** Restore persisted non-terminal panels (call once on startup). Returns count restored. */
+  restoreSavedPanels: () => number
   setActiveTerminal: (id: string) => void
   updateSession: (id: string, updates: Partial<TerminalSession>) => void
 
@@ -245,6 +247,41 @@ const saveSessionMeta = (sessions: Map<string, TerminalSession>) => {
   } catch {
     // Ignore storage errors
   }
+}
+
+// Non-terminal panels (data + integration nodes) persisted across renderer reloads.
+// Ids are preserved so bashgym_canvas_positions entries still apply.
+const SAVED_PANELS_KEY = 'bashgym_saved_panels'
+const PERSISTED_PANEL_TYPES: PanelType[] = [
+  'activity', 'training', 'evals', 'designer', 'context', 'neon', 'vercel'
+]
+
+interface PersistedPanel {
+  id: string
+  type: PanelType
+  title: string
+  adapterConfig?: Record<string, unknown>
+}
+
+const savePanels = (panels: Panel[]) => {
+  try {
+    const toSave: PersistedPanel[] = panels
+      .filter((p) => PERSISTED_PANEL_TYPES.includes(p.type))
+      .map((p) => ({ id: p.id, type: p.type, title: p.title, adapterConfig: p.adapterConfig }))
+    localStorage.setItem(SAVED_PANELS_KEY, JSON.stringify(toSave))
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+const loadSavedPanels = (): PersistedPanel[] => {
+  try {
+    const stored = localStorage.getItem(SAVED_PANELS_KEY)
+    if (stored) return JSON.parse(stored)
+  } catch {
+    // Ignore
+  }
+  return []
 }
 
 // A running/tool_calling session is never killed without explicit confirmation
@@ -385,6 +422,18 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     return live.length
   },
 
+  restoreSavedPanels: () => {
+    const saved = loadSavedPanels()
+    if (saved.length === 0) return 0
+    const existing = new Set(get().panels.map((p) => p.id))
+    const restored: Panel[] = saved
+      .filter((p) => !existing.has(p.id) && PERSISTED_PANEL_TYPES.includes(p.type))
+      .map((p) => ({ id: p.id, type: p.type, title: p.title, adapterConfig: p.adapterConfig }))
+    if (restored.length === 0) return 0
+    set((state) => ({ panels: [...state.panels, ...restored] }))
+    return restored.length
+  },
+
   setActiveTerminal: (id: string) => {
     set({ activeSessionId: id })
     // Find and set active panel
@@ -427,6 +476,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       activePanelId: id
     }))
 
+    savePanels(get().panels)
     return id
   },
 
@@ -460,6 +510,8 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
           : state.activePanelId
       }
     })
+
+    savePanels(get().panels)
   },
 
   setActivePanel: (id: string) => {
@@ -491,6 +543,8 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
       return { panels: newPanels }
     })
+
+    savePanels(get().panels)
   },
 
   setViewMode: (mode: ViewMode) => {
@@ -601,5 +655,6 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         p.id === panelId ? { ...p, adapterConfig } : p
       )
     }))
+    savePanels(get().panels)
   }
 }))

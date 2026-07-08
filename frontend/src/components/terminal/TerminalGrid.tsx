@@ -43,7 +43,9 @@ export function TerminalGrid() {
     if (panels.length === 0 && !initializedRef.current) {
       initializedRef.current = true
       useTerminalStore.getState().restoreSessions().then((restored) => {
-        if (restored === 0 && useTerminalStore.getState().panels.length === 0) {
+        useTerminalStore.getState().restoreSavedPanels()
+        const hasTerminal = useTerminalStore.getState().panels.some((p) => p.type === 'terminal')
+        if (restored === 0 && !hasTerminal) {
           createTerminal()
         }
       })

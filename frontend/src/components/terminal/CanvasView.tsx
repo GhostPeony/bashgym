@@ -28,6 +28,7 @@ import { BrowserNode, type BrowserNodeData } from './BrowserNode'
 import { IntegrationNode } from './nodes/IntegrationNode'
 import { ActivityFeedNode } from './nodes/ActivityFeedNode'
 import { TrainingRunNode } from './nodes/TrainingRunNode'
+import { EvalNode } from './nodes/EvalNode'
 import { DATA_NODE_TYPES } from './nodes/dataPanels'
 import type { IntegrationNodeData, DataNodeData } from './nodes/types'
 // Import adapters to trigger registration side effects
@@ -75,6 +76,7 @@ const nodeTypes = {
   vercel: IntegrationNode,
   activity: ActivityFeedNode,
   training: TrainingRunNode,
+  evals: EvalNode,
 }
 
 export interface CanvasViewProps {

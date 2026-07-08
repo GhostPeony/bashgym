@@ -1,4 +1,4 @@
-import { Activity } from 'lucide-react'
+import { Activity, Dumbbell } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { PanelType } from '../../../stores/terminalStore'
 
@@ -11,6 +11,7 @@ export interface DataPanelDef {
 /** Live-data canvas nodes. MasterControlPanel renders one add-button per entry. */
 export const DATA_PANEL_DEFS: DataPanelDef[] = [
   { type: 'activity', title: 'Activity', icon: Activity },
+  { type: 'training', title: 'Training Run', icon: Dumbbell },
 ]
 
 export const DATA_NODE_TYPES: PanelType[] = DATA_PANEL_DEFS.map((d) => d.type)

@@ -27,6 +27,7 @@ import { PreviewNode, type PreviewNodeData } from './PreviewNode'
 import { BrowserNode, type BrowserNodeData } from './BrowserNode'
 import { IntegrationNode } from './nodes/IntegrationNode'
 import { ActivityFeedNode } from './nodes/ActivityFeedNode'
+import { TrainingRunNode } from './nodes/TrainingRunNode'
 import { DATA_NODE_TYPES } from './nodes/dataPanels'
 import type { IntegrationNodeData, DataNodeData } from './nodes/types'
 // Import adapters to trigger registration side effects
@@ -73,6 +74,7 @@ const nodeTypes = {
   neon: IntegrationNode,
   vercel: IntegrationNode,
   activity: ActivityFeedNode,
+  training: TrainingRunNode,
 }
 
 export interface CanvasViewProps {

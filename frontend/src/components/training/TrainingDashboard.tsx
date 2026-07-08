@@ -158,10 +158,10 @@ export function TrainingDashboard() {
   }, [exportResult])
 
   return (
-    <div className="h-full p-6 overflow-auto">
+    <div className="h-full p-4 overflow-auto">
       <div className="max-w-[1500px] mx-auto">
       {/* Header */}
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-6">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between mb-4">
         <div>
           <div className="flex items-center gap-3">
             <h1 className="font-brand text-2xl text-text-primary">Training Monitor</h1>
@@ -235,10 +235,10 @@ export function TrainingDashboard() {
         </div>
       </div>
 
-      <div className="section-divider mb-6" />
+      <div className="section-divider mb-4" />
 
       {/* Tabs */}
-      <div className="flex gap-1 mb-6 overflow-x-auto">
+      <div className="flex gap-1 mb-4 overflow-x-auto">
         {[
           { id: 'dashboard' as TrainingTab, label: 'Dashboard', icon: Gauge },
           { id: 'logs' as TrainingTab, label: 'Logs', icon: ScrollText },
@@ -270,11 +270,11 @@ export function TrainingDashboard() {
 
       {/* Main Grid */}
       {activeTab === 'dashboard' && (
-      <div className="grid grid-cols-12 gap-5">
+      <div className="grid grid-cols-12 gap-3">
         {/* Loss Curve - Main Chart */}
-        <div className="col-span-12 xl:col-span-8 card p-4">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-brand text-xl text-text-primary">Loss Curve</h2>
+        <div className="col-span-12 xl:col-span-8 card p-3">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="font-brand text-lg text-text-primary">Loss Curve</h2>
             {lossHistory.length > 0 && (
               <div className="flex items-center gap-2">
                 <button
@@ -300,7 +300,7 @@ export function TrainingDashboard() {
               </div>
             )}
           </div>
-          <div className="h-64">
+          <div className="h-56">
             {lossHistory.length > 0 ? (
               <LossCurve data={lossHistory} smoothed={smoothLoss} />
             ) : (
@@ -313,8 +313,8 @@ export function TrainingDashboard() {
         </div>
 
         {/* Epoch Progress */}
-        <div className="col-span-12 md:col-span-6 xl:col-span-4 card p-4">
-          <h2 className="font-brand text-xl text-text-primary mb-4">Progress</h2>
+        <div className="col-span-12 md:col-span-6 xl:col-span-4 card p-3">
+          <h2 className="font-brand text-lg text-text-primary mb-2">Progress</h2>
           <EpochProgress
             currentEpoch={metrics?.epoch ?? 0}
             totalEpochs={currentRun?.config.epochs ?? 1}
@@ -324,7 +324,7 @@ export function TrainingDashboard() {
         </div>
 
         {/* Metrics Grid */}
-        <div className="col-span-12">
+        <div className="col-span-12 xl:col-span-7">
           <MetricsGrid
             loss={metrics?.loss}
             learningRate={metrics?.learningRate ?? currentRun?.config.learningRate}
@@ -335,7 +335,7 @@ export function TrainingDashboard() {
         </div>
 
         {/* Resource tiles: live throughput + GPU (tokens/sec, VRAM, utilization) */}
-        <div className="col-span-12">
+        <div className="col-span-12 xl:col-span-5">
           <ResourceTiles
             tokensPerSecond={metrics?.tokensPerSecond}
             gpuMemoryGb={metrics?.gpuMemoryGb}
@@ -386,51 +386,51 @@ export function TrainingDashboard() {
 
         {/* Training Config Card */}
         {currentRun && (
-          <div className="col-span-12 xl:col-span-6 card p-4">
-            <h2 className="font-brand text-xl text-text-primary mb-4">Configuration</h2>
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div className="card p-4">
+          <div className="col-span-12 xl:col-span-6 card p-3">
+            <h2 className="font-brand text-lg text-text-primary mb-2">Configuration</h2>
+            <div className="grid grid-cols-2 gap-2.5 text-sm">
+              <div className="card p-2.5">
                 <span className="font-mono text-xs uppercase tracking-widest text-text-muted">Strategy</span>
-                <p className="font-brand text-2xl text-text-primary uppercase mt-1">
+                <p className="font-brand text-base text-text-primary uppercase mt-0.5">
                   {currentRun.config.strategy}
                 </p>
               </div>
-              <div className="card p-4">
+              <div className="card p-2.5">
                 <span className="font-mono text-xs uppercase tracking-widest text-text-muted">Base Model</span>
-                <p className="font-brand text-2xl text-text-primary mt-1 truncate">{currentRun.config.baseModel}</p>
+                <p className="font-brand text-base text-text-primary mt-0.5 truncate">{currentRun.config.baseModel}</p>
               </div>
-              <div className="card p-4">
+              <div className="card p-2.5">
                 <span className="font-mono text-xs uppercase tracking-widest text-text-muted">Batch Size</span>
-                <p className="font-brand text-2xl text-text-primary mt-1">{currentRun.config.batchSize}</p>
+                <p className="font-brand text-base text-text-primary mt-0.5">{currentRun.config.batchSize}</p>
               </div>
-              <div className="card p-4">
+              <div className="card p-2.5">
                 <span className="font-mono text-xs uppercase tracking-widest text-text-muted">Learning Rate</span>
-                <p className="font-brand text-2xl text-text-primary mt-1">{currentRun.config.learningRate}</p>
+                <p className="font-brand text-base text-text-primary mt-0.5">{currentRun.config.learningRate}</p>
               </div>
               {currentRun.config.loraRank && (
-                <div className="card p-4">
+                <div className="card p-2.5">
                   <span className="font-mono text-xs uppercase tracking-widest text-text-muted">LoRA Rank</span>
-                  <p className="font-brand text-2xl text-text-primary mt-1">{currentRun.config.loraRank}</p>
+                  <p className="font-brand text-base text-text-primary mt-0.5">{currentRun.config.loraRank}</p>
                 </div>
               )}
               {currentRun.config.loraAlpha && (
-                <div className="card p-4">
+                <div className="card p-2.5">
                   <span className="font-mono text-xs uppercase tracking-widest text-text-muted">LoRA Alpha</span>
-                  <p className="font-brand text-2xl text-text-primary mt-1">{currentRun.config.loraAlpha}</p>
+                  <p className="font-brand text-base text-text-primary mt-0.5">{currentRun.config.loraAlpha}</p>
                 </div>
               )}
               {currentRun.config.selectedRepos && currentRun.config.selectedRepos.length > 0 && (
-                <div className="col-span-2 card p-4">
+                <div className="col-span-2 card p-2.5">
                   <span className="font-mono text-xs uppercase tracking-widest text-text-muted">Training Repos</span>
-                  <p className="font-brand text-lg text-text-primary mt-1">
+                  <p className="font-brand text-sm text-text-primary mt-0.5">
                     {currentRun.config.selectedRepos.join(', ')}
                   </p>
                 </div>
               )}
               {(!currentRun.config.selectedRepos || currentRun.config.selectedRepos.length === 0) && (
-                <div className="col-span-2 card p-4">
+                <div className="col-span-2 card p-2.5">
                   <span className="font-mono text-xs uppercase tracking-widest text-text-muted">Training Repos</span>
-                  <p className="font-brand text-lg text-text-primary mt-1">All repos (Generalist)</p>
+                  <p className="font-brand text-sm text-text-primary mt-0.5">All repos (Generalist)</p>
                 </div>
               )}
             </div>
@@ -438,9 +438,9 @@ export function TrainingDashboard() {
         )}
 
         {/* System Stats */}
-        <div className={clsx('card p-4 col-span-12', currentRun ? 'xl:col-span-6' : 'xl:col-span-5')}>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-brand text-xl text-text-primary">System Resources</h2>
+        <div className={clsx('card p-3 col-span-12', currentRun ? 'xl:col-span-6' : 'xl:col-span-5')}>
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="font-brand text-lg text-text-primary">System Resources</h2>
             {currentRun && (
               <div className="flex items-center gap-2 font-mono text-xs uppercase tracking-widest text-text-muted">
                 <Clock className="w-4 h-4" />

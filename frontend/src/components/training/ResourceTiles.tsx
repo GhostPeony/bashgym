@@ -25,19 +25,19 @@ function Tile({ icon, label, value, subvalue, color, isWaiting }: TileProps) {
   }[color]
 
   return (
-    <div className={clsx('card p-4 flex items-center gap-4', isWaiting && 'opacity-50')}>
+    <div className={clsx('card p-2.5 flex items-center gap-2.5', isWaiting && 'opacity-50')}>
       <div
         className={clsx(
-          'w-12 h-12 border-brutal border-border rounded-brutal flex items-center justify-center bg-background-secondary',
+          'w-8 h-8 border-brutal border-border rounded-brutal flex items-center justify-center bg-background-secondary flex-shrink-0',
           iconColor
         )}
       >
         {icon}
       </div>
-      <div className="flex-1">
-        <p className="font-mono text-xs uppercase tracking-widest text-text-secondary">{label}</p>
-        <div className="flex items-baseline gap-2">
-          <p className="font-brand text-3xl text-text-primary">{value}</p>
+      <div className="flex-1 min-w-0">
+        <p className="font-mono text-[10px] uppercase tracking-widest text-text-secondary">{label}</p>
+        <div className="flex items-baseline gap-1.5">
+          <p className="font-brand text-lg leading-tight text-text-primary">{value}</p>
           {subvalue && <span className="font-mono text-xs text-text-muted">{subvalue}</span>}
         </div>
       </div>
@@ -52,9 +52,9 @@ export function ResourceTiles({ tokensPerSecond, gpuMemoryGb, gpuUtilization, is
   const fmtUtil = (v?: number) => (v === undefined ? 'N/A' : `${Math.round(v)}%`)
 
   return (
-    <div className="grid grid-cols-3 gap-4">
+    <div className="grid grid-cols-3 gap-2.5">
       <Tile
-        icon={<Zap className="w-6 h-6" />}
+        icon={<Zap className="w-4 h-4" />}
         label="Tokens / sec"
         value={fmtTps(tokensPerSecond)}
         subvalue={tokensPerSecond !== undefined ? 'tok/s' : undefined}
@@ -62,7 +62,7 @@ export function ResourceTiles({ tokensPerSecond, gpuMemoryGb, gpuUtilization, is
         isWaiting={isWaiting}
       />
       <Tile
-        icon={<MemoryStick className="w-6 h-6" />}
+        icon={<MemoryStick className="w-4 h-4" />}
         label="GPU Memory"
         value={fmtGb(gpuMemoryGb)}
         subvalue={gpuMemoryGb !== undefined ? 'GB peak' : undefined}
@@ -70,7 +70,7 @@ export function ResourceTiles({ tokensPerSecond, gpuMemoryGb, gpuUtilization, is
         isWaiting={isWaiting}
       />
       <Tile
-        icon={<Cpu className="w-6 h-6" />}
+        icon={<Cpu className="w-4 h-4" />}
         label="GPU Util"
         value={fmtUtil(gpuUtilization)}
         color="orange"

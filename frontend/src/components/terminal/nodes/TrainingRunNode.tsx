@@ -1,10 +1,11 @@
 import { memo } from 'react'
 import type { Node, NodeProps } from '@xyflow/react'
-import { Dumbbell, Pause, Play, Square, Wifi, WifiOff } from 'lucide-react'
+import { Dumbbell, Pause, Play, Server, Square, Wifi, WifiOff } from 'lucide-react'
 import { LineChart, Line, YAxis } from 'recharts'
 import { clsx } from 'clsx'
 import { useTrainingStore } from '../../../stores'
 import { DataNodeShell } from './DataNodeShell'
+import { hueFor } from './dataPanels'
 import type { DataNodeData } from './types'
 
 export type TrainingRunNodeType = Node<DataNodeData, 'training'>
@@ -30,6 +31,15 @@ export const TrainingRunNode = memo(function TrainingRunNode({ data, selected }:
   const progress = m && m.totalSteps > 0 ? Math.min(100, (m.step / m.totalSteps) * 100) : 0
   const recentLogs = logs.slice(-2)
 
+  // Where the run executes: prefer the live payload, fall back to the launch config
+  const computeTarget = m?.computeTarget ?? (
+    currentRun?.config?.useRemoteSSH
+      ? (currentRun.config.deviceId ? `ssh:${currentRun.config.deviceId}` : 'ssh:remote')
+      : currentRun?.config?.useNemoGym
+        ? 'cloud'
+        : currentRun?.config?.strategy ? 'local' : undefined
+  )
+
   const buildContext = () => {
     if (!currentRun) return '## Training status\n\nNo active training run.'
     return [
@@ -37,6 +47,7 @@ export const TrainingRunNode = memo(function TrainingRunNode({ data, selected }:
       `- status: ${currentRun.status}`,
       `- strategy: ${currentRun.config.strategy ?? 'unknown'}`,
       `- base model: ${currentRun.config.baseModel ?? 'unknown'}`,
+      computeTarget ? `- compute target: ${computeTarget}` : '',
       m ? `- step: ${m.step}/${m.totalSteps} (epoch ${m.epoch.toFixed(2)})` : '',
       m ? `- loss: ${m.loss}` : '',
       '- recent logs:',
@@ -53,6 +64,7 @@ export const TrainingRunNode = memo(function TrainingRunNode({ data, selected }:
       hasConnections={data.hasConnections}
       buildContext={buildContext}
       statusBarClass={currentRun ? STATUS_BAR[currentRun.status] ?? 'bg-background-tertiary' : 'bg-background-tertiary'}
+      hue={hueFor('training')}
       headerRight={
         isConnected
           ? <Wifi className="w-3 h-3 text-status-success flex-shrink-0" />
@@ -80,6 +92,15 @@ export const TrainingRunNode = memo(function TrainingRunNode({ data, selected }:
               {currentRun.status}
             </span>
             <span className="text-text-secondary uppercase">{currentRun.config.strategy ?? ''}</span>
+            {computeTarget && (
+              <span
+                className="flex items-center gap-0.5 px-1 py-px border-brutal border-border-subtle rounded-brutal text-text-secondary"
+                title={`Compute target: ${computeTarget}`}
+              >
+                <Server className="w-2.5 h-2.5" />
+                {computeTarget}
+              </span>
+            )}
             <span className="flex-1 truncate text-text-muted text-right" title={currentRun.id}>{currentRun.id}</span>
           </div>
 

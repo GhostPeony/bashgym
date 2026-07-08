@@ -6,14 +6,20 @@ export interface DataPanelDef {
   type: PanelType
   title: string
   icon: LucideIcon
+  /** Identity hue from the platform accent palette (accentStore spectrum) */
+  hue: number
 }
 
 /** Live-data canvas nodes. MasterControlPanel renders one add-button per entry. */
 export const DATA_PANEL_DEFS: DataPanelDef[] = [
-  { type: 'activity', title: 'Activity', icon: Activity },
-  { type: 'training', title: 'Training Run', icon: Dumbbell },
-  { type: 'evals', title: 'Evals', icon: FlaskConical },
-  { type: 'designer', title: 'Data Designer', icon: Factory },
+  { type: 'activity', title: 'Activity', icon: Activity, hue: 308 },   // Orchid
+  { type: 'training', title: 'Training Run', icon: Dumbbell, hue: 35 }, // Marigold
+  { type: 'evals', title: 'Evals', icon: FlaskConical, hue: 140 },      // Moss
+  { type: 'designer', title: 'Data Designer', icon: Factory, hue: 210 } // Sky
 ]
 
 export const DATA_NODE_TYPES: PanelType[] = DATA_PANEL_DEFS.map((d) => d.type)
+
+export function hueFor(type: PanelType): number | undefined {
+  return DATA_PANEL_DEFS.find((d) => d.type === type)?.hue
+}

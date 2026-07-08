@@ -213,6 +213,7 @@ class WebSocketService {
           tokensPerSecond: payload.tokens_per_second,
           gpuMemoryGb: payload.gpu_memory_gb,
           gpuUtilization: payload.gpu_utilization,
+          computeTarget: payload.compute_target,
           sessionDistillationLoss: payload.session_distillation_loss,
           sessionDistillationKl: payload.session_distillation_kl,
           sessionDistillationCe: payload.session_distillation_ce,
@@ -222,6 +223,10 @@ class WebSocketService {
         if (!store.currentRun && payload.run_id) {
           // Reconnected to an orphaned training run — hydrate the store
           console.log('WebSocket: Reconnected to training run', payload.run_id)
+          store.hydrateFromReconnect(payload.run_id, metrics)
+        } else if (store.currentRun && payload.run_id && payload.run_id !== store.currentRun.id) {
+          // A different run started streaming — switch to it (resets loss history)
+          console.log('WebSocket: New training run detected', payload.run_id)
           store.hydrateFromReconnect(payload.run_id, metrics)
         } else {
           store.updateMetrics(metrics)

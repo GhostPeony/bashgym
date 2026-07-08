@@ -27,6 +27,8 @@ export interface TrainingMetrics {
   tokensPerSecond?: number
   gpuMemoryGb?: number
   gpuUtilization?: number
+  /** Where the run executes, e.g. 'local', 'ssh:<device>', 'cloud' */
+  computeTarget?: string
   sessionDistillationLoss?: number
   sessionDistillationKl?: number
   sessionDistillationCe?: number

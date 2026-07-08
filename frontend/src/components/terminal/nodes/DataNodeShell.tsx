@@ -16,6 +16,8 @@ export interface DataNodeShellProps {
   headerRight?: ReactNode
   /** Tailwind bg-* class for the bottom indicator bar */
   statusBarClass?: string
+  /** Identity hue from the platform accent palette; tints strip + icon per node type */
+  hue?: number
   onFocus?: (panelId: string) => void
   onClose?: (panelId: string) => void
   children: ReactNode
@@ -30,6 +32,7 @@ export const DataNodeShell = memo(function DataNodeShell({
   buildContext,
   headerRight,
   statusBarClass = 'bg-background-tertiary',
+  hue,
   onFocus,
   onClose,
   children
@@ -65,9 +68,27 @@ export const DataNodeShell = memo(function DataNodeShell({
       <Handle type="target" position={Position.Left} className="!bg-accent !w-2 !h-2 !border-brutal !border-border" />
       <Handle type="source" position={Position.Right} className="!bg-accent !w-2 !h-2 !border-brutal !border-border" />
 
-      <div className="flex items-center gap-2 px-3 py-2 bg-background-secondary border-b border-brutal border-border rounded-t-brutal">
-        <div className="p-1.5 border-brutal border-border-subtle rounded-brutal bg-background-tertiary">
-          <Icon className="w-4 h-4 text-accent" />
+      {hue != null && (
+        <div
+          className="h-1 rounded-t-brutal"
+          style={{ background: `hsl(${hue}, 45%, 65%)` }}
+        />
+      )}
+      <div className={clsx(
+        'flex items-center gap-2 px-3 py-2 bg-background-secondary border-b border-brutal border-border',
+        hue == null && 'rounded-t-brutal'
+      )}>
+        <div
+          className="p-1.5 border-brutal border-border-subtle rounded-brutal bg-background-tertiary"
+          style={hue != null ? {
+            background: `hsla(${hue}, 40%, 60%, 0.16)`,
+            borderColor: `hsla(${hue}, 35%, 50%, 0.55)`
+          } : undefined}
+        >
+          <Icon
+            className={clsx('w-4 h-4', hue == null && 'text-accent')}
+            style={hue != null ? { color: `hsl(${hue}, 45%, 48%)` } : undefined}
+          />
         </div>
         <span className="flex-1 min-w-0 text-sm font-mono font-semibold text-text-primary truncate">
           {title}

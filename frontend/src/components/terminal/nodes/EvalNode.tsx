@@ -4,6 +4,7 @@ import { FlaskConical, Loader2 } from 'lucide-react'
 import { clsx } from 'clsx'
 import { evalAdvancedApi, type HeldoutJobResponse } from '../../../services/api'
 import { DataNodeShell } from './DataNodeShell'
+import { hueFor } from './dataPanels'
 import type { DataNodeData } from './types'
 
 export type EvalNodeType = Node<DataNodeData, 'evals'>
@@ -66,6 +67,7 @@ export const EvalNode = memo(function EvalNode({ data, selected }: NodeProps<Eva
         jobs.some((j) => j.status === 'running') ? 'bg-accent animate-pulse' :
         latest?.report?.ship ? 'bg-status-success' : 'bg-background-tertiary'
       }
+      hue={hueFor('evals')}
       onFocus={data.onFocus}
       onClose={data.onClose}
     >

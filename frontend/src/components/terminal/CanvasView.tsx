@@ -20,8 +20,9 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
-import { useTerminalStore, useCanvasControlStore } from '../../stores'
+import { useTerminalStore, useCanvasControlStore, useTrainingStore } from '../../stores'
 import type { Panel, TerminalSession, CanvasEdge } from '../../stores'
+import { applyPreset, type CanvasPreset } from './canvasPresets'
 import { TerminalNode, type TerminalNodeData } from './TerminalNode'
 import { PreviewNode, type PreviewNodeData } from './PreviewNode'
 import { BrowserNode, type BrowserNodeData } from './BrowserNode'
@@ -41,6 +42,34 @@ import { useCanvasHotkeys } from '../../hooks/useCanvasHotkeys'
 import { AlertCircle } from 'lucide-react'
 
 const VIEWPORT_KEY = 'bashgym_canvas_viewport'
+const EDGES_KEY = 'bashgym_canvas_edges'
+
+const EDGE_STYLE = { stroke: 'var(--accent)', strokeWidth: 2 }
+
+// Edges persist as bare {id, source, target}; style/animation re-applied on load
+const loadEdges = (): Edge[] => {
+  try {
+    const stored = localStorage.getItem(EDGES_KEY)
+    if (stored) {
+      const parsed: Array<{ id: string; source: string; target: string }> = JSON.parse(stored)
+      return parsed.map((e) => ({ ...e, animated: true, style: EDGE_STYLE }))
+    }
+  } catch {
+    // Ignore
+  }
+  return []
+}
+
+const saveEdges = (edges: Edge[]) => {
+  try {
+    localStorage.setItem(
+      EDGES_KEY,
+      JSON.stringify(edges.map((e) => ({ id: e.id, source: e.source, target: e.target })))
+    )
+  } catch {
+    // Ignore storage errors
+  }
+}
 
 // Union of all node data shapes rendered on the canvas
 type CanvasNodeData = TerminalNodeData | PreviewNodeData | BrowserNodeData | IntegrationNodeData | DataNodeData
@@ -216,11 +245,17 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
   canvasNodesRef.current = canvasNodes
 
   const [nodes, setNodes, onNodesChange] = useNodesState<CanvasFlowNode>([])
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
+  const initialEdgesRef = useRef<Edge[] | null>(null)
+  if (initialEdgesRef.current === null) {
+    initialEdgesRef.current = loadEdges()
+  }
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdgesRef.current)
 
-  // Sync React Flow edges to Zustand store for cross-component routing (e.g. BrowserPane screenshot routing)
+  // Sync React Flow edges to Zustand store for cross-component routing (e.g. BrowserPane
+  // screenshot routing) and persist them across reloads
   useEffect(() => {
     setCanvasEdges(edges.map(e => ({ id: e.id, source: e.source, target: e.target })))
+    saveEdges(edges)
   }, [edges, setCanvasEdges])
 
   // Use stable refs for callbacks so the Zustand subscription never needs to be recreated
@@ -276,6 +311,64 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
 
     return unsubscribe
   }, [setNodes]) // setNodes is stable; callbacks accessed via ref
+
+  // Auto-build: when a training run goes live, ensure a Training Run node exists and
+  // wire it to the terminal that initiated it (most recently active busy agent session)
+  const autoBuiltRunIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    const ensureTrainingGraph = (run: { id: string; status: string } | null) => {
+      if (!run || (run.status !== 'running' && run.status !== 'starting')) return
+      if (autoBuiltRunIdRef.current === run.id) return
+      autoBuiltRunIdRef.current = run.id
+
+      const ts = useTerminalStore.getState()
+      const existing = ts.panels.find((p) => p.type === 'training')
+      const panelId = existing?.id ?? ts.addPanel({ type: 'training', title: 'Training Run' })
+
+      const sessions = Array.from(ts.sessions.values()).sort((a, b) => b.lastActivity - a.lastActivity)
+      const initiating = sessions.find((s) => s.status === 'running' || s.status === 'tool_calling') ?? sessions[0]
+      const termPanel = initiating
+        ? useTerminalStore.getState().panels.find((p) => p.terminalId === initiating.id)
+        : undefined
+      if (!termPanel) return
+
+      if (!existing) {
+        const termPos = canvasNodesRef.current.get(termPanel.id)?.position
+        if (termPos) {
+          const pos = { x: termPos.x + 460, y: termPos.y - 60 }
+          updateCanvasNode(panelId, pos)
+          setNodes((nds) => nds.map((n) => (n.id === panelId ? { ...n, position: pos } : n)))
+        }
+      }
+
+      setEdges((eds) => {
+        const exists = eds.some(
+          (e) =>
+            (e.source === termPanel.id && e.target === panelId) ||
+            (e.source === panelId && e.target === termPanel.id)
+        )
+        if (exists) return eds
+        return addEdge(
+          {
+            source: termPanel.id,
+            target: panelId,
+            sourceHandle: null,
+            targetHandle: null,
+            animated: true,
+            style: EDGE_STYLE
+          },
+          eds
+        )
+      })
+    }
+
+    ensureTrainingGraph(useTrainingStore.getState().currentRun)
+    const unsubscribe = useTrainingStore.subscribe((state, prev) => {
+      if (state.currentRun === prev.currentRun) return
+      ensureTrainingGraph(state.currentRun)
+    })
+    return unsubscribe
+  }, [setEdges, setNodes, updateCanvasNode])
 
   // Handle node position changes
   const handleNodesChange = useCallback((changes: NodeChange<CanvasFlowNode>[]) => {
@@ -402,6 +495,34 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
     addPanel({ type, title })
   }, [])
 
+  // Spawn a saved/built-in workspace preset: panels at their positions plus edges
+  const handleApplyPreset = useCallback((preset: CanvasPreset) => {
+    const setPosition = (panelId: string, pos: { x: number; y: number }) => {
+      updateCanvasNode(panelId, pos)
+      setNodes((nds) => nds.map((n) => (n.id === panelId ? { ...n, position: pos } : n)))
+    }
+    const pairs = applyPreset(preset, setPosition)
+    setEdges((eds) => {
+      let updated = eds
+      for (const [source, target] of pairs) {
+        const exists = updated.some(
+          (e) => (e.source === source && e.target === target) || (e.source === target && e.target === source)
+        )
+        if (!exists) {
+          updated = addEdge(
+            { source, target, sourceHandle: null, targetHandle: null, animated: true, style: EDGE_STYLE },
+            updated
+          )
+        }
+      }
+      return updated
+    })
+    setTimeout(() => {
+      fitView({ padding: 0.2 })
+      setCurrentZoom(getZoom())
+    }, 150)
+  }, [setEdges, setNodes, updateCanvasNode, fitView, getZoom])
+
   return (
     <div className="h-full w-full relative">
       <ReactFlow
@@ -473,6 +594,7 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
         onAddNeon={() => addIntegrationPanel('neon', 'Neon DB')}
         onAddVercel={() => addIntegrationPanel('vercel', 'Vercel')}
         onAddDataPanel={addDataPanel}
+        onApplyPreset={handleApplyPreset}
       />
     </div>
   )

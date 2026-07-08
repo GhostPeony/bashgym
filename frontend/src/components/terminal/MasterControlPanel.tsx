@@ -1,10 +1,12 @@
-import { memo, useCallback } from 'react'
+import { memo, useCallback, useState } from 'react'
 import {
   Play,
   Pause,
   Plus,
   Bot,
   Code2,
+  FolderOpen,
+  Save,
   LayoutGrid,
   Grid3X3,
   Magnet,
@@ -22,6 +24,13 @@ import {
 import { clsx } from 'clsx'
 import { useCanvasControlStore, useTerminalStore } from '../../stores'
 import { DATA_PANEL_DEFS } from './nodes/dataPanels'
+import {
+  BUILTIN_PRESETS,
+  captureCurrentAsPreset,
+  loadCustomPresets,
+  saveCustomPreset,
+  type CanvasPreset
+} from './canvasPresets'
 import type { PanelType } from '../../stores/terminalStore'
 
 export interface MasterControlPanelProps {
@@ -36,6 +45,7 @@ export interface MasterControlPanelProps {
   onAddNeon?: () => void
   onAddVercel?: () => void
   onAddDataPanel?: (type: PanelType, title: string) => void
+  onApplyPreset?: (preset: CanvasPreset) => void
   currentZoom?: number
 }
 
@@ -51,8 +61,27 @@ export const MasterControlPanel = memo(function MasterControlPanel({
   onAddNeon,
   onAddVercel,
   onAddDataPanel,
+  onApplyPreset,
   currentZoom = 1
 }: MasterControlPanelProps) {
+  const [customPresets, setCustomPresets] = useState<CanvasPreset[]>(() => loadCustomPresets())
+  const [selectedPresetId, setSelectedPresetId] = useState<string>(BUILTIN_PRESETS[0].id)
+
+  const allPresets = [...BUILTIN_PRESETS, ...customPresets]
+
+  const handleOpenPreset = useCallback(() => {
+    const preset = [...BUILTIN_PRESETS, ...loadCustomPresets()].find((p) => p.id === selectedPresetId)
+    if (preset && onApplyPreset) onApplyPreset(preset)
+  }, [selectedPresetId, onApplyPreset])
+
+  const handleSavePreset = useCallback(() => {
+    const name = window.prompt('Preset name?')
+    if (!name?.trim()) return
+    const preset = captureCurrentAsPreset(name.trim())
+    saveCustomPreset(preset)
+    setCustomPresets(loadCustomPresets())
+    setSelectedPresetId(preset.id)
+  }, [])
   const {
     globalPaused,
     showMetrics,
@@ -354,6 +383,7 @@ export const MasterControlPanel = memo(function MasterControlPanel({
                   key={def.type}
                   onClick={() => onAddDataPanel(def.type, def.title)}
                   className="btn-secondary !py-1.5 !px-3 !text-xs flex-1"
+                  style={{ color: `hsl(${def.hue}, 45%, 48%)` }}
                 >
                   <DefIcon className="w-3 h-3" />
                   {def.title}
@@ -363,6 +393,38 @@ export const MasterControlPanel = memo(function MasterControlPanel({
           </div>
         )}
       </div>
+
+      {/* Workspace layouts */}
+      {onApplyPreset && (
+        <div className="px-3 py-2 border-b border-brutal border-border">
+          <div className="text-[10px] text-text-muted uppercase tracking-wider mb-2 font-mono font-semibold">Layouts</div>
+          <div className="flex items-center gap-1.5">
+            <select
+              value={selectedPresetId}
+              onChange={(e) => setSelectedPresetId(e.target.value)}
+              className="flex-1 min-w-0 text-xs font-mono bg-background-card border-brutal border-border rounded-brutal px-1.5 py-1 focus:border-accent focus:outline-none"
+            >
+              {allPresets.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+            <button
+              onClick={handleOpenPreset}
+              className="btn-icon !w-6 !h-6 !border-1"
+              title="Open this layout"
+            >
+              <FolderOpen className="w-3 h-3" />
+            </button>
+            <button
+              onClick={handleSavePreset}
+              className="btn-icon !w-6 !h-6 !border-1"
+              title="Save current canvas as a layout"
+            >
+              <Save className="w-3 h-3" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Keyboard shortcuts hint */}
       <div className="px-3 py-2 bg-background-secondary">

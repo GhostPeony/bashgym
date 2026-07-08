@@ -4,6 +4,7 @@ import { Factory, Loader2 } from 'lucide-react'
 import { clsx } from 'clsx'
 import { designerApi, type DesignerJobStatus } from '../../../services/api'
 import { DataNodeShell } from './DataNodeShell'
+import { hueFor } from './dataPanels'
 import type { DataNodeData } from './types'
 
 export type DataDesignerNodeType = Node<DataNodeData, 'designer'>
@@ -64,6 +65,7 @@ export const DataDesignerNode = memo(function DataDesignerNode({ data, selected 
         jobs.some((j) => j.status === 'running' || j.status === 'queued') ? 'bg-accent animate-pulse' :
         latestDone ? 'bg-status-success' : 'bg-background-tertiary'
       }
+      hue={hueFor('designer')}
       onFocus={data.onFocus}
       onClose={data.onClose}
     >

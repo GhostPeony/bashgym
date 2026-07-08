@@ -4,6 +4,7 @@ import { Activity } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useActivityStore, type ActivitySeverity } from '../../../stores/activityStore'
 import { DataNodeShell } from './DataNodeShell'
+import { hueFor } from './dataPanels'
 import type { DataNodeData } from './types'
 
 export type ActivityFeedNodeType = Node<DataNodeData, 'activity'>
@@ -51,6 +52,7 @@ export const ActivityFeedNode = memo(function ActivityFeedNode({ data, selected 
       hasConnections={data.hasConnections}
       buildContext={buildContext}
       statusBarClass={visible.some((e) => e.severity === 'error') ? 'bg-status-error' : 'bg-background-tertiary'}
+      hue={hueFor('activity')}
       onFocus={data.onFocus}
       onClose={data.onClose}
     >

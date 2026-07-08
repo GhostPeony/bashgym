@@ -22,7 +22,7 @@ import {
   Link2
 } from 'lucide-react'
 import { clsx } from 'clsx'
-import type { AttentionState, AgentStatus, PanelType, ToolHistoryItem, SessionMetrics } from '../../stores/terminalStore'
+import type { AttentionState, AgentStatus, AgentKind, PanelType, ToolHistoryItem, SessionMetrics } from '../../stores/terminalStore'
 import { ToolBreadcrumbs } from './ToolBreadcrumbs'
 import { useCanvasControlStore } from '../../stores'
 
@@ -34,6 +34,7 @@ export interface TerminalNodeData extends Record<string, unknown> {
   attention?: AttentionState
   gitBranch?: string
   model?: string
+  agentKind?: AgentKind
   currentTool?: string
   cwd?: string
   lastActivity?: number
@@ -147,6 +148,7 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: NodeP
     attention,
     gitBranch,
     model,
+    agentKind,
     currentTool,
     cwd,
     lastActivity,
@@ -228,8 +230,20 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: NodeP
           {getPanelIcon(type)}
         </div>
         <div className="flex-1 min-w-0">
-          <span className="text-sm font-mono font-semibold text-text-primary truncate block">
-            {title}
+          <span className="text-sm font-mono font-semibold text-text-primary truncate flex items-center gap-1.5">
+            <span className="truncate">{title}</span>
+            {agentKind && (
+              <span
+                className={clsx(
+                  'flex-shrink-0 px-1 py-px border-brutal rounded-brutal text-[8px] font-bold uppercase tracking-wider',
+                  agentKind === 'claude'
+                    ? 'border-accent/60 bg-accent/10 text-accent'
+                    : 'border-status-warning/60 bg-status-warning/10 text-status-warning'
+                )}
+              >
+                {agentKind}
+              </span>
+            )}
           </span>
           {relativeTime && (
             <span className="text-[10px] text-text-muted flex items-center gap-1 font-mono">

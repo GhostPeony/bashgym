@@ -140,6 +140,7 @@ function buildNodeData(
       attention: session?.attention,
       gitBranch: session?.gitBranch,
       model: session?.model,
+      agentKind: session?.agentKind,
       currentTool: session?.currentTool,
       cwd: session?.cwd,
       lastActivity: session?.lastActivity,
@@ -361,6 +362,14 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
     createTerminal()
   }, [createTerminal])
 
+  const handleLaunchClaude = useCallback(() => {
+    createTerminal(undefined, 'Claude Code', 'claude')
+  }, [createTerminal])
+
+  const handleLaunchCodex = useCallback(() => {
+    createTerminal(undefined, 'Codex', 'codex')
+  }, [createTerminal])
+
   const addIntegrationPanel = useCallback((type: 'context' | 'neon' | 'vercel', title: string) => {
     const { addPanel } = useTerminalStore.getState()
     addPanel({ type, title, adapterConfig: {} })
@@ -431,6 +440,8 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
         onFitView={handleFitView}
         onAutoArrange={handleAutoArrange}
         onNewSession={handleNewSession}
+        onLaunchClaude={handleLaunchClaude}
+        onLaunchCodex={handleLaunchCodex}
         onAddContext={() => addIntegrationPanel('context', 'Context')}
         onAddNeon={() => addIntegrationPanel('neon', 'Neon DB')}
         onAddVercel={() => addIntegrationPanel('vercel', 'Vercel')}

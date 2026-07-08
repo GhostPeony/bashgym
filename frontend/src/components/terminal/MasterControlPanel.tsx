@@ -3,6 +3,8 @@ import {
   Play,
   Pause,
   Plus,
+  Bot,
+  Code2,
   LayoutGrid,
   Grid3X3,
   Magnet,
@@ -26,6 +28,8 @@ export interface MasterControlPanelProps {
   onFitView?: () => void
   onAutoArrange?: () => void
   onNewSession?: () => void
+  onLaunchClaude?: () => void
+  onLaunchCodex?: () => void
   onAddContext?: () => void
   onAddNeon?: () => void
   onAddVercel?: () => void
@@ -38,6 +42,8 @@ export const MasterControlPanel = memo(function MasterControlPanel({
   onFitView,
   onAutoArrange,
   onNewSession,
+  onLaunchClaude,
+  onLaunchCodex,
   onAddContext,
   onAddNeon,
   onAddVercel,
@@ -288,6 +294,22 @@ export const MasterControlPanel = memo(function MasterControlPanel({
             </button>
           )}
         </div>
+        {(onLaunchClaude || onLaunchCodex) && (
+          <div className="flex items-center gap-2 mt-2">
+            {onLaunchClaude && (
+              <button onClick={onLaunchClaude} className="btn-secondary !py-1.5 !px-3 !text-xs flex-1">
+                <Bot className="w-3 h-3" />
+                Claude
+              </button>
+            )}
+            {onLaunchCodex && (
+              <button onClick={onLaunchCodex} className="btn-secondary !py-1.5 !px-3 !text-xs flex-1">
+                <Code2 className="w-3 h-3" />
+                Codex
+              </button>
+            )}
+          </div>
+        )}
         {(onAddContext || onAddNeon || onAddVercel) && (
           <div className="flex items-center gap-2 mt-2">
             {onAddContext && (

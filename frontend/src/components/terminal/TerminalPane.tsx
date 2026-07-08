@@ -5,6 +5,7 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Square, X, MoreHorizontal, Copy, ClipboardPaste, Loader2, MessageSquare, Wrench, Coffee } from 'lucide-react'
 import { useTerminalStore, useThemeStore, useAccentStore, getTerminalFgColor } from '../../stores'
+import type { AgentKind } from '../../stores/terminalStore'
 import { FileDropZone } from './FileDropZone'
 import { clsx } from 'clsx'
 import '@xterm/xterm/css/xterm.css'
@@ -371,6 +372,16 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
         if (result.cwd) {
           updateSession(id, { cwd: result.cwd })
         }
+        // Auto-type the launch command into a fresh PTY (not on re-attach)
+        if (!result.attached) {
+          const pending = useTerminalStore.getState().sessions.get(id)?.launchCommand
+          if (pending) {
+            updateSession(id, { launchCommand: undefined })
+            setTimeout(() => {
+              window.bashgym?.terminal.write(id, pending + '\r')
+            }, 500)
+          }
+        }
         // Re-attached to a live PTY: replay retained scrollback
         if (result.attached && result.buffer) {
           terminal.write(result.buffer)
@@ -576,6 +587,14 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
         outputUpdate = { lastOutput: [...prev, ...lines].slice(-6) }
       }
 
+      // Detect which agent CLI is driving this terminal from its banner output
+      let agentUpdate: Partial<{ agentKind: AgentKind }> = {}
+      if (/Claude Code|✻ Welcome/i.test(clean)) {
+        agentUpdate = { agentKind: 'claude' }
+      } else if (/OpenAI Codex/i.test(clean)) {
+        agentUpdate = { agentKind: 'codex' }
+      }
+
       // --- Pattern matching in priority order ---
       // Single updateSession call per flush to avoid double state updates
 
@@ -584,6 +603,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
       if (toolMatch) {
         updateSession(id, {
           ...outputUpdate,
+          ...agentUpdate,
           status: 'tool_calling',
           attention: 'none',
           currentTool: toolMatch[1],
@@ -597,6 +617,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
       if (/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s*(Thinking|Planning)/i.test(clean)) {
         updateSession(id, {
           ...outputUpdate,
+          ...agentUpdate,
           status: 'running',
           attention: 'none',
           lastActivity: Date.now()
@@ -609,6 +630,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
       if (/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/.test(clean)) {
         updateSession(id, {
           ...outputUpdate,
+          ...agentUpdate,
           status: 'running',
           attention: 'none',
           lastActivity: Date.now()
@@ -621,6 +643,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
       if (/[✓✗✔✘]/.test(clean)) {
         updateSession(id, {
           ...outputUpdate,
+          ...agentUpdate,
           status: 'running',
           attention: 'none',
           currentTool: undefined,
@@ -636,6 +659,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
       if (/^\s*>\s*$/m.test(clean) || /[╭╰]/.test(clean)) {
         updateSession(id, {
           ...outputUpdate,
+          ...agentUpdate,
           status: 'waiting_input',
           attention: 'waiting',
           currentTool: undefined,
@@ -654,6 +678,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
           status: 'idle',
           attention: 'none',
           currentTool: undefined,
+          agentKind: undefined,
           lastActivity: Date.now(),
           ...(psPromptMatch?.[1] && { cwd: psPromptMatch[1].trim() })
         })
@@ -667,6 +692,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
       if (clean.trim().length > 0 && currentSession?.status === 'idle') {
         updateSession(id, {
           ...outputUpdate,
+          ...agentUpdate,
           status: 'running',
           attention: 'none',
           lastActivity: Date.now()

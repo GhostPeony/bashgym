@@ -6,6 +6,7 @@ export type PanelType = 'terminal' | 'preview' | 'browser' | 'files' | 'context'
 export type AttentionState = 'none' | 'waiting' | 'success' | 'error'
 export type ViewMode = 'grid' | 'single' | 'canvas'
 export type AgentStatus = 'running' | 'idle' | 'waiting_input' | 'tool_calling'
+export type AgentKind = 'claude' | 'codex'
 
 // Tool history entry for tracking recent tool calls
 export interface ToolHistoryItem {
@@ -44,6 +45,10 @@ export interface TerminalSession {
   isPaused?: boolean
   /** Last few lines of terminal output for canvas preview */
   lastOutput?: string[]
+  /** Detected agent CLI running in this terminal (undefined = plain shell) */
+  agentKind?: AgentKind
+  /** Command auto-typed into a freshly created PTY (cleared after use) */
+  launchCommand?: string
 }
 
 // Canvas node for React Flow view
@@ -108,7 +113,7 @@ interface TerminalState {
   broadcastCommand: string
 
   // Actions
-  createTerminal: (id?: string, title?: string) => string
+  createTerminal: (id?: string, title?: string, launchCommand?: string) => string
   closeTerminal: (id: string) => void
   /** Close with confirmation if the agent is busy. Returns true if closed. */
   requestCloseTerminal: (id: string) => boolean
@@ -264,7 +269,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   draggedPanelId: null,
   broadcastCommand: '',
 
-  createTerminal: (id?: string, title?: string) => {
+  createTerminal: (id?: string, title?: string, launchCommand?: string) => {
     const terminalId = id || generateId()
 
     // Show banner only if it hasn't been shown yet in this session
@@ -281,7 +286,8 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       attention: 'none',
       showBanner,  // Only first terminal shows the banner
       status: 'idle',
-      lastActivity: Date.now()
+      lastActivity: Date.now(),
+      launchCommand
     }
 
     const panel: Panel = {
@@ -400,11 +406,12 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       const outputChanged = false // lastOutput no longer displayed in canvas nodes
       const attentionChanged = updates.attention !== undefined && updates.attention !== session.attention
       const taskSummaryChanged = updates.taskSummary !== undefined && updates.taskSummary !== session.taskSummary
+      const agentKindChanged = 'agentKind' in updates && updates.agentKind !== session.agentKind
 
       newSessions.set(id, { ...session, ...updates })
 
       // Increment version for any significant change to force canvas re-renders
-      if (statusChanged || toolChanged || outputChanged || attentionChanged || taskSummaryChanged) {
+      if (statusChanged || toolChanged || outputChanged || attentionChanged || taskSummaryChanged || agentKindChanged) {
         return { sessions: newSessions, sessionsVersion: state.sessionsVersion + 1 }
       }
       return { sessions: newSessions }

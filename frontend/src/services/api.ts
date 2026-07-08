@@ -800,6 +800,9 @@ export const designerApi = {
   getJob: (jobId: string) =>
     request<DesignerJobStatus>(`/factory/designer/jobs/${encodeURIComponent(jobId)}`),
 
+  listJobs: (limit = 10) =>
+    request<DesignerJobStatus[]>(`/factory/designer/jobs?limit=${limit}`),
+
   listModels: (codeOnly = false) =>
     request<{ models: DesignerModel[]; provider_models: string[]; available: boolean }>(
       `/factory/designer/models?code_only=${codeOnly}`

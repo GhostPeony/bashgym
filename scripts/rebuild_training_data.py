@@ -4,7 +4,7 @@ Full Training Data Rebuild — Import ALL Claude Code sessions and build clean t
 
 Sources:
   - Desktop raw sessions: ~/desktop-home/.claude/projects/**/*.jsonl
-  - DGX raw sessions: ~/.claude/projects/-home-ponyo/*.jsonl
+  - DGX raw sessions: ~/.claude/projects/-home-user/*.jsonl
 
 Pipeline:
   1. Parse all raw JSONL session files directly (skip bashgym import/trace pipeline)
@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 # Sources
 DESKTOP_CLAUDE = Path.home() / "desktop-home" / ".claude" / "projects"
-DGX_CLAUDE = Path.home() / ".claude" / "projects" / "-home-ponyo"
+DGX_CLAUDE = Path.home() / ".claude" / "projects" / "-home-user"
 
 # Output
 OUTPUT_DIR = Path.home() / "bashgym-training" / "data-rebuilt"

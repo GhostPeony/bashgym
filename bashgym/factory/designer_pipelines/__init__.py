@@ -237,11 +237,11 @@ def register_pipeline(name: str):
 
 
 def ollama_provider_spec(models: list, endpoint: str | None = None, name: str = "ollama"):
-    """ProviderSpec for an OpenAI-compatible Ollama endpoint (e.g. DGX Spark).
+    """ProviderSpec for an OpenAI-compatible Ollama endpoint.
 
     No API key is needed (Ollama ignores auth); ``models`` are the column aliases
     this provider serves, enabling per-column routing (weakness #7) — e.g. route
-    text/code columns to local/DGX Ollama and the judge to NIM or Claude.
+    text/code columns to local or private Ollama and the judge to NIM or Claude.
     Endpoint defaults to ``OLLAMA_BASE_URL`` then ``http://localhost:11434``.
     """
     from bashgym.factory.data_designer import ProviderSpec
@@ -305,6 +305,9 @@ try:
     from bashgym.factory.designer_pipelines.from_external import build_external_pipeline
     from bashgym.factory.designer_pipelines.from_unstructured import build_unstructured_pipeline
     from bashgym.factory.designer_pipelines.mcp_tool_use import build_mcp_tool_use_pipeline
+    from bashgym.factory.designer_pipelines.session_distillation_records import (
+        build_session_distillation_pipeline,
+    )
     from bashgym.factory.designer_pipelines.terminal_env_generation import (
         build_terminal_env_pipeline,
     )
@@ -313,9 +316,11 @@ try:
     PIPELINES["coding_agent_sft"] = build_sft_pipeline
     PIPELINES["coding_agent_dpo"] = build_dpo_pipeline
     PIPELINES["coding_agent_distill"] = build_distill_pipeline
+    PIPELINES["session_distillation_records"] = build_session_distillation_pipeline
     PIPELINES["terminal_env_generation"] = build_terminal_env_pipeline
     PIPELINES["tool_use_sft"] = build_tool_use_pipeline
     PIPELINES["from_external"] = build_external_pipeline
+    PIPELINES["from_source"] = build_external_pipeline
     PIPELINES["from_unstructured"] = build_unstructured_pipeline
     if HAS_MCP:
         # Real tool-use pipeline only registers when MCP (ToolConfig) is available.

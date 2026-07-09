@@ -4,7 +4,7 @@ Three parallel lanes of work to move bashgym from "pipeline runs end-to-end but 
 
 ## How to use this document
 
-1. Open a new Claude Code window in `/home/ponyo/bashgym`.
+1. Open a new Claude Code window in `/home/user/bashgym`.
 2. Pick one of the three workstreams below.
 3. Copy the entire section (from `# Workstream N` through the next `---`) into the conversation.
 4. Claude reads the briefing, knows what to do, and does not need to re-discover context.
@@ -16,7 +16,7 @@ Three parallel lanes of work to move bashgym from "pipeline runs end-to-end but 
 
 You are working on **bashgym**, an open-source cascade RL orchestration platform for training code/bash agents. It already has most of its pieces; the remaining work is wiring, hardening, and filling gaps.
 
-**Repo**: `/home/ponyo/bashgym` on branch `feat/training-strategies-device-mgmt`.
+**Repo**: `/home/user/bashgym` on branch `feat/training-strategies-device-mgmt`.
 
 **Platform state as of 2026-04-10** (verified by codebase inventory):
 
@@ -428,7 +428,7 @@ When done, append:
 ## Current date and branch
 
 - Date: 2026-04-10
-- Repo: `/home/ponyo/bashgym`
+- Repo: `/home/user/bashgym`
 - Branch: `feat/training-strategies-device-mgmt` at `d4b8442`
 - Recent uncommitted work (from today): `bashgym/gym/trainer.py`, `bashgym/gym/cascade_scheduler.py`, `bashgym/api/cascade_routes.py`. Commit these to `feat/training-strategies-device-mgmt` before branching so all three workstreams start from the same base.
 
@@ -454,7 +454,7 @@ When done, append:
       "domains": ["file_operations", "bash_commands"],
       "stage_strategies": ["sft", "dpo"],
       "base_model": "unsloth/gemma-4-E4B-it",
-      "dataset_path": "/home/ponyo/.bashgym/gold_traces_local",
+      "dataset_path": "/home/user/.bashgym/gold_traces_local",
       "train_steps_per_stage": 20,
       "mode": "real"
     }'

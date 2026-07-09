@@ -117,7 +117,7 @@ export function DownloadPage() {
       {/* Hero */}
       <div className="text-center space-y-4">
         <div className="flex items-center justify-center gap-3">
-          <img src="/ghost-icon.png" alt="BashGym" className="w-16 h-16 object-cover" />
+          <img src="/bashgym-peony.png" alt="BashGym" className="w-20 h-20 object-contain" />
         </div>
         <h1 className="font-brand text-4xl font-bold text-text-primary">
           <span className="text-accent">/</span>BashGym Desktop
@@ -143,7 +143,7 @@ export function DownloadPage() {
               return url ? (
                 <a
                   href={url}
-                  className="inline-flex items-center gap-3 px-8 py-4 bg-accent text-white font-mono font-semibold text-lg border-brutal border-border rounded-brutal shadow-brutal hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all"
+                  className="inline-flex items-center gap-3 px-8 py-4 bg-accent text-white font-mono font-semibold text-lg border-brutal border-border rounded-brutal shadow-brutal hover:brightness-95 active:translate-x-[2px] active:translate-y-[2px] active:shadow-brutal-pressed transition-press"
                 >
                   <Download className="w-6 h-6" />
                   Download for {info.label}

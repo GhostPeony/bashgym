@@ -10,8 +10,10 @@ from bashgym.eval.benchmarks_ext import (
     normalize_external_benchmark_results,
     parse_accuracy,
     parse_bfcl_results,
+    parse_cua_rewardbench_results,
     parse_lm_eval,
     parse_resolved_rate,
+    parse_rewardbench_results,
     parse_swebench_results,
     record_benchmarks,
     run_benchmarks,
@@ -163,6 +165,99 @@ class TestParsers:
         assert result.total == 3
         assert result.metrics["repo.sympy_sympy.resolution_rate"] == 0.5
         assert result.metrics["repo.django_django.resolution_rate"] == 1.0
+
+    def test_parse_rewardbench_subset_rows(self):
+        result = parse_rewardbench_results(
+            "RewardBench 2",
+            {
+                "results": [
+                    {"subset": "Chat", "num_correct": 1, "total": 2},
+                    {"subset": "Safety", "num_correct": 2, "total": 2},
+                    {"subset": "Reasoning", "accuracy": "50%"},
+                ]
+            },
+        )
+
+        assert result.name == "rewardbench_2"
+        assert result.score == pytest.approx((0.5 + 1.0 + 0.5) / 3)
+        assert result.passed == 3
+        assert result.total == 4
+        assert result.metrics["subset.chat"] == 0.5
+        assert result.metrics["subset.safety"] == 1.0
+        assert result.metrics["subset.reasoning"] == 0.5
+        assert result.metrics["rewardbench_subset_count"] == 3.0
+
+    def test_normalize_external_rewardbench_hf_like_rows(self):
+        report = normalize_external_benchmark_results(
+            [
+                {"subset": "Factuality", "results": 1.0},
+                {"subset": "Factuality", "results": 0.0},
+                {"subset": "Chat Hard", "results": 1.0},
+            ],
+            benchmark_name="rewardbench",
+        )
+
+        result = report.results[0]
+        assert report.scores["rewardbench"] == pytest.approx(0.75)
+        assert result.passed == 2
+        assert result.total == 3
+        assert result.metrics["subset.factuality"] == 0.5
+        assert result.metrics["subset.chat_hard"] == 1.0
+
+    def test_parse_cua_rewardbench_metrics_json(self):
+        result = parse_cua_rewardbench_results(
+            "CUARewardBench",
+            {
+                "trajectory_reward_metrics": {
+                    "overall": {
+                        "Overall Accuracy": 0.72,
+                        "F1": 0.7,
+                        "TP": 36,
+                        "TN": 20,
+                        "FP": 8,
+                        "FN": 6,
+                    },
+                    "by_task_type": {
+                        "spreadsheet": {"Overall Accuracy": 0.8},
+                    },
+                },
+                "action_reward_metrics": {
+                    "overall": {"Overall Accuracy": "65%", "F1": 0.6},
+                    "by_reward_type": {
+                        "redundant": {"Overall Accuracy": 0.7},
+                    },
+                },
+            },
+        )
+
+        assert result.name == "cuarewardbench"
+        assert result.score == 0.72
+        assert result.passed == 56
+        assert result.total == 70
+        assert result.metrics["trajectory_overall_accuracy"] == 0.72
+        assert result.metrics["action_overall_accuracy"] == 0.65
+        assert (
+            result.metrics["trajectory.by_task_type.spreadsheet.overall_accuracy"]
+            == 0.8
+        )
+        assert result.metrics["action.by_reward_type.redundant.overall_accuracy"] == 0.7
+
+    def test_normalize_external_cua_rewardbench_rows(self):
+        report = normalize_external_benchmark_results(
+            {
+                "results": [
+                    {"task_type": "browser", "correct": True},
+                    {"task_type": "browser", "correct": False},
+                    {"task_type": "desktop", "accuracy": 1.0},
+                ]
+            },
+            benchmark_name="cua_rewardbench",
+        )
+
+        result = report.results[0]
+        assert result.score == pytest.approx(2 / 3)
+        assert result.passed == 2
+        assert result.total == 3
 
 
 class TestCommandBuilders:

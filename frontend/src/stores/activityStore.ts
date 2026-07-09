@@ -60,6 +60,8 @@ export function titleFor(type: string, payload: Record<string, unknown>): string
       return `Pipeline: ${type.split(':').slice(1).join(' ')}`
     case type.startsWith('guardrail:'):
       return `Guardrail ${type.split(':')[1]}${p.rule ? ` — ${p.rule}` : ''}`
+    case type === 'verification:result':
+      return `Verification ${(p.passed ?? p.success) ? 'passed' : 'failed'}${p.task_id ? ` — ${p.task_id}` : ''}`
     default:
       return type
   }
@@ -79,7 +81,8 @@ interface ActivityState {
 
 const TRACKED_PREFIXES = [
   'training', 'trace', 'orchestration', 'pipeline', 'guardrail',
-  'cascade', 'hf', 'autoresearch', 'integration', 'schema-research'
+  'cascade', 'hf', 'autoresearch', 'integration', 'schema-research',
+  'verification'
 ]
 
 export function isTrackedType(type: string): boolean {

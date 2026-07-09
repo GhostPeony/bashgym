@@ -437,7 +437,7 @@ RECOMMENDED_TRAINING_MODELS = [
         is_code_model=True,
         supports_training=True,
         context_length=256000,
-        description="Mixture-of-experts — strong quality at low active cost (DGX Spark).",
+        description="Mixture-of-experts — strong quality at low active cost on larger GPUs.",
     ),
     UnifiedModel(
         id="hf/Qwen/Qwen3.5-4B",

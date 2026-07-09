@@ -1,13 +1,13 @@
 {
   "name": "bash-gym",
   "version": "1.0.0",
-  "description": "Bash Gym - A Self-Improving Agentic Development Gym",
+  "description": "Bash Gym - Self-Improving Training Workspace",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build && electron-builder",
     "preview": "vite preview",
-    "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron:dev": "concurrently \"vite --host 127.0.0.1 --port 5190\" \"wait-on http://localhost:5190 && electron .\"",
     "electron:build": "vite build && electron-builder",
     "web:dev": "vite --config vite.config.web.ts --mode web",
     "web:build": "vite build --config vite.config.web.ts --mode web",
@@ -58,8 +58,10 @@
     "appId": "com.bashgym.app",
     "productName": "Bash Gym",
     "directories": {
+      "buildResources": "build",
       "output": "release"
     },
+    "icon": "build/icon.png",
     "files": [
       "dist/**/*",
       "dist-electron/**/*"
@@ -68,9 +70,11 @@
       "target": "dmg"
     },
     "win": {
+      "icon": "build/icon.ico",
       "target": "nsis"
     },
     "linux": {
+      "icon": "build/icon.png",
       "target": "AppImage"
     }
   }

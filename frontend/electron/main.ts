@@ -56,6 +56,20 @@ const isDev = !app.isPackaged
 // Credentials directory for secure storage
 const credentialsDir = path.join(app.getPath('userData'), 'credentials')
 
+function resolveAppIconPath(): string | undefined {
+  const candidates = isDev
+    ? [
+        path.join(process.cwd(), 'public', 'bashgym-peony.png'),
+        path.join(__dirname, '../public/bashgym-peony.png')
+      ]
+    : [
+        path.join(__dirname, '../dist/bashgym-peony.png'),
+        path.join(process.resourcesPath, 'app.asar', 'dist', 'bashgym-peony.png')
+      ]
+
+  return candidates.find((candidate) => fs.existsSync(candidate))
+}
+
 function setupMenu() {
   const template: Electron.MenuItemConstructorOptions[] = [
     {
@@ -88,6 +102,7 @@ function setupMenu() {
 
 function createWindow() {
   const isWin = process.platform === 'win32'
+  const appIconPath = resolveAppIconPath()
 
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -97,6 +112,7 @@ function createWindow() {
     title: 'Bash Gym',
     titleBarStyle: isWin ? 'hidden' : 'hiddenInset',
     ...(isWin ? {} : { trafficLightPosition: { x: 16, y: 16 } }),
+    ...(appIconPath ? { icon: appIconPath } : {}),
     backgroundColor: '#0D0D0D',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -132,7 +148,8 @@ function createWindow() {
 
   // Load the app
   if (isDev) {
-    mainWindow.loadURL('http://localhost:5173')
+    const devServerUrl = process.env.BASHGYM_DEV_SERVER_URL || 'http://localhost:5190'
+    mainWindow.loadURL(devServerUrl)
     mainWindow.webContents.openDevTools() // TEMP: debug black screen
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
@@ -245,6 +262,15 @@ function getFreshEnv(): Record<string, string> {
   return env
 }
 
+function resolveTerminalCwd(cwd?: string): string {
+  const requested = cwd?.trim()
+  if (!requested || requested === '~') return os.homedir()
+  if (requested.startsWith('~/') || requested.startsWith('~\\')) {
+    return path.join(os.homedir(), requested.slice(2))
+  }
+  return requested
+}
+
 // Terminal management — create-or-attach: a live PTY for this id is re-attached
 // (with scrollback replay) instead of respawned, so renderer remounts never
 // orphan or kill the underlying process.
@@ -275,14 +301,19 @@ ipcMain.handle('terminal:create', async (_, id: string, cwd?: string) => {
       ? ['-NoLogo']
       : []
 
-    const resolvedCwd = cwd || process.env.HOME || process.cwd()
+    const resolvedCwd = resolveTerminalCwd(cwd)
+
+    const env = {
+      ...getFreshEnv(),
+      BASHGYM_TERMINAL_ID: id
+    }
 
     const ptyProcess = pty.spawn(shell, shellArgs, {
       name: 'xterm-256color',
       cols: 80,
       rows: 24,
       cwd: resolvedCwd,
-      env: getFreshEnv()
+      env
     })
 
     const session: PtySession = {
@@ -310,7 +341,7 @@ ipcMain.handle('terminal:create', async (_, id: string, cwd?: string) => {
       // it is dropped on explicit kill or recreate.
     })
 
-    return { success: true, id, attached: false }
+    return { success: true, id, attached: false, cwd: resolvedCwd }
   } catch (error) {
     console.error('Failed to create terminal:', error)
     return { success: false, error: String(error) }
@@ -354,6 +385,19 @@ ipcMain.handle('terminal:list', () => {
     exited: s.exited,
     exitCode: s.exitCode
   }))
+})
+
+// Read-only tail of the scrollback ring buffer (raw ANSI; renderer strips)
+ipcMain.handle('terminal:snapshot', (_, id: string, maxBytes?: number) => {
+  const session = ptySessions.get(id)
+  if (!session) return { success: false, error: 'No such terminal session' }
+  const cap = Math.min(Math.max(maxBytes ?? 64_000, 1_000), MAX_BUFFER_BYTES)
+  return {
+    success: true,
+    data: session.buffer.join('').slice(-cap),
+    cwd: session.cwd,
+    exited: session.exited
+  }
 })
 
 // System info
@@ -528,9 +572,10 @@ ipcMain.handle('browser:screenshot', async (_, webContentsId: number, rect?: { x
   }
 })
 
-ipcMain.handle('files:writeTempFile', async (_, dataUrl: string, ext: string) => {
+ipcMain.handle('files:writeTempFile', async (_, dataUrl: string, ext: string, basename?: string) => {
   try {
-    const filename = `bashgym_screenshot_${Date.now()}.${ext}`
+    const safeBase = (basename || 'bashgym_file').replace(/[^a-zA-Z0-9_-]/g, '_')
+    const filename = `${safeBase}_${Date.now()}.${ext}`
     const filePath = path.join(os.tmpdir(), filename)
     const base64Data = dataUrl.replace(/^data:[^;]+;base64,/, '')
     await fs.promises.writeFile(filePath, Buffer.from(base64Data, 'base64'))
@@ -551,6 +596,194 @@ ipcMain.handle('files:stat', async (_, filePath: string) => {
         size: stats.size,
         modified: stats.mtimeMs,
         created: stats.birthtimeMs
+      }
+    }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  }
+})
+
+// Session history handlers — read-only access to local agent-CLI session journals
+// (Claude Code: ~/.claude/projects, Codex: ~/.codex/sessions). All reads stay on
+// this machine; paths are restricted to the session roots and .jsonl files only.
+
+const SESSION_ROOTS = [
+  path.join(os.homedir(), '.claude', 'projects'),
+  path.join(os.homedir(), '.codex', 'sessions')
+]
+
+function safeSessionFilePath(p: string): string {
+  const resolved = path.resolve(p)
+  const inRoot = SESSION_ROOTS.some((root) => resolved.startsWith(root + path.sep))
+  if (!inRoot || !resolved.endsWith('.jsonl')) {
+    throw new Error('Path outside session roots')
+  }
+  return resolved
+}
+
+interface SessionFileInfo {
+  path: string
+  size: number
+  modified: number
+}
+
+async function listJsonlFiles(dir: string): Promise<SessionFileInfo[]> {
+  const out: SessionFileInfo[] = []
+  let entries: fs.Dirent[]
+  try {
+    entries = await fs.promises.readdir(dir, { withFileTypes: true })
+  } catch {
+    return out
+  }
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.jsonl')) continue
+    const filePath = path.join(dir, entry.name)
+    try {
+      const stats = await fs.promises.stat(filePath)
+      out.push({ path: filePath, size: stats.size, modified: stats.mtimeMs })
+    } catch {
+      // File vanished between readdir and stat
+    }
+  }
+  return out
+}
+
+const SCAN_MAX_FILES_PER_KIND = 400
+
+ipcMain.handle('sessions:scan', async (_, lookbackDays = 14) => {
+  try {
+    const days = Math.min(Math.max(Number(lookbackDays) || 14, 1), 90)
+    const cutoff = Date.now() - days * 86_400_000
+    const byRecency = (files: SessionFileInfo[]) =>
+      files
+        .filter((f) => f.modified >= cutoff)
+        .sort((a, b) => b.modified - a.modified)
+        .slice(0, SCAN_MAX_FILES_PER_KIND)
+
+    // Claude: every project dir's top-level *.jsonl. Enumerating the root (rather
+    // than taking dir names from the renderer) sidesteps path-case mismatches on
+    // Windows. Subagent files live in <session-id>/subagents/ subdirs and are
+    // excluded by the top-level-only listing.
+    const claude: SessionFileInfo[] = []
+    const claudeRoot = SESSION_ROOTS[0]
+    let projectDirs: fs.Dirent[] = []
+    try {
+      projectDirs = await fs.promises.readdir(claudeRoot, { withFileTypes: true })
+    } catch {
+      // No Claude Code installation
+    }
+    for (const entry of projectDirs) {
+      if (!entry.isDirectory()) continue
+      claude.push(...await listJsonlFiles(path.join(claudeRoot, entry.name)))
+    }
+
+    // Codex: rollout-*.jsonl under date dirs for the last N days
+    const codex: SessionFileInfo[] = []
+    const codexRoot = SESSION_ROOTS[1]
+    for (let i = 0; i < days; i++) {
+      const d = new Date(Date.now() - i * 86_400_000)
+      const dir = path.join(
+        codexRoot,
+        String(d.getFullYear()),
+        String(d.getMonth() + 1).padStart(2, '0'),
+        String(d.getDate()).padStart(2, '0')
+      )
+      codex.push(...(await listJsonlFiles(dir)).filter((f) => path.basename(f.path).startsWith('rollout-')))
+    }
+
+    return { success: true, claude: byRecency(claude), codex: byRecency(codex) }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  }
+})
+
+const SESSION_TAIL_HARD_CAP = 262_144 // 256KB per read
+
+ipcMain.handle('sessions:readTail', async (_, filePath: string, fromOffset: number, maxBytes = 131_072) => {
+  let fd: fs.promises.FileHandle | null = null
+  try {
+    const resolved = safeSessionFilePath(filePath)
+    const cap = Math.min(Math.max(Number(maxBytes) || 131_072, 4_096), SESSION_TAIL_HARD_CAP)
+    const stats = await fs.promises.stat(resolved)
+
+    // File truncated or rotated since last read: restart near the end
+    let offset = Math.max(Number(fromOffset) || 0, 0)
+    let reset = false
+    if (stats.size < offset) {
+      offset = Math.max(0, stats.size - cap)
+      reset = true
+    }
+
+    const toRead = Math.min(cap, stats.size - offset)
+    if (toRead <= 0) {
+      return { success: true, data: '', newOffset: offset, size: stats.size, reset }
+    }
+
+    fd = await fs.promises.open(resolved, 'r')
+    const buf = Buffer.alloc(toRead)
+    const { bytesRead } = await fd.read(buf, 0, toRead, offset)
+
+    // Trim at the last newline so the renderer never sees split lines or
+    // split multibyte characters
+    const lastNewline = buf.lastIndexOf(0x0a, bytesRead - 1)
+    if (lastNewline === -1) {
+      if (bytesRead >= cap) {
+        // Single line longer than the cap: skip it to guarantee forward progress
+        return { success: true, data: '', newOffset: offset + bytesRead, size: stats.size, reset }
+      }
+      // Partial final line still being written: wait for the next poll
+      return { success: true, data: '', newOffset: offset, size: stats.size, reset }
+    }
+
+    const data = buf.toString('utf-8', 0, lastNewline + 1)
+    return { success: true, data, newOffset: offset + lastNewline + 1, size: stats.size, reset }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  } finally {
+    await fd?.close().catch(() => {})
+  }
+})
+
+ipcMain.handle('sessions:readHead', async (_, filePath: string, maxBytes = 16_384) => {
+  let fd: fs.promises.FileHandle | null = null
+  try {
+    const resolved = safeSessionFilePath(filePath)
+    const cap = Math.min(Math.max(Number(maxBytes) || 16_384, 1_024), SESSION_TAIL_HARD_CAP)
+    fd = await fs.promises.open(resolved, 'r')
+    const buf = Buffer.alloc(cap)
+    const { bytesRead } = await fd.read(buf, 0, cap, 0)
+    // Trim at the last complete line for safe parsing
+    const lastNewline = buf.lastIndexOf(0x0a, bytesRead - 1)
+    const end = lastNewline === -1 ? bytesRead : lastNewline + 1
+    return { success: true, data: buf.toString('utf-8', 0, end) }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  } finally {
+    await fd?.close().catch(() => {})
+  }
+})
+
+// Account info: parsed in the main process, only a whitelist of fields crosses
+// IPC — the raw config file (which contains much more) never leaves this handler.
+ipcMain.handle('sessions:readAccount', async () => {
+  try {
+    const raw = await fs.promises.readFile(path.join(os.homedir(), '.claude.json'), 'utf-8')
+    const parsed = JSON.parse(raw)
+    const acct = parsed?.oauthAccount
+    if (!acct || typeof acct !== 'object') {
+      return { success: false, error: 'No account info found' }
+    }
+    return {
+      success: true,
+      account: {
+        emailAddress: acct.emailAddress ?? null,
+        displayName: acct.displayName ?? null,
+        organizationName: acct.organizationName ?? null,
+        organizationRole: acct.organizationRole ?? null,
+        billingType: acct.billingType ?? null,
+        seatTier: acct.seatTier ?? null,
+        userRateLimitTier: acct.userRateLimitTier ?? null,
+        organizationRateLimitTier: acct.organizationRateLimitTier ?? null
       }
     }
   } catch (error) {

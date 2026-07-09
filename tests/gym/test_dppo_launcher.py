@@ -96,6 +96,26 @@ def test_command_template_overrides_backend_default(tmp_path):
     assert plan.reason == "using configured DPPO command template"
 
 
+def test_explicit_command_template_can_run_when_backend_probe_misses(tmp_path):
+    replay_path = tmp_path / "replay.jsonl"
+    replay_path.write_text("{}\n", encoding="utf-8")
+    config = DPPOSmokeLaunchConfig(
+        replay_path=replay_path,
+        output_dir=tmp_path / "run",
+        base_model="model",
+        backend="verl",
+        command_template="python train.py --data {replay_path} --model {base_model}",
+    )
+
+    plan = build_dppo_smoke_launch_plan(config, capabilities=_capabilities())
+
+    assert plan.runnable is True
+    assert plan.selection.selected == "verl"
+    assert plan.command == ["python", "train.py", "--data", str(replay_path), "--model", "model"]
+    assert "explicit DPPO command template" in plan.reason
+    assert plan.env["BASHGYM_DPPO_REPLAY_PATH"] == str(replay_path)
+
+
 def test_launch_plan_threads_world_model_settings_to_backend(tmp_path):
     replay_path = tmp_path / "replay.jsonl"
     replay_path.write_text("{}\n", encoding="utf-8")
@@ -134,12 +154,8 @@ def test_launch_plan_threads_world_model_settings_to_backend(tmp_path):
     assert plan.env["BASHGYM_DPPO_ECHO_LOSS_HOOK"].endswith(
         "WorldModelTrainerAdapter.apply_echo_loss"
     )
-    assert plan.env["BASHGYM_DPPO_TRL_RWML_REWARD_FACTORY"].endswith(
-        "build_trl_rwml_reward_func"
-    )
-    assert plan.env["BASHGYM_DPPO_VERL_RWML_REWARD_FACTORY"].endswith(
-        "build_verl_rwml_reward_fn"
-    )
+    assert plan.env["BASHGYM_DPPO_TRL_RWML_REWARD_FACTORY"].endswith("build_trl_rwml_reward_func")
+    assert plan.env["BASHGYM_DPPO_VERL_RWML_REWARD_FACTORY"].endswith("build_verl_rwml_reward_fn")
 
     world_model = plan.to_dict()["world_model"]
     assert world_model["echo_enabled"] is True

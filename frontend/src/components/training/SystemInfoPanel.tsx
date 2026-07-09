@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { RefreshCw, Cpu, HardDrive, AlertCircle, CheckCircle2, XCircle, Server, Wifi } from 'lucide-react'
 import { systemInfoApi, providersApi, sshApi, SystemInfo, ModelRecommendations, OllamaModel } from '../../services/api'
+import { MaskedHost } from '../common'
 import { clsx } from 'clsx'
 
 interface SystemInfoPanelProps {
@@ -246,7 +247,7 @@ export function SystemInfoPanel({ onSystemInfo, onRecommendations, compact = fal
         </div>
       )}
 
-      {/* DGX Spark Training Target */}
+      {/* Private Compute Target */}
       {sshStatus && (
         <div className="card p-4">
           <div className="flex items-center gap-2 mb-3">
@@ -257,10 +258,10 @@ export function SystemInfoPanel({ onSystemInfo, onRecommendations, compact = fal
             <div className="space-y-1">
               <div className="flex items-center gap-2">
                 <Wifi className="w-3.5 h-3.5 text-status-success" />
-                <span className="text-sm font-medium text-text-primary">DGX Spark Connected</span>
+                <span className="text-sm font-medium text-text-primary">Private target connected</span>
               </div>
               <p className="font-mono text-xs text-text-muted">
-                {sshStatus.username}@{sshStatus.host}
+                <MaskedHost username={sshStatus.username} host={sshStatus.host ?? ''} />
               </p>
               <p className="font-mono text-xs text-text-muted">
                 {sshStatus.python_version}
@@ -270,7 +271,7 @@ export function SystemInfoPanel({ onSystemInfo, onRecommendations, compact = fal
           ) : (
             <div className="flex items-center gap-2 text-text-muted">
               <XCircle className="w-3.5 h-3.5 text-status-error" />
-              <span className="text-sm">{sshStatus.error || 'SSH not configured'}</span>
+              <span className="text-sm">{sshStatus.error || 'Private compute target not configured'}</span>
             </div>
           )}
         </div>

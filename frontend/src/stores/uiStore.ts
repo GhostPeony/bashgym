@@ -2,10 +2,14 @@ import { create } from 'zustand'
 
 export type ViewMode = 'home' | 'workspace' | 'training' | 'autoresearch' | 'router' | 'traces' | 'factory' | 'evaluator' | 'guardrails' | 'profiler' | 'models' | 'huggingface' | 'integration' | 'achievements' | 'orchestrator' | 'pipeline' | 'download'
 
+/** What the left sidebar renders: the nav menu or the Agent Sessions feed */
+export type SidebarMode = 'nav' | 'sessions'
+
 interface UIState {
   // Navigation
   currentView: ViewMode
   isSidebarOpen: boolean
+  sidebarMode: SidebarMode
   isSettingsOpen: boolean
   isCommandPaletteOpen: boolean
   isOnboardingOpen: boolean
@@ -21,6 +25,7 @@ interface UIState {
   closeOverlay: () => void
   toggleSidebar: () => void
   setSidebarOpen: (open: boolean) => void
+  setSidebarMode: (mode: SidebarMode) => void
   setSettingsOpen: (open: boolean) => void
   setCommandPaletteOpen: (open: boolean) => void
   setOnboardingOpen: (open: boolean) => void
@@ -32,6 +37,7 @@ interface UIState {
 export const useUIStore = create<UIState>((set) => ({
   currentView: 'home',
   isSidebarOpen: true,
+  sidebarMode: 'nav',
   isSettingsOpen: false,
   isCommandPaletteOpen: false,
   isOnboardingOpen: false,
@@ -48,6 +54,8 @@ export const useUIStore = create<UIState>((set) => ({
   toggleSidebar: () => set((state) => ({ isSidebarOpen: !state.isSidebarOpen })),
 
   setSidebarOpen: (open) => set({ isSidebarOpen: open }),
+
+  setSidebarMode: (mode) => set({ sidebarMode: mode, isSidebarOpen: true }),
 
   setSettingsOpen: (open) => set({ isSettingsOpen: open }),
 

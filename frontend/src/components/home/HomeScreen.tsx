@@ -80,18 +80,15 @@ export function HomeScreen() {
         {/* Header row — brand + stats */}
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-4">
-            <div className="h-14 w-16 overflow-hidden border-brutal border-border rounded-brutal shadow-brutal shrink-0">
-              <img src="/bb.png" alt="Bash Gym" className="h-full w-auto object-cover object-right" />
-            </div>
-            <div>
-              <h1 className="font-brand text-2xl text-text-primary leading-tight">Bash Gym</h1>
-              <p className="text-sm text-text-secondary mt-0.5">Self-improving agentic development gym</p>
-            </div>
+            <img src="/bashgym-peony.png" alt="BashGym" className="h-16 w-16 object-contain" />
+            <h1 className="font-brand text-3xl font-semibold text-text-primary leading-none">
+              <span className="text-accent">/</span>BashGym
+            </h1>
           </div>
           <div className="flex items-center gap-3">
             <button
               onClick={() => openOverlay('traces')}
-              className="card flex items-center gap-2 px-3 py-1.5 hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all"
+              className="card flex items-center gap-2 px-3 py-1.5 hover:border-accent active:translate-x-[1px] active:translate-y-[1px] active:shadow-brutal-pressed transition-press"
             >
               <Database className="w-3.5 h-3.5 text-accent" />
               <span className="font-mono text-xs text-text-primary">{stats.traces}</span>
@@ -99,7 +96,7 @@ export function HomeScreen() {
             </button>
             <button
               onClick={() => openOverlay('achievements')}
-              className="card flex items-center gap-2 px-3 py-1.5 hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all"
+              className="card flex items-center gap-2 px-3 py-1.5 hover:border-accent active:translate-x-[1px] active:translate-y-[1px] active:shadow-brutal-pressed transition-press"
             >
               <Trophy className="w-3.5 h-3.5 text-status-warning" />
               <span className="font-mono text-xs text-text-primary">{earnedCount}/{totalCount}</span>

@@ -69,7 +69,7 @@ export function MainLayout() {
         <Sidebar />
 
         {/* Workspace Area */}
-        <main className="flex-1 flex flex-col">
+        <main className="relative z-0 min-w-0 flex-1 flex flex-col">
           {/* Home Screen */}
           {showHome && (
             <div className="flex-1 overflow-auto">
@@ -266,7 +266,7 @@ export function MainLayout() {
       {AgentChat && !isAgentChatOpen && (
         <button
           onClick={toggleAgentChat}
-          className="fixed bottom-6 right-6 z-40 w-12 h-12 border-brutal border-border rounded-full bg-accent text-white shadow-brutal flex items-center justify-center hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all"
+          className="fixed bottom-6 right-6 z-40 w-12 h-12 border-brutal border-border rounded-full bg-accent text-white shadow-brutal flex items-center justify-center hover:brightness-95 active:translate-x-[2px] active:translate-y-[2px] active:shadow-brutal-pressed transition-press"
           title="Open Peony Agent"
         >
           <MessageSquare className="w-5 h-5" />

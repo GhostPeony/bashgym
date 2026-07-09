@@ -124,7 +124,7 @@ The factory segments multi-task sessions into individual training examples, scru
 Open the **Training** dashboard:
 
 1. Select **SFT** (Supervised Fine-Tuning) as the strategy
-2. Choose a base model — any HuggingFace model works (training is accelerated with Unsloth). Smaller models train fast on a consumer GPU; larger ones run on the DGX Spark. See the [Unsloth model catalog](https://unsloth.ai/docs/get-started/unsloth-model-catalog) for current options
+2. Choose a base model — any HuggingFace model works (training is accelerated with Unsloth). Smaller models train fast on a consumer GPU; larger ones use private or cloud GPU targets. See the [Unsloth model catalog](https://unsloth.ai/docs/get-started/unsloth-model-catalog) for current options
 3. Select which repos to train on (or use all gold traces)
 4. Click **Start Training**
 5. Watch the live loss curve and training logs

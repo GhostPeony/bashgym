@@ -17,6 +17,8 @@ Every AI coding session is a chain-of-thought reasoning trace — step-by-step p
 - **[docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)** — install to first trained model, step by step.
 - **[docs/training/overview.md](docs/training/overview.md)** — training gym curriculum: how strategies, rewards, world models, and gates fit together.
 - **[docs/training/capability-map.md](docs/training/capability-map.md)** — full training/eval spread, including ready, backend-dependent, and diagnostic surfaces.
+- **[docs/training/tmax-terminal-rl-recipe.md](docs/training/tmax-terminal-rl-recipe.md)** — TMax-style terminal RL recipe from environment pool to backend smoke and release gates.
+- **[docs/training/private-compute-eval-checklist.md](docs/training/private-compute-eval-checklist.md)** — private/cloud compute backend-smoke and eval checklist for DPPO/ECHO/RWML runs.
 - **[docs/TRAINING_DATA_GUIDE.md](docs/TRAINING_DATA_GUIDE.md)** — trace format, quality tiers, and example generation.
 - **[docs/training/strategy-guide.md](docs/training/strategy-guide.md)** — concrete SFT, DPO, GRPO/RLVR, distillation, cascade, and DPPO starting recipes.
 - **[docs/API.md](docs/API.md)** — REST API reference.
@@ -33,7 +35,7 @@ Adapters capture every session as structured traces
         ↓
 Pipeline scores, classifies, and segments traces into training examples
         ↓
-Fine-tune with SFT, DPO, GRPO, RLVR, or Distillation (Unsloth + QLoRA)
+Fine-tune with SFT, DPO, GRPO, RLVR, Distillation, or Session Distillation (Unsloth + QLoRA)
         ↓
 Export to LoRA adapter, merged weights, or GGUF → run via Ollama
 ```
@@ -43,7 +45,7 @@ Export to LoRA adapter, merged weights, or GGUF → run via Ollama
 | **Capture** | Adapters record every tool call, file edit, and command from your AI coding sessions (Claude Code, Gemini CLI, OpenCode, Codex, Copilot CLI) as structured JSON. Historical sessions can be bulk-imported. |
 | **Curate** | Traces are scored on 6 quality metrics. Good sessions become gold training data, bad ones become negative examples for DPO. PII is scrubbed. |
 | **Synthesize** | Gold traces are segmented into task-response pairs. Gaps are filled with synthetic augmentation via NVIDIA NeMo Data Designer or LLM-based generation. |
-| **Train** | SFT, DPO, GRPO, RLVR, or Distillation fine-tunes a model using Unsloth (2–5x faster, 50–80% less VRAM). Train locally, on a remote GPU over SSH, or via HuggingFace cloud. |
+| **Train** | SFT, DPO, GRPO, RLVR, Distillation, or Session Distillation fine-tunes a model using Unsloth (2–5x faster, 50–80% less VRAM). Train locally, on a private compute target, or via HuggingFace cloud. |
 | **Evaluate** | 11 benchmarks (HumanEval, MBPP, BigCodeBench, SWE-bench, GSM8K, and more) score the result. |
 | **Route** | Confidence-based routing shifts simple tasks from Claude to your trained model over time. |
 
@@ -213,11 +215,11 @@ Uses Claude Haiku for cost efficiency (~$2-5 per 1,000 traces). Integrated into 
 
 See [Training](#training) for details.
 
-- **Strategies**: SFT, DPO, GRPO, RLVR, Distillation, Cascade RL
+- **Strategies**: SFT, DPO, GRPO, RLVR, Distillation, Session Distillation, Cascade RL
 - **Cascade RL**: Sequential domain-by-domain training (file ops → bash → search → multi-step reasoning) with per-domain reward functions, checkpoint chaining, and MOPD distillation to merge domain experts
 - **Acceleration**: Unsloth with QLoRA (4-bit quantization) by default
 - **Providers**: Pluggable inference via Anthropic, NVIDIA NIM, and Ollama. Ollama models are auto-discovered at startup — any model you've pulled is immediately available as a Student model
-- **Compute**: Local GPU, remote SSH (e.g. DGX Spark), or HuggingFace cloud
+- **Compute**: Local GPU, private compute target, or HuggingFace cloud
 - **Output**: LoRA adapter, merged weights (16-bit), GGUF (for Ollama/llama.cpp/LM Studio)
 - **Training goals**: Define weighted success criteria and hard/soft constraints instead of optimizing a single loss scalar. The outcome aggregator tracks progress and recommends when to stop, adjust, or continue.
 - **AutoResearch**: Three evolutionary search modes (hyperparameters, trace curation, schema evolution) — see [AutoResearch](#autoresearch) for the full breakdown
@@ -326,6 +328,7 @@ Gamified progress tracking across trace collection, quality, training, and maste
 | **GRPO** | Group Relative Policy Optimization via `trl.GRPOTrainer`. Three tiered reward functions: syntax (`ast.parse`), execution (`subprocess`), and verification (`pytest`). Model generates multiple completions per prompt and learns from the reward signal. | When you want RL-based training. Needs test cases for verification mode. |
 | **RLVR** | RL with Verifiable Rewards — GRPO with verification-locked rewards. Test results from `pytest` are the reward signal: pass rate becomes the score. | When your traces include test code. The strongest signal for code correctness. |
 | **Distillation** | Knowledge distillation from a large teacher (e.g. Claude) into a small student. Combines soft labels (KL divergence) and hard labels (cross-entropy) weighted by alpha. Supports offline and on-policy modes. | When you want a compact model that reasons like a larger one. |
+| **Session Distillation** | Targeted self-distillation from failed trace spans: insert a short local hint, score the same target tokens under original and hinted context, and train with masked KL/CE. | When traces contain local mistakes, retries, or recovery pivots that are too narrow for DPO and not yet ready for GRPO/RLVR. |
 | **Cascade RL** | Sequential domain-by-domain GRPO training inspired by Nemotron Cascade 2. Trains each coding domain independently with tailored reward functions, then merges domain experts via MOPD distillation. | When you want domain-specialized training. Best results with diverse traces across file editing, bash, search, and multi-step tasks. |
 
 ### Base Models
@@ -337,8 +340,8 @@ Any HuggingFace model compatible with Unsloth works. Set `BASE_MODEL` in the das
 | Model family | Notes |
 |--------------|-------|
 | Gemma 4 (E2B / E4B / 12B / 26B-A4B / 31B) | E2B trains in ~8 GB locally; dense and MoE variants for more capacity. |
-| Qwen3.5 / Qwen3.6 (dense 0.8B–27B; MoE 30B-A3B / 35B-A3B / 235B-A22B) | Apache-2.0. Strong coding/reasoning; small dense models fit consumer GPUs, MoE for DGX-class. |
-| DeepSeek V4 | Large MoE, long context, MIT — DGX Spark. |
+| Qwen3.5 / Qwen3.6 (dense 0.8B–27B; MoE 30B-A3B / 35B-A3B / 235B-A22B) | Apache-2.0. Strong coding/reasoning; small dense models fit consumer GPUs, MoE variants need larger local, private, or cloud GPU capacity. |
+| DeepSeek V4 | Large MoE, long context, MIT; use larger private or cloud GPUs. |
 | Llama 4 (Scout / Maverick) | Very long context. |
 | Mistral Small 4 / Devstral · Phi-4 | Apache-2.0 efficient general, coding, and instruct options. |
 
@@ -352,9 +355,9 @@ These are suggestions, not restrictions. Any `AutoModelForCausalLM`-compatible m
 | **Merged weights** | `merged/` | Full 16-bit model, ready for inference |
 | **GGUF** | `exported_gguf/` | Quantized (default `q4_k_m`), for Ollama / llama.cpp / LM Studio / GPT4All |
 
-### Remote SSH Training
+### Private Compute Training
 
-Train on a remote machine (e.g. NVIDIA DGX Spark) over SSH. The dashboard uploads the training script, streams logs in real time, and supports pause/resume/cancel. All five training strategies (SFT, DPO, GRPO, RLVR, Distillation) generate strategy-specific scripts that run on the remote host. The dashboard shows connection status and a pre-flight check with GPU detection before each run.
+Train on a private compute target when local hardware is too small. The dashboard uploads the training script, streams logs in real time, and supports pause/resume/cancel. Supported training strategies generate strategy-specific scripts that run on the target host. The dashboard shows connection status and a pre-flight check with GPU detection before each run.
 
 ### Device Management
 
@@ -404,7 +407,7 @@ Copy `.env.example` to `.env`:
 | `AUGMENTATION_PROVIDER` | No | `anthropic` | Synthetic data provider: `anthropic` or `nim` |
 | `OLLAMA_ENABLED` | No | `true` | Enable Ollama local inference provider |
 | `OLLAMA_BASE_URL` | No | `http://localhost:11434` | Ollama server URL |
-| `SSH_REMOTE_HOST` | No | — | Remote training host (e.g. DGX Spark IP) |
+| `SSH_REMOTE_HOST` | No | — | Private compute target host |
 | `SSH_REMOTE_USER` | No | — | SSH username for remote training |
 | `SSH_REMOTE_KEY_PATH` | No | `~/.ssh/id_rsa` | Path to SSH private key |
 

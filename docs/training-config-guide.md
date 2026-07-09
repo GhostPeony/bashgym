@@ -6,7 +6,10 @@ For the broader operator curriculum, start with
 [training/capability-map.md](training/capability-map.md), then use
 [training/strategy-guide.md](training/strategy-guide.md) and
 [training/metrics-runbook.md](training/metrics-runbook.md) while configuring and
-diagnosing runs.
+diagnosing runs. For terminal RL, use
+[training/tmax-terminal-rl-recipe.md](training/tmax-terminal-rl-recipe.md); before
+private/cloud backend work, use
+[training/private-compute-eval-checklist.md](training/private-compute-eval-checklist.md).
 
 ---
 
@@ -43,7 +46,7 @@ For security datasets, you can choose **Direct** mode (fast, no API calls) or **
 | Backend | Requirements | Best For |
 |---------|-------------|----------|
 | **Local** | CUDA GPU + Unsloth installed | Small models (1.5B-7B) on your own hardware |
-| **DGX Spark** | SSH config in `.env` (`SSH_REMOTE_*`) | Larger models or when your local GPU is busy |
+| **Private compute target** | Saved device or private compute config | Larger models or when your local GPU is busy |
 | **NeMo Cloud** | NVIDIA NeMo API key | Scalable cloud training, largest models |
 
 ---
@@ -79,11 +82,23 @@ Transfer knowledge from a large teacher model (Claude, GPT-4, 70B+) to your smal
 - **Temperature** (0.5-10): Higher makes the teacher's output distribution softer, which gives the student more information per example. Start at **2.0**.
 - **Alpha** (0-1): Balance between distillation loss and standard task loss. 0.5 is a balanced starting point.
 
+### Session Distillation
+Targeted self-distillation for failed trace spans. BashGym inserts a short local
+hint before the mistake, scores the same target action under original and hinted
+context, and trains only the target span with masked KL/CE.
+
+- Best for: retries, failed commands, local recovery pivots, and small tool-choice mistakes
+- Data: `session_distillation_records.jsonl`
+- **Alpha** (0-1): Weight on hinted-context KL versus hard-label CE. Start at **0.7**.
+- **Temperature** (>0): Softness for the hinted-context distribution. Start at **1.0**.
+- **Minimum confidence** (0-1): Filters weak reader guesses. Start at **0.6**.
+- **Mask policy**: Use **target_span_only** so unrelated transcript text is not trained.
+
 ### Recommended progression
 ```
-SFT → DPO → GRPO (optional)
-         ↑
-         KD (if you have a teacher model budget)
+SFT -> DPO -> GRPO/RLVR (optional)
+         ^
+         KD or Session Distillation when the student needs a bridge
 ```
 
 ---
@@ -97,7 +112,7 @@ Choose the model architecture to fine-tune. Key considerations:
 | 8-12 GB | Gemma 4 E2B; small Qwen3 / Phi-4 dense models |
 | 12-24 GB | Gemma 4 E4B; Qwen3 4B-14B; Mistral Small |
 | 24-48 GB | Gemma 4 12B / 26B-A4B; Qwen3 dense ~30B |
-| 48+ GB (DGX) | Qwen3-Coder / Qwen3 MoE; DeepSeek V3.x-V4; Llama 4 |
+| 48+ GB | Qwen3-Coder / Qwen3 MoE; DeepSeek V3.x-V4; Llama 4 |
 
 These are examples, not requirements. New models land in Unsloth continuously —
 see the [Unsloth model catalog](https://unsloth.ai/docs/get-started/unsloth-model-catalog)
@@ -232,9 +247,9 @@ Beta: 0.1
 Learning Rate: 5e-6 (lower than SFT)
 ```
 
-### DGX Spark training (larger model)
+### Private compute training (larger model)
 ```
-Backend: DGX Spark
+Backend: Private compute target
 Strategy: SFT
 Base Model: (a larger model, e.g. Gemma 4 E4B or a Qwen3 dense model)
 Epochs: 3

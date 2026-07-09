@@ -79,6 +79,10 @@ class TestDecisionDpoForTrace:
         assert "cat config.yaml" in pair.rejected
         assert "ls -la" in pair.chosen
         assert pair.prompt  # carries the system prompt + task
+        assert pair.metadata["pair_generation_method"] == "decision_level_failure_recovery"
+        assert pair.metadata["prompt_hash"]
+        assert pair.metadata["chosen_trace_id"] == "t1"
+        assert pair.metadata["rejected_trace_id"] == "t1"
 
     def test_no_decisions_returns_empty(self, tmp_path):
         factory = _factory(tmp_path)

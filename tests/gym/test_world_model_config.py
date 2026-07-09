@@ -13,7 +13,7 @@ from bashgym.gym.trainer import TrainerConfig
 
 
 def test_world_model_settings_defaults_are_disabled():
-    config = TrainerConfig(base_model="Qwen/Qwen2.5-Coder-1.5B-Instruct")
+    config = TrainerConfig(base_model="tiny-local-model")
 
     assert config.echo_enabled is False
     assert config.echo_aux_lambda == ECHO_DEFAULT_LAMBDA
@@ -35,7 +35,7 @@ def test_world_model_settings_defaults_are_disabled():
 
 def test_world_model_settings_reflects_overrides():
     config = TrainerConfig(
-        base_model="Qwen/Qwen2.5-Coder-1.5B-Instruct",
+        base_model="tiny-local-model",
         echo_enabled=True,
         echo_aux_lambda=0.1,
         rwml_enabled=True,

@@ -244,7 +244,7 @@ class OllamaSettings:
 
 @dataclass
 class SSHSettings:
-    """Remote SSH training settings (DGX Spark)."""
+    """Private compute target training settings."""
 
     enabled: bool = field(default_factory=lambda: get_env_bool("SSH_REMOTE_ENABLED", False))
     host: str = field(default_factory=lambda: get_env("SSH_REMOTE_HOST", ""))
@@ -616,7 +616,17 @@ class Settings:
     host: str = field(default_factory=lambda: get_env("HOST", "127.0.0.1"))
     cors_origins: list[str] = field(
         default_factory=lambda: get_env_list(
-            "CORS_ORIGINS", ["http://localhost:5173", "http://localhost:8003"]
+            "CORS_ORIGINS",
+            [
+                "http://localhost:5173",
+                "http://127.0.0.1:5173",
+                "http://localhost:5174",
+                "http://127.0.0.1:5174",
+                "http://localhost:5190",
+                "http://127.0.0.1:5190",
+                "http://localhost:8003",
+                "http://127.0.0.1:8003",
+            ],
         )
     )
 
@@ -730,7 +740,7 @@ HF_DEFAULT_HARDWARE=t4-small
 HF_JOB_TIMEOUT_MINUTES=60
 
 # =============================================
-# Ollama Local Inference (DGX Spark)
+# Ollama Local/Private Inference
 # =============================================
 OLLAMA_ENABLED=true
 OLLAMA_BASE_URL=http://localhost:11434
@@ -741,7 +751,7 @@ OLLAMA_TIMEOUT=120
 OLLAMA_PREFER_CODE=true
 
 # =============================================
-# Remote Training via SSH (DGX Spark)
+# Private Compute Training
 # =============================================
 SSH_REMOTE_ENABLED=false
 SSH_REMOTE_HOST=

@@ -2,8 +2,7 @@ import { useEffect, lazy, Suspense } from 'react'
 import { MainLayout } from './components/layout/MainLayout'
 import { SettingsModal } from './components/common'
 import { OnboardingModal } from './components/onboarding/OnboardingModal'
-import { useThemeStore, useAccentStore, useUIStore, useAuthStore } from './stores'
-import { useTutorialStore } from './stores/tutorialStore'
+import { useThemeStore, useAccentStore, useAuthStore } from './stores'
 import { useGlobalHotkeys } from './hooks'
 import { wsService } from './services'
 import { isWeb } from './utils/platform'
@@ -20,8 +19,6 @@ const requireWebAuth = isWeb && !import.meta.env.DEV
 function App() {
   const { theme } = useThemeStore()
   const { accentHue } = useAccentStore()
-  const { setOnboardingOpen } = useUIStore()
-  const { hasSeenIntro } = useTutorialStore()
   const { isAuthenticated, isLoading, checkAuth } = useAuthStore()
 
   // Apply theme on mount
@@ -58,13 +55,6 @@ function App() {
       wsService.disconnect()
     }
   }, [isAuthenticated])
-
-  // Show onboarding on first visit
-  useEffect(() => {
-    if (!hasSeenIntro) {
-      setOnboardingOpen(true)
-    }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Global keyboard shortcuts
   useGlobalHotkeys()

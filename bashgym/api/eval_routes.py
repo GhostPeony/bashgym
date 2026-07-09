@@ -118,6 +118,13 @@ class HeldoutEnvironmentEvidence(BaseModel):
             "evidence only until correlated with held-out pass@k."
         ),
     )
+    learned_reward_evidence: dict[str, Any] | None = Field(
+        None,
+        description=(
+            "Optional reward_eval.json or reward-model fixture report. Diagnostic "
+            "release evidence until claim-tier thresholds are chosen."
+        ),
+    )
     external_benchmark_min_scores: dict[str, float] | None = Field(
         None,
         description="Optional minimum score thresholds by external benchmark name",

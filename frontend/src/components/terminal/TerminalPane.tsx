@@ -5,17 +5,12 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Square, X, MoreHorizontal, Copy, ClipboardPaste, Loader2, MessageSquare, Wrench, Coffee } from 'lucide-react'
 import { useTerminalStore, useThemeStore, useAccentStore, getTerminalFgColor } from '../../stores'
+import type { AgentKind } from '../../stores/terminalStore'
 import { FileDropZone } from './FileDropZone'
 import { clsx } from 'clsx'
+import { stripAnsi } from '../../utils/ansi'
+import { maybeAutoSnapshot } from '../../utils/monitorRouting'
 import '@xterm/xterm/css/xterm.css'
-
-// Strip ANSI escape sequences from raw PTY data so regex patterns can match cleanly
-// eslint-disable-next-line no-control-regex
-const ANSI_RE = /[\x1b\x9b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><~]/g
-
-function stripAnsi(text: string): string {
-  return text.replace(ANSI_RE, '')
-}
 
 interface TerminalPaneProps {
   id: string
@@ -321,16 +316,20 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
       terminal.writeln(`${green}  ██████╔╝██║  ██║███████║██║  ██║    ╚██████╔╝   ██║   ██║ ╚═╝ ██║${reset}`)
       terminal.writeln(`${green}  ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝     ╚═════╝    ╚═╝   ╚═╝     ╚═╝${reset}`)
       terminal.writeln('')
-      terminal.writeln(`${dim}                    Self-Improving Agentic Development Gym${reset}`)
+      terminal.writeln(`${dim}                         Self-Improving Training Workspace${reset}`)
       terminal.writeln('')
       terminal.writeln(`${line}  ═══════════════════════════════════════════════════════════════════════════${reset}`)
       terminal.writeln('')
 
       // Force resize sync after banner to update PTY cursor position
       setTimeout(() => {
-        fitAddon.fit()
-        const { cols, rows } = terminal
-        window.bashgym?.terminal.resize(id, cols, rows)
+        try {
+          fitAddon.fit()
+          const { cols, rows } = terminal
+          window.bashgym?.terminal.resize(id, cols, rows)
+        } catch {
+          // Terminal disposed before the banner fit fired
+        }
       }, 50)
     }
 
@@ -360,14 +359,56 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
       window.bashgym?.terminal.resize(id, cols, rows)
     })
 
+    // Track if banner has been shown (only for first terminal)
+    let bannerShown = false
+    const shouldShowBanner = session?.showBanner ?? false
+
+    // Live output listener — registered only AFTER create/attach resolves so
+    // the replayed scrollback (snapshotted at create time in main) is written
+    // before any live chunks. Registering earlier double-writes bytes that
+    // arrive between subscription and the snapshot.
+    let removeDataListener: (() => void) | undefined
+    const ensureDataListener = () => {
+      if (removeDataListener) return
+      removeDataListener = window.bashgym?.terminal.onData(id, (data) => {
+        // Show banner after first output (shell is ready) - only for first terminal
+        if (shouldShowBanner && !bannerShown) {
+          bannerShown = true
+          // Small delay to let shell fully initialize
+          setTimeout(() => {
+            writeBanner()
+          }, 100)
+        }
+
+        terminal.write(data)
+
+        // Parse output for session state detection
+        parseTerminalOutput(data)
+      })
+    }
+
     // Create or re-attach the PTY process (main process keeps PTYs alive across remounts)
     const startPty = () => {
-      window.bashgym?.terminal.create(id).then((result) => {
+      const requestedCwd = useTerminalStore.getState().sessions.get(id)?.cwd
+      window.bashgym?.terminal.create(id, requestedCwd !== '~' ? requestedCwd : undefined).then((result) => {
         if (!result.success) {
           terminal.writeln(`\x1b[31mFailed to create terminal: ${result.error}\x1b[0m`)
           return
         }
         setExitedCode(null)
+        if (result.cwd) {
+          updateSession(id, { cwd: result.cwd })
+        }
+        // Auto-type the launch command into a fresh PTY (not on re-attach)
+        if (!result.attached) {
+          const pending = useTerminalStore.getState().sessions.get(id)?.launchCommand
+          if (pending) {
+            updateSession(id, { launchCommand: undefined })
+            setTimeout(() => {
+              window.bashgym?.terminal.write(id, pending + '\r')
+            }, 500)
+          }
+        }
         // Re-attached to a live PTY: replay retained scrollback
         if (result.attached && result.buffer) {
           terminal.write(result.buffer)
@@ -381,32 +422,12 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
             }
           }, 50)
         }
+        ensureDataListener()
       })
     }
 
     startPty()
     startPtyRef.current = startPty
-
-    // Track if banner has been shown (only for first terminal)
-    let bannerShown = false
-    const shouldShowBanner = session?.showBanner ?? false
-
-    // Listen for output
-    const removeDataListener = window.bashgym?.terminal.onData(id, (data) => {
-      // Show banner after first output (shell is ready) - only for first terminal
-      if (shouldShowBanner && !bannerShown) {
-        bannerShown = true
-        // Small delay to let shell fully initialize
-        setTimeout(() => {
-          writeBanner()
-        }, 100)
-      }
-
-      terminal.write(data)
-
-      // Parse output for session state detection
-      parseTerminalOutput(data)
-    })
 
     // Listen for exit — surface a restart overlay instead of leaving a dead pane
     const removeExitListener = window.bashgym?.terminal.onExit(id, (exitCode) => {
@@ -536,7 +557,13 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
             // Terminal became visible, refit after a short delay
             setTimeout(() => {
               fitWithScrollPreservation()
-              if (isActive) {
+              // Don't yank focus away from an input the user just clicked into
+              const active = document.activeElement as HTMLElement | null
+              const typingElsewhere =
+                active && active !== document.body &&
+                !active.closest('.xterm') &&
+                (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)
+              if (isActive && !typingElsewhere) {
                 terminalRef.current?.focus()
               }
             }, 50)
@@ -554,6 +581,13 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
   // Buffers chunks and strips ANSI codes before matching patterns
   const parseTerminalOutput = (data: string) => {
     outputBufferRef.current += data
+
+    // Sustained streams never hit the 80ms lull — cap the accumulator so a
+    // flood doesn't grow it unbounded and stall the flush. Only the tail
+    // matters for prompt/spinner/status detection.
+    if (outputBufferRef.current.length > 32_768) {
+      outputBufferRef.current = outputBufferRef.current.slice(-8_192)
+    }
 
     // Debounce: flush after 80ms of no new data (handles split PTY chunks)
     if (flushTimerRef.current) clearTimeout(flushTimerRef.current)
@@ -573,6 +607,14 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
         outputUpdate = { lastOutput: [...prev, ...lines].slice(-6) }
       }
 
+      // Detect which agent CLI is driving this terminal from its banner output
+      let agentUpdate: Partial<{ agentKind: AgentKind }> = {}
+      if (/Claude Code|✻ Welcome/i.test(clean)) {
+        agentUpdate = { agentKind: 'claude' }
+      } else if (/OpenAI Codex/i.test(clean)) {
+        agentUpdate = { agentKind: 'codex' }
+      }
+
       // --- Pattern matching in priority order ---
       // Single updateSession call per flush to avoid double state updates
 
@@ -581,6 +623,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
       if (toolMatch) {
         updateSession(id, {
           ...outputUpdate,
+          ...agentUpdate,
           status: 'tool_calling',
           attention: 'none',
           currentTool: toolMatch[1],
@@ -594,6 +637,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
       if (/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s*(Thinking|Planning)/i.test(clean)) {
         updateSession(id, {
           ...outputUpdate,
+          ...agentUpdate,
           status: 'running',
           attention: 'none',
           lastActivity: Date.now()
@@ -606,6 +650,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
       if (/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/.test(clean)) {
         updateSession(id, {
           ...outputUpdate,
+          ...agentUpdate,
           status: 'running',
           attention: 'none',
           lastActivity: Date.now()
@@ -618,6 +663,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
       if (/[✓✗✔✘]/.test(clean)) {
         updateSession(id, {
           ...outputUpdate,
+          ...agentUpdate,
           status: 'running',
           attention: 'none',
           currentTool: undefined,
@@ -631,8 +677,10 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
       //    - ">" on its own line (Claude's input prompt)
       //    - Box drawing chars from Claude's UI (╭, ╰)
       if (/^\s*>\s*$/m.test(clean) || /[╭╰]/.test(clean)) {
+        const prevStatus = useTerminalStore.getState().sessions.get(id)?.status
         updateSession(id, {
           ...outputUpdate,
+          ...agentUpdate,
           status: 'waiting_input',
           attention: 'waiting',
           currentTool: undefined,
@@ -640,21 +688,25 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
         })
         // Clear idle timer - we've reached a definitive state
         if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
+        if (prevStatus === 'running' || prevStatus === 'tool_calling') maybeAutoSnapshot(id)
         return
       }
 
       // 6. Shell prompt → idle (back to shell), extract cwd from PS prompt
       const psPromptMatch = clean.match(/PS\s+([A-Z]:\\[^>]*?)>\s*$/m)
       if (psPromptMatch || /[$#%]\s*$/m.test(clean)) {
+        const prevStatus = useTerminalStore.getState().sessions.get(id)?.status
         updateSession(id, {
           ...outputUpdate,
           status: 'idle',
           attention: 'none',
           currentTool: undefined,
+          agentKind: undefined,
           lastActivity: Date.now(),
           ...(psPromptMatch?.[1] && { cwd: psPromptMatch[1].trim() })
         })
         if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
+        if (prevStatus === 'running' || prevStatus === 'tool_calling') maybeAutoSnapshot(id)
         return
       }
 
@@ -664,6 +716,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
       if (clean.trim().length > 0 && currentSession?.status === 'idle') {
         updateSession(id, {
           ...outputUpdate,
+          ...agentUpdate,
           status: 'running',
           attention: 'none',
           lastActivity: Date.now()
@@ -690,6 +743,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
           currentTool: undefined,
           lastActivity: Date.now()
         })
+        maybeAutoSnapshot(id)
       }
     }, 8000)
   }

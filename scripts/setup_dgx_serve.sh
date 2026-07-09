@@ -13,7 +13,7 @@
 # Preflight first (read-only, installs nothing):
 #                    bash ~/bashgym/scripts/setup_dgx_serve.sh --check
 # Run ON the GX10:   bash ~/bashgym/scripts/setup_dgx_serve.sh
-# or from desktop:   ssh ponyo@192.168.50.173 'cd ~/bashgym && git pull --ff-only && bash scripts/setup_dgx_serve.sh'
+# or from desktop:   ssh "$SSH_REMOTE_USER@$SSH_REMOTE_HOST" 'cd ~/bashgym && git pull --ff-only && bash scripts/setup_dgx_serve.sh'
 set -euo pipefail
 
 VENV="${BASHGYM_SERVE_VENV:-$HOME/bashgym-serve}"

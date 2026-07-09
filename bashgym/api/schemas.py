@@ -40,6 +40,7 @@ class TrainingStrategy(str, Enum):
     GRPO = "grpo"
     RLVR = "rlvr"
     DISTILLATION = "distillation"
+    SESSION_DISTILLATION = "session_distillation"
 
 
 class ExportFormat(str, Enum):
@@ -303,6 +304,36 @@ class TrainingRequest(BaseModel):
         ge=0.0,
         le=1.0,
     )
+    session_distillation_alpha: float = Field(
+        0.7,
+        description="Session Distillation: weight for hinted-context KL vs hard-label CE",
+        ge=0.0,
+        le=1.0,
+    )
+    session_distillation_temperature: float = Field(
+        1.0,
+        description="Session Distillation: KL temperature for hinted-context soft labels",
+        gt=0.0,
+        le=10.0,
+    )
+    session_distillation_min_confidence: float = Field(
+        0.6,
+        description="Session Distillation: minimum reader confidence for accepted records",
+        ge=0.0,
+        le=1.0,
+    )
+    session_distillation_mask_policy: str = Field(
+        "target_span_only",
+        description="Session Distillation: loss mask policy; target_span_only is currently supported",
+    )
+    session_distillation_context_mode: str = Field(
+        "hint_injected",
+        description="Session Distillation: context construction mode",
+    )
+    session_distillation_reader: str = Field(
+        "heuristic",
+        description="Session Distillation: reader used to create hints, e.g. heuristic or model",
+    )
     # Export settings
     auto_export_gguf: bool = Field(True, description="Export to GGUF after training")
     gguf_quantization: str = Field("q4_k_m", description="GGUF quantization level")
@@ -313,9 +344,21 @@ class TrainingRequest(BaseModel):
     hf_private: bool = Field(True, description="Make HF repo private")
     # Backend selection
     use_nemo_gym: bool = Field(False, description="Use NVIDIA NeMo cloud training instead of local")
-    use_remote_ssh: bool = Field(False, description="Execute training on remote DGX Spark via SSH")
+    use_remote_ssh: bool = Field(False, description="Execute training on a private compute target")
     device_id: str | None = Field(
-        None, description="Target device ID for remote SSH training (uses default if omitted)"
+        None, description="Target device ID for private compute training (uses default if omitted)"
+    )
+    compute_target: str | None = Field(
+        None,
+        description="Generic execution target label for canvas provenance: local, ssh:<device_id>, or cloud",
+    )
+    origin: dict[str, Any] | None = Field(
+        None,
+        description="Optional workspace origin metadata, e.g. terminal/panel/agent ids",
+    )
+    correlation_id: str | None = Field(
+        None,
+        description="Optional workspace intent correlation id that links prep and run events",
     )
     selected_repos: list[str] | None = Field(
         None, description="Repos to include (None or empty = all repos)"
@@ -356,8 +399,13 @@ class TrainingResponse(BaseModel):
     error: str | None = None  # Error message if training failed
     started_at: str | None = None
     completed_at: str | None = None
-    metrics: dict[str, float] | None = None
+    # Values arrive from parsed trainer logs and may be strings (e.g. TRL
+    # stats dicts serialize numbers as strings) — do not reject the response.
+    metrics: dict[str, Any] | None = None
     output_path: str | None = None
+    origin: dict[str, Any] | None = None
+    correlation_id: str | None = None
+    compute_target: str | None = None
 
 
 # =============================================================================
@@ -714,7 +762,7 @@ class ModelRecommendations(BaseModel):
         "(inference/qlora/lora/full_finetune)",
     )
     unified_memory: bool = Field(
-        False, description="Whether the budget is unified memory (RAM-backed, e.g. DGX Spark)"
+        False, description="Whether the budget is unified memory or RAM-backed"
     )
 
 
@@ -1294,4 +1342,42 @@ class EnvironmentRecipeProposalRequest(BaseModel):
     output_path: str | None = Field(
         None,
         description="Optional local path where the reproducible proposal JSON is written",
+    )
+
+
+class DataRecipeProposalRequest(BaseModel):
+    """Request to propose a public-source data recipe through AutoResearch."""
+
+    goal: str = Field("sft", description="Target use: sft, dpo, reward_model, etc.")
+    source_ids: list[str] = Field(
+        default_factory=list,
+        description="Optional curated source ids. Empty means use safe catalog candidates.",
+    )
+    domain: str | None = Field(None, description="Optional source domain filter")
+    include_eval_only: bool = Field(
+        False,
+        description="Include eval-only sources in candidate recipes",
+    )
+    max_experiments: int = Field(8, ge=1, le=200, description="Recipe mutations to evaluate")
+    sample_size: int = Field(1000, ge=1, le=1_000_000)
+    quality_threshold: float = Field(0.7, ge=0.0, le=1.0)
+    synthetic_multiplier: float = Field(1.0, ge=0.0, le=10.0)
+    decontam_jaccard_threshold: float = Field(0.7, ge=0.0, le=1.0)
+    cost_budget_usd: float = Field(25.0, ge=0.0, le=10000.0)
+    eval_target: str = Field("heldout_pass@k")
+    mutation_rate: float = Field(0.35, ge=0.0, le=1.0)
+    mutation_scale: float = Field(0.2, ge=0.0, le=1.0)
+    seed: int = Field(0, ge=0)
+    output_path: str | None = Field(
+        None,
+        description="Optional local path where the proposal JSON is written",
+    )
+
+
+class DataRecipeExportRequest(BaseModel):
+    """Request to export the latest data-recipe AutoResearch proposal."""
+
+    output_path: str = Field(
+        ...,
+        description="Local path where the latest data-recipe proposal JSON is written",
     )

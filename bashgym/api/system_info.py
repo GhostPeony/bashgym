@@ -546,10 +546,10 @@ class SystemInfoService:
     ) -> dict[str, Any]:
         """Get model recommendations based on available VRAM.
 
-        ``vram_gb`` overrides the detected local VRAM — pass a remote SSH device's
-        discovered ``effective_vram_gb`` (e.g. a unified-memory DGX Spark) to get
-        recommendations for that machine instead of the local one. ``unified_memory``
-        is surfaced so the UI can explain a RAM-backed budget.
+        ``vram_gb`` overrides the detected local VRAM — pass a private compute
+        target's discovered ``effective_vram_gb`` to get recommendations for that
+        machine instead of the local one. ``unified_memory`` is surfaced so the UI
+        can explain a RAM-backed budget.
         """
         from bashgym.models.hardware_estimator import recommend_for_budget
 

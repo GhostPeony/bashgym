@@ -284,6 +284,45 @@ def test_heldout_world_model_quality_evidence_records_diagnostic(tmp_path, monke
     assert fake_reg.recorded == [("candidate-sft", report)]
 
 
+def test_heldout_learned_reward_evidence_records_diagnostic(tmp_path, monkeypatch):
+    fake_reg = _FakeRegistry()
+    monkeypatch.setattr("bashgym.models.get_registry", lambda *a, **k: fake_reg)
+    monkeypatch.setattr(eval_routes.service, "run_heldout", lambda *a, **k: _FakeReport(ship=True))
+
+    r = client.post(
+        "/api/eval/heldout",
+        json=_body(
+            tmp_path,
+            environment_evidence={
+                "learned_reward_evidence": {
+                    "schema_version": "bashgym.reward_model_eval.v1",
+                    "ok": True,
+                    "metrics": {
+                        "heldout_pair_accuracy": 0.81,
+                        "calibration_error": 0.07,
+                        "reward_variance": 0.04,
+                        "eval_only_leakage_count": 0,
+                    },
+                    "findings": [],
+                }
+            },
+        ),
+    )
+
+    assert r.status_code == 200
+    report = client.get(f"/api/eval/heldout/{r.json()['job_id']}").json()["report"]
+    reward = report["release_gate"]["learned_reward_evidence"]
+    assert report["ship"] is True
+    assert report["release_gate"]["learned_reward_evidence_present"] is True
+    assert report["release_gate"]["learned_reward_evidence_sections"] == [
+        "learned_reward_evidence"
+    ]
+    assert reward["signal"] == "healthy"
+    assert reward["metrics"]["heldout_pair_accuracy"] == pytest.approx(0.81)
+    assert report["environment_evidence"]["learned_reward_evidence"]["ok"] is True
+    assert fake_reg.recorded == [("candidate-sft", report)]
+
+
 def test_heldout_job_failure_is_captured(tmp_path, monkeypatch):
     monkeypatch.setattr("bashgym.models.get_registry", lambda *a, **k: _FakeRegistry())
 
@@ -404,6 +443,30 @@ def test_ingest_external_benchmarks_records(monkeypatch):
     assert fake_reg.benchmarks == [
         ("candidate-sft", "harbor_terminal_bench", pytest.approx(2 / 3))
     ]
+
+
+def test_ingest_external_rewardbench_records(monkeypatch):
+    fake_reg = _FakeRegistry()
+    monkeypatch.setattr("bashgym.models.get_registry", lambda *a, **k: fake_reg)
+    r = client.post(
+        "/api/eval/benchmarks/external-ingest",
+        json={
+            "model_id": "candidate-rm",
+            "benchmark_name": "rewardbench",
+            "results": {
+                "subsets": {
+                    "Chat": {"accuracy": 0.75, "num_correct": 3, "total": 4},
+                    "Safety": {"accuracy": 0.5, "num_correct": 1, "total": 2},
+                }
+            },
+        },
+    )
+
+    assert r.status_code == 200
+    data = r.json()
+    assert data["report"]["scores"]["rewardbench"] == pytest.approx(0.625)
+    assert data["recorded"] == ["rewardbench"]
+    assert fake_reg.benchmarks == [("candidate-rm", "rewardbench", pytest.approx(0.625))]
 
 
 # ── environment pass@k ───────────────────────────────────────────────────────

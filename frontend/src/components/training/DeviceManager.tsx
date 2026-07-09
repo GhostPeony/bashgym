@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useDeviceStore } from '../../stores/deviceStore'
 import type { SSHCandidate, PreflightResult } from '../../services/api'
 import { Server, Plus, Search, Trash2, Star, RefreshCw, CheckCircle, XCircle } from 'lucide-react'
+import { MaskedHost } from '../common'
 import { clsx } from 'clsx'
 
 export function DeviceManager() {
@@ -128,7 +129,7 @@ export function DeviceManager() {
                         )}
                       </div>
                       <p className="font-mono text-xs text-text-muted mt-0.5">
-                        {device.username}@{device.host}:{device.port}
+                        <MaskedHost username={device.username} host={device.host} port={device.port} />
                       </p>
                       <p className="font-mono text-xs text-text-secondary mt-0.5">
                         {formatGpuSummary(device)}
@@ -272,7 +273,7 @@ export function DeviceManager() {
                 value={formName}
                 onChange={(e) => setFormName(e.target.value)}
                 className="input w-full"
-                placeholder="DGX Spark"
+                placeholder="Private GPU"
                 required
               />
             </div>

@@ -29,19 +29,19 @@ function MetricCard({ icon, label, value, subvalue, trend, color, isWaiting }: M
 
   return (
     <div className={clsx(
-      'card p-4 flex items-center gap-4',
+      'card p-2.5 flex items-center gap-2.5',
       isWaiting && 'opacity-50'
     )}>
       <div className={clsx(
-        'w-12 h-12 border-brutal border-border rounded-brutal flex items-center justify-center bg-background-secondary',
+        'w-8 h-8 border-brutal border-border rounded-brutal flex items-center justify-center bg-background-secondary flex-shrink-0',
         iconColorClasses[color]
       )}>
         {icon}
       </div>
-      <div className="flex-1">
-        <p className="font-mono text-xs uppercase tracking-widest text-text-secondary">{label}</p>
-        <div className="flex items-baseline gap-2">
-          <p className="font-brand text-3xl text-text-primary">{value}</p>
+      <div className="flex-1 min-w-0">
+        <p className="font-mono text-[10px] uppercase tracking-widest text-text-secondary">{label}</p>
+        <div className="flex items-baseline gap-1.5">
+          <p className="font-brand text-lg leading-tight text-text-primary">{value}</p>
           {subvalue && <span className="font-mono text-xs text-text-muted">{subvalue}</span>}
           {trend && !isWaiting && (
             <span
@@ -81,9 +81,9 @@ export function MetricsGrid({ loss, learningRate, gradNorm, eta, isWaiting }: Me
   const formatEta = (e?: string) => e ?? '—'
 
   return (
-    <div className="grid grid-cols-4 gap-4">
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
       <MetricCard
-        icon={<TrendingDown className="w-6 h-6" />}
+        icon={<TrendingDown className="w-4 h-4" />}
         label="Loss"
         value={formatLoss(loss)}
         trend={loss !== undefined ? 'down' : undefined}
@@ -91,14 +91,14 @@ export function MetricsGrid({ loss, learningRate, gradNorm, eta, isWaiting }: Me
         isWaiting={isWaiting}
       />
       <MetricCard
-        icon={<Gauge className="w-6 h-6" />}
+        icon={<Gauge className="w-4 h-4" />}
         label="Learning Rate"
         value={formatLR(learningRate)}
         color="blue"
         isWaiting={isWaiting}
       />
       <MetricCard
-        icon={<Activity className="w-6 h-6" />}
+        icon={<Activity className="w-4 h-4" />}
         label="Gradient Norm"
         value={formatGradNorm(gradNorm)}
         trend={gradNorm !== undefined ? 'neutral' : undefined}
@@ -106,7 +106,7 @@ export function MetricsGrid({ loss, learningRate, gradNorm, eta, isWaiting }: Me
         isWaiting={isWaiting}
       />
       <MetricCard
-        icon={<Clock className="w-6 h-6" />}
+        icon={<Clock className="w-4 h-4" />}
         label="ETA"
         value={formatEta(eta)}
         color="purple"

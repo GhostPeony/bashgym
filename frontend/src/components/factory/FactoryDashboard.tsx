@@ -26,6 +26,7 @@ import { SyntheticGenerator, SyntheticGeneratorState } from './SyntheticGenerato
 import { SeedsPanel } from './SeedsPanel'
 import { SettingsPanel } from './SettingsPanel'
 import { DataDesignerTab } from './DataDesignerTab'
+import { SourceLibraryPanel } from './SourceLibraryPanel'
 import { DecisionDpoPanel } from './DecisionDpoPanel'
 import { EnvironmentLab } from './EnvironmentLab'
 import { GitBranch } from 'lucide-react'
@@ -359,6 +360,7 @@ export function FactoryDashboard() {
         <div className="flex gap-1 mt-6 overflow-x-auto">
           {[
             { id: 'create' as TabId, label: 'Create', icon: Wand2 },
+            { id: 'sources' as TabId, label: 'Sources', icon: Database },
             { id: 'designer' as TabId, label: 'Data Designer', icon: Sparkles },
             { id: 'environments' as TabId, label: 'Environments', icon: Boxes },
             { id: 'quality' as TabId, label: 'Quality', icon: GitBranch },
@@ -563,7 +565,7 @@ export function FactoryDashboard() {
                     <div className="flex items-center gap-3">
                       <button
                         onClick={() => setExpandedColumn(expandedColumn === column.id ? null : column.id)}
-                        className="p-1 border-brutal border-border rounded-brutal bg-background-secondary hover:bg-accent-light hover:shadow-brutal-sm transition-all"
+                        className="p-1 border-brutal border-border rounded-brutal bg-background-secondary hover:bg-accent-light hover:border-accent transition-colors"
                       >
                         {expandedColumn === column.id ? (
                           <ChevronDown className="w-4 h-4 text-text-muted" />
@@ -893,6 +895,9 @@ export function FactoryDashboard() {
 
         {/* Data Designer Tab */}
         {activeTab === 'designer' && <DataDesignerTab />}
+
+        {/* Sources Tab - source cards, provenance, and artifact preparation */}
+        {activeTab === 'sources' && <SourceLibraryPanel />}
 
         {/* Quality Tab - decision-DPO mining + trace-quality toggles */}
         {activeTab === 'quality' && <DecisionDpoPanel />}

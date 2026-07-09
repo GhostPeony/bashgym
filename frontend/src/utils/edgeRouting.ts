@@ -25,13 +25,14 @@ export interface RouteResult {
 export async function routeToLinkedTerminals(
   sourcePanelId: string,
   content: string,
-  fileExtension = 'md'
+  fileExtension = 'md',
+  basename = 'bashgym_context'
 ): Promise<RouteResult> {
   // Encode text content as a base64 data URL so writeTempFile can handle it
   const base64 = btoa(unescape(encodeURIComponent(content)))
   const dataUrl = `data:text/plain;base64,${base64}`
 
-  return routeBinaryToLinkedTerminals(sourcePanelId, dataUrl, fileExtension)
+  return routeBinaryToLinkedTerminals(sourcePanelId, dataUrl, fileExtension, basename)
 }
 
 /**
@@ -44,9 +45,10 @@ export async function routeToLinkedTerminals(
 export async function routeBinaryToLinkedTerminals(
   sourcePanelId: string,
   dataUrl: string,
-  fileExtension = 'png'
+  fileExtension = 'png',
+  basename = 'bashgym_screenshot'
 ): Promise<RouteResult> {
-  const result = await window.bashgym?.files.writeTempFile(dataUrl, fileExtension)
+  const result = await window.bashgym?.files.writeTempFile(dataUrl, fileExtension, basename)
   if (!result?.success || !result.path) {
     return { routed: 0, error: result?.error ?? 'Failed to write temp file' }
   }

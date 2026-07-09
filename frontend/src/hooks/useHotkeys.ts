@@ -15,8 +15,18 @@ interface HotkeyConfig {
 export function useHotkeys(hotkeys: HotkeyConfig[]) {
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {
-      // Let native clipboard/text shortcuts through when focused on an input
       const target = event.target as HTMLElement
+      const active = document.activeElement as HTMLElement | null
+
+      // Never intercept keys destined for a terminal: Ctrl+D/W/B/K/N and
+      // friends are core shell/readline/tmux keys, and the app must not eat
+      // them (Ctrl+W closing the pane mid-word-delete, Ctrl+D toggling theme
+      // instead of sending EOF). xterm handles its own clipboard combos.
+      if (target.closest?.('.xterm') || active?.closest?.('.xterm')) {
+        return
+      }
+
+      // Let native clipboard/text shortcuts through when focused on an input
       const isEditable = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable
       if (isEditable && (event.ctrlKey || event.metaKey)) {
         const key = event.key.toLowerCase()

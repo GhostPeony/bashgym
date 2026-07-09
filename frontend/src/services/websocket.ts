@@ -27,6 +27,7 @@ import { useOrchestratorStore } from '../stores/orchestratorStore'
 import { useAutoResearchStore } from '../stores/autoresearchStore'
 import { useActivityStore } from '../stores/activityStore'
 import { useCascadeStore } from '../stores/cascadeStore'
+import { useCanvasOrchestratorStore } from '../stores/canvasOrchestratorStore'
 
 type MessageHandler = (data: any) => void
 
@@ -39,6 +40,7 @@ interface WebSocketMessage {
 // Message types matching backend MessageType enum
 export const MessageTypes = {
   // Training events
+  TRAINING_QUEUED: 'training:queued',
   TRAINING_PROGRESS: 'training:progress',
   TRAINING_COMPLETE: 'training:complete',
   TRAINING_FAILED: 'training:failed',
@@ -62,6 +64,9 @@ export const MessageTypes = {
   // System events
   SYSTEM_STATUS: 'system:status',
   ERROR: 'error',
+  // Workspace canvas events
+  WORKSPACE_CANVAS_INTENT: 'workspace:canvas:intent',
+  WORKSPACE_CONTEXT_UPDATED: 'workspace:context:updated',
   // Connection events
   CONNECTED: 'connected',
   SUBSCRIBED: 'subscribed',
@@ -196,7 +201,12 @@ class WebSocketService {
     // Handle built-in message types
     switch (type) {
       // Training events
+      case MessageTypes.TRAINING_QUEUED:
+        useCanvasOrchestratorStore.getState().handleTrainingQueued(payload as any)
+        break
+
       case MessageTypes.TRAINING_PROGRESS: {
+        useCanvasOrchestratorStore.getState().handleTrainingProgress(payload as any)
         const metrics = {
           loss: payload.loss,
           learningRate: payload.learning_rate,
@@ -206,12 +216,27 @@ class WebSocketService {
           totalSteps: payload.total_steps || 0,
           eta: payload.eta,
           simulation: payload.simulation || false,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          // Richer metrics forwarded from the backend (present only when emitted).
+          evalLoss: payload.eval_loss,
+          samplesProcessed: payload.samples_processed,
+          tokensPerSecond: payload.tokens_per_second,
+          gpuMemoryGb: payload.gpu_memory_gb,
+          gpuUtilization: payload.gpu_utilization,
+          computeTarget: payload.compute_target,
+          sessionDistillationLoss: payload.session_distillation_loss,
+          sessionDistillationKl: payload.session_distillation_kl,
+          sessionDistillationCe: payload.session_distillation_ce,
+          sessionDistillationMaskedTokens: payload.session_distillation_masked_tokens
         }
         const store = useTrainingStore.getState()
         if (!store.currentRun && payload.run_id) {
           // Reconnected to an orphaned training run — hydrate the store
           console.log('WebSocket: Reconnected to training run', payload.run_id)
+          store.hydrateFromReconnect(payload.run_id, metrics)
+        } else if (store.currentRun && payload.run_id && payload.run_id !== store.currentRun.id) {
+          // A different run started streaming — switch to it (resets loss history)
+          console.log('WebSocket: New training run detected', payload.run_id)
           store.hydrateFromReconnect(payload.run_id, metrics)
         } else {
           store.updateMetrics(metrics)
@@ -220,10 +245,16 @@ class WebSocketService {
       }
 
       case MessageTypes.TRAINING_COMPLETE:
+        if (payload.run_id) {
+          useCanvasOrchestratorStore.getState().handleTrainingTerminalStatus(payload.run_id, 'completed')
+        }
         useTrainingStore.getState().setStatus('completed')
         break
 
       case MessageTypes.TRAINING_FAILED:
+        if (payload.run_id) {
+          useCanvasOrchestratorStore.getState().handleTrainingTerminalStatus(payload.run_id, 'failed')
+        }
         useTrainingStore.getState().setStatus('failed')
         break
 
@@ -234,6 +265,26 @@ class WebSocketService {
           level: payload.level || 'info'
         })
         break
+
+      // Cloud (HuggingFace/managed) job metrics — map the provider's fields into
+      // the same live metrics stream as local runs so the loss curve populates.
+      case MessageTypes.HF_JOB_METRICS: {
+        const m = payload.metrics || {}
+        const store = useTrainingStore.getState()
+        if (store.currentRun && m.loss !== undefined) {
+          store.updateMetrics({
+            loss: m.loss,
+            learningRate: m.learning_rate ?? 0,
+            gradNorm: m.grad_norm ?? 0,
+            epoch: m.epoch ?? 0,
+            step: m.step ?? 0,
+            totalSteps: m.total_steps ?? 0,
+            evalLoss: m.eval_loss,
+            timestamp: Date.now()
+          })
+        }
+        break
+      }
 
       // Task events
       case MessageTypes.TASK_STATUS:
@@ -408,6 +459,14 @@ class WebSocketService {
 
       case MessageTypes.PONG:
         // Heartbeat response, connection is alive
+        break
+
+      case MessageTypes.WORKSPACE_CANVAS_INTENT:
+        useCanvasOrchestratorStore.getState().handleWorkspaceIntent(payload as any)
+        break
+
+      case MessageTypes.WORKSPACE_CONTEXT_UPDATED:
+        // Lightweight notification only; Activity feed already records it.
         break
     }
 

@@ -3,8 +3,21 @@
  * Handles communication with the Python backend
  */
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8002/api'
-const BACKEND_START_COMMAND = 'bashgym serve --host 127.0.0.1 --port 8002'
+export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8002/api'
+
+function backendStartCommand(apiBase: string): string {
+  try {
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost'
+    const url = new URL(apiBase, origin)
+    const host = url.hostname === 'localhost' ? '127.0.0.1' : url.hostname
+    const port = url.port || (url.protocol === 'https:' ? '443' : '80')
+    return `bashgym serve --host ${host} --port ${port}`
+  } catch {
+    return 'bashgym serve --host 127.0.0.1 --port 8002'
+  }
+}
+
+const BACKEND_START_COMMAND = backendStartCommand(API_BASE)
 
 function normalizeApiError(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error || 'Unknown API error')
@@ -48,7 +61,7 @@ export interface TaskResponse {
 }
 
 export interface TrainingRequest {
-  strategy?: 'sft' | 'dpo' | 'grpo' | 'distillation' | 'cascade'
+  strategy?: 'sft' | 'dpo' | 'grpo' | 'distillation' | 'session_distillation' | 'cascade'
   dataset_path?: string
   base_model?: string
   model_type?: string
@@ -102,6 +115,13 @@ export interface TrainingRequest {
   teacher_model?: string
   teacher_temperature?: number
   distillation_alpha?: number
+  // Session Distillation
+  session_distillation_alpha?: number
+  session_distillation_temperature?: number
+  session_distillation_min_confidence?: number
+  session_distillation_mask_policy?: string
+  session_distillation_context_mode?: string
+  session_distillation_reader?: string
   // Export
   auto_export_gguf?: boolean
   gguf_quantization?: string
@@ -115,6 +135,9 @@ export interface TrainingRequest {
   use_nemo_gym?: boolean
   use_remote_ssh?: boolean
   device_id?: string
+  compute_target?: string
+  origin?: Record<string, any>
+  correlation_id?: string
   selected_repos?: string[]
   // Data source
   data_source?: 'traces' | 'dataset_path' | 'security_dataset'
@@ -134,6 +157,71 @@ export interface TrainingResponse {
   completed_at?: string
   metrics?: TrainingStatusMetrics
   output_path?: string
+  origin?: Record<string, any>
+  correlation_id?: string
+  compute_target?: string
+}
+
+export interface WorkspacePanelSnapshot {
+  panel_id: string
+  type: string
+  title: string
+  terminal_id?: string
+  adapter_config?: Record<string, any>
+  visible?: boolean
+}
+
+export interface WorkspaceEdgeSnapshot {
+  id: string
+  source: string
+  target: string
+  type?: string
+  data?: Record<string, any>
+}
+
+export interface WorkspaceTerminalSnapshot {
+  terminal_id: string
+  panel_id?: string
+  title?: string
+  cwd?: string
+  agent_kind?: string
+  status?: string
+  current_tool?: string
+}
+
+export interface WorkspaceCanvasSnapshot {
+  schema_version?: string
+  updated_at?: string
+  panels: WorkspacePanelSnapshot[]
+  edges: WorkspaceEdgeSnapshot[]
+  terminals: WorkspaceTerminalSnapshot[]
+  data_summaries?: Record<string, any>
+  allowed_actions?: string[]
+}
+
+export interface WorkspaceEvent {
+  type: string
+  source?: {
+    kind?: string
+    terminal_id?: string
+    panel_id?: string
+    agent?: string
+  }
+  correlation_id?: string
+  title?: string
+  summary?: string
+  entity?: Record<string, any>
+  suggested_nodes?: Array<{
+    recipe: string
+    title?: string
+    config?: Record<string, any>
+  }>
+  relationships?: Array<{
+    source: string
+    target: string
+    type: string
+  }>
+  payload?: Record<string, any>
 }
 
 // Metrics dict emitted by the trainer progress callbacks (see bashgym/gym/trainer.py
@@ -457,6 +545,67 @@ export interface TrainingRunSummary {
   has_final: boolean
 }
 
+export interface RunCardSummary {
+  run_id?: string | null
+  path: string
+  training_method?: string | null
+  base_model?: string | null
+  claim_tier?: string | null
+  decision?: string | null
+  modified: number
+}
+
+export interface RunCardFinding {
+  code: string
+  level: 'fail' | 'warn' | 'diagnostic' | string
+  message: string
+  field?: string
+  path?: string
+}
+
+export interface RunCardArtifactStatus {
+  field: string
+  path: string
+  resolved_path: string
+  present: boolean
+}
+
+export interface RunCardFailedGate {
+  gate: string
+  blocker_count: number
+  codes: string[]
+  summary: string
+  next_action: string
+}
+
+export interface RunCardPromotionExplanation {
+  schema_version: string
+  ok: boolean
+  headline: string
+  blocker_count: number
+  warning_count: number
+  diagnostic_count: number
+  failed_gates: RunCardFailedGate[]
+  next_actions: string[]
+}
+
+export interface RunCardValidationResponse {
+  schema_version: string
+  path: string
+  ok: boolean
+  run_card: {
+    run_id: string
+    training_method: string
+    base_model: string
+    claim_tier: string
+    decision: string
+    [key: string]: unknown
+  }
+  findings: RunCardFinding[]
+  artifact_status: RunCardArtifactStatus[]
+  promotion_explanation: RunCardPromotionExplanation
+}
+
 export interface RunMetricPoint {
   step: number
   loss: number
@@ -486,6 +635,22 @@ export interface DatasetInspectReport {
   with_warnings_in_slice: number
 }
 
+export interface TrainingRunFinding {
+  severity: string
+  code: string
+  message: string
+  evidence?: Record<string, unknown>
+  next?: string
+}
+
+export interface TrainingRunAnalysis {
+  ok: boolean
+  run_id?: string
+  verdict: { level: string; summary?: Record<string, unknown> }
+  findings: TrainingRunFinding[]
+  training_metrics?: { points?: number } & Record<string, unknown>
+}
+
 export const trainingApi = {
   start: (config: TrainingRequest) =>
     request<TrainingResponse>('/training/start', {
@@ -504,6 +669,10 @@ export const trainingApi = {
 
   getStatus: (runId: string) =>
     request<TrainingResponse>(`/training/${runId}`),
+
+  // Health analysis (verdict + findings) for a run, computed from its metrics.jsonl.
+  getRunAnalysis: (runId: string) =>
+    request<TrainingRunAnalysis>(`/training/runs/${encodeURIComponent(runId)}/analysis`),
 
   pause: (runId: string) =>
     request<{ success: boolean; message: string }>(`/training/${runId}/pause`, { method: 'POST' }),
@@ -534,6 +703,16 @@ export const trainingApi = {
   // Persisted run history (metrics.jsonl written next to checkpoints)
   listRuns: () =>
     request<{ runs: TrainingRunSummary[] }>('/training/runs'),
+
+  listRunCards: (limit = 20) =>
+    request<{ schema_version: string; run_cards: RunCardSummary[] }>(
+      `/training/runcards?limit=${limit}`
+    ),
+
+  validateRunCard: (path: string, promotion = true) =>
+    request<RunCardValidationResponse>(
+      `/training/runcards/validate?path=${encodeURIComponent(path)}&promotion=${promotion}`
+    ),
 
   getRunMetrics: (runId: string) =>
     request<{ run_id: string; metrics: RunMetricPoint[] }>(
@@ -689,10 +868,257 @@ export const designerApi = {
   getJob: (jobId: string) =>
     request<DesignerJobStatus>(`/factory/designer/jobs/${encodeURIComponent(jobId)}`),
 
+  listJobs: (limit = 10) =>
+    request<DesignerJobStatus[]>(`/factory/designer/jobs?limit=${limit}`),
+
   listModels: (codeOnly = false) =>
     request<{ models: DesignerModel[]; provider_models: string[]; available: boolean }>(
       `/factory/designer/models?code_only=${codeOnly}`
     ),
+}
+
+// =============================================================================
+// Source Library API
+// =============================================================================
+
+export type SourceUse =
+  | 'sft'
+  | 'dpo'
+  | 'reward_model'
+  | 'process_reward'
+  | 'terminal_rl'
+  | 'evaluation'
+  | 'raw_reference'
+
+export type SourceArtifactType =
+  | 'sft_examples'
+  | 'dpo_pairs'
+  | 'reward_examples'
+  | 'process_reward_examples'
+  | 'environment_specs'
+  | 'eval_manifest'
+  | 'raw_corpus'
+
+export interface SourceCard {
+  id: string
+  name: string
+  homepage: string
+  domain: string
+  task_family: string
+  artifact_types: SourceArtifactType[]
+  training_eligible: boolean
+  eval_only: boolean
+  license: string
+  input_format: string
+  adapter: string
+  recommended_uses: SourceUse[]
+  not_recommended_for: SourceUse[]
+  known_risks: string[]
+  decontam_notes: string
+  split_policy: string
+  source_quality_notes: string
+  repo?: string | null
+  huggingface_id?: string | null
+  data_size?: string | null
+  metadata: Record<string, unknown>
+}
+
+export interface SourceUseVerdict {
+  ok: boolean
+  source_id: string
+  goal: SourceUse
+  blocking_codes: string[]
+  warnings: string[]
+  requires_override_reason: boolean
+  override_reason?: string | null
+}
+
+export interface SourceManifest {
+  schema_version: string
+  source: SourceCard
+  goal: SourceUse
+  use_verdict: SourceUseVerdict
+  adapter: string
+  next_artifacts: SourceArtifactType[]
+  manifest_path?: string
+}
+
+export interface SourceCatalogResponse {
+  ok: boolean
+  schema_version: string
+  count: number
+  sources: SourceCard[]
+  validation_errors: Record<string, string[]>
+}
+
+export interface SourceInspectResponse {
+  ok: boolean
+  schema_version: string
+  source: SourceCard
+  validation_errors: string[]
+}
+
+export interface SourceRecommendation {
+  score: number
+  reasons: string[]
+  source: SourceCard
+}
+
+export interface SourceRecommendRequest {
+  domain?: string
+  goal?: SourceUse
+  include_eval_only?: boolean
+}
+
+export interface SourceRecommendResponse {
+  ok: boolean
+  schema_version: string
+  domain?: string | null
+  goal?: SourceUse | null
+  recommendations: SourceRecommendation[]
+}
+
+export interface SourcePrepareRequest {
+  goal: SourceUse
+  output_dir?: string
+  input_path?: string
+  fetch?: boolean
+  split?: string
+  subset?: string
+  revision?: string
+  limit?: number
+  fetch_approval_reason?: string
+  force_refresh?: boolean
+  allow_eval_only?: boolean
+  override_reason?: string
+}
+
+export interface SourceFetchRequest {
+  output_dir: string
+  split?: string
+  subset?: string
+  revision?: string
+  limit?: number
+  approval_reason?: string
+  force_refresh?: boolean
+}
+
+export interface SourceFetchReport {
+  ok: boolean
+  schema_version: string
+  source_id: string
+  source_name: string
+  huggingface_id?: string | null
+  split: string
+  subset?: string | null
+  revision?: string | null
+  limit?: number | null
+  output_dir: string
+  records_path: string
+  report_path?: string
+  record_count: number
+  truncated: boolean
+  request?: Record<string, unknown>
+  cache_enabled?: boolean
+  cache_hit?: boolean
+  force_refresh?: boolean
+  approval_policy?: Record<string, unknown>
+  approval_required?: boolean
+  approval_granted?: boolean
+  approval_reason?: string | null
+  warnings: string[]
+  errors: string[]
+}
+
+export interface SourceSchemaMappingReport {
+  schema_version: string
+  source_id: string
+  mapper: string
+  input_records: number
+  consumed_records?: number
+  normalized_records: number
+  dropped_records: number
+}
+
+export interface SourcePreparedArtifact {
+  artifact_type: SourceArtifactType
+  path: string
+  record_count: number
+  validation?: {
+    ok?: boolean
+    errors?: string[]
+    warnings?: string[]
+    [key: string]: unknown
+  }
+}
+
+export const workspaceApi = {
+  putCanvasSnapshot: (snapshot: WorkspaceCanvasSnapshot) =>
+    request<{ ok: boolean; updated_at: string }>('/workspace/canvas/snapshot', {
+      method: 'PUT',
+      body: JSON.stringify(snapshot),
+    }),
+
+  getContext: (format: 'json' | 'markdown' = 'json') =>
+    request<Record<string, any> | string>(`/workspace/context?format=${format}`),
+
+  emitEvent: (event: WorkspaceEvent) =>
+    request<{ ok: boolean; event: WorkspaceEvent & { event_id?: string; received_at?: string } }>(
+      '/workspace/events',
+      {
+        method: 'POST',
+        body: JSON.stringify(event),
+      }
+    ),
+}
+
+export interface SourcePrepareResponse {
+  ok: boolean
+  schema_version?: string
+  source?: SourceCard
+  goal?: SourceUse
+  use_verdict?: SourceUseVerdict
+  adapter?: string
+  next_artifacts?: SourceArtifactType[]
+  manifest_path?: string
+  source_id?: string
+  input_path?: string
+  output_dir?: string
+  source_manifest?: SourceManifest
+  record_count?: number
+  converted_count?: number
+  source_schema_mapping?: SourceSchemaMappingReport
+  artifacts?: SourcePreparedArtifact[]
+  fetch_report?: SourceFetchReport
+  warnings?: string[]
+  errors?: string[]
+  report_path?: string
+}
+
+export const sourcesApi = {
+  list: () =>
+    request<SourceCatalogResponse>('/sources'),
+
+  inspect: (sourceId: string) =>
+    request<SourceInspectResponse>(`/sources/${encodeURIComponent(sourceId)}`),
+
+  recommend: (req: SourceRecommendRequest) =>
+    request<SourceRecommendResponse>('/sources/recommend', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
+
+  prepare: (sourceId: string, req: SourcePrepareRequest) =>
+    request<SourcePrepareResponse>(`/sources/${encodeURIComponent(sourceId)}/prepare`, {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
+
+  fetch: (sourceId: string, req: SourceFetchRequest) =>
+    request<SourceFetchReport>(`/sources/${encodeURIComponent(sourceId)}/fetch`, {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
 }
 
 // =============================================================================
@@ -930,6 +1356,7 @@ export interface HeldoutEnvironmentEvidence {
     | null
   external_benchmarks?: ExternalBenchmarkIngestResponse | ExternalBenchmarkReport | Record<string, unknown> | null
   world_model_quality?: Record<string, unknown> | null
+  learned_reward_evidence?: Record<string, unknown> | null
   external_benchmark_min_scores?: Record<string, number> | null
   external_benchmarks_required?: boolean
   required?: boolean
@@ -962,6 +1389,17 @@ export interface HeldoutReleaseGate {
     findings: string[]
     coverage?: Record<string, unknown> | null
   }
+  learned_reward_evidence_present?: boolean
+  learned_reward_evidence_diagnostic_only?: boolean
+  learned_reward_evidence_signal?: string
+  learned_reward_evidence_findings?: string[]
+  learned_reward_evidence?: {
+    present: boolean
+    diagnostic_only: boolean
+    signal: string
+    metrics: Record<string, number>
+    findings: string[]
+  }
   trace_reasons: string[]
   environment_reasons: string[]
   external_benchmark_reasons?: string[]
@@ -971,6 +1409,7 @@ export interface HeldoutReleaseGate {
   external_benchmark_sections?: string[]
   blocking_external_benchmark_sections?: string[]
   world_model_quality_sections?: string[]
+  learned_reward_evidence_sections?: string[]
 }
 
 export interface HeldoutReport {
@@ -986,6 +1425,12 @@ export interface HeldoutReport {
   reasons: string[]
   release_gate?: HeldoutReleaseGate
   environment_evidence?: HeldoutEnvironmentEvidence
+  /** Per-metric breakdowns present on imported/remote evals (e.g. embedding retrieval) */
+  base_metrics?: Record<string, number>
+  candidate_metrics?: Record<string, number>
+  delta_metrics?: Record<string, number>
+  candidate_model_path?: string
+  remote_eval_manifest?: string
 }
 
 export interface HeldoutJobResponse {
@@ -1974,7 +2419,7 @@ export interface ModelRecommendations {
   warning?: string
   // Largest model (billions of params) that fits per regime, from the estimator.
   regime_capacities?: Record<string, number>
-  // Budget is unified memory (RAM-backed, e.g. DGX Spark)
+  // Budget is unified memory or RAM-backed.
   unified_memory?: boolean
 }
 
@@ -2005,8 +2450,8 @@ export const systemInfoApi = {
   getGpus: () =>
     request<GpuInfo[]>('/system/gpus'),
 
-  // Pass a registered SSH device_id to target that machine's discovered budget
-  // (e.g. a unified-memory DGX Spark) instead of the local GPU.
+  // Pass a registered private compute target to use that machine's discovered
+  // budget instead of the local GPU.
   getRecommendations: (deviceId?: string) =>
     request<ModelRecommendations>(
       `/system/recommendations${deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : ''}`
@@ -2895,7 +3340,7 @@ export interface HFJobSubmitRequest {
   base_model?: string
   num_epochs?: number
   learning_rate?: number
-  strategy?: 'sft' | 'dpo' | 'distillation'
+  strategy?: 'sft' | 'dpo' | 'distillation' | 'session_distillation'
   batch_size?: number
   lora_r?: number
   lora_alpha?: number
@@ -2988,11 +3433,88 @@ export interface HFMyModel {
   tags: string[]
 }
 
+export interface HFInventoryWarning {
+  section: string
+  message: string
+}
+
+export interface HFInventoryCounts {
+  models: number
+  datasets: number
+  trace_datasets: number
+  buckets: number
+  spaces: number
+}
+
+export interface HFInventoryLocalModel {
+  model_id: string
+  display_name: string
+  training_strategy: string
+  base_model: string
+  status: string
+}
+
+export interface HFInventoryModel extends HFMyModel {
+  local?: HFInventoryLocalModel
+}
+
+export interface HFInventoryDataset {
+  id: string
+  url: string
+  private?: boolean | null
+  downloads?: number
+  last_modified?: string
+}
+
+export interface HFInventoryBucket {
+  id: string
+  private?: boolean | null
+  created_at?: string
+  updated_at?: string
+}
+
+export interface HFInventoryResponse {
+  status: HFStatus
+  namespace: string
+  prefix: string
+  limit: number
+  last_refreshed: string
+  cached: boolean
+  ttl_seconds: number
+  counts: HFInventoryCounts
+  models: HFInventoryModel[]
+  datasets: HFInventoryDataset[]
+  trace_datasets: HFInventoryDataset[]
+  buckets: HFInventoryBucket[]
+  spaces: HFSpace[]
+  warnings: HFInventoryWarning[]
+}
+
+export interface HFInventoryOptions {
+  prefix?: string
+  namespace?: string
+  limit?: number
+  refresh?: boolean
+}
+
+function hfInventoryQuery(options?: HFInventoryOptions): string {
+  const params = new URLSearchParams()
+  if (options?.prefix !== undefined) params.set('prefix', options.prefix)
+  if (options?.namespace) params.set('namespace', options.namespace)
+  if (options?.limit !== undefined) params.set('limit', String(options.limit))
+  if (options?.refresh !== undefined) params.set('refresh', String(options.refresh))
+  const qs = params.toString()
+  return qs ? `?${qs}` : ''
+}
+
 // HuggingFace API
 export const hfApi = {
   // Status
   getStatus: () =>
     request<HFStatus>('/hf/status'),
+
+  inventory: (options?: HFInventoryOptions) =>
+    request<HFInventoryResponse>(`/hf/inventory${hfInventoryQuery(options)}`),
 
   // Token Configuration
   configureToken: (token: string) =>
@@ -3634,6 +4156,255 @@ export const agentApi = {
     request(`/agent/sessions/${sessionId}`, { method: 'DELETE' }),
 }
 
+// Generic agent endpoint API — currently optimized for Hermes API Server
+export interface AgentEndpointProfile {
+  id: string
+  label: string
+  kind: string
+  base_url: string
+  model: string
+  model_options: string[]
+  session_key?: string | null
+  enabled: boolean
+  api_key_configured: boolean
+}
+
+export interface AgentEndpointListResponse {
+  endpoints: AgentEndpointProfile[]
+}
+
+export interface AgentEndpointUpdate {
+  label: string
+  kind?: string
+  base_url: string
+  model: string
+  model_options?: string[]
+  session_key?: string | null
+  enabled?: boolean
+  api_key?: string | null
+  clear_api_key?: boolean
+}
+
+export interface AgentEndpointDiscovery {
+  ok: boolean
+  profile: AgentEndpointProfile
+  auth_configured: boolean
+  probes: Record<string, {
+    ok?: boolean
+    status_code?: number
+    data?: unknown
+    error?: string
+  }>
+  summary: {
+    models: number
+    skills: number
+    toolsets: number
+  }
+  warnings: string[]
+}
+
+export interface AgentEndpointChatResponse {
+  response: string
+  endpoint_id: string
+  model: string
+  response_id?: string | null
+  raw_status?: string | null
+}
+
+export interface ToolkitSkillResourceCounts {
+  scripts: number
+  references: number
+  assets: number
+}
+
+export interface ToolkitSkill {
+  name: string
+  description: string
+  source: string
+  path?: string | null
+  resource_counts: ToolkitSkillResourceCounts
+  tool_count: number
+}
+
+export interface ToolkitTool {
+  name: string
+  description: string
+  source: string
+  required: string[]
+}
+
+export interface ToolkitEndpointCapability {
+  endpoint_id: string
+  label: string
+  kind: string
+  enabled: boolean
+  ok: boolean
+  auth_configured: boolean
+  models: number
+  skills: number
+  toolsets: number
+  skill_names: string[]
+  toolset_names: string[]
+  warnings: string[]
+}
+
+export interface ToolkitSkillRoot {
+  label: string
+  path: string
+  exists: boolean
+  skill_count: number
+}
+
+export interface ToolkitInventoryResponse {
+  generated_at: string
+  cached: boolean
+  cache_ttl_seconds: number
+  counts: Record<string, number>
+  skill_roots: ToolkitSkillRoot[]
+  skills: ToolkitSkill[]
+  tools: ToolkitTool[]
+  endpoint_capabilities: ToolkitEndpointCapability[]
+  warnings: string[]
+}
+
+export interface HermesSetupStatus {
+  installed: boolean
+  command?: string | null
+  gateway_command: string[]
+  hermes_home: string
+  config_path?: string | null
+  configured_model?: string | null
+  configured_provider?: string | null
+  env_path: string
+  env_exists: boolean
+  env_api_enabled: boolean
+  env_key_present: boolean
+  gateway_url: string
+  gateway_healthy: boolean
+  gateway_error?: string | null
+  profile: AgentEndpointProfile
+  setup_needed: string[]
+  log_path?: string | null
+}
+
+export interface HermesQuickSetupResponse {
+  status: HermesSetupStatus
+  actions: string[]
+}
+
+export interface HermesTunnelStatus {
+  active: boolean
+  endpoint_id: string
+  ssh_target?: string | null
+  local_base_url?: string | null
+  local_port?: number | null
+  remote_host: string
+  remote_port: number
+  pid?: number | null
+  healthy: boolean
+  health_error?: string | null
+  profile?: AgentEndpointProfile | null
+}
+
+export const agentEndpointApi = {
+  list: () =>
+    request<AgentEndpointListResponse>('/agent/endpoints'),
+
+  save: (endpointId: string, payload: AgentEndpointUpdate) =>
+    request<AgentEndpointProfile>(`/agent/endpoints/${encodeURIComponent(endpointId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    }),
+
+  remove: (endpointId: string) =>
+    request<{ status: string; endpoint_id: string; deleted: boolean }>(
+      `/agent/endpoints/${encodeURIComponent(endpointId)}`,
+      { method: 'DELETE' }
+    ),
+
+  discover: (endpointId: string) =>
+    request<AgentEndpointDiscovery>(
+      `/agent/endpoints/${encodeURIComponent(endpointId)}/discover`,
+      { method: 'POST' }
+    ),
+
+  chat: (
+    endpointId: string,
+    payload: { message: string; context?: string; conversation?: string; session_key?: string | null }
+  ) =>
+    request<AgentEndpointChatResponse>(`/agent/endpoints/${encodeURIComponent(endpointId)}/chat`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+}
+
+export const hermesSetupApi = {
+  status: (options?: { endpointId?: string; baseUrl?: string }) => {
+    const params = new URLSearchParams()
+    if (options?.endpointId) params.set('endpoint_id', options.endpointId)
+    if (options?.baseUrl) params.set('base_url', options.baseUrl)
+    const query = params.toString()
+    return request<HermesSetupStatus>(`/agent/hermes/setup-status${query ? `?${query}` : ''}`)
+  },
+
+  quickSetup: (payload: {
+    profile_id?: string
+    label?: string
+    base_url?: string
+    model?: string
+    model_options?: string[]
+    session_key?: string | null
+    api_key?: string | null
+    write_env?: boolean
+    start_gateway?: boolean
+  }) =>
+    request<HermesQuickSetupResponse>('/agent/hermes/quick-setup', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+
+  tunnelStatus: (endpointId?: string) => {
+    const params = new URLSearchParams()
+    if (endpointId) params.set('endpoint_id', endpointId)
+    const query = params.toString()
+    return request<HermesTunnelStatus>(`/agent/hermes/tunnel/status${query ? `?${query}` : ''}`)
+  },
+
+  connectTunnel: (payload: {
+    endpoint_id?: string
+    label?: string
+    ssh_target: string
+    remote_host?: string
+    remote_port?: number
+    local_port?: number | null
+    model?: string
+    model_options?: string[]
+    session_key?: string | null
+    api_key?: string | null
+    save_profile?: boolean
+  }) =>
+    request<HermesTunnelStatus>('/agent/hermes/tunnel/connect', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+
+  disconnectTunnel: (endpointId?: string) =>
+    request<HermesTunnelStatus>('/agent/hermes/tunnel/disconnect', {
+      method: 'POST',
+      body: JSON.stringify({ endpoint_id: endpointId })
+    }),
+}
+
+export const toolkitApi = {
+  inventory: (options?: { includeRemote?: boolean; refresh?: boolean }) => {
+    const params = new URLSearchParams()
+    if (options?.includeRemote === false) params.set('include_remote', 'false')
+    if (options?.refresh) params.set('refresh', 'true')
+    const query = params.toString()
+    return request<ToolkitInventoryResponse>(`/agent/toolkit${query ? `?${query}` : ''}`)
+  }
+}
+
 // Orchestrator API
 // Orchestrator API response types (see bashgym/api/orchestrator_routes.py)
 export type OrchestratorJobStatus =
@@ -3921,6 +4692,90 @@ export interface EnvironmentRecipeProposalResponse {
   output_path?: string | null
 }
 
+export interface DataRecipeProposalConfig {
+  goal?: string
+  sourceIds?: string[]
+  domain?: string
+  includeEvalOnly?: boolean
+  maxExperiments?: number
+  sampleSize?: number
+  qualityThreshold?: number
+  syntheticMultiplier?: number
+  decontamJaccardThreshold?: number
+  costBudgetUsd?: number
+  evalTarget?: string
+  mutationRate?: number
+  mutationScale?: number
+  seed?: number
+  outputPath?: string
+}
+
+export interface DataRecipeExperiment {
+  experiment_id: number
+  config_snapshot: Record<string, unknown>
+  metric_value: number
+  improved: boolean
+  duration_seconds: number
+  timestamp: string
+}
+
+export interface DataRecipeProposal {
+  schema_version: string
+  goal: string
+  genome: {
+    sample_size: number
+    seed: number
+    quality_threshold: number
+    synthetic_multiplier: number
+    decontam_jaccard_threshold: number
+    cost_budget_usd: number
+    eval_target: string
+    source_weights: Record<string, number>
+    domain_weights: Record<string, number>
+  }
+  sources: Array<{
+    id: string
+    domain: string
+    weight: number
+    adapter: string
+    artifact_types: string[]
+    training_eligible: boolean
+    eval_only: boolean
+  }>
+  guardrails: Record<string, unknown>
+  data_designer: {
+    pipeline: string
+    synthetic_multiplier: number
+    sample_size: number
+  }
+}
+
+export interface DataRecipeProposalResponse {
+  status: string
+  goal: string
+  source_count: number
+  excluded_sources: Array<{ id: string; reason: string }>
+  best_metric: number | null
+  proposal: DataRecipeProposal
+  experiments: DataRecipeExperiment[]
+  output_path?: string | null
+}
+
+export interface DataRecipeStatusResponse {
+  status: string
+  total_experiments: number
+  completed_experiments: number
+  best_metric: number | null
+  best_config: Record<string, unknown>
+  search_params: string[]
+  experiments: DataRecipeExperiment[]
+  proposal?: DataRecipeProposal | null
+  output_path?: string | null
+  goal?: string
+  source_count?: number
+  excluded_sources?: Array<{ id: string; reason: string }>
+}
+
 // Research index — Firecrawl-grounded news feed + AutoResearch advice
 export interface ResearchNewsItem {
   kind: 'github' | 'paper'
@@ -4006,6 +4861,43 @@ export const autoresearchApi = {
         output_path: config.outputPath || null,
       }),
     }),
+
+  proposeDataRecipe: (config: DataRecipeProposalConfig) =>
+    request<DataRecipeProposalResponse>('/autoresearch/data-recipe/propose', {
+      method: 'POST',
+      body: JSON.stringify({
+        goal: config.goal || 'dpo',
+        source_ids: config.sourceIds || [],
+        domain: config.domain || null,
+        include_eval_only: config.includeEvalOnly ?? false,
+        max_experiments: config.maxExperiments ?? 8,
+        sample_size: config.sampleSize ?? 1000,
+        quality_threshold: config.qualityThreshold ?? 0.7,
+        synthetic_multiplier: config.syntheticMultiplier ?? 1.0,
+        decontam_jaccard_threshold: config.decontamJaccardThreshold ?? 0.7,
+        cost_budget_usd: config.costBudgetUsd ?? 25.0,
+        eval_target: config.evalTarget || 'heldout_pass@k',
+        mutation_rate: config.mutationRate ?? 0.35,
+        mutation_scale: config.mutationScale ?? 0.2,
+        seed: config.seed ?? 0,
+        output_path: config.outputPath || null,
+      }),
+    }),
+
+  getDataRecipeStatus: () =>
+    request<DataRecipeStatusResponse>('/autoresearch/data-recipe/status'),
+
+  stopDataRecipe: () =>
+    request<{ status: string }>('/autoresearch/data-recipe/stop', { method: 'POST' }),
+
+  exportDataRecipe: (outputPath: string) =>
+    request<{ status: string; output_path: string; proposal: DataRecipeProposal }>(
+      '/autoresearch/data-recipe/export',
+      {
+        method: 'POST',
+        body: JSON.stringify({ output_path: outputPath }),
+      }
+    ),
 
   // Trace research
   startTraceResearch: (config: { searchParams: string[]; maxExperiments: number; mutationRate: number; mutationScale: number }) =>

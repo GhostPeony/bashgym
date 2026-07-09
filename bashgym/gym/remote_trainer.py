@@ -1,7 +1,7 @@
 """
 Remote training execution via SSH.
 
-Uploads training scripts and datasets to a remote machine (e.g. DGX Spark),
+Uploads training scripts and datasets to a private compute target,
 executes training over SSH, streams logs back in real-time, and downloads
 model artifacts on completion.
 """
@@ -35,7 +35,7 @@ def _mib_to_gb(value: str) -> float | None:
 def parse_nvidia_smi_gpus(stdout: str) -> list[dict[str, Any]]:
     """Parse `nvidia-smi --query-gpu=name,memory.total,memory.free` CSV rows.
 
-    Unified-memory devices (e.g. GB10/DGX Spark) report VRAM as `[N/A]`; those
+    Unified-memory devices can report VRAM as `[N/A]`; those
     become `None` so the caller can fall back to system RAM as the budget.
     """
     gpus: list[dict[str, Any]] = []
@@ -182,7 +182,7 @@ class RemoteTrainer:
         """Verify the remote machine is ready for training.
 
         ``require_unsloth`` defaults to True for the Unsloth backend. Set it False
-        for plain-transformers backends (e.g. sm_121/GB10 like ponyo, where Unsloth
+        for plain-transformers backends on newer compute architectures where Unsloth
         cannot load) so a missing Unsloth is reported as a warning, not a failure.
         """
         try:
@@ -291,9 +291,23 @@ class RemoteTrainer:
         venv = f"{self.config.remote_work_dir}/venv"
         return f"source {venv}/bin/activate 2>/dev/null; {cmd}"
 
-    def _remote_run_dir(self, run_id: str) -> str:
+    async def _resolve_work_dir(self, conn) -> str:
+        """Expand a leading ``~`` in the remote work dir to the remote $HOME.
+
+        SFTP operations treat ``~`` as a literal directory name, so every
+        path handed to the SFTP client must be absolute.
+        """
+        work_dir = self.config.remote_work_dir
+        if work_dir == "~" or work_dir.startswith("~/"):
+            result = await conn.run('printf %s "$HOME"', check=False)
+            home = result.stdout.strip()
+            if home:
+                work_dir = home + work_dir[1:]
+        return work_dir
+
+    def _remote_run_dir(self, run_id: str, work_dir: str | None = None) -> str:
         """Get the remote directory for a training run."""
-        return f"{self.config.remote_work_dir}/{run_id}"
+        return f"{work_dir or self.config.remote_work_dir}/{run_id}"
 
     async def _upload_files(
         self,
@@ -301,9 +315,10 @@ class RemoteTrainer:
         run_id: str,
         script_path: Path,
         dataset_path: Path,
+        work_dir: str | None = None,
     ) -> None:
         """Upload training script and dataset to remote via SFTP."""
-        remote_dir = self._remote_run_dir(run_id)
+        remote_dir = self._remote_run_dir(run_id, work_dir)
         sftp = await conn.start_sftp_client()
         await sftp.makedirs(remote_dir, exist_ok=True)
         await sftp.put(str(script_path), f"{remote_dir}/{script_path.name}")
@@ -311,14 +326,19 @@ class RemoteTrainer:
         logger.info(f"Uploaded training files to {remote_dir}")
 
     async def _start_remote_training(
-        self, conn, run_id: str, script_name: str = "train_sft.py"
+        self, conn, run_id: str, script_name: str = "train_sft.py", work_dir: str | None = None
     ) -> int:
-        """Start training on the remote machine, return PID."""
-        remote_dir = self._remote_run_dir(run_id)
-        cmd = (
-            f"cd {remote_dir} && "
-            f"nohup bash -c '{self._venv_cmd(f'python3 {script_name}')}' > training.log 2>&1 & echo $!"
+        """Start training on the remote machine, return PID.
+
+        The wrapped command records the script's exit status to ``exit_code``
+        in the run directory so the caller can distinguish a crashed run from
+        a completed one.
+        """
+        remote_dir = self._remote_run_dir(run_id, work_dir)
+        inner = (
+            f"{self._venv_cmd(f'PYTHONUNBUFFERED=1 python3 {script_name}')}; echo $? > exit_code"
         )
+        cmd = f"cd {remote_dir} && " f"nohup bash -c '{inner}' > training.log 2>&1 & echo $!"
         result = await conn.run(cmd, check=False)
         pid = int(result.stdout.strip())
         logger.info(f"Remote training started with PID {pid}")
@@ -331,11 +351,24 @@ class RemoteTrainer:
         remote_pid: int,
         log_callback: Callable[[str], None] | None = None,
         poll_interval: float = 2.0,
+        work_dir: str | None = None,
     ) -> None:
-        """Stream training logs from remote machine until process exits."""
-        remote_dir = self._remote_run_dir(run_id)
+        """Stream training logs from remote machine until process exits.
+
+        Callback errors are logged and swallowed — a failing log consumer
+        must not abort a training run that is still healthy on the remote.
+        """
+        remote_dir = self._remote_run_dir(run_id, work_dir)
         log_file = f"{remote_dir}/training.log"
         lines_read = 0
+        dead_polls = 0
+
+        def _emit(line: str) -> None:
+            if log_callback:
+                try:
+                    log_callback(line)
+                except Exception as exc:
+                    logger.warning(f"Log callback error: {exc}")
 
         while True:
             result = await conn.run(
@@ -345,12 +378,20 @@ class RemoteTrainer:
             if result.exit_status == 0 and result.stdout.strip():
                 new_lines = result.stdout.strip().split("\n")
                 for line in new_lines:
-                    if log_callback:
-                        log_callback(line)
+                    _emit(line)
                 lines_read += len(new_lines)
 
             alive = await conn.run(f"kill -0 {remote_pid} 2>/dev/null", check=False)
             if alive.exit_status != 0:
+                # A failed kill -0 can be a transient channel error, not a dead
+                # process. The run is authoritatively over when exit_code
+                # exists; otherwise require several consecutive failures.
+                done = await conn.run(f"test -f {remote_dir}/exit_code", check=False)
+                if done.exit_status != 0:
+                    dead_polls += 1
+                    if dead_polls < 5:
+                        await asyncio.sleep(poll_interval)
+                        continue
                 # Process exited — drain any remaining log lines
                 result = await conn.run(
                     f"tail -n +{lines_read + 1} {log_file} 2>/dev/null",
@@ -358,10 +399,10 @@ class RemoteTrainer:
                 )
                 if result.exit_status == 0 and result.stdout.strip():
                     for line in result.stdout.strip().split("\n"):
-                        if log_callback:
-                            log_callback(line)
+                        _emit(line)
                 break
 
+            dead_polls = 0
             await asyncio.sleep(poll_interval)
 
     async def _download_artifacts(
@@ -369,9 +410,10 @@ class RemoteTrainer:
         conn,
         run_id: str,
         local_output_dir: Path,
+        work_dir: str | None = None,
     ) -> None:
         """Download trained model artifacts from remote to local."""
-        remote_dir = self._remote_run_dir(run_id)
+        remote_dir = self._remote_run_dir(run_id, work_dir)
         sftp = await conn.start_sftp_client()
 
         local_output_dir.mkdir(parents=True, exist_ok=True)
@@ -379,16 +421,21 @@ class RemoteTrainer:
         for subdir in ["final", "merged"]:
             remote_path = f"{remote_dir}/{subdir}"
             try:
-                entries = await sftp.listdir(remote_path)
-                local_subdir = local_output_dir / subdir
-                local_subdir.mkdir(parents=True, exist_ok=True)
-                for entry in entries:
-                    remote_file = f"{remote_path}/{entry}"
-                    local_file = str(local_subdir / entry)
-                    logger.info(f"Downloading {remote_file} -> {local_file}")
-                    await sftp.get(remote_file, local_file)
+                # listdir includes "." and ".." entries
+                entries = [e for e in await sftp.listdir(remote_path) if e not in (".", "..")]
             except Exception as e:
                 logger.warning(f"Could not download {subdir}: {e}")
+                continue
+            local_subdir = local_output_dir / subdir
+            local_subdir.mkdir(parents=True, exist_ok=True)
+            for entry in entries:
+                remote_file = f"{remote_path}/{entry}"
+                local_file = str(local_subdir / entry)
+                try:
+                    logger.info(f"Downloading {remote_file} -> {local_file}")
+                    await sftp.get(remote_file, local_file)
+                except Exception as e:
+                    logger.warning(f"Could not download {remote_file}: {e}")
 
     async def pause_remote(self, remote_pid: int) -> bool:
         """Pause a remote training process."""
@@ -432,6 +479,7 @@ class RemoteTrainer:
         log_callback: Callable[[str], None] | None = None,
         pid_callback: Callable[[int], None] | None = None,
         script_name: str = "train_sft.py",
+        require_unsloth: bool = True,
     ) -> dict[str, Any]:
         """Full remote training orchestration.
 
@@ -446,13 +494,16 @@ class RemoteTrainer:
             log_callback: Optional callback invoked with each log line.
             pid_callback: Optional callback invoked with the remote PID once training starts.
             script_name: Name of the training script to execute on remote.
+            require_unsloth: Gate the run on a remote Unsloth install. Set False
+                for plain-transformers backends (e.g. Session Distillation) on
+                compute targets where Unsloth cannot load.
 
         Returns:
             Dict with 'success' bool plus 'remote_pid'/'run_id' on success
             or 'error' string on failure.
         """
         # Pre-flight
-        preflight = await self.preflight_check()
+        preflight = await self.preflight_check(require_unsloth=require_unsloth)
         if not preflight.ok:
             return {"success": False, "error": preflight.error}
 
@@ -462,11 +513,16 @@ class RemoteTrainer:
             return {"success": False, "error": f"SSH connection failed: {e}"}
 
         async with conn:
+            # SFTP does not expand "~" — resolve the work dir once and use it
+            # for every path in this run.
+            work_dir = await self._resolve_work_dir(conn)
+            remote_dir = self._remote_run_dir(run_id, work_dir)
+
             # Upload
-            await self._upload_files(conn, run_id, script_path, dataset_path)
+            await self._upload_files(conn, run_id, script_path, dataset_path, work_dir)
 
             # Execute
-            remote_pid = await self._start_remote_training(conn, run_id, script_name)
+            remote_pid = await self._start_remote_training(conn, run_id, script_name, work_dir)
             if pid_callback:
                 pid_callback(remote_pid)
 
@@ -477,10 +533,30 @@ class RemoteTrainer:
                 remote_pid,
                 log_callback=log_callback,
                 poll_interval=2.0,
+                work_dir=work_dir,
             )
 
+            # The training process has exited — verify it succeeded before
+            # downloading artifacts, so a crashed run is reported as a
+            # failure instead of a silent success.
+            result = await conn.run(f"cat {remote_dir}/exit_code 2>/dev/null", check=False)
+            exit_code = result.stdout.strip()
+            if exit_code != "0":
+                tail = await conn.run(
+                    f"tail -n 15 {remote_dir}/training.log 2>/dev/null", check=False
+                )
+                return {
+                    "success": False,
+                    "remote_pid": remote_pid,
+                    "run_id": run_id,
+                    "error": (
+                        f"Remote training exited with code {exit_code or 'unknown'}. "
+                        f"Last log lines:\n{tail.stdout.strip()}"
+                    ),
+                }
+
             # Download artifacts
-            await self._download_artifacts(conn, run_id, local_output_dir)
+            await self._download_artifacts(conn, run_id, local_output_dir, work_dir)
 
         return {
             "success": True,

@@ -449,7 +449,7 @@ export function TrainingGuidance() {
                     href={source.href}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="card p-4 transition-press hover:shadow-none"
+                    className="card p-4 transition-colors hover:border-accent"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div>

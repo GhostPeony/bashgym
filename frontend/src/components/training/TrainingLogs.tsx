@@ -12,13 +12,13 @@ export function TrainingLogs({ maxHeight = 300, defaultExpanded = true }: Traini
   const { logs, clearLogs } = useTrainingStore()
   const [expanded, setExpanded] = useState(defaultExpanded)
   const [autoScroll, setAutoScroll] = useState(true)
-  const logsEndRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
-  // Auto-scroll to bottom when new logs arrive
+  // Auto-scroll to bottom when new logs arrive. Scroll only the log container —
+  // scrollIntoView would also scroll every ancestor, yanking the page down.
   useEffect(() => {
-    if (autoScroll && logsEndRef.current) {
-      logsEndRef.current.scrollIntoView({ behavior: 'smooth' })
+    if (autoScroll && containerRef.current) {
+      containerRef.current.scrollTop = containerRef.current.scrollHeight
     }
   }, [logs, autoScroll])
 
@@ -121,7 +121,6 @@ export function TrainingLogs({ maxHeight = 300, defaultExpanded = true }: Traini
                   <span className="whitespace-pre-wrap break-all">{log.message}</span>
                 </div>
               ))}
-              <div ref={logsEndRef} />
             </div>
           )}
         </div>
@@ -133,7 +132,7 @@ export function TrainingLogs({ maxHeight = 300, defaultExpanded = true }: Traini
           className="absolute bottom-2 right-4 tag cursor-pointer"
           onClick={() => {
             setAutoScroll(true)
-            logsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+            containerRef.current?.scrollTo({ top: containerRef.current.scrollHeight, behavior: 'smooth' })
           }}
         >
           <span>Scroll to bottom</span>

@@ -126,65 +126,12 @@ class DPPOSmokeLaunchPlan:
         }
 
 
-def build_dppo_smoke_launch_plan(
-    config: DPPOSmokeLaunchConfig,
-    *,
-    capabilities: dict[str, DPPOBackendCapability] | None = None,
-    env: Mapping[str, str] | None = None,
-) -> DPPOSmokeLaunchPlan:
-    """Build a backend-specific command plan for a tiny DPPO smoke run."""
+def build_dppo_launch_env(config: DPPOSmokeLaunchConfig) -> dict[str, str]:
+    """Return the stable DPPO/ECHO/RWML env contract for backend entrypoints."""
 
-    env_map = env or os.environ
-    selection = select_dppo_backend(config.backend, capabilities=capabilities)
-    output_dir = config.output_dir
-    replay_path = config.replay_path
-    warnings: list[str] = []
-
-    if not replay_path.exists():
-        return DPPOSmokeLaunchPlan(
-            config=config,
-            selection=selection,
-            command=[],
-            cwd=None,
-            env={},
-            runnable=False,
-            reason=f"replay_path does not exist: {replay_path}",
-            warnings=warnings,
-        )
-
-    if selection.fallback_to_grpo:
-        return DPPOSmokeLaunchPlan(
-            config=config,
-            selection=selection,
-            command=[],
-            cwd=None,
-            env={},
-            runnable=False,
-            reason=selection.reason,
-            warnings=[
-                "DPPO backend unavailable; run GRPO fallback or configure a backend checkout."
-            ],
-        )
-
-    values = {
-        "replay_path": str(replay_path),
-        "output_dir": str(output_dir),
-        "base_model": config.base_model,
-        "max_steps": str(config.max_steps),
-        "n_gpus_per_node": str(config.n_gpus_per_node),
-    }
-    template = _resolve_command_template(selection.selected, config, env_map)
-    if template:
-        command = _split_command_template(template, values)
-        reason = "using configured DPPO command template"
-    else:
-        command, warnings = _default_backend_command(selection, values, config)
-        reason = f"using BashGym default {selection.selected} smoke command"
-
-    cwd = _backend_cwd(selection)
-    launch_env = {
-        "BASHGYM_DPPO_REPLAY_PATH": str(replay_path),
-        "BASHGYM_DPPO_OUTPUT_DIR": str(output_dir),
+    return {
+        "BASHGYM_DPPO_REPLAY_PATH": str(config.replay_path),
+        "BASHGYM_DPPO_OUTPUT_DIR": str(config.output_dir),
         "BASHGYM_DPPO_BASE_MODEL": config.base_model,
         "BASHGYM_DPPO_MAX_STEPS": str(config.max_steps),
         # World-model objectives the backend's training entrypoint reads.
@@ -211,6 +158,93 @@ def build_dppo_smoke_launch_plan(
             "bashgym.gym.world_model_backend:build_verl_rwml_reward_fn"
         ),
     }
+
+
+def build_dppo_smoke_launch_plan(
+    config: DPPOSmokeLaunchConfig,
+    *,
+    capabilities: dict[str, DPPOBackendCapability] | None = None,
+    env: Mapping[str, str] | None = None,
+) -> DPPOSmokeLaunchPlan:
+    """Build a backend-specific command plan for a tiny DPPO smoke run."""
+
+    env_map = env or os.environ
+    selection = select_dppo_backend(config.backend, capabilities=capabilities)
+    output_dir = config.output_dir
+    replay_path = config.replay_path
+    warnings: list[str] = []
+    values = {
+        "replay_path": str(replay_path),
+        "output_dir": str(output_dir),
+        "base_model": config.base_model,
+        "max_steps": str(config.max_steps),
+        "n_gpus_per_node": str(config.n_gpus_per_node),
+    }
+
+    if not replay_path.exists():
+        return DPPOSmokeLaunchPlan(
+            config=config,
+            selection=selection,
+            command=[],
+            cwd=None,
+            env={},
+            runnable=False,
+            reason=f"replay_path does not exist: {replay_path}",
+            warnings=warnings,
+        )
+
+    template = _resolve_command_template(selection.selected, config, env_map)
+    if (
+        selection.fallback_to_grpo
+        and config.backend in COMMAND_TEMPLATE_ENV
+        and config.command_template
+    ):
+        command = _split_command_template(config.command_template, values)
+        selection = DPPOBackendSelection(
+            requested=config.backend,
+            selected=config.backend,
+            available=True,
+            fallback_to_grpo=False,
+            reason="using explicit DPPO command template for undetected backend",
+            capabilities=selection.capabilities,
+        )
+        return DPPOSmokeLaunchPlan(
+            config=config,
+            selection=selection,
+            command=command,
+            cwd=_backend_cwd(selection),
+            env=build_dppo_launch_env(config),
+            runnable=bool(command),
+            reason=selection.reason,
+            warnings=[
+                "Backend probe did not detect the requested stack; explicit command template "
+                "is responsible for activating the right environment."
+            ],
+        )
+
+    if selection.fallback_to_grpo:
+        return DPPOSmokeLaunchPlan(
+            config=config,
+            selection=selection,
+            command=[],
+            cwd=None,
+            env={},
+            runnable=False,
+            reason=selection.reason,
+            warnings=[
+                "DPPO backend unavailable; run GRPO fallback or configure a backend checkout."
+            ],
+        )
+
+    if template:
+        command = _split_command_template(template, values)
+        reason = "using configured DPPO command template"
+    else:
+        command, warnings = _default_backend_command(selection, values, config)
+        reason = f"using BashGym default {selection.selected} smoke command"
+
+    cwd = _backend_cwd(selection)
+    launch_env = build_dppo_launch_env(config)
     return DPPOSmokeLaunchPlan(
         config=config,
         selection=selection,

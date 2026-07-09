@@ -1,4 +1,3 @@
-import pytest
 from bashgym.config import OllamaSettings, Settings, SSHSettings
 
 
@@ -61,18 +60,18 @@ class TestSSHSettings:
     def test_from_env(self, monkeypatch):
         monkeypatch.setenv("SSH_REMOTE_ENABLED", "true")
         monkeypatch.setenv("SSH_REMOTE_HOST", "192.168.1.100")
-        monkeypatch.setenv("SSH_REMOTE_USER", "ponyo")
+        monkeypatch.setenv("SSH_REMOTE_USER", "remote-user")
         monkeypatch.setenv("SSH_REMOTE_PORT", "2222")
         monkeypatch.setenv("SSH_REMOTE_KEY_PATH", "~/.ssh/id_ed25519")
         monkeypatch.setenv("SSH_REMOTE_WORK_DIR", "~/training")
         s = SSHSettings()
         assert s.enabled is True
         assert s.host == "192.168.1.100"
-        assert s.username == "ponyo"
+        assert s.username == "remote-user"
         assert s.port == 2222
         assert s.key_path == "~/.ssh/id_ed25519"
         assert s.remote_work_dir == "~/training"
 
     def test_settings_has_ssh(self):
         s = Settings()
-        assert hasattr(s, 'ssh')
+        assert hasattr(s, "ssh")

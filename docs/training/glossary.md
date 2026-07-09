@@ -58,6 +58,12 @@ Compact definitions for BashGym training, terminal RL, and world-model docs.
 | Zero-std filtering | Dropping zero-variance groups from terminal RL updates. |
 | Active sampling | Sampling extra groups to replace dropped zero-std groups and keep the batch full. |
 | SFT warm start | Using an SFT checkpoint or SFT-style behavior before RL so the model can produce attempts worth scoring. |
+| KL | Divergence from the reference or previous policy, depending on backend. Useful for training health, not a release gate by itself. |
+| Entropy | Policy randomness/diversity signal. Falling entropy can indicate collapse; high entropy can indicate unfocused sampling. Interpret with reward and pass@k. |
+| Verifier error rate | Fraction of environment attempts where the verifier infrastructure failed rather than the model simply failing the task. |
+| Tokens per second | Throughput metric for sizing batch, context, backend, and hardware choices. |
+| Peak GPU memory | Maximum observed GPU memory use during the run. Use with OOM count before scaling. |
+| OOM count | Out-of-memory events reported by the run. Any non-zero count means the run shape is not stable enough to scale. |
 
 ## World models
 

@@ -9,6 +9,7 @@ export type {
   AgentStatus,
   CanvasNode,
   CanvasEdge,
+  MonitorAutoMode,
   ToolHistoryItem,
   SessionMetrics
 } from './terminalStore'
@@ -17,6 +18,7 @@ export type { CanvasControlState } from './canvasControlStore'
 export { useFileStore, initializeFileStore } from './fileStore'
 export type { FileNode } from './fileStore'
 export { useTrainingStore } from './trainingStore'
+export { useCanvasOrchestratorStore } from './canvasOrchestratorStore'
 export type {
   TrainingStrategy,
   TrainingProfile,
@@ -59,3 +61,6 @@ export { useAutoResearchStore } from './autoresearchStore'
 export type { ExperimentResult, TraceExperimentResult, AutoResearchStatus, AutoResearchStartConfig, AutoResearchMode } from './autoresearchStore'
 export { useCascadeStore } from './cascadeStore'
 export type { CascadeStatus, CascadeStage, StageStatus } from './cascadeStore'
+// agentSessionsStore is deliberately NOT re-exported here: it is Electron-only
+// and a barrel export would pull it into the web bundle. Import it directly
+// from './agentSessionsStore' inside Electron-gated components.

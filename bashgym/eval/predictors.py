@@ -137,7 +137,7 @@ def openai_complete(
     """A ``complete`` callable hitting an OpenAI-compatible chat endpoint.
 
     Point ``base_url`` at the vLLM ``local-completions`` server on the Spark
-    (``http://192.168.50.173:8100/v1``) or Ollama's ``/v1``. ``httpx`` is imported
+    (``http://192.0.2.10:8100/v1``) or Ollama's ``/v1``. ``httpx`` is imported
     lazily so this module stays import-light; the runner only touches it when
     actually serving a model.
     """

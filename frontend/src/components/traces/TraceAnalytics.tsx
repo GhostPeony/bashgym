@@ -335,7 +335,7 @@ function SummaryCard({ label, value, icon, accent }: {
 }) {
   return (
     <div className={clsx(
-      'card p-4 hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all duration-150',
+      'card p-4 hover:border-accent transition-colors duration-150',
       accent && 'border-[var(--status-success)]'
     )}>
       <div className="flex items-center gap-2 mb-2">

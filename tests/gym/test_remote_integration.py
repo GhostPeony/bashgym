@@ -24,7 +24,7 @@ class TestRemoteIntegration:
         return RemoteTrainer(
             SSHConfig(
                 host=os.environ["SSH_REMOTE_HOST"],
-                username=os.environ.get("SSH_REMOTE_USER", "ponyo"),
+                username=os.environ.get("SSH_REMOTE_USER", "remote-user"),
                 port=int(os.environ.get("SSH_REMOTE_PORT", "22")),
                 key_path=os.environ.get("SSH_REMOTE_KEY_PATH", "~/.ssh/id_rsa"),
                 remote_work_dir=os.environ.get("SSH_REMOTE_WORK_DIR", "~/bashgym-training"),

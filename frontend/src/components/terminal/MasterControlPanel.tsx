@@ -1,8 +1,12 @@
-import { memo, useCallback } from 'react'
+import { memo, useCallback, useState } from 'react'
 import {
   Play,
   Pause,
   Plus,
+  Bot,
+  Code2,
+  FolderOpen,
+  Save,
   LayoutGrid,
   Grid3X3,
   Magnet,
@@ -19,6 +23,16 @@ import {
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useCanvasControlStore, useTerminalStore } from '../../stores'
+import { DATA_PANEL_DEFS } from './nodes/dataPanels'
+import { GhostPeonyIcon, type GhostPeonyIconName } from '../common'
+import {
+  BUILTIN_PRESETS,
+  captureCurrentAsPreset,
+  loadCustomPresets,
+  saveCustomPreset,
+  type CanvasPreset
+} from './canvasPresets'
+import type { PanelType } from '../../stores/terminalStore'
 
 export interface MasterControlPanelProps {
   onZoomIn?: () => void
@@ -26,9 +40,13 @@ export interface MasterControlPanelProps {
   onFitView?: () => void
   onAutoArrange?: () => void
   onNewSession?: () => void
+  onLaunchClaude?: () => void
+  onLaunchCodex?: () => void
   onAddContext?: () => void
   onAddNeon?: () => void
   onAddVercel?: () => void
+  onAddDataPanel?: (type: PanelType, title: string) => void
+  onApplyPreset?: (preset: CanvasPreset) => void
   currentZoom?: number
 }
 
@@ -38,11 +56,33 @@ export const MasterControlPanel = memo(function MasterControlPanel({
   onFitView,
   onAutoArrange,
   onNewSession,
+  onLaunchClaude,
+  onLaunchCodex,
   onAddContext,
   onAddNeon,
   onAddVercel,
+  onAddDataPanel,
+  onApplyPreset,
   currentZoom = 1
 }: MasterControlPanelProps) {
+  const [customPresets, setCustomPresets] = useState<CanvasPreset[]>(() => loadCustomPresets())
+  const [selectedPresetId, setSelectedPresetId] = useState<string>(BUILTIN_PRESETS[0].id)
+
+  const allPresets = [...BUILTIN_PRESETS, ...customPresets]
+
+  const handleOpenPreset = useCallback(() => {
+    const preset = [...BUILTIN_PRESETS, ...loadCustomPresets()].find((p) => p.id === selectedPresetId)
+    if (preset && onApplyPreset) onApplyPreset(preset)
+  }, [selectedPresetId, onApplyPreset])
+
+  const handleSavePreset = useCallback(() => {
+    const name = window.prompt('Preset name?')
+    if (!name?.trim()) return
+    const preset = captureCurrentAsPreset(name.trim())
+    saveCustomPreset(preset)
+    setCustomPresets(loadCustomPresets())
+    setSelectedPresetId(preset.id)
+  }, [])
   const {
     globalPaused,
     showMetrics,
@@ -112,10 +152,10 @@ export const MasterControlPanel = memo(function MasterControlPanel({
         </span>
         <button
           onClick={togglePanelCollapsed}
-          className="p-1 hover:bg-background-tertiary text-text-muted hover:text-text-secondary transition-press"
+          className="node-btn"
           title="Collapse"
         >
-          <ChevronUp className="w-3.5 h-3.5" />
+          <ChevronUp className="w-3 h-3" />
         </button>
       </div>
 
@@ -240,7 +280,7 @@ export const MasterControlPanel = memo(function MasterControlPanel({
           <div className="flex items-center gap-1 flex-1">
             <button
               onClick={onZoomOut}
-              className="btn-icon !w-5 !h-5 !border-1"
+              className="node-btn"
               title="Zoom out"
             >
               <Minus className="w-3 h-3" />
@@ -250,14 +290,14 @@ export const MasterControlPanel = memo(function MasterControlPanel({
             </span>
             <button
               onClick={onZoomIn}
-              className="btn-icon !w-5 !h-5 !border-1"
+              className="node-btn"
               title="Zoom in"
             >
               <Plus className="w-3 h-3" />
             </button>
             <button
               onClick={onFitView}
-              className="btn-icon !w-5 !h-5 !border-1 ml-1"
+              className="node-btn node-btn-accent ml-1"
               title="Fit view"
             >
               <Maximize className="w-3 h-3" />
@@ -288,6 +328,22 @@ export const MasterControlPanel = memo(function MasterControlPanel({
             </button>
           )}
         </div>
+        {(onLaunchClaude || onLaunchCodex) && (
+          <div className="flex items-center gap-2 mt-2">
+            {onLaunchClaude && (
+              <button onClick={onLaunchClaude} className="btn-secondary !py-1.5 !px-3 !text-xs flex-1">
+                <Bot className="w-3 h-3" />
+                Claude
+              </button>
+            )}
+            {onLaunchCodex && (
+              <button onClick={onLaunchCodex} className="btn-secondary !py-1.5 !px-3 !text-xs flex-1">
+                <Code2 className="w-3 h-3" />
+                Codex
+              </button>
+            )}
+          </div>
+        )}
         {(onAddContext || onAddNeon || onAddVercel) && (
           <div className="flex items-center gap-2 mt-2">
             {onAddContext && (
@@ -319,7 +375,61 @@ export const MasterControlPanel = memo(function MasterControlPanel({
             )}
           </div>
         )}
+        {onAddDataPanel && (
+          <div className="flex items-center gap-2 mt-2 flex-wrap">
+            {DATA_PANEL_DEFS.map((def) => {
+              return (
+                <button
+                  key={def.type}
+                  onClick={() => onAddDataPanel(def.type, def.title)}
+                  className="btn-secondary !py-1.5 !px-3 !text-xs flex-1"
+                  style={{ color: `hsl(${def.hue}, 45%, 48%)` }}
+                >
+                  <GhostPeonyIcon
+                    name={def.type as GhostPeonyIconName}
+                    size="xs"
+                    tone="node"
+                    hue={def.hue}
+                  />
+                  {def.title}
+                </button>
+              )
+            })}
+          </div>
+        )}
       </div>
+
+      {/* Workspace layouts */}
+      {onApplyPreset && (
+        <div className="px-3 py-2 border-b border-brutal border-border">
+          <div className="text-[10px] text-text-muted uppercase tracking-wider mb-2 font-mono font-semibold">Layouts</div>
+          <div className="flex items-center gap-1.5">
+            <select
+              value={selectedPresetId}
+              onChange={(e) => setSelectedPresetId(e.target.value)}
+              className="flex-1 min-w-0 text-xs font-mono bg-background-card border-brutal border-border rounded-brutal px-1.5 py-1 focus:border-accent focus:outline-none"
+            >
+              {allPresets.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+            <button
+              onClick={handleOpenPreset}
+              className="node-btn node-btn-accent"
+              title="Open this layout"
+            >
+              <FolderOpen className="w-3 h-3" />
+            </button>
+            <button
+              onClick={handleSavePreset}
+              className="node-btn"
+              title="Save current canvas as a layout"
+            >
+              <Save className="w-3 h-3" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Keyboard shortcuts hint */}
       <div className="px-3 py-2 bg-background-secondary">

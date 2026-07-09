@@ -85,12 +85,21 @@ export function useCanvasHotkeys({
     if (!enabled) return
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      // Ignore if typing in an input, textarea, or contenteditable
+      // Ignore if typing in an input, textarea, contenteditable, or a terminal.
+      // Check document.activeElement as well as event.target — xterm's hidden
+      // helper textarea can hold focus while the event targets a wrapper, and
+      // swallowing Space/f/g/m/digits then breaks typing into the shell.
       const target = event.target as HTMLElement
+      const active = document.activeElement as HTMLElement | null
       if (
         target.tagName === 'INPUT' ||
         target.tagName === 'TEXTAREA' ||
-        target.isContentEditable
+        target.isContentEditable ||
+        !!target.closest?.('.xterm') ||
+        !!active?.closest?.('.xterm') ||
+        active?.tagName === 'INPUT' ||
+        active?.tagName === 'TEXTAREA' ||
+        active?.isContentEditable
       ) {
         return
       }

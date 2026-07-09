@@ -849,13 +849,45 @@ Generate {num_variations} variations in JSON format:
 
         # Generate example ID
         example_id = hashlib.sha256(f"{prompt}{chosen}{rejected}".encode()).hexdigest()[:16]
+        prompt_hash = hashlib.sha256(prompt.encode()).hexdigest()[:16]
+        gold_metadata = gold_trace.get("metadata", {}) if isinstance(gold_trace, dict) else {}
+        failed_metadata = failed_trace.get("metadata", {}) if isinstance(failed_trace, dict) else {}
+        gold_trace_id = str(
+            gold_metadata.get("trace_id") or gold_trace.get("trace_id") or gold_trace_path.stem
+        )
+        failed_trace_id = str(
+            failed_metadata.get("trace_id")
+            or failed_trace.get("trace_id")
+            or failed_trace_path.stem
+        )
 
         return DPOExample(
             example_id=example_id,
             prompt=f"{self.SYSTEM_PROMPT_TEMPLATE}\n\nUser: {prompt}",
             chosen=chosen,
             rejected=rejected,
-            metadata={"gold_trace": str(gold_trace_path), "failed_trace": str(failed_trace_path)},
+            metadata={
+                "pair_id": example_id,
+                "prompt_hash": prompt_hash,
+                "chosen_trace_id": gold_trace_id,
+                "rejected_trace_id": failed_trace_id,
+                "gold_trace": str(gold_trace_path),
+                "failed_trace": str(failed_trace_path),
+                "pair_generation_method": "trace_pair",
+                "label_strength": "verified_success_vs_failure",
+                "label_source": "trace_verifier",
+                "chosen_length_chars": len(chosen),
+                "rejected_length_chars": len(rejected),
+                "domain": gold_metadata.get("domain") or failed_metadata.get("domain"),
+                "task_family": gold_metadata.get("task_family")
+                or failed_metadata.get("task_family")
+                or "terminal_agent",
+                "split": gold_metadata.get("split") or failed_metadata.get("split"),
+                "decontamination_status": gold_metadata.get("decontamination_status")
+                or failed_metadata.get("decontamination_status"),
+                "chosen_quality_score": gold_metadata.get("quality_score"),
+                "rejected_quality_score": failed_metadata.get("quality_score"),
+            },
         )
 
     def generate_decision_level_dpo_pairs(
@@ -924,6 +956,7 @@ Generate {num_variations} variations in JSON format:
             example_id = hashlib.sha256(
                 f"dpo_decision_{trace.trace_id}_{decision.step_index}_{successor.step_index}".encode()
             ).hexdigest()[:16]
+            prompt_hash = hashlib.sha256(prompt.encode()).hexdigest()[:16]
 
             dpo_pairs.append(
                 DPOExample(
@@ -932,11 +965,22 @@ Generate {num_variations} variations in JSON format:
                     chosen=chosen,
                     rejected=rejected,
                     metadata={
+                        "pair_id": example_id,
+                        "prompt_hash": prompt_hash,
                         "source_trace": trace.trace_id,
+                        "chosen_trace_id": trace.trace_id,
+                        "rejected_trace_id": trace.trace_id,
                         "failed_step_index": decision.step_index,
                         "success_step_index": successor.step_index,
                         "failed_intent": decision.intent,
                         "success_intent": successor.intent,
+                        "pair_generation_method": "decision_level_failure_recovery",
+                        "label_strength": "failure_to_success_recovery",
+                        "label_source": "step_verifier",
+                        "chosen_length_chars": len(chosen),
+                        "rejected_length_chars": len(rejected),
+                        "domain": "terminal_agent",
+                        "task_family": "decision_recovery",
                         "decision_level": True,
                     },
                 )

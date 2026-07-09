@@ -132,7 +132,8 @@ function createWindow() {
     });
     // Load the app
     if (isDev) {
-        mainWindow.loadURL('http://localhost:5173');
+        const devServerUrl = process.env.BASHGYM_DEV_SERVER_URL || 'http://localhost:5190';
+        mainWindow.loadURL(devServerUrl);
         mainWindow.webContents.openDevTools(); // TEMP: debug black screen
     }
     else {
@@ -221,9 +222,18 @@ function getFreshEnv() {
     }
     return env;
 }
+function resolveTerminalCwd(cwd) {
+    var requested = cwd === null || cwd === void 0 ? void 0 : cwd.trim();
+    if (!requested || requested === '~')
+        return os.homedir();
+    if (requested.startsWith('~/') || requested.startsWith('~\\')) {
+        return path.join(os.homedir(), requested.slice(2));
+    }
+    return requested;
+}
 // Terminal management
 ipcMain.handle('terminal:create', function (_, id, cwd) { return __awaiter(void 0, void 0, void 0, function () {
-    var pty, shell_1, shellArgs, ptyProcess, error_1;
+    var pty, shell_1, shellArgs, resolvedCwd, ptyProcess, error_1;
     return __generator(this, function (_a) {
         switch (_a.label) {
             case 0:
@@ -237,11 +247,12 @@ ipcMain.handle('terminal:create', function (_, id, cwd) { return __awaiter(void 
                 shellArgs = process.platform === 'win32'
                     ? ['-NoLogo']
                     : [];
+                resolvedCwd = resolveTerminalCwd(cwd);
                 ptyProcess = pty.spawn(shell_1, shellArgs, {
                     name: 'xterm-256color',
                     cols: 80,
                     rows: 24,
-                    cwd: cwd || process.env.HOME || process.cwd(),
+                    cwd: resolvedCwd,
                     env: getFreshEnv()
                 });
                 // Store reference (cast to ChildProcessWithoutNullStreams for type compatibility)
@@ -255,7 +266,7 @@ ipcMain.handle('terminal:create', function (_, id, cwd) { return __awaiter(void 
                     mainWindow === null || mainWindow === void 0 ? void 0 : mainWindow.webContents.send("terminal:exit:".concat(id), exitCode);
                     terminals.delete(id);
                 });
-                return [2 /*return*/, { success: true, id: id }];
+                return [2 /*return*/, { success: true, id: id, cwd: resolvedCwd }];
             case 2:
                 error_1 = _a.sent();
                 console.error('Failed to create terminal:', error_1);

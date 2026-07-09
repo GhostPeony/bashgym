@@ -268,14 +268,14 @@ export function AutoResearchPanel() {
     })
   }, [traceSelectedParams, traceMaxExperiments, traceMutationRate, traceMutationScale, startTraceResearch])
 
-  // Experiment log auto-scroll
-  const logEndRef = useRef<HTMLDivElement>(null)
+  // Experiment log auto-scroll. Scroll only the log container — scrollIntoView
+  // would also scroll every ancestor, yanking the page down.
   const logContainerRef = useRef<HTMLDivElement>(null)
   const [autoScroll, setAutoScroll] = useState(true)
 
   useEffect(() => {
-    if (autoScroll && logEndRef.current) {
-      logEndRef.current.scrollIntoView({ behavior: 'smooth' })
+    if (autoScroll && logContainerRef.current) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight
     }
   }, [experiments, autoScroll])
 
@@ -717,7 +717,7 @@ export function AutoResearchPanel() {
               {schemaStatus === 'idle' && (
                 <button
                   onClick={handleStartSchemaResearch}
-                  className="px-4 py-2 bg-accent text-white font-mono text-sm uppercase tracking-wider border-2 border-text-primary shadow-[3px_3px_0_0] shadow-text-primary hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_0] transition-all duration-150"
+                  className="px-4 py-2 bg-accent text-white font-mono text-sm uppercase tracking-wider border-2 border-text-primary shadow-[3px_3px_0_0] shadow-text-primary hover:brightness-95 active:translate-x-[2px] active:translate-y-[2px] active:shadow-[1px_1px_0_0] transition-press duration-150"
                 >
                   Start
                 </button>
@@ -726,13 +726,13 @@ export function AutoResearchPanel() {
                 <>
                   <button
                     onClick={pauseSchemaResearch}
-                    className="px-4 py-2 bg-background-secondary text-text-primary font-mono text-sm uppercase tracking-wider border-2 border-text-primary shadow-[3px_3px_0_0] shadow-text-primary hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_0] transition-all duration-150"
+                    className="px-4 py-2 bg-background-secondary text-text-primary font-mono text-sm uppercase tracking-wider border-2 border-text-primary shadow-[3px_3px_0_0] shadow-text-primary hover:bg-background-tertiary active:translate-x-[2px] active:translate-y-[2px] active:shadow-[1px_1px_0_0] transition-press duration-150"
                   >
                     Pause
                   </button>
                   <button
                     onClick={stopSchemaResearch}
-                    className="px-4 py-2 bg-status-error text-white font-mono text-sm uppercase tracking-wider border-2 border-text-primary shadow-[3px_3px_0_0] shadow-text-primary hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_0] transition-all duration-150"
+                    className="px-4 py-2 bg-status-error text-white font-mono text-sm uppercase tracking-wider border-2 border-text-primary shadow-[3px_3px_0_0] shadow-text-primary hover:brightness-95 active:translate-x-[2px] active:translate-y-[2px] active:shadow-[1px_1px_0_0] transition-press duration-150"
                   >
                     Stop
                   </button>
@@ -742,13 +742,13 @@ export function AutoResearchPanel() {
                 <>
                   <button
                     onClick={resumeSchemaResearch}
-                    className="px-4 py-2 bg-accent text-white font-mono text-sm uppercase tracking-wider border-2 border-text-primary shadow-[3px_3px_0_0] shadow-text-primary hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_0] transition-all duration-150"
+                    className="px-4 py-2 bg-accent text-white font-mono text-sm uppercase tracking-wider border-2 border-text-primary shadow-[3px_3px_0_0] shadow-text-primary hover:brightness-95 active:translate-x-[2px] active:translate-y-[2px] active:shadow-[1px_1px_0_0] transition-press duration-150"
                   >
                     Resume
                   </button>
                   <button
                     onClick={stopSchemaResearch}
-                    className="px-4 py-2 bg-status-error text-white font-mono text-sm uppercase tracking-wider border-2 border-text-primary shadow-[3px_3px_0_0] shadow-text-primary hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_0] transition-all duration-150"
+                    className="px-4 py-2 bg-status-error text-white font-mono text-sm uppercase tracking-wider border-2 border-text-primary shadow-[3px_3px_0_0] shadow-text-primary hover:brightness-95 active:translate-x-[2px] active:translate-y-[2px] active:shadow-[1px_1px_0_0] transition-press duration-150"
                   >
                     Stop
                   </button>
@@ -757,7 +757,7 @@ export function AutoResearchPanel() {
               {(schemaStatus === 'completed' || schemaStatus === 'failed') && (
                 <button
                   onClick={resetSchema}
-                  className="px-4 py-2 bg-background-secondary text-text-primary font-mono text-sm uppercase tracking-wider border-2 border-text-primary shadow-[3px_3px_0_0] shadow-text-primary hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[1px_1px_0_0] transition-all duration-150"
+                  className="px-4 py-2 bg-background-secondary text-text-primary font-mono text-sm uppercase tracking-wider border-2 border-text-primary shadow-[3px_3px_0_0] shadow-text-primary hover:bg-background-tertiary active:translate-x-[2px] active:translate-y-[2px] active:shadow-[1px_1px_0_0] transition-press duration-150"
                 >
                   New Search
                 </button>
@@ -1130,7 +1130,6 @@ export function AutoResearchPanel() {
                       </span>
                     </div>
                   ))}
-                  <div ref={logEndRef} />
                 </div>
               </div>
               {!autoScroll && (isHyperparam ? experiments : traceExperiments).length > 6 && (
@@ -1138,7 +1137,10 @@ export function AutoResearchPanel() {
                   className="absolute bottom-2 right-4 tag cursor-pointer"
                   onClick={() => {
                     setAutoScroll(true)
-                    logEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+                    logContainerRef.current?.scrollTo({
+                      top: logContainerRef.current.scrollHeight,
+                      behavior: 'smooth'
+                    })
                   }}
                 >
                   <span>Scroll to bottom</span>

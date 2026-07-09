@@ -84,11 +84,11 @@ class TestGateIntegration:
 
 class TestLmEvalCommand:
     def test_builds_local_completions_argv(self):
-        cmd = lm_eval_command("http://192.168.50.173:8100/v1/completions", model_name="cand-v3")
+        cmd = lm_eval_command("http://192.0.2.10:8100/v1/completions", model_name="cand-v3")
         assert cmd[0] == "lm_eval"
         assert "local-completions" in cmd
         joined = " ".join(cmd)
-        assert "base_url=http://192.168.50.173:8100/v1/completions" in joined
+        assert "base_url=http://192.0.2.10:8100/v1/completions" in joined
         assert "model=cand-v3" in joined
         assert ",".join(DEFAULT_FORGETTING_TASKS) in joined
 

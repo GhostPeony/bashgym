@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { settingsApi, EnvKeyStatus } from '../../services/api'
 import { clsx } from 'clsx'
+import { GhostPeonyIcon } from '../common/GhostPeonyIcon'
 
 // Provider configuration
 const PROVIDERS: {
@@ -133,7 +134,18 @@ function ProviderCard({
                 : 'bg-background-secondary text-text-muted'
             )}
           >
-            {provider.initial}
+            {provider.envKey === 'HF_TOKEN' ? (
+              <GhostPeonyIcon
+                name="huggingface"
+                size="md"
+                tone={isConfigured ? 'accent' : 'neutral'}
+                hue={52}
+                active={isConfigured}
+                muted={!isConfigured}
+              />
+            ) : (
+              provider.initial
+            )}
           </div>
 
           {/* Provider info */}

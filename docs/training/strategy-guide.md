@@ -12,13 +12,38 @@ has the data and reward signal it needs.
 |---|---|---|---|
 | First model from gold traces | SFT | QLoRA, LoRA rank 16 or 32, 1-3 epochs, max length 2048+. | Eval loss, truncation, heldout pass@k. |
 | You have good/bad answers for the same prompt | DPO after SFT | `beta=0.1`, 1-2 epochs, adapter LR around `5e-6` to `1e-5`. | Chosen/rejected margin and preference accuracy. |
+| You need a learned scorer for selection or audits | Reward model / ORM / PRM | Validate `reward_examples.jsonl`, train a small scorer, evaluate heldout accuracy and calibration. | Heldout pair accuracy, calibration error, length bias. |
 | You have executable verifiers and sampled attempts differ | GRPO/RLVR | Terminal RL profile, group size 8-32, DAPO, active sampling. | Reward, reward_std, `frac_reward_zero_std`, pass@k. |
 | Model cannot pass any terminal tasks yet | SFT or distillation before RL | Teacher distillation or easier curriculum, then re-evaluate. | pass@k moves above zero. |
+| Failed traces contain local recovery pivots | Session Distillation | Build `session_distillation_records.jsonl`, use target-span masking, start alpha at `0.7`. | Masked KL/CE, reader confidence, heldout recovery decisions. |
 | You need domain specialists | Cascade RL | Short staged runs by domain, then MOPD distillation. | Per-domain pass@k and final holdout. |
 | You have DPPO backend + rollout replay | DPPO smoke/replay path | Export scored replay JSONL, pick backend, run tiny smoke first. | Behavior/train logprobs, mask telemetry, pass@k. |
 
 Default to SFT when in doubt. RL needs contrast. If every sampled attempt gets
 the same reward, group-relative RL has little policy-gradient signal.
+
+For the end-to-end terminal-agent recipe, read
+[tmax-terminal-rl-recipe.md](tmax-terminal-rl-recipe.md). It walks from
+environment pool to rollout, DPPO replay, smoke bundle, private/cloud backend
+smoke, and release evidence.
+
+---
+
+## Readiness ladder
+
+Every strategy moves through the same idea: prove the cheap contract first, then
+spend more compute only when the evidence justifies it.
+
+| Stage | What it proves | Move forward when |
+|---|---|---|
+| Data contract | The examples, pairs, or environments are shaped correctly. | Inspection finds no mislabeled gold data, broken pairs, or invalid environment specs. |
+| Local smoke | The run can start and write metrics without backend/runtime surprises. | Loss/reward telemetry appears and no loader, template, verifier, or replay-schema error blocks the run. |
+| Behavior gate | The candidate changes actual task behavior, not only training loss. | Heldout traces and executable pass@k are stable or better than the baseline. |
+| Backend smoke | External RL/backend integration can consume BashGym artifacts. | `backend_smoke_readiness.json` has `contract_ready=true`; DPPO optimizer work also needs `optimizer_ready=true`. |
+| Release gate | The trained model is safe to route into real workflows. | Holdout, comparison, spurious-reward, tamper, and relevant external benchmark evidence all pass. |
+
+Use `bashgym training plan --strategy <strategy> --json` to get the
+strategy-specific `readiness_ladder` and `adjustment_rules` fields.
 
 ---
 
@@ -172,6 +197,66 @@ Stop or adjust when:
 
 ---
 
+## Reward Models, ORM, and PRM
+
+Reward-model training produces a learned scorer. Use it for reward audits,
+best-of-N selection, rejection sampling, or later RL only after the scorer
+survives heldout checks.
+
+Use this lane when:
+
+- You have validated `reward_examples.jsonl` records.
+- Labels include a declared reward type, reward scale, source, split, and
+  decontamination metadata.
+- You want a scorer before spending on policy-gradient training.
+
+Start with:
+
+```text
+strategy=reward-model
+reward_artifact=reward_examples.jsonl
+reward_type=preference_reward or outcome_reward
+reward_loss=pairwise_or_regression
+learning_rate=1e-5
+epochs=1
+eval_split_required=true
+```
+
+For PRM/process rewards, require step-level labels before training:
+
+```bash
+bashgym training reward-examples validate reward_examples.jsonl --strict --json
+bashgym training reward-model smoke reward_examples.jsonl --output-dir data/reward-model-smokes/run-001 --json
+bashgym training plan --strategy reward-model --json
+```
+
+The fixture smoke proves the artifact, split, prediction, metrics, and
+`reward_eval.json` path before a real TRL/OpenRLHF reward backend. Keep it as a
+contract smoke, not a final reward-model quality claim.
+
+Watch:
+
+- Heldout pair accuracy.
+- Calibration error.
+- Reward margin.
+- Length bias.
+- Task-family breakdown.
+- Reward variance.
+- Eval-only leakage.
+
+Stop or adjust when:
+
+- Accuracy is high but calibration is poor: keep the scorer audit-only.
+- Length bias is strong: length-stratify evals or rebuild labels.
+- Reward variance is near zero: the scorer cannot separate candidates.
+- Eval-only sources appear in the training artifact: block training and rebuild.
+
+Use the scorer first in a controlled selection loop. Compare reward-selected
+traces against a random-selection control with the same sample budget before
+using the learned reward for RL.
+
+---
+
 ## GRPO and RLVR
 
 GRPO samples a group of attempts for the same prompt, scores them, and updates
@@ -253,6 +338,52 @@ Watch:
 
 ---
 
+## Session Distillation
+
+Session Distillation is for local mistakes inside otherwise useful traces. It is
+not teacher distillation: no stronger model rewrites the whole answer. BashGym
+inserts a short hint before the failed action, scores the same target tokens
+under original and hinted context, and trains only the target span.
+
+Use Session Distillation when:
+
+- A command failed and the recovery step reveals the missing path, flag, or file.
+- Tests failed and the next step shows the local correction.
+- The model repeated a nearly identical action before pivoting.
+- The mistake is too local for DPO and too sparse for GRPO/RLVR.
+
+Start with:
+
+```text
+strategy=session_distillation
+session_distillation_alpha=0.7
+session_distillation_temperature=1.0
+session_distillation_min_confidence=0.6
+session_distillation_mask_policy=target_span_only
+session_distillation_context_mode=hint_injected
+session_distillation_reader=heuristic
+```
+
+Watch:
+
+- `session_distillation_loss`
+- `session_distillation_kl`
+- `session_distillation_ce`
+- `session_distillation_masked_tokens`
+- heldout recovery-decision accuracy
+- tool-call validity and executable pass@k where environments exist
+
+Stop or adjust when:
+
+- Hints are noisy: raise `session_distillation_min_confidence` or inspect the
+  reader output.
+- Loss falls but recovery behavior does not improve: rebuild records around
+  clearer failed spans, or move to DPO/GRPO if the issue is broader.
+- The model overfits hinted behavior: lower alpha and require heldout recovery
+  decisions before promotion.
+
+---
+
 ## Cascade RL
 
 Cascade RL trains domain stages in order, such as file operations, bash commands,
@@ -293,6 +424,7 @@ Start with:
 ```text
 export replay JSONL
 enrich train-policy logprobs if needed
+run bashgym training smoke-bundle
 plan a one-step smoke run
 run with max_steps=1 before any long job
 ```
@@ -303,10 +435,17 @@ Watch:
 - `train_logprobs_ready_records`.
 - `train_logprob_replay_required_records`.
 - DPPO mask telemetry.
+- `contract_ready`, `optimizer_ready`, and `backend_launch_ready` from the smoke bundle.
 - pass@k after the smoke run.
 
 World-model replay enrichment is optional and additive. It does not change the
 base `bashgym.dppo_replay.v1` record semantics.
+
+Do not move DPPO work to private/cloud compute until the local smoke bundle
+explains the state of the replay. `contract_ready=false` means fix the replay.
+`optimizer_ready=false` means train-policy logprob replay is still missing.
+`backend_launch_ready=false` alone can be acceptable on the desktop when the
+backend exists only on the target.
 
 ---
 

@@ -32,6 +32,7 @@ from bashgym.api.achievements_routes import router as achievements_router  # noq
 from bashgym.api.agent_routes import router as agent_router  # noqa: E402
 from bashgym.api.autoresearch_routes import router as autoresearch_router  # noqa: E402
 from bashgym.api.cascade_routes import router as cascade_router  # noqa: E402
+from bashgym.api.dev_routes import router as dev_router  # noqa: E402
 from bashgym.api.device_routes import get_registry as get_device_registry  # noqa: E402
 from bashgym.api.device_routes import router as device_router  # noqa: E402
 from bashgym.api.environment_routes import router as environment_router  # noqa: E402
@@ -100,6 +101,7 @@ from bashgym.api.schemas import (  # noqa: E402
 )
 from bashgym.api.security_routes import router as security_router  # noqa: E402
 from bashgym.api.settings_routes import router as settings_router  # noqa: E402
+from bashgym.api.source_routes import router as source_router  # noqa: E402
 from bashgym.api.training_monitor import OrphanedTrainingMonitor  # noqa: E402
 from bashgym.api.training_state import (  # noqa: E402
     TrainingRunState,
@@ -123,9 +125,11 @@ from bashgym.api.websocket import (  # noqa: E402
     broadcast_trace_event,
     broadcast_training_complete,
     broadcast_training_failed,
+    broadcast_training_queued,
     broadcast_verification_result,
     handle_websocket,
 )
+from bashgym.api.workspace_routes import router as workspace_router  # noqa: E402
 from bashgym.factory.quality_calculator import calculate_quality_breakdown  # noqa: E402
 
 
@@ -165,6 +169,8 @@ def create_app() -> FastAPI:
     app.state.data_factory = None
     app.state.tasks = {}  # In-memory task storage
     app.state.training_runs = {}  # In-memory training run storage
+    app.state.workspace_canvas_snapshot = None  # Live renderer-owned canvas context
+    app.state.workspace_events = []  # Recent semantic canvas intents
     app.state.factory_config = None  # Factory configuration
     app.state.synthesis_jobs = {}  # Synthesis job storage
     app.state.evaluation_jobs = {}  # Evaluation job storage
@@ -624,10 +630,10 @@ def create_app() -> FastAPI:
     async def get_model_recommendations(device_id: str | None = None):
         """Get model recommendations based on detected hardware.
 
-        When ``device_id`` is supplied, recommendations target that registered SSH
+        When ``device_id`` is supplied, recommendations target that registered private
         device's discovered budget (its ``effective_vram_gb`` capability, which
-        falls back to RAM on unified-memory machines like a DGX Spark) instead of
-        the local GPU. Run the device's preflight first to populate capabilities.
+        can fall back to RAM on unified-memory machines) instead of the local GPU.
+        Run the device's preflight first to populate capabilities.
         """
         from bashgym.api.system_info import get_system_info_service
 
@@ -1092,10 +1098,51 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=502, detail=f"poll failed: {e}") from e
         return job.to_dict()
 
+    def _training_compute_target(request: TrainingRequest) -> str:
+        explicit = (request.compute_target or "").strip()
+        if explicit:
+            return explicit
+        if request.use_remote_ssh:
+            return f"ssh:{request.device_id}" if request.device_id else "ssh:remote"
+        if request.use_nemo_gym:
+            return "cloud"
+        return "local"
+
+    def _training_origin(request: TrainingRequest, http_request: Request) -> dict[str, Any]:
+        origin = dict(request.origin or {})
+        terminal_id = http_request.headers.get("X-BashGym-Origin-Terminal")
+        panel_id = http_request.headers.get("X-BashGym-Origin-Panel")
+        agent = http_request.headers.get("X-BashGym-Origin-Agent")
+        if terminal_id:
+            origin["terminal_id"] = terminal_id
+            origin.setdefault("kind", "terminal")
+        if panel_id:
+            origin["panel_id"] = panel_id
+        if agent:
+            origin["agent"] = agent
+        return origin
+
+    def _training_correlation_id(request: TrainingRequest, http_request: Request) -> str | None:
+        return request.correlation_id or http_request.headers.get("X-BashGym-Correlation-Id")
+
     @app.post("/api/training/start", response_model=TrainingResponse, tags=["Training"])
-    async def start_training(request: TrainingRequest, background_tasks: BackgroundTasks):
+    async def start_training(
+        request: TrainingRequest,
+        background_tasks: BackgroundTasks,
+        http_request: Request,
+    ):
         """Start a new training run."""
         run_id = f"run_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+        origin = _training_origin(request, http_request)
+        correlation_id = _training_correlation_id(request, http_request)
+        compute_target = _training_compute_target(request)
+        request = request.copy(
+            update={
+                "origin": origin,
+                "correlation_id": correlation_id,
+                "compute_target": compute_target,
+            }
+        )
 
         # Store training run
         app.state.training_runs[run_id] = {
@@ -1104,7 +1151,23 @@ def create_app() -> FastAPI:
             "status": TrainingStatus.PENDING,
             "config": request.dict(),
             "started_at": datetime.utcnow().isoformat(),
+            "origin": origin,
+            "correlation_id": correlation_id,
+            "compute_target": compute_target,
         }
+
+        await broadcast_training_queued(
+            run_id,
+            {
+                "status": TrainingStatus.PENDING.value,
+                "strategy": request.strategy.value,
+                "base_model": request.base_model,
+                "dataset_path": request.dataset_path,
+                "origin": origin,
+                "correlation_id": correlation_id,
+                "compute_target": compute_target,
+            },
+        )
 
         # Start training in background
         background_tasks.add_task(run_training, app, run_id, request)
@@ -1115,6 +1178,9 @@ def create_app() -> FastAPI:
             strategy=request.strategy,
             message="Training run queued",
             started_at=app.state.training_runs[run_id]["started_at"],
+            origin=origin,
+            correlation_id=correlation_id,
+            compute_target=compute_target,
         )
 
     async def run_training(app, run_id: str, request: TrainingRequest):
@@ -1128,7 +1194,11 @@ def create_app() -> FastAPI:
             logger.info(f"[Training] Status set to RUNNING for {run_id}")
 
             # Create progress callback for WebSocket updates
-            callback = TrainingProgressCallback(run_id)
+            run_meta = app.state.training_runs.get(run_id, {})
+            callback = TrainingProgressCallback(
+                run_id,
+                static_payload={"compute_target": run_meta.get("compute_target")},
+            )
 
             if app.state.trainer:
                 from bashgym.config import get_settings
@@ -1312,6 +1382,22 @@ def create_app() -> FastAPI:
                     teacher_model=request.teacher_model or "claude-sonnet-4-6",
                     teacher_temperature=request.teacher_temperature,
                     distillation_alpha=request.distillation_alpha,
+                    session_distillation_alpha=getattr(request, "session_distillation_alpha", 0.7),
+                    session_distillation_temperature=getattr(
+                        request, "session_distillation_temperature", 1.0
+                    ),
+                    session_distillation_min_confidence=getattr(
+                        request, "session_distillation_min_confidence", 0.6
+                    ),
+                    session_distillation_mask_policy=getattr(
+                        request, "session_distillation_mask_policy", "target_span_only"
+                    ),
+                    session_distillation_context_mode=getattr(
+                        request, "session_distillation_context_mode", "hint_injected"
+                    ),
+                    session_distillation_reader=getattr(
+                        request, "session_distillation_reader", "heuristic"
+                    ),
                     # Export & backend
                     auto_export_gguf=request.auto_export_gguf,
                     gguf_quantization=request.gguf_quantization,
@@ -1326,7 +1412,7 @@ def create_app() -> FastAPI:
 
                 app.state.trainer.config = config
 
-                # Resolve device for remote SSH training
+                # Resolve device for private compute training
                 if config.use_remote_ssh:
                     ssh_config = None
                     device_id_to_use = getattr(request, "device_id", None)
@@ -1420,9 +1506,18 @@ def create_app() -> FastAPI:
                     training_metadata["teacher_model"] = (
                         request.teacher_model or "claude-sonnet-4-6"
                     )
+                if request.strategy == TrainingStrategy.SESSION_DISTILLATION:
+                    training_metadata["session_distillation"] = (
+                        app.state.trainer.config.session_distillation_settings()
+                    )
 
+                # The train_* entry points are synchronous and, on the remote
+                # path, call asyncio.run() internally — both require a worker
+                # thread: to_thread keeps the event loop responsive and gives
+                # the remote path a thread with no running loop.
                 if request.strategy == TrainingStrategy.SFT:
-                    run = app.state.trainer.train_sft(
+                    run = await asyncio.to_thread(
+                        app.state.trainer.train_sft,
                         dataset_path=dataset_path,
                         val_dataset_path=val_dataset_path,
                         run_id=run_id,
@@ -1432,7 +1527,8 @@ def create_app() -> FastAPI:
                         training_metadata=training_metadata,
                     )
                 elif request.strategy == TrainingStrategy.DPO:
-                    run = app.state.trainer.train_dpo(
+                    run = await asyncio.to_thread(
+                        app.state.trainer.train_dpo,
                         dataset_path=dataset_path,
                         val_dataset_path=val_dataset_path,
                         run_id=run_id,
@@ -1440,7 +1536,18 @@ def create_app() -> FastAPI:
                         training_metadata=training_metadata,
                     )
                 elif request.strategy == TrainingStrategy.DISTILLATION:
-                    run = app.state.trainer.train_distillation(
+                    run = await asyncio.to_thread(
+                        app.state.trainer.train_distillation,
+                        dataset_path=dataset_path,
+                        run_id=run_id,
+                        callback=callback.on_progress_sync,
+                        log_callback=callback.on_log_sync,
+                        pid_callback=_on_pid,
+                        training_metadata=training_metadata,
+                    )
+                elif request.strategy == TrainingStrategy.SESSION_DISTILLATION:
+                    run = await asyncio.to_thread(
+                        app.state.trainer.train_session_distillation,
                         dataset_path=dataset_path,
                         run_id=run_id,
                         callback=callback.on_progress_sync,
@@ -1452,7 +1559,8 @@ def create_app() -> FastAPI:
                     from bashgym.gym.trainer import GRPOTrainer
 
                     grpo_trainer = GRPOTrainer(app.state.trainer.config)
-                    run = grpo_trainer.train_grpo(
+                    run = await asyncio.to_thread(
+                        grpo_trainer.train_grpo,
                         dataset_path=dataset_path,
                         verifier_fn=lambda p, r: 0.0,
                         run_id=run_id,
@@ -1462,7 +1570,8 @@ def create_app() -> FastAPI:
                         training_metadata=training_metadata,
                     )
                 elif request.strategy.value == "rlvr":
-                    run = app.state.trainer.train_rlvr(
+                    run = await asyncio.to_thread(
+                        app.state.trainer.train_rlvr,
                         dataset_path=dataset_path,
                         run_id=run_id,
                         callback=callback.on_progress_sync,
@@ -1472,6 +1581,12 @@ def create_app() -> FastAPI:
                     )
                 else:
                     raise ValueError(f"Unknown training strategy: {request.strategy}")
+
+                # The train_* entry points swallow exceptions into
+                # run.status/run.error_message — propagate failures instead of
+                # reporting every run as completed.
+                if run is not None and run.status == "failed":
+                    raise RuntimeError(run.error_message or "Training failed")
 
                 app.state.training_runs[run_id]["status"] = TrainingStatus.COMPLETED
                 app.state.training_runs[run_id]["completed_at"] = datetime.utcnow().isoformat()
@@ -1526,6 +1641,9 @@ def create_app() -> FastAPI:
                                 "grad_norm": round(grad_norm, 3),
                                 "eta": eta,
                                 "simulation": True,  # Flag to indicate simulation mode
+                                "compute_target": app.state.training_runs[run_id].get(
+                                    "compute_target", "local"
+                                ),
                             }
                         )
                         await asyncio.sleep(0.02)  # Fast simulation (20ms per step)
@@ -1536,9 +1654,19 @@ def create_app() -> FastAPI:
                 app.state.training_runs[run_id]["metrics"] = {
                     "final_loss": final_loss,
                     "simulation": True,
+                    "compute_target": app.state.training_runs[run_id].get(
+                        "compute_target", "local"
+                    ),
                 }
                 await broadcast_training_complete(
-                    run_id, {"final_loss": final_loss, "simulation": True}
+                    run_id,
+                    {
+                        "final_loss": final_loss,
+                        "simulation": True,
+                        "compute_target": app.state.training_runs[run_id].get(
+                            "compute_target", "local"
+                        ),
+                    },
                 )
 
         except Exception as e:
@@ -1585,6 +1713,109 @@ def create_app() -> FastAPI:
         if points is None:
             raise HTTPException(status_code=404, detail=f"No metrics for run {run_id}")
         return {"run_id": run_id, "metrics": points}
+
+    @app.get("/api/training/runs/{run_id}/analysis", tags=["Training"])
+    async def get_training_run_analysis(run_id: str):
+        """Health analysis for one run: verdict + findings (loss trend, grad
+        spikes, OOM, zero-masked-tokens, etc.) computed from its metrics.jsonl."""
+        from bashgym.gym.run_analysis import build_training_analysis
+        from bashgym.gym.run_metrics import read_run_metrics
+
+        try:
+            points = read_run_metrics(run_id, models_dir=_models_dir())
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid run_id: {run_id}")
+        if points is None:
+            raise HTTPException(status_code=404, detail=f"No metrics for run {run_id}")
+        return build_training_analysis(metrics=points, run_id=run_id)
+
+    def _run_card_roots() -> list[Path]:
+        from bashgym.config import get_settings
+
+        settings = get_settings()
+        roots = [
+            _models_dir(),
+            Path(settings.data.data_dir),
+            Path("data"),
+            Path.home() / ".bashgym",
+        ]
+        unique: list[Path] = []
+        seen: set[Path] = set()
+        for root in roots:
+            resolved = root.resolve()
+            if resolved not in seen:
+                unique.append(resolved)
+                seen.add(resolved)
+        return unique
+
+    def _resolve_run_card_path(raw_path: str) -> Path:
+        if not raw_path.strip():
+            raise HTTPException(status_code=400, detail="path is required")
+        target = Path(raw_path)
+        resolved = target.resolve()
+        allowed_roots = _run_card_roots()
+        if not any(resolved.is_relative_to(root) for root in allowed_roots):
+            raise HTTPException(status_code=400, detail="RunCard path outside allowed directories")
+        if not resolved.exists():
+            raise HTTPException(status_code=404, detail=f"RunCard not found: {resolved}")
+        if not resolved.is_file():
+            raise HTTPException(status_code=400, detail="RunCard path must be a file")
+        return resolved
+
+    def _run_card_summary(path: Path) -> dict[str, Any] | None:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            stat = path.stat()
+        except (OSError, json.JSONDecodeError):
+            return None
+        if not isinstance(payload, dict) or payload.get("schema_version") != "bashgym.run_card.v1":
+            return None
+        return {
+            "run_id": payload.get("run_id"),
+            "path": str(path),
+            "training_method": payload.get("training_method"),
+            "base_model": payload.get("base_model"),
+            "claim_tier": payload.get("claim_tier"),
+            "decision": payload.get("decision"),
+            "modified": stat.st_mtime,
+        }
+
+    @app.get("/api/training/runcards", tags=["Training"])
+    async def list_run_cards(limit: int = 20):
+        """List recent RunCards under local BashGym data/model directories."""
+
+        candidates: dict[Path, float] = {}
+        for root in _run_card_roots():
+            if not root.exists():
+                continue
+            try:
+                for pattern in ("run_card*.json", "*run_card*.json"):
+                    for path in root.rglob(pattern):
+                        if path.is_file():
+                            candidates[path.resolve()] = path.stat().st_mtime
+            except OSError:
+                continue
+        summaries: list[dict[str, Any]] = []
+        for path, _mtime in sorted(candidates.items(), key=lambda item: item[1], reverse=True):
+            summary = _run_card_summary(path)
+            if summary:
+                summaries.append(summary)
+            if len(summaries) >= max(1, min(limit, 100)):
+                break
+        return {"schema_version": "bashgym.run_card_list.v1", "run_cards": summaries}
+
+    @app.get("/api/training/runcards/validate", tags=["Training"])
+    async def validate_run_card(path: str = Query(...), promotion: bool = True):
+        """Validate one RunCard and surface promotion blockers for the UI."""
+
+        from bashgym.run_cards import validate_run_card_file
+
+        resolved = _resolve_run_card_path(path)
+        try:
+            validation = validate_run_card_file(resolved, promotion=promotion)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"schema_version": "bashgym.run_card_validation.v1", **validation}
 
     @app.get("/api/training/dataset/inspect", tags=["Training"])
     async def inspect_training_dataset(path: str = "", offset: int = 0, limit: int = 20):
@@ -1812,6 +2043,9 @@ def create_app() -> FastAPI:
                 started_at=run.get("started_at"),
                 completed_at=run.get("completed_at"),
                 metrics=run.get("metrics"),
+                origin=run.get("origin"),
+                correlation_id=run.get("correlation_id"),
+                compute_target=run.get("compute_target"),
             )
 
         # Fallback: check persisted state on disk
@@ -1824,6 +2058,9 @@ def create_app() -> FastAPI:
                 started_at=state.started_at,
                 completed_at=state.completed_at,
                 metrics=state.last_metrics,
+                origin=state.config.get("origin"),
+                correlation_id=state.config.get("correlation_id"),
+                compute_target=state.config.get("compute_target"),
             )
 
         raise HTTPException(status_code=404, detail="Training run not found")
@@ -1909,6 +2146,9 @@ def create_app() -> FastAPI:
                     started_at=r.get("started_at"),
                     completed_at=r.get("completed_at"),
                     metrics=r.get("metrics"),
+                    origin=r.get("origin"),
+                    correlation_id=r.get("correlation_id"),
+                    compute_target=r.get("compute_target"),
                 )
             )
 
@@ -1926,6 +2166,9 @@ def create_app() -> FastAPI:
                     started_at=state.started_at,
                     completed_at=state.completed_at,
                     metrics=state.last_metrics,
+                    origin=state.config.get("origin"),
+                    correlation_id=state.config.get("correlation_id"),
+                    compute_target=state.config.get("compute_target"),
                 )
             )
 
@@ -5304,6 +5547,9 @@ def create_app() -> FastAPI:
     # Include Settings routes (env/API key management)
     app.include_router(settings_router)
 
+    # Include curated public source library routes
+    app.include_router(source_router)
+
     # Include AutoResearch routes (hyperparameter search)
     app.include_router(autoresearch_router)
 
@@ -5327,6 +5573,8 @@ def create_app() -> FastAPI:
         app.include_router(orchestrator_router)
         app.include_router(agent_router)
         app.include_router(pipeline_router)
+        app.include_router(dev_router)
+        app.include_router(workspace_router)
 
     # =========================================================================
     # Web-mode endpoints: trace upload, hook receiver, install docs

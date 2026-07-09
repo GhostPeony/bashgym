@@ -2,10 +2,11 @@ import { create } from 'zustand'
 // persist and createJSONStorage available if needed for future state persistence
 // import { persist, createJSONStorage } from 'zustand/middleware'
 
-export type PanelType = 'terminal' | 'preview' | 'browser' | 'files' | 'context' | 'neon' | 'vercel'
+export type PanelType = 'terminal' | 'preview' | 'browser' | 'files' | 'context' | 'neon' | 'vercel' | 'activity' | 'training' | 'evals' | 'designer' | 'huggingface' | 'agent' | 'toolkit'
 export type AttentionState = 'none' | 'waiting' | 'success' | 'error'
 export type ViewMode = 'grid' | 'single' | 'canvas'
 export type AgentStatus = 'running' | 'idle' | 'waiting_input' | 'tool_calling'
+export type AgentKind = 'claude' | 'codex'
 
 // Tool history entry for tracking recent tool calls
 export interface ToolHistoryItem {
@@ -44,6 +45,10 @@ export interface TerminalSession {
   isPaused?: boolean
   /** Last few lines of terminal output for canvas preview */
   lastOutput?: string[]
+  /** Detected agent CLI running in this terminal (undefined = plain shell) */
+  agentKind?: AgentKind
+  /** Command auto-typed into a freshly created PTY (cleared after use) */
+  launchCommand?: string
 }
 
 // Canvas node for React Flow view
@@ -59,11 +64,17 @@ export interface CanvasNode {
   }
 }
 
-// Canvas edge — a connection between two panels on the canvas
+/** Auto-snapshot mode for a monitor edge: prefill types the path, send submits it */
+export type MonitorAutoMode = 'off' | 'prefill' | 'send'
+
+// Canvas edge — a connection between two panels on the canvas.
+// Terminal→terminal edges are monitor edges: source = watched, target = watcher.
 export interface CanvasEdge {
   id: string
   source: string  // panelId of source node
   target: string  // panelId of target node
+  type?: 'monitor'
+  data?: { auto?: MonitorAutoMode }
 }
 
 export interface Panel {
@@ -108,12 +119,14 @@ interface TerminalState {
   broadcastCommand: string
 
   // Actions
-  createTerminal: (id?: string, title?: string) => string
+  createTerminal: (id?: string, title?: string, launchCommand?: string, cwd?: string) => string
   closeTerminal: (id: string) => void
   /** Close with confirmation if the agent is busy. Returns true if closed. */
   requestCloseTerminal: (id: string) => boolean
   /** Re-adopt live PTY sessions from the main process (call once on startup). Returns count restored. */
   restoreSessions: () => Promise<number>
+  /** Restore persisted non-terminal panels (call once on startup). Returns count restored. */
+  restoreSavedPanels: () => number
   setActiveTerminal: (id: string) => void
   updateSession: (id: string, updates: Partial<TerminalSession>) => void
 
@@ -242,6 +255,41 @@ const saveSessionMeta = (sessions: Map<string, TerminalSession>) => {
   }
 }
 
+// Non-terminal panels (data + integration nodes) persisted across renderer reloads.
+// Ids are preserved so bashgym_canvas_positions entries still apply.
+const SAVED_PANELS_KEY = 'bashgym_saved_panels'
+const PERSISTED_PANEL_TYPES: PanelType[] = [
+  'activity', 'training', 'evals', 'designer', 'huggingface', 'agent', 'toolkit', 'context', 'neon', 'vercel'
+]
+
+interface PersistedPanel {
+  id: string
+  type: PanelType
+  title: string
+  adapterConfig?: Record<string, unknown>
+}
+
+const savePanels = (panels: Panel[]) => {
+  try {
+    const toSave: PersistedPanel[] = panels
+      .filter((p) => PERSISTED_PANEL_TYPES.includes(p.type))
+      .map((p) => ({ id: p.id, type: p.type, title: p.title, adapterConfig: p.adapterConfig }))
+    localStorage.setItem(SAVED_PANELS_KEY, JSON.stringify(toSave))
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+const loadSavedPanels = (): PersistedPanel[] => {
+  try {
+    const stored = localStorage.getItem(SAVED_PANELS_KEY)
+    if (stored) return JSON.parse(stored)
+  } catch {
+    // Ignore
+  }
+  return []
+}
+
 // A running/tool_calling session is never killed without explicit confirmation
 const confirmCloseIfBusy = (session: TerminalSession | undefined): boolean => {
   if (session && (session.status === 'running' || session.status === 'tool_calling')) {
@@ -264,7 +312,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   draggedPanelId: null,
   broadcastCommand: '',
 
-  createTerminal: (id?: string, title?: string) => {
+  createTerminal: (id?: string, title?: string, launchCommand?: string, cwd?: string) => {
     const terminalId = id || generateId()
 
     // Show banner only if it hasn't been shown yet in this session
@@ -276,12 +324,13 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     const session: TerminalSession = {
       id: terminalId,
       title: title || `Terminal ${get().sessions.size + 1}`,
-      cwd: '~',
+      cwd: cwd || '~',
       isActive: true,
       attention: 'none',
       showBanner,  // Only first terminal shows the banner
       status: 'idle',
-      lastActivity: Date.now()
+      lastActivity: Date.now(),
+      launchCommand
     }
 
     const panel: Panel = {
@@ -379,6 +428,18 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     return live.length
   },
 
+  restoreSavedPanels: () => {
+    const saved = loadSavedPanels()
+    if (saved.length === 0) return 0
+    const existing = new Set(get().panels.map((p) => p.id))
+    const restored: Panel[] = saved
+      .filter((p) => !existing.has(p.id) && PERSISTED_PANEL_TYPES.includes(p.type))
+      .map((p) => ({ id: p.id, type: p.type, title: p.title, adapterConfig: p.adapterConfig }))
+    if (restored.length === 0) return 0
+    set((state) => ({ panels: [...state.panels, ...restored] }))
+    return restored.length
+  },
+
   setActiveTerminal: (id: string) => {
     set({ activeSessionId: id })
     // Find and set active panel
@@ -400,11 +461,15 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       const outputChanged = false // lastOutput no longer displayed in canvas nodes
       const attentionChanged = updates.attention !== undefined && updates.attention !== session.attention
       const taskSummaryChanged = updates.taskSummary !== undefined && updates.taskSummary !== session.taskSummary
+      const agentKindChanged = 'agentKind' in updates && updates.agentKind !== session.agentKind
+      const pausedChanged = 'isPaused' in updates && updates.isPaused !== session.isPaused
+      const cwdChanged = updates.cwd !== undefined && updates.cwd !== session.cwd
+      const errorChanged = 'errorMessage' in updates && updates.errorMessage !== session.errorMessage
 
       newSessions.set(id, { ...session, ...updates })
 
       // Increment version for any significant change to force canvas re-renders
-      if (statusChanged || toolChanged || outputChanged || attentionChanged || taskSummaryChanged) {
+      if (statusChanged || toolChanged || outputChanged || attentionChanged || taskSummaryChanged || agentKindChanged || pausedChanged || cwdChanged || errorChanged) {
         return { sessions: newSessions, sessionsVersion: state.sessionsVersion + 1 }
       }
       return { sessions: newSessions }
@@ -420,6 +485,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       activePanelId: id
     }))
 
+    savePanels(get().panels)
     return id
   },
 
@@ -453,6 +519,8 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
           : state.activePanelId
       }
     })
+
+    savePanels(get().panels)
   },
 
   setActivePanel: (id: string) => {
@@ -484,6 +552,8 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
       return { panels: newPanels }
     })
+
+    savePanels(get().panels)
   },
 
   setViewMode: (mode: ViewMode) => {
@@ -594,5 +664,6 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         p.id === panelId ? { ...p, adapterConfig } : p
       )
     }))
+    savePanels(get().panels)
   }
 }))

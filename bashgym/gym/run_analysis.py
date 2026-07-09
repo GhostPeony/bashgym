@@ -97,6 +97,35 @@ def summarize_training_metrics(metrics: list[dict[str, Any]]) -> dict[str, Any]:
     test_result_accuracy = _summary(_series(metrics, "test_result_accuracy", "testResultAccuracy"))
     grad_norm = _summary(_series(metrics, "grad_norm", "gradNorm"))
     learning_rate = _summary(_series(metrics, "learning_rate", "learningRate"))
+    kl = _summary(_series(metrics, "kl", "kl_divergence", "approx_kl", "mean_kl"))
+    entropy = _summary(_series(metrics, "entropy", "policy_entropy"))
+    preference_accuracy = _summary(
+        _series(metrics, "preference_accuracy", "dpo_accuracy", "rewards/accuracies")
+    )
+    reward_margin = _summary(
+        _series(metrics, "reward_margin", "chosen_reward_margin", "rewards/margins")
+    )
+    session_distillation_loss = _summary(_series(metrics, "session_distillation_loss"))
+    session_distillation_kl = _summary(_series(metrics, "session_distillation_kl"))
+    session_distillation_ce = _summary(_series(metrics, "session_distillation_ce"))
+    session_distillation_masked_tokens = _summary(
+        _series(metrics, "session_distillation_masked_tokens")
+    )
+    verifier_error_rate = _summary(_series(metrics, "verifier_error_rate", "verifierErrorRate"))
+    tool_calls = _summary(_series(metrics, "tool_calls", "toolCalls", "command_count"))
+    tokens_per_second = _summary(
+        _series(metrics, "tokens_per_second", "throughput_tokens_per_sec", "tokens/sec")
+    )
+    gpu_memory_peak_gb = _summary(
+        _series(
+            metrics,
+            "gpu_memory_peak_gb",
+            "gpu_mem_peak_gb",
+            "gpu_memory_gb",
+            "gpu_memory_used_gb",
+        )
+    )
+    oom_count = _summary(_series(metrics, "oom_count", "ooms"))
 
     return {
         "points": len(metrics),
@@ -118,6 +147,19 @@ def summarize_training_metrics(metrics: list[dict[str, Any]]) -> dict[str, Any]:
         "test_result_accuracy": test_result_accuracy,
         "grad_norm": grad_norm,
         "learning_rate": learning_rate,
+        "kl": kl,
+        "entropy": entropy,
+        "preference_accuracy": preference_accuracy,
+        "reward_margin": reward_margin,
+        "session_distillation_loss": session_distillation_loss,
+        "session_distillation_kl": session_distillation_kl,
+        "session_distillation_ce": session_distillation_ce,
+        "session_distillation_masked_tokens": session_distillation_masked_tokens,
+        "verifier_error_rate": verifier_error_rate,
+        "tool_calls": tool_calls,
+        "tokens_per_second": tokens_per_second,
+        "gpu_memory_peak_gb": gpu_memory_peak_gb,
+        "oom_count": oom_count,
     }
 
 
@@ -146,6 +188,49 @@ def _load_release_evidence(path: Path | str | None) -> dict[str, Any] | None:
     if not isinstance(payload, dict):
         raise ValueError("release evidence must be a JSON object")
     return payload
+
+
+def _load_smoke_bundle(path: Path | str | None) -> dict[str, Any] | None:
+    if path is None:
+        return None
+    with open(path, encoding="utf-8") as f:
+        payload = json.load(f)
+    if not isinstance(payload, dict):
+        raise ValueError("smoke bundle must be a JSON object")
+    return payload
+
+
+def _smoke_bundle_summary(payload: dict[str, Any] | None) -> dict[str, Any]:
+    if payload is None:
+        return {
+            "present": False,
+            "schema_version": None,
+            "contract_ready": None,
+            "optimizer_ready": None,
+            "backend_launch_ready": None,
+            "verdict": None,
+            "checks": [],
+            "artifacts": {},
+        }
+    checks = payload.get("checks")
+    if not isinstance(checks, list):
+        checks = []
+    artifacts = payload.get("artifacts")
+    if not isinstance(artifacts, dict):
+        artifacts = {}
+    verdict = payload.get("verdict")
+    if not isinstance(verdict, dict):
+        verdict = None
+    return {
+        "present": True,
+        "schema_version": payload.get("schema_version"),
+        "contract_ready": payload.get("contract_ready"),
+        "optimizer_ready": payload.get("optimizer_ready"),
+        "backend_launch_ready": payload.get("backend_launch_ready"),
+        "verdict": verdict,
+        "checks": checks,
+        "artifacts": artifacts,
+    }
 
 
 def _release_summary(payload: dict[str, Any] | None) -> dict[str, Any]:
@@ -195,6 +280,7 @@ def build_training_analysis(
     metrics_path: Path | str | None = None,
     replay_path: Path | str | None = None,
     release_evidence_path: Path | str | None = None,
+    smoke_bundle_path: Path | str | None = None,
 ) -> dict[str, Any]:
     """Build an agent-readable analysis payload."""
 
@@ -206,6 +292,8 @@ def build_training_analysis(
 
     release_payload = _load_release_evidence(release_evidence_path)
     release_summary = _release_summary(release_payload)
+    smoke_bundle_payload = _load_smoke_bundle(smoke_bundle_path)
+    smoke_bundle_summary = _smoke_bundle_summary(smoke_bundle_payload)
     findings: list[dict[str, Any]] = []
 
     if metric_summary["points"] == 0:
@@ -239,6 +327,18 @@ def build_training_analysis(
                     "Latest GRPO reward_std is zero, so policy-gradient learning has little contrast.",
                     evidence={"reward_std": reward_std_last},
                     next_step="Use active sampling, rebalance task difficulty, or return to SFT/curriculum until attempts vary.",
+                )
+            )
+
+        session_masked_tokens_last = metric_summary["session_distillation_masked_tokens"]["last"]
+        if session_masked_tokens_last is not None and session_masked_tokens_last <= 0.0:
+            findings.append(
+                _finding(
+                    "blocker",
+                    "session_distillation_zero_masked_tokens",
+                    "Session Distillation metrics report zero masked target tokens.",
+                    evidence={"session_distillation_masked_tokens": session_masked_tokens_last},
+                    next_step="Rebuild records so target_text and target_span align before trusting masked KL/CE loss.",
                 )
             )
 
@@ -278,6 +378,30 @@ def build_training_analysis(
                 )
             )
 
+        verifier_error_last = metric_summary["verifier_error_rate"]["last"]
+        if verifier_error_last is not None and verifier_error_last > 0.02:
+            findings.append(
+                _finding(
+                    "warning",
+                    "verifier_errors_elevated",
+                    "Verifier error rate is above the starter tolerance.",
+                    evidence={"verifier_error_rate": verifier_error_last},
+                    next_step="Fix environment setup, verifier paths, or protected-file coverage before trusting reward or pass@k.",
+                )
+            )
+
+        oom_last = metric_summary["oom_count"]["last"]
+        if oom_last is not None and oom_last > 0:
+            findings.append(
+                _finding(
+                    "warning",
+                    "oom_seen",
+                    "The run reported at least one out-of-memory event.",
+                    evidence={"oom_count": oom_last},
+                    next_step="Lower batch size, sequence length, or adapter/full-finetune memory pressure before scaling.",
+                )
+            )
+
     pass1 = metric_summary["pass_at_1"]["last"]
     passk = metric_summary["pass_at_k"]["last"]
     if pass1 is None and passk is None and not release_summary["present"]:
@@ -300,6 +424,49 @@ def build_training_analysis(
                 next_step="Address each release-gate reason, then rerun the held-out/environment evidence.",
             )
         )
+
+    if smoke_bundle_summary["present"]:
+        if smoke_bundle_summary["contract_ready"] is False:
+            failed_checks = [
+                check
+                for check in smoke_bundle_summary["checks"]
+                if isinstance(check, dict) and check.get("status") == "fail"
+            ]
+            findings.append(
+                _finding(
+                    "blocker",
+                    "smoke_bundle_contract_blocked",
+                    "Backend smoke bundle says the DPPO/ECHO/RWML handoff contract is not ready.",
+                    evidence={
+                        "verdict": smoke_bundle_summary["verdict"],
+                        "failed_checks": failed_checks,
+                    },
+                    next_step=(
+                        "Fix the failed smoke-bundle checks, then regenerate "
+                        "`bashgym training smoke-bundle` before private compute work."
+                    ),
+                )
+            )
+        elif smoke_bundle_summary["optimizer_ready"] is False:
+            findings.append(
+                _finding(
+                    "warning",
+                    "smoke_bundle_needs_train_logprob_replay",
+                    "Smoke bundle contract is ready, but DPPO optimizer logprob enrichment is incomplete.",
+                    evidence={"verdict": smoke_bundle_summary["verdict"]},
+                    next_step="Run train-policy logprob replay/enrichment before a real DPPO optimizer update.",
+                )
+            )
+        elif smoke_bundle_summary["backend_launch_ready"] is False:
+            findings.append(
+                _finding(
+                    "warning",
+                    "smoke_bundle_needs_backend",
+                    "Smoke bundle is shaped correctly, but no runnable backend launch plan is ready.",
+                    evidence={"verdict": smoke_bundle_summary["verdict"]},
+                    next_step="Install/configure verl, SkyRL, or TMax/open-instruct on the private compute target, or provide a command template.",
+                )
+            )
 
     release_world_model_quality = release_summary.get("world_model_quality")
     if isinstance(release_world_model_quality, dict):
@@ -389,6 +556,29 @@ def build_training_analysis(
     ]
     if replay_summary is not None:
         docs.append({"topic": "world-models", "path": "docs/training/world-models.md"})
+    if any(
+        metric_summary[key]["count"] > 0
+        for key in (
+            "session_distillation_loss",
+            "session_distillation_kl",
+            "session_distillation_ce",
+            "session_distillation_masked_tokens",
+        )
+    ):
+        docs.append(
+            {
+                "topic": "session-distillation",
+                "path": "docs/training/session-distillation.md",
+            }
+        )
+    if smoke_bundle_summary["present"]:
+        docs.append({"topic": "agent-cli", "path": "docs/training/agent-cli.md"})
+        docs.append(
+            {
+                "topic": "private-compute-checklist",
+                "path": "docs/training/private-compute-eval-checklist.md",
+            }
+        )
 
     level = _verdict_level(findings)
     return {
@@ -403,10 +593,14 @@ def build_training_analysis(
                 if release_evidence_path is not None
                 else None
             ),
+            "smoke_bundle_path": (
+                str(Path(smoke_bundle_path).resolve()) if smoke_bundle_path is not None else None
+            ),
         },
         "training_metrics": metric_summary,
         "replay_summary": replay_summary,
         "release_evidence": release_summary,
+        "smoke_bundle": smoke_bundle_summary,
         "verdict": {
             "level": level,
             "summary": {
@@ -419,6 +613,10 @@ def build_training_analysis(
                 ),
                 "has_world_model_quality": world_model_quality_metric_count > 0
                 or release_has_world_model_quality,
+                "has_backend_smoke_bundle": smoke_bundle_summary["present"],
+                "backend_contract_ready": smoke_bundle_summary["contract_ready"],
+                "backend_optimizer_ready": smoke_bundle_summary["optimizer_ready"],
+                "backend_launch_ready": smoke_bundle_summary["backend_launch_ready"],
             },
         },
         "findings": findings,
@@ -440,6 +638,7 @@ def analyze_run_artifacts(
     metrics_path: Path | str | None = None,
     replay_path: Path | str | None = None,
     release_evidence_path: Path | str | None = None,
+    smoke_bundle_path: Path | str | None = None,
 ) -> dict[str, Any]:
     """Load requested artifacts and return ``build_training_analysis`` output."""
 
@@ -459,4 +658,5 @@ def analyze_run_artifacts(
         metrics_path=resolved_metrics_path,
         replay_path=replay_path,
         release_evidence_path=release_evidence_path,
+        smoke_bundle_path=smoke_bundle_path,
     )

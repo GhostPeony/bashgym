@@ -1,21 +1,31 @@
 # bashgym/api/agent_routes.py
 """API routes for Peony — the botanical assistant for Bash Gym."""
 
+from __future__ import annotations
+
+import asyncio
 import json
 import logging
 import os
 import re
 import secrets
+import shutil
+import socket
 import subprocess
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
+from urllib.parse import urlparse
 
+import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from bashgym import secrets as secret_store
 from bashgym.agent.memory import PeonyMemory
 from bashgym.agent.skills.registry import SkillRegistry
-from bashgym.agent.tools import ToolRegistry
+from bashgym.agent.tools import AWARENESS_TOOLS, CORE_TOOLS, MEMORY_TOOLS, ToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -34,12 +44,280 @@ _memory = PeonyMemory()
 # ---------------------------------------------------------------------------
 
 _SAFE_ID = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+_SAFE_SSH_TARGET = re.compile(r"^[A-Za-z0-9._@:-]{1,160}$")
+_SAFE_TUNNEL_HOST = re.compile(r"^[A-Za-z0-9._-]{1,253}$")
 
 
 def _validate_session_id(session_id: str) -> str:
     if not _SAFE_ID.match(session_id):
         raise HTTPException(status_code=400, detail="Invalid session ID")
     return session_id
+
+
+AGENT_ENDPOINTS_CONFIG = "agent_endpoints.json"
+DEFAULT_AGENT_ENDPOINT_ID = "hermes"
+
+
+def _validate_endpoint_id(endpoint_id: str) -> str:
+    if not _SAFE_ID.match(endpoint_id):
+        raise HTTPException(status_code=400, detail="Invalid endpoint ID")
+    return endpoint_id
+
+
+def _agent_endpoints_path() -> Path:
+    from bashgym.config import get_bashgym_dir
+
+    return get_bashgym_dir() / AGENT_ENDPOINTS_CONFIG
+
+
+def _read_agent_endpoint_config() -> dict[str, dict[str, Any]]:
+    path = _agent_endpoints_path()
+    if not path.exists():
+        return {}
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("Failed to read agent endpoint config: %s", exc)
+        return {}
+
+    endpoints = data.get("endpoints", {})
+    return endpoints if isinstance(endpoints, dict) else {}
+
+
+def _write_agent_endpoint_config(endpoints: dict[str, dict[str, Any]]) -> None:
+    path = _agent_endpoints_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"endpoints": endpoints}, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _normalize_agent_base_url(raw_url: str) -> str:
+    base_url = raw_url.strip().rstrip("/")
+    if not base_url:
+        raise HTTPException(status_code=400, detail="Endpoint URL is required")
+
+    parsed = urlparse(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise HTTPException(
+            status_code=400,
+            detail="Endpoint URL must be an http(s) URL",
+        )
+    if parsed.query or parsed.fragment:
+        raise HTTPException(
+            status_code=400,
+            detail="Endpoint URL cannot include query strings or fragments",
+        )
+
+    return base_url if base_url.endswith("/v1") else f"{base_url}/v1"
+
+
+def _default_agent_endpoint() -> dict[str, Any]:
+    model = os.environ.get("HERMES_MODEL", "hermes-agent")
+    return {
+        "id": DEFAULT_AGENT_ENDPOINT_ID,
+        "label": os.environ.get("HERMES_ENDPOINT_LABEL", "Hermes"),
+        "kind": "hermes",
+        "base_url": _normalize_agent_base_url(
+            os.environ.get("HERMES_API_BASE", "http://127.0.0.1:8642/v1")
+        ),
+        "model": model,
+        "model_options": _normalize_model_options(
+            model,
+            os.environ.get("HERMES_MODEL_OPTIONS", ""),
+        ),
+        "session_key": os.environ.get("HERMES_SESSION_KEY") or None,
+        "enabled": True,
+    }
+
+
+def _normalize_model_options(model: str, raw_options: Any) -> list[str]:
+    if isinstance(raw_options, str):
+        candidates = [item.strip() for item in raw_options.split(",")]
+    elif isinstance(raw_options, list):
+        candidates = [str(item).strip() for item in raw_options]
+    else:
+        candidates = []
+
+    options: list[str] = []
+    for item in [model, *candidates]:
+        if item and item not in options:
+            options.append(item[:120])
+    return options[:20]
+
+
+def _agent_secret_key(endpoint_id: str) -> str:
+    normalized = re.sub(r"[^A-Za-z0-9_]", "_", endpoint_id).upper()
+    return f"AGENT_ENDPOINT_{normalized}_API_KEY"
+
+
+def _agent_secret_env_keys(endpoint_id: str) -> list[str]:
+    keys = [_agent_secret_key(endpoint_id)]
+    if endpoint_id == DEFAULT_AGENT_ENDPOINT_ID:
+        keys = ["HERMES_API_KEY", "HERMES_API_SERVER_KEY", *keys]
+    return keys
+
+
+def _get_agent_api_key(endpoint_id: str) -> str | None:
+    for key in _agent_secret_env_keys(endpoint_id):
+        value = secret_store.get_secret(key)
+        if value:
+            return value
+    return None
+
+
+def _set_agent_api_key(endpoint_id: str, api_key: str | None) -> None:
+    if api_key is None:
+        return
+    trimmed = api_key.strip()
+    if trimmed:
+        secret_store.set_secret(_agent_secret_key(endpoint_id), trimmed)
+
+
+def _delete_agent_api_key(endpoint_id: str) -> None:
+    secret_store.delete_secret(_agent_secret_key(endpoint_id))
+
+
+def _public_agent_profile(profile: dict[str, Any]) -> AgentEndpointProfile:
+    endpoint_id = str(profile["id"])
+    model = str(profile.get("model") or "hermes-agent")
+    return AgentEndpointProfile(
+        id=endpoint_id,
+        label=str(profile.get("label") or "Hermes"),
+        kind=str(profile.get("kind") or "hermes"),
+        base_url=str(profile.get("base_url") or "http://127.0.0.1:8642/v1"),
+        model=model,
+        model_options=_normalize_model_options(model, profile.get("model_options") or []),
+        session_key=profile.get("session_key") or None,
+        enabled=bool(profile.get("enabled", True)),
+        api_key_configured=_get_agent_api_key(endpoint_id) is not None,
+    )
+
+
+def _load_agent_endpoint_profiles() -> dict[str, dict[str, Any]]:
+    endpoints = _read_agent_endpoint_config()
+    if DEFAULT_AGENT_ENDPOINT_ID not in endpoints:
+        endpoints[DEFAULT_AGENT_ENDPOINT_ID] = _default_agent_endpoint()
+    return endpoints
+
+
+def _get_agent_endpoint_profile(endpoint_id: str) -> dict[str, Any]:
+    endpoint_id = _validate_endpoint_id(endpoint_id)
+    endpoints = _load_agent_endpoint_profiles()
+    profile = endpoints.get(endpoint_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Agent endpoint not found")
+    profile["id"] = endpoint_id
+    profile["base_url"] = _normalize_agent_base_url(
+        str(profile.get("base_url") or "http://127.0.0.1:8642/v1")
+    )
+    profile["model"] = str(profile.get("model") or "hermes-agent")
+    profile["model_options"] = _normalize_model_options(
+        profile["model"],
+        profile.get("model_options") or [],
+    )
+    return profile
+
+
+def _endpoint_url(profile: dict[str, Any], path: str) -> str:
+    base_url = _normalize_agent_base_url(str(profile["base_url"]))
+    if path.lstrip("/").startswith("health") and base_url.endswith("/v1"):
+        base_url = base_url[:-3]
+    return f"{base_url}/{path.lstrip('/')}"
+
+
+def _agent_headers(profile: dict[str, Any], session_key: str | None = None) -> dict[str, str]:
+    endpoint_id = str(profile["id"])
+    api_key = _get_agent_api_key(endpoint_id)
+    headers = {"content-type": "application/json"}
+    if api_key:
+        headers["authorization"] = f"Bearer {api_key}"
+
+    scoped_session_key = session_key or profile.get("session_key")
+    if scoped_session_key:
+        if any(ord(ch) < 32 or ord(ch) == 127 for ch in str(scoped_session_key)):
+            raise HTTPException(
+                status_code=400,
+                detail="Session key cannot contain control characters",
+            )
+        headers["x-hermes-session-key"] = str(scoped_session_key)[:256]
+
+    return headers
+
+
+def _sanitize_agent_error(message: str, endpoint_id: str) -> str:
+    scrubbed = message
+    for key in _agent_secret_env_keys(endpoint_id):
+        value = secret_store.get_secret(key)
+        if value:
+            scrubbed = scrubbed.replace(value, "<redacted>")
+    scrubbed = re.sub(
+        r"Bearer\s+[A-Za-z0-9._~+/=-]+",
+        "Bearer <redacted>",
+        scrubbed,
+        flags=re.IGNORECASE,
+    )
+    return scrubbed
+
+
+def _json_or_text(response: httpx.Response) -> Any:
+    try:
+        return response.json()
+    except ValueError:
+        return {"text": response.text[:1000]}
+
+
+def _extract_responses_text(data: dict[str, Any]) -> str:
+    output_text = data.get("output_text")
+    if isinstance(output_text, str) and output_text.strip():
+        return output_text
+
+    chunks: list[str] = []
+    for item in data.get("output", []) or []:
+        if not isinstance(item, dict):
+            continue
+        for block in item.get("content", []) or []:
+            if not isinstance(block, dict):
+                continue
+            text = block.get("text")
+            if isinstance(text, str):
+                chunks.append(text)
+
+    return "\n".join(chunk for chunk in chunks if chunk).strip()
+
+
+def _extract_chat_completion_text(data: dict[str, Any]) -> str:
+    choices = data.get("choices") or []
+    if not choices or not isinstance(choices[0], dict):
+        return ""
+    message = choices[0].get("message") or {}
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            block.get("text", "")
+            for block in content
+            if isinstance(block, dict) and isinstance(block.get("text"), str)
+        ).strip()
+    return ""
+
+
+def _looks_like_agent_runtime_failure(text: str) -> bool:
+    """Detect provider/runtime errors that Hermes may return as assistant text."""
+    normalized = text.strip().lower()
+    if not normalized:
+        return False
+    runtime_markers = (
+        "api call failed",
+        "api call failed after",
+        "validationexception",
+        "provided model identifier is invalid",
+        "model identifier is invalid",
+    )
+    return any(marker in normalized for marker in runtime_markers)
 
 
 # ---------------------------------------------------------------------------
@@ -110,6 +388,182 @@ class SaveSessionRequest(BaseModel):
     session_id: str
     name: str
     messages: list[SessionMessage]
+
+
+# ---------------------------------------------------------------------------
+# External agent endpoint models
+# ---------------------------------------------------------------------------
+
+
+class AgentEndpointUpdate(BaseModel):
+    label: str = "Hermes"
+    kind: str = "hermes"
+    base_url: str = "http://127.0.0.1:8642/v1"
+    model: str = "hermes-agent"
+    model_options: list[str] = []
+    session_key: str | None = None
+    enabled: bool = True
+    api_key: str | None = None
+    clear_api_key: bool = False
+
+
+class AgentEndpointProfile(BaseModel):
+    id: str
+    label: str
+    kind: str = "hermes"
+    base_url: str
+    model: str
+    model_options: list[str] = []
+    session_key: str | None = None
+    enabled: bool = True
+    api_key_configured: bool = False
+
+
+class AgentEndpointListResponse(BaseModel):
+    endpoints: list[AgentEndpointProfile]
+
+
+class AgentEndpointChatRequest(BaseModel):
+    message: str
+    context: str | None = None
+    conversation: str | None = None
+    session_key: str | None = None
+
+
+class AgentEndpointChatResponse(BaseModel):
+    response: str
+    endpoint_id: str
+    model: str
+    response_id: str | None = None
+    raw_status: str | None = None
+
+
+class HermesSetupStatus(BaseModel):
+    installed: bool
+    command: str | None = None
+    gateway_command: list[str] = []
+    hermes_home: str
+    config_path: str | None = None
+    configured_model: str | None = None
+    configured_provider: str | None = None
+    env_path: str
+    env_exists: bool = False
+    env_api_enabled: bool = False
+    env_key_present: bool = False
+    gateway_url: str = "http://127.0.0.1:8642/v1"
+    gateway_healthy: bool = False
+    gateway_error: str | None = None
+    profile: AgentEndpointProfile
+    setup_needed: list[str] = []
+    log_path: str | None = None
+
+
+class HermesQuickSetupRequest(BaseModel):
+    profile_id: str = DEFAULT_AGENT_ENDPOINT_ID
+    label: str = "Hermes"
+    base_url: str = "http://127.0.0.1:8642/v1"
+    model: str = "hermes-agent"
+    model_options: list[str] = []
+    session_key: str | None = "bashgym-canvas"
+    api_key: str | None = None
+    write_env: bool = True
+    start_gateway: bool = True
+
+
+class HermesQuickSetupResponse(BaseModel):
+    status: HermesSetupStatus
+    actions: list[str]
+
+
+class HermesTunnelRequest(BaseModel):
+    endpoint_id: str = DEFAULT_AGENT_ENDPOINT_ID
+    label: str = "Hermes"
+    ssh_target: str
+    remote_host: str = "127.0.0.1"
+    remote_port: int = 8642
+    local_port: int | None = None
+    model: str = "hermes-agent"
+    model_options: list[str] = []
+    session_key: str | None = "bashgym-canvas"
+    api_key: str | None = None
+    save_profile: bool = True
+
+
+class HermesTunnelDisconnectRequest(BaseModel):
+    endpoint_id: str = DEFAULT_AGENT_ENDPOINT_ID
+
+
+class HermesTunnelStatus(BaseModel):
+    active: bool = False
+    endpoint_id: str = DEFAULT_AGENT_ENDPOINT_ID
+    ssh_target: str | None = None
+    local_base_url: str | None = None
+    local_port: int | None = None
+    remote_host: str = "127.0.0.1"
+    remote_port: int = 8642
+    pid: int | None = None
+    healthy: bool = False
+    health_error: str | None = None
+    profile: AgentEndpointProfile | None = None
+
+
+_HERMES_TUNNELS: dict[str, dict[str, Any]] = {}
+
+
+class ToolkitSkillResourceCounts(BaseModel):
+    scripts: int = 0
+    references: int = 0
+    assets: int = 0
+
+
+class ToolkitSkill(BaseModel):
+    name: str
+    description: str = ""
+    source: str
+    path: str | None = None
+    resource_counts: ToolkitSkillResourceCounts = ToolkitSkillResourceCounts()
+    tool_count: int = 0
+
+
+class ToolkitTool(BaseModel):
+    name: str
+    description: str = ""
+    source: str
+    required: list[str] = []
+
+
+class ToolkitEndpointCapability(BaseModel):
+    endpoint_id: str
+    label: str
+    kind: str = "hermes"
+    enabled: bool = True
+    ok: bool = False
+    auth_configured: bool = False
+    models: int = 0
+    skills: int = 0
+    toolsets: int = 0
+    skill_names: list[str] = []
+    toolset_names: list[str] = []
+    warnings: list[str] = []
+
+
+class ToolkitSkillRoot(BaseModel):
+    label: str
+    path: str
+    exists: bool
+    skill_count: int = 0
+
+
+class ToolkitInventoryResponse(BaseModel):
+    generated_at: str
+    cached: bool = False
+    cache_ttl_seconds: int
+    counts: dict[str, int]
+    skill_roots: list[ToolkitSkillRoot]
+    skills: list[ToolkitSkill]
+    tools: list[ToolkitTool]
+    endpoint_capabilities: list[ToolkitEndpointCapability]
+    warnings: list[str] = []
 
 
 # ---------------------------------------------------------------------------
@@ -461,6 +915,15 @@ async def _execute_tool(name: str, tool_input: dict) -> str:
                 }
                 if tool_input.get("model"):
                     payload["base_model"] = tool_input["model"]
+                if tool_input.get("dataset_path"):
+                    payload["dataset_path"] = tool_input["dataset_path"]
+                if tool_input.get("correlation_id"):
+                    payload["correlation_id"] = tool_input["correlation_id"]
+                payload["origin"] = {
+                    "kind": "agent",
+                    "agent": "hermes",
+                    **(tool_input.get("origin") or {}),
+                }
                 resp = await client.post(f"{base_url}/api/training/start", json=payload)
                 resp.raise_for_status()
                 data = resp.json()
@@ -519,6 +982,1342 @@ async def _execute_tool(name: str, tool_input: dict) -> str:
             return json.dumps({"error": f"HTTP {e.response.status_code}: {e.response.text[:200]}"})
         except Exception as e:
             return json.dumps({"error": str(e)})
+
+
+# ---------------------------------------------------------------------------
+# External agent endpoint routes
+# ---------------------------------------------------------------------------
+
+
+@router.get("/endpoints", response_model=AgentEndpointListResponse)
+async def list_agent_endpoints():
+    """List configured Hermes-compatible agent endpoints without secrets."""
+    endpoints = _load_agent_endpoint_profiles()
+    profiles = []
+    for endpoint_id, profile in sorted(endpoints.items()):
+        profile = {**profile, "id": endpoint_id}
+        profiles.append(_public_agent_profile(profile))
+    return AgentEndpointListResponse(endpoints=profiles)
+
+
+@router.get("/hermes/setup-status", response_model=HermesSetupStatus)
+async def get_hermes_setup_status(
+    endpoint_id: str = DEFAULT_AGENT_ENDPOINT_ID,
+    base_url: str = "http://127.0.0.1:8642/v1",
+):
+    """Inspect local Hermes gateway readiness for a fresh canvas node."""
+    return await _hermes_setup_status(endpoint_id=endpoint_id, base_url=base_url)
+
+
+@router.post("/hermes/quick-setup", response_model=HermesQuickSetupResponse)
+async def quick_setup_hermes(request: HermesQuickSetupRequest):
+    """Configure the local Hermes API server profile and optionally start the gateway."""
+    endpoint_id = _validate_endpoint_id(request.profile_id or DEFAULT_AGENT_ENDPOINT_ID)
+    base_url = _normalize_agent_base_url(request.base_url)
+    actions: list[str] = []
+    command = _hermes_command()
+
+    env_path = _hermes_env_path(command)
+    env_values = _parse_env_file(env_path)
+    api_key = (
+        request.api_key.strip()
+        if request.api_key and request.api_key.strip()
+        else _get_agent_api_key(endpoint_id)
+        or env_values.get("API_SERVER_KEY")
+        or secrets.token_urlsafe(32)
+    )
+
+    _save_agent_endpoint_profile(
+        endpoint_id,
+        label=request.label,
+        base_url=base_url,
+        model=request.model,
+        model_options=request.model_options,
+        session_key=request.session_key,
+        api_key=api_key,
+    )
+    actions.append("Saved BashGym Hermes endpoint profile")
+
+    if request.write_env:
+        configured_with_cli = False
+        if command:
+            enabled_ok = _hermes_config_set(command, "API_SERVER_ENABLED", "true")
+            configured_with_cli = enabled_ok
+            if enabled_ok:
+                actions.append("Enabled Hermes API server via hermes config")
+
+        _upsert_env_file(
+            env_path,
+            {
+                "API_SERVER_ENABLED": "true",
+                "API_SERVER_KEY": api_key,
+            },
+        )
+        actions.append(
+            "Updated Hermes .env API server fallback"
+            if configured_with_cli
+            else "Updated Hermes .env API server settings"
+        )
+
+    healthy, _ = await _probe_hermes_health(base_url, api_key)
+    log_path: str | None = None
+    if request.start_gateway and not healthy:
+        gateway_command = _hermes_gateway_command(command)
+        if not gateway_command:
+            actions.append("Hermes CLI not found; gateway was not started")
+        else:
+            try:
+                log_path = _start_hermes_gateway(gateway_command)
+                actions.append("Started Hermes gateway process")
+                time.sleep(4)
+            except Exception as exc:
+                actions.append(f"Gateway start failed: {exc}")
+
+    status = await _hermes_setup_status(
+        endpoint_id=endpoint_id,
+        base_url=base_url,
+        log_path=log_path,
+    )
+    return HermesQuickSetupResponse(status=status, actions=actions)
+
+
+@router.get("/hermes/tunnel/status", response_model=HermesTunnelStatus)
+async def get_hermes_tunnel_status(endpoint_id: str = DEFAULT_AGENT_ENDPOINT_ID):
+    """Return the local SSH tunnel status for a remote Hermes gateway."""
+    return await _hermes_tunnel_status(endpoint_id)
+
+
+@router.post("/hermes/tunnel/connect", response_model=HermesTunnelStatus)
+async def connect_hermes_tunnel(request: HermesTunnelRequest):
+    """Start a local SSH port-forward to a remote Hermes API server."""
+    endpoint_id = _validate_endpoint_id(request.endpoint_id or DEFAULT_AGENT_ENDPOINT_ID)
+    ssh_target = _validate_ssh_target(request.ssh_target)
+    remote_host = _validate_tunnel_host(request.remote_host or "127.0.0.1")
+    remote_port = _validate_port(request.remote_port, field="Remote port")
+
+    _stop_hermes_tunnel(endpoint_id)
+    if request.local_port is None:
+        local_port = _find_available_local_port()
+    else:
+        local_port = _validate_port(request.local_port, field="Local port")
+        if not _can_bind_local_port(local_port):
+            raise HTTPException(
+                status_code=409, detail=f"Local port {local_port} is already in use"
+            )
+
+    state = _start_hermes_ssh_tunnel(
+        endpoint_id=endpoint_id,
+        ssh_target=ssh_target,
+        local_port=local_port,
+        remote_host=remote_host,
+        remote_port=remote_port,
+    )
+    local_base_url = str(state["local_base_url"])
+    api_key = (
+        request.api_key.strip()
+        if request.api_key and request.api_key.strip()
+        else _get_agent_api_key(endpoint_id)
+    )
+
+    profile: AgentEndpointProfile | None = None
+    if request.save_profile:
+        profile = _save_agent_endpoint_profile(
+            endpoint_id,
+            label=request.label or "Hermes",
+            base_url=local_base_url,
+            model=request.model or "hermes-agent",
+            model_options=request.model_options,
+            session_key=request.session_key,
+            api_key=api_key,
+        )
+
+    healthy = False
+    health_error: str | None = None
+    process = state.get("process")
+    for _ in range(20):
+        if not _process_active(process):
+            log_text = _tail_file(Path(str(state.get("log_path") or "")))
+            _HERMES_TUNNELS.pop(endpoint_id, None)
+            detail = log_text or "SSH tunnel process exited before the forward became available"
+            raise HTTPException(status_code=502, detail=detail)
+        healthy, health_error = await _probe_hermes_health(local_base_url, api_key)
+        if healthy:
+            break
+        await asyncio.sleep(0.25)
+
+    if profile is None:
+        profile = _public_agent_profile(_get_agent_endpoint_profile(endpoint_id))
+
+    return HermesTunnelStatus(
+        active=_process_active(process),
+        endpoint_id=endpoint_id,
+        ssh_target=ssh_target,
+        local_base_url=local_base_url,
+        local_port=local_port,
+        remote_host=remote_host,
+        remote_port=remote_port,
+        pid=int(state.get("pid") or 0) or None,
+        healthy=healthy,
+        health_error=health_error,
+        profile=profile,
+    )
+
+
+@router.post("/hermes/tunnel/disconnect", response_model=HermesTunnelStatus)
+async def disconnect_hermes_tunnel(request: HermesTunnelDisconnectRequest):
+    """Stop a BashGym-managed local SSH port-forward for Hermes."""
+    endpoint_id = _validate_endpoint_id(request.endpoint_id or DEFAULT_AGENT_ENDPOINT_ID)
+    _stop_hermes_tunnel(endpoint_id)
+    return await _hermes_tunnel_status(endpoint_id)
+
+
+@router.put("/endpoints/{endpoint_id}", response_model=AgentEndpointProfile)
+async def save_agent_endpoint(endpoint_id: str, request: AgentEndpointUpdate):
+    """Create or update an agent endpoint profile."""
+    endpoint_id = _validate_endpoint_id(endpoint_id)
+    session_key = request.session_key.strip() if request.session_key else None
+    if session_key and any(ord(ch) < 32 or ord(ch) == 127 for ch in session_key):
+        raise HTTPException(
+            status_code=400,
+            detail="Session key cannot contain control characters",
+        )
+
+    profile = {
+        "id": endpoint_id,
+        "label": (request.label or "Hermes").strip()[:80],
+        "kind": (request.kind or "hermes").strip().lower()[:40],
+        "base_url": _normalize_agent_base_url(request.base_url),
+        "model": (request.model or "hermes-agent").strip()[:120],
+        "model_options": _normalize_model_options(
+            (request.model or "hermes-agent").strip()[:120],
+            request.model_options,
+        ),
+        "session_key": session_key[:256] if session_key else None,
+        "enabled": bool(request.enabled),
+    }
+
+    endpoints = _read_agent_endpoint_config()
+    endpoints[endpoint_id] = profile
+    _write_agent_endpoint_config(endpoints)
+
+    if request.clear_api_key:
+        _delete_agent_api_key(endpoint_id)
+    else:
+        _set_agent_api_key(endpoint_id, request.api_key)
+
+    return _public_agent_profile(profile)
+
+
+@router.delete("/endpoints/{endpoint_id}")
+async def delete_agent_endpoint(endpoint_id: str):
+    """Delete an agent endpoint profile and its stored local secret."""
+    endpoint_id = _validate_endpoint_id(endpoint_id)
+    endpoints = _read_agent_endpoint_config()
+    existed = endpoint_id in endpoints
+    if existed:
+        del endpoints[endpoint_id]
+        _write_agent_endpoint_config(endpoints)
+    _delete_agent_api_key(endpoint_id)
+    return {"status": "ok", "endpoint_id": endpoint_id, "deleted": existed}
+
+
+def _count_endpoint_items(data: Any, keys: tuple[str, ...]) -> int:
+    if isinstance(data, list):
+        return len(data)
+    if isinstance(data, dict):
+        for key in keys:
+            value = data.get(key)
+            if isinstance(value, list):
+                return len(value)
+            if isinstance(value, dict):
+                return len(value)
+    return 0
+
+
+def _extract_named_endpoint_items(data: Any, keys: tuple[str, ...], limit: int = 250) -> list[str]:
+    candidates: Any = data
+    if isinstance(data, dict):
+        for key in keys:
+            value = data.get(key)
+            if isinstance(value, (list, dict)):
+                candidates = value
+                break
+
+    if isinstance(candidates, dict):
+        iterable = candidates.values()
+    elif isinstance(candidates, list):
+        iterable = candidates
+    else:
+        return []
+
+    names: list[str] = []
+    for item in iterable:
+        if isinstance(item, str):
+            name = item
+        elif isinstance(item, dict):
+            name = str(item.get("name") or item.get("id") or item.get("label") or "")
+        else:
+            name = ""
+        if name:
+            names.append(name)
+        if len(names) >= limit:
+            break
+    return names
+
+
+def _hermes_cli_path(command: str | None, *args: str) -> Path | None:
+    if not command:
+        return None
+    try:
+        result = subprocess.run(
+            [command, "config", *args],
+            capture_output=True,
+            text=True,
+            timeout=8,
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+    value = result.stdout.strip().splitlines()[0].strip() if result.stdout.strip() else ""
+    return Path(value).expanduser() if value else None
+
+
+def _hermes_env_path(command: str | None = None) -> Path:
+    explicit = os.environ.get("HERMES_ENV_PATH")
+    if explicit:
+        return Path(explicit).expanduser()
+    home_override = os.environ.get("HERMES_HOME")
+    if home_override:
+        return Path(home_override).expanduser() / ".env"
+
+    discovered = _hermes_cli_path(command, "env-path")
+    if discovered:
+        return discovered
+
+    return _hermes_home(command) / ".env"
+
+
+def _hermes_config_path(command: str | None = None) -> Path | None:
+    explicit = os.environ.get("HERMES_CONFIG_PATH")
+    if explicit:
+        return Path(explicit).expanduser()
+    home_override = os.environ.get("HERMES_HOME")
+    if home_override:
+        return Path(home_override).expanduser() / "config.yaml"
+    return _hermes_cli_path(command, "path")
+
+
+def _hermes_home(command: str | None = None) -> Path:
+    explicit = os.environ.get("HERMES_HOME")
+    if explicit:
+        return Path(explicit).expanduser()
+
+    env_path = _hermes_cli_path(command, "env-path")
+    if env_path:
+        return env_path.parent
+
+    return Path.home() / ".hermes"
+
+
+def _parse_env_file(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    if not path.exists():
+        return values
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return values
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        values[key.strip()] = value.strip().strip("\"'")
+    return values
+
+
+def _upsert_env_file(path: Path, updates: dict[str, str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing_lines = (
+        path.read_text(encoding="utf-8", errors="replace").splitlines() if path.exists() else []
+    )
+    seen: set[str] = set()
+    output: list[str] = []
+    for line in existing_lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            output.append(line)
+            continue
+        key = stripped.split("=", 1)[0].strip()
+        if key in updates:
+            output.append(f"{key}={updates[key]}")
+            seen.add(key)
+        else:
+            output.append(line)
+    for key, value in updates.items():
+        if key not in seen:
+            output.append(f"{key}={value}")
+    path.write_text("\n".join(output).rstrip() + "\n", encoding="utf-8")
+
+
+def _hermes_config_set(command: str | None, key: str, value: str) -> bool:
+    if not command:
+        return False
+    try:
+        result = subprocess.run(
+            [command, "config", "set", key, value],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except Exception as exc:
+        logger.debug("Hermes config set failed for %s: %s", key, exc)
+        return False
+    if result.returncode != 0:
+        logger.debug("Hermes config set failed for %s with exit %s", key, result.returncode)
+        return False
+    return True
+
+
+def _truthy_config_value(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() in {"true", "1", "yes", "on"}
+
+
+def _hermes_api_server_enabled(env_values: dict[str, str], config_path: Path | None = None) -> bool:
+    if _truthy_config_value(env_values.get("API_SERVER_ENABLED", "")):
+        return True
+    if not config_path or not config_path.exists():
+        return False
+
+    try:
+        import yaml  # type: ignore
+
+        data = yaml.safe_load(config_path.read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        data = None
+
+    if not isinstance(data, dict):
+        return False
+
+    candidates = [
+        data.get("api_server"),
+        (
+            (data.get("platforms") or {}).get("api_server")
+            if isinstance(data.get("platforms"), dict)
+            else None
+        ),
+        (
+            (data.get("gateway") or {}).get("api_server")
+            if isinstance(data.get("gateway"), dict)
+            else None
+        ),
+    ]
+    for candidate in candidates:
+        if isinstance(candidate, dict) and _truthy_config_value(candidate.get("enabled", "")):
+            return True
+    return False
+
+
+def _hermes_config_summary(config_path: Path | None) -> tuple[str | None, str | None]:
+    if not config_path or not config_path.exists():
+        return None, None
+
+    try:
+        import yaml  # type: ignore
+
+        data = yaml.safe_load(config_path.read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        return None, None
+
+    if not isinstance(data, dict):
+        return None, None
+
+    model_config = data.get("model")
+    if isinstance(model_config, str):
+        return model_config, None
+    if isinstance(model_config, dict):
+        model = model_config.get("default") or model_config.get("model") or model_config.get("name")
+        provider = model_config.get("provider")
+        return (
+            str(model) if model else None,
+            str(provider) if provider else None,
+        )
+    return None, None
+
+
+def _hermes_command() -> str | None:
+    return shutil.which("hermes")
+
+
+def _hermes_gateway_command(command: str | None) -> list[str]:
+    if not command:
+        return []
+    try:
+        result = subprocess.run(
+            [command, "gateway", "run", "--help"],
+            capture_output=True,
+            text=True,
+            timeout=8,
+        )
+        if result.returncode == 0:
+            return [command, "gateway", "run"]
+    except Exception:
+        pass
+    return [command, "gateway"]
+
+
+async def _probe_hermes_health(
+    base_url: str, api_key: str | None = None
+) -> tuple[bool, str | None]:
+    url = _normalize_agent_base_url(base_url)
+    health_root = url[:-3] if url.endswith("/v1") else url
+    headers = {"authorization": f"Bearer {api_key}"} if api_key else {}
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(4.0, connect=2.0)) as client:
+            response = await client.get(f"{health_root}/health", headers=headers)
+            if response.is_success:
+                return True, None
+            return False, f"HTTP {response.status_code}"
+    except Exception as exc:
+        return False, str(exc) or exc.__class__.__name__
+
+
+def _validate_ssh_target(target: str) -> str:
+    value = target.strip()
+    if not value or value.startswith("-") or not _SAFE_SSH_TARGET.match(value):
+        raise HTTPException(
+            status_code=400,
+            detail="SSH target must be a host or SSH config alias without spaces",
+        )
+    return value
+
+
+def _validate_tunnel_host(host: str) -> str:
+    value = host.strip()
+    if not value or value.startswith("-") or not _SAFE_TUNNEL_HOST.match(value):
+        raise HTTPException(status_code=400, detail="Remote host is invalid")
+    return value
+
+
+def _validate_port(port: int, *, field: str) -> int:
+    if port < 1 or port > 65535:
+        raise HTTPException(status_code=400, detail=f"{field} must be between 1 and 65535")
+    return port
+
+
+def _can_bind_local_port(port: int) -> bool:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", port))
+            return True
+    except OSError:
+        return False
+
+
+def _find_available_local_port(preferred: int = 18642) -> int:
+    start = _validate_port(preferred, field="Local port")
+    for port in range(start, min(start + 100, 65536)):
+        if _can_bind_local_port(port):
+            return port
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _tunnel_log_path(endpoint_id: str) -> Path:
+    from bashgym.config import get_bashgym_dir
+
+    log_dir = get_bashgym_dir() / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    return log_dir / f"hermes-tunnel-{endpoint_id}.log"
+
+
+def _tail_file(path: Path, limit: int = 1200) -> str:
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    return text[-limit:].strip()
+
+
+def _forwarded_local_port(base_url: str) -> int | None:
+    try:
+        parsed = urlparse(_normalize_agent_base_url(base_url))
+    except HTTPException:
+        return None
+    if parsed.hostname not in {"127.0.0.1", "localhost"}:
+        return None
+    if parsed.port is None or parsed.port == 8642:
+        return None
+    return parsed.port
+
+
+def _process_active(process: Any) -> bool:
+    poll = getattr(process, "poll", None)
+    return process is not None and callable(poll) and poll() is None
+
+
+def _stop_forwarded_tunnel_process(port: int) -> bool:
+    try:
+        import psutil  # type: ignore
+    except Exception:
+        return False
+
+    for conn in psutil.net_connections(kind="tcp"):
+        laddr = getattr(conn, "laddr", None)
+        conn_port = getattr(laddr, "port", None)
+        if conn_port != port or not conn.pid:
+            continue
+        try:
+            process = psutil.Process(conn.pid)
+            name = process.name().lower()
+            cmdline = " ".join(process.cmdline()).lower()
+            if "ssh" not in name and "ssh" not in cmdline:
+                continue
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except psutil.TimeoutExpired:
+                process.kill()
+            return True
+        except Exception:
+            continue
+    return False
+
+
+def _stop_hermes_tunnel(endpoint_id: str) -> None:
+    state = _HERMES_TUNNELS.pop(endpoint_id, None)
+    process = state.get("process") if isinstance(state, dict) else None
+    if _process_active(process):
+        try:
+            process.terminate()
+            process.wait(timeout=5)
+        except Exception:
+            try:
+                process.kill()
+            except Exception:
+                pass
+        return
+
+    try:
+        profile = _public_agent_profile(_get_agent_endpoint_profile(endpoint_id))
+    except HTTPException:
+        return
+    local_port = _forwarded_local_port(profile.base_url)
+    if local_port:
+        _stop_forwarded_tunnel_process(local_port)
+
+
+def _start_hermes_ssh_tunnel(
+    *,
+    endpoint_id: str,
+    ssh_target: str,
+    local_port: int,
+    remote_host: str,
+    remote_port: int,
+) -> dict[str, Any]:
+    ssh_command = shutil.which("ssh") or shutil.which("ssh.exe")
+    if not ssh_command:
+        raise HTTPException(status_code=503, detail="OpenSSH client was not found on this machine")
+
+    log_path = _tunnel_log_path(endpoint_id)
+    forward = f"127.0.0.1:{local_port}:{remote_host}:{remote_port}"
+    command = [
+        ssh_command,
+        "-N",
+        "-L",
+        forward,
+        "-o",
+        "ExitOnForwardFailure=yes",
+        "-o",
+        "ServerAliveInterval=30",
+        "-o",
+        "ServerAliveCountMax=2",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "StrictHostKeyChecking=accept-new",
+        ssh_target,
+    ]
+    flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+    log_handle = log_path.open("ab")
+    try:
+        process = subprocess.Popen(
+            command,
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            creationflags=flags,
+        )
+    except Exception as exc:
+        log_handle.close()
+        raise HTTPException(status_code=502, detail=f"Failed to start SSH tunnel: {exc}") from exc
+    log_handle.close()
+
+    state = {
+        "process": process,
+        "endpoint_id": endpoint_id,
+        "ssh_target": ssh_target,
+        "local_port": local_port,
+        "remote_host": remote_host,
+        "remote_port": remote_port,
+        "local_base_url": f"http://127.0.0.1:{local_port}/v1",
+        "pid": getattr(process, "pid", None),
+        "log_path": str(log_path),
+    }
+    _HERMES_TUNNELS[endpoint_id] = state
+    return state
+
+
+async def _hermes_tunnel_status(
+    endpoint_id: str = DEFAULT_AGENT_ENDPOINT_ID,
+) -> HermesTunnelStatus:
+    endpoint_id = _validate_endpoint_id(endpoint_id)
+    profile: AgentEndpointProfile | None = None
+    try:
+        profile = _public_agent_profile(_get_agent_endpoint_profile(endpoint_id))
+    except HTTPException:
+        profile = None
+
+    state = _HERMES_TUNNELS.get(endpoint_id)
+    if not state:
+        if profile:
+            local_port = _forwarded_local_port(profile.base_url)
+            if local_port:
+                healthy, health_error = await _probe_hermes_health(
+                    profile.base_url,
+                    _get_agent_api_key(endpoint_id),
+                )
+                return HermesTunnelStatus(
+                    active=healthy,
+                    endpoint_id=endpoint_id,
+                    local_base_url=profile.base_url,
+                    local_port=local_port,
+                    healthy=healthy,
+                    health_error=health_error,
+                    profile=profile,
+                )
+        return HermesTunnelStatus(endpoint_id=endpoint_id, profile=profile)
+
+    process = state.get("process")
+    active = _process_active(process)
+    local_base_url = str(state.get("local_base_url") or "")
+    healthy = False
+    health_error = "Tunnel process exited" if not active else None
+    if active and local_base_url:
+        healthy, health_error = await _probe_hermes_health(
+            local_base_url,
+            _get_agent_api_key(endpoint_id),
+        )
+    if not active:
+        _HERMES_TUNNELS.pop(endpoint_id, None)
+
+    return HermesTunnelStatus(
+        active=active,
+        endpoint_id=endpoint_id,
+        ssh_target=str(state.get("ssh_target") or "") or None,
+        local_base_url=local_base_url or None,
+        local_port=int(state.get("local_port") or 0) or None,
+        remote_host=str(state.get("remote_host") or "127.0.0.1"),
+        remote_port=int(state.get("remote_port") or 8642),
+        pid=int(state.get("pid") or 0) or None,
+        healthy=healthy,
+        health_error=health_error,
+        profile=profile,
+    )
+
+
+def _save_agent_endpoint_profile(
+    endpoint_id: str,
+    *,
+    label: str,
+    base_url: str,
+    model: str,
+    model_options: list[str] | None = None,
+    session_key: str | None,
+    api_key: str | None,
+) -> AgentEndpointProfile:
+    endpoint_id = _validate_endpoint_id(endpoint_id)
+    normalized_model = (model or "hermes-agent").strip()[:120]
+    profile = {
+        "id": endpoint_id,
+        "label": (label or "Hermes").strip()[:80],
+        "kind": "hermes",
+        "base_url": _normalize_agent_base_url(base_url),
+        "model": normalized_model,
+        "model_options": _normalize_model_options(normalized_model, model_options or []),
+        "session_key": (session_key or None),
+        "enabled": True,
+    }
+    endpoints = _read_agent_endpoint_config()
+    endpoints[endpoint_id] = profile
+    _write_agent_endpoint_config(endpoints)
+    _set_agent_api_key(endpoint_id, api_key)
+    return _public_agent_profile(profile)
+
+
+async def _hermes_setup_status(
+    *,
+    endpoint_id: str = DEFAULT_AGENT_ENDPOINT_ID,
+    base_url: str = "http://127.0.0.1:8642/v1",
+    log_path: str | None = None,
+) -> HermesSetupStatus:
+    endpoint_id = _validate_endpoint_id(endpoint_id)
+    command = _hermes_command()
+    env_path = _hermes_env_path(command)
+    config_path = _hermes_config_path(command)
+    env_values = _parse_env_file(env_path)
+    api_server_enabled = _hermes_api_server_enabled(env_values, config_path)
+    configured_model, configured_provider = _hermes_config_summary(config_path)
+    profile = _get_agent_endpoint_profile(endpoint_id)
+    public_profile = _public_agent_profile(profile)
+    api_key = _get_agent_api_key(endpoint_id) or env_values.get("API_SERVER_KEY")
+    healthy, health_error = await _probe_hermes_health(base_url, api_key)
+    setup_needed: list[str] = []
+
+    if not command:
+        setup_needed.append("Install Hermes CLI")
+    if not api_server_enabled:
+        setup_needed.append("Enable API server in Hermes config")
+    if not env_values.get("API_SERVER_KEY") and not public_profile.api_key_configured:
+        setup_needed.append("Create and save API server key")
+    if not healthy:
+        setup_needed.append("Start Hermes gateway")
+
+    return HermesSetupStatus(
+        installed=bool(command),
+        command=command,
+        gateway_command=_hermes_gateway_command(command),
+        hermes_home=str(_hermes_home(command)),
+        config_path=str(config_path) if config_path else None,
+        configured_model=configured_model,
+        configured_provider=configured_provider,
+        env_path=str(env_path),
+        env_exists=env_path.exists(),
+        env_api_enabled=api_server_enabled,
+        env_key_present=bool(env_values.get("API_SERVER_KEY")),
+        gateway_url=_normalize_agent_base_url(base_url),
+        gateway_healthy=healthy,
+        gateway_error=health_error,
+        profile=public_profile,
+        setup_needed=setup_needed,
+        log_path=log_path,
+    )
+
+
+def _start_hermes_gateway(command: list[str]) -> str | None:
+    if not command:
+        return None
+    from bashgym.config import get_bashgym_dir
+
+    log_dir = get_bashgym_dir() / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "hermes-gateway.log"
+    flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+    log_handle = log_path.open("ab")
+    try:
+        subprocess.Popen(
+            command,
+            cwd=str(Path.home()),
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            creationflags=flags,
+        )
+    except Exception:
+        log_handle.close()
+        raise
+    log_handle.close()
+    return str(log_path)
+
+
+async def _probe_agent_endpoint_profile(profile: dict[str, Any]) -> dict[str, Any]:
+    endpoint_id = str(profile["id"])
+    headers = _agent_headers(profile)
+    probes: dict[str, dict[str, Any]] = {}
+    warnings: list[str] = []
+
+    async with httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=5.0)) as client:
+        for name, path, optional in (
+            ("health", "health", False),
+            ("health_detailed", "health/detailed", True),
+            ("capabilities", "capabilities", False),
+            ("models", "models", False),
+            ("skills", "skills", False),
+            ("toolsets", "toolsets", False),
+        ):
+            url = _endpoint_url(profile, path)
+            try:
+                response = await client.get(url, headers=headers)
+                probes[name] = {
+                    "ok": response.is_success,
+                    "status_code": response.status_code,
+                    "data": _json_or_text(response),
+                }
+                if not response.is_success and not optional:
+                    warnings.append(f"{name} returned HTTP {response.status_code}")
+            except Exception as exc:
+                message = _sanitize_agent_error(str(exc), endpoint_id)
+                probes[name] = {"ok": False, "error": message}
+                if not optional:
+                    warnings.append(f"{name} failed: {message}")
+
+    models_data = probes.get("models", {}).get("data")
+    skills_data = probes.get("skills", {}).get("data")
+    toolsets_data = probes.get("toolsets", {}).get("data")
+    ok = any(probe.get("ok") for probe in probes.values())
+
+    return {
+        "ok": ok,
+        "profile": _public_agent_profile(profile),
+        "auth_configured": _get_agent_api_key(endpoint_id) is not None,
+        "probes": probes,
+        "summary": {
+            "models": _count_endpoint_items(models_data, ("data", "models")),
+            "skills": _count_endpoint_items(skills_data, ("skills", "data")),
+            "toolsets": _count_endpoint_items(toolsets_data, ("toolsets", "data")),
+        },
+        "warnings": warnings,
+    }
+
+
+@router.post("/endpoints/{endpoint_id}/discover")
+async def discover_agent_endpoint(endpoint_id: str):
+    """Probe a Hermes-compatible endpoint for health and capabilities."""
+    profile = _get_agent_endpoint_profile(endpoint_id)
+    return await _probe_agent_endpoint_profile(profile)
+
+
+TOOLKIT_CACHE_TTL_SECONDS = 60
+_TOOLKIT_CACHE: dict[str, dict[str, Any]] = {}
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def _toolkit_skill_root_candidates() -> list[tuple[str, Path]]:
+    roots: list[tuple[str, Path]] = []
+    env_roots = os.environ.get("BASHGYM_SKILL_DIRS", "")
+    for index, raw in enumerate([p for p in env_roots.split(os.pathsep) if p.strip()]):
+        roots.append((f"env:{index + 1}", Path(raw).expanduser()))
+
+    repo_root = _repo_root()
+    roots.extend(
+        [
+            ("workspace", repo_root / "assistant" / "workspace" / "skills"),
+            ("agents", Path.home() / ".agents" / "skills"),
+            ("codex", Path.home() / ".codex" / "skills"),
+            ("codex-system", Path.home() / ".codex" / "skills" / ".system"),
+            ("claude", Path.home() / ".claude" / "skills"),
+        ]
+    )
+
+    seen: set[str] = set()
+    unique: list[tuple[str, Path]] = []
+    for label, path in roots:
+        key = str(path.resolve()) if path.exists() else str(path)
+        if key not in seen:
+            unique.append((label, path))
+            seen.add(key)
+    return unique
+
+
+def _read_skill_frontmatter(skill_path: Path) -> tuple[str, str]:
+    name = skill_path.parent.name
+    description = ""
+    try:
+        lines = skill_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return name, description
+
+    if not lines or lines[0].strip() != "---":
+        for line in lines[:20]:
+            if line.lower().startswith("# "):
+                name = line[2:].strip() or name
+                break
+        return name, description
+
+    for line in lines[1:80]:
+        stripped = line.strip()
+        if stripped == "---":
+            break
+        if stripped.startswith("name:"):
+            name = stripped.split(":", 1)[1].strip().strip("\"'") or name
+        elif stripped.startswith("description:"):
+            description = stripped.split(":", 1)[1].strip().strip("\"'")
+    return name, description
+
+
+def _resource_counts(skill_dir: Path) -> ToolkitSkillResourceCounts:
+    def count_files(dirname: str) -> int:
+        path = skill_dir / dirname
+        if not path.exists() or not path.is_dir():
+            return 0
+        return sum(1 for item in path.rglob("*") if item.is_file())
+
+    return ToolkitSkillResourceCounts(
+        scripts=count_files("scripts"),
+        references=count_files("references"),
+        assets=count_files("assets"),
+    )
+
+
+def _scan_skill_roots(
+    max_skills: int = 400,
+) -> tuple[list[ToolkitSkillRoot], list[ToolkitSkill], list[str]]:
+    root_infos: list[ToolkitSkillRoot] = []
+    skills: list[ToolkitSkill] = []
+    warnings: list[str] = []
+    seen_paths: set[str] = set()
+
+    skip_dirs = {".git", "__pycache__", "node_modules", ".venv", "venv"}
+    for label, root in _toolkit_skill_root_candidates():
+        root_count = 0
+        exists = root.exists()
+        if exists:
+            try:
+                for current, dirs, files in os.walk(root):
+                    dirs[:] = [d for d in dirs if d not in skip_dirs]
+                    depth = len(Path(current).relative_to(root).parts)
+                    if depth > 6:
+                        dirs[:] = []
+                        continue
+                    if "SKILL.md" not in files:
+                        continue
+                    skill_path = Path(current) / "SKILL.md"
+                    key = str(skill_path.resolve())
+                    if key in seen_paths:
+                        continue
+                    seen_paths.add(key)
+                    name, description = _read_skill_frontmatter(skill_path)
+                    skills.append(
+                        ToolkitSkill(
+                            name=name,
+                            description=description,
+                            source=label,
+                            path=str(skill_path),
+                            resource_counts=_resource_counts(skill_path.parent),
+                        )
+                    )
+                    root_count += 1
+                    if len(skills) >= max_skills:
+                        logger.debug("Stopped local skill scan at %s skills", max_skills)
+                        break
+            except OSError as exc:
+                warnings.append(f"Could not scan {label}: {exc}")
+        root_infos.append(
+            ToolkitSkillRoot(
+                label=label,
+                path=str(root),
+                exists=exists,
+                skill_count=root_count,
+            )
+        )
+        if len(skills) >= max_skills:
+            break
+
+    peony_skills = _skill_registry.list_all()
+    for skill in peony_skills:
+        skills.append(
+            ToolkitSkill(
+                name=str(skill.get("name") or "unknown"),
+                description=str(skill.get("description") or ""),
+                source="peony",
+                path=None,
+                resource_counts=ToolkitSkillResourceCounts(),
+                tool_count=len(skill.get("tools") or []),
+            )
+        )
+
+    skills.sort(key=lambda item: (item.source, item.name.lower()))
+    return root_infos, skills, warnings
+
+
+def _tool_source_maps() -> tuple[dict[str, str], dict[str, list[str]]]:
+    source_by_name: dict[str, str] = {}
+    required_by_name: dict[str, list[str]] = {}
+    for source, tools in (
+        ("peony-core", CORE_TOOLS),
+        ("peony-memory", MEMORY_TOOLS),
+        ("peony-awareness", AWARENESS_TOOLS),
+    ):
+        for tool in tools:
+            name = str(tool.get("name") or "")
+            if name:
+                source_by_name[name] = source
+                required_by_name[name] = list(
+                    (tool.get("input_schema") or {}).get("required") or []
+                )
+
+    for skill in _skill_registry.skills:
+        skill_name = str(skill.get("name") or "skill")
+        for tool in skill.get("tools", []) or []:
+            name = str(tool.get("name") or "")
+            if name and name not in source_by_name:
+                source_by_name[name] = f"peony-skill:{skill_name}"
+                required_by_name[name] = list(
+                    (tool.get("input_schema") or {}).get("required") or []
+                )
+
+    return source_by_name, required_by_name
+
+
+def _list_toolkit_tools() -> list[ToolkitTool]:
+    skill_tools: list[dict] = []
+    for skill in _skill_registry.skills:
+        skill_tools.extend(skill.get("tools", []) or [])
+
+    source_by_name, required_by_name = _tool_source_maps()
+    tools: list[ToolkitTool] = []
+    for tool in _tool_registry.build_tools(skill_tools=skill_tools):
+        name = str(tool.get("name") or "")
+        if not name:
+            continue
+        tools.append(
+            ToolkitTool(
+                name=name,
+                description=str(tool.get("description") or ""),
+                source=source_by_name.get(name, "peony"),
+                required=required_by_name.get(name, []),
+            )
+        )
+    tools.sort(key=lambda item: (item.source, item.name))
+    return tools
+
+
+async def _list_endpoint_capabilities(
+    include_remote: bool,
+) -> tuple[list[ToolkitEndpointCapability], list[str]]:
+    capabilities: list[ToolkitEndpointCapability] = []
+    warnings: list[str] = []
+
+    for endpoint_id, raw_profile in sorted(_load_agent_endpoint_profiles().items()):
+        profile = {**raw_profile, "id": endpoint_id}
+        public_profile = _public_agent_profile(profile)
+        item = ToolkitEndpointCapability(
+            endpoint_id=endpoint_id,
+            label=public_profile.label,
+            kind=public_profile.kind,
+            enabled=public_profile.enabled,
+            auth_configured=public_profile.api_key_configured,
+        )
+
+        if not include_remote:
+            item.warnings.append("Remote probing disabled for this request")
+            capabilities.append(item)
+            continue
+        if not public_profile.enabled:
+            item.warnings.append("Endpoint disabled")
+            capabilities.append(item)
+            continue
+        if not public_profile.api_key_configured:
+            item.warnings.append("API key not configured")
+            capabilities.append(item)
+            continue
+
+        try:
+            probe = await _probe_agent_endpoint_profile(profile)
+            item.ok = bool(probe.get("ok"))
+            summary = probe.get("summary") or {}
+            item.models = int(summary.get("models") or 0)
+            item.skills = int(summary.get("skills") or 0)
+            item.toolsets = int(summary.get("toolsets") or 0)
+            item.warnings = list(probe.get("warnings") or [])
+            probes = probe.get("probes") or {}
+            item.skill_names = _extract_named_endpoint_items(
+                (probes.get("skills") or {}).get("data"),
+                ("skills", "data"),
+            )
+            item.toolset_names = _extract_named_endpoint_items(
+                (probes.get("toolsets") or {}).get("data"),
+                ("toolsets", "data"),
+            )
+        except Exception as exc:
+            message = _sanitize_agent_error(str(exc), endpoint_id)
+            item.warnings.append(message)
+            warnings.append(f"{endpoint_id}: {message}")
+        capabilities.append(item)
+
+    return capabilities, warnings
+
+
+async def _build_toolkit_inventory(include_remote: bool) -> ToolkitInventoryResponse:
+    root_infos, skills, scan_warnings = _scan_skill_roots()
+    tools = _list_toolkit_tools()
+    endpoint_capabilities, endpoint_warnings = await _list_endpoint_capabilities(include_remote)
+    warnings = [*scan_warnings, *endpoint_warnings]
+
+    return ToolkitInventoryResponse(
+        generated_at=datetime.now(timezone.utc).isoformat(),
+        cached=False,
+        cache_ttl_seconds=TOOLKIT_CACHE_TTL_SECONDS,
+        counts={
+            "skills": len(skills),
+            "tools": len(tools),
+            "skill_roots": len(root_infos),
+            "endpoints": len(endpoint_capabilities),
+            "endpoint_skills": sum(item.skills for item in endpoint_capabilities),
+            "endpoint_toolsets": sum(item.toolsets for item in endpoint_capabilities),
+        },
+        skill_roots=root_infos,
+        skills=skills,
+        tools=tools,
+        endpoint_capabilities=endpoint_capabilities,
+        warnings=warnings,
+    )
+
+
+@router.get("/toolkit", response_model=ToolkitInventoryResponse)
+async def get_toolkit_inventory(include_remote: bool = True, refresh: bool = False):
+    """Return a cached capability inventory for local skills, tools, and agent endpoints."""
+    cache_key = f"include_remote={include_remote}"
+    now = datetime.now(timezone.utc)
+    cached = _TOOLKIT_CACHE.get(cache_key)
+    if (
+        cached
+        and not refresh
+        and cached["expires_at"] > now
+        and isinstance(cached.get("data"), ToolkitInventoryResponse)
+    ):
+        data = cached["data"].model_copy(deep=True)
+        data.cached = True
+        return data
+
+    data = await _build_toolkit_inventory(include_remote)
+    _TOOLKIT_CACHE[cache_key] = {
+        "expires_at": now + timedelta(seconds=TOOLKIT_CACHE_TTL_SECONDS),
+        "data": data,
+    }
+    return data
+
+
+@router.post(
+    "/endpoints/{endpoint_id}/chat",
+    response_model=AgentEndpointChatResponse,
+)
+async def chat_with_agent_endpoint(
+    endpoint_id: str,
+    request: AgentEndpointChatRequest,
+):
+    """Send a workspace-contextual message to a Hermes-compatible endpoint."""
+    profile = _get_agent_endpoint_profile(endpoint_id)
+    if not bool(profile.get("enabled", True)):
+        raise HTTPException(status_code=400, detail="Agent endpoint is disabled")
+    if not _get_agent_api_key(endpoint_id):
+        raise HTTPException(status_code=400, detail="Agent endpoint API key is not configured")
+
+    message = request.message.strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="Message is required")
+
+    full_input = message
+    if request.context and request.context.strip():
+        full_input = (
+            "BashGym workspace context:\n"
+            f"{request.context.strip()}\n\n"
+            "User request:\n"
+            f"{message}"
+        )
+
+    model = str(profile.get("model") or "hermes-agent")
+    session_key = request.session_key or profile.get("session_key") or request.conversation
+    headers = _agent_headers(profile, session_key=session_key)
+    instructions = (
+        "You are Hermes connected to a BashGym workspace canvas. Use the supplied "
+        "workspace context to help manage training runs, evals, datasets, models, "
+        "and connected nodes. Be explicit about actions you can and cannot take."
+    )
+
+    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=5.0)) as client:
+        responses_payload = {
+            "model": model,
+            "input": full_input,
+            "instructions": instructions,
+        }
+        responses_url = _endpoint_url(profile, "responses")
+        try:
+            response = await client.post(
+                responses_url,
+                headers=headers,
+                json=responses_payload,
+            )
+        except Exception as exc:
+            message = _sanitize_agent_error(str(exc), endpoint_id)
+            raise HTTPException(status_code=502, detail=message)
+
+        data = _json_or_text(response)
+        responses_runtime_failure: str | None = None
+        if response.status_code not in {404, 405}:
+            if not response.is_success:
+                detail = _sanitize_agent_error(str(data), endpoint_id)
+                raise HTTPException(status_code=502, detail=detail)
+            if not isinstance(data, dict):
+                raise HTTPException(status_code=502, detail="Agent endpoint returned non-JSON")
+            text = _extract_responses_text(data)
+            if not text:
+                raise HTTPException(status_code=502, detail="Agent endpoint returned no text")
+            if _looks_like_agent_runtime_failure(text):
+                responses_runtime_failure = _sanitize_agent_error(text, endpoint_id)
+            else:
+                return AgentEndpointChatResponse(
+                    response=text,
+                    endpoint_id=endpoint_id,
+                    model=model,
+                    response_id=data.get("id") if isinstance(data.get("id"), str) else None,
+                    raw_status=data.get("status") if isinstance(data.get("status"), str) else None,
+                )
+
+        if response.status_code in {404, 405} or responses_runtime_failure:
+            chat_payload = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": instructions},
+                    {"role": "user", "content": full_input},
+                ],
+                "stream": False,
+            }
+            chat_url = _endpoint_url(profile, "chat/completions")
+            try:
+                chat_response = await client.post(
+                    chat_url,
+                    headers=headers,
+                    json=chat_payload,
+                )
+            except Exception as exc:
+                message = _sanitize_agent_error(str(exc), endpoint_id)
+                raise HTTPException(status_code=502, detail=message)
+
+            chat_data = _json_or_text(chat_response)
+            if not chat_response.is_success:
+                detail = _sanitize_agent_error(str(chat_data), endpoint_id)
+                if responses_runtime_failure:
+                    detail = f"{responses_runtime_failure}; chat fallback failed: {detail}"
+                raise HTTPException(status_code=502, detail=detail)
+            if not isinstance(chat_data, dict):
+                raise HTTPException(status_code=502, detail="Agent endpoint returned non-JSON")
+            text = _extract_chat_completion_text(chat_data)
+            if not text:
+                detail = "Agent endpoint returned no text"
+                if responses_runtime_failure:
+                    detail = f"{responses_runtime_failure}; chat fallback returned no text"
+                raise HTTPException(status_code=502, detail=detail)
+            if _looks_like_agent_runtime_failure(text):
+                detail = _sanitize_agent_error(text, endpoint_id)
+                raise HTTPException(status_code=502, detail=detail)
+
+            return AgentEndpointChatResponse(
+                response=text,
+                endpoint_id=endpoint_id,
+                model=model,
+                response_id=chat_data.get("id") if isinstance(chat_data.get("id"), str) else None,
+                raw_status="chat.completions",
+            )
 
 
 # ---------------------------------------------------------------------------

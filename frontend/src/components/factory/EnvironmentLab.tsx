@@ -39,6 +39,8 @@ import {
   type EnvironmentSpuriousRewardControlResponse,
   type TerminalEnvironmentSpec,
 } from '../../services/api'
+import { BaseModelSelect } from '../common/BaseModelSelect'
+import { ModelSelect } from '../common/ModelSelect'
 
 type LabStatus =
   | { kind: 'idle'; message: string }
@@ -1735,11 +1737,10 @@ function ModelRolloutPanel({
         </label>
         <label className="block">
           <span className="block font-mono text-xs uppercase text-text-muted mb-1">Model</span>
-          <input
-            type="text"
+          <ModelSelect
             value={endpointModel}
-            onChange={(event) => onEndpointModelChange(event.target.value)}
-            placeholder="Qwen/Qwen3-Coder"
+            onChange={onEndpointModelChange}
+            placeholder="Select endpoint model..."
             className="input w-full font-mono text-xs"
           />
         </label>
@@ -2294,11 +2295,9 @@ function DppoSmokePanel({
         </label>
         <label className="block">
           <span className="block font-mono text-xs uppercase text-text-muted mb-1">Base model</span>
-          <input
-            type="text"
+          <BaseModelSelect
             value={baseModel}
-            onChange={(event) => onBaseModelChange(event.target.value)}
-            placeholder="Qwen/Qwen3.5-4B"
+            onChange={onBaseModelChange}
             className="input w-full font-mono text-xs"
           />
         </label>

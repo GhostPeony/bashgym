@@ -2,12 +2,14 @@ import { useState, useEffect } from 'react'
 import { X, FolderGit2, Database, Sparkles, Info, Cloud, Monitor, Shield, FileText, Server, AlertCircle, Boxes, BookOpen } from 'lucide-react'
 import type { TrainingConfig as TrainingConfigType, DataSource, TrainingProfile } from '../../stores'
 import type { TrainingStrategy } from '../../stores'
-import { tracesApi, securityApi, providersApi, trainingApi, RepoInfo, SecurityDatasetInfo, OllamaModel } from '../../services/api'
+import { tracesApi, securityApi, providersApi, trainingApi, systemInfoApi, RepoInfo, SecurityDatasetInfo, OllamaModel, ModelRecommendations } from '../../services/api'
 import { useTutorialComplete } from '../../hooks'
 import { clsx } from 'clsx'
 import { DeviceManager } from './DeviceManager'
 import { useDeviceStore } from '../../stores/deviceStore'
 import { useCascadeStore } from '../../stores/cascadeStore'
+import { BaseModelSelect } from '../common/BaseModelSelect'
+import { ModelSelect } from '../common/ModelSelect'
 
 type TrainingScope = 'all' | 'selected' | 'single'
 type TrainingBackend = 'local' | 'remote_ssh' | 'nemo' | 'managed'
@@ -48,6 +50,14 @@ const WORLD_MODEL_DEFAULTS = {
   rwmlKlBeta: 0,
 } satisfies Partial<TrainingConfigType>
 
+const RWML_EMBEDDING_MODEL_OPTIONS = [
+  { value: 'qwen3-embedding', label: 'Qwen3 Embedding' },
+  { value: 'nomic-embed-text', label: 'Nomic Embed Text' },
+  { value: 'mxbai-embed-large', label: 'MxBai Embed Large' },
+  { value: 'text-embedding-3-large', label: 'OpenAI Text Embedding 3 Large' },
+  { value: 'text-embedding-3-small', label: 'OpenAI Text Embedding 3 Small' },
+]
+
 const TRAINING_GUIDANCE: Record<TrainingStrategy, {
   fit: string
   start: string
@@ -77,6 +87,12 @@ const TRAINING_GUIDANCE: Record<TrainingStrategy, {
     start: 'Use this for hard tasks where pass@k is zero or when a stronger teacher can create cleaner reasoning traces.',
     metrics: 'Watch student loss, held-out pass@k, teacher agreement, and whether distilled traces preserve safe tool use.',
     caution: 'Distillation can copy teacher mistakes; keep verifier and holdout checks in the loop.',
+  },
+  session_distillation: {
+    fit: 'Self-distillation from the model\'s own traces: add a local hint before a failed action, then train the original context toward the hinted logprobs.',
+    start: 'Use alpha 0.7, temperature 1.0, target-span-only masking, and confidence >= 0.6 for failed commands, retry loops, and recovery pivots.',
+    metrics: 'Watch masked KL, hard CE, accepted/skipped records, reader confidence, held-out decision accuracy, and pass@k on terminal tasks.',
+    caution: 'Do not use it as proof by loss alone. Promote only when held-out behavior improves against SFT or classic distillation.',
   },
   cascade: {
     fit: 'Domain-staged GRPO that trains easier terminal skills before harder multi-step tasks.',
@@ -129,11 +145,15 @@ export function TrainingConfig({ onClose, onStart, onOpenGuides }: TrainingConfi
   const [managedPlatform, setManagedPlatform] = useState<'together' | 'openai' | 'fireworks'>('together')
   const [managedAccountId, setManagedAccountId] = useState('')
   const [managedMsg, setManagedMsg] = useState<string | null>(null)
+  const [managedJob, setManagedJob] = useState<{ platform: 'together' | 'openai' | 'fireworks'; jobId: string } | null>(null)
+  // Quick Start vs Advanced setup (progressive disclosure). Quick shows ~3
+  // inputs with hardware-aware recommendations; Advanced is the full form.
+  const [setupMode, setSetupMode] = useState<'quick' | 'advanced'>('quick')
+  const [recs, setRecs] = useState<ModelRecommendations | null>(null)
   const [dataSource, setDataSource] = useState<DataSource>('traces')
   const [securityDatasets, setSecurityDatasets] = useState<SecurityDatasetInfo[]>([])
   const [ollamaModels, setOllamaModels] = useState<OllamaModel[]>([])
-  const [customModelInput, setCustomModelInput] = useState('')
-  const [showCustomModel, setShowCustomModel] = useState(false)
+  const [showCustomEmbeddingModel, setShowCustomEmbeddingModel] = useState(false)
   const { complete: completeTutorialStep } = useTutorialComplete()
   const { defaultDeviceId, fetchDevices } = useDeviceStore()
 
@@ -191,6 +211,12 @@ export function TrainingConfig({ onClose, onStart, onOpenGuides }: TrainingConfi
     teacherModel: 'meta-llama/Llama-3.1-70B-Instruct',
     teacherTemperature: 2.0,
     distillationAlpha: 0.5,
+    sessionDistillationAlpha: 0.7,
+    sessionDistillationTemperature: 1.0,
+    sessionDistillationMinConfidence: 0.6,
+    sessionDistillationMaskPolicy: 'target_span_only',
+    sessionDistillationContextMode: 'hint_injected',
+    sessionDistillationReader: 'heuristic',
     // Security dataset defaults
     securityDatasetType: '',
     securityDatasetPath: '',
@@ -226,11 +252,63 @@ export function TrainingConfig({ onClose, onStart, onOpenGuides }: TrainingConfi
     }
   }, [defaultDeviceId, trainingBackend])
 
+  // Fetch hardware-aware recommendations (detected GPU → model/quant/batch).
+  useEffect(() => {
+    let cancelled = false
+    const deviceId = trainingBackend === 'remote_ssh' ? config.deviceId : undefined
+    systemInfoApi.getRecommendations(deviceId).then((res) => {
+      if (!cancelled && res.ok && res.data) setRecs(res.data)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [trainingBackend, config.deviceId])
+
+  // In Quick Start, adopt the top recommended model for the detected hardware.
+  useEffect(() => {
+    if (setupMode === 'quick' && recs?.recommended_models?.length) {
+      setConfig((prev) => ({ ...prev, baseModel: recs.recommended_models[0] }))
+    }
+  }, [setupMode, recs])
+
+  // Poll a submitted managed (cloud) fine-tune for live status until it finishes.
+  useEffect(() => {
+    if (!managedJob) return
+    const TERMINAL = ['succeeded', 'completed', 'failed', 'cancelled', 'error']
+    let cancelled = false
+
+    const poll = async () => {
+      const res = await trainingApi.managedPoll(managedJob.platform, managedJob.jobId)
+      if (cancelled) return
+      if (res.ok && res.data) {
+        const { backend, status, output_model, error } = res.data
+        if (error) {
+          setManagedMsg(`${backend} job ${managedJob.jobId} failed — ${error}`)
+        } else if (output_model) {
+          setManagedMsg(`${backend} job ${managedJob.jobId} — ${status} · model: ${output_model}`)
+        } else {
+          setManagedMsg(`${backend} job ${managedJob.jobId} — ${status}`)
+        }
+        if (TERMINAL.includes((status || '').toLowerCase()) || error) {
+          setManagedJob(null) // stop polling
+        }
+      }
+    }
+
+    poll()
+    const interval = window.setInterval(poll, 10000)
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+    }
+  }, [managedJob])
+
   const strategies: { value: TrainingStrategy; label: string; description: string }[] = [
     { value: 'sft', label: 'SFT', description: 'Supervised Fine-Tuning' },
     { value: 'dpo', label: 'DPO', description: 'Direct Preference Optimization' },
     { value: 'grpo', label: 'GRPO', description: 'Group Relative Policy Optimization' },
     { value: 'distillation', label: 'KD', description: 'Knowledge Distillation' },
+    { value: 'session_distillation', label: 'Session', description: 'Hinted Self-Distillation' },
     { value: 'cascade', label: 'Cascade RL', description: 'Domain-Staged GRPO' },
   ]
   const strategyGuide = TRAINING_GUIDANCE[config.strategy]
@@ -304,6 +382,8 @@ export function TrainingConfig({ onClose, onStart, onOpenGuides }: TrainingConfi
       })
       if (result.ok && result.data?.job_id) {
         setManagedMsg(`Submitted ${result.data.backend} job ${result.data.job_id} — ${result.data.status}`)
+        // Kick off live status polling (managed jobs run on the provider's cloud).
+        setManagedJob({ platform: managedPlatform, jobId: result.data.job_id })
       } else {
         setManagedMsg(result.data?.error || result.error || 'Submit failed')
       }
@@ -351,7 +431,103 @@ export function TrainingConfig({ onClose, onStart, onOpenGuides }: TrainingConfi
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="overflow-y-auto max-h-[calc(92vh-148px)] p-5 md:p-6">
-          <div className="grid grid-cols-1 xl:grid-cols-[minmax(360px,0.9fr)_minmax(0,1.55fr)] gap-5 xl:gap-6">
+          {/* Quick Start vs Advanced toggle */}
+          <div className="flex items-center gap-2 mb-5">
+            {(['quick', 'advanced'] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setSetupMode(mode)}
+                className={clsx(
+                  'font-mono text-xs uppercase tracking-widest px-3 py-1.5 border-brutal rounded-brutal transition-all',
+                  setupMode === mode
+                    ? 'bg-accent-light text-accent-dark border-border shadow-brutal-sm'
+                    : 'bg-transparent text-text-secondary border-border hover:text-text-primary'
+                )}
+              >
+                {mode === 'quick' ? 'Quick Start' : 'Advanced'}
+              </button>
+            ))}
+          </div>
+
+          {/* Quick Start: hardware-aware, ~3 inputs, everything else defaulted */}
+          {setupMode === 'quick' && (
+            <div className="space-y-5 mb-2">
+              {recs && (
+                <div className="card border-brutal border-accent p-4">
+                  <p className="font-mono text-xs uppercase tracking-widest text-accent mb-1">Detected hardware</p>
+                  <p className="text-sm text-text-primary">
+                    {recs.max_vram_gb}GB {recs.unified_memory ? 'unified memory' : recs.cuda_available ? 'VRAM' : '(CPU)'} · recommended: {recs.recommended_quantization}, batch {recs.recommended_batch_size}
+                  </p>
+                  {recs.warning && <p className="font-mono text-xs text-status-warning mt-1">{recs.warning}</p>}
+                </div>
+              )}
+
+              <div>
+                <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-3">Method</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {strategies.slice(0, 3).map((s) => (
+                    <button
+                      key={s.value}
+                      type="button"
+                      onClick={() => setConfig((prev) => ({ ...prev, strategy: s.value }))}
+                      className={clsx(
+                        'card p-3 text-center transition-press',
+                        config.strategy === s.value ? 'border-accent bg-accent-light text-accent-dark' : ''
+                      )}
+                    >
+                      <div className="font-mono text-xs font-bold uppercase">{s.label}</div>
+                      <div className="text-[11px] text-text-muted mt-1">{s.description}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-3">Base model</label>
+                <BaseModelSelect
+                  value={config.baseModel}
+                  onChange={(v) => setConfig((prev) => ({ ...prev, baseModel: v }))}
+                />
+                {recs?.recommended_models?.length ? (
+                  <p className="font-mono text-xs text-text-muted mt-2">Recommended for your hardware: {recs.recommended_models.slice(0, 3).join(', ')}</p>
+                ) : null}
+              </div>
+
+              <div>
+                <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-3">Training data</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {([
+                    { value: 'all', label: 'Generalist', hint: 'All gold traces' },
+                    { value: 'selected', label: 'Mixed', hint: 'Selected repos' },
+                    { value: 'single', label: 'Specialist', hint: 'One repo' }
+                  ] as const).map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setTrainingScope(opt.value)}
+                      className={clsx(
+                        'card p-3 text-center transition-press',
+                        trainingScope === opt.value ? 'border-accent bg-accent-light text-accent-dark' : ''
+                      )}
+                    >
+                      <div className="font-mono text-xs font-bold uppercase">{opt.label}</div>
+                      <div className="text-[11px] text-text-muted mt-1">{opt.hint}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <p className="font-mono text-xs text-text-muted">
+                Everything else uses hardware-tuned defaults ({recs?.recommended_quantization ?? 'QLoRA'}, batch {recs?.recommended_batch_size ?? 1}, local compute). Switch to Advanced to customize any of it.
+              </p>
+            </div>
+          )}
+
+          <div className={clsx(
+            'grid grid-cols-1 xl:grid-cols-[minmax(360px,0.9fr)_minmax(0,1.55fr)] gap-5 xl:gap-6',
+            setupMode !== 'advanced' && 'hidden'
+          )}>
             <div className="space-y-5 xl:self-start">
               <SectionKicker
                 title="Run setup"
@@ -625,8 +801,8 @@ export function TrainingConfig({ onClose, onStart, onOpenGuides }: TrainingConfi
                 )}
               >
                 <Server className="w-5 h-5 mx-auto mb-1" />
-                <span className="block font-mono text-xs font-bold uppercase">Remote Device</span>
-                <span className="block font-mono text-xs mt-1 text-text-muted">SSH Training</span>
+                <span className="block font-mono text-xs font-bold uppercase">Private Target</span>
+                <span className="block font-mono text-xs mt-1 text-text-muted">Larger GPU</span>
               </button>
               <button
                 type="button"
@@ -710,7 +886,7 @@ export function TrainingConfig({ onClose, onStart, onOpenGuides }: TrainingConfi
                 {trainingBackend === 'local'
                   ? 'Train locally using your GPU with Unsloth. Requires CUDA-capable GPU.'
                   : trainingBackend === 'remote_ssh'
-                    ? 'Select or add a remote SSH device for training.'
+                    ? 'Select or add a private compute target for larger training jobs.'
                     : trainingBackend === 'managed'
                       ? 'Submit a hosted fine-tune job to Together or OpenAI — no local GPU.'
                       : 'Train using NVIDIA NeMo Microservices for scalable cloud training.'}
@@ -842,72 +1018,15 @@ export function TrainingConfig({ onClose, onStart, onOpenGuides }: TrainingConfi
             <label className="block font-mono text-xs uppercase tracking-widest text-text-secondary mb-3">
               Base Model
             </label>
-            <select
-              value={showCustomModel ? '__custom__' : config.baseModel}
-              onChange={(e) => {
-                if (e.target.value === '__custom__') {
-                  setShowCustomModel(true)
-                } else {
-                  setShowCustomModel(false)
-                  setConfig({ ...config, baseModel: e.target.value })
-                }
-              }}
+            <BaseModelSelect
+              value={config.baseModel}
+              onChange={(baseModel) => setConfig({ ...config, baseModel })}
               className="input w-full"
-            >
-              <optgroup label="Gemma 4 (Apr 2026)">
-                <option value="google/gemma-4-31B-it">Gemma 4 31B Dense (#3 open model, DGX Spark)</option>
-                <option value="google/gemma-4-26B-A4B-it">Gemma 4 26B MoE (4B active, efficient)</option>
-                <option value="google/gemma-4-E4B-it">Gemma 4 E4B (edge/device)</option>
-                <option value="google/gemma-4-E2B-it">Gemma 4 E2B (edge/device)</option>
-              </optgroup>
-              <optgroup label="Qwen 3.5 (Feb 2026)">
-                <option value="Qwen/Qwen3.5-0.8B">Qwen3.5-0.8B (dense)</option>
-                <option value="Qwen/Qwen3.5-4B">Qwen3.5-4B (dense)</option>
-                <option value="Qwen/Qwen3.5-9B">Qwen3.5-9B (dense)</option>
-                <option value="Qwen/Qwen3.5-27B">Qwen3.5-27B (dense)</option>
-                <option value="Qwen/Qwen3.5-35B-A3B">Qwen3.5-35B-A3B (MoE, ~74GB VRAM)</option>
-              </optgroup>
-              <optgroup label="Llama">
-                <option value="meta-llama/Llama-3.2-1B-Instruct">Llama-3.2-1B-Instruct</option>
-                <option value="meta-llama/Llama-3.2-3B-Instruct">Llama-3.2-3B-Instruct</option>
-                <option value="meta-llama/Llama-3.1-8B-Instruct">Llama-3.1-8B-Instruct</option>
-              </optgroup>
-              <optgroup label="DeepSeek">
-                <option value="deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct">DeepSeek-Coder-V2-Lite</option>
-                <option value="deepseek-ai/deepseek-coder-6.7b-instruct">DeepSeek-Coder-6.7B</option>
-              </optgroup>
-              <optgroup label="Nemotron (NVIDIA)">
-                <option value="nvidia/Nemotron-Cascade-2-30B-A3B">Nemotron-Cascade-2-30B-A3B (MoE, DGX Spark)</option>
-                <option value="nvidia/Nemotron-3-Nano-4B-Instruct">Nemotron-3-Nano-4B</option>
-                <option value="nvidia/Nemotron-Mini-4B-Instruct">Nemotron-Mini-4B</option>
-              </optgroup>
-              <optgroup label="Other">
-                <option value="mistralai/Mistral-7B-Instruct-v0.3">Mistral-7B-Instruct</option>
-                <option value="google/gemma-2-9b-it">Gemma-2-9B-IT</option>
-              </optgroup>
-              <option value="__custom__">Custom model...</option>
-            </select>
-
-            {/* Custom model input */}
-            {showCustomModel && (
-              <div className="flex gap-2 mt-2">
-                <input
-                  type="text"
-                  value={customModelInput}
-                  onChange={(e) => {
-                    setCustomModelInput(e.target.value)
-                    setConfig({ ...config, baseModel: e.target.value })
-                  }}
-                  className="input flex-1"
-                  placeholder="org/model-name (HuggingFace ID or Ollama tag)"
-                  autoFocus
-                />
-              </div>
-            )}
+            />
 
             <p className="font-mono text-xs text-text-muted mt-2">
               Select a HuggingFace model to fine-tune, or enter a custom model ID.
-              {ollamaModels.length > 0 && ' After training, deploy to Ollama for inference on your DGX Spark.'}
+              {ollamaModels.length > 0 && ' After training, deploy to Ollama for local or private inference.'}
             </p>
           </div>
 
@@ -1430,13 +1549,45 @@ export function TrainingConfig({ onClose, onStart, onOpenGuides }: TrainingConfi
                     <FieldLabel hint="RWML compares predicted and observed next states in embedding space. Keep this stable across runs so distances are comparable.">
                       Embedding Model
                     </FieldLabel>
-                    <input
-                      type="text"
-                      value={config.rwmlEmbeddingModel ?? ''}
-                      onChange={(e) => setConfig({ ...config, rwmlEmbeddingModel: e.target.value })}
+                    <select
+                      value={
+                        showCustomEmbeddingModel ||
+                        ((config.rwmlEmbeddingModel ?? '') !== '' &&
+                          !RWML_EMBEDDING_MODEL_OPTIONS.some((model) => model.value === config.rwmlEmbeddingModel))
+                          ? '__custom__'
+                          : config.rwmlEmbeddingModel ?? ''
+                      }
+                      onChange={(e) => {
+                        if (e.target.value === '__custom__') {
+                          setShowCustomEmbeddingModel(true)
+                        } else {
+                          setShowCustomEmbeddingModel(false)
+                          setConfig({ ...config, rwmlEmbeddingModel: e.target.value })
+                        }
+                      }}
                       className="input w-full"
-                      placeholder="qwen3-embedding"
-                    />
+                    >
+                      <option value="">Backend default</option>
+                      {RWML_EMBEDDING_MODEL_OPTIONS.map((model) => (
+                        <option key={model.value} value={model.value}>
+                          {model.label}
+                        </option>
+                      ))}
+                      <option value="__custom__">Custom embedding model...</option>
+                    </select>
+                    {(showCustomEmbeddingModel ||
+                      ((config.rwmlEmbeddingModel ?? '') !== '' &&
+                        !RWML_EMBEDDING_MODEL_OPTIONS.some((model) => model.value === config.rwmlEmbeddingModel))) && (
+                      <input
+                        type="text"
+                        value={config.rwmlEmbeddingModel ?? ''}
+                        onChange={(e) => setConfig({ ...config, rwmlEmbeddingModel: e.target.value })}
+                        className="input w-full mt-2"
+                        placeholder="provider/model-or-local-tag"
+                        spellCheck={false}
+                        autoComplete="off"
+                      />
+                    )}
                   </div>
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
@@ -1542,30 +1693,12 @@ export function TrainingConfig({ onClose, onStart, onOpenGuides }: TrainingConfi
               <div className="space-y-4">
                 <div>
                   <label className="block font-mono text-xs text-text-muted mb-2">Teacher Model</label>
-                  <select
-                    value={config.teacherModel}
-                    onChange={(e) => setConfig({ ...config, teacherModel: e.target.value })}
+                  <ModelSelect
+                    value={config.teacherModel ?? ''}
+                    onChange={(teacherModel) => setConfig({ ...config, teacherModel })}
+                    placeholder="Select a teacher model..."
                     className="input w-full"
-                  >
-                    <optgroup label="Large Language Models">
-                      <option value="meta-llama/Llama-3.1-70B-Instruct">Llama-3.1-70B-Instruct</option>
-                      <option value="meta-llama/Llama-3.1-405B-Instruct">Llama-3.1-405B-Instruct</option>
-                      <option value="Qwen/Qwen2.5-72B-Instruct">Qwen2.5-72B-Instruct</option>
-                    </optgroup>
-                    <optgroup label="Code Models">
-                      <option value="Qwen/Qwen2.5-Coder-32B-Instruct">Qwen2.5-Coder-32B-Instruct</option>
-                      <option value="deepseek-ai/DeepSeek-Coder-V2-Instruct">DeepSeek-Coder-V2</option>
-                    </optgroup>
-                    <optgroup label="Anthropic Claude 4.5 (requires ANTHROPIC_API_KEY)">
-                      <option value="claude-opus-4-5-20251101">Claude Opus 4.5 (Best)</option>
-                      <option value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5</option>
-                      <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (Fast)</option>
-                    </optgroup>
-                    <optgroup label="Anthropic Claude 4 (Legacy)">
-                      <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
-                      <option value="claude-opus-4-20250514">Claude Opus 4</option>
-                    </optgroup>
-                  </select>
+                  />
                   <p className="font-mono text-xs text-text-muted mt-1">
                     The larger model to distill knowledge from
                   </p>
@@ -1610,6 +1743,83 @@ export function TrainingConfig({ onClose, onStart, onOpenGuides }: TrainingConfi
                     Knowledge distillation transfers capabilities from a large teacher model to your smaller student model.
                     The student learns to match the teacher's probability distributions, not just the correct answers.
                   </p>
+                </div>
+              </div>
+            </div>
+          )}
+          {/* Session Distillation Config */}
+          {config.strategy === 'session_distillation' && (
+            <div className="card p-4 border-l-4 border-l-accent">
+              <h3 className="font-mono text-xs uppercase tracking-widest text-text-secondary mb-3 flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-accent" />
+                Session Distillation Settings
+              </h3>
+              <div className="space-y-4">
+                <p className="font-mono text-xs text-text-secondary">
+                  Converts failed trace decisions into hint-injected records, then trains the original context toward the same action tokens rescored under that hint.
+                </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block font-mono text-xs text-text-muted mb-2">Alpha</label>
+                    <input
+                      type="number"
+                      value={config.sessionDistillationAlpha ?? 0.7}
+                      onChange={(e) => setConfig({ ...config, sessionDistillationAlpha: parseFloat(e.target.value) })}
+                      className="input w-full"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                    />
+                    <p className="font-mono text-xs text-text-muted mt-1">
+                      Weight for hinted KL vs hard CE.
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block font-mono text-xs text-text-muted mb-2">Temperature</label>
+                    <input
+                      type="number"
+                      value={config.sessionDistillationTemperature ?? 1.0}
+                      onChange={(e) => setConfig({ ...config, sessionDistillationTemperature: parseFloat(e.target.value) })}
+                      className="input w-full"
+                      min={0.1}
+                      max={10}
+                      step={0.1}
+                    />
+                    <p className="font-mono text-xs text-text-muted mt-1">
+                      Softens the hinted-context distribution.
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block font-mono text-xs text-text-muted mb-2">Min Confidence</label>
+                    <input
+                      type="number"
+                      value={config.sessionDistillationMinConfidence ?? 0.6}
+                      onChange={(e) => setConfig({ ...config, sessionDistillationMinConfidence: parseFloat(e.target.value) })}
+                      className="input w-full"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                    />
+                    <p className="font-mono text-xs text-text-muted mt-1">
+                      Filters weak reader hints.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <GuidanceNote
+                    title="Mask"
+                    body="Target span only. The loss should update the failed action tokens, not the whole transcript."
+                  />
+                  <GuidanceNote
+                    title="Reader"
+                    body="Heuristic first: failed commands, verifier failures, retry loops, and recovery pivots."
+                  />
+                  <GuidanceNote
+                    title="Gate"
+                    body="Compare against SFT or teacher KD with held-out decision and terminal-task behavior."
+                  />
                 </div>
               </div>
             </div>

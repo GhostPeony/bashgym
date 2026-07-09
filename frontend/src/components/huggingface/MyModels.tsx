@@ -68,7 +68,7 @@ export function MyModels() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {models.map((model) => (
-          <div key={model.id} className="card p-4 border-2 hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all shadow-brutal-sm">
+          <div key={model.id} className="card p-4 border-2 hover:border-accent transition-colors shadow-brutal-sm">
             <div className="flex items-start justify-between">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">

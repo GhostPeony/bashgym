@@ -1,5 +1,6 @@
 """Gym - Training Layer"""
 
+from bashgym.gym.data_recipe_search_space import DataRecipeSearchSpace
 from bashgym.gym.dppo import (
     DPPO_BINARY_KL_THRESHOLD,
     DPPO_BINARY_TV_THRESHOLD,
@@ -144,6 +145,7 @@ __all__ = [
     "ActionType",
     "Observation",
     "BatchGymEnv",
+    "DataRecipeSearchSpace",
     "EnvironmentRecipeSearchSpace",
     # Router
     "ModelRouter",

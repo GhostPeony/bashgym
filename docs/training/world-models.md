@@ -283,6 +283,24 @@ BASHGYM_DPPO_TRL_RWML_REWARD_FACTORY
 BASHGYM_DPPO_VERL_RWML_REWARD_FACTORY
 ```
 
+Before moving this to a private or cloud GPU target, produce the local smoke bundle:
+
+```bash
+bashgym training smoke-bundle \
+  --replay data/dppo_replay/latest.jsonl \
+  --output-dir data/backend-smokes/latest \
+  --backend auto \
+  --json
+```
+
+The bundle writes a replay summary, an ECHO/RWML backend probe, the exact launch
+environment contract, and a readiness report. Treat it as the preflight gate:
+
+- `contract_ready=false` means replay/logprob/world-model data is missing.
+- `optimizer_ready=false` means train-policy logprob enrichment is still needed.
+- `backend_launch_ready=false` with `contract_ready=true` means the replay handoff
+  is shaped correctly and the next step is installing/configuring the backend.
+
 ---
 
 ## Promotion path

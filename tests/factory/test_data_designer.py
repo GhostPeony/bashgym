@@ -206,6 +206,125 @@ class TestDataDesignerPipelineInit:
             with pytest.raises(ImportError, match="data-designer"):
                 _ = pipeline.designer
 
+    def test_prepare_source_writes_source_and_dataset_cards(self, tmp_path):
+        pipeline = DataDesignerPipeline(PipelineConfig(output_dir=tmp_path))
+
+        prepared = pipeline.prepare_source("helpsteer2", goal="reward_model")
+
+        assert prepared["source_manifest"]["source"]["id"] == "helpsteer2"
+        assert prepared["dataset_card"]["schema_version"] == "bashgym.dataset_card.v1"
+        assert prepared["dataset_card"]["source_id"] == "helpsteer2"
+        assert tmp_path.joinpath("source_manifest.json").exists()
+        assert tmp_path.joinpath("dataset_card.json").exists()
+
+    def test_prepare_source_blocks_eval_only_training_use(self, tmp_path):
+        pipeline = DataDesignerPipeline(PipelineConfig(output_dir=tmp_path))
+
+        with pytest.raises(ValueError, match="eval_only_source_for_training"):
+            pipeline.prepare_source("harbor_terminal_bench", goal="sft")
+
+    def test_prepare_source_can_convert_local_input_artifacts(self, tmp_path):
+        source_path = tmp_path / "source.jsonl"
+        source_path.write_text(
+            json.dumps(
+                {
+                    "id": "uf-1",
+                    "prompt": "Fix a failing test.",
+                    "chosen": "Run pytest and patch the failing function.",
+                    "rejected": "Claim success without running tests.",
+                    "metadata": {
+                        "quality_score": 0.9,
+                        "label_source": "fixture",
+                        "decontamination_status": "checked",
+                    },
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        pipeline = DataDesignerPipeline(PipelineConfig(output_dir=tmp_path / "out"))
+
+        prepared = pipeline.prepare_source(
+            "ultrafeedback_binarized",
+            goal="dpo",
+            input_path=source_path,
+        )
+
+        assert prepared["artifact_report"]["ok"] is True
+        assert prepared["dataset_card"]["artifacts"][0]["artifact_type"] == "dpo_pairs"
+        assert tmp_path.joinpath("out", "dpo_pairs.jsonl").exists()
+
+    def test_prepare_source_can_fetch_then_convert_artifacts(self, tmp_path, monkeypatch):
+        def fake_fetch(
+            card,
+            *,
+            output_dir,
+            split,
+            subset=None,
+            revision=None,
+            limit=None,
+            approval_reason=None,
+            force_refresh=False,
+        ):
+            output_path = Path(output_dir)
+            output_path.mkdir(parents=True, exist_ok=True)
+            records_path = output_path / "source_records.jsonl"
+            records_path.write_text(
+                json.dumps(
+                    {
+                        "id": "uf-1",
+                        "prompt": "Fix a failing test.",
+                        "chosen": "Run pytest and patch the failing function.",
+                        "rejected": "Claim success without running tests.",
+                        "metadata": {"decontamination_status": "checked"},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            return {
+                "schema_version": "bashgym.source_fetch.v1",
+                "ok": True,
+                "source_id": card.id,
+                "source_name": card.name,
+                "huggingface_id": card.huggingface_id,
+                "split": split,
+                "subset": subset,
+                "revision": revision,
+                "limit": limit,
+                "output_dir": str(output_path),
+                "records_path": str(records_path),
+                "report_path": str(output_path / "source_fetch_report.json"),
+                "record_count": 1,
+                "truncated": False,
+                "cache_hit": False,
+                "force_refresh": force_refresh,
+                "approval_required": limit is None or limit > 1000,
+                "approval_granted": True,
+                "approval_reason": approval_reason,
+                "warnings": [],
+                "errors": [],
+            }
+
+        monkeypatch.setattr("bashgym.sources.fetch_source_records", fake_fetch)
+        pipeline = DataDesignerPipeline(PipelineConfig(output_dir=tmp_path / "out"))
+
+        prepared = pipeline.prepare_source(
+            "ultrafeedback_binarized",
+            goal="dpo",
+            fetch=True,
+            limit=1,
+            fetch_approval_reason="fixture fetch",
+            force_refresh=True,
+        )
+
+        assert prepared["fetch_report"]["schema_version"] == "bashgym.source_fetch.v1"
+        assert prepared["fetch_report"]["approval_reason"] == "fixture fetch"
+        assert prepared["fetch_report"]["force_refresh"] is True
+        assert prepared["dataset_card"]["source_records_path"].endswith("source_records.jsonl")
+        assert prepared["artifact_report"]["ok"] is True
+        assert tmp_path.joinpath("out", "dpo_pairs.jsonl").exists()
+
 
 # =========================================================================
 # _extract_seeds_from_traces
@@ -734,6 +853,7 @@ class TestRealPipelineConstruction:
             "coding_agent_distill",
             "tool_use_sft",
             "from_external",
+            "from_source",
             "from_unstructured",
         ],
     )

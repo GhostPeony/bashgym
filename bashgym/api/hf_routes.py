@@ -10,15 +10,20 @@ Provides REST endpoints for HuggingFace Pro features:
 """
 
 import logging
+import re
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/hf", tags=["huggingface"])
+
+HF_INVENTORY_CACHE_TTL_SECONDS = 60
 
 
 # =============================================================================
@@ -37,6 +42,42 @@ class HFStatusResponse(BaseModel):
     token_source: str = Field(
         default="", description="Where token comes from: 'env', 'stored', or ''"
     )
+
+
+class HFInventoryWarning(BaseModel):
+    """Recoverable issue from one inventory section."""
+
+    section: str
+    message: str
+
+
+class HFInventoryCounts(BaseModel):
+    """Counts for resources returned in the inventory snapshot."""
+
+    models: int = 0
+    datasets: int = 0
+    trace_datasets: int = 0
+    buckets: int = 0
+    spaces: int = 0
+
+
+class HFInventoryResponse(BaseModel):
+    """Read-only HuggingFace inventory for workflow canvas nodes."""
+
+    status: HFStatusResponse
+    namespace: str = ""
+    prefix: str = "bashgym"
+    limit: int = 12
+    last_refreshed: str
+    cached: bool = False
+    ttl_seconds: int = HF_INVENTORY_CACHE_TTL_SECONDS
+    counts: HFInventoryCounts = Field(default_factory=HFInventoryCounts)
+    models: list[dict[str, Any]] = Field(default_factory=list)
+    datasets: list[dict[str, Any]] = Field(default_factory=list)
+    trace_datasets: list[dict[str, Any]] = Field(default_factory=list)
+    buckets: list[dict[str, Any]] = Field(default_factory=list)
+    spaces: list[dict[str, Any]] = Field(default_factory=list)
+    warnings: list[HFInventoryWarning] = Field(default_factory=list)
 
 
 class HFConfigureRequest(BaseModel):
@@ -174,6 +215,90 @@ class InferenceEmbedResponse(BaseModel):
 
 
 # =============================================================================
+# Inventory Helpers
+# =============================================================================
+
+
+def _get_token_metadata() -> tuple[bool, str]:
+    """Return whether a token exists and where it was found, without exposing it."""
+    import os
+
+    from bashgym.secrets import get_secret
+
+    if os.environ.get("HF_TOKEN"):
+        return True, "env"
+    if get_secret("HF_TOKEN"):
+        return True, "stored"
+    return False, ""
+
+
+def _status_from_client(client: Any) -> HFStatusResponse:
+    """Build a public status response from the shared HF client."""
+    token_configured, token_source = _get_token_metadata()
+    return HFStatusResponse(
+        enabled=bool(client.is_enabled),
+        pro_enabled=bool(client.is_pro),
+        username=client.username or "",
+        namespace=client.namespace or "",
+        token_configured=token_configured,
+        token_source=token_source,
+    )
+
+
+def _sanitize_hf_error(error: Exception) -> str:
+    """Avoid echoing tokens from lower-level exception strings."""
+    message = str(error) or error.__class__.__name__
+    return re.sub(r"hf_[A-Za-z0-9_-]+", "hf_***", message)
+
+
+def _inventory_cache(request: Request) -> dict[str, dict[str, Any]]:
+    cache = getattr(request.app.state, "hf_inventory_cache", None)
+    if not isinstance(cache, dict):
+        cache = {}
+        request.app.state.hf_inventory_cache = cache
+    return cache
+
+
+def _model_dump(model: BaseModel) -> dict[str, Any]:
+    if hasattr(model, "model_dump"):
+        return model.model_dump()
+    return model.dict()
+
+
+def _local_model_links() -> dict[str, dict[str, Any]]:
+    """Best-effort mapping of HF repo IDs to local BashGym model profiles."""
+    try:
+        from bashgym.models.registry import get_registry
+
+        registry = get_registry()
+        registry.scan()
+        links: dict[str, dict[str, Any]] = {}
+        for profile in registry.list(limit=250):
+            hf_repo_id = getattr(profile, "hf_repo_id", None)
+            if not hf_repo_id:
+                continue
+            links[hf_repo_id] = {
+                "model_id": profile.model_id,
+                "display_name": profile.display_name,
+                "training_strategy": profile.training_strategy,
+                "base_model": profile.base_model,
+                "status": profile.status,
+            }
+        return links
+    except Exception as e:
+        logger.debug("Could not link HF models to local registry: %s", e)
+        return {}
+
+
+def _repo_url(repo_id: str, repo_type: str = "model") -> str:
+    if repo_type == "dataset":
+        return f"https://huggingface.co/datasets/{repo_id}"
+    if repo_type == "space":
+        return f"https://huggingface.co/spaces/{repo_id}"
+    return f"https://huggingface.co/{repo_id}"
+
+
+# =============================================================================
 # Status Endpoints
 # =============================================================================
 
@@ -181,30 +306,178 @@ class InferenceEmbedResponse(BaseModel):
 @router.get("/status", response_model=HFStatusResponse)
 async def get_hf_status():
     """Get HuggingFace integration status."""
-    import os
-
     from bashgym.integrations.huggingface import get_hf_client
-    from bashgym.secrets import get_secret
 
-    # Determine token source
-    token_source = ""
-    token_configured = False
-    if os.environ.get("HF_TOKEN"):
-        token_source = "env"
-        token_configured = True
-    elif get_secret("HF_TOKEN"):
-        token_source = "stored"
-        token_configured = True
+    return _status_from_client(get_hf_client())
+
+
+@router.get("/inventory", response_model=HFInventoryResponse)
+async def get_hf_inventory(
+    request: Request,
+    prefix: str = "bashgym",
+    namespace: str | None = None,
+    limit: int = Query(default=12, ge=1, le=50),
+    refresh: bool = False,
+):
+    """Read-only, cached HF inventory for workflow canvas data nodes.
+
+    This endpoint intentionally avoids expensive listings such as bucket tree walks,
+    repo file listings, and job polling. It gives the canvas enough context to orient
+    an agent without turning every canvas render into multiple Hub API requests.
+    """
+    from bashgym.integrations.huggingface import get_hf_client
 
     client = get_hf_client()
-    return HFStatusResponse(
-        enabled=client.is_enabled,
-        pro_enabled=client.is_pro,
-        username=client.username or "",
-        namespace=client.namespace or "",
-        token_configured=token_configured,
-        token_source=token_source,
+    status = _status_from_client(client)
+    prefix = prefix.strip()
+    resolved_namespace = (namespace or status.namespace or status.username or "").strip()
+
+    if not status.enabled:
+        return HFInventoryResponse(
+            status=status,
+            namespace=resolved_namespace,
+            prefix=prefix,
+            limit=limit,
+            last_refreshed=datetime.now(timezone.utc).isoformat(),
+        )
+
+    cache = _inventory_cache(request)
+    cache_key = "|".join(
+        [
+            status.username,
+            resolved_namespace,
+            prefix,
+            str(limit),
+            status.token_source,
+        ]
     )
+    now = time.time()
+    cached_entry = cache.get(cache_key)
+    if (
+        not refresh
+        and cached_entry
+        and now - float(cached_entry.get("created_at", 0)) < HF_INVENTORY_CACHE_TTL_SECONDS
+    ):
+        payload = dict(cached_entry["payload"])
+        payload["cached"] = True
+        return HFInventoryResponse(**payload)
+
+    warnings: list[HFInventoryWarning] = []
+
+    def guarded(section: str, default: list[dict[str, Any]], loader) -> list[dict[str, Any]]:
+        try:
+            return loader()
+        except Exception as e:
+            logger.warning("Failed to load HF inventory section %s: %s", section, e)
+            warnings.append(HFInventoryWarning(section=section, message=_sanitize_hf_error(e)))
+            return default
+
+    def load_models() -> list[dict[str, Any]]:
+        from bashgym.integrations.huggingface.model_manager import HFModelManager
+
+        links = _local_model_links()
+        rows: list[dict[str, Any]] = []
+        for model in HFModelManager(client).list_my_models(limit=limit):
+            model_id = getattr(model, "id", "")
+            row = {
+                "id": model_id,
+                "url": getattr(model, "url", "") or _repo_url(model_id),
+                "downloads": getattr(model, "downloads", 0) or 0,
+                "likes": getattr(model, "likes", 0) or 0,
+                "private": bool(getattr(model, "private", False)),
+                "last_modified": getattr(model, "last_modified", "") or "",
+                "pipeline_tag": getattr(model, "pipeline_tag", None),
+                "tags": list(getattr(model, "tags", []) or [])[:12],
+            }
+            if model_id in links:
+                row["local"] = links[model_id]
+            rows.append(row)
+        return rows
+
+    def load_datasets() -> list[dict[str, Any]]:
+        from bashgym.integrations.huggingface.datasets import HFDatasetManager
+
+        manager = HFDatasetManager(client=client)
+        return [
+            {"id": repo_id, "url": _repo_url(repo_id, repo_type="dataset")}
+            for repo_id in manager.list_datasets(prefix=prefix)[:limit]
+            if repo_id
+        ]
+
+    def load_trace_datasets() -> list[dict[str, Any]]:
+        from bashgym.integrations.huggingface.traces import TraceUploader
+
+        uploader = TraceUploader(token=client.token)
+        rows: list[dict[str, Any]] = []
+        for item in uploader.list_trace_datasets(prefix=prefix)[:limit]:
+            repo_id = str(item.get("id", ""))
+            if not repo_id:
+                continue
+            rows.append(
+                {
+                    "id": repo_id,
+                    "url": _repo_url(repo_id, repo_type="dataset"),
+                    "private": item.get("private"),
+                    "downloads": item.get("downloads", 0) or 0,
+                    "last_modified": item.get("last_modified", "") or "",
+                }
+            )
+        return rows
+
+    def load_buckets() -> list[dict[str, Any]]:
+        from bashgym.integrations.huggingface.buckets import BucketManager
+
+        manager = BucketManager(token=client.token)
+        rows: list[dict[str, Any]] = []
+        for item in manager.list_buckets(namespace=resolved_namespace or None)[:limit]:
+            bucket_id = str(item.get("id", ""))
+            if not bucket_id:
+                continue
+            rows.append(
+                {
+                    "id": bucket_id,
+                    "private": item.get("private"),
+                    "created_at": item.get("created_at", "") or "",
+                    "updated_at": item.get("updated_at", "") or "",
+                }
+            )
+        return rows
+
+    models = guarded("models", [], load_models)
+    datasets = guarded("datasets", [], load_datasets)
+    trace_datasets = guarded("trace_datasets", [], load_trace_datasets)
+    buckets = guarded("buckets", [], load_buckets)
+
+    response = HFInventoryResponse(
+        status=status,
+        namespace=resolved_namespace,
+        prefix=prefix,
+        limit=limit,
+        last_refreshed=datetime.now(timezone.utc).isoformat(),
+        counts=HFInventoryCounts(
+            models=len(models),
+            datasets=len(datasets),
+            trace_datasets=len(trace_datasets),
+            buckets=len(buckets),
+            spaces=0,
+        ),
+        models=models,
+        datasets=datasets,
+        trace_datasets=trace_datasets,
+        buckets=buckets,
+        spaces=[],
+        warnings=warnings,
+    )
+
+    cache[cache_key] = {
+        "created_at": now,
+        "payload": _model_dump(response),
+    }
+    if len(cache) > 16:
+        oldest_key = min(cache, key=lambda k: cache[k].get("created_at", 0))
+        cache.pop(oldest_key, None)
+
+    return response
 
 
 @router.post("/configure")

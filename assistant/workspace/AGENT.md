@@ -12,9 +12,14 @@ GhostWork/BashGym system via API.
 - If an API call fails, report the error and suggest next steps
 
 ## API Access
-All BashGym interaction goes through HTTP calls to $BASHGYM_API_URL.
-Use the api.sh helper script in each skill's scripts/ directory.
-The base URL is set via environment variable — never hardcode it.
+All BashGym interaction goes through HTTP calls discovered by the shared helper.
+Use the shared scripts/api.sh helper from the workspace.
+Prefer `BASHGYM_API_URL` when set, but do not hardcode localhost ports in skills.
+
+## Training Operations
+- Use the training skill for all BashGym training, monitoring, evaluation, and RunCard work.
+- Register meaningful runs through BashGym before training; do not launch raw trainer scripts unless the user asks for manual debugging.
+- Treat train loss as training evidence only. Promotion requires method-specific heldout, environment, reward, replay, smoke-bundle, or RunCard evidence.
 
 ## Destructive Operations (require confirmation)
 - POST /api/training/{run_id}/stop

@@ -1,10 +1,7 @@
 import { memo, useCallback, useState } from 'react'
 import { Handle, Position, NodeProps, Node } from '@xyflow/react'
 import {
-  Terminal,
-  Globe,
   FileText,
-  FolderTree,
   Loader2,
   MessageSquare,
   Wrench,
@@ -19,12 +16,15 @@ import {
   Coins,
   Pause,
   Play,
-  Link2
+  Link2,
+  Eye
 } from 'lucide-react'
 import { clsx } from 'clsx'
-import type { AttentionState, AgentStatus, PanelType, ToolHistoryItem, SessionMetrics } from '../../stores/terminalStore'
+import type { AttentionState, AgentStatus, AgentKind, PanelType, ToolHistoryItem, SessionMetrics } from '../../stores/terminalStore'
 import { ToolBreadcrumbs } from './ToolBreadcrumbs'
+import { AgentBadge } from '../sessions/AgentBadge'
 import { useCanvasControlStore } from '../../stores'
+import { NodeFlowerMark } from './NodeFlowerMark'
 
 export interface TerminalNodeData extends Record<string, unknown> {
   panelId: string
@@ -34,6 +34,7 @@ export interface TerminalNodeData extends Record<string, unknown> {
   attention?: AttentionState
   gitBranch?: string
   model?: string
+  agentKind?: AgentKind
   currentTool?: string
   cwd?: string
   lastActivity?: number
@@ -47,28 +48,16 @@ export interface TerminalNodeData extends Record<string, unknown> {
   isPaused?: boolean
   lastOutput?: string[]
   hasConnections?: boolean
+  /** This terminal is the watched end of a monitor edge */
+  isWatched?: boolean
+  /** Title of the terminal this one is watching (watcher end of a monitor edge) */
+  watchingTitle?: string
   onFocus?: (panelId: string) => void
   onClose?: (panelId: string) => void
   onTogglePause?: (panelId: string) => void
 }
 
 export type TerminalNodeType = Node<TerminalNodeData, 'terminal'>
-
-// Get icon based on panel type
-function getPanelIcon(type: PanelType) {
-  switch (type) {
-    case 'terminal':
-      return <Terminal className="w-4 h-4" />
-    case 'browser':
-      return <Globe className="w-4 h-4" />
-    case 'preview':
-      return <FileText className="w-4 h-4" />
-    case 'files':
-      return <FolderTree className="w-4 h-4" />
-    default:
-      return <Terminal className="w-4 h-4" />
-  }
-}
 
 // Get status icon based on agent status
 function getStatusIcon(status?: AgentStatus, isPaused?: boolean) {
@@ -147,6 +136,7 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: NodeP
     attention,
     gitBranch,
     model,
+    agentKind,
     currentTool,
     cwd,
     lastActivity,
@@ -158,6 +148,8 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: NodeP
     isExpanded: dataExpanded,
     isPaused,
     hasConnections,
+    isWatched,
+    watchingTitle,
     onFocus,
     onClose,
     onTogglePause
@@ -196,7 +188,6 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: NodeP
         'card !rounded-brutal border-brutal cursor-pointer',
         getAttentionStyle(attention),
         selected && 'border-accent shadow-brutal',
-        isPaused && 'opacity-75',
         !isPaused && status === 'running' && 'terminal-status-running',
         !isPaused && status === 'tool_calling' && 'terminal-status-tool-calling',
         !isPaused && status === 'waiting_input' && 'terminal-status-waiting-input'
@@ -218,18 +209,17 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: NodeP
 
       {/* Header — terminal style */}
       <div className="flex items-center gap-2 px-3 py-2 bg-background-secondary border-b border-brutal border-border rounded-t-brutal">
-        <div className={clsx(
-          'p-1.5 border-brutal rounded-brutal',
-          status === 'running' && !isPaused && 'bg-accent-light border-accent',
-          status === 'waiting_input' && 'bg-status-warning/20 border-status-warning',
-          status === 'tool_calling' && !isPaused && 'bg-accent-light border-accent',
-          (isPaused || !status || status === 'idle') && 'bg-background-tertiary border-border-subtle'
-        )}>
-          {getPanelIcon(type)}
-        </div>
+        <NodeFlowerMark
+          variant={type}
+          size="xl"
+          active={Boolean(!isPaused && (status === 'running' || status === 'tool_calling' || selected))}
+          muted={Boolean(isPaused || !status || status === 'idle')}
+          title={`${type} node`}
+        />
         <div className="flex-1 min-w-0">
-          <span className="text-sm font-mono font-semibold text-text-primary truncate block">
-            {title}
+          <span className="text-sm font-mono font-semibold text-text-primary truncate flex items-center gap-1.5">
+            <span className="truncate">{title}</span>
+            {agentKind && <AgentBadge kind={agentKind} />}
           </span>
           {relativeTime && (
             <span className="text-[10px] text-text-muted flex items-center gap-1 font-mono">
@@ -250,11 +240,29 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: NodeP
             </span>
           </div>
         )}
-        <div className="flex items-center gap-0.5">
+        <div className="flex items-center gap-1 nodrag">
+          {watchingTitle && (
+            <div
+              className="flex items-center gap-0.5 px-1 py-0.5 border-brutal border-[hsl(270_45%_60%)]/60 bg-[hsl(270_45%_60%)]/10 rounded-brutal text-[hsl(270_45%_60%)] text-[8px] font-bold uppercase tracking-wider max-w-[110px]"
+              title={`Monitoring "${watchingTitle}" — snapshots arrive as a file path in this terminal's input`}
+            >
+              <Eye className="w-2.5 h-2.5 flex-shrink-0" />
+              <span className="truncate">{watchingTitle}</span>
+            </div>
+          )}
+          {isWatched && (
+            <div
+              className="flex items-center gap-0.5 px-1 py-0.5 border-brutal border-[hsl(270_45%_60%)]/60 bg-[hsl(270_45%_60%)]/10 rounded-brutal text-[hsl(270_45%_60%)] text-[8px] font-bold uppercase tracking-wider"
+              title="Being monitored — a connected watcher can receive snapshots of this terminal's output"
+            >
+              <Eye className="w-2.5 h-2.5" />
+              <span>WATCHED</span>
+            </div>
+          )}
           {hasConnections && (
             <div
               className="flex items-center gap-0.5 px-1 py-0.5 border-brutal border-accent/60 bg-accent/10 rounded-brutal text-accent"
-              title="Receiving screenshots from connected browser"
+              title="Connected to a data node — content routes into this terminal"
             >
               <Link2 className="w-2.5 h-2.5" />
             </div>
@@ -262,28 +270,25 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: NodeP
           {onTogglePause && (
             <button
               onClick={handleTogglePause}
-              className={clsx(
-                'p-1 text-text-muted transition-press',
-                isPaused ? 'hover:text-status-success' : 'hover:text-status-warning'
-              )}
+              className={clsx('node-btn', isPaused ? 'node-btn-success' : 'node-btn-warning')}
               title={isPaused ? 'Resume' : 'Pause'}
             >
-              {isPaused ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
+              {isPaused ? <Play className="w-3 h-3" /> : <Pause className="w-3 h-3" />}
             </button>
           )}
           <button
             onClick={handleFocus}
-            className="p-1 hover:bg-background-tertiary text-text-muted hover:text-text-secondary transition-press"
+            className="node-btn node-btn-accent"
             title="Focus panel"
           >
-            <Maximize2 className="w-3.5 h-3.5" />
+            <Maximize2 className="w-3 h-3" />
           </button>
           <button
             onClick={handleClose}
-            className="p-1 hover:bg-status-error/20 text-text-muted hover:text-status-error transition-press"
+            className="node-btn node-btn-danger"
             title="Close"
           >
-            <X className="w-3.5 h-3.5" />
+            <X className="w-3 h-3" />
           </button>
         </div>
       </div>

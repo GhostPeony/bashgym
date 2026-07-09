@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, lazy, Suspense } from 'react'
 import {
   Home,
   Terminal,
@@ -16,19 +16,27 @@ import {
   GitBranch,
   Shield,
   Activity,
-  Cloud,
   Link2,
   Trophy,
   Network,
   Rocket,
   Workflow,
   Download,
-  Zap
+  Zap,
+  ListTree
 } from 'lucide-react'
 import { useUIStore, useTrainingStore } from '../../stores'
+import { useTutorialStore } from '../../stores/tutorialStore'
 import { hooksApi, systemApi } from '../../services/api'
 import { clsx } from 'clsx'
 import { isElectron, isWeb } from '../../utils/platform'
+import { GhostPeonyIcon } from '../common/GhostPeonyIcon'
+
+// Agent Sessions feed is Electron-only (reads local CLI session journals);
+// lazy + gated so it tree-shakes out of the web build
+const AgentSessionsRail = isElectron
+  ? lazy(() => import('../sessions/AgentSessionsRail'))
+  : null
 
 interface MenuItemProps {
   icon: React.ReactNode
@@ -84,15 +92,13 @@ interface CollapsibleSectionProps {
 }
 
 function CollapsibleSection({ title, items, defaultExpanded = false }: CollapsibleSectionProps) {
-  const { overlayView, openOverlay, setSidebarOpen: _setSidebarOpen } = useUIStore()
+  const { overlayView, openOverlay } = useUIStore()
+  const { dismissTooltip } = useTutorialStore()
   const [isExpanded, setIsExpanded] = useState(defaultExpanded)
 
   const handleClick = (id: SecondaryViewId) => {
-    if (overlayView === id) {
-      openOverlay('home')
-    } else {
-      openOverlay(id)
-    }
+    dismissTooltip()
+    if (overlayView !== id) openOverlay(id)
   }
 
   const hasActiveItem = items.some(item => overlayView === item.id)
@@ -158,7 +164,7 @@ function SecondarySections() {
   ]
 
   const connectionsItems: CollapsibleSectionProps['items'] = [
-    { id: 'huggingface', icon: <Cloud className="w-4 h-4" />, label: 'HuggingFace' },
+    { id: 'huggingface', icon: <GhostPeonyIcon name="huggingface" size="xs" tone="neutral" />, label: 'HuggingFace' },
     // Experimental: Electron-only
     ...(isElectron ? [
       { id: 'integration' as SecondaryViewId, icon: <Link2 className="w-4 h-4" />, label: 'Integration' },
@@ -180,8 +186,9 @@ function SecondarySections() {
 }
 
 export function Sidebar() {
-  const { isSidebarOpen, setSidebarOpen, overlayView, openOverlay, closeOverlay, setSettingsOpen } = useUIStore()
+  const { isSidebarOpen, setSidebarOpen, overlayView, openOverlay, closeOverlay, setSettingsOpen, sidebarMode, setSidebarMode } = useUIStore()
   const { currentRun } = useTrainingStore()
+  const { dismissTooltip } = useTutorialStore()
 
   // Status state
   const [hooksInstalled, setHooksInstalled] = useState<boolean | null>(null)
@@ -209,32 +216,43 @@ export function Sidebar() {
   }, [isSidebarOpen])
 
   const handleNavClick = (view: 'home' | 'training' | 'factory' | null) => {
+    dismissTooltip()
     if (view === null) {
       closeOverlay() // Go to workspace (terminals)
-    } else if (overlayView === view) {
-      closeOverlay() // Toggle off
     } else {
       openOverlay(view)
     }
   }
 
+  // Agent Sessions is a Workspace companion — leaving the workspace for any
+  // dashboard page restores the nav panel
+  useEffect(() => {
+    if (overlayView !== null && sidebarMode === 'sessions') {
+      setSidebarMode('nav')
+    }
+  }, [overlayView, sidebarMode, setSidebarMode])
+
   if (!isSidebarOpen) return null
 
+  const showSessions = sidebarMode === 'sessions' && AgentSessionsRail !== null
+
   return (
-      <aside className="w-64 min-w-[16rem] bg-background-card border-r border-border overflow-y-auto flex-shrink-0">
+      <aside className="relative z-30 w-64 min-w-[16rem] bg-background-card border-r border-border overflow-y-auto flex-shrink-0">
+        {showSessions && AgentSessionsRail ? (
+          <Suspense fallback={<div className="p-4 font-mono text-xs text-text-muted">Loading sessions…</div>}>
+            <AgentSessionsRail />
+          </Suspense>
+        ) : (
         <div className="p-4">
           {/* Header - Clickable to go home */}
           <button
             onClick={() => handleNavClick('home')}
-            className="flex items-center gap-3 mb-6 w-full text-left hover-press transition-press"
+            className="flex items-center gap-3 mb-7 w-full text-left hover-press transition-press"
           >
-            <img src="/ghost-icon.png" alt="BashGym" className="w-10 h-10 object-cover" />
-            <div>
-              <h2 className="font-brand font-semibold text-lg">
-                <span className="text-accent">/</span>BashGym
-              </h2>
-              <p className="text-xs text-text-muted">Agentic Development</p>
-            </div>
+            <img src="/bashgym-peony.png" alt="BashGym" className="w-14 h-14 -ml-1 object-contain" />
+            <h2 className="font-brand text-2xl font-semibold leading-none text-text-primary">
+              <span className="text-accent">/</span>BashGym
+            </h2>
           </button>
 
           {/* Primary Navigation */}
@@ -252,6 +270,19 @@ export function Sidebar() {
                 label="Workspace"
                 onClick={() => handleNavClick(null)}
                 active={overlayView === null}
+                primary
+              />
+            )}
+            {isElectron && (
+              <MenuItem
+                icon={<ListTree className="w-4 h-4" />}
+                label="Agent Sessions"
+                onClick={() => {
+                  dismissTooltip()
+                  // Sessions live in the Workspace: swap the panel and go there
+                  setSidebarMode('sessions')
+                  closeOverlay()
+                }}
                 primary
               />
             )}
@@ -362,6 +393,7 @@ export function Sidebar() {
             />
           </div>
         </div>
+        )}
       </aside>
   )
 }

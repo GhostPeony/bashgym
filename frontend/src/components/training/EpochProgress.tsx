@@ -18,24 +18,24 @@ export function EpochProgress({
   return (
     <div className="flex flex-col items-center">
       {/* Epoch Display */}
-      <div className="card w-full p-6 flex flex-col items-center mb-4">
+      <div className="card w-full p-3 flex flex-col items-center mb-3">
         {isWaiting ? (
           <>
-            <span className="font-brand text-3xl text-text-muted">&mdash;</span>
-            <span className="font-mono text-xs uppercase tracking-widest text-text-muted mt-1">Waiting</span>
+            <span className="font-brand text-lg leading-tight text-text-muted">&mdash;</span>
+            <span className="font-mono text-[10px] uppercase tracking-widest text-text-muted mt-0.5">Waiting</span>
           </>
         ) : (
           <>
-            <span className="font-brand text-3xl text-text-primary">
+            <span className="font-brand text-lg leading-tight text-text-primary">
               {currentEpoch}/{totalEpochs}
             </span>
-            <span className="font-mono text-xs uppercase tracking-widest text-text-secondary mt-1">Epochs</span>
+            <span className="font-mono text-[10px] uppercase tracking-widest text-text-secondary mt-0.5">Epochs</span>
           </>
         )}
 
         {/* Epoch dots */}
         {!isWaiting && totalEpochs > 0 && (
-          <div className="flex items-center gap-2 mt-3">
+          <div className="flex items-center gap-2 mt-2">
             {Array.from({ length: totalEpochs }, (_, i) => (
               <div
                 key={i}

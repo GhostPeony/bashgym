@@ -14,6 +14,7 @@ ENVIRONMENT_GATE_SECTIONS: tuple[tuple[str, str], ...] = (
 )
 EXTERNAL_BENCHMARK_SECTION = "external_benchmarks"
 WORLD_MODEL_QUALITY_SECTION = "world_model_quality"
+LEARNED_REWARD_SECTION = "learned_reward_evidence"
 
 WORLD_MODEL_QUALITY_ALIASES: dict[str, tuple[str, ...]] = {
     "echo_loss": ("echo_loss", "echoLoss", "environment_prediction_loss"),
@@ -242,6 +243,101 @@ def _world_model_quality_summary(evidence: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _unwrap_learned_reward_payload(payload: Any) -> dict[str, Any] | None:
+    """Accept raw reward_eval.json or fixture/report wrappers containing it."""
+
+    if not isinstance(payload, dict):
+        return None
+    for key in ("reward_eval", "result", "report", "learned_reward_evidence"):
+        nested = payload.get(key)
+        if isinstance(nested, dict):
+            return nested
+    return payload
+
+
+def _learned_reward_summary(evidence: dict[str, Any]) -> dict[str, Any]:
+    payload = _unwrap_learned_reward_payload(evidence.get(LEARNED_REWARD_SECTION))
+    if payload is None:
+        return {
+            "present": False,
+            "diagnostic_only": True,
+            "signal": "missing",
+            "metrics": {},
+            "findings": [],
+        }
+
+    raw_metrics = payload.get("metrics") if isinstance(payload.get("metrics"), dict) else {}
+    metric_names = (
+        "heldout_pair_accuracy",
+        "calibration_error",
+        "reward_margin",
+        "length_bias",
+        "reward_variance",
+        "eval_only_leakage_count",
+        "eval_only_leakage_rate",
+        "pair_count",
+        "prediction_records",
+        "evaluated_records",
+    )
+    metrics: dict[str, float] = {}
+    for name in metric_names:
+        number = _float(raw_metrics.get(name))
+        if number is None:
+            number = _float(payload.get(name))
+        if number is not None:
+            metrics[name] = number
+
+    normalized_findings: list[str] = []
+    if isinstance(payload.get("findings"), list):
+        for item in payload["findings"]:
+            if isinstance(item, dict):
+                code = item.get("code")
+                message = item.get("message")
+                if message:
+                    normalized_findings.append(f"learned reward {code or 'finding'}: {message}")
+                continue
+            text = str(item)
+            if text:
+                normalized_findings.append(f"learned reward: {text}")
+
+    if not metrics:
+        normalized_findings.append("learned reward evidence has no recognized reward metrics")
+    if bool(payload.get("ok")) is False:
+        normalized_findings.append("learned reward evidence reports ok=false")
+    leakage_count = metrics.get("eval_only_leakage_count")
+    if leakage_count is not None and leakage_count > 0:
+        normalized_findings.append("learned reward evidence reports eval-only leakage")
+    calibration = metrics.get("calibration_error")
+    if calibration is not None and calibration > 0.2:
+        normalized_findings.append(
+            "learned reward calibration error is above the starter threshold"
+        )
+    pair_accuracy = metrics.get("heldout_pair_accuracy")
+    if pair_accuracy is not None and pair_accuracy < 0.6:
+        normalized_findings.append(
+            "learned reward heldout pair accuracy is below the starter threshold"
+        )
+    reward_variance = metrics.get("reward_variance")
+    if reward_variance is not None and reward_variance == 0.0:
+        normalized_findings.append("learned reward predictions have zero variance")
+
+    signal = "present"
+    if not metrics:
+        signal = "missing_quality_metrics"
+    elif normalized_findings:
+        signal = "needs_attention"
+    elif pair_accuracy is not None and pair_accuracy >= 0.7:
+        signal = "healthy"
+
+    return {
+        "present": True,
+        "diagnostic_only": True,
+        "signal": signal,
+        "metrics": metrics,
+        "findings": normalized_findings,
+    }
+
+
 def _external_benchmark_reasons(
     evidence: dict[str, Any],
 ) -> tuple[list[str], list[str], list[str]]:
@@ -324,6 +420,8 @@ def combine_release_gate_evidence(
     ) = _external_benchmark_reasons(evidence)
     world_model_quality = _world_model_quality_summary(evidence)
     world_model_sections = [WORLD_MODEL_QUALITY_SECTION] if world_model_quality["present"] else []
+    learned_reward = _learned_reward_summary(evidence)
+    learned_reward_sections = [LEARNED_REWARD_SECTION] if learned_reward["present"] else []
 
     environment_ship = not environment_reasons
     external_benchmark_ship = not external_reasons
@@ -346,12 +444,18 @@ def combine_release_gate_evidence(
         "world_model_quality_diagnostic_only": world_model_quality["diagnostic_only"],
         "world_model_quality_signal": world_model_quality["signal"],
         "world_model_quality_findings": world_model_quality["findings"],
+        "learned_reward_evidence": learned_reward,
+        "learned_reward_evidence_present": learned_reward["present"],
+        "learned_reward_evidence_diagnostic_only": learned_reward["diagnostic_only"],
+        "learned_reward_evidence_signal": learned_reward["signal"],
+        "learned_reward_evidence_findings": learned_reward["findings"],
         "environment_required": evidence_required,
         "environment_sections": provided_sections,
         "blocking_environment_sections": blocking_sections,
         "external_benchmark_sections": external_sections,
         "blocking_external_benchmark_sections": blocking_external_sections,
         "world_model_quality_sections": world_model_sections,
+        "learned_reward_evidence_sections": learned_reward_sections,
     }
     if environment_evidence is not None:
         report["environment_evidence"] = evidence

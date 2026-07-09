@@ -12,17 +12,14 @@ export function LoginPage() {
         {/* Header */}
         <div className="p-8 pb-4 text-center">
           <img
-            src="/ghost-icon.png"
+            src="/bashgym-peony.png"
             alt="BashGym"
-            className="w-16 h-16 mx-auto mb-4 object-cover"
+            className="w-20 h-20 mx-auto mb-4 object-contain"
           />
           <h1 className="font-brand text-2xl mb-1">
             <span className="text-accent">/</span>
             <span className="text-text-primary">BashGym</span>
           </h1>
-          <p className="text-text-secondary text-sm font-mono uppercase tracking-wider">
-            Agent Training Gym
-          </p>
         </div>
 
         {/* Divider */}

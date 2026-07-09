@@ -6,7 +6,9 @@ import { PreviewPane } from './PreviewPane'
 import { BrowserPane } from './BrowserPane'
 import { FileBrowser } from '../files/FileBrowser'
 import { CanvasViewWrapper } from './CanvasView'
+import { DATA_PANEL_DEFS, DATA_NODE_TYPES } from './nodes/dataPanels'
 import { clsx } from 'clsx'
+import { GhostPeonyIcon, type GhostPeonyIconName } from '../common'
 
 export function TerminalGrid() {
   const {
@@ -42,7 +44,9 @@ export function TerminalGrid() {
     if (panels.length === 0 && !initializedRef.current) {
       initializedRef.current = true
       useTerminalStore.getState().restoreSessions().then((restored) => {
-        if (restored === 0 && useTerminalStore.getState().panels.length === 0) {
+        useTerminalStore.getState().restoreSavedPanels()
+        const hasTerminal = useTerminalStore.getState().panels.some((p) => p.type === 'terminal')
+        if (restored === 0 && !hasTerminal) {
           createTerminal()
         }
       })
@@ -53,12 +57,12 @@ export function TerminalGrid() {
   // State for canvas popup - must be before any early returns
   const [canvasPopupPanelId, setCanvasPopupPanelId] = useState<string | null>(null)
 
-  // Handle focus panel from canvas view - show popup (skip for integration nodes which configure inline)
+  // Handle focus panel from canvas view. Data/config nodes stay on-canvas and own their modal settings.
   const handleFocusPanel = useCallback((panelId: string) => {
     setActivePanel(panelId)
     const panel = useTerminalStore.getState().panels.find(p => p.id === panelId)
-    const integrationTypes = ['context', 'neon', 'vercel']
-    if (panel && integrationTypes.includes(panel.type)) return
+    const inlineTypes = ['context', 'neon', 'vercel', ...DATA_NODE_TYPES]
+    if (panel && inlineTypes.includes(panel.type)) return
     setCanvasPopupPanelId(panelId)
   }, [setActivePanel])
 
@@ -97,8 +101,21 @@ export function TerminalGrid() {
         return <FileText className="w-3.5 h-3.5 flex-shrink-0" />
       case 'files':
         return <FolderTree className="w-3.5 h-3.5 flex-shrink-0" />
-      default:
+      default: {
+        const def = DATA_PANEL_DEFS.find((d) => d.type === type)
+        if (def) {
+          return (
+            <GhostPeonyIcon
+              name={def.type as GhostPeonyIconName}
+              size="xs"
+              tone="node"
+              hue={def.hue}
+              className="flex-shrink-0"
+            />
+          )
+        }
         return <Terminal className="w-3.5 h-3.5 flex-shrink-0" />
+      }
     }
   }
 
@@ -214,6 +231,15 @@ export function TerminalGrid() {
           title={panel.title}
           isActive={isActive}
         />
+      )
+    }
+    if (DATA_NODE_TYPES.includes(panel.type)) {
+      return (
+        <div className="h-full flex items-center justify-center bg-background-secondary">
+          <span className="text-xs font-mono text-text-muted px-4 text-center">
+            "{panel.title}" is a canvas node — switch to Canvas view
+          </span>
+        </div>
       )
     }
     return null
@@ -450,7 +476,7 @@ export function TerminalGrid() {
         {/* Canvas popup backdrop - only when popup is open */}
         {viewMode === 'canvas' && canvasPopupPanelId && (
           <div
-            className="absolute inset-0 z-50 bg-black/60 cursor-pointer"
+            className="absolute inset-0 z-50 canvas-popup-backdrop cursor-pointer"
             onClick={closeCanvasPopup}
           />
         )}
@@ -521,7 +547,7 @@ export function TerminalGrid() {
             >
               <div
                 className={needsPopupWrapper
-                  ? 'rounded-brutal shadow-brutal border-brutal border-border overflow-hidden bg-background-primary pointer-events-auto'
+                  ? 'canvas-popup-panel pointer-events-auto'
                   : 'h-full w-full'
                 }
                 style={needsPopupWrapper ? { width: '90%', maxWidth: '1280px', height: '85%' } : undefined}

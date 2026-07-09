@@ -1,6 +1,6 @@
 """Tests for the pure remote-hardware preflight parsers.
 
-These cover the GB10/unified-memory case (ponyo): nvidia-smi reports VRAM as
+These cover the GB10/unified-memory case (user): nvidia-smi reports VRAM as
 [N/A] on unified memory, so the effective training budget must fall back to
 system RAM.
 """
@@ -66,7 +66,7 @@ def _trainer():
     return RemoteTrainer(
         SSHConfig(
             host="192.168.1.100",
-            username="ponyo",
+            username="remote-user",
             port=22,
             key_path="~/.ssh/id_rsa",
             remote_work_dir="~/bashgym-training",
@@ -75,7 +75,7 @@ def _trainer():
 
 
 def test_preflight_without_unsloth_requirement_stays_ok_for_plain_backend():
-    # ponyo (sm_121/GB10) uses the plain transformers backend; a missing Unsloth
+    # user (sm_121/GB10) uses the plain transformers backend; a missing Unsloth
     # must not fail preflight when the caller does not require it.
     mock_conn = AsyncMock()
     mock_conn.run = AsyncMock(

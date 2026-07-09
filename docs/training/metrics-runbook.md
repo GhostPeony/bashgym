@@ -17,13 +17,66 @@ You can also pass explicit artifacts:
 bashgym training analyze \
   --metrics data/models/<run-id>/metrics.jsonl \
   --replay data/dppo_replay/<run-id>.jsonl \
+  --smoke-bundle data/backend-smokes/<run-id>/backend_smoke_readiness.json \
   --release-evidence artifacts/<run-id>-release.json \
   --json
 ```
 
 The analyzer highlights missing heldout evidence, zero reward variance, high
-timeout/tamper rates, release-gate blockers, and world-model replay coverage
-without ECHO/RWML quality metrics.
+timeout/tamper rates, release-gate blockers, smoke-bundle readiness, and
+world-model replay coverage without ECHO/RWML quality metrics.
+
+It also summarizes non-gating diagnostic signals when present:
+
+- `kl`, `entropy`, `grad_norm`, and `learning_rate` for optimization health.
+- `preference_accuracy` and `reward_margin` for DPO/preference runs.
+- `verifier_error_rate`, `tool_calls`, `tokens_per_second`, `gpu_memory_peak_gb`,
+  and `oom_count` for operational health.
+- `echo_loss`, `rwml_pass_rate`, embedding-distance, exit-code, and test-result
+  metrics for world-model diagnostics.
+
+---
+
+## Metric roles
+
+Not every number has the same authority. Use this hierarchy before changing run
+settings or promoting a model.
+
+| Role | Metrics | What to do with them |
+|---|---|---|
+| Setup checks | Dataset size, truncation count, replay schema, smoke-bundle `contract_ready`. | Fix before training. These are cheap contract failures. |
+| Training health | Train/eval loss, grad norm, reward, KL, entropy, ECHO loss. | Tune learning rate, epochs, sequence length, and objective weights. |
+| Signal quality | `reward_std`, `frac_reward_zero_std`, verifier status, timeout rate, RWML transition count. | Decide whether RL has a usable learning signal. |
+| Behavior evidence | pass@1/pass@k, heldout trace score, holdout comparison, external benchmark scores. | Decide whether the candidate is better. |
+| Safety/release gates | Tamper status, spurious-reward controls, reward-hacking canaries, verifier-error patterns. | Block routing until cleared. |
+| Diagnostic context | ECHO/RWML quality, embedding-distance distribution, command-count change. | Explain behavior and mine curriculum; do not ship from these alone. |
+| Operational health | Tokens/sec, peak GPU memory, OOM count, backend import status. | Right-size batch, sequence length, backend, and compute-target readiness. |
+
+Good training review starts at the bottom of the compute stack: setup checks,
+then training health, then signal quality, then behavior and safety. Do not spend
+private/cloud compute time on a run with failed setup checks.
+
+---
+
+## Starter thresholds
+
+These are first-pass operating thresholds. Treat them as prompts to inspect, not
+as universal pass/fail laws.
+
+| Area | Starter value | If it misses |
+|---|---|---|
+| SFT eval loss | Flat or decreasing after the warmup window. | Lower LR or epochs, add dropout, or remove weak examples. |
+| GRPO reward contrast | `reward_std > 0` for enough prompt groups to fill a batch. | Use active sampling, easier tasks, graded rewards, or SFT warm start. |
+| Zero-std groups | `frac_reward_zero_std < 0.5` for serious RL batches. | Increase group size, filter zero-std groups, or rebalance task difficulty. |
+| Timeout rate | Under 10 percent for promotion candidates. | Lower max tool calls, inspect loops, and add concise recovery traces. |
+| Verifier errors | Rare and explainable, ideally under 2 percent. | Fix environment setup before training on the reward. |
+| Tamper attempts | Zero for release candidates. | Treat as a release blocker and inspect protected-file coverage. |
+| OOM count | Zero for serious smoke or train runs. | Lower batch, sequence length, or full-finetune memory pressure. |
+| KL/entropy | Stable relative to the chosen algorithm; no universal threshold. | Use backend-specific ranges; do not promote or block from these alone. |
+| DPPO smoke bundle | `contract_ready=true`; `optimizer_ready=true` for optimizer updates. | Fix replay/logprob/world-model coverage locally before private/cloud compute. |
+| ECHO/RWML quality | Improves on heldout transitions and does not hurt pass@k. | Keep diagnostic, mine outliers, and avoid release-gating on it. |
+
+---
 
 When a backend smoke produces world-model quality metrics, attach them to the
 heldout release run as diagnostic evidence:
@@ -58,12 +111,45 @@ environment, safety, and external benchmark gates.
 |---|---|---|
 | SFT | Train loss, eval loss, grad norm, token count, truncation warnings. | Heldout trace eval, executable environment pass@k. |
 | DPO | Chosen/rejected rewards, reward margin, preference accuracy, chosen/rejected logprobs. | Heldout trace eval and task behavior against the SFT baseline. |
+| Reward model / ORM / PRM | Heldout pair accuracy, calibration error, reward margin, length bias, task-family breakdown, reward variance. | Reward-model evidence plus selected-vs-random controls before using the scorer for training claims. |
 | GRPO/RLVR | Reward, `reward_std`, `frac_reward_zero_std`, KL, entropy, verifier status, timeouts. | pass@1/pass@k, holdout gate, spurious-reward control, tamper canaries. |
+| Session Distillation | `session_distillation_loss`, `session_distillation_kl`, `session_distillation_ce`, masked token count, reader confidence. | Heldout recovery-decision accuracy, tool-call validity, executable pass@k where environments exist. |
 | DPPO | Behavior logprobs ready, train logprobs ready, replay-required records, trust-region mask telemetry. | Backend smoke artifacts plus pass@k before/after. |
 | ECHO/RWML | Replay coverage, ECHO loss, RWML pass rate, embedding-distance distribution, exit-code/test-result prediction accuracy. | Diagnostic release evidence only until correlated with heldout pass@k and safety. |
 | Cascade | Per-stage loss/reward, per-domain pass@k, stage-to-stage forgetting. | Domain holdouts and final generalist holdout. |
 
 ---
+
+## Producing reward-model evidence
+
+For reward-model, ORM, and PRM runs, validate the source artifact first and then
+evaluate model predictions on a heldout split:
+
+```bash
+bashgym training reward-examples validate reward_examples.jsonl --strict --json
+bashgym training reward-model smoke reward_examples.jsonl --output-dir data/reward-model-smokes/run-001 --json
+bashgym training reward-eval evaluate reward_predictions.jsonl --output reward_eval.json --json
+```
+
+The fixture smoke writes `metrics.jsonl`, `reward_predictions.jsonl`, and
+`reward_eval.json` without requiring a GPU reward-model backend. Use it to prove
+the contract before a TRL/OpenRLHF reward run; do not treat fixture loss as
+production reward quality.
+
+The prediction file can be the reward examples file enriched with
+`predicted_reward`, `predicted_score`, `model_score`, `reward_model_score`, or
+`prediction`. Keep `reward_eval.json` with the RunCard before using the scorer
+for best-of-N, rejection sampling, reward audits, or RL.
+
+When reviewing a candidate model, paste `reward_eval.json` or the fixture report
+into the Held-out Gate release evidence field as `learned_reward_evidence`. The
+combined release gate reports reward accuracy, calibration, variance, and
+leakage as diagnostic evidence; it does not block or approve shipping until
+claim-tier thresholds are chosen.
+
+For public reward-model benchmark evidence, attach RewardBench or CUARewardBench
+result JSON through external benchmark ingest. Keep those benchmark sources
+eval-only unless an explicit source-card override and RunCard rationale exist.
 
 ## Symptom: loss improves but pass@k is flat
 
@@ -280,6 +366,54 @@ Done when:
 
 ---
 
+## Symptom: smoke bundle blocks private/cloud compute work
+
+Likely causes:
+
+- Replay JSONL was not exported.
+- Behavior logprobs are missing.
+- World-model payloads were not included.
+- RWML has no command -> next-state transitions.
+- ECHO has no terminal observations.
+
+Actions:
+
+1. Inspect `backend_smoke_readiness.json`.
+2. Fix every failed check before syncing to a compute target.
+3. Regenerate replay with `include_world_model_replay=true` for ECHO/RWML.
+4. Enable response logprobs during served-model rollouts.
+5. Run train-policy logprob enrichment before real DPPO optimizer updates.
+6. Re-run `bashgym training smoke-bundle`.
+
+Done when:
+
+- `contract_ready=true`.
+- `optimizer_ready=true` for DPPO optimizer updates.
+- ECHO/RWML probe counts are non-zero when those objectives are enabled.
+
+---
+
+## Symptom: smoke bundle is ready but backend launch is not
+
+Likely causes:
+
+- verl, SkyRL, or open-instruct is installed only on the compute target, not locally.
+- The backend is in a custom conda/uv environment that local probing cannot see.
+- A project-specific command wrapper is required.
+
+Actions:
+
+1. Treat `contract_ready=true` as proof that replay handoff is shaped correctly.
+2. Use `docs/training/private-compute-eval-checklist.md` to move artifacts to the compute target.
+3. Provide `--command-template` if the backend launcher is custom.
+4. Keep `max_steps=1` until the backend reads replay and logs metrics cleanly.
+
+Done when:
+
+- The one-step backend smoke writes logs, metrics, and an output directory.
+
+---
+
 ## Minimum release checklist
 
 Before routing real traffic to a trained student:
@@ -291,6 +425,7 @@ Before routing real traffic to a trained student:
 - Spurious-reward controls do not pass by chance.
 - Reward-hacking canaries are guarded.
 - External benchmark evidence is attached for broad capability claims.
+- Backend-smoke readiness and private/cloud compute logs are preserved when DPPO/ECHO/RWML was used.
 - World-model quality evidence is attached when ECHO/RWML was enabled, and it is
   interpreted as diagnostic context.
 - No unresolved verifier-error or tamper pattern remains.

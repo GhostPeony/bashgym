@@ -20,7 +20,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
-import { useTerminalStore, useCanvasControlStore, useTrainingStore } from '../../stores'
+import { useTerminalStore, useCanvasControlStore } from '../../stores'
 import type { Panel, TerminalSession, CanvasEdge, MonitorAutoMode } from '../../stores'
 import { getMonitorInfo, isMonitorEdge, sendMonitorSnapshot } from '../../utils/monitorRouting'
 import { applyPreset, type CanvasPreset } from './canvasPresets'
@@ -38,6 +38,7 @@ import { AgentEndpointNode } from './nodes/AgentEndpointNode'
 import { ToolKitNode } from './nodes/ToolKitNode'
 import { DATA_NODE_TYPES } from './nodes/dataPanels'
 import type { IntegrationNodeData, DataNodeData } from './nodes/types'
+import { workspaceApi } from '../../services/api'
 // Import adapters to trigger registration side effects
 import './nodes/adapters/context'
 import './nodes/adapters/neon'
@@ -70,16 +71,30 @@ const toPersistedEdge = (e: Edge): PersistedEdge => ({
     : {})
 })
 
+const toFlowEdge = (e: PersistedEdge): Edge =>
+  e.type === 'monitor'
+    ? {
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        type: 'monitor' as const,
+        data: { auto: e.data?.auto ?? 'off' }
+      }
+    : {
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        animated: true,
+        style: EDGE_STYLE,
+        className: 'canvas-edge-pulse'
+      }
+
 const loadEdges = (): Edge[] => {
   try {
     const stored = localStorage.getItem(EDGES_KEY)
     if (stored) {
       const parsed: PersistedEdge[] = JSON.parse(stored)
-      return parsed.map((e) =>
-        e.type === 'monitor'
-          ? { id: e.id, source: e.source, target: e.target, type: 'monitor' as const, data: { auto: e.data?.auto ?? 'off' } }
-          : { ...e, animated: true, style: EDGE_STYLE }
-      )
+      return parsed.map(toFlowEdge)
     }
   } catch {
     // Ignore
@@ -151,6 +166,63 @@ const saveViewport = (viewport: Viewport) => {
   }
 }
 
+const SECRET_KEY_RE = /(api[_-]?key|authorization|bearer|password|secret|token)/i
+
+function sanitizeConfig(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sanitizeConfig)
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
+        key,
+        SECRET_KEY_RE.test(key) ? '[redacted]' : sanitizeConfig(entry)
+      ])
+    )
+  }
+  if (typeof value === 'string' && /^(sk-|ghp_|hf_|xox[bp]-)/.test(value)) return '[redacted]'
+  return value
+}
+
+function buildWorkspaceSnapshot(state: ReturnType<typeof useTerminalStore.getState>) {
+  const panels = state.panels.map((panel) => ({
+    panel_id: panel.id,
+    type: panel.type,
+    title: panel.title,
+    terminal_id: panel.terminalId,
+    adapter_config: sanitizeConfig(panel.adapterConfig || {}) as Record<string, unknown>,
+    visible: true
+  }))
+  const terminals = Array.from(state.sessions.values()).map((session) => {
+    const panel = state.panels.find((candidate) => candidate.terminalId === session.id)
+    return {
+      terminal_id: session.id,
+      panel_id: panel?.id,
+      title: session.title,
+      cwd: session.cwd,
+      agent_kind: session.agentKind,
+      status: session.status,
+      current_tool: session.currentTool
+    }
+  })
+  return {
+    schema_version: 'bashgym.workspace.canvas.v1',
+    updated_at: new Date().toISOString(),
+    panels,
+    edges: state.canvasEdges,
+    terminals,
+    data_summaries: {
+      panel_count: panels.length,
+      edge_count: state.canvasEdges.length,
+      terminal_count: terminals.length
+    },
+    allowed_actions: [
+      'workspace.context.read',
+      'workspace.canvas.intent.emit',
+      'training.start',
+      'terminal.snapshot.send'
+    ]
+  }
+}
+
 // Register all node types
 const nodeTypes = {
   terminal: TerminalNode,
@@ -204,6 +276,7 @@ function buildNodeData(
     return {
       panelId: panel.id,
       title: panel.title,
+      adapterConfig: panel.adapterConfig,
       hasConnections,
       onFocus,
       onClose,
@@ -313,6 +386,7 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
   // panels without re-running every time a drag updates canvasNodes
   const canvasNodesRef = useRef(canvasNodes)
   canvasNodesRef.current = canvasNodes
+  const snapshotTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   const [nodes, setNodes, onNodesChange] = useNodesState<CanvasFlowNode>([])
   const initialEdgesRef = useRef<Edge[] | null>(null)
@@ -356,6 +430,21 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
     }
   }
   const monitorHandlers = monitorHandlersRef.current
+
+  // Orchestrated graph changes write to terminalStore.canvasEdges. Reconcile
+  // those back into React Flow while leaving manual React Flow changes alone.
+  useEffect(() => {
+    const unsubscribe = useTerminalStore.subscribe((state, prev) => {
+      if (state.canvasEdges === prev.canvasEdges) return
+      setEdges((current) => {
+        const currentShape = JSON.stringify(current.map(toPersistedEdge))
+        const nextShape = JSON.stringify(state.canvasEdges)
+        if (currentShape === nextShape) return current
+        return decorateMonitorEdges(state.canvasEdges.map(toFlowEdge), state.panels, monitorHandlers)
+      })
+    })
+    return unsubscribe
+  }, [setEdges, monitorHandlers])
 
   // Upgrade terminal↔terminal edges to monitor edges (covers edges loaded from
   // storage before panels restored, and legacy saved edges)
@@ -420,63 +509,32 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
     return unsubscribe
   }, [setNodes]) // setNodes is stable; callbacks accessed via ref
 
-  // Auto-build: when a training run goes live, ensure a Training Run node exists and
-  // wire it to the terminal that initiated it (most recently active busy agent session)
-  const autoBuiltRunIdRef = useRef<string | null>(null)
+  // Sync a sanitized live canvas snapshot for terminal/Hermes agents. Throttled
+  // and keyed on render-relevant state so terminal output streaming does not
+  // hammer the backend.
   useEffect(() => {
-    const ensureTrainingGraph = (run: { id: string; status: string } | null) => {
-      if (!run || (run.status !== 'running' && run.status !== 'starting')) return
-      if (autoBuiltRunIdRef.current === run.id) return
-      autoBuiltRunIdRef.current = run.id
-
-      const ts = useTerminalStore.getState()
-      const existing = ts.panels.find((p) => p.type === 'training')
-      const panelId = existing?.id ?? ts.addPanel({ type: 'training', title: 'Training Run' })
-
-      const sessions = Array.from(ts.sessions.values()).sort((a, b) => b.lastActivity - a.lastActivity)
-      const initiating = sessions.find((s) => s.status === 'running' || s.status === 'tool_calling') ?? sessions[0]
-      const termPanel = initiating
-        ? useTerminalStore.getState().panels.find((p) => p.terminalId === initiating.id)
-        : undefined
-      if (!termPanel) return
-
-      if (!existing) {
-        const termPos = canvasNodesRef.current.get(termPanel.id)?.position
-        if (termPos) {
-          const pos = { x: termPos.x + 460, y: termPos.y - 60 }
-          updateCanvasNode(panelId, pos)
-          setNodes((nds) => nds.map((n) => (n.id === panelId ? { ...n, position: pos } : n)))
-        }
-      }
-
-      setEdges((eds) => {
-        const exists = eds.some(
-          (e) =>
-            (e.source === termPanel.id && e.target === panelId) ||
-            (e.source === panelId && e.target === termPanel.id)
-        )
-        if (exists) return eds
-        return addEdge(
-          {
-            source: termPanel.id,
-            target: panelId,
-            sourceHandle: null,
-            targetHandle: null,
-            animated: true,
-            style: EDGE_STYLE
-          },
-          eds
-        )
-      })
+    const pushSnapshot = () => {
+      if (snapshotTimerRef.current) clearTimeout(snapshotTimerRef.current)
+      snapshotTimerRef.current = setTimeout(() => {
+        void workspaceApi.putCanvasSnapshot(buildWorkspaceSnapshot(useTerminalStore.getState()))
+      }, 800)
     }
 
-    ensureTrainingGraph(useTrainingStore.getState().currentRun)
-    const unsubscribe = useTrainingStore.subscribe((state, prev) => {
-      if (state.currentRun === prev.currentRun) return
-      ensureTrainingGraph(state.currentRun)
+    pushSnapshot()
+    const unsubscribe = useTerminalStore.subscribe((state, prev) => {
+      if (
+        state.panels === prev.panels &&
+        state.sessionsVersion === prev.sessionsVersion &&
+        state.canvasEdges === prev.canvasEdges &&
+        state.canvasNodes === prev.canvasNodes
+      ) return
+      pushSnapshot()
     })
-    return unsubscribe
-  }, [setEdges, setNodes, updateCanvasNode])
+    return () => {
+      if (snapshotTimerRef.current) clearTimeout(snapshotTimerRef.current)
+      unsubscribe()
+    }
+  }, [])
 
   // Handle node position changes
   const handleNodesChange = useCallback((changes: NodeChange<CanvasFlowNode>[]) => {
@@ -507,7 +565,8 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
     setEdges((eds) => addEdge({
       ...connection,
       animated: true,
-      style: { stroke: 'var(--accent)', strokeWidth: 2 }
+      style: { stroke: 'var(--accent)', strokeWidth: 2 },
+      className: 'canvas-edge-pulse'
     }, eds))
   }, [setEdges, monitorHandlers])
 
@@ -645,7 +704,7 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
   }, [setEdges, setNodes, updateCanvasNode, fitView, getZoom, monitorHandlers])
 
   return (
-    <div className="h-full w-full relative">
+    <div className={`h-full w-full relative ${currentZoom < 0.55 ? 'canvas-compact' : ''}`}>
       <ReactFlow
         nodes={nodes}
         edges={edges}

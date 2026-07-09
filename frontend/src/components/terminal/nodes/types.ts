@@ -45,6 +45,7 @@ export interface IntegrationNodeData extends Record<string, unknown> {
 export interface DataNodeData extends Record<string, unknown> {
   panelId: string
   title: string
+  adapterConfig?: Record<string, unknown>
   hasConnections?: boolean
   onFocus?: (panelId: string) => void
   onClose?: (panelId: string) => void

@@ -428,6 +428,84 @@
     letter-spacing: 0.08em;
   }
 
+  /* Canvas node form controls — explicit, bordered, and readable at compact scale */
+  .input-brutal {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    background: var(--bg-card);
+    color: var(--text-primary);
+    border: var(--border-weight) solid var(--border-color);
+    border-radius: var(--radius);
+    padding: 7px 9px;
+    line-height: 1.25;
+    outline: none;
+    box-shadow: inset 2px 2px 0px rgba(30, 30, 36, 0.08);
+    transition: border-color 0.15s ease, background 0.15s ease,
+      box-shadow 0.15s ease;
+  }
+
+  .input-brutal::placeholder {
+    color: var(--text-muted);
+    opacity: 0.85;
+  }
+
+  .input-brutal:focus {
+    border-color: var(--accent-dark);
+    background: var(--bg-secondary);
+    box-shadow:
+      0 0 0 2px var(--accent-light),
+      inset 2px 2px 0px rgba(30, 30, 36, 0.08);
+  }
+
+  textarea.input-brutal {
+    min-height: 64px;
+    line-height: 1.4;
+    resize: vertical;
+  }
+
+  select.input-brutal {
+    padding-right: 28px;
+  }
+
+  .node-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .node-field-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8.5px;
+    line-height: 1;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-secondary);
+  }
+
+  .node-section {
+    border: var(--border-weight) solid var(--border-subtle);
+    border-radius: var(--radius);
+    background: var(--bg-secondary);
+    padding: 10px;
+  }
+
+  .node-section-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    line-height: 1;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-primary);
+  }
+
   /* CTA / Directional — rectangle with triangle arrow */
   .btn-cta {
     padding: 10px 40px 10px 24px;
@@ -770,6 +848,116 @@
 
   .dark .hover-press:active {
     transform: translate(1px, 1px);
+  }
+
+  /* Canvas motion tokens — cheap, semantic feedback for generated graph changes */
+  .canvas-node-enter {
+    animation: canvas-node-enter 180ms ease-out both;
+    will-change: transform, opacity;
+  }
+
+  .canvas-node-ghost {
+    background-image: linear-gradient(
+      135deg,
+      hsla(var(--accent-hue), 42%, 62%, 0.08) 0,
+      hsla(var(--accent-hue), 42%, 62%, 0.08) 8px,
+      transparent 8px,
+      transparent 16px
+    );
+  }
+
+  .canvas-state-strip-live {
+    background-image: linear-gradient(
+      90deg,
+      var(--accent) 0%,
+      hsla(var(--accent-hue), 58%, 72%, 1) 50%,
+      var(--accent) 100%
+    );
+    background-size: 200% 100%;
+    animation: canvas-state-strip-flow 1.2s linear infinite;
+  }
+
+  .canvas-state-strip-queued {
+    background: repeating-linear-gradient(
+      90deg,
+      var(--accent) 0,
+      var(--accent) 10px,
+      hsla(var(--accent-hue), 45%, 72%, 0.75) 10px,
+      hsla(var(--accent-hue), 45%, 72%, 0.75) 18px
+    );
+  }
+
+  .canvas-edge-pulse .react-flow__edge-path,
+  .react-flow__edge.canvas-edge-pulse .react-flow__edge-path {
+    stroke-dasharray: 8 7;
+    animation: canvas-edge-pulse 700ms ease-out 1;
+  }
+
+  .canvas-action-flash-success {
+    animation: canvas-action-flash-success 900ms ease-out 1;
+  }
+
+  .canvas-action-flash-error {
+    animation: canvas-action-flash-error 900ms ease-out 1;
+  }
+
+  .canvas-node-dragging {
+    transform: translate(2px, 2px);
+    box-shadow: 1px 1px 0px var(--shadow-color);
+    will-change: transform;
+  }
+
+  .canvas-compact .node-btn-wide {
+    padding-inline: 6px;
+  }
+
+  .canvas-compact [data-canvas-phase] {
+    max-height: 220px;
+    overflow: hidden;
+  }
+
+  @keyframes canvas-node-enter {
+    from {
+      opacity: 0;
+      transform: translate3d(-10px, 6px, 0) scale(0.985);
+    }
+    to {
+      opacity: 1;
+      transform: translate3d(0, 0, 0) scale(1);
+    }
+  }
+
+  @keyframes canvas-state-strip-flow {
+    from { background-position: 0 0; }
+    to { background-position: 200% 0; }
+  }
+
+  @keyframes canvas-edge-pulse {
+    from { stroke-dashoffset: 28; }
+    to { stroke-dashoffset: 0; }
+  }
+
+  @keyframes canvas-action-flash-success {
+    0%, 100% { border-color: var(--border-color); }
+    30% { border-color: var(--status-success); }
+  }
+
+  @keyframes canvas-action-flash-error {
+    0%, 100% { border-color: var(--border-color); transform: translateX(0); }
+    20% { border-color: var(--status-error); transform: translateX(-1px); }
+    40% { transform: translateX(1px); }
+    60% { transform: translateX(-1px); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .canvas-node-enter,
+    .canvas-state-strip-live,
+    .canvas-edge-pulse .react-flow__edge-path,
+    .react-flow__edge.canvas-edge-pulse .react-flow__edge-path,
+    .canvas-action-flash-success,
+    .canvas-action-flash-error {
+      animation: none;
+    }
   }
 }
 

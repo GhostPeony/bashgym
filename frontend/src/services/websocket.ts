@@ -27,6 +27,7 @@ import { useOrchestratorStore } from '../stores/orchestratorStore'
 import { useAutoResearchStore } from '../stores/autoresearchStore'
 import { useActivityStore } from '../stores/activityStore'
 import { useCascadeStore } from '../stores/cascadeStore'
+import { useCanvasOrchestratorStore } from '../stores/canvasOrchestratorStore'
 
 type MessageHandler = (data: any) => void
 
@@ -39,6 +40,7 @@ interface WebSocketMessage {
 // Message types matching backend MessageType enum
 export const MessageTypes = {
   // Training events
+  TRAINING_QUEUED: 'training:queued',
   TRAINING_PROGRESS: 'training:progress',
   TRAINING_COMPLETE: 'training:complete',
   TRAINING_FAILED: 'training:failed',
@@ -62,6 +64,9 @@ export const MessageTypes = {
   // System events
   SYSTEM_STATUS: 'system:status',
   ERROR: 'error',
+  // Workspace canvas events
+  WORKSPACE_CANVAS_INTENT: 'workspace:canvas:intent',
+  WORKSPACE_CONTEXT_UPDATED: 'workspace:context:updated',
   // Connection events
   CONNECTED: 'connected',
   SUBSCRIBED: 'subscribed',
@@ -196,7 +201,12 @@ class WebSocketService {
     // Handle built-in message types
     switch (type) {
       // Training events
+      case MessageTypes.TRAINING_QUEUED:
+        useCanvasOrchestratorStore.getState().handleTrainingQueued(payload as any)
+        break
+
       case MessageTypes.TRAINING_PROGRESS: {
+        useCanvasOrchestratorStore.getState().handleTrainingProgress(payload as any)
         const metrics = {
           loss: payload.loss,
           learningRate: payload.learning_rate,
@@ -235,10 +245,16 @@ class WebSocketService {
       }
 
       case MessageTypes.TRAINING_COMPLETE:
+        if (payload.run_id) {
+          useCanvasOrchestratorStore.getState().handleTrainingTerminalStatus(payload.run_id, 'completed')
+        }
         useTrainingStore.getState().setStatus('completed')
         break
 
       case MessageTypes.TRAINING_FAILED:
+        if (payload.run_id) {
+          useCanvasOrchestratorStore.getState().handleTrainingTerminalStatus(payload.run_id, 'failed')
+        }
         useTrainingStore.getState().setStatus('failed')
         break
 
@@ -443,6 +459,14 @@ class WebSocketService {
 
       case MessageTypes.PONG:
         // Heartbeat response, connection is alive
+        break
+
+      case MessageTypes.WORKSPACE_CANVAS_INTENT:
+        useCanvasOrchestratorStore.getState().handleWorkspaceIntent(payload as any)
+        break
+
+      case MessageTypes.WORKSPACE_CONTEXT_UPDATED:
+        // Lightweight notification only; Activity feed already records it.
         break
     }
 

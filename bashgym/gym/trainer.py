@@ -175,6 +175,7 @@ class _ProgressLineParser:
         self.last_loss: float | None = None
         self.last_epoch = 0
         self.last_step = 0
+        self.loss_lines = 0
         self.last_grad_norm: float | None = None
         self.samples_processed = 0
         self.estimated_total_steps = 1000
@@ -206,12 +207,16 @@ class _ProgressLineParser:
         epoch_match = re.search(r"'epoch':\s*'?([\d.]+)", line)
         step_match = re.search(r"'step':\s*'?(\d+)", line)
         grad_norm_match = re.search(r"'grad_norm':\s*'?([\d.]+)", line)
-        progress_match = re.search(r"(\d+)%\|[^|]*\|\s*(\d+)/(\d+)", line)
+        # tqdm updates use \r, so one streamed line can hold many progress
+        # snapshots — the last one is current.
+        progress_matches = re.findall(r"(\d+)%\|[^|]*\|\s*(\d+)/(\d+)", line)
+        progress_match = progress_matches[-1] if progress_matches else None
         unsloth_steps_match = re.search(r"Total steps\s*=\s*(\d+)", line)
 
         self.had_loss = bool(loss_match)
         if loss_match:
             self.last_loss = float(loss_match.group(1))
+            self.loss_lines += 1
         if epoch_match:
             self.last_epoch = int(float(epoch_match.group(1)))
         if step_match:
@@ -228,8 +233,8 @@ class _ProgressLineParser:
         if unsloth_steps_match:
             self.estimated_total_steps = int(unsloth_steps_match.group(1))
         if progress_match:
-            self.last_step = int(progress_match.group(2))
-            self.estimated_total_steps = int(progress_match.group(3))
+            self.last_step = int(progress_match[1])
+            self.estimated_total_steps = int(progress_match[2])
             self.samples_processed = self.last_step * self.batch_size
 
         if not (progress_match or loss_match or sd_metrics or resource_metrics):
@@ -2029,6 +2034,7 @@ if __name__ == "__main__":
         max_seq_length=max_seq_length,
         dtype=dtype,
         load_in_4bit=load_in_4bit,
+        device_map="sequential",
     )
 
     # Unwrap ProcessorMixin → raw tokenizer for text-only SFT.
@@ -2653,6 +2659,7 @@ student_model, tokenizer = FastLanguageModel.from_pretrained(
     max_seq_length={self.config.max_seq_length},
     dtype=torch.float16,
     load_in_4bit={self.config.load_in_4bit},
+    device_map="sequential",
 )
 
 # Add LoRA adapters to student
@@ -3103,6 +3110,7 @@ model, tokenizer = FastLanguageModel.from_pretrained(
     max_seq_length=max_seq_length,
     dtype=dtype,
     load_in_4bit=load_in_4bit,
+    device_map="sequential",
 )
 
 # Add LoRA adapters
@@ -3249,9 +3257,12 @@ print("DPO training complete!")
                 if payload is not None:
                     if callback:
                         callback(payload)
-                    if parser.had_loss and parser.last_loss is not None and parser.last_step > 0:
+                    if parser.had_loss and parser.last_loss is not None:
+                        # Remote TRL metric dicts carry no 'step' key and tqdm
+                        # lines may not survive the log stream — fall back to
+                        # the loss-line ordinal so the curve still populates.
                         run.add_loss_point(
-                            step=parser.last_step,
+                            step=parser.last_step or parser.loss_lines,
                             loss=parser.last_loss,
                             epoch=parser.last_epoch,
                             learning_rate=self.config.learning_rate,

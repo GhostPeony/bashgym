@@ -303,12 +303,17 @@ ipcMain.handle('terminal:create', async (_, id: string, cwd?: string) => {
 
     const resolvedCwd = resolveTerminalCwd(cwd)
 
+    const env = {
+      ...getFreshEnv(),
+      BASHGYM_TERMINAL_ID: id
+    }
+
     const ptyProcess = pty.spawn(shell, shellArgs, {
       name: 'xterm-256color',
       cols: 80,
       rows: 24,
       cwd: resolvedCwd,
-      env: getFreshEnv()
+      env
     })
 
     const session: PtySession = {

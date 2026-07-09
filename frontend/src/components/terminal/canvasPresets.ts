@@ -96,7 +96,7 @@ export function deleteCustomPreset(id: string): void {
 
 /** Panel types a captured preset can restore (terminals restart fresh, optionally with an agent) */
 const CAPTURABLE_TYPES: PanelType[] = [
-  'terminal', 'browser', 'activity', 'training', 'evals', 'designer', 'context', 'neon', 'vercel'
+  'terminal', 'browser', 'activity', 'training', 'evals', 'designer', 'huggingface', 'context', 'neon', 'vercel'
 ]
 
 /** Snapshot the live canvas (panels, positions, edges) as a reusable preset */

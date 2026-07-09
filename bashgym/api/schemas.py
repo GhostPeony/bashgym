@@ -348,6 +348,18 @@ class TrainingRequest(BaseModel):
     device_id: str | None = Field(
         None, description="Target device ID for private compute training (uses default if omitted)"
     )
+    compute_target: str | None = Field(
+        None,
+        description="Generic execution target label for canvas provenance: local, ssh:<device_id>, or cloud",
+    )
+    origin: dict[str, Any] | None = Field(
+        None,
+        description="Optional workspace origin metadata, e.g. terminal/panel/agent ids",
+    )
+    correlation_id: str | None = Field(
+        None,
+        description="Optional workspace intent correlation id that links prep and run events",
+    )
     selected_repos: list[str] | None = Field(
         None, description="Repos to include (None or empty = all repos)"
     )
@@ -387,8 +399,13 @@ class TrainingResponse(BaseModel):
     error: str | None = None  # Error message if training failed
     started_at: str | None = None
     completed_at: str | None = None
-    metrics: dict[str, float] | None = None
+    # Values arrive from parsed trainer logs and may be strings (e.g. TRL
+    # stats dicts serialize numbers as strings) — do not reject the response.
+    metrics: dict[str, Any] | None = None
     output_path: str | None = None
+    origin: dict[str, Any] | None = None
+    correlation_id: str | None = None
+    compute_target: str | None = None
 
 
 # =============================================================================

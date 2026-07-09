@@ -2,18 +2,18 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
 import {
   Check,
-  ChevronDown,
-  ChevronRight,
   ExternalLink,
   Link2,
   Loader2,
   Send,
+  Settings2,
   X
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import type { ConfigField, IntegrationNodeData, NodeAdapter } from './types'
 import { routeToLinkedTerminals } from '../../../utils/edgeRouting'
 import { useTerminalStore } from '../../../stores/terminalStore'
+import { ConfigRow, ConfigRows, ConfigSection, NodeConfigModal } from './NodeConfigModal'
 
 // ---------------------------------------------------------------------------
 // Adapter registry
@@ -62,7 +62,7 @@ function ConfigFieldInput({
     case 'textarea':
       return (
         <textarea
-          className={clsx(inputClasses, 'resize-y min-h-[60px]')}
+          className={clsx(inputClasses, 'nodrag nowheel resize-y min-h-[60px]')}
           placeholder={field.placeholder}
           value={(value as string) ?? ''}
           onChange={e => onChange(field.key, e.target.value)}
@@ -211,9 +211,9 @@ export const IntegrationNode = memo(function IntegrationNode({
     onClose
   } = data
 
-  // Local UI state — auto-expand when node is freshly created (no meaningful config yet)
+  // Local UI state — open config when node is freshly created (no meaningful config yet)
   const hasExistingConfig = Object.keys(adapterConfig).some(k => k !== '_panelId' && adapterConfig[k] !== undefined && adapterConfig[k] !== '')
-  const [expanded, setExpanded] = useState(!hasExistingConfig)
+  const [configOpen, setConfigOpen] = useState(!hasExistingConfig)
   const [config, setConfig] = useState<Record<string, unknown>>(
     () => ({ ...adapterConfig })
   )
@@ -289,10 +289,10 @@ export const IntegrationNode = memo(function IntegrationNode({
     onFocus?.(panelId)
   }, [panelId, onFocus])
 
-  const handleToggleExpand = useCallback(
+  const handleOpenConfig = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation()
-      setExpanded(prev => !prev)
+      setConfigOpen(true)
     },
     []
   )
@@ -323,6 +323,7 @@ export const IntegrationNode = memo(function IntegrationNode({
   const AdapterIcon = adapter?.icon
 
   return (
+    <>
     <div
       className={clsx(
         'w-[300px] card !rounded-brutal border-brutal cursor-pointer',
@@ -371,15 +372,11 @@ export const IntegrationNode = memo(function IntegrationNode({
           )}
           <button
             type="button"
-            onClick={handleToggleExpand}
-            className="node-btn"
-            title={expanded ? 'Collapse config' : 'Expand config'}
+            onClick={handleOpenConfig}
+            className={clsx('node-btn', configOpen ? 'node-btn-success' : 'node-btn-accent')}
+            title="Configure integration"
           >
-            {expanded ? (
-              <ChevronDown className="w-3 h-3" />
-            ) : (
-              <ChevronRight className="w-3 h-3" />
-            )}
+            <Settings2 className="w-3 h-3" />
           </button>
           <button
             type="button"
@@ -486,50 +483,15 @@ export const IntegrationNode = memo(function IntegrationNode({
         </div>
       )}
 
-      {/* Expanded config panel */}
-      {expanded && (credentialFields.length > 0 || configFields.length > 0) && (
-        <div className="px-3 py-2 space-y-2 bg-background-secondary nodrag nowheel">
-          {/* Credential fields (shown above adapter config) */}
-          {credentialFields.length > 0 && (
-            <>
-              {credentialFields.map(field => (
-                <CredentialField
-                  key={field.key}
-                  field={field}
-                  isSaved={credentialStatus[field.key] ?? false}
-                  onSave={handleCredentialSave}
-                />
-              ))}
-              {configFields.length > 0 && (
-                <div className="border-t border-brutal border-border-subtle my-1" />
-              )}
-            </>
-          )}
-          {/* Adapter config fields */}
-          {configFields.map(field => (
-            <div key={field.key}>
-              <label className="block text-[9px] font-mono uppercase tracking-wider text-text-secondary mb-1">
-                {field.label}
-              </label>
-              <ConfigFieldInput
-                field={field}
-                value={config[field.key]}
-                onChange={handleConfigChange}
-              />
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Setup prompt when collapsed with no config */}
-      {adapter && !expanded && !hasExistingConfig && (
+      {/* Setup prompt when no config has been saved yet */}
+      {adapter && !hasExistingConfig && (
         <button
           type="button"
-          onClick={handleToggleExpand}
+          onClick={handleOpenConfig}
           className="w-full px-3 py-3 text-center bg-background-secondary hover:bg-background-tertiary transition-press cursor-pointer border-t border-brutal border-border"
         >
           <span className="text-[10px] font-mono text-accent uppercase tracking-wider">
-            Click to configure
+            Configure adapter
           </span>
         </button>
       )}
@@ -543,5 +505,64 @@ export const IntegrationNode = memo(function IntegrationNode({
         </div>
       )}
     </div>
+    <NodeConfigModal
+      isOpen={configOpen}
+      onClose={() => setConfigOpen(false)}
+      title={`${title} Config`}
+      description={context?.summary || adapterType}
+      size="lg"
+    >
+      <ConfigSection title="Adapter State">
+        <ConfigRows>
+          <ConfigRow label="Adapter" value={adapterType} />
+          <ConfigRow label="Summary" value={context?.summary} />
+          <ConfigRow label="Token estimate" value={context?.tokenEstimate} />
+          <ConfigRow label="Linked" value={hasConnections ? 'yes' : 'no'} />
+          <ConfigRow label="Config fields" value={configFields.length} />
+          <ConfigRow label="Credential fields" value={credentialFields.length} />
+        </ConfigRows>
+      </ConfigSection>
+
+      {credentialFields.length > 0 && (
+        <ConfigSection title="Credentials">
+          <div className="space-y-3">
+            {credentialFields.map(field => (
+              <CredentialField
+                key={field.key}
+                field={field}
+                isSaved={credentialStatus[field.key] ?? false}
+                onSave={handleCredentialSave}
+              />
+            ))}
+          </div>
+        </ConfigSection>
+      )}
+
+      {configFields.length > 0 && (
+        <ConfigSection title="Adapter Config">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {configFields.map(field => (
+              <label key={field.key} className="node-field">
+                <span className="node-field-label">{field.label}</span>
+                <ConfigFieldInput
+                  field={field}
+                  value={config[field.key]}
+                  onChange={handleConfigChange}
+                />
+              </label>
+            ))}
+          </div>
+        </ConfigSection>
+      )}
+
+      {credentialFields.length === 0 && configFields.length === 0 && (
+        <ConfigSection>
+          <div className="text-xs font-mono text-text-muted">
+            No editable fields for this adapter.
+          </div>
+        </ConfigSection>
+      )}
+    </NodeConfigModal>
+    </>
   )
 })

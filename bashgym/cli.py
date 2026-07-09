@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import urllib.error
+import urllib.request
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -2029,6 +2032,8 @@ def cmd_manifest(args: argparse.Namespace) -> int:
         "ok": True,
         "commands": {
             "manifest": "Show agent-readable command and docs map.",
+            "workspace context": "Read the live sanitized workspace canvas context.",
+            "workspace emit": "Emit a semantic canvas intent for dynamic node creation.",
             "training docs": "List or read training docs by topic.",
             "training capabilities": "Show structured training/eval/backend capability matrix.",
             "training plan": "Recommend starting settings and metrics for a strategy.",
@@ -2767,6 +2772,100 @@ def cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def _workspace_api_base(args: argparse.Namespace) -> str:
+    raw = (
+        getattr(args, "api_base", None)
+        or os.environ.get("BASHGYM_API_BASE")
+        or "http://localhost:8003/api"
+    )
+    return raw.rstrip("/")
+
+
+def _workspace_http_json(
+    args: argparse.Namespace,
+    path: str,
+    *,
+    method: str = "GET",
+    payload: dict[str, Any] | None = None,
+) -> Any:
+    data = None
+    headers = {
+        "Content-Type": "application/json",
+        "X-Requested-With": "XMLHttpRequest",
+    }
+    if os.environ.get("BASHGYM_TERMINAL_ID"):
+        headers["X-BashGym-Origin-Terminal"] = os.environ["BASHGYM_TERMINAL_ID"]
+    if payload is not None:
+        data = json.dumps(payload).encode("utf-8")
+    url = f"{_workspace_api_base(args)}{path}"
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            body = resp.read().decode("utf-8")
+            content_type = resp.headers.get("Content-Type", "")
+            if "json" in content_type:
+                return json.loads(body)
+            return body
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"{method} {url} failed: HTTP {exc.code} {detail}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"{method} {url} failed: {exc.reason}") from exc
+
+
+def cmd_workspace_context(args: argparse.Namespace) -> int:
+    format_arg = getattr(args, "format", "json")
+    response = _workspace_http_json(args, f"/workspace/context?format={format_arg}")
+    if isinstance(response, str):
+        print(response)
+        return 0
+    return _emit(response, as_json=True if args.json else format_arg == "json")
+
+
+def cmd_workspace_emit(args: argparse.Namespace) -> int:
+    terminal_id = os.environ.get("BASHGYM_TERMINAL_ID")
+    source = {"kind": args.source_kind}
+    if terminal_id:
+        source["terminal_id"] = terminal_id
+    if args.agent:
+        source["agent"] = args.agent
+
+    event: dict[str, Any] = {
+        "type": args.event_type,
+        "source": source,
+        "title": args.title,
+        "summary": args.summary,
+        "correlation_id": args.correlation_id,
+        "entity": {},
+        "suggested_nodes": [],
+        "relationships": [],
+    }
+    if args.strategy or args.run_id:
+        event["entity"] = {
+            "kind": "training_run",
+            "strategy": args.strategy,
+            "run_id": args.run_id,
+        }
+    if args.recipe:
+        event["suggested_nodes"].append(
+            {
+                "recipe": args.recipe,
+                "title": args.node_title,
+                "config": {
+                    "strategy": args.strategy,
+                    "status": args.node_status,
+                    "runId": args.run_id,
+                },
+            }
+        )
+        event["relationships"].append(
+            {"source": "origin", "target": args.recipe, "type": "initiated"}
+        )
+
+    response = _workspace_http_json(args, "/workspace/events", method="POST", payload=event)
+    return _emit(response, as_json=True)
+
+
 def build_parser() -> argparse.ArgumentParser:
     json_parent = argparse.ArgumentParser(add_help=False)
     json_parent.add_argument("--json", action="store_true", help="Emit a single JSON object")
@@ -2784,6 +2883,52 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[json_parent],
     )
     manifest.set_defaults(func=cmd_manifest)
+
+    workspace = subparsers.add_parser(
+        "workspace",
+        help="Canvas-aware workspace context and intent helpers",
+        parents=[json_parent],
+    )
+    workspace_sub = workspace.add_subparsers(dest="workspace_command", required=True)
+
+    workspace_context = workspace_sub.add_parser(
+        "context",
+        help="Read the live sanitized workspace canvas context from the backend",
+        parents=[json_parent],
+    )
+    workspace_context.add_argument(
+        "--format",
+        choices=["json", "markdown"],
+        default="json",
+        help="Response format to request",
+    )
+    workspace_context.add_argument(
+        "--api-base",
+        help="Backend /api base URL (default: BASHGYM_API_BASE or http://localhost:8003/api)",
+    )
+    workspace_context.set_defaults(func=cmd_workspace_context)
+
+    workspace_emit = workspace_sub.add_parser(
+        "emit",
+        help="Emit a semantic canvas intent for the workspace orchestrator",
+        parents=[json_parent],
+    )
+    workspace_emit.add_argument("--type", dest="event_type", required=True)
+    workspace_emit.add_argument("--title", default="")
+    workspace_emit.add_argument("--summary", default="")
+    workspace_emit.add_argument("--correlation-id")
+    workspace_emit.add_argument("--source-kind", default="terminal")
+    workspace_emit.add_argument("--agent", default=os.environ.get("BASHGYM_AGENT_KIND", ""))
+    workspace_emit.add_argument("--recipe", default="")
+    workspace_emit.add_argument("--node-title", default="")
+    workspace_emit.add_argument("--node-status", default="planned")
+    workspace_emit.add_argument("--strategy", default="")
+    workspace_emit.add_argument("--run-id", default="")
+    workspace_emit.add_argument(
+        "--api-base",
+        help="Backend /api base URL (default: BASHGYM_API_BASE or http://localhost:8003/api)",
+    )
+    workspace_emit.set_defaults(func=cmd_workspace_emit)
 
     training = subparsers.add_parser(
         "training",

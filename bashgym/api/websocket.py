@@ -22,6 +22,7 @@ class MessageType(str, Enum):
     """WebSocket message types."""
 
     # Training events
+    TRAINING_QUEUED = "training:queued"
     TRAINING_PROGRESS = "training:progress"
     TRAINING_COMPLETE = "training:complete"
     TRAINING_FAILED = "training:failed"
@@ -51,6 +52,10 @@ class MessageType(str, Enum):
     # System events
     SYSTEM_STATUS = "system:status"
     ERROR = "error"
+
+    # Workspace canvas events
+    WORKSPACE_CANVAS_INTENT = "workspace:canvas:intent"
+    WORKSPACE_CONTEXT_UPDATED = "workspace:context:updated"
 
     # HuggingFace events
     HF_JOB_STARTED = "hf:job:started"
@@ -319,6 +324,7 @@ _OPTIONAL_PROGRESS_KEYS = (
     "tokens_per_second",
     "gpu_memory_gb",
     "gpu_utilization",
+    "compute_target",
     "session_distillation_loss",
     "session_distillation_kl",
     "session_distillation_ce",
@@ -335,13 +341,24 @@ class TrainingProgressCallback:
         trainer.train_sft(dataset, callback=callback.on_progress)
     """
 
-    def __init__(self, run_id: str, output_dir: str | None = None):
+    def __init__(
+        self,
+        run_id: str,
+        output_dir: str | None = None,
+        static_payload: dict[str, Any] | None = None,
+    ):
         self.run_id = run_id
         # When set, each progress point is persisted to <output_dir>/metrics.jsonl
         # so loss curves survive the session (backs the run-comparison API).
         self.output_dir = output_dir
         self._loop = None
+        # WebSocket connections live on the loop this callback was created on
+        # (the server's main loop). Sync callbacks fire from trainer worker
+        # threads — broadcasts must be scheduled back onto this loop, not
+        # whatever loop is running in the worker.
+        self._main_loop = self._get_loop()
         self._last_recorded_step = -1
+        self.static_payload = static_payload or {}
 
     def _get_loop(self):
         """Get the event loop, creating one if needed for sync context."""
@@ -369,10 +386,17 @@ class TrainingProgressCallback:
         for key in _OPTIONAL_PROGRESS_KEYS:
             if metrics.get(key) is not None:
                 payload[key] = metrics[key]
+            elif self.static_payload.get(key) is not None:
+                payload[key] = self.static_payload[key]
+
+        # Persist metrics before broadcasting so a broadcast problem can
+        # never cost the on-disk loss curve.
+        self._persist_point(metrics)
 
         message = WSMessage(type=MessageType.TRAINING_PROGRESS, payload=payload)
         await manager.broadcast(message)
 
+    def _persist_point(self, metrics: dict[str, Any]) -> None:
         step = metrics.get("step")
         loss = metrics.get("loss")
         if (
@@ -395,7 +419,25 @@ class TrainingProgressCallback:
             for key in _OPTIONAL_PROGRESS_KEYS:
                 if metrics.get(key) is not None:
                     point[key] = metrics[key]
+                elif self.static_payload.get(key) is not None:
+                    point[key] = self.static_payload[key]
             record_run_metric(self.output_dir, point)
+
+    def _schedule(self, coro) -> bool:
+        """Run a callback coroutine on the server's main loop from any thread.
+
+        Returns False if there is no usable loop (caller falls back to
+        asyncio.run in the current thread).
+        """
+        loop = self._main_loop
+        if loop is not None and loop.is_running():
+            asyncio.run_coroutine_threadsafe(coro, loop)
+            return True
+        loop = self._get_loop()
+        if loop is not None and loop.is_running():
+            asyncio.ensure_future(coro, loop=loop)
+            return True
+        return False
 
     def on_progress_sync(self, metrics: dict[str, Any]) -> None:
         """Synchronous version for non-async training loops."""
@@ -404,19 +446,16 @@ class TrainingProgressCallback:
         logger = logging.getLogger(__name__)
 
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # Schedule the coroutine to run in the existing loop
-                asyncio.ensure_future(self.on_progress(metrics), loop=loop)
-            else:
-                # Run in a new loop if none is running
+            if not self._schedule(self.on_progress(metrics)):
                 asyncio.run(self.on_progress(metrics))
-        except RuntimeError:
-            # No event loop in current thread - create one
+        except Exception as e:
+            # Never let a broadcast problem interrupt training; keep the
+            # on-disk metric point at minimum.
+            logger.warning(f"Failed to send progress via WebSocket: {e}")
             try:
-                asyncio.run(self.on_progress(metrics))
-            except Exception as e:
-                logger.warning(f"Failed to send progress via WebSocket: {e}")
+                self._persist_point(metrics)
+            except Exception:
+                pass
 
         # Also log progress for visibility
         step = metrics.get("step", 0)
@@ -432,22 +471,25 @@ class TrainingProgressCallback:
     def on_log_sync(self, log_line: str) -> None:
         """Synchronous version for log lines."""
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.ensure_future(self.on_log(log_line), loop=loop)
-            else:
+            if not self._schedule(self.on_log(log_line)):
                 asyncio.run(self.on_log(log_line))
-        except RuntimeError:
-            try:
-                asyncio.run(self.on_log(log_line))
-            except Exception:
-                pass  # Silently fail for log lines
+        except Exception:
+            pass  # Silently fail for log lines
 
 
 async def broadcast_training_complete(run_id: str, metrics: dict[str, Any]) -> None:
     """Broadcast training completion."""
     message = WSMessage(
         type=MessageType.TRAINING_COMPLETE, payload={"run_id": run_id, "metrics": metrics}
+    )
+    await manager.broadcast(message)
+
+
+async def broadcast_training_queued(run_id: str, payload: dict[str, Any]) -> None:
+    """Broadcast that a training run has been accepted and queued."""
+    message = WSMessage(
+        type=MessageType.TRAINING_QUEUED,
+        payload={"run_id": run_id, **payload},
     )
     await manager.broadcast(message)
 
@@ -467,6 +509,16 @@ async def broadcast_training_log(run_id: str, log_line: str, level: str = "info"
         payload={"run_id": run_id, "message": log_line, "level": level},
     )
     await manager.broadcast(message)
+
+
+async def broadcast_workspace_canvas_intent(payload: dict[str, Any]) -> None:
+    """Broadcast a semantic canvas intent emitted by an agent or workspace tool."""
+    await manager.broadcast(WSMessage(type=MessageType.WORKSPACE_CANVAS_INTENT, payload=payload))
+
+
+async def broadcast_workspace_context_updated(payload: dict[str, Any]) -> None:
+    """Broadcast a lightweight notification that workspace context changed."""
+    await manager.broadcast(WSMessage(type=MessageType.WORKSPACE_CONTEXT_UPDATED, payload=payload))
 
 
 async def broadcast_task_status(task_id: str, status: str, result: Any = None) -> None:

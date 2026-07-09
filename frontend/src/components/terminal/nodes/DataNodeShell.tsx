@@ -11,13 +11,15 @@ export interface DataNodeShellProps {
   icon: LucideIcon
   selected?: boolean
   hasConnections?: boolean
-  /** Builds the markdown for Send-to-terminal; button shown only when linked */
-  buildContext?: () => string
+  /** Builds the markdown for Send-to-terminal; button shown only when linked. May be async (e.g. to fetch analysis at send time). */
+  buildContext?: () => string | Promise<string>
   headerRight?: ReactNode
   /** Tailwind bg-* class for the bottom indicator bar */
   statusBarClass?: string
   /** Identity hue from the platform accent palette; tints strip + icon per node type */
   hue?: number
+  visualPhase?: string
+  motion?: string
   onFocus?: (panelId: string) => void
   onClose?: (panelId: string) => void
   children: ReactNode
@@ -33,6 +35,8 @@ export const DataNodeShell = memo(function DataNodeShell({
   headerRight,
   statusBarClass = 'bg-background-tertiary',
   hue,
+  visualPhase,
+  motion,
   onFocus,
   onClose,
   children
@@ -51,7 +55,8 @@ export const DataNodeShell = memo(function DataNodeShell({
     if (!buildContext || sending) return
     setSending(true)
     try {
-      await routeToLinkedTerminals(panelId, buildContext(), 'md')
+      const content = await buildContext()
+      await routeToLinkedTerminals(panelId, content, 'md')
     } finally {
       setSending(false)
     }
@@ -60,10 +65,13 @@ export const DataNodeShell = memo(function DataNodeShell({
   return (
     <div
       className={clsx(
-        'w-[320px] card !rounded-brutal border-brutal cursor-pointer',
-        selected ? 'border-accent shadow-brutal' : 'border-border hover:border-border'
+        'w-[360px] card !rounded-brutal border-brutal cursor-pointer',
+        selected ? 'border-accent shadow-brutal' : 'border-border hover:border-border',
+        visualPhase === 'planned' && 'canvas-node-ghost',
+        motion === 'enter-from-origin' && 'canvas-node-enter'
       )}
       onClick={handleFocus}
+      data-canvas-phase={visualPhase}
     >
       <Handle type="target" position={Position.Left} className="!bg-accent !w-2 !h-2 !border-brutal !border-border" />
       <Handle type="source" position={Position.Right} className="!bg-accent !w-2 !h-2 !border-brutal !border-border" />
@@ -125,9 +133,16 @@ export const DataNodeShell = memo(function DataNodeShell({
         </div>
       </div>
 
-      <div className="px-3 py-2 nodrag nowheel">{children}</div>
+      <div className="px-3 py-2">{children}</div>
 
-      <div className={clsx('h-1.5 rounded-b-brutal', statusBarClass)} />
+      <div
+        className={clsx(
+          'h-1.5 rounded-b-brutal',
+          statusBarClass,
+          visualPhase === 'running' && 'canvas-state-strip-live',
+          visualPhase === 'queued' && 'canvas-state-strip-queued'
+        )}
+      />
     </div>
   )
 })

@@ -18,6 +18,7 @@ export type { CanvasControlState } from './canvasControlStore'
 export { useFileStore, initializeFileStore } from './fileStore'
 export type { FileNode } from './fileStore'
 export { useTrainingStore } from './trainingStore'
+export { useCanvasOrchestratorStore } from './canvasOrchestratorStore'
 export type {
   TrainingStrategy,
   TrainingProfile,

@@ -3,7 +3,7 @@
  * Handles communication with the Python backend
  */
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8002/api'
+export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8002/api'
 
 function backendStartCommand(apiBase: string): string {
   try {
@@ -135,6 +135,9 @@ export interface TrainingRequest {
   use_nemo_gym?: boolean
   use_remote_ssh?: boolean
   device_id?: string
+  compute_target?: string
+  origin?: Record<string, any>
+  correlation_id?: string
   selected_repos?: string[]
   // Data source
   data_source?: 'traces' | 'dataset_path' | 'security_dataset'
@@ -154,6 +157,71 @@ export interface TrainingResponse {
   completed_at?: string
   metrics?: TrainingStatusMetrics
   output_path?: string
+  origin?: Record<string, any>
+  correlation_id?: string
+  compute_target?: string
+}
+
+export interface WorkspacePanelSnapshot {
+  panel_id: string
+  type: string
+  title: string
+  terminal_id?: string
+  adapter_config?: Record<string, any>
+  visible?: boolean
+}
+
+export interface WorkspaceEdgeSnapshot {
+  id: string
+  source: string
+  target: string
+  type?: string
+  data?: Record<string, any>
+}
+
+export interface WorkspaceTerminalSnapshot {
+  terminal_id: string
+  panel_id?: string
+  title?: string
+  cwd?: string
+  agent_kind?: string
+  status?: string
+  current_tool?: string
+}
+
+export interface WorkspaceCanvasSnapshot {
+  schema_version?: string
+  updated_at?: string
+  panels: WorkspacePanelSnapshot[]
+  edges: WorkspaceEdgeSnapshot[]
+  terminals: WorkspaceTerminalSnapshot[]
+  data_summaries?: Record<string, any>
+  allowed_actions?: string[]
+}
+
+export interface WorkspaceEvent {
+  type: string
+  source?: {
+    kind?: string
+    terminal_id?: string
+    panel_id?: string
+    agent?: string
+  }
+  correlation_id?: string
+  title?: string
+  summary?: string
+  entity?: Record<string, any>
+  suggested_nodes?: Array<{
+    recipe: string
+    title?: string
+    config?: Record<string, any>
+  }>
+  relationships?: Array<{
+    source: string
+    target: string
+    type: string
+  }>
+  payload?: Record<string, any>
 }
 
 // Metrics dict emitted by the trainer progress callbacks (see bashgym/gym/trainer.py
@@ -984,6 +1052,26 @@ export interface SourcePreparedArtifact {
   }
 }
 
+export const workspaceApi = {
+  putCanvasSnapshot: (snapshot: WorkspaceCanvasSnapshot) =>
+    request<{ ok: boolean; updated_at: string }>('/workspace/canvas/snapshot', {
+      method: 'PUT',
+      body: JSON.stringify(snapshot),
+    }),
+
+  getContext: (format: 'json' | 'markdown' = 'json') =>
+    request<Record<string, any> | string>(`/workspace/context?format=${format}`),
+
+  emitEvent: (event: WorkspaceEvent) =>
+    request<{ ok: boolean; event: WorkspaceEvent & { event_id?: string; received_at?: string } }>(
+      '/workspace/events',
+      {
+        method: 'POST',
+        body: JSON.stringify(event),
+      }
+    ),
+}
+
 export interface SourcePrepareResponse {
   ok: boolean
   schema_version?: string
@@ -1337,6 +1425,12 @@ export interface HeldoutReport {
   reasons: string[]
   release_gate?: HeldoutReleaseGate
   environment_evidence?: HeldoutEnvironmentEvidence
+  /** Per-metric breakdowns present on imported/remote evals (e.g. embedding retrieval) */
+  base_metrics?: Record<string, number>
+  candidate_metrics?: Record<string, number>
+  delta_metrics?: Record<string, number>
+  candidate_model_path?: string
+  remote_eval_manifest?: string
 }
 
 export interface HeldoutJobResponse {
@@ -3339,11 +3433,88 @@ export interface HFMyModel {
   tags: string[]
 }
 
+export interface HFInventoryWarning {
+  section: string
+  message: string
+}
+
+export interface HFInventoryCounts {
+  models: number
+  datasets: number
+  trace_datasets: number
+  buckets: number
+  spaces: number
+}
+
+export interface HFInventoryLocalModel {
+  model_id: string
+  display_name: string
+  training_strategy: string
+  base_model: string
+  status: string
+}
+
+export interface HFInventoryModel extends HFMyModel {
+  local?: HFInventoryLocalModel
+}
+
+export interface HFInventoryDataset {
+  id: string
+  url: string
+  private?: boolean | null
+  downloads?: number
+  last_modified?: string
+}
+
+export interface HFInventoryBucket {
+  id: string
+  private?: boolean | null
+  created_at?: string
+  updated_at?: string
+}
+
+export interface HFInventoryResponse {
+  status: HFStatus
+  namespace: string
+  prefix: string
+  limit: number
+  last_refreshed: string
+  cached: boolean
+  ttl_seconds: number
+  counts: HFInventoryCounts
+  models: HFInventoryModel[]
+  datasets: HFInventoryDataset[]
+  trace_datasets: HFInventoryDataset[]
+  buckets: HFInventoryBucket[]
+  spaces: HFSpace[]
+  warnings: HFInventoryWarning[]
+}
+
+export interface HFInventoryOptions {
+  prefix?: string
+  namespace?: string
+  limit?: number
+  refresh?: boolean
+}
+
+function hfInventoryQuery(options?: HFInventoryOptions): string {
+  const params = new URLSearchParams()
+  if (options?.prefix !== undefined) params.set('prefix', options.prefix)
+  if (options?.namespace) params.set('namespace', options.namespace)
+  if (options?.limit !== undefined) params.set('limit', String(options.limit))
+  if (options?.refresh !== undefined) params.set('refresh', String(options.refresh))
+  const qs = params.toString()
+  return qs ? `?${qs}` : ''
+}
+
 // HuggingFace API
 export const hfApi = {
   // Status
   getStatus: () =>
     request<HFStatus>('/hf/status'),
+
+  inventory: (options?: HFInventoryOptions) =>
+    request<HFInventoryResponse>(`/hf/inventory${hfInventoryQuery(options)}`),
 
   // Token Configuration
   configureToken: (token: string) =>
@@ -3983,6 +4154,255 @@ export const agentApi = {
 
   deleteSession: (sessionId: string) =>
     request(`/agent/sessions/${sessionId}`, { method: 'DELETE' }),
+}
+
+// Generic agent endpoint API — currently optimized for Hermes API Server
+export interface AgentEndpointProfile {
+  id: string
+  label: string
+  kind: string
+  base_url: string
+  model: string
+  model_options: string[]
+  session_key?: string | null
+  enabled: boolean
+  api_key_configured: boolean
+}
+
+export interface AgentEndpointListResponse {
+  endpoints: AgentEndpointProfile[]
+}
+
+export interface AgentEndpointUpdate {
+  label: string
+  kind?: string
+  base_url: string
+  model: string
+  model_options?: string[]
+  session_key?: string | null
+  enabled?: boolean
+  api_key?: string | null
+  clear_api_key?: boolean
+}
+
+export interface AgentEndpointDiscovery {
+  ok: boolean
+  profile: AgentEndpointProfile
+  auth_configured: boolean
+  probes: Record<string, {
+    ok?: boolean
+    status_code?: number
+    data?: unknown
+    error?: string
+  }>
+  summary: {
+    models: number
+    skills: number
+    toolsets: number
+  }
+  warnings: string[]
+}
+
+export interface AgentEndpointChatResponse {
+  response: string
+  endpoint_id: string
+  model: string
+  response_id?: string | null
+  raw_status?: string | null
+}
+
+export interface ToolkitSkillResourceCounts {
+  scripts: number
+  references: number
+  assets: number
+}
+
+export interface ToolkitSkill {
+  name: string
+  description: string
+  source: string
+  path?: string | null
+  resource_counts: ToolkitSkillResourceCounts
+  tool_count: number
+}
+
+export interface ToolkitTool {
+  name: string
+  description: string
+  source: string
+  required: string[]
+}
+
+export interface ToolkitEndpointCapability {
+  endpoint_id: string
+  label: string
+  kind: string
+  enabled: boolean
+  ok: boolean
+  auth_configured: boolean
+  models: number
+  skills: number
+  toolsets: number
+  skill_names: string[]
+  toolset_names: string[]
+  warnings: string[]
+}
+
+export interface ToolkitSkillRoot {
+  label: string
+  path: string
+  exists: boolean
+  skill_count: number
+}
+
+export interface ToolkitInventoryResponse {
+  generated_at: string
+  cached: boolean
+  cache_ttl_seconds: number
+  counts: Record<string, number>
+  skill_roots: ToolkitSkillRoot[]
+  skills: ToolkitSkill[]
+  tools: ToolkitTool[]
+  endpoint_capabilities: ToolkitEndpointCapability[]
+  warnings: string[]
+}
+
+export interface HermesSetupStatus {
+  installed: boolean
+  command?: string | null
+  gateway_command: string[]
+  hermes_home: string
+  config_path?: string | null
+  configured_model?: string | null
+  configured_provider?: string | null
+  env_path: string
+  env_exists: boolean
+  env_api_enabled: boolean
+  env_key_present: boolean
+  gateway_url: string
+  gateway_healthy: boolean
+  gateway_error?: string | null
+  profile: AgentEndpointProfile
+  setup_needed: string[]
+  log_path?: string | null
+}
+
+export interface HermesQuickSetupResponse {
+  status: HermesSetupStatus
+  actions: string[]
+}
+
+export interface HermesTunnelStatus {
+  active: boolean
+  endpoint_id: string
+  ssh_target?: string | null
+  local_base_url?: string | null
+  local_port?: number | null
+  remote_host: string
+  remote_port: number
+  pid?: number | null
+  healthy: boolean
+  health_error?: string | null
+  profile?: AgentEndpointProfile | null
+}
+
+export const agentEndpointApi = {
+  list: () =>
+    request<AgentEndpointListResponse>('/agent/endpoints'),
+
+  save: (endpointId: string, payload: AgentEndpointUpdate) =>
+    request<AgentEndpointProfile>(`/agent/endpoints/${encodeURIComponent(endpointId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    }),
+
+  remove: (endpointId: string) =>
+    request<{ status: string; endpoint_id: string; deleted: boolean }>(
+      `/agent/endpoints/${encodeURIComponent(endpointId)}`,
+      { method: 'DELETE' }
+    ),
+
+  discover: (endpointId: string) =>
+    request<AgentEndpointDiscovery>(
+      `/agent/endpoints/${encodeURIComponent(endpointId)}/discover`,
+      { method: 'POST' }
+    ),
+
+  chat: (
+    endpointId: string,
+    payload: { message: string; context?: string; conversation?: string; session_key?: string | null }
+  ) =>
+    request<AgentEndpointChatResponse>(`/agent/endpoints/${encodeURIComponent(endpointId)}/chat`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+}
+
+export const hermesSetupApi = {
+  status: (options?: { endpointId?: string; baseUrl?: string }) => {
+    const params = new URLSearchParams()
+    if (options?.endpointId) params.set('endpoint_id', options.endpointId)
+    if (options?.baseUrl) params.set('base_url', options.baseUrl)
+    const query = params.toString()
+    return request<HermesSetupStatus>(`/agent/hermes/setup-status${query ? `?${query}` : ''}`)
+  },
+
+  quickSetup: (payload: {
+    profile_id?: string
+    label?: string
+    base_url?: string
+    model?: string
+    model_options?: string[]
+    session_key?: string | null
+    api_key?: string | null
+    write_env?: boolean
+    start_gateway?: boolean
+  }) =>
+    request<HermesQuickSetupResponse>('/agent/hermes/quick-setup', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+
+  tunnelStatus: (endpointId?: string) => {
+    const params = new URLSearchParams()
+    if (endpointId) params.set('endpoint_id', endpointId)
+    const query = params.toString()
+    return request<HermesTunnelStatus>(`/agent/hermes/tunnel/status${query ? `?${query}` : ''}`)
+  },
+
+  connectTunnel: (payload: {
+    endpoint_id?: string
+    label?: string
+    ssh_target: string
+    remote_host?: string
+    remote_port?: number
+    local_port?: number | null
+    model?: string
+    model_options?: string[]
+    session_key?: string | null
+    api_key?: string | null
+    save_profile?: boolean
+  }) =>
+    request<HermesTunnelStatus>('/agent/hermes/tunnel/connect', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+
+  disconnectTunnel: (endpointId?: string) =>
+    request<HermesTunnelStatus>('/agent/hermes/tunnel/disconnect', {
+      method: 'POST',
+      body: JSON.stringify({ endpoint_id: endpointId })
+    }),
+}
+
+export const toolkitApi = {
+  inventory: (options?: { includeRemote?: boolean; refresh?: boolean }) => {
+    const params = new URLSearchParams()
+    if (options?.includeRemote === false) params.set('include_remote', 'false')
+    if (options?.refresh) params.set('refresh', 'true')
+    const query = params.toString()
+    return request<ToolkitInventoryResponse>(`/agent/toolkit${query ? `?${query}` : ''}`)
+  }
 }
 
 // Orchestrator API

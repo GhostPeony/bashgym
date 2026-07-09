@@ -2,7 +2,7 @@ import { create } from 'zustand'
 // persist and createJSONStorage available if needed for future state persistence
 // import { persist, createJSONStorage } from 'zustand/middleware'
 
-export type PanelType = 'terminal' | 'preview' | 'browser' | 'files' | 'context' | 'neon' | 'vercel' | 'activity' | 'training' | 'evals' | 'designer'
+export type PanelType = 'terminal' | 'preview' | 'browser' | 'files' | 'context' | 'neon' | 'vercel' | 'activity' | 'training' | 'evals' | 'designer' | 'huggingface' | 'agent' | 'toolkit'
 export type AttentionState = 'none' | 'waiting' | 'success' | 'error'
 export type ViewMode = 'grid' | 'single' | 'canvas'
 export type AgentStatus = 'running' | 'idle' | 'waiting_input' | 'tool_calling'
@@ -259,7 +259,7 @@ const saveSessionMeta = (sessions: Map<string, TerminalSession>) => {
 // Ids are preserved so bashgym_canvas_positions entries still apply.
 const SAVED_PANELS_KEY = 'bashgym_saved_panels'
 const PERSISTED_PANEL_TYPES: PanelType[] = [
-  'activity', 'training', 'evals', 'designer', 'context', 'neon', 'vercel'
+  'activity', 'training', 'evals', 'designer', 'huggingface', 'agent', 'toolkit', 'context', 'neon', 'vercel'
 ]
 
 interface PersistedPanel {

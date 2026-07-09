@@ -275,3 +275,29 @@ def test_progress_line_parser_includes_resource_metrics_without_loss():
     assert payload["tokens_per_second"] == 500
     assert payload["gpu_memory_gb"] == 6.0
     assert p.had_loss is False
+
+
+def test_progress_line_parser_accepts_quoted_remote_metric_values():
+    """The remote SSH log stream carries TRL dicts with quoted string values."""
+    from bashgym.gym.trainer import _ProgressLineParser
+
+    p = _ProgressLineParser(batch_size=1, num_epochs=1, learning_rate=1e-4)
+    payload = p.feed(
+        "{'loss': '11.35', 'grad_norm': '21.62', 'learning_rate': '1.111e-05', 'epoch': '1.5'}",
+        now=1.0,
+    )
+    assert payload["loss"] == 11.35
+    assert payload["grad_norm"] == 21.62
+    assert p.had_loss is True
+    assert p.loss_lines == 1
+
+
+def test_progress_line_parser_uses_last_tqdm_snapshot_in_glued_line():
+    """tqdm \\r updates can arrive glued into one streamed line — last one wins."""
+    from bashgym.gym.trainer import _ProgressLineParser
+
+    p = _ProgressLineParser(batch_size=1, num_epochs=1, learning_rate=1e-4)
+    glued = " 0%|          | 0/10 [00:00<?, ?it/s] 30%|███       | 3/10 [00:45<01:45, 15.0s/it]"
+    payload = p.feed(glued, now=1.0)
+    assert payload["step"] == 3
+    assert payload["total_steps"] == 10

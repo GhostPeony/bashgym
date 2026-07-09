@@ -335,7 +335,9 @@ class RemoteTrainer:
         a completed one.
         """
         remote_dir = self._remote_run_dir(run_id, work_dir)
-        inner = f"{self._venv_cmd(f'python3 {script_name}')}; echo $? > exit_code"
+        inner = (
+            f"{self._venv_cmd(f'PYTHONUNBUFFERED=1 python3 {script_name}')}; echo $? > exit_code"
+        )
         cmd = f"cd {remote_dir} && " f"nohup bash -c '{inner}' > training.log 2>&1 & echo $!"
         result = await conn.run(cmd, check=False)
         pid = int(result.stdout.strip())
@@ -359,6 +361,7 @@ class RemoteTrainer:
         remote_dir = self._remote_run_dir(run_id, work_dir)
         log_file = f"{remote_dir}/training.log"
         lines_read = 0
+        dead_polls = 0
 
         def _emit(line: str) -> None:
             if log_callback:
@@ -380,6 +383,15 @@ class RemoteTrainer:
 
             alive = await conn.run(f"kill -0 {remote_pid} 2>/dev/null", check=False)
             if alive.exit_status != 0:
+                # A failed kill -0 can be a transient channel error, not a dead
+                # process. The run is authoritatively over when exit_code
+                # exists; otherwise require several consecutive failures.
+                done = await conn.run(f"test -f {remote_dir}/exit_code", check=False)
+                if done.exit_status != 0:
+                    dead_polls += 1
+                    if dead_polls < 5:
+                        await asyncio.sleep(poll_interval)
+                        continue
                 # Process exited — drain any remaining log lines
                 result = await conn.run(
                     f"tail -n +{lines_read + 1} {log_file} 2>/dev/null",
@@ -390,6 +402,7 @@ class RemoteTrainer:
                         _emit(line)
                 break
 
+            dead_polls = 0
             await asyncio.sleep(poll_interval)
 
     async def _download_artifacts(

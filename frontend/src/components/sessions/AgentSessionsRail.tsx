@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowLeft, ListTree, RefreshCw, FolderGit2, ChevronDown, ChevronRight, Plus } from 'lucide-react'
 import { clsx } from 'clsx'
-import { useTerminalStore, useUIStore } from '../../stores'
+import { useTerminalStore, useUIStore, useWorkspaceStore } from '../../stores'
 import { useAgentSessionsStore } from '../../stores/agentSessionsStore'
+import { WorkspaceStrip } from './WorkspaceStrip'
 import { candidatesForTerminal, normPath } from '../../services/agentSessions/matching'
 import type { AgentSessionSnapshot, AgentSessionKind } from '../../services/agentSessions/types'
 import type { Panel, TerminalSession } from '../../stores'
@@ -139,8 +140,17 @@ export function AgentSessionsRail() {
     closeOverlay()
   }
 
+  const handleNewWorkspace = () => {
+    const name = window.prompt('Workspace name?')
+    if (name?.trim()) {
+      useWorkspaceStore.getState().createWorkspace(name, { activate: true })
+      setLauncherFor(null)
+      closeOverlay()
+    }
+  }
+
   const NewSessionLauncher = ({ cwd }: { cwd?: string }) => (
-    <div className="flex items-center gap-1 py-1">
+    <div className="flex items-center gap-1 py-1 flex-wrap">
       <button onClick={() => handleLaunch('claude', cwd)} className="node-btn node-btn-wide node-btn-accent">
         NEW CLAUDE
       </button>
@@ -149,6 +159,13 @@ export function AgentSessionsRail() {
       </button>
       <button onClick={() => handleLaunch('shell', cwd)} className="node-btn node-btn-wide">
         SHELL
+      </button>
+      <button
+        onClick={handleNewWorkspace}
+        className="node-btn node-btn-wide"
+        title="Create a new named canvas workspace and switch to it"
+      >
+        NEW WORKSPACE
       </button>
     </div>
   )
@@ -195,6 +212,9 @@ export function AgentSessionsRail() {
 
   return (
     <div className="p-3 space-y-3">
+      {/* Workspace switcher */}
+      <WorkspaceStrip />
+
       {/* Header */}
       <div className="space-y-2.5 pb-1">
         <div className="flex items-center gap-2">

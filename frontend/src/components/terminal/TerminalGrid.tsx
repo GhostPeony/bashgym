@@ -244,25 +244,41 @@ export function TerminalGrid() {
     return null
   }
 
-  // Empty state
+  // Empty state — this workspace has no panels yet
   if (panels.length === 0) {
+    const wsName = useWorkspaceStore.getState().workspaces.find((w) => w.id === activeWorkspaceId)?.name
     return (
       <div className="h-full flex items-center justify-center bg-background-primary">
         <div className="text-center">
           <div className="w-16 h-16 mx-auto mb-4 border-brutal border-border rounded-brutal bg-background-secondary flex items-center justify-center shadow-brutal-sm">
             <Terminal className="w-8 h-8 text-text-muted" />
           </div>
-          <h3 className="text-lg font-brand font-semibold text-text-primary mb-2">No terminals open</h3>
+          <h3 className="text-lg font-brand font-semibold text-text-primary mb-2">
+            {wsName ? `${wsName} is empty` : 'No terminals open'}
+          </h3>
           <p className="text-sm text-text-muted mb-4 font-mono">
-            Create a terminal to start working
+            Launch a session to start working in this workspace
           </p>
-          <button
-            onClick={() => createTerminal()}
-            className="btn-primary inline-flex items-center gap-2"
-          >
-            <Plus className="w-4 h-4" />
-            New Terminal
-          </button>
+          <div className="flex items-center justify-center gap-2">
+            <button
+              onClick={() => createTerminal(undefined, 'Claude Code', 'claude')}
+              className="node-btn node-btn-wide node-btn-accent"
+            >
+              NEW CLAUDE
+            </button>
+            <button
+              onClick={() => createTerminal(undefined, 'Codex', 'codex')}
+              className="node-btn node-btn-wide"
+            >
+              NEW CODEX
+            </button>
+            <button
+              onClick={() => createTerminal()}
+              className="node-btn node-btn-wide"
+            >
+              <span className="flex items-center gap-1"><Plus className="w-2.5 h-2.5" /> SHELL</span>
+            </button>
+          </div>
         </div>
       </div>
     )

@@ -19,10 +19,11 @@ import {
   Keyboard,
   StickyNote,
   Database,
-  Triangle
+  Triangle,
+  Edit3
 } from 'lucide-react'
 import { clsx } from 'clsx'
-import { useCanvasControlStore, useTerminalStore } from '../../stores'
+import { useCanvasControlStore, useTerminalStore, useWorkspaceStore } from '../../stores'
 import { DATA_PANEL_DEFS } from './nodes/dataPanels'
 import { GhostPeonyIcon, type GhostPeonyIconName } from '../common'
 import {
@@ -67,6 +68,7 @@ export const MasterControlPanel = memo(function MasterControlPanel({
 }: MasterControlPanelProps) {
   const [customPresets, setCustomPresets] = useState<CanvasPreset[]>(() => loadCustomPresets())
   const [selectedPresetId, setSelectedPresetId] = useState<string>(BUILTIN_PRESETS[0].id)
+  const { workspaces, activeWorkspaceId, switchWorkspace, createWorkspace, renameWorkspace } = useWorkspaceStore()
 
   const allPresets = [...BUILTIN_PRESETS, ...customPresets]
 
@@ -397,6 +399,44 @@ export const MasterControlPanel = memo(function MasterControlPanel({
             })}
           </div>
         )}
+      </div>
+
+      {/* Workspace instances */}
+      <div className="px-3 py-2 border-b border-brutal border-border">
+        <div className="text-[10px] text-text-muted uppercase tracking-wider mb-2 font-mono font-semibold">Workspace</div>
+        <div className="flex items-center gap-1.5">
+          <select
+            value={activeWorkspaceId}
+            onChange={(e) => switchWorkspace(e.target.value)}
+            className="flex-1 min-w-0 text-xs font-mono bg-background-card border-brutal border-border rounded-brutal px-1.5 py-1 focus:border-accent focus:outline-none"
+            title="Switch workspace — background workspaces keep their terminals running"
+          >
+            {workspaces.map((ws) => (
+              <option key={ws.id} value={ws.id}>{ws.name}</option>
+            ))}
+          </select>
+          <button
+            onClick={() => {
+              const name = window.prompt('Workspace name?')
+              if (name?.trim()) createWorkspace(name, { activate: true })
+            }}
+            className="node-btn node-btn-accent"
+            title="New workspace"
+          >
+            <Plus className="w-3 h-3" />
+          </button>
+          <button
+            onClick={() => {
+              const current = workspaces.find((w) => w.id === activeWorkspaceId)
+              const name = window.prompt('Rename workspace', current?.name)
+              if (name?.trim()) renameWorkspace(activeWorkspaceId, name)
+            }}
+            className="node-btn"
+            title="Rename this workspace"
+          >
+            <Edit3 className="w-3 h-3" />
+          </button>
+        </div>
       </div>
 
       {/* Workspace layouts */}

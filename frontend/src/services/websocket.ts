@@ -28,6 +28,7 @@ import { useAutoResearchStore } from '../stores/autoresearchStore'
 import { useActivityStore } from '../stores/activityStore'
 import { useCascadeStore } from '../stores/cascadeStore'
 import { useCanvasOrchestratorStore } from '../stores/canvasOrchestratorStore'
+import { useWorkspaceStore } from '../stores/workspaceStore'
 
 type MessageHandler = (data: any) => void
 
@@ -461,9 +462,17 @@ class WebSocketService {
         // Heartbeat response, connection is alive
         break
 
-      case MessageTypes.WORKSPACE_CANVAS_INTENT:
+      case MessageTypes.WORKSPACE_CANVAS_INTENT: {
+        // Intents addressed to a specific workspace only materialize on that
+        // workspace's canvas
+        const intentWs = (payload as { workspace_id?: string }).workspace_id
+        if (intentWs && intentWs !== useWorkspaceStore.getState().activeWorkspaceId) {
+          console.info('[ws] workspace intent for inactive workspace skipped', intentWs)
+          break
+        }
         useCanvasOrchestratorStore.getState().handleWorkspaceIntent(payload as any)
         break
+      }
 
       case MessageTypes.WORKSPACE_CONTEXT_UPDATED:
         // Lightweight notification only; Activity feed already records it.

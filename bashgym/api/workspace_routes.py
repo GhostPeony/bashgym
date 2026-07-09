@@ -94,6 +94,10 @@ class WorkspaceTerminal(BaseModel):
 class WorkspaceCanvasSnapshot(BaseModel):
     schema_version: str = "bashgym.workspace.canvas.v1"
     updated_at: str = Field(default_factory=_now)
+    # Named canvas workspaces: snapshots are keyed by workspace_id; defaulted
+    # fields keep single-workspace clients fully back-compatible
+    workspace_id: str = "default"
+    workspace_name: str | None = None
     panels: list[WorkspacePanel] = Field(default_factory=list)
     edges: list[WorkspaceEdge] = Field(default_factory=list)
     terminals: list[WorkspaceTerminal] = Field(default_factory=list)
@@ -128,6 +132,7 @@ class WorkspaceRelationship(BaseModel):
 
 class WorkspaceEvent(BaseModel):
     type: str
+    workspace_id: str | None = None
     source: WorkspaceEventSource = Field(default_factory=WorkspaceEventSource)
     correlation_id: str | None = None
     title: str | None = None
@@ -138,20 +143,38 @@ class WorkspaceEvent(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
-def _state_snapshot(request: Request) -> WorkspaceCanvasSnapshot:
-    snapshot = getattr(request.app.state, "workspace_canvas_snapshot", None)
-    if isinstance(snapshot, WorkspaceCanvasSnapshot):
-        return snapshot
-    if isinstance(snapshot, dict):
-        return WorkspaceCanvasSnapshot(**snapshot)
+def _snapshot_store(request: Request) -> dict[str, WorkspaceCanvasSnapshot]:
+    store = getattr(request.app.state, "workspace_canvas_snapshots", None)
+    if not isinstance(store, dict):
+        store = {}
+        request.app.state.workspace_canvas_snapshots = store
+    return store
+
+
+def _state_snapshot(request: Request, workspace_id: str | None = None) -> WorkspaceCanvasSnapshot:
+    """The requested workspace's snapshot; without an id, the freshest one."""
+    store = _snapshot_store(request)
+    if workspace_id is not None:
+        snapshot = store.get(workspace_id)
+        return (
+            snapshot
+            if isinstance(snapshot, WorkspaceCanvasSnapshot)
+            else WorkspaceCanvasSnapshot(workspace_id=workspace_id)
+        )
+    if store:
+        return max(store.values(), key=lambda snap: snap.updated_at)
     return WorkspaceCanvasSnapshot()
 
 
-def _state_events(request: Request) -> list[dict[str, Any]]:
-    events = getattr(request.app.state, "workspace_events", None)
+def _state_events(request: Request, workspace_id: str) -> list[dict[str, Any]]:
+    store = getattr(request.app.state, "workspace_events", None)
+    if not isinstance(store, dict):
+        store = {}
+        request.app.state.workspace_events = store
+    events = store.get(workspace_id)
     if not isinstance(events, list):
         events = []
-        request.app.state.workspace_events = events
+        store[workspace_id] = events
     return events
 
 
@@ -183,12 +206,14 @@ def _training_runs(request: Request) -> list[dict[str, Any]]:
     return result
 
 
-def _context_payload(request: Request) -> dict[str, Any]:
-    snapshot = _state_snapshot(request)
-    events = _state_events(request)
+def _context_payload(request: Request, workspace_id: str | None = None) -> dict[str, Any]:
+    snapshot = _state_snapshot(request, workspace_id)
+    events = _state_events(request, snapshot.workspace_id)
     return {
         "schema_version": "bashgym.workspace.context.v1",
         "generated_at": _now(),
+        "workspace_id": snapshot.workspace_id,
+        "workspace_name": snapshot.workspace_name,
         "canvas": redact_workspace_value(snapshot.dict()),
         "training_runs": _training_runs(request),
         "recent_events": events[-20:],
@@ -247,9 +272,14 @@ def _as_markdown(payload: dict[str, Any]) -> str:
 async def get_workspace_context(
     request: Request,
     format: str = Query("json", pattern="^(json|markdown)$"),
+    workspace_id: str | None = Query(None),
 ):
-    """Return the latest sanitized workspace context for local agents."""
-    payload = _context_payload(request)
+    """Return the sanitized workspace context for local agents.
+
+    Without workspace_id, the most recently updated workspace is returned so
+    single-workspace clients keep working unchanged.
+    """
+    payload = _context_payload(request, workspace_id)
     if format == "markdown":
         return PlainTextResponse(_as_markdown(payload), media_type="text/markdown")
     return payload
@@ -257,13 +287,15 @@ async def get_workspace_context(
 
 @router.put("/canvas/snapshot")
 async def put_workspace_canvas_snapshot(request: Request, snapshot: WorkspaceCanvasSnapshot):
-    """Store the renderer-owned sanitized canvas snapshot."""
+    """Store the renderer-owned sanitized canvas snapshot (keyed by workspace)."""
     safe_snapshot = WorkspaceCanvasSnapshot(**redact_workspace_value(snapshot.dict()))
     safe_snapshot.updated_at = _now()
-    request.app.state.workspace_canvas_snapshot = safe_snapshot
+    _snapshot_store(request)[safe_snapshot.workspace_id] = safe_snapshot
     await broadcast_workspace_context_updated(
         {
             "updated_at": safe_snapshot.updated_at,
+            "workspace_id": safe_snapshot.workspace_id,
+            "workspace_name": safe_snapshot.workspace_name,
             "panels": len(safe_snapshot.panels),
             "edges": len(safe_snapshot.edges),
             "terminals": len(safe_snapshot.terminals),
@@ -281,7 +313,7 @@ async def post_workspace_event(request: Request, event: WorkspaceEvent):
     if not payload.get("correlation_id"):
         payload["correlation_id"] = f"intent_{uuid4().hex[:12]}"
 
-    events = _state_events(request)
+    events = _state_events(request, event.workspace_id or "default")
     events.append(payload)
     del events[:-100]
 

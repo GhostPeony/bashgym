@@ -169,8 +169,8 @@ def create_app() -> FastAPI:
     app.state.data_factory = None
     app.state.tasks = {}  # In-memory task storage
     app.state.training_runs = {}  # In-memory training run storage
-    app.state.workspace_canvas_snapshot = None  # Live renderer-owned canvas context
-    app.state.workspace_events = []  # Recent semantic canvas intents
+    app.state.workspace_canvas_snapshots = {}  # Live renderer-owned canvas context, keyed by workspace_id
+    app.state.workspace_events = {}  # Recent semantic canvas intents, keyed by workspace_id
     app.state.factory_config = None  # Factory configuration
     app.state.synthesis_jobs = {}  # Synthesis job storage
     app.state.evaluation_jobs = {}  # Evaluation job storage

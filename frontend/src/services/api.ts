@@ -192,6 +192,9 @@ export interface WorkspaceTerminalSnapshot {
 export interface WorkspaceCanvasSnapshot {
   schema_version?: string
   updated_at?: string
+  /** Which named canvas workspace this snapshot describes */
+  workspace_id?: string
+  workspace_name?: string
   panels: WorkspacePanelSnapshot[]
   edges: WorkspaceEdgeSnapshot[]
   terminals: WorkspaceTerminalSnapshot[]
@@ -201,6 +204,8 @@ export interface WorkspaceCanvasSnapshot {
 
 export interface WorkspaceEvent {
   type: string
+  /** Address the intent to a specific workspace canvas */
+  workspace_id?: string
   source?: {
     kind?: string
     terminal_id?: string
@@ -1059,8 +1064,10 @@ export const workspaceApi = {
       body: JSON.stringify(snapshot),
     }),
 
-  getContext: (format: 'json' | 'markdown' = 'json') =>
-    request<Record<string, any> | string>(`/workspace/context?format=${format}`),
+  getContext: (format: 'json' | 'markdown' = 'json', workspaceId?: string) =>
+    request<Record<string, any> | string>(
+      `/workspace/context?format=${format}${workspaceId ? `&workspace_id=${encodeURIComponent(workspaceId)}` : ''}`
+    ),
 
   emitEvent: (event: WorkspaceEvent) =>
     request<{ ok: boolean; event: WorkspaceEvent & { event_id?: string; received_at?: string } }>(

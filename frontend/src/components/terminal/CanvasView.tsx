@@ -23,6 +23,7 @@ import '@xyflow/react/dist/style.css'
 import { useTerminalStore, useCanvasControlStore } from '../../stores'
 import type { Panel, TerminalSession, CanvasEdge, MonitorAutoMode } from '../../stores'
 import { getActiveWorkspaceId, wsKey } from '../../stores/workspacePersistence'
+import { useWorkspaceStore } from '../../stores/workspaceStore'
 import { getMonitorInfo, isMonitorEdge, sendMonitorSnapshot } from '../../utils/monitorRouting'
 import { applyPreset, type CanvasPreset } from './canvasPresets'
 import { TerminalNode, type TerminalNodeData } from './TerminalNode'
@@ -204,9 +205,13 @@ function buildWorkspaceSnapshot(state: ReturnType<typeof useTerminalStore.getSta
       current_tool: session.currentTool
     }
   })
+  const wsId = getActiveWorkspaceId()
+  const wsName = useWorkspaceStore.getState().workspaces.find((w) => w.id === wsId)?.name
   return {
     schema_version: 'bashgym.workspace.canvas.v1',
     updated_at: new Date().toISOString(),
+    workspace_id: wsId,
+    workspace_name: wsName,
     panels,
     edges: state.canvasEdges,
     terminals,

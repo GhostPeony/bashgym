@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { useTerminalStore, type CanvasEdge, type Panel } from './terminalStore'
+import { useWorkspaceStore } from './workspaceStore'
 import {
   recipeFromTrainingProgress,
   recipeFromTrainingQueued,
@@ -29,8 +30,17 @@ function panelMatchesRecipe(panel: Panel, recipe: CanvasNodeRecipe): boolean {
   return false
 }
 
-function findOriginPanel(recipe: CanvasNodeRecipe): Panel | undefined {
+/**
+ * Resolve the origin panel within the ACTIVE workspace. When the recipe names
+ * an explicit origin that isn't materialized here (it lives in a background
+ * workspace), return the sentinel so the caller skips materialization instead
+ * of grafting the node onto the wrong canvas.
+ */
+const ORIGIN_ELSEWHERE = Symbol('origin-elsewhere')
+
+function findOriginPanel(recipe: CanvasNodeRecipe): Panel | undefined | typeof ORIGIN_ELSEWHERE {
   const state = useTerminalStore.getState()
+  const hasExplicitOrigin = Boolean(recipe.originPanelId || recipe.originTerminalId)
   if (recipe.originPanelId) {
     const byPanel = state.panels.find((panel) => panel.id === recipe.originPanelId)
     if (byPanel) return byPanel
@@ -39,6 +49,7 @@ function findOriginPanel(recipe: CanvasNodeRecipe): Panel | undefined {
     const byTerminal = state.panels.find((panel) => panel.terminalId === recipe.originTerminalId)
     if (byTerminal) return byTerminal
   }
+  if (hasExplicitOrigin) return ORIGIN_ELSEWHERE
 
   const sessions = Array.from(state.sessions.values()).sort((a, b) => b.lastActivity - a.lastActivity)
   const activeAgent =
@@ -93,10 +104,19 @@ function upsertEdge(source: string | undefined, target: string): void {
   state.setCanvasEdges([...state.canvasEdges, edge])
 }
 
-function materializeRecipe(recipe: CanvasNodeRecipe): string {
+function materializeRecipe(recipe: CanvasNodeRecipe): string | null {
+  if (useWorkspaceStore.getState().switching) {
+    console.info('[canvas-orchestrator] dropped recipe mid-switch', recipe.key)
+    return null
+  }
   const state = useTerminalStore.getState()
   const existing = state.panels.find((panel) => panelMatchesRecipe(panel, recipe))
-  const originPanel = findOriginPanel(recipe)
+  const resolved = findOriginPanel(recipe)
+  if (resolved === ORIGIN_ELSEWHERE && !existing) {
+    console.info('[canvas-orchestrator] origin not in active workspace, skipping', recipe.key)
+    return null
+  }
+  const originPanel = resolved === ORIGIN_ELSEWHERE ? undefined : resolved
   const existingConfig = existing?.adapterConfig || {}
   const visual =
     recipe.type === 'training'
@@ -135,14 +155,14 @@ export const useCanvasOrchestratorStore = create<CanvasOrchestratorState>((set, 
       : undefined
     const recipe = recipeFromWorkspaceIntent(payload, originPanel?.id)
     if (!recipe) return
-    materializeRecipe(recipe)
+    if (materializeRecipe(recipe) === null) return
     set((state) => ({ handledKeys: { ...state.handledKeys, [recipe.key]: Date.now() } }))
   },
 
   handleTrainingQueued: (payload) => {
     if (!payload.run_id) return
     const recipe = recipeFromTrainingQueued(payload)
-    materializeRecipe(recipe)
+    if (materializeRecipe(recipe) === null) return
     set((state) => ({ handledKeys: { ...state.handledKeys, [recipe.key]: Date.now() } }))
   },
 
@@ -153,7 +173,7 @@ export const useCanvasOrchestratorStore = create<CanvasOrchestratorState>((set, 
       panel.type === 'training' && panel.adapterConfig?.runId === payload.run_id
     ))
     if (!exists) {
-      materializeRecipe(recipeFromTrainingProgress(payload))
+      if (materializeRecipe(recipeFromTrainingProgress(payload)) === null) return
     } else {
       get().handleTrainingTerminalStatus(payload.run_id, 'running')
     }
@@ -161,6 +181,7 @@ export const useCanvasOrchestratorStore = create<CanvasOrchestratorState>((set, 
   },
 
   handleTrainingTerminalStatus: (runId, status) => {
+    if (useWorkspaceStore.getState().switching) return
     const state = useTerminalStore.getState()
     const panel = state.panels.find((candidate) => (
       candidate.type === 'training' && candidate.adapterConfig?.runId === runId

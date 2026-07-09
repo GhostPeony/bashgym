@@ -106,7 +106,11 @@ export async function sendMonitorSnapshot(edgeId: string, submit = false): Promi
     return { sent: false, error: 'Both ends must be terminals' }
   }
 
-  const snap = await window.bashgym?.terminal.snapshot(watched.terminalId, SNAPSHOT_MAX_BYTES)
+  if (typeof window.bashgym?.terminal.snapshot !== 'function') {
+    return { sent: false, error: 'Snapshot bridge unavailable — restart the app' }
+  }
+
+  const snap = await window.bashgym.terminal.snapshot(watched.terminalId, SNAPSHOT_MAX_BYTES)
   if (!snap?.success || !snap.data) {
     return { sent: false, error: snap?.error ?? 'No output captured yet' }
   }

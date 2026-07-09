@@ -380,6 +380,7 @@ The Workspace canvas (`frontend/src/components/terminal/CanvasView.tsx`, React F
 - **Terminal nodes** — PTY sessions with agent detection (Claude Code / Codex badges from banner output); quick-launch buttons in the Master Control Panel type `claude` / `codex` into a fresh PTY.
 - **Data nodes** (`frontend/src/components/terminal/nodes/`): `TrainingRunNode` (live `useTrainingStore` metrics + pause/resume/stop), `EvalNode` (polls `GET /api/eval/heldout`), `DataDesignerNode` (polls `GET /api/factory/designer/jobs`), `ActivityFeedNode` (WebSocket activity feed). All share `DataNodeShell`; registry in `nodes/dataPanels.ts`.
 - **Edge routing** — connect any data node to a terminal and press Send to write a markdown context file path into the agent's input (`utils/edgeRouting.ts`).
+- **Monitor edges** — a terminal→terminal edge makes the source the *watched* terminal and the target the *watcher* (`edges/MonitorEdge.tsx`, `utils/monitorRouting.ts`). Selecting the edge exposes Send Snapshot (prefills an ANSI-stripped scrollback markdown file path into the watcher's input), a per-edge AUTO toggle (off → prefill → send; fires when the watched agent finishes a step, ≥20s apart, skips a busy watcher), and Swap. Scrollback is read on demand from the main process via `terminal:snapshot` IPC — zero overhead when no monitor edges exist.
 - Non-terminal panels persist across reloads via `bashgym_saved_panels`; canvas hotkeys live in `hooks/useCanvasHotkeys.ts`.
 
 ---

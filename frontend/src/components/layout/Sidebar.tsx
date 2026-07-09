@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, lazy, Suspense } from 'react'
 import {
   Home,
   Terminal,
@@ -23,13 +23,20 @@ import {
   Rocket,
   Workflow,
   Download,
-  Zap
+  Zap,
+  ListTree
 } from 'lucide-react'
 import { useUIStore, useTrainingStore } from '../../stores'
 import { useTutorialStore } from '../../stores/tutorialStore'
 import { hooksApi, systemApi } from '../../services/api'
 import { clsx } from 'clsx'
 import { isElectron, isWeb } from '../../utils/platform'
+
+// Agent Sessions feed is Electron-only (reads local CLI session journals);
+// lazy + gated so it tree-shakes out of the web build
+const AgentSessionsRail = isElectron
+  ? lazy(() => import('../sessions/AgentSessionsRail'))
+  : null
 
 interface MenuItemProps {
   icon: React.ReactNode
@@ -179,7 +186,7 @@ function SecondarySections() {
 }
 
 export function Sidebar() {
-  const { isSidebarOpen, setSidebarOpen, overlayView, openOverlay, closeOverlay, setSettingsOpen } = useUIStore()
+  const { isSidebarOpen, setSidebarOpen, overlayView, openOverlay, closeOverlay, setSettingsOpen, sidebarMode, setSidebarMode } = useUIStore()
   const { currentRun } = useTrainingStore()
   const { dismissTooltip } = useTutorialStore()
 
@@ -219,8 +226,18 @@ export function Sidebar() {
 
   if (!isSidebarOpen) return null
 
+  const showSessions = sidebarMode === 'sessions' && AgentSessionsRail !== null
+
   return (
-      <aside className="relative z-30 w-64 min-w-[16rem] bg-background-card border-r border-border overflow-y-auto flex-shrink-0">
+      <aside className={clsx(
+        'relative z-30 bg-background-card border-r border-border overflow-y-auto flex-shrink-0',
+        showSessions ? 'w-96 min-w-[24rem]' : 'w-64 min-w-[16rem]'
+      )}>
+        {showSessions && AgentSessionsRail ? (
+          <Suspense fallback={<div className="p-4 font-mono text-xs text-text-muted">Loading sessions…</div>}>
+            <AgentSessionsRail />
+          </Suspense>
+        ) : (
         <div className="p-4">
           {/* Header - Clickable to go home */}
           <button
@@ -251,6 +268,17 @@ export function Sidebar() {
                 label="Workspace"
                 onClick={() => handleNavClick(null)}
                 active={overlayView === null}
+                primary
+              />
+            )}
+            {isElectron && (
+              <MenuItem
+                icon={<ListTree className="w-4 h-4" />}
+                label="Agent Sessions"
+                onClick={() => {
+                  dismissTooltip()
+                  setSidebarMode('sessions')
+                }}
                 primary
               />
             )}
@@ -361,6 +389,7 @@ export function Sidebar() {
             />
           </div>
         </div>
+        )}
       </aside>
   )
 }

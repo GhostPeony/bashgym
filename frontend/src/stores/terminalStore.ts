@@ -1,13 +1,15 @@
 import { create } from 'zustand'
 import {
   DEFAULT_WORKSPACE_ID,
+  type WsPersistedPanel,
   collectClaimedTerminalIds,
   getActiveWorkspaceId,
   loadRegistry,
   loadWorkspaceSnapshot,
   saveActivePanelFor,
   savePanelsFor,
-  savePositionsFor
+  savePositionsFor,
+  toPersistedPanel
 } from './workspacePersistence'
 
 export type PanelType = 'terminal' | 'preview' | 'browser' | 'files' | 'context' | 'neon' | 'vercel' | 'activity' | 'training' | 'evals' | 'designer' | 'huggingface' | 'agent' | 'toolkit'
@@ -142,6 +144,11 @@ interface TerminalState {
 
   addPanel: (panel: Omit<Panel, 'id'>) => string
   removePanel: (id: string) => void
+  /**
+   * Remove a panel (and its session/edges/position) from the ACTIVE workspace
+   * WITHOUT killing its PTY — used to move a live terminal between workspaces.
+   */
+  detachPanel: (panelId: string) => { stub: WsPersistedPanel; position?: CanvasNode } | null
   setActivePanel: (id: string) => void
   renamePanel: (id: string, title: string) => void
   reorderPanels: (sourceId: string, targetId: string) => void
@@ -516,6 +523,41 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     })
 
     persistPanels(get().panels, get().sessions)
+  },
+
+  detachPanel: (panelId: string) => {
+    const current = get()
+    const panel = current.panels.find((p) => p.id === panelId)
+    if (!panel) return null
+
+    const stub = toPersistedPanel(panel, current.sessions)
+    const position = current.canvasNodes.get(panelId)
+
+    set((state) => {
+      const newSessions = new Map(state.sessions)
+      if (panel.terminalId) newSessions.delete(panel.terminalId)
+      const newNodes = new Map(state.canvasNodes)
+      newNodes.delete(panelId)
+      const newPanels = state.panels.filter((p) => p.id !== panelId)
+      const newEdges = state.canvasEdges.filter((e) => e.source !== panelId && e.target !== panelId)
+      return {
+        panels: newPanels,
+        sessions: newSessions,
+        canvasNodes: newNodes,
+        canvasEdges: newEdges,
+        activePanelId:
+          state.activePanelId === panelId
+            ? (newPanels.length > 0 ? newPanels[newPanels.length - 1].id : null)
+            : state.activePanelId,
+        activeSessionId:
+          panel.terminalId && state.activeSessionId === panel.terminalId ? null : state.activeSessionId,
+        sessionsVersion: state.sessionsVersion + 1
+      }
+    })
+
+    saveCanvasPositions(get().canvasNodes)
+    persistPanels(get().panels, get().sessions)
+    return { stub, position }
   },
 
   setActivePanel: (id: string) => {

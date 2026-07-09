@@ -13,6 +13,8 @@ export type {
   ToolHistoryItem,
   SessionMetrics
 } from './terminalStore'
+export { useWorkspaceStore } from './workspaceStore'
+export type { WorkspaceMeta } from './workspacePersistence'
 export { useCanvasControlStore } from './canvasControlStore'
 export type { CanvasControlState } from './canvasControlStore'
 export { useFileStore, initializeFileStore } from './fileStore'

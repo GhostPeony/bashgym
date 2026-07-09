@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Plus, Terminal, X, Globe, FileText, Layers, FolderTree, GripVertical, LayoutGrid, Maximize2 } from 'lucide-react'
-import { useTerminalStore } from '../../stores'
+import { useTerminalStore, useWorkspaceStore } from '../../stores'
 import { TerminalPane } from './TerminalPane'
 import { PreviewPane } from './PreviewPane'
 import { BrowserPane } from './BrowserPane'
@@ -49,6 +49,12 @@ export function TerminalGrid() {
 
   // State for canvas popup - must be before any early returns
   const [canvasPopupPanelId, setCanvasPopupPanelId] = useState<string | null>(null)
+
+  // Workspace switching: remount the canvas per workspace and drop any open popup
+  const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId)
+  useEffect(() => {
+    setCanvasPopupPanelId(null)
+  }, [activeWorkspaceId])
 
   // Handle focus panel from canvas view. Data/config nodes stay on-canvas and own their modal settings.
   const handleFocusPanel = useCallback((panelId: string) => {
@@ -462,7 +468,7 @@ export function TerminalGrid() {
         {/* Canvas view background - rendered first so terminals appear on top when in popup */}
         {viewMode === 'canvas' && (
           <div className="absolute inset-0 z-10">
-            <CanvasViewWrapper onFocusPanel={handleFocusPanel} onClosePopup={closeCanvasPopup} />
+            <CanvasViewWrapper key={activeWorkspaceId} onFocusPanel={handleFocusPanel} onClosePopup={closeCanvasPopup} />
           </div>
         )}
 

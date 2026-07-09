@@ -7,7 +7,6 @@ import type { AgentSessionSnapshot } from '../../services/agentSessions/types'
 import type { Panel, TerminalSession } from '../../stores'
 import { SessionCard } from './SessionCard'
 import { JournalSessionRow } from './JournalSessionRow'
-import { AccountChip } from './AccountChip'
 
 const JOURNALS_COLLAPSED_COUNT = 4
 
@@ -125,14 +124,16 @@ export function AgentSessionsRail() {
   }
 
   return (
-    <div className="p-3 space-y-3">
+    <div className="p-3 space-y-2.5">
       {/* Header */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 pb-2 border-b border-brutal border-border">
         <button onClick={() => setSidebarMode('nav')} className="node-btn" title="Back to navigation">
           <ArrowLeft className="w-3 h-3" />
         </button>
-        <ListTree className="w-4 h-4 text-accent" />
-        <h2 className="font-brand font-semibold text-sm flex-1">Agent Sessions</h2>
+        <ListTree className="w-3.5 h-3.5 text-accent" />
+        <h2 className="font-mono text-xs font-bold uppercase tracking-widest text-text-primary flex-1">
+          Agent Sessions
+        </h2>
         <button
           onClick={() => void pollOnce()}
           className="node-btn"
@@ -142,14 +143,20 @@ export function AgentSessionsRail() {
         </button>
       </div>
 
-      {error && <p className="font-mono text-[10px] text-status-error break-all">{error}</p>}
+      {error && (
+        <div className="card p-2 border-l-2 border-l-status-warning">
+          <p className="font-mono text-[10px] text-text-secondary">{error}</p>
+        </div>
+      )}
 
-      {projects.length === 0 && (
-        <p className="font-mono text-xs text-text-muted">
-          {lastScanAt
-            ? 'No projects found yet — sessions appear here as agents work in folders on this machine.'
-            : 'Scanning local agent sessions…'}
-        </p>
+      {projects.length === 0 && !error && (
+        <div className="card p-3">
+          <p className="font-mono text-[10px] text-text-muted leading-relaxed">
+            {lastScanAt
+              ? 'No projects yet — sessions appear here as agents work in folders on this machine.'
+              : 'Scanning local agent sessions…'}
+          </p>
+        </div>
       )}
 
       {projects.map((project) => {
@@ -244,8 +251,6 @@ export function AgentSessionsRail() {
           </div>
         )
       })}
-
-      <AccountChip />
     </div>
   )
 }

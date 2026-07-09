@@ -198,7 +198,15 @@ export const useAgentSessionsStore = create<AgentSessionsState>((set, get) => ({
         if (result.success && result.account) set({ account: result.account })
       }
     } catch (err) {
-      set({ error: String(err) })
+      const msg = String(err)
+      if (/No handler registered/i.test(msg)) {
+        // Running app predates the sessions IPC (main process only loads at
+        // launch) — stop polling instead of erroring every tick
+        get().stopPolling()
+        set({ error: 'App update pending — restart BashGym to enable session intel.' })
+      } else {
+        set({ error: msg })
+      }
     } finally {
       pollInFlight = false
     }

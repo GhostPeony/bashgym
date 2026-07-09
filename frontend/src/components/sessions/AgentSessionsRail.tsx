@@ -130,14 +130,14 @@ export function AgentSessionsRail() {
   return (
     <div className="p-3 space-y-2.5">
       {/* Header */}
-      <div className="flex items-center gap-2 pb-2 border-b border-brutal border-border">
+      <div className="flex items-center gap-2">
         <button onClick={() => setSidebarMode('nav')} className="node-btn" title="Back to navigation">
           <ArrowLeft className="w-3 h-3" />
         </button>
         <ListTree className="w-3.5 h-3.5 text-accent" />
-        <h2 className="font-mono text-xs font-bold uppercase tracking-widest text-text-primary flex-1">
+        <span className="font-mono text-xs font-bold uppercase tracking-widest text-text-primary flex-1">
           Agent Sessions
-        </h2>
+        </span>
         <button
           onClick={() => void pollOnce()}
           className="node-btn"

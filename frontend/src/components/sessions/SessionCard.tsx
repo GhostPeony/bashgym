@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { clsx } from 'clsx'
-import { Pin, ChevronDown, ChevronRight } from 'lucide-react'
+import { Pin, ChevronDown, ChevronRight, Maximize2, MessageSquare } from 'lucide-react'
 import type { Panel, TerminalSession, CanvasEdge } from '../../stores'
 import type { AgentSessionSnapshot, SessionMatch } from '../../services/agentSessions/types'
 import { ContextMeter } from './ContextMeter'
@@ -89,31 +89,26 @@ export function SessionCard({
         !session.isPaused && session.status === 'tool_calling' && 'terminal-status-tool-calling',
         !session.isPaused && session.status === 'waiting_input' && 'terminal-status-waiting-input'
       )}
-      onClick={() => onFocus(session.id)}
+      onClick={() => setExpanded((v) => !v)}
       onContextMenu={(e) => {
         e.preventDefault()
         setShowPrompt((v) => !v)
       }}
-      title={`${session.title} — click to open · right-click to prompt`}
+      title={`${session.title} — click for details · right-click to prompt`}
     >
       {/* Topic line */}
       <div className="flex items-center gap-1.5 min-w-0">
+        {expanded ? (
+          <ChevronDown className="w-3 h-3 text-text-muted flex-shrink-0" />
+        ) : (
+          <ChevronRight className="w-3 h-3 text-text-muted flex-shrink-0" />
+        )}
         <span className={clsx('status-dot flex-shrink-0', STATUS_DOT[session.status])} />
         <span className="font-mono text-[11px] font-semibold text-text-primary truncate flex-1" title={topic}>
           {topic}
         </span>
         <span className={clsx(KIND_CHIP_BASE, kindChipClass(kind))}>{kind ?? 'shell'}</span>
         <span className="font-mono text-[10px] text-text-muted flex-shrink-0">{timeAgo(session.lastActivity)}</span>
-        <button
-          onClick={(e) => {
-            e.stopPropagation()
-            setExpanded((v) => !v)
-          }}
-          className="text-text-muted hover:text-text-primary transition-press flex-shrink-0"
-          title={expanded ? 'Less' : 'More details'}
-        >
-          {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-        </button>
       </div>
 
       {/* Quiet context bar (collapsed) */}
@@ -127,6 +122,24 @@ export function SessionCard({
 
       {expanded && (
         <div className="space-y-1.5" onClick={(e) => e.stopPropagation()}>
+          {/* Explicit actions — opening the terminal swaps the workspace view,
+              so it's a deliberate button, never a side effect of selecting */}
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => onFocus(session.id)}
+              className="node-btn node-btn-wide node-btn-accent"
+              title="Open this terminal in the Workspace"
+            >
+              <span className="flex items-center gap-1"><Maximize2 className="w-2.5 h-2.5" /> OPEN TERMINAL</span>
+            </button>
+            <button
+              onClick={() => setShowPrompt((v) => !v)}
+              className="node-btn node-btn-wide"
+              title="Send a prompt into this agent without opening it (also: right-click the card)"
+            >
+              <span className="flex items-center gap-1"><MessageSquare className="w-2.5 h-2.5" /> PROMPT</span>
+            </button>
+          </div>
           <ContextMeter
             contextTokens={snapshot?.contextTokens}
             contextWindow={snapshot?.contextWindow}

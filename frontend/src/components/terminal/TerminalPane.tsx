@@ -316,7 +316,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
       terminal.writeln(`${green}  ██████╔╝██║  ██║███████║██║  ██║    ╚██████╔╝   ██║   ██║ ╚═╝ ██║${reset}`)
       terminal.writeln(`${green}  ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝     ╚═════╝    ╚═╝   ╚═╝     ╚═╝${reset}`)
       terminal.writeln('')
-      terminal.writeln(`${dim}                    Self-Improving Agentic Development Gym${reset}`)
+      terminal.writeln(`${dim}                         Self-Improving Training Workspace${reset}`)
       terminal.writeln('')
       terminal.writeln(`${line}  ═══════════════════════════════════════════════════════════════════════════${reset}`)
       terminal.writeln('')

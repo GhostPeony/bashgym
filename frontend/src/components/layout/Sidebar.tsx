@@ -247,15 +247,12 @@ export function Sidebar() {
           {/* Header - Clickable to go home */}
           <button
             onClick={() => handleNavClick('home')}
-            className="flex items-center gap-3 mb-6 w-full text-left hover-press transition-press"
+            className="flex items-center gap-3 mb-7 w-full text-left hover-press transition-press"
           >
-            <img src="/ghost-icon.png" alt="BashGym" className="w-10 h-10 object-cover" />
-            <div>
-              <h2 className="font-brand font-semibold text-lg">
-                <span className="text-accent">/</span>BashGym
-              </h2>
-              <p className="text-xs text-text-muted">Agentic Development</p>
-            </div>
+            <img src="/bashgym-peony.png" alt="BashGym" className="w-14 h-14 -ml-1 object-contain" />
+            <h2 className="font-brand text-2xl font-semibold leading-none text-text-primary">
+              <span className="text-accent">/</span>BashGym
+            </h2>
           </button>
 
           {/* Primary Navigation */}

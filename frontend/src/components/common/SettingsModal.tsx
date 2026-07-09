@@ -317,7 +317,7 @@ export function SettingsModal() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-brand text-text-primary">BashGym</p>
-                  <p className="text-xs text-text-muted">A Self-Improving Agentic Development Gym</p>
+                  <p className="text-xs text-text-muted">Self-improving training workspace</p>
                 </div>
                 <div className="flex items-center gap-3">
                   <button

@@ -117,7 +117,7 @@ export function DownloadPage() {
       {/* Hero */}
       <div className="text-center space-y-4">
         <div className="flex items-center justify-center gap-3">
-          <img src="/ghost-icon.png" alt="BashGym" className="w-16 h-16 object-cover" />
+          <img src="/bashgym-peony.png" alt="BashGym" className="w-20 h-20 object-contain" />
         </div>
         <h1 className="font-brand text-4xl font-bold text-text-primary">
           <span className="text-accent">/</span>BashGym Desktop

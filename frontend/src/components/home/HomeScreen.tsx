@@ -80,13 +80,10 @@ export function HomeScreen() {
         {/* Header row — brand + stats */}
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-4">
-            <div className="h-14 w-16 overflow-hidden border-brutal border-border rounded-brutal shadow-brutal shrink-0">
-              <img src="/bb.png" alt="Bash Gym" className="h-full w-auto object-cover object-right" />
-            </div>
-            <div>
-              <h1 className="font-brand text-2xl text-text-primary leading-tight">Bash Gym</h1>
-              <p className="text-sm text-text-secondary mt-0.5">Self-improving agentic development gym</p>
-            </div>
+            <img src="/bashgym-peony.png" alt="BashGym" className="h-16 w-16 object-contain" />
+            <h1 className="font-brand text-3xl font-semibold text-text-primary leading-none">
+              <span className="text-accent">/</span>BashGym
+            </h1>
           </div>
           <div className="flex items-center gap-3">
             <button

@@ -100,10 +100,10 @@ export function NavigationBar() {
         {/* Logo / Title - Clickable to go home */}
         <button
           onClick={handleGoHome}
-          className="flex items-center gap-2"
+          className="flex items-center gap-3"
         >
-          <img src="/ghost-icon.png" alt="BashGym" className="w-6 h-6 object-cover" />
-          <span className="font-brand font-semibold text-lg">
+          <img src="/bashgym-peony.png" alt="BashGym" className="w-9 h-9 -my-1 object-contain" />
+          <span className="font-brand text-xl font-semibold leading-none">
             <span className="text-accent">/</span>
             <span className="text-text-primary">BashGym</span>
           </span>

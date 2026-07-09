@@ -56,6 +56,20 @@ const isDev = !app.isPackaged
 // Credentials directory for secure storage
 const credentialsDir = path.join(app.getPath('userData'), 'credentials')
 
+function resolveAppIconPath(): string | undefined {
+  const candidates = isDev
+    ? [
+        path.join(process.cwd(), 'public', 'bashgym-peony.png'),
+        path.join(__dirname, '../public/bashgym-peony.png')
+      ]
+    : [
+        path.join(__dirname, '../dist/bashgym-peony.png'),
+        path.join(process.resourcesPath, 'app.asar', 'dist', 'bashgym-peony.png')
+      ]
+
+  return candidates.find((candidate) => fs.existsSync(candidate))
+}
+
 function setupMenu() {
   const template: Electron.MenuItemConstructorOptions[] = [
     {
@@ -88,6 +102,7 @@ function setupMenu() {
 
 function createWindow() {
   const isWin = process.platform === 'win32'
+  const appIconPath = resolveAppIconPath()
 
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -97,6 +112,7 @@ function createWindow() {
     title: 'Bash Gym',
     titleBarStyle: isWin ? 'hidden' : 'hiddenInset',
     ...(isWin ? {} : { trafficLightPosition: { x: 16, y: 16 } }),
+    ...(appIconPath ? { icon: appIconPath } : {}),
     backgroundColor: '#0D0D0D',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),

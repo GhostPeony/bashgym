@@ -29,6 +29,7 @@ docs/
 !docs/
 docs/*
 !docs/TRAINING_SETUP.md
+!docs/hermes-agent-endpoints.md
 !docs/training-config-guide.md
 !docs/training/
 docs/training/*
@@ -72,6 +73,7 @@ node_modules/
 .worktrees/
 
 # Misc / stray artifacts
+.tmp/
 nul
 =*
 bash.exe.stackdump

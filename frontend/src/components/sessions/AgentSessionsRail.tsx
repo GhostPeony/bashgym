@@ -8,8 +8,14 @@ import type { AgentSessionSnapshot, AgentSessionKind } from '../../services/agen
 import type { Panel, TerminalSession } from '../../stores'
 import { SessionCard } from './SessionCard'
 import { JournalSessionRow } from './JournalSessionRow'
+import { SessionDetailPopover, type SessionDetailTarget } from './SessionDetailPopover'
 
 type KindFilter = 'all' | AgentSessionKind
+
+/** Popover target held as ids so the open popover live-updates from the stores */
+type DetailRef =
+  | { type: 'live'; panelId: string; x: number; y: number }
+  | { type: 'journal'; filePath: string; x: number; y: number }
 
 const JOURNALS_COLLAPSED_COUNT = 4
 
@@ -53,6 +59,7 @@ export function AgentSessionsRail() {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [showAllJournals, setShowAllJournals] = useState<Set<string>>(new Set())
   const [kindFilter, setKindFilter] = useState<KindFilter>('all')
+  const [detail, setDetail] = useState<DetailRef | null>(null)
 
   useEffect(() => {
     startPolling()
@@ -125,6 +132,36 @@ export function AgentSessionsRail() {
     if (next.has(key)) next.delete(key)
     else next.add(key)
     apply(next)
+  }
+
+  // Resolve the modal target fresh each render so it live-updates
+  let detailTarget: SessionDetailTarget | null = null
+  let detailPinCandidates: AgentSessionSnapshot[] = []
+  if (detail?.type === 'live') {
+    const panel = panels.find((p) => p.id === detail.panelId)
+    const session = panel?.terminalId
+      ? useTerminalStore.getState().sessions.get(panel.terminalId)
+      : undefined
+    if (panel && session) {
+      const match = matches.get(session.id)
+      const snapshot = match ? snapshots.get(match.filePath) : undefined
+      detailTarget = { type: 'live', session, panel, snapshot, match }
+      if (!snapshot) {
+        detailPinCandidates = candidatesForTerminal(
+          {
+            terminalId: session.id,
+            panelId: panel.id,
+            cwd: session.cwd,
+            agentKind: session.agentKind,
+            lastActivity: session.lastActivity
+          },
+          snapshots
+        )
+      }
+    }
+  } else if (detail?.type === 'journal') {
+    const snapshot = snapshots.get(detail.filePath)
+    if (snapshot) detailTarget = { type: 'journal', snapshot }
   }
 
   return (
@@ -238,30 +275,17 @@ export function AgentSessionsRail() {
                       panel={panel}
                       snapshot={snapshot}
                       match={match}
-                      pinCandidates={
-                        snapshot
-                          ? []
-                          : candidatesForTerminal(
-                              {
-                                terminalId: session.id,
-                                panelId: panel.id,
-                                cwd: session.cwd,
-                                agentKind: session.agentKind,
-                                lastActivity: session.lastActivity
-                              },
-                              snapshots
-                            )
-                      }
-                      onPin={pinSession}
-                      onFocus={handleFocus}
-                      panels={panels}
-                      canvasEdges={canvasEdges}
+                      onOpenDetail={(e) => setDetail({ type: 'live', panelId: panel.id, x: e.clientX, y: e.clientY })}
                     />
                   )
                 })}
 
                 {journalsShown.map((snap) => (
-                  <JournalSessionRow key={snap.filePath} snapshot={snap} onResume={handleResume} />
+                  <JournalSessionRow
+                    key={snap.filePath}
+                    snapshot={snap}
+                    onOpenDetail={(e) => setDetail({ type: 'journal', filePath: snap.filePath, x: e.clientX, y: e.clientY })}
+                  />
                 ))}
                 {journals.length > JOURNALS_COLLAPSED_COUNT && (
                   <button
@@ -278,6 +302,18 @@ export function AgentSessionsRail() {
           </div>
         )
       })}
+
+      <SessionDetailPopover
+        target={detailTarget}
+        anchor={detail ? { x: detail.x, y: detail.y } : null}
+        onClose={() => setDetail(null)}
+        onFocus={handleFocus}
+        onResume={handleResume}
+        onPin={pinSession}
+        pinCandidates={detailPinCandidates}
+        panels={panels}
+        canvasEdges={canvasEdges}
+      />
     </div>
   )
 }

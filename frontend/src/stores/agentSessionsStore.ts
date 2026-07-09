@@ -39,10 +39,45 @@ const savePins = (pins: Record<string, string>) => {
   }
 }
 
+// Snapshot cache: parsed journal intel persisted across app sessions so the
+// feed fills instantly on open — only files whose size changed re-read.
+const SNAPSHOT_CACHE_KEY = 'bashgym_session_snapshots_v1'
+const SNAPSHOT_CACHE_MAX = 400
+
+const loadSnapshotCache = (): Map<string, AgentSessionSnapshot> => {
+  try {
+    const stored = localStorage.getItem(SNAPSHOT_CACHE_KEY)
+    if (stored) {
+      const arr: AgentSessionSnapshot[] = JSON.parse(stored)
+      return new Map(arr.filter((s) => s && s.filePath).map((s) => [s.filePath, s]))
+    }
+  } catch {
+    // Ignore
+  }
+  return new Map()
+}
+
+const saveSnapshotCache = (snapshots: Map<string, AgentSessionSnapshot>) => {
+  try {
+    const arr = Array.from(snapshots.values())
+      .sort((a, b) => b.fileMtime - a.fileMtime)
+      .slice(0, SNAPSHOT_CACHE_MAX)
+    localStorage.setItem(SNAPSHOT_CACHE_KEY, JSON.stringify(arr))
+  } catch {
+    // Ignore storage errors
+  }
+}
+
 // Module-level bookkeeping — not reactive state
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let pollInFlight = false
+let firstPollDone = false
 const knownSizes = new Map<string, number>()
+
+const initialSnapshots = loadSnapshotCache()
+for (const [path, snap] of initialSnapshots) {
+  knownSizes.set(path, snap.fileSize)
+}
 
 interface AgentSessionsState {
   isPolling: boolean
@@ -67,7 +102,7 @@ export const useAgentSessionsStore = create<AgentSessionsState>((set, get) => ({
   isPolling: false,
   version: 0,
   lastScanAt: null,
-  snapshots: new Map(),
+  snapshots: initialSnapshots,
   matches: new Map(),
   pins: loadPins(),
   accountOptIn: localStorage.getItem(ACCOUNT_OPTIN_KEY) === 'true',
@@ -150,11 +185,14 @@ export const useAgentSessionsStore = create<AgentSessionsState>((set, get) => ({
         return hotClaudeDirs.has(dir)
       }
 
-      // Ingest changed files: hot first, then freshest, bounded per tick
+      // Ingest changed files: hot first, then freshest, bounded per tick.
+      // The first poll after open bursts higher so an uncached feed fills fast.
+      const tickCap = firstPollDone ? MAX_INGESTS_PER_TICK : 24
+      firstPollDone = true
       const changed = files
         .filter((f) => knownSizes.get(f.path) !== f.size)
         .sort((a, b) => Number(isHot(b)) - Number(isHot(a)) || b.modified - a.modified)
-        .slice(0, MAX_INGESTS_PER_TICK)
+        .slice(0, tickCap)
 
       for (const file of changed) {
         const snapshot =
@@ -192,6 +230,7 @@ export const useAgentSessionsStore = create<AgentSessionsState>((set, get) => ({
         lastScanAt: Date.now(),
         error: null
       }))
+      if (changed.length > 0) saveSnapshotCache(snapshots)
 
       if (get().accountOptIn && !get().account) {
         const result = await api.readAccount()

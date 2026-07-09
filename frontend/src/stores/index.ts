@@ -60,4 +60,6 @@ export { useAutoResearchStore } from './autoresearchStore'
 export type { ExperimentResult, TraceExperimentResult, AutoResearchStatus, AutoResearchStartConfig, AutoResearchMode } from './autoresearchStore'
 export { useCascadeStore } from './cascadeStore'
 export type { CascadeStatus, CascadeStage, StageStatus } from './cascadeStore'
-export { useAgentSessionsStore } from './agentSessionsStore'
+// agentSessionsStore is deliberately NOT re-exported here: it is Electron-only
+// and a barrel export would pull it into the web bundle. Import it directly
+// from './agentSessionsStore' inside Electron-gated components.

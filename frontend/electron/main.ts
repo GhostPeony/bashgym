@@ -582,6 +582,180 @@ ipcMain.handle('files:stat', async (_, filePath: string) => {
   }
 })
 
+// Session history handlers — read-only access to local agent-CLI session journals
+// (Claude Code: ~/.claude/projects, Codex: ~/.codex/sessions). All reads stay on
+// this machine; paths are restricted to the session roots and .jsonl files only.
+
+const SESSION_ROOTS = [
+  path.join(os.homedir(), '.claude', 'projects'),
+  path.join(os.homedir(), '.codex', 'sessions')
+]
+
+function safeSessionFilePath(p: string): string {
+  const resolved = path.resolve(p)
+  const inRoot = SESSION_ROOTS.some((root) => resolved.startsWith(root + path.sep))
+  if (!inRoot || !resolved.endsWith('.jsonl')) {
+    throw new Error('Path outside session roots')
+  }
+  return resolved
+}
+
+interface SessionFileInfo {
+  path: string
+  size: number
+  modified: number
+}
+
+async function listJsonlFiles(dir: string): Promise<SessionFileInfo[]> {
+  const out: SessionFileInfo[] = []
+  let entries: fs.Dirent[]
+  try {
+    entries = await fs.promises.readdir(dir, { withFileTypes: true })
+  } catch {
+    return out
+  }
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.jsonl')) continue
+    const filePath = path.join(dir, entry.name)
+    try {
+      const stats = await fs.promises.stat(filePath)
+      out.push({ path: filePath, size: stats.size, modified: stats.mtimeMs })
+    } catch {
+      // File vanished between readdir and stat
+    }
+  }
+  return out
+}
+
+ipcMain.handle('sessions:scan', async (_, claudeDirNames: string[], codexLookbackDays = 7) => {
+  try {
+    const claude: SessionFileInfo[] = []
+    const codex: SessionFileInfo[] = []
+
+    // Claude: top-level *.jsonl per requested project dir (dir NAMES, never paths —
+    // sanitized and joined under the root, so traversal is impossible). Subagent
+    // files live in <session-id>/subagents/ subdirs and are excluded by design.
+    const claudeRoot = SESSION_ROOTS[0]
+    for (const rawName of Array.isArray(claudeDirNames) ? claudeDirNames : []) {
+      const name = String(rawName).replace(/[^a-zA-Z0-9-]/g, '')
+      if (!name) continue
+      claude.push(...await listJsonlFiles(path.join(claudeRoot, name)))
+    }
+
+    // Codex: rollout-*.jsonl under date dirs for the last N days
+    const codexRoot = SESSION_ROOTS[1]
+    const days = Math.min(Math.max(Number(codexLookbackDays) || 7, 1), 31)
+    for (let i = 0; i < days; i++) {
+      const d = new Date(Date.now() - i * 86_400_000)
+      const dir = path.join(
+        codexRoot,
+        String(d.getFullYear()),
+        String(d.getMonth() + 1).padStart(2, '0'),
+        String(d.getDate()).padStart(2, '0')
+      )
+      codex.push(...(await listJsonlFiles(dir)).filter((f) => path.basename(f.path).startsWith('rollout-')))
+    }
+
+    return { success: true, claude, codex }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  }
+})
+
+const SESSION_TAIL_HARD_CAP = 262_144 // 256KB per read
+
+ipcMain.handle('sessions:readTail', async (_, filePath: string, fromOffset: number, maxBytes = 131_072) => {
+  let fd: fs.promises.FileHandle | null = null
+  try {
+    const resolved = safeSessionFilePath(filePath)
+    const cap = Math.min(Math.max(Number(maxBytes) || 131_072, 4_096), SESSION_TAIL_HARD_CAP)
+    const stats = await fs.promises.stat(resolved)
+
+    // File truncated or rotated since last read: restart near the end
+    let offset = Math.max(Number(fromOffset) || 0, 0)
+    let reset = false
+    if (stats.size < offset) {
+      offset = Math.max(0, stats.size - cap)
+      reset = true
+    }
+
+    const toRead = Math.min(cap, stats.size - offset)
+    if (toRead <= 0) {
+      return { success: true, data: '', newOffset: offset, size: stats.size, reset }
+    }
+
+    fd = await fs.promises.open(resolved, 'r')
+    const buf = Buffer.alloc(toRead)
+    const { bytesRead } = await fd.read(buf, 0, toRead, offset)
+
+    // Trim at the last newline so the renderer never sees split lines or
+    // split multibyte characters
+    const lastNewline = buf.lastIndexOf(0x0a, bytesRead - 1)
+    if (lastNewline === -1) {
+      if (bytesRead >= cap) {
+        // Single line longer than the cap: skip it to guarantee forward progress
+        return { success: true, data: '', newOffset: offset + bytesRead, size: stats.size, reset }
+      }
+      // Partial final line still being written: wait for the next poll
+      return { success: true, data: '', newOffset: offset, size: stats.size, reset }
+    }
+
+    const data = buf.toString('utf-8', 0, lastNewline + 1)
+    return { success: true, data, newOffset: offset + lastNewline + 1, size: stats.size, reset }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  } finally {
+    await fd?.close().catch(() => {})
+  }
+})
+
+ipcMain.handle('sessions:readHead', async (_, filePath: string, maxBytes = 16_384) => {
+  let fd: fs.promises.FileHandle | null = null
+  try {
+    const resolved = safeSessionFilePath(filePath)
+    const cap = Math.min(Math.max(Number(maxBytes) || 16_384, 1_024), SESSION_TAIL_HARD_CAP)
+    fd = await fs.promises.open(resolved, 'r')
+    const buf = Buffer.alloc(cap)
+    const { bytesRead } = await fd.read(buf, 0, cap, 0)
+    // Trim at the last complete line for safe parsing
+    const lastNewline = buf.lastIndexOf(0x0a, bytesRead - 1)
+    const end = lastNewline === -1 ? bytesRead : lastNewline + 1
+    return { success: true, data: buf.toString('utf-8', 0, end) }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  } finally {
+    await fd?.close().catch(() => {})
+  }
+})
+
+// Account info: parsed in the main process, only a whitelist of fields crosses
+// IPC — the raw config file (which contains much more) never leaves this handler.
+ipcMain.handle('sessions:readAccount', async () => {
+  try {
+    const raw = await fs.promises.readFile(path.join(os.homedir(), '.claude.json'), 'utf-8')
+    const parsed = JSON.parse(raw)
+    const acct = parsed?.oauthAccount
+    if (!acct || typeof acct !== 'object') {
+      return { success: false, error: 'No account info found' }
+    }
+    return {
+      success: true,
+      account: {
+        emailAddress: acct.emailAddress ?? null,
+        displayName: acct.displayName ?? null,
+        organizationName: acct.organizationName ?? null,
+        organizationRole: acct.organizationRole ?? null,
+        billingType: acct.billingType ?? null,
+        seatTier: acct.seatTier ?? null,
+        userRateLimitTier: acct.userRateLimitTier ?? null,
+        organizationRateLimitTier: acct.organizationRateLimitTier ?? null
+      }
+    }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  }
+})
+
 // Clipboard handlers — native Electron clipboard is reliable; navigator.clipboard.write() is not
 ipcMain.handle('clipboard:writeImage', (_, dataUrl: string) => {
   try {

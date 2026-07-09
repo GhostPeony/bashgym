@@ -104,6 +104,51 @@ export interface FilesAPI {
   }>
 }
 
+export interface SessionFileInfo {
+  path: string
+  size: number
+  modified: number
+}
+
+export interface SessionAccountInfo {
+  emailAddress: string | null
+  displayName: string | null
+  organizationName: string | null
+  organizationRole: string | null
+  billingType: string | null
+  seatTier: string | null
+  userRateLimitTier: string | null
+  organizationRateLimitTier: string | null
+}
+
+/** Read-only access to local agent-CLI session journals (Claude Code / Codex) */
+export interface SessionsAPI {
+  scan: (claudeDirNames: string[], codexLookbackDays?: number) => Promise<{
+    success: boolean
+    claude?: SessionFileInfo[]
+    codex?: SessionFileInfo[]
+    error?: string
+  }>
+  readTail: (filePath: string, fromOffset: number, maxBytes?: number) => Promise<{
+    success: boolean
+    data?: string
+    newOffset?: number
+    size?: number
+    reset?: boolean
+    error?: string
+  }>
+  readHead: (filePath: string, maxBytes?: number) => Promise<{
+    success: boolean
+    data?: string
+    error?: string
+  }>
+  readAccount: () => Promise<{
+    success: boolean
+    account?: SessionAccountInfo
+    error?: string
+  }>
+}
+
 export interface WindowAPI {
   minimize: () => Promise<void>
   maximize: () => Promise<void>
@@ -137,6 +182,7 @@ export interface BashGymAPI {
   system: SystemAPI
   api: ApiProxy
   files: FilesAPI
+  sessions: SessionsAPI
   window: WindowAPI
   browser: BrowserAPI
   clipboard: ClipboardAPI
@@ -183,6 +229,12 @@ contextBridge.exposeInMainWorld('bashgym', {
     exists: (path: string) => ipcRenderer.invoke('files:exists', path),
     stat: (path: string) => ipcRenderer.invoke('files:stat', path),
     writeTempFile: (dataUrl: string, ext: string, basename?: string) => ipcRenderer.invoke('files:writeTempFile', dataUrl, ext, basename)
+  },
+  sessions: {
+    scan: (claudeDirNames: string[], codexLookbackDays?: number) => ipcRenderer.invoke('sessions:scan', claudeDirNames, codexLookbackDays),
+    readTail: (filePath: string, fromOffset: number, maxBytes?: number) => ipcRenderer.invoke('sessions:readTail', filePath, fromOffset, maxBytes),
+    readHead: (filePath: string, maxBytes?: number) => ipcRenderer.invoke('sessions:readHead', filePath, maxBytes),
+    readAccount: () => ipcRenderer.invoke('sessions:readAccount')
   },
   browser: {
     screenshot: (webContentsId: number, rect?: { x: number; y: number; width: number; height: number; vpW: number; vpH: number }) =>

@@ -23,6 +23,8 @@ export interface AgentSessionSnapshot {
   sessionId?: string
   /** Claude: session slug; Codex: cwd basename */
   title?: string
+  /** What the session is about: conversation summary, else the first real user prompt */
+  topic?: string
   cwd?: string
   gitBranch?: string
   /** Most recent model seen in the journal */

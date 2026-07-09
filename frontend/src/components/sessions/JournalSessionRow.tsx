@@ -33,13 +33,16 @@ export function JournalSessionRow({ snapshot, onResume }: JournalSessionRowProps
           'flex-shrink-0 px-1 py-px border-brutal rounded-brutal text-[8px] font-bold uppercase tracking-wider font-mono',
           snapshot.kind === 'claude'
             ? 'border-accent/60 bg-accent/10 text-accent'
-            : 'border-status-warning/60 bg-status-warning/10 text-status-warning'
+            : 'border-accent/40 bg-accent/5 text-accent-dark'
         )}
       >
         {snapshot.kind}
       </span>
-      <span className="font-mono text-[11px] text-text-secondary truncate flex-1">
-        {snapshot.title ?? snapshot.sessionId?.slice(0, 8) ?? '—'}
+      <span
+        className="font-mono text-[11px] text-text-secondary truncate flex-1"
+        title={snapshot.topic ?? snapshot.title}
+      >
+        {snapshot.topic ?? snapshot.title ?? snapshot.sessionId?.slice(0, 8) ?? '—'}
       </span>
       <span className="font-mono text-[10px] text-text-muted flex-shrink-0">
         {tokens > 0 && `${snapshot.totalsApprox ? '≈' : ''}${formatTokens(tokens)} tok · `}

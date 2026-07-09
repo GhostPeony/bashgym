@@ -81,6 +81,14 @@ function applyLine(snap: AgentSessionSnapshot, line: string): void {
     return
   }
 
+  if (payload.type === 'user_message' && snap.topic === undefined) {
+    const text = typeof payload.message === 'string' ? payload.message.trim() : undefined
+    if (text && !/^[<[]/.test(text)) {
+      snap.topic = text.split('\n')[0].slice(0, 120)
+    }
+    return
+  }
+
   if (payload.type === 'token_count' || event.type === 'token_count') {
     const info = payload.info as Record<string, unknown> | undefined
     if (info) {

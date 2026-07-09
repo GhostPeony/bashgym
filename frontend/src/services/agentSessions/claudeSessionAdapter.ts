@@ -69,6 +69,30 @@ function applyLine(snap: AgentSessionSnapshot, line: string): void {
     if (!Number.isNaN(ts)) snap.lastEventAt = ts
   }
 
+  // Conversation summaries are the best topic when present (last one wins)
+  if (event.type === 'summary' && typeof event.summary === 'string' && event.summary) {
+    snap.topic = event.summary
+    return
+  }
+
+  // Fallback topic: the first real user prompt (skip command/caveat/tool noise)
+  if (event.type === 'user' && snap.topic === undefined) {
+    const message = event.message as Record<string, unknown> | undefined
+    const content = message?.content
+    let text: string | undefined
+    if (typeof content === 'string') {
+      text = content
+    } else if (Array.isArray(content)) {
+      const block = content.find((b) => b?.type === 'text' && typeof b.text === 'string')
+      text = block?.text
+    }
+    const clean = text?.trim()
+    if (clean && !/^[<[]/.test(clean)) {
+      snap.topic = clean.split('\n')[0].slice(0, 120)
+    }
+    return
+  }
+
   if (event.type !== 'assistant') return
   const message = event.message as Record<string, unknown> | undefined
   if (!message) return

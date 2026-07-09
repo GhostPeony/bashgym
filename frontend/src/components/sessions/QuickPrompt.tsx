@@ -5,6 +5,8 @@ import type { AgentStatus } from '../../stores'
 interface QuickPromptProps {
   terminalId: string
   status: AgentStatus
+  autoFocus?: boolean
+  onClose?: () => void
 }
 
 /**
@@ -12,7 +14,7 @@ interface QuickPromptProps {
  * Prefill only types the text. When the agent is mid-task, sending requires a
  * second confirmation so nothing lands in a busy agent by accident.
  */
-export function QuickPrompt({ terminalId, status }: QuickPromptProps) {
+export function QuickPrompt({ terminalId, status, autoFocus, onClose }: QuickPromptProps) {
   const [text, setText] = useState('')
   const [armed, setArmed] = useState(false)
   const armTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -25,6 +27,7 @@ export function QuickPrompt({ terminalId, status }: QuickPromptProps) {
     setText('')
     setArmed(false)
     if (armTimerRef.current) clearTimeout(armTimerRef.current)
+    onClose?.()
   }
 
   const handleSend = () => {
@@ -38,23 +41,26 @@ export function QuickPrompt({ terminalId, status }: QuickPromptProps) {
   }
 
   return (
-    <div>
+    <div onClick={(e) => e.stopPropagation()}>
       <div className="flex items-center gap-1">
         <input
           value={text}
+          autoFocus={autoFocus}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
               e.preventDefault()
               handleSend()
+            } else if (e.key === 'Escape') {
+              e.preventDefault()
+              onClose?.()
             }
           }}
-          onClick={(e) => e.stopPropagation()}
-          placeholder="Quick prompt…"
+          placeholder="Prompt this agent… (Esc to close)"
           className="input flex-1 !py-1 !px-2 !text-xs font-mono min-w-0"
         />
         <button
-          onClick={(e) => { e.stopPropagation(); handleSend() }}
+          onClick={handleSend}
           disabled={!text.trim()}
           className="node-btn node-btn-accent"
           title="Send into the terminal (submits with Enter)"
@@ -62,7 +68,7 @@ export function QuickPrompt({ terminalId, status }: QuickPromptProps) {
           <Send className="w-3 h-3" />
         </button>
         <button
-          onClick={(e) => { e.stopPropagation(); write(false) }}
+          onClick={() => write(false)}
           disabled={!text.trim()}
           className="node-btn"
           title="Prefill into the terminal input without submitting"

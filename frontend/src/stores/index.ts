@@ -9,6 +9,7 @@ export type {
   AgentStatus,
   CanvasNode,
   CanvasEdge,
+  MonitorAutoMode,
   ToolHistoryItem,
   SessionMetrics
 } from './terminalStore'

@@ -8,15 +8,9 @@ import { useTerminalStore, useThemeStore, useAccentStore, getTerminalFgColor } f
 import type { AgentKind } from '../../stores/terminalStore'
 import { FileDropZone } from './FileDropZone'
 import { clsx } from 'clsx'
+import { stripAnsi } from '../../utils/ansi'
+import { maybeAutoSnapshot } from '../../utils/monitorRouting'
 import '@xterm/xterm/css/xterm.css'
-
-// Strip ANSI escape sequences from raw PTY data so regex patterns can match cleanly
-// eslint-disable-next-line no-control-regex
-const ANSI_RE = /[\x1b\x9b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><~]/g
-
-function stripAnsi(text: string): string {
-  return text.replace(ANSI_RE, '')
-}
 
 interface TerminalPaneProps {
   id: string
@@ -657,6 +651,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
       //    - ">" on its own line (Claude's input prompt)
       //    - Box drawing chars from Claude's UI (╭, ╰)
       if (/^\s*>\s*$/m.test(clean) || /[╭╰]/.test(clean)) {
+        const prevStatus = useTerminalStore.getState().sessions.get(id)?.status
         updateSession(id, {
           ...outputUpdate,
           ...agentUpdate,
@@ -667,12 +662,14 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
         })
         // Clear idle timer - we've reached a definitive state
         if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
+        if (prevStatus === 'running' || prevStatus === 'tool_calling') maybeAutoSnapshot(id)
         return
       }
 
       // 6. Shell prompt → idle (back to shell), extract cwd from PS prompt
       const psPromptMatch = clean.match(/PS\s+([A-Z]:\\[^>]*?)>\s*$/m)
       if (psPromptMatch || /[$#%]\s*$/m.test(clean)) {
+        const prevStatus = useTerminalStore.getState().sessions.get(id)?.status
         updateSession(id, {
           ...outputUpdate,
           status: 'idle',
@@ -683,6 +680,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
           ...(psPromptMatch?.[1] && { cwd: psPromptMatch[1].trim() })
         })
         if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
+        if (prevStatus === 'running' || prevStatus === 'tool_calling') maybeAutoSnapshot(id)
         return
       }
 
@@ -719,6 +717,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
           currentTool: undefined,
           lastActivity: Date.now()
         })
+        maybeAutoSnapshot(id)
       }
     }, 8000)
   }

@@ -19,7 +19,8 @@ import {
   Coins,
   Pause,
   Play,
-  Link2
+  Link2,
+  Eye
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import type { AttentionState, AgentStatus, AgentKind, PanelType, ToolHistoryItem, SessionMetrics } from '../../stores/terminalStore'
@@ -48,6 +49,10 @@ export interface TerminalNodeData extends Record<string, unknown> {
   isPaused?: boolean
   lastOutput?: string[]
   hasConnections?: boolean
+  /** This terminal is the watched end of a monitor edge */
+  isWatched?: boolean
+  /** Title of the terminal this one is watching (watcher end of a monitor edge) */
+  watchingTitle?: string
   onFocus?: (panelId: string) => void
   onClose?: (panelId: string) => void
   onTogglePause?: (panelId: string) => void
@@ -160,6 +165,8 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: NodeP
     isExpanded: dataExpanded,
     isPaused,
     hasConnections,
+    isWatched,
+    watchingTitle,
     onFocus,
     onClose,
     onTogglePause
@@ -265,10 +272,28 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: NodeP
           </div>
         )}
         <div className="flex items-center gap-1 nodrag">
+          {watchingTitle && (
+            <div
+              className="flex items-center gap-0.5 px-1 py-0.5 border-brutal border-[hsl(270_45%_60%)]/60 bg-[hsl(270_45%_60%)]/10 rounded-brutal text-[hsl(270_45%_60%)] text-[8px] font-bold uppercase tracking-wider max-w-[110px]"
+              title={`Monitoring "${watchingTitle}" — snapshots arrive as a file path in this terminal's input`}
+            >
+              <Eye className="w-2.5 h-2.5 flex-shrink-0" />
+              <span className="truncate">{watchingTitle}</span>
+            </div>
+          )}
+          {isWatched && (
+            <div
+              className="flex items-center gap-0.5 px-1 py-0.5 border-brutal border-[hsl(270_45%_60%)]/60 bg-[hsl(270_45%_60%)]/10 rounded-brutal text-[hsl(270_45%_60%)] text-[8px] font-bold uppercase tracking-wider"
+              title="Being monitored — a connected watcher can receive snapshots of this terminal's output"
+            >
+              <Eye className="w-2.5 h-2.5" />
+              <span>WATCHED</span>
+            </div>
+          )}
           {hasConnections && (
             <div
               className="flex items-center gap-0.5 px-1 py-0.5 border-brutal border-accent/60 bg-accent/10 rounded-brutal text-accent"
-              title="Receiving screenshots from connected browser"
+              title="Connected to a data node — content routes into this terminal"
             >
               <Link2 className="w-2.5 h-2.5" />
             </div>

@@ -21,9 +21,11 @@ import {
 import '@xyflow/react/dist/style.css'
 
 import { useTerminalStore, useCanvasControlStore, useTrainingStore } from '../../stores'
-import type { Panel, TerminalSession, CanvasEdge } from '../../stores'
+import type { Panel, TerminalSession, CanvasEdge, MonitorAutoMode } from '../../stores'
+import { getMonitorInfo, isMonitorEdge, sendMonitorSnapshot } from '../../utils/monitorRouting'
 import { applyPreset, type CanvasPreset } from './canvasPresets'
 import { TerminalNode, type TerminalNodeData } from './TerminalNode'
+import { MonitorEdge, type MonitorEdgeData } from './edges/MonitorEdge'
 import { PreviewNode, type PreviewNodeData } from './PreviewNode'
 import { BrowserNode, type BrowserNodeData } from './BrowserNode'
 import { IntegrationNode } from './nodes/IntegrationNode'
@@ -46,13 +48,35 @@ const EDGES_KEY = 'bashgym_canvas_edges'
 
 const EDGE_STYLE = { stroke: 'var(--accent)', strokeWidth: 2 }
 
-// Edges persist as bare {id, source, target}; style/animation re-applied on load
+// Edges persist as {id, source, target} plus type/data for monitor edges;
+// style/animation re-applied on load (monitor edges style themselves)
+type PersistedEdge = {
+  id: string
+  source: string
+  target: string
+  type?: 'monitor'
+  data?: { auto?: MonitorAutoMode }
+}
+
+const toPersistedEdge = (e: Edge): PersistedEdge => ({
+  id: e.id,
+  source: e.source,
+  target: e.target,
+  ...(e.type === 'monitor'
+    ? { type: 'monitor' as const, data: { auto: (e.data as MonitorEdgeData | undefined)?.auto ?? 'off' } }
+    : {})
+})
+
 const loadEdges = (): Edge[] => {
   try {
     const stored = localStorage.getItem(EDGES_KEY)
     if (stored) {
-      const parsed: Array<{ id: string; source: string; target: string }> = JSON.parse(stored)
-      return parsed.map((e) => ({ ...e, animated: true, style: EDGE_STYLE }))
+      const parsed: PersistedEdge[] = JSON.parse(stored)
+      return parsed.map((e) =>
+        e.type === 'monitor'
+          ? { id: e.id, source: e.source, target: e.target, type: 'monitor' as const, data: { auto: e.data?.auto ?? 'off' } }
+          : { ...e, animated: true, style: EDGE_STYLE }
+      )
     }
   } catch {
     // Ignore
@@ -62,13 +86,40 @@ const loadEdges = (): Edge[] => {
 
 const saveEdges = (edges: Edge[]) => {
   try {
-    localStorage.setItem(
-      EDGES_KEY,
-      JSON.stringify(edges.map((e) => ({ id: e.id, source: e.source, target: e.target })))
-    )
+    localStorage.setItem(EDGES_KEY, JSON.stringify(edges.map(toPersistedEdge)))
   } catch {
     // Ignore storage errors
   }
+}
+
+// Handler bundle injected into monitor edge data at runtime (never persisted)
+interface MonitorHandlers {
+  onSendSnapshot: (edgeId: string) => Promise<{ sent: boolean; error?: string }>
+  onCycleAuto: (edgeId: string) => void
+  onSwapDirection: (edgeId: string) => void
+}
+
+const cycleAutoMode = (mode?: MonitorAutoMode): MonitorAutoMode =>
+  mode === 'prefill' ? 'send' : mode === 'send' ? 'off' : 'prefill'
+
+// Terminal→terminal edges are monitor edges: ensure type + data with live handlers.
+// Idempotent — returns the same array when nothing needs upgrading.
+function decorateMonitorEdges(edges: Edge[], panels: Panel[], handlers: MonitorHandlers): Edge[] {
+  let changed = false
+  const next = edges.map((e) => {
+    if (!isMonitorEdge(e, panels)) return e
+    const data = e.data as MonitorEdgeData | undefined
+    if (e.type === 'monitor' && data?.onSendSnapshot === handlers.onSendSnapshot) return e
+    changed = true
+    return {
+      ...e,
+      type: 'monitor' as const,
+      animated: false,
+      style: undefined,
+      data: { auto: data?.auto ?? 'off', ...handlers }
+    }
+  })
+  return changed ? next : edges
 }
 
 // Union of all node data shapes rendered on the canvas
@@ -111,6 +162,11 @@ const nodeTypes = {
   designer: DataDesignerNode,
 }
 
+// Register custom edge types
+const edgeTypes = {
+  monitor: MonitorEdge,
+}
+
 export interface CanvasViewProps {
   onFocusPanel: (panelId: string) => void
   onClosePopup?: () => void
@@ -122,7 +178,8 @@ function buildNodeData(
   sessions: Map<string, TerminalSession>,
   onFocus: (id: string) => void,
   onClose: (id: string) => void,
-  canvasEdges: CanvasEdge[] = []
+  canvasEdges: CanvasEdge[] = [],
+  panels: Panel[] = []
 ): TerminalNodeData | PreviewNodeData | BrowserNodeData | IntegrationNodeData | DataNodeData {
   const session = panel.terminalId ? sessions.get(panel.terminalId) : undefined
   const hasConnections = canvasEdges.some(e => e.source === panel.id || e.target === panel.id)
@@ -179,6 +236,11 @@ function buildNodeData(
       }
     } as BrowserNodeData
   } else {
+    const monitor = getMonitorInfo(panel.id, canvasEdges, panels)
+    // Link2 chip stays about data-node routing; monitor edges get their own chips
+    const dataConnections = canvasEdges.some(
+      e => (e.source === panel.id || e.target === panel.id) && !isMonitorEdge(e, panels)
+    )
     return {
       panelId: panel.id,
       title: panel.title,
@@ -198,7 +260,9 @@ function buildNodeData(
       errorMessage: session?.errorMessage,
       isExpanded: session?.isExpanded,
       isPaused: session?.isPaused,
-      hasConnections,
+      hasConnections: dataConnections,
+      isWatched: monitor.isWatched,
+      watchingTitle: monitor.watchingTitle,
       onFocus,
       onClose
     } as TerminalNodeData
@@ -252,11 +316,46 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdgesRef.current)
 
   // Sync React Flow edges to Zustand store for cross-component routing (e.g. BrowserPane
-  // screenshot routing) and persist them across reloads
+  // screenshot routing, monitor snapshots) and persist them across reloads
   useEffect(() => {
-    setCanvasEdges(edges.map(e => ({ id: e.id, source: e.source, target: e.target })))
+    setCanvasEdges(edges.map(toPersistedEdge))
     saveEdges(edges)
   }, [edges, setCanvasEdges])
+
+  // Monitor edge actions — stable references so edge data survives memo comparison
+  const handleSendSnapshot = useCallback(
+    (edgeId: string) => sendMonitorSnapshot(edgeId, false),
+    []
+  )
+  const handleCycleAuto = useCallback((edgeId: string) => {
+    setEdges((eds) => eds.map((e) =>
+      e.id === edgeId
+        ? { ...e, data: { ...e.data, auto: cycleAutoMode((e.data as MonitorEdgeData | undefined)?.auto) } }
+        : e
+    ))
+  }, [setEdges])
+  const handleSwapDirection = useCallback((edgeId: string) => {
+    setEdges((eds) => eds.map((e) =>
+      e.id === edgeId
+        ? { ...e, source: e.target, target: e.source, sourceHandle: null, targetHandle: null }
+        : e
+    ))
+  }, [setEdges])
+  const monitorHandlersRef = useRef<MonitorHandlers | null>(null)
+  if (!monitorHandlersRef.current) {
+    monitorHandlersRef.current = {
+      onSendSnapshot: handleSendSnapshot,
+      onCycleAuto: handleCycleAuto,
+      onSwapDirection: handleSwapDirection
+    }
+  }
+  const monitorHandlers = monitorHandlersRef.current
+
+  // Upgrade terminal↔terminal edges to monitor edges (covers edges loaded from
+  // storage before panels restored, and legacy saved edges)
+  useEffect(() => {
+    setEdges((eds) => decorateMonitorEdges(eds, useTerminalStore.getState().panels, monitorHandlers))
+  }, [_panels, setEdges, monitorHandlers])
 
   // Use stable refs for callbacks so the Zustand subscription never needs to be recreated
   const handleFocusPanelRef = useRef(handleFocusPanel)
@@ -288,7 +387,7 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
             type: nodeType,
             position: savedPosition || persistedPosition || defaultPosition,
             selected: panel.id === state.activePanelId,
-            data: buildNodeData(panel, state.sessions, handleFocusPanelRef.current, handleClosePanelRef.current, state.canvasEdges)
+            data: buildNodeData(panel, state.sessions, handleFocusPanelRef.current, handleClosePanelRef.current, state.canvasEdges, state.panels)
           }
         })
       })
@@ -297,10 +396,13 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
     // Run immediately on mount with current state
     rebuildNodes(useTerminalStore.getState())
 
-    // Subscribe to all subsequent changes
+    // Subscribe to all subsequent changes. Deliberately NOT comparing the sessions
+    // Map reference — updateSession reallocates it on every 80ms output flush;
+    // sessionsVersion only bumps on render-relevant changes (status/tool/attention/
+    // taskSummary/agentKind/isPaused/cwd/errorMessage), so keying on it keeps the
+    // canvas from rebuilding all nodes while a terminal is merely streaming output.
     const unsubscribe = useTerminalStore.subscribe((state, prev) => {
       if (
-        state.sessions === prev.sessions &&
         state.panels === prev.panels &&
         state.sessionsVersion === prev.sessionsVersion &&
         state.activePanelId === prev.activePanelId &&
@@ -382,14 +484,26 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
     })
   }, [onNodesChange, updateCanvasNode])
 
-  // Handle connections between nodes
+  // Handle connections between nodes. Terminal→terminal = monitor edge
+  // (source = watched, target = watcher)
   const onConnect = useCallback((connection: Connection) => {
+    const panels = useTerminalStore.getState().panels
+    const isTerminal = (pid: string | null) =>
+      !!pid && panels.some((p) => p.id === pid && p.type === 'terminal')
+    if (isTerminal(connection.source) && isTerminal(connection.target) && connection.source !== connection.target) {
+      setEdges((eds) => addEdge({
+        ...connection,
+        type: 'monitor',
+        data: { auto: 'off', ...monitorHandlers }
+      }, eds))
+      return
+    }
     setEdges((eds) => addEdge({
       ...connection,
       animated: true,
       style: { stroke: 'var(--accent)', strokeWidth: 2 }
     }, eds))
-  }, [setEdges])
+  }, [setEdges, monitorHandlers])
 
   // Auto-connect all nodes when shift+drag box-selects 2+ nodes
   const onSelectionEnd = useCallback(() => {
@@ -418,9 +532,10 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
           }
         }
       }
-      return updated
+      // Terminal↔terminal pairs become monitor edges
+      return decorateMonitorEdges(updated, useTerminalStore.getState().panels, monitorHandlers)
     })
-  }, [getNodes, setEdges])
+  }, [getNodes, setEdges, monitorHandlers])
 
   // Handle node selection
   const onNodeClick = useCallback((_: any, node: Node) => {
@@ -515,13 +630,13 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
           )
         }
       }
-      return updated
+      return decorateMonitorEdges(updated, useTerminalStore.getState().panels, monitorHandlers)
     })
     setTimeout(() => {
       fitView({ padding: 0.2 })
       setCurrentZoom(getZoom())
     }, 150)
-  }, [setEdges, setNodes, updateCanvasNode, fitView, getZoom])
+  }, [setEdges, setNodes, updateCanvasNode, fitView, getZoom, monitorHandlers])
 
   return (
     <div className="h-full w-full relative">
@@ -535,6 +650,7 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
         onSelectionEnd={onSelectionEnd}
         onMoveEnd={onMoveEnd}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         fitView={shouldFitView}
         fitViewOptions={{
           padding: 0.2

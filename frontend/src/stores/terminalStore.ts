@@ -64,11 +64,17 @@ export interface CanvasNode {
   }
 }
 
-// Canvas edge — a connection between two panels on the canvas
+/** Auto-snapshot mode for a monitor edge: prefill types the path, send submits it */
+export type MonitorAutoMode = 'off' | 'prefill' | 'send'
+
+// Canvas edge — a connection between two panels on the canvas.
+// Terminal→terminal edges are monitor edges: source = watched, target = watcher.
 export interface CanvasEdge {
   id: string
   source: string  // panelId of source node
   target: string  // panelId of target node
+  type?: 'monitor'
+  data?: { auto?: MonitorAutoMode }
 }
 
 export interface Panel {
@@ -456,11 +462,14 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       const attentionChanged = updates.attention !== undefined && updates.attention !== session.attention
       const taskSummaryChanged = updates.taskSummary !== undefined && updates.taskSummary !== session.taskSummary
       const agentKindChanged = 'agentKind' in updates && updates.agentKind !== session.agentKind
+      const pausedChanged = 'isPaused' in updates && updates.isPaused !== session.isPaused
+      const cwdChanged = updates.cwd !== undefined && updates.cwd !== session.cwd
+      const errorChanged = 'errorMessage' in updates && updates.errorMessage !== session.errorMessage
 
       newSessions.set(id, { ...session, ...updates })
 
       // Increment version for any significant change to force canvas re-renders
-      if (statusChanged || toolChanged || outputChanged || attentionChanged || taskSummaryChanged || agentKindChanged) {
+      if (statusChanged || toolChanged || outputChanged || attentionChanged || taskSummaryChanged || agentKindChanged || pausedChanged || cwdChanged || errorChanged) {
         return { sessions: newSessions, sessionsVersion: state.sessionsVersion + 1 }
       }
       return { sessions: newSessions }

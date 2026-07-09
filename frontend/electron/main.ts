@@ -366,6 +366,19 @@ ipcMain.handle('terminal:list', () => {
   }))
 })
 
+// Read-only tail of the scrollback ring buffer (raw ANSI; renderer strips)
+ipcMain.handle('terminal:snapshot', (_, id: string, maxBytes?: number) => {
+  const session = ptySessions.get(id)
+  if (!session) return { success: false, error: 'No such terminal session' }
+  const cap = Math.min(Math.max(maxBytes ?? 64_000, 1_000), MAX_BUFFER_BYTES)
+  return {
+    success: true,
+    data: session.buffer.join('').slice(-cap),
+    cwd: session.cwd,
+    exited: session.exited
+  }
+})
+
 // System info
 ipcMain.handle('system:info', () => {
   return {
@@ -538,9 +551,10 @@ ipcMain.handle('browser:screenshot', async (_, webContentsId: number, rect?: { x
   }
 })
 
-ipcMain.handle('files:writeTempFile', async (_, dataUrl: string, ext: string) => {
+ipcMain.handle('files:writeTempFile', async (_, dataUrl: string, ext: string, basename?: string) => {
   try {
-    const filename = `bashgym_screenshot_${Date.now()}.${ext}`
+    const safeBase = (basename || 'bashgym_file').replace(/[^a-zA-Z0-9_-]/g, '_')
+    const filename = `${safeBase}_${Date.now()}.${ext}`
     const filePath = path.join(os.tmpdir(), filename)
     const base64Data = dataUrl.replace(/^data:[^;]+;base64,/, '')
     await fs.promises.writeFile(filePath, Buffer.from(base64Data, 'base64'))

@@ -20,12 +20,22 @@ export interface TerminalSessionInfo {
   exitCode: number | null
 }
 
+export interface TerminalSnapshotResult {
+  success: boolean
+  /** Raw scrollback tail (may contain ANSI sequences) */
+  data?: string
+  cwd?: string
+  exited?: boolean
+  error?: string
+}
+
 export interface TerminalAPI {
   create: (id: string, cwd?: string) => Promise<TerminalCreateResult>
   write: (id: string, data: string) => Promise<boolean>
   resize: (id: string, cols: number, rows: number) => Promise<boolean>
   kill: (id: string) => Promise<boolean>
   list: () => Promise<TerminalSessionInfo[]>
+  snapshot: (id: string, maxBytes?: number) => Promise<TerminalSnapshotResult>
   onData: (id: string, callback: (data: string) => void) => () => void
   onExit: (id: string, callback: (exitCode: number) => void) => () => void
 }
@@ -87,7 +97,7 @@ export interface FilesAPI {
     }
     error?: string
   }>
-  writeTempFile: (dataUrl: string, ext: string) => Promise<{
+  writeTempFile: (dataUrl: string, ext: string, basename?: string) => Promise<{
     success: boolean
     path?: string
     error?: string
@@ -141,6 +151,7 @@ contextBridge.exposeInMainWorld('bashgym', {
     resize: (id: string, cols: number, rows: number) => ipcRenderer.invoke('terminal:resize', id, cols, rows),
     kill: (id: string) => ipcRenderer.invoke('terminal:kill', id),
     list: () => ipcRenderer.invoke('terminal:list'),
+    snapshot: (id: string, maxBytes?: number) => ipcRenderer.invoke('terminal:snapshot', id, maxBytes),
     onData: (id: string, callback: (data: string) => void) => {
       const channel = `terminal:data:${id}`
       const listener = (_: any, data: string) => callback(data)
@@ -171,7 +182,7 @@ contextBridge.exposeInMainWorld('bashgym', {
     readFile: (path: string) => ipcRenderer.invoke('files:readFile', path),
     exists: (path: string) => ipcRenderer.invoke('files:exists', path),
     stat: (path: string) => ipcRenderer.invoke('files:stat', path),
-    writeTempFile: (dataUrl: string, ext: string) => ipcRenderer.invoke('files:writeTempFile', dataUrl, ext)
+    writeTempFile: (dataUrl: string, ext: string, basename?: string) => ipcRenderer.invoke('files:writeTempFile', dataUrl, ext, basename)
   },
   browser: {
     screenshot: (webContentsId: number, rect?: { x: number; y: number; width: number; height: number; vpW: number; vpH: number }) =>

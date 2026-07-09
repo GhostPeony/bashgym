@@ -1,6 +1,5 @@
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { clsx } from 'clsx'
 import { Play, Maximize2, Pin, FolderGit2, X } from 'lucide-react'
 import type { Panel, TerminalSession, CanvasEdge } from '../../stores'
 import type { AgentSessionSnapshot, SessionMatch } from '../../services/agentSessions/types'
@@ -8,7 +7,7 @@ import { ContextMeter } from './ContextMeter'
 import { QuickPrompt } from './QuickPrompt'
 import { ConnectionsTree } from './ConnectionsTree'
 import { formatTokens } from './format'
-import { KIND_CHIP_BASE, kindChipClass } from './kindStyles'
+import { AgentBadge } from './AgentBadge'
 
 export type SessionDetailTarget =
   | { type: 'live'; session: TerminalSession; panel: Panel; snapshot?: AgentSessionSnapshot; match?: SessionMatch }
@@ -120,7 +119,7 @@ export function SessionDetailPopover({
     >
       {/* Title strip */}
       <div className="flex items-center gap-2 px-3 py-2 bg-background-secondary border-b border-brutal border-border min-w-0">
-        <span className={clsx(KIND_CHIP_BASE, kindChipClass(kind))}>{kind ?? 'shell'}</span>
+        <AgentBadge kind={kind} size="md" />
         <span className="font-mono text-[11px] font-semibold text-text-primary truncate flex-1" title={topic}>
           {topic}
         </span>

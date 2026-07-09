@@ -4,7 +4,7 @@ import type { Panel, TerminalSession } from '../../stores'
 import type { AgentSessionSnapshot, SessionMatch } from '../../services/agentSessions/types'
 import { ContextMeter } from './ContextMeter'
 import { QuickPrompt } from './QuickPrompt'
-import { KIND_CHIP_BASE, kindChipClass } from './kindStyles'
+import { AgentBadge } from './AgentBadge'
 
 interface SessionCardProps {
   session: TerminalSession
@@ -62,7 +62,7 @@ export function SessionCard({ session, panel: _panel, snapshot, match: _match, o
         <span className="font-mono text-[11px] font-semibold text-text-primary truncate flex-1" title={topic}>
           {topic}
         </span>
-        <span className={clsx(KIND_CHIP_BASE, kindChipClass(kind))}>{kind ?? 'shell'}</span>
+        <AgentBadge kind={kind} />
         <span className="font-mono text-[10px] text-text-muted flex-shrink-0">{timeAgo(session.lastActivity)}</span>
       </div>
 

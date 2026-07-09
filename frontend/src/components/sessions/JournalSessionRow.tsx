@@ -1,6 +1,5 @@
-import { clsx } from 'clsx'
 import type { AgentSessionSnapshot } from '../../services/agentSessions/types'
-import { KIND_CHIP_BASE, kindChipClass } from './kindStyles'
+import { AgentBadge } from './AgentBadge'
 
 interface JournalSessionRowProps {
   snapshot: AgentSessionSnapshot
@@ -30,7 +29,7 @@ export function JournalSessionRow({ snapshot, onOpenDetail }: JournalSessionRowP
       onClick={onOpenDetail}
       title={snapshot.topic ?? snapshot.filePath}
     >
-      <span className={clsx(KIND_CHIP_BASE, kindChipClass(snapshot.kind))}>{snapshot.kind}</span>
+      <AgentBadge kind={snapshot.kind} />
       <span className="font-mono text-[11px] text-text-secondary truncate flex-1">
         {snapshot.topic ?? snapshot.title ?? snapshot.sessionId?.slice(0, 8) ?? '—'}
       </span>

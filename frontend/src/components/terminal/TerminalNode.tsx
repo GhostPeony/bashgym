@@ -25,6 +25,7 @@ import {
 import { clsx } from 'clsx'
 import type { AttentionState, AgentStatus, AgentKind, PanelType, ToolHistoryItem, SessionMetrics } from '../../stores/terminalStore'
 import { ToolBreadcrumbs } from './ToolBreadcrumbs'
+import { AgentBadge } from '../sessions/AgentBadge'
 import { useCanvasControlStore } from '../../stores'
 
 export interface TerminalNodeData extends Record<string, unknown> {
@@ -239,18 +240,7 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: NodeP
         <div className="flex-1 min-w-0">
           <span className="text-sm font-mono font-semibold text-text-primary truncate flex items-center gap-1.5">
             <span className="truncate">{title}</span>
-            {agentKind && (
-              <span
-                className={clsx(
-                  'flex-shrink-0 px-1 py-px border-brutal rounded-brutal text-[8px] font-bold uppercase tracking-wider',
-                  agentKind === 'claude'
-                    ? 'border-accent/60 bg-accent/10 text-accent'
-                    : 'border-status-warning/60 bg-status-warning/10 text-status-warning'
-                )}
-              >
-                {agentKind}
-              </span>
-            )}
+            {agentKind && <AgentBadge kind={agentKind} />}
           </span>
           {relativeTime && (
             <span className="text-[10px] text-text-muted flex items-center gap-1 font-mono">

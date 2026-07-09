@@ -123,7 +123,7 @@ export interface SessionAccountInfo {
 
 /** Read-only access to local agent-CLI session journals (Claude Code / Codex) */
 export interface SessionsAPI {
-  scan: (claudeDirNames: string[], codexLookbackDays?: number) => Promise<{
+  scan: (lookbackDays?: number) => Promise<{
     success: boolean
     claude?: SessionFileInfo[]
     codex?: SessionFileInfo[]
@@ -231,7 +231,7 @@ contextBridge.exposeInMainWorld('bashgym', {
     writeTempFile: (dataUrl: string, ext: string, basename?: string) => ipcRenderer.invoke('files:writeTempFile', dataUrl, ext, basename)
   },
   sessions: {
-    scan: (claudeDirNames: string[], codexLookbackDays?: number) => ipcRenderer.invoke('sessions:scan', claudeDirNames, codexLookbackDays),
+    scan: (lookbackDays?: number) => ipcRenderer.invoke('sessions:scan', lookbackDays),
     readTail: (filePath: string, fromOffset: number, maxBytes?: number) => ipcRenderer.invoke('sessions:readTail', filePath, fromOffset, maxBytes),
     readHead: (filePath: string, maxBytes?: number) => ipcRenderer.invoke('sessions:readHead', filePath, maxBytes),
     readAccount: () => ipcRenderer.invoke('sessions:readAccount')

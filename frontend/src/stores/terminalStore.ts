@@ -119,7 +119,7 @@ interface TerminalState {
   broadcastCommand: string
 
   // Actions
-  createTerminal: (id?: string, title?: string, launchCommand?: string) => string
+  createTerminal: (id?: string, title?: string, launchCommand?: string, cwd?: string) => string
   closeTerminal: (id: string) => void
   /** Close with confirmation if the agent is busy. Returns true if closed. */
   requestCloseTerminal: (id: string) => boolean
@@ -312,7 +312,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   draggedPanelId: null,
   broadcastCommand: '',
 
-  createTerminal: (id?: string, title?: string, launchCommand?: string) => {
+  createTerminal: (id?: string, title?: string, launchCommand?: string, cwd?: string) => {
     const terminalId = id || generateId()
 
     // Show banner only if it hasn't been shown yet in this session
@@ -324,7 +324,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     const session: TerminalSession = {
       id: terminalId,
       title: title || `Terminal ${get().sessions.size + 1}`,
-      cwd: '~',
+      cwd: cwd || '~',
       isActive: true,
       attention: 'none',
       showBanner,  // Only first terminal shows the banner

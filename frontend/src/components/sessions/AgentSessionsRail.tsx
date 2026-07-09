@@ -1,31 +1,44 @@
-import { useEffect, useMemo } from 'react'
-import { ArrowLeft, ListTree, RefreshCw } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { ArrowLeft, ListTree, RefreshCw, FolderGit2, ChevronDown, ChevronRight } from 'lucide-react'
 import { useTerminalStore, useUIStore } from '../../stores'
 import { useAgentSessionsStore } from '../../stores/agentSessionsStore'
-import { candidatesForTerminal } from '../../services/agentSessions/matching'
+import { candidatesForTerminal, normPath } from '../../services/agentSessions/matching'
+import type { AgentSessionSnapshot } from '../../services/agentSessions/types'
 import type { Panel, TerminalSession } from '../../stores'
 import { SessionCard } from './SessionCard'
+import { JournalSessionRow } from './JournalSessionRow'
 import { AccountChip } from './AccountChip'
 
-interface RepoEntry {
+const JOURNALS_COLLAPSED_COUNT = 4
+
+interface ProjectEntry {
   key: string
-  label: string
-  branch?: string
-  items: Array<{ session: TerminalSession; panel: Panel }>
+  /** Display path — best-cased source we saw */
+  path: string
+  name: string
+  live: Array<{ session: TerminalSession; panel: Panel }>
+  journals: AgentSessionSnapshot[]
   lastActivity: number
 }
 
-function repoKeyOf(cwd: string): { key: string; label: string } {
-  if (!cwd || cwd === '~') return { key: '~', label: 'home' }
-  const norm = cwd.replace(/\\/g, '/').replace(/\/+$/, '')
-  const label = norm.split('/').pop() || norm
-  return { key: norm.toLowerCase(), label }
+function projectKeyOf(cwd: string): string {
+  return normPath(cwd).toLowerCase()
+}
+
+function basenameOf(p: string): string {
+  const norm = p.replace(/\\/g, '/').replace(/\/+$/, '')
+  return norm.split('/').pop() || norm
+}
+
+function shortenPath(p: string): string {
+  return p.replace(/^(C:\\Users\\[^\\]+|\/home\/[^/]+|\/Users\/[^/]+)/i, '~')
 }
 
 /**
- * Master feed of live agent terminals: repo-grouped cards with session intel
- * from local CLI journals. Mounting starts the journal polling; unmounting
- * stops it — the feed costs nothing while closed.
+ * Master feed of agent work, organized like a project browser: each project is
+ * a folder on this machine (discovered from live terminals and the CLIs' own
+ * session journals), with live terminals and resumable past sessions beneath.
+ * Mounting starts journal polling; unmounting stops it.
  */
 export function AgentSessionsRail() {
   const { setSidebarMode, closeOverlay } = useUIStore()
@@ -35,36 +48,59 @@ export function AgentSessionsRail() {
   const { snapshots, matches, lastScanAt, error, startPolling, stopPolling, pinSession, pollOnce } =
     useAgentSessionsStore()
 
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [showAllJournals, setShowAllJournals] = useState<Set<string>>(new Set())
+
   useEffect(() => {
     startPolling()
     return () => stopPolling()
   }, [startPolling, stopPolling])
 
-  const groups = useMemo<RepoEntry[]>(() => {
+  const projects = useMemo<ProjectEntry[]>(() => {
     const terminalSessions = useTerminalStore.getState().sessions
-    const byRepo = new Map<string, RepoEntry>()
+    const matchedPaths = new Set(Array.from(matches.values()).map((m) => m.filePath))
+    const byKey = new Map<string, ProjectEntry>()
+
+    const ensure = (cwd: string): ProjectEntry | null => {
+      if (!cwd || cwd === '~') return null
+      const key = projectKeyOf(cwd)
+      let entry = byKey.get(key)
+      if (!entry) {
+        entry = { key, path: cwd, name: basenameOf(cwd), live: [], journals: [], lastActivity: 0 }
+        byKey.set(key, entry)
+      }
+      return entry
+    }
+
+    // Live terminals anchor their projects (and carry real path casing)
     for (const panel of panels) {
       if (panel.type !== 'terminal' || !panel.terminalId) continue
       const session = terminalSessions.get(panel.terminalId)
       if (!session) continue
-      const { key, label } = repoKeyOf(session.cwd)
-      let entry = byRepo.get(key)
-      if (!entry) {
-        entry = { key, label, items: [], lastActivity: 0 }
-        byRepo.set(key, entry)
-      }
-      entry.items.push({ session, panel })
+      const entry = ensure(session.cwd)
+      if (!entry) continue
+      entry.path = session.cwd
+      entry.name = basenameOf(session.cwd)
+      entry.live.push({ session, panel })
       entry.lastActivity = Math.max(entry.lastActivity, session.lastActivity)
-      if (!entry.branch) {
-        const match = matches.get(session.id)
-        const snap = match ? snapshots.get(match.filePath) : undefined
-        if (snap?.gitBranch) entry.branch = snap.gitBranch
-      }
     }
-    const out = Array.from(byRepo.values())
-    out.forEach((g) => g.items.sort((a, b) => b.session.lastActivity - a.session.lastActivity))
-    return out.sort((a, b) => b.lastActivity - a.lastActivity)
-    // sessionsVersion drives recompute when session state changes
+
+    // Past sessions from the journals (unmatched ones only — matched journals
+    // render inside their live terminal's card)
+    for (const snap of snapshots.values()) {
+      if (matchedPaths.has(snap.filePath) || !snap.cwd) continue
+      const entry = ensure(snap.cwd)
+      if (!entry) continue
+      entry.journals.push(snap)
+      entry.lastActivity = Math.max(entry.lastActivity, snap.lastEventAt ?? snap.fileMtime)
+    }
+
+    for (const entry of byKey.values()) {
+      entry.live.sort((a, b) => b.session.lastActivity - a.session.lastActivity)
+      entry.journals.sort((a, b) => (b.lastEventAt ?? b.fileMtime) - (a.lastEventAt ?? a.fileMtime))
+    }
+    return Array.from(byKey.values()).sort((a, b) => b.lastActivity - a.lastActivity)
+    // sessionsVersion drives recompute when live session state changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [panels, matches, snapshots, sessionsVersion])
 
@@ -73,17 +109,26 @@ export function AgentSessionsRail() {
     closeOverlay()
   }
 
-  const totalTerminals = groups.reduce((n, g) => n + g.items.length, 0)
+  const handleResume = (snap: AgentSessionSnapshot) => {
+    if (!snap.sessionId) return
+    const cmd = snap.kind === 'claude' ? `claude --resume ${snap.sessionId}` : `codex resume ${snap.sessionId}`
+    const title = snap.title ?? (snap.cwd ? basenameOf(snap.cwd) : snap.kind)
+    useTerminalStore.getState().createTerminal(undefined, title, cmd, snap.cwd)
+    closeOverlay()
+  }
+
+  const toggle = (set: Set<string>, key: string, apply: (next: Set<string>) => void) => {
+    const next = new Set(set)
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    apply(next)
+  }
 
   return (
     <div className="p-4 space-y-4">
       {/* Header */}
       <div className="flex items-center gap-2">
-        <button
-          onClick={() => setSidebarMode('nav')}
-          className="node-btn"
-          title="Back to navigation"
-        >
+        <button onClick={() => setSidebarMode('nav')} className="node-btn" title="Back to navigation">
           <ArrowLeft className="w-3 h-3" />
         </button>
         <ListTree className="w-4 h-4 text-accent" />
@@ -97,62 +142,108 @@ export function AgentSessionsRail() {
         </button>
       </div>
 
-      {error && (
-        <p className="font-mono text-[10px] text-status-error break-all">{error}</p>
-      )}
+      {error && <p className="font-mono text-[10px] text-status-error break-all">{error}</p>}
 
-      {totalTerminals === 0 && (
+      {projects.length === 0 && (
         <p className="font-mono text-xs text-text-muted">
-          No terminals yet — open the Workspace and launch an agent.
+          {lastScanAt
+            ? 'No projects found yet — sessions appear here as agents work in folders on this machine.'
+            : 'Scanning local agent sessions…'}
         </p>
       )}
 
-      {groups.map((group) => (
-        <div key={group.key} className="space-y-2">
-          <div className="flex items-center gap-2 px-1">
-            <span className="font-mono text-xs uppercase tracking-widest text-text-muted">
-              {group.label}
-            </span>
-            <span className="font-mono text-[10px] text-text-muted">
-              {group.items.length}
-            </span>
-            {group.branch && (
-              <span className="font-mono text-[10px] text-accent truncate">⎇ {group.branch}</span>
+      {projects.map((project) => {
+        const isCollapsed = collapsed.has(project.key)
+        const liveCount = project.live.filter(
+          ({ session }) => session.status === 'running' || session.status === 'tool_calling'
+        ).length
+        const journalsShown = showAllJournals.has(project.key)
+          ? project.journals
+          : project.journals.slice(0, JOURNALS_COLLAPSED_COUNT)
+
+        return (
+          <div key={project.key} className="space-y-1.5">
+            {/* Project header — a folder on this machine */}
+            <button
+              onClick={() => toggle(collapsed, project.key, setCollapsed)}
+              className="w-full flex items-center gap-2 px-1 py-1 text-left hover:bg-accent/[0.06] rounded-brutal transition-colors min-w-0"
+              title={project.path}
+            >
+              {isCollapsed ? (
+                <ChevronRight className="w-3 h-3 text-text-muted flex-shrink-0" />
+              ) : (
+                <ChevronDown className="w-3 h-3 text-text-muted flex-shrink-0" />
+              )}
+              <FolderGit2 className="w-3.5 h-3.5 text-accent flex-shrink-0" />
+              <span className="font-mono text-xs font-bold uppercase tracking-wider text-text-primary truncate">
+                {project.name}
+              </span>
+              <span className="font-mono text-[10px] text-text-muted truncate flex-1">
+                {shortenPath(project.path)}
+              </span>
+              {liveCount > 0 && (
+                <span className="flex items-center gap-1 flex-shrink-0">
+                  <span className="status-dot status-success" />
+                  <span className="font-mono text-[10px] text-status-success">{liveCount}</span>
+                </span>
+              )}
+              <span className="font-mono text-[10px] text-text-muted flex-shrink-0">
+                {project.live.length + project.journals.length}
+              </span>
+            </button>
+
+            {!isCollapsed && (
+              <div className="space-y-1.5 pl-2 border-l border-brutal border-border-subtle ml-1.5">
+                {project.live.map(({ session, panel }) => {
+                  const match = matches.get(session.id)
+                  const snapshot = match ? snapshots.get(match.filePath) : undefined
+                  return (
+                    <SessionCard
+                      key={panel.id}
+                      session={session}
+                      panel={panel}
+                      snapshot={snapshot}
+                      match={match}
+                      pinCandidates={
+                        snapshot
+                          ? []
+                          : candidatesForTerminal(
+                              {
+                                terminalId: session.id,
+                                panelId: panel.id,
+                                cwd: session.cwd,
+                                agentKind: session.agentKind,
+                                lastActivity: session.lastActivity
+                              },
+                              snapshots
+                            )
+                      }
+                      onPin={pinSession}
+                      onFocus={handleFocus}
+                      panels={panels}
+                      canvasEdges={canvasEdges}
+                    />
+                  )
+                })}
+
+                {journalsShown.map((snap) => (
+                  <JournalSessionRow key={snap.filePath} snapshot={snap} onResume={handleResume} />
+                ))}
+                {project.journals.length > JOURNALS_COLLAPSED_COUNT && (
+                  <button
+                    onClick={() => toggle(showAllJournals, project.key, setShowAllJournals)}
+                    className="font-mono text-[10px] text-text-muted hover:text-text-primary transition-press px-2"
+                  >
+                    {showAllJournals.has(project.key)
+                      ? 'show fewer'
+                      : `+${project.journals.length - JOURNALS_COLLAPSED_COUNT} more session${project.journals.length - JOURNALS_COLLAPSED_COUNT !== 1 ? 's' : ''}`}
+                  </button>
+                )}
+              </div>
             )}
           </div>
-          {group.items.map(({ session, panel }) => {
-            const match = matches.get(session.id)
-            const snapshot = match ? snapshots.get(match.filePath) : undefined
-            return (
-              <SessionCard
-                key={panel.id}
-                session={session}
-                panel={panel}
-                snapshot={snapshot}
-                match={match}
-                pinCandidates={
-                  snapshot
-                    ? []
-                    : candidatesForTerminal(
-                        {
-                          terminalId: session.id,
-                          panelId: panel.id,
-                          cwd: session.cwd,
-                          agentKind: session.agentKind,
-                          lastActivity: session.lastActivity
-                        },
-                        snapshots
-                      )
-                }
-                onPin={pinSession}
-                onFocus={handleFocus}
-                panels={panels}
-                canvasEdges={canvasEdges}
-              />
-            )
-          })}
-        </div>
-      ))}
+        )
+      })}
 
       <AccountChip />
     </div>

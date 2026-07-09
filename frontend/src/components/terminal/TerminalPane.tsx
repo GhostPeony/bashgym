@@ -357,7 +357,8 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
 
     // Create or re-attach the PTY process (main process keeps PTYs alive across remounts)
     const startPty = () => {
-      window.bashgym?.terminal.create(id).then((result) => {
+      const requestedCwd = useTerminalStore.getState().sessions.get(id)?.cwd
+      window.bashgym?.terminal.create(id, requestedCwd !== '~' ? requestedCwd : undefined).then((result) => {
         if (!result.success) {
           terminal.writeln(`\x1b[31mFailed to create terminal: ${result.error}\x1b[0m`)
           return

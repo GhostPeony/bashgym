@@ -16,7 +16,8 @@ import { matchSessions, type MatchableTerminal } from '../services/agentSessions
 import { useTerminalStore } from './terminalStore'
 
 const POLL_INTERVAL_MS = 4_000
-const MAX_INGESTS_PER_TICK = 6
+const MAX_INGESTS_PER_TICK = 10
+const SCAN_LOOKBACK_DAYS = 14
 const PINS_KEY = 'bashgym_session_pins'
 const ACCOUNT_OPTIN_KEY = 'bashgym_sessions_account_optin'
 
@@ -110,15 +111,7 @@ export const useAgentSessionsStore = create<AgentSessionsState>((set, get) => ({
         })
       }
 
-      const dirNames = Array.from(
-        new Set(
-          terminals
-            .filter((t) => t.cwd && t.cwd !== '~')
-            .map((t) => encodeClaudeProjectDir(t.cwd))
-        )
-      )
-
-      const scan = await api.scan(dirNames, 7)
+      const scan = await api.scan(SCAN_LOOKBACK_DAYS)
       if (!scan.success) {
         set({ error: scan.error ?? 'Session scan failed' })
         return
@@ -141,14 +134,31 @@ export const useAgentSessionsStore = create<AgentSessionsState>((set, get) => ({
         }
       }
 
-      // Ingest changed files, freshest first, bounded per tick
+      // Journals in a live terminal's project (or pinned) get exact ingest;
+      // historical journals get the cheap head+tail read. Case-insensitive —
+      // Windows prompt casing can differ from the journal dir encoding.
+      const hotClaudeDirs = new Set(
+        terminals
+          .filter((t) => t.cwd && t.cwd !== '~')
+          .map((t) => encodeClaudeProjectDir(t.cwd).toLowerCase())
+      )
+      const pinnedPaths = new Set(Object.values(get().pins))
+      const isHot = (f: SessionFileInfo & { kind: 'claude' | 'codex' }) => {
+        if (pinnedPaths.has(f.path)) return true
+        if (f.kind !== 'claude') return true // codex ingest is always cheap
+        const dir = f.path.replace(/\\/g, '/').split('/').slice(-2, -1)[0]?.toLowerCase() ?? ''
+        return hotClaudeDirs.has(dir)
+      }
+
+      // Ingest changed files: hot first, then freshest, bounded per tick
       const changed = files
         .filter((f) => knownSizes.get(f.path) !== f.size)
-        .sort((a, b) => b.modified - a.modified)
+        .sort((a, b) => Number(isHot(b)) - Number(isHot(a)) || b.modified - a.modified)
         .slice(0, MAX_INGESTS_PER_TICK)
 
       for (const file of changed) {
-        const snapshot = file.kind === 'claude' ? await ingestClaudeFile(file) : await ingestCodexFile(file)
+        const snapshot =
+          file.kind === 'claude' ? await ingestClaudeFile(file, isHot(file)) : await ingestCodexFile(file)
         if (snapshot) {
           snapshots.set(file.path, snapshot)
           knownSizes.set(file.path, file.size)

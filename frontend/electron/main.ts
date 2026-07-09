@@ -627,24 +627,38 @@ async function listJsonlFiles(dir: string): Promise<SessionFileInfo[]> {
   return out
 }
 
-ipcMain.handle('sessions:scan', async (_, claudeDirNames: string[], codexLookbackDays = 7) => {
-  try {
-    const claude: SessionFileInfo[] = []
-    const codex: SessionFileInfo[] = []
+const SCAN_MAX_FILES_PER_KIND = 400
 
-    // Claude: top-level *.jsonl per requested project dir (dir NAMES, never paths —
-    // sanitized and joined under the root, so traversal is impossible). Subagent
-    // files live in <session-id>/subagents/ subdirs and are excluded by design.
+ipcMain.handle('sessions:scan', async (_, lookbackDays = 14) => {
+  try {
+    const days = Math.min(Math.max(Number(lookbackDays) || 14, 1), 90)
+    const cutoff = Date.now() - days * 86_400_000
+    const byRecency = (files: SessionFileInfo[]) =>
+      files
+        .filter((f) => f.modified >= cutoff)
+        .sort((a, b) => b.modified - a.modified)
+        .slice(0, SCAN_MAX_FILES_PER_KIND)
+
+    // Claude: every project dir's top-level *.jsonl. Enumerating the root (rather
+    // than taking dir names from the renderer) sidesteps path-case mismatches on
+    // Windows. Subagent files live in <session-id>/subagents/ subdirs and are
+    // excluded by the top-level-only listing.
+    const claude: SessionFileInfo[] = []
     const claudeRoot = SESSION_ROOTS[0]
-    for (const rawName of Array.isArray(claudeDirNames) ? claudeDirNames : []) {
-      const name = String(rawName).replace(/[^a-zA-Z0-9-]/g, '')
-      if (!name) continue
-      claude.push(...await listJsonlFiles(path.join(claudeRoot, name)))
+    let projectDirs: fs.Dirent[] = []
+    try {
+      projectDirs = await fs.promises.readdir(claudeRoot, { withFileTypes: true })
+    } catch {
+      // No Claude Code installation
+    }
+    for (const entry of projectDirs) {
+      if (!entry.isDirectory()) continue
+      claude.push(...await listJsonlFiles(path.join(claudeRoot, entry.name)))
     }
 
     // Codex: rollout-*.jsonl under date dirs for the last N days
+    const codex: SessionFileInfo[] = []
     const codexRoot = SESSION_ROOTS[1]
-    const days = Math.min(Math.max(Number(codexLookbackDays) || 7, 1), 31)
     for (let i = 0; i < days; i++) {
       const d = new Date(Date.now() - i * 86_400_000)
       const dir = path.join(
@@ -656,7 +670,7 @@ ipcMain.handle('sessions:scan', async (_, claudeDirNames: string[], codexLookbac
       codex.push(...(await listJsonlFiles(dir)).filter((f) => path.basename(f.path).startsWith('rollout-')))
     }
 
-    return { success: true, claude, codex }
+    return { success: true, claude: byRecency(claude), codex: byRecency(codex) }
   } catch (error) {
     return { success: false, error: String(error) }
   }

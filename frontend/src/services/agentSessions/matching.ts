@@ -25,9 +25,15 @@ export function normPath(p: string): string {
   return out
 }
 
+// Lowercased for comparison: Windows paths are case-insensitive and the
+// prompt-scraped cwd casing can differ from the journal dir's encoding
 function claudeDirOf(filePath: string): string {
   const parts = filePath.replace(/\\/g, '/').split('/')
-  return parts[parts.length - 2] ?? ''
+  return (parts[parts.length - 2] ?? '').toLowerCase()
+}
+
+function encodedDirFor(cwd: string): string {
+  return encodeClaudeProjectDir(cwd).toLowerCase()
 }
 
 function freshness(s: AgentSessionSnapshot): number {
@@ -53,14 +59,14 @@ export function matchSessions(
       continue
     }
 
-    const cwd = normPath(term.cwd === '~' ? '' : term.cwd)
+    const cwd = normPath(term.cwd === '~' ? '' : term.cwd).toLowerCase()
     if (!cwd) continue
-    const encodedDir = encodeClaudeProjectDir(term.cwd)
+    const encodedDir = encodedDirFor(term.cwd)
 
     const cwdMatches = all.filter((s) => {
       if (claimed.has(s.filePath)) return false
       if (s.kind === 'claude') return claudeDirOf(s.filePath) === encodedDir
-      return s.cwd !== undefined && normPath(s.cwd) === cwd
+      return s.cwd !== undefined && normPath(s.cwd).toLowerCase() === cwd
     })
 
     // Prefer journals matching the detected CLI; agentKind clears at the shell
@@ -72,7 +78,11 @@ export function matchSessions(
     if (candidates.length === 0) {
       // Prefix fallback: journal cwd is an ancestor of the terminal cwd
       candidates = all.filter(
-        (s) => !claimed.has(s.filePath) && s.cwd !== undefined && s.cwd.length > 3 && cwd.startsWith(normPath(s.cwd))
+        (s) =>
+          !claimed.has(s.filePath) &&
+          s.cwd !== undefined &&
+          s.cwd.length > 3 &&
+          cwd.startsWith(normPath(s.cwd).toLowerCase())
       )
       capped = 'probable'
     }
@@ -105,14 +115,14 @@ export function candidatesForTerminal(
   term: MatchableTerminal,
   snapshots: Map<string, AgentSessionSnapshot>
 ): AgentSessionSnapshot[] {
-  const cwd = normPath(term.cwd === '~' ? '' : term.cwd)
-  const encodedDir = encodeClaudeProjectDir(term.cwd)
+  const cwd = normPath(term.cwd === '~' ? '' : term.cwd).toLowerCase()
+  const encodedDir = encodedDirFor(term.cwd)
   return Array.from(snapshots.values())
-    .filter((s) =>
-      s.kind === 'claude'
-        ? claudeDirOf(s.filePath) === encodedDir
-        : s.cwd !== undefined && (normPath(s.cwd) === cwd || (cwd && cwd.startsWith(normPath(s.cwd))))
-    )
+    .filter((s) => {
+      if (s.kind === 'claude') return claudeDirOf(s.filePath) === encodedDir
+      const sCwd = s.cwd !== undefined ? normPath(s.cwd).toLowerCase() : undefined
+      return sCwd !== undefined && (sCwd === cwd || (cwd !== '' && cwd.startsWith(sCwd)))
+    })
     .sort((a, b) => freshness(b) - freshness(a))
     .slice(0, 8)
 }

@@ -127,12 +127,19 @@ function finalize(snap: AgentSessionSnapshot, size: number, mtime: number): Agen
 }
 
 /**
- * Ingest new journal content for a file. Bootstraps exact totals via a chunked
- * full read for files up to 20MB; beyond that, reads identity from the head and
- * tails the last 2MB, marking totals approximate.
+ * Ingest new journal content for a file.
+ *
+ * `exact` (journals bound to a live terminal): bootstraps exact totals via a
+ * chunked full read for files up to 20MB; beyond that, head for identity +
+ * last 2MB tail, totals approximate.
+ *
+ * Cheap mode (historical journals): head for identity + last 256KB tail —
+ * enough for slug/branch/model, latest context occupancy, and last activity,
+ * without paying a full read per old session.
  */
 export async function ingestClaudeFile(
-  fileInfo: { path: string; size: number; modified: number }
+  fileInfo: { path: string; size: number; modified: number },
+  exact = true
 ): Promise<AgentSessionSnapshot | null> {
   const api = window.bashgym?.sessions
   if (!api) return null
@@ -140,15 +147,21 @@ export async function ingestClaudeFile(
   let state = fileStates.get(fileInfo.path)
   if (!state) {
     state = { tail: { offset: 0, carry: '', bootstrapped: false }, snapshot: newSnapshot(fileInfo.path) }
-    if (fileInfo.size > BOOTSTRAP_FULL_SCAN_MAX) {
+    const cheapTailStart = Math.max(0, fileInfo.size - 262_144)
+    const fullScanCap = exact ? BOOTSTRAP_FULL_SCAN_MAX : 262_144
+    if (fileInfo.size > fullScanCap) {
       const head = await api.readHead(fileInfo.path, 65_536)
       if (head.success && head.data) {
         for (const line of head.data.split('\n')) if (line) applyLine(state.snapshot, line)
       }
-      state.tail.offset = Math.max(0, fileInfo.size - BOOTSTRAP_TAIL_BYTES)
+      state.tail.offset = exact ? Math.max(0, fileInfo.size - BOOTSTRAP_TAIL_BYTES) : cheapTailStart
       state.snapshot.totalsApprox = true
     }
     fileStates.set(fileInfo.path, state)
+  } else if (exact && state.snapshot.totalsApprox && state.snapshot.fileSize <= BOOTSTRAP_FULL_SCAN_MAX) {
+    // Upgraded from cheap to exact (journal became live-bound): re-bootstrap
+    fileStates.delete(fileInfo.path)
+    return ingestClaudeFile(fileInfo, true)
   }
 
   // Chunked catch-up loop; bounded by file size / read cap

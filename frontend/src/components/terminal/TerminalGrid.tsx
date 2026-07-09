@@ -38,20 +38,13 @@ export function TerminalGrid() {
   // Prevent React Strict Mode from creating multiple terminals
   const initializedRef = useRef(false)
 
-  // On first mount: re-adopt any live PTY sessions from the main process,
-  // then create a fresh terminal only if none were restored.
+  // On first mount: materialize the active workspace (restores its panels,
+  // re-adopts live PTYs, adopts orphans, opens a terminal on true first run)
   useEffect(() => {
-    if (panels.length === 0 && !initializedRef.current) {
+    if (!initializedRef.current) {
       initializedRef.current = true
-      useTerminalStore.getState().restoreSessions().then((restored) => {
-        useTerminalStore.getState().restoreSavedPanels()
-        const hasTerminal = useTerminalStore.getState().panels.some((p) => p.type === 'terminal')
-        if (restored === 0 && !hasTerminal) {
-          createTerminal()
-        }
-      })
+      void useTerminalStore.getState().bootActiveWorkspace()
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // State for canvas popup - must be before any early returns

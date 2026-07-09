@@ -22,6 +22,7 @@ import '@xyflow/react/dist/style.css'
 
 import { useTerminalStore, useCanvasControlStore } from '../../stores'
 import type { Panel, TerminalSession, CanvasEdge, MonitorAutoMode } from '../../stores'
+import { getActiveWorkspaceId, wsKey } from '../../stores/workspacePersistence'
 import { getMonitorInfo, isMonitorEdge, sendMonitorSnapshot } from '../../utils/monitorRouting'
 import { applyPreset, type CanvasPreset } from './canvasPresets'
 import { TerminalNode, type TerminalNodeData } from './TerminalNode'
@@ -46,9 +47,6 @@ import './nodes/adapters/vercel'
 import { MasterControlPanel } from './MasterControlPanel'
 import { useCanvasHotkeys } from '../../hooks/useCanvasHotkeys'
 import { AlertCircle } from 'lucide-react'
-
-const VIEWPORT_KEY = 'bashgym_canvas_viewport'
-const EDGES_KEY = 'bashgym_canvas_edges'
 
 const EDGE_STYLE = { stroke: 'var(--accent)', strokeWidth: 2 }
 
@@ -89,9 +87,12 @@ const toFlowEdge = (e: PersistedEdge): Edge =>
         className: 'canvas-edge-pulse'
       }
 
-const loadEdges = (): Edge[] => {
+// Edges/viewport are stored per workspace. All load/save calls take the
+// workspace id captured at mount (wsIdRef) so a component unmounting during a
+// workspace switch can only ever write to its OWN workspace's keys.
+const loadEdges = (wsId: string): Edge[] => {
   try {
-    const stored = localStorage.getItem(EDGES_KEY)
+    const stored = localStorage.getItem(wsKey(wsId, 'edges'))
     if (stored) {
       const parsed: PersistedEdge[] = JSON.parse(stored)
       return parsed.map(toFlowEdge)
@@ -102,9 +103,9 @@ const loadEdges = (): Edge[] => {
   return []
 }
 
-const saveEdges = (edges: Edge[]) => {
+const saveEdges = (wsId: string, edges: Edge[]) => {
   try {
-    localStorage.setItem(EDGES_KEY, JSON.stringify(edges.map(toPersistedEdge)))
+    localStorage.setItem(wsKey(wsId, 'edges'), JSON.stringify(edges.map(toPersistedEdge)))
   } catch {
     // Ignore storage errors
   }
@@ -144,10 +145,10 @@ function decorateMonitorEdges(edges: Edge[], panels: Panel[], handlers: MonitorH
 type CanvasNodeData = TerminalNodeData | PreviewNodeData | BrowserNodeData | IntegrationNodeData | DataNodeData
 type CanvasFlowNode = Node<CanvasNodeData>
 
-// Load saved viewport
-const loadViewport = (): Viewport | null => {
+// Load saved viewport (per workspace)
+const loadViewport = (wsId: string): Viewport | null => {
   try {
-    const stored = localStorage.getItem(VIEWPORT_KEY)
+    const stored = localStorage.getItem(wsKey(wsId, 'viewport'))
     if (stored) {
       return JSON.parse(stored)
     }
@@ -157,10 +158,10 @@ const loadViewport = (): Viewport | null => {
   return null
 }
 
-// Save viewport
-const saveViewport = (viewport: Viewport) => {
+// Save viewport (per workspace)
+const saveViewport = (wsId: string, viewport: Viewport) => {
   try {
-    localStorage.setItem(VIEWPORT_KEY, JSON.stringify(viewport))
+    localStorage.setItem(wsKey(wsId, 'viewport'), JSON.stringify(viewport))
   } catch {
     // Ignore
   }
@@ -388,10 +389,15 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
   canvasNodesRef.current = canvasNodes
   const snapshotTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
+  // Workspace this component instance belongs to — captured at mount. The
+  // component remounts (keyed) on workspace switch, so this never goes stale,
+  // and unmount-straggler effects can't write into another workspace's keys.
+  const wsIdRef = useRef(getActiveWorkspaceId())
+
   const [nodes, setNodes, onNodesChange] = useNodesState<CanvasFlowNode>([])
   const initialEdgesRef = useRef<Edge[] | null>(null)
   if (initialEdgesRef.current === null) {
-    initialEdgesRef.current = loadEdges()
+    initialEdgesRef.current = loadEdges(wsIdRef.current)
   }
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdgesRef.current)
 
@@ -399,7 +405,7 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
   // screenshot routing, monitor snapshots) and persist them across reloads
   useEffect(() => {
     setCanvasEdges(edges.map(toPersistedEdge))
-    saveEdges(edges)
+    saveEdges(wsIdRef.current, edges)
   }, [edges, setCanvasEdges])
 
   // Monitor edge actions — stable references so edge data survives memo comparison
@@ -608,12 +614,12 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
   }, [setActivePanel])
 
   // Load saved viewport or use default
-  const savedViewport = useRef(loadViewport())
+  const savedViewport = useRef(loadViewport(wsIdRef.current))
   const shouldFitView = !savedViewport.current
 
   // Save viewport on move/zoom
   const onMoveEnd = useCallback((_: any, viewport: Viewport) => {
-    saveViewport(viewport)
+    saveViewport(wsIdRef.current, viewport)
     setCurrentZoom(viewport.zoom)
   }, [])
 

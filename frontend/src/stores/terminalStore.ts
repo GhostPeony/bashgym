@@ -1,6 +1,14 @@
 import { create } from 'zustand'
-// persist and createJSONStorage available if needed for future state persistence
-// import { persist, createJSONStorage } from 'zustand/middleware'
+import {
+  DEFAULT_WORKSPACE_ID,
+  collectClaimedTerminalIds,
+  getActiveWorkspaceId,
+  loadRegistry,
+  loadWorkspaceSnapshot,
+  saveActivePanelFor,
+  savePanelsFor,
+  savePositionsFor
+} from './workspacePersistence'
 
 export type PanelType = 'terminal' | 'preview' | 'browser' | 'files' | 'context' | 'neon' | 'vercel' | 'activity' | 'training' | 'evals' | 'designer' | 'huggingface' | 'agent' | 'toolkit'
 export type AttentionState = 'none' | 'waiting' | 'success' | 'error'
@@ -123,10 +131,12 @@ interface TerminalState {
   closeTerminal: (id: string) => void
   /** Close with confirmation if the agent is busy. Returns true if closed. */
   requestCloseTerminal: (id: string) => boolean
-  /** Re-adopt live PTY sessions from the main process (call once on startup). Returns count restored. */
-  restoreSessions: () => Promise<number>
-  /** Restore persisted non-terminal panels (call once on startup). Returns count restored. */
-  restoreSavedPanels: () => number
+  /**
+   * Materialize the active workspace on startup: rebuild panels/sessions from
+   * its persisted snapshot, re-adopt live PTYs, and adopt any orphaned PTYs
+   * unclaimed by every workspace. Call once on app boot.
+   */
+  bootActiveWorkspace: () => Promise<void>
   setActiveTerminal: (id: string) => void
   updateSession: (id: string, updates: Partial<TerminalSession>) => void
 
@@ -169,40 +179,19 @@ const setBannerShown = (): void => {
   }
 }
 
-// Persist panel order to localStorage
-const PANEL_ORDER_KEY = 'bashgym_panel_order'
-const CANVAS_POSITIONS_KEY = 'bashgym_canvas_positions'
+// View mode stays global (not per-workspace)
 const VIEW_MODE_KEY = 'bashgym_view_mode'
 
-const savePanelOrder = (panels: Panel[]) => {
-  try {
-    localStorage.setItem(PANEL_ORDER_KEY, JSON.stringify(panels.map(p => p.id)))
-  } catch {
-    // Ignore storage errors
-  }
-}
+// Workspace-keyed persistence: positions/panels/active-panel are written to
+// the ACTIVE workspace's namespaced keys (workspacePersistence.ts)
+const loadCanvasPositions = (): Map<string, CanvasNode> =>
+  new Map(Object.entries(loadWorkspaceSnapshot(getActiveWorkspaceId()).positions))
 
-const loadCanvasPositions = (): Map<string, CanvasNode> => {
-  try {
-    const stored = localStorage.getItem(CANVAS_POSITIONS_KEY)
-    if (stored) {
-      const parsed = JSON.parse(stored)
-      return new Map(Object.entries(parsed))
-    }
-  } catch {
-    // Ignore
-  }
-  return new Map()
-}
+const saveCanvasPositions = (nodes: Map<string, CanvasNode>) =>
+  savePositionsFor(getActiveWorkspaceId(), nodes)
 
-const saveCanvasPositions = (nodes: Map<string, CanvasNode>) => {
-  try {
-    const obj = Object.fromEntries(nodes)
-    localStorage.setItem(CANVAS_POSITIONS_KEY, JSON.stringify(obj))
-  } catch {
-    // Ignore storage errors
-  }
-}
+const persistPanels = (panels: Panel[], sessions: Map<string, TerminalSession>) =>
+  savePanelsFor(getActiveWorkspaceId(), panels, sessions)
 
 const loadViewMode = (): ViewMode => {
   try {
@@ -253,41 +242,6 @@ const saveSessionMeta = (sessions: Map<string, TerminalSession>) => {
   } catch {
     // Ignore storage errors
   }
-}
-
-// Non-terminal panels (data + integration nodes) persisted across renderer reloads.
-// Ids are preserved so bashgym_canvas_positions entries still apply.
-const SAVED_PANELS_KEY = 'bashgym_saved_panels'
-const PERSISTED_PANEL_TYPES: PanelType[] = [
-  'activity', 'training', 'evals', 'designer', 'huggingface', 'agent', 'toolkit', 'context', 'neon', 'vercel'
-]
-
-interface PersistedPanel {
-  id: string
-  type: PanelType
-  title: string
-  adapterConfig?: Record<string, unknown>
-}
-
-const savePanels = (panels: Panel[]) => {
-  try {
-    const toSave: PersistedPanel[] = panels
-      .filter((p) => PERSISTED_PANEL_TYPES.includes(p.type))
-      .map((p) => ({ id: p.id, type: p.type, title: p.title, adapterConfig: p.adapterConfig }))
-    localStorage.setItem(SAVED_PANELS_KEY, JSON.stringify(toSave))
-  } catch {
-    // Ignore storage errors
-  }
-}
-
-const loadSavedPanels = (): PersistedPanel[] => {
-  try {
-    const stored = localStorage.getItem(SAVED_PANELS_KEY)
-    if (stored) return JSON.parse(stored)
-  } catch {
-    // Ignore
-  }
-  return []
 }
 
 // A running/tool_calling session is never killed without explicit confirmation
@@ -353,6 +307,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     })
 
     saveSessionMeta(get().sessions)
+    persistPanels(get().panels, get().sessions)
     return terminalId
   },
 
@@ -375,6 +330,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     })
 
     saveSessionMeta(get().sessions)
+    persistPanels(get().panels, get().sessions)
 
     // Kill the terminal process
     window.bashgym?.terminal.kill(id)
@@ -386,58 +342,97 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     return true
   },
 
-  restoreSessions: async () => {
-    const api = window.bashgym?.terminal
-    if (!api?.list) return 0
-    let infos: Awaited<ReturnType<typeof api.list>> = []
-    try {
-      infos = await api.list()
-    } catch {
-      return 0
-    }
+  bootActiveWorkspace: async () => {
+    const registry = loadRegistry()
+    const snap = loadWorkspaceSnapshot(registry.activeWorkspaceId)
     const meta = loadSessionMeta()
-    const live = infos.filter((i) => !i.exited && !get().sessions.has(i.id))
-    if (live.length === 0) return 0
 
-    set((state) => {
-      const newSessions = new Map(state.sessions)
-      const newPanels = [...state.panels]
-      for (const info of live) {
-        const title = meta.get(info.id)?.title || `Terminal ${newSessions.size + 1}`
-        newSessions.set(info.id, {
-          id: info.id,
-          title,
-          cwd: info.cwd,
+    let infos: Awaited<ReturnType<NonNullable<typeof window.bashgym>['terminal']['list']>> = []
+    try {
+      infos = (await window.bashgym?.terminal.list()) ?? []
+    } catch {
+      // No PTY bridge (web mode) — panels still restore
+    }
+    const live = new Map(infos.filter((i) => !i.exited).map((i) => [i.id, i]))
+
+    const sessions = new Map<string, TerminalSession>()
+    const panels: Panel[] = []
+    for (const stub of snap.panels) {
+      panels.push({
+        id: stub.id,
+        type: stub.type,
+        title: stub.title,
+        terminalId: stub.terminalId,
+        url: stub.url,
+        filePath: stub.filePath,
+        adapterConfig: stub.adapterConfig
+      })
+      if (stub.type === 'terminal' && stub.terminalId) {
+        // Dead PTYs keep their panel: TerminalPane respawns a fresh shell in
+        // the stub's cwd (layout restore after full app quit)
+        const info = live.get(stub.terminalId)
+        sessions.set(stub.terminalId, {
+          id: stub.terminalId,
+          title: meta.get(stub.terminalId)?.title || stub.title,
+          cwd: info?.cwd ?? stub.cwd ?? '~',
           isActive: false,
           attention: 'none',
           showBanner: false,
           status: 'idle',
+          agentKind: stub.agentKind,
           lastActivity: Date.now()
         })
-        newPanels.push({ id: generateId(), type: 'terminal', title, terminalId: info.id })
       }
-      const lastPanel = newPanels[newPanels.length - 1]
-      return {
-        sessions: newSessions,
-        panels: newPanels,
-        activeSessionId: state.activeSessionId ?? live[live.length - 1].id,
-        activePanelId: state.activePanelId ?? lastPanel.id
-      }
-    })
-    saveSessionMeta(get().sessions)
-    return live.length
-  },
+    }
 
-  restoreSavedPanels: () => {
-    const saved = loadSavedPanels()
-    if (saved.length === 0) return 0
-    const existing = new Set(get().panels.map((p) => p.id))
-    const restored: Panel[] = saved
-      .filter((p) => !existing.has(p.id) && PERSISTED_PANEL_TYPES.includes(p.type))
-      .map((p) => ({ id: p.id, type: p.type, title: p.title, adapterConfig: p.adapterConfig }))
-    if (restored.length === 0) return 0
-    set((state) => ({ panels: [...state.panels, ...restored] }))
-    return restored.length
+    // Orphan adoption: live PTYs unclaimed by ANY workspace land in the active
+    // one, so no running process is ever stranded invisible
+    const claimed = collectClaimedTerminalIds(registry)
+    for (const [id, info] of live) {
+      if (claimed.has(id) || sessions.has(id)) continue
+      const title = meta.get(id)?.title || `Terminal ${sessions.size + 1}`
+      sessions.set(id, {
+        id,
+        title,
+        cwd: info.cwd,
+        isActive: false,
+        attention: 'none',
+        showBanner: false,
+        status: 'idle',
+        lastActivity: Date.now()
+      })
+      panels.push({ id: generateId(), type: 'terminal', title, terminalId: id })
+    }
+
+    const activePanelId =
+      snap.activePanelId && panels.some((p) => p.id === snap.activePanelId)
+        ? snap.activePanelId
+        : panels.length > 0
+          ? panels[panels.length - 1].id
+          : null
+    const activePanel = panels.find((p) => p.id === activePanelId)
+
+    set((state) => ({
+      sessions,
+      panels,
+      canvasNodes: new Map(Object.entries(snap.positions)),
+      canvasEdges: snap.edges,
+      activePanelId,
+      activeSessionId: activePanel?.terminalId ?? null,
+      sessionsVersion: state.sessionsVersion + 1
+    }))
+    saveSessionMeta(get().sessions)
+    persistPanels(get().panels, get().sessions)
+
+    // First run (lone default workspace, nothing restored): open a terminal.
+    // User-created empty workspaces stay empty by design.
+    if (
+      get().panels.length === 0 &&
+      registry.workspaces.length === 1 &&
+      registry.workspaces[0].id === DEFAULT_WORKSPACE_ID
+    ) {
+      get().createTerminal()
+    }
   },
 
   setActiveTerminal: (id: string) => {
@@ -485,7 +480,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       activePanelId: id
     }))
 
-    savePanels(get().panels)
+    persistPanels(get().panels, get().sessions)
     return id
   },
 
@@ -520,7 +515,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       }
     })
 
-    savePanels(get().panels)
+    persistPanels(get().panels, get().sessions)
   },
 
   setActivePanel: (id: string) => {
@@ -530,6 +525,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     if (panel?.type === 'terminal' && panel.terminalId) {
       set({ activeSessionId: panel.terminalId })
     }
+    saveActivePanelFor(getActiveWorkspaceId(), id)
   },
 
   renamePanel: (id: string, title: string) => {
@@ -553,7 +549,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       return { panels: newPanels }
     })
 
-    savePanels(get().panels)
+    persistPanels(get().panels, get().sessions)
   },
 
   setViewMode: (mode: ViewMode) => {
@@ -592,9 +588,9 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       const [removed] = newPanels.splice(sourceIndex, 1)
       newPanels.splice(targetIndex, 0, removed)
 
-      savePanelOrder(newPanels)
       return { panels: newPanels }
     })
+    persistPanels(get().panels, get().sessions)
   },
 
   updateCanvasNode: (panelId: string, position: { x: number; y: number }) => {
@@ -664,6 +660,6 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         p.id === panelId ? { ...p, adapterConfig } : p
       )
     }))
-    savePanels(get().panels)
+    persistPanels(get().panels, get().sessions)
   }
 }))

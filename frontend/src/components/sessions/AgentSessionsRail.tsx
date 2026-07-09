@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowLeft, ListTree, RefreshCw, FolderGit2, ChevronDown, ChevronRight } from 'lucide-react'
+import { clsx } from 'clsx'
 import { useTerminalStore, useUIStore } from '../../stores'
 import { useAgentSessionsStore } from '../../stores/agentSessionsStore'
 import { candidatesForTerminal, normPath } from '../../services/agentSessions/matching'
-import type { AgentSessionSnapshot } from '../../services/agentSessions/types'
+import type { AgentSessionSnapshot, AgentSessionKind } from '../../services/agentSessions/types'
 import type { Panel, TerminalSession } from '../../stores'
 import { SessionCard } from './SessionCard'
 import { JournalSessionRow } from './JournalSessionRow'
+
+type KindFilter = 'all' | AgentSessionKind
 
 const JOURNALS_COLLAPSED_COUNT = 4
 
@@ -49,6 +52,7 @@ export function AgentSessionsRail() {
 
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [showAllJournals, setShowAllJournals] = useState<Set<string>>(new Set())
+  const [kindFilter, setKindFilter] = useState<KindFilter>('all')
 
   useEffect(() => {
     startPolling()
@@ -143,6 +147,24 @@ export function AgentSessionsRail() {
         </button>
       </div>
 
+      {/* Kind filter */}
+      <div className="flex items-center gap-1">
+        {(['all', 'claude', 'codex'] as const).map((f) => (
+          <button
+            key={f}
+            onClick={() => setKindFilter(f)}
+            className={clsx(
+              'px-2 py-0.5 border-brutal rounded-brutal font-mono text-[9px] font-bold uppercase tracking-wider transition-colors',
+              kindFilter === f
+                ? 'border-accent bg-accent/10 text-accent shadow-brutal-sm'
+                : 'border-border-subtle text-text-muted hover:text-text-primary'
+            )}
+          >
+            {f}
+          </button>
+        ))}
+      </div>
+
       {error && (
         <div className="card p-2 border-l-2 border-l-status-warning">
           <p className="font-mono text-[10px] text-text-secondary">{error}</p>
@@ -161,12 +183,17 @@ export function AgentSessionsRail() {
 
       {projects.map((project) => {
         const isCollapsed = collapsed.has(project.key)
-        const liveCount = project.live.filter(
+        const live = project.live.filter(
+          ({ session }) => kindFilter === 'all' || (session.agentKind ?? 'shell') === kindFilter
+        )
+        const journals = project.journals.filter((s) => kindFilter === 'all' || s.kind === kindFilter)
+        if (live.length === 0 && journals.length === 0) return null
+        const liveCount = live.filter(
           ({ session }) => session.status === 'running' || session.status === 'tool_calling'
         ).length
         const journalsShown = showAllJournals.has(project.key)
-          ? project.journals
-          : project.journals.slice(0, JOURNALS_COLLAPSED_COUNT)
+          ? journals
+          : journals.slice(0, JOURNALS_COLLAPSED_COUNT)
 
         return (
           <div key={project.key} className="space-y-1.5">
@@ -195,13 +222,13 @@ export function AgentSessionsRail() {
                 </span>
               )}
               <span className="font-mono text-[10px] text-text-muted flex-shrink-0">
-                {project.live.length + project.journals.length}
+                {live.length + journals.length}
               </span>
             </button>
 
             {!isCollapsed && (
-              <div className="space-y-1.5 pl-2 border-l border-brutal border-border-subtle ml-1.5">
-                {project.live.map(({ session, panel }) => {
+              <div className="space-y-1 pb-1">
+                {live.map(({ session, panel }) => {
                   const match = matches.get(session.id)
                   const snapshot = match ? snapshots.get(match.filePath) : undefined
                   return (
@@ -236,14 +263,14 @@ export function AgentSessionsRail() {
                 {journalsShown.map((snap) => (
                   <JournalSessionRow key={snap.filePath} snapshot={snap} onResume={handleResume} />
                 ))}
-                {project.journals.length > JOURNALS_COLLAPSED_COUNT && (
+                {journals.length > JOURNALS_COLLAPSED_COUNT && (
                   <button
                     onClick={() => toggle(showAllJournals, project.key, setShowAllJournals)}
                     className="font-mono text-[10px] text-text-muted hover:text-text-primary transition-press px-2"
                   >
                     {showAllJournals.has(project.key)
                       ? 'show fewer'
-                      : `+${project.journals.length - JOURNALS_COLLAPSED_COUNT} more session${project.journals.length - JOURNALS_COLLAPSED_COUNT !== 1 ? 's' : ''}`}
+                      : `+${journals.length - JOURNALS_COLLAPSED_COUNT} more session${journals.length - JOURNALS_COLLAPSED_COUNT !== 1 ? 's' : ''}`}
                   </button>
                 )}
               </div>

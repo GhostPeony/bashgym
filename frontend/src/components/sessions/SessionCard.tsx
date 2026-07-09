@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { clsx } from 'clsx'
-import { Pin } from 'lucide-react'
+import { Pin, ChevronDown, ChevronRight } from 'lucide-react'
 import type { Panel, TerminalSession, CanvasEdge } from '../../stores'
 import type { AgentSessionSnapshot, SessionMatch } from '../../services/agentSessions/types'
 import { ContextMeter } from './ContextMeter'
 import { QuickPrompt } from './QuickPrompt'
 import { ConnectionsTree } from './ConnectionsTree'
 import { formatTokens } from './format'
+import { KIND_CHIP_BASE, kindChipClass } from './kindStyles'
 
 interface SessionCardProps {
   session: TerminalSession
@@ -71,6 +72,7 @@ export function SessionCard({
   canvasEdges
 }: SessionCardProps) {
   const [showPrompt, setShowPrompt] = useState(false)
+  const [expanded, setExpanded] = useState(false)
 
   const kind = session.agentKind ?? snapshot?.kind
   const limits = rateLimitTags(snapshot?.rateLimits)
@@ -79,20 +81,10 @@ export function SessionCard({
   // What the session is ABOUT — journal topic beats the generic terminal name
   const topic = snapshot?.topic ?? session.taskSummary ?? snapshot?.title ?? session.title
 
-  const metaParts: string[] = []
-  if (snapshot?.gitBranch) metaParts.push(`⎇ ${snapshot.gitBranch}`)
-  if (snapshot) {
-    const tokens = snapshot.totals.input + snapshot.totals.output
-    if (tokens > 0) metaParts.push(`${snapshot.totalsApprox ? '≈' : ''}${formatTokens(tokens)} tok`)
-    if (snapshot.estCostUsd !== undefined && snapshot.estCostUsd > 0) {
-      metaParts.push(formatCost(snapshot.estCostUsd))
-    }
-  }
-
   return (
     <div
       className={clsx(
-        'card p-2 space-y-1.5 cursor-pointer border-l-2 border-l-accent',
+        'card p-2 space-y-1.5 cursor-pointer',
         !session.isPaused && session.status === 'running' && 'terminal-status-running',
         !session.isPaused && session.status === 'tool_calling' && 'terminal-status-tool-calling',
         !session.isPaused && session.status === 'waiting_input' && 'terminal-status-waiting-input'
@@ -110,74 +102,97 @@ export function SessionCard({
         <span className="font-mono text-[11px] font-semibold text-text-primary truncate flex-1" title={topic}>
           {topic}
         </span>
-        <span
-          className={clsx(
-            'flex-shrink-0 px-1 py-px border-brutal rounded-brutal text-[8px] font-bold uppercase tracking-wider font-mono',
-            kind === 'claude' && 'border-accent/60 bg-accent/10 text-accent',
-            kind === 'codex' && 'border-accent/40 bg-accent/5 text-accent-dark',
-            !kind && 'border-border-subtle bg-background-tertiary text-text-muted'
-          )}
-        >
-          {kind ?? 'shell'}
-        </span>
+        <span className={clsx(KIND_CHIP_BASE, kindChipClass(kind))}>{kind ?? 'shell'}</span>
         <span className="font-mono text-[10px] text-text-muted flex-shrink-0">{timeAgo(session.lastActivity)}</span>
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            setExpanded((v) => !v)
+          }}
+          className="text-text-muted hover:text-text-primary transition-press flex-shrink-0"
+          title={expanded ? 'Less' : 'More details'}
+        >
+          {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+        </button>
       </div>
 
-      <ContextMeter
-        contextTokens={snapshot?.contextTokens}
-        contextWindow={snapshot?.contextWindow}
-        approx={snapshot?.contextWindowApprox ?? true}
-      />
+      {/* Quiet context bar (collapsed) */}
+      {!expanded && (
+        <ContextMeter
+          contextTokens={snapshot?.contextTokens}
+          contextWindow={snapshot?.contextWindow}
+          approx={snapshot?.contextWindowApprox ?? true}
+        />
+      )}
 
-      {/* Meta line */}
-      {(metaParts.length > 0 || limits.length > 0 || match?.confidence === 'manual' || match?.confidence === 'probable') && (
-        <div className="flex items-center gap-1.5 font-mono text-[10px] text-text-muted min-w-0 flex-wrap">
-          {match?.confidence === 'manual' && (
-            <span title="Manually pinned to this session file"><Pin className="w-2.5 h-2.5 text-accent" /></span>
+      {expanded && (
+        <div className="space-y-1.5" onClick={(e) => e.stopPropagation()}>
+          <ContextMeter
+            contextTokens={snapshot?.contextTokens}
+            contextWindow={snapshot?.contextWindow}
+            approx={snapshot?.contextWindowApprox ?? true}
+            detailed
+          />
+          {snapshot && (
+            <div className="flex items-center gap-1.5 font-mono text-[10px] text-text-muted min-w-0 flex-wrap">
+              {match?.confidence === 'manual' && (
+                <span title="Manually pinned to this session file"><Pin className="w-2.5 h-2.5 text-accent" /></span>
+              )}
+              {match?.confidence === 'probable' && <span title="Best-guess match — pin to lock it">~</span>}
+              {snapshot.gitBranch && <span className="text-accent">⎇ {snapshot.gitBranch}</span>}
+              {snapshot.model && <span className="truncate max-w-[110px]">{snapshot.model}</span>}
+              {snapshot.totals.input + snapshot.totals.output > 0 && (
+                <span>
+                  {snapshot.totalsApprox ? '≈' : ''}in {formatTokens(snapshot.totals.input)} · out {formatTokens(snapshot.totals.output)}
+                  {snapshot.totals.cacheRead > 0 && ` · cache ${formatTokens(snapshot.totals.cacheRead)}`}
+                </span>
+              )}
+              {snapshot.estCostUsd !== undefined && snapshot.estCostUsd > 0 && (
+                <span className="text-text-primary font-bold" title="Estimated API-equivalent cost for this session">
+                  {formatCost(snapshot.estCostUsd)}
+                </span>
+              )}
+              {limits.map((tag) => (
+                <span key={tag} className="px-1 border-brutal border-border-subtle rounded-brutal" title="Provider rate limit usage">
+                  {tag}
+                </span>
+              ))}
+            </div>
           )}
-          {match?.confidence === 'probable' && <span title="Best-guess match — pin to lock it">~</span>}
-          <span className="truncate">{metaParts.join(' · ')}</span>
-          {limits.map((tag) => (
-            <span key={tag} className="px-1 border-brutal border-accent/30 rounded-brutal text-accent-dark" title="Provider rate limit usage">
-              {tag}
-            </span>
-          ))}
+
+          {showPinPicker && (
+            <select
+              className="input w-full !py-1 !px-2 !text-[10px] font-mono"
+              value=""
+              onChange={(e) => {
+                if (e.target.value) onPin(panel.id, e.target.value)
+              }}
+            >
+              <option value="">no session file matched — pin one…</option>
+              {pinCandidates.map((c) => (
+                <option key={c.filePath} value={c.filePath}>
+                  {c.kind} · {c.topic ?? c.title ?? c.sessionId?.slice(0, 8) ?? c.filePath} · {timeAgo(c.fileMtime)}
+                </option>
+              ))}
+            </select>
+          )}
+          {match?.confidence === 'manual' && (
+            <button
+              onClick={() => onPin(panel.id, null)}
+              className="font-mono text-[10px] text-text-muted hover:text-status-error transition-press"
+            >
+              unpin session file
+            </button>
+          )}
+
+          <ConnectionsTree
+            panelId={panel.id}
+            panels={panels}
+            canvasEdges={canvasEdges}
+            recentFiles={snapshot?.recentFiles ?? []}
+          />
         </div>
       )}
-
-      {/* No journal matched: offer the pin picker */}
-      {showPinPicker && (
-        <select
-          className="input w-full !py-1 !px-2 !text-[10px] font-mono"
-          value=""
-          onClick={(e) => e.stopPropagation()}
-          onChange={(e) => {
-            if (e.target.value) onPin(panel.id, e.target.value)
-          }}
-        >
-          <option value="">no session file matched — pin one…</option>
-          {pinCandidates.map((c) => (
-            <option key={c.filePath} value={c.filePath}>
-              {c.kind} · {c.topic ?? c.title ?? c.sessionId?.slice(0, 8) ?? c.filePath} · {timeAgo(c.fileMtime)}
-            </option>
-          ))}
-        </select>
-      )}
-      {match?.confidence === 'manual' && (
-        <button
-          onClick={(e) => { e.stopPropagation(); onPin(panel.id, null) }}
-          className="font-mono text-[10px] text-text-muted hover:text-status-error transition-press"
-        >
-          unpin session file
-        </button>
-      )}
-
-      <ConnectionsTree
-        panelId={panel.id}
-        panels={panels}
-        canvasEdges={canvasEdges}
-        recentFiles={snapshot?.recentFiles ?? []}
-      />
 
       {showPrompt && (
         <QuickPrompt

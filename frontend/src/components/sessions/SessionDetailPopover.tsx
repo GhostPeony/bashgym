@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { Play, Maximize2, Pin, FolderGit2, X } from 'lucide-react'
+import { Play, Maximize2, Pin, FolderGit2, X, LayoutGrid } from 'lucide-react'
 import type { Panel, TerminalSession, CanvasEdge } from '../../stores'
+import { useWorkspaceStore } from '../../stores'
 import type { AgentSessionSnapshot, SessionMatch } from '../../services/agentSessions/types'
 import { ContextMeter } from './ContextMeter'
 import { QuickPrompt } from './QuickPrompt'
@@ -21,6 +22,10 @@ interface SessionDetailPopoverProps {
   onFocus: (terminalId: string) => void
   onResume: (snapshot: AgentSessionSnapshot) => void
   onPin: (panelId: string, filePath: string | null) => void
+  /** Journal session → resume it inside a brand-new workspace */
+  onOpenInNewWorkspace?: (snapshot: AgentSessionSnapshot) => void
+  /** Live terminal → move its panel into a brand-new workspace (PTY untouched) */
+  onMoveToNewWorkspace?: (panelId: string) => void
   pinCandidates: AgentSessionSnapshot[]
   panels: Panel[]
   canvasEdges: CanvasEdge[]
@@ -76,11 +81,15 @@ export function SessionDetailPopover({
   onFocus,
   onResume,
   onPin,
+  onOpenInNewWorkspace,
+  onMoveToNewWorkspace,
   pinCandidates,
   panels,
   canvasEdges
 }: SessionDetailPopoverProps) {
   const popoverRef = useRef<HTMLDivElement>(null)
+  const { workspaces, activeWorkspaceId } = useWorkspaceStore()
+  const activeWorkspaceName = workspaces.find((w) => w.id === activeWorkspaceId)?.name
 
   useEffect(() => {
     if (!target) return
@@ -140,6 +149,18 @@ export function SessionDetailPopover({
               <FolderGit2 className="w-3 h-3 text-accent flex-shrink-0" />
               <span className="truncate" title={cwd}>{cwd}</span>
               {snapshot?.gitBranch && <span className="text-accent flex-shrink-0">⎇ {snapshot.gitBranch}</span>}
+            </span>
+          </Row>
+        )}
+
+        {target.type === 'live' && activeWorkspaceName && (
+          <Row label="Canvas">
+            <span
+              className="inline-flex items-center gap-1 px-1 border-brutal border-accent/40 rounded-brutal text-[10px] text-accent uppercase tracking-wider"
+              title="The workspace canvas this terminal lives in"
+            >
+              <LayoutGrid className="w-2.5 h-2.5" />
+              {activeWorkspaceName}
             </span>
           </Row>
         )}
@@ -229,24 +250,46 @@ export function SessionDetailPopover({
       </div>
 
       {/* Actions */}
-      <div className="flex items-center gap-1 px-3 py-2 border-t border-brutal border-border bg-background-secondary">
+      <div className="flex items-center gap-1 px-3 py-2 border-t border-brutal border-border bg-background-secondary flex-wrap">
         {target.type === 'live' ? (
-          <button
-            onClick={() => { onFocus(target.session.id); onClose() }}
-            className="node-btn node-btn-wide node-btn-accent"
-            title="Open this terminal in the Workspace"
-          >
-            <span className="flex items-center gap-1"><Maximize2 className="w-2.5 h-2.5" /> OPEN TERMINAL</span>
-          </button>
+          <>
+            <button
+              onClick={() => { onFocus(target.session.id); onClose() }}
+              className="node-btn node-btn-wide node-btn-accent"
+              title="Open this terminal in the Workspace"
+            >
+              <span className="flex items-center gap-1"><Maximize2 className="w-2.5 h-2.5" /> OPEN TERMINAL</span>
+            </button>
+            {onMoveToNewWorkspace && (
+              <button
+                onClick={() => { onMoveToNewWorkspace(target.panel.id); onClose() }}
+                className="node-btn node-btn-wide"
+                title="Create a new workspace canvas and move this terminal into it (the process keeps running)"
+              >
+                <span className="flex items-center gap-1"><LayoutGrid className="w-2.5 h-2.5" /> MOVE TO NEW WORKSPACE</span>
+              </button>
+            )}
+          </>
         ) : (
           target.snapshot.sessionId && (
-            <button
-              onClick={() => { onResume(target.snapshot); onClose() }}
-              className="node-btn node-btn-wide node-btn-accent"
-              title={`Opens a new terminal in this project folder and resumes this conversation (${target.snapshot.kind === 'claude' ? 'claude --resume' : 'codex resume'})`}
-            >
-              <span className="flex items-center gap-1"><Play className="w-2.5 h-2.5" /> RESUME IN TERMINAL</span>
-            </button>
+            <>
+              <button
+                onClick={() => { onResume(target.snapshot); onClose() }}
+                className="node-btn node-btn-wide node-btn-accent"
+                title={`Opens a new terminal in this project folder and resumes this conversation (${target.snapshot.kind === 'claude' ? 'claude --resume' : 'codex resume'})`}
+              >
+                <span className="flex items-center gap-1"><Play className="w-2.5 h-2.5" /> RESUME IN TERMINAL</span>
+              </button>
+              {onOpenInNewWorkspace && (
+                <button
+                  onClick={() => { onOpenInNewWorkspace(target.snapshot); onClose() }}
+                  className="node-btn node-btn-wide"
+                  title="Create a new workspace canvas and resume this session inside it"
+                >
+                  <span className="flex items-center gap-1"><LayoutGrid className="w-2.5 h-2.5" /> OPEN IN NEW WORKSPACE</span>
+                </button>
+              )}
+            </>
           )
         )}
       </div>

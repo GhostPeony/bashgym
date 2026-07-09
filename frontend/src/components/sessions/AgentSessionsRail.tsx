@@ -149,6 +149,28 @@ export function AgentSessionsRail() {
     }
   }
 
+  const handleOpenInNewWorkspace = (snap: AgentSessionSnapshot) => {
+    if (!snap.sessionId) return
+    const ws = useWorkspaceStore.getState()
+    const wsId = ws.createWorkspace(snap.cwd ? basenameOf(snap.cwd) : snap.kind)
+    ws.switchWorkspace(wsId)
+    const cmd = snap.kind === 'claude' ? `claude --resume ${snap.sessionId}` : `codex resume ${snap.sessionId}`
+    const title = snap.title ?? (snap.cwd ? basenameOf(snap.cwd) : snap.kind)
+    useTerminalStore.getState().createTerminal(undefined, title, cmd, snap.cwd)
+    closeOverlay()
+  }
+
+  const handleMoveToNewWorkspace = (panelId: string) => {
+    const state = useTerminalStore.getState()
+    const panel = state.panels.find((p) => p.id === panelId)
+    const session = panel?.terminalId ? state.sessions.get(panel.terminalId) : undefined
+    const name = session?.cwd && session.cwd !== '~' ? basenameOf(session.cwd) : panel?.title ?? 'workspace'
+    const ws = useWorkspaceStore.getState()
+    const wsId = ws.createWorkspace(name)
+    ws.moveLivePanelToWorkspace(panelId, wsId)
+    closeOverlay()
+  }
+
   const NewSessionLauncher = ({ cwd }: { cwd?: string }) => (
     <div className="flex items-center gap-1 py-1 flex-wrap">
       <button onClick={() => handleLaunch('claude', cwd)} className="node-btn node-btn-wide node-btn-accent">
@@ -389,6 +411,8 @@ export function AgentSessionsRail() {
         onFocus={handleFocus}
         onResume={handleResume}
         onPin={pinSession}
+        onOpenInNewWorkspace={handleOpenInNewWorkspace}
+        onMoveToNewWorkspace={handleMoveToNewWorkspace}
         pinCandidates={detailPinCandidates}
         panels={panels}
         canvasEdges={canvasEdges}

@@ -1,6 +1,6 @@
 import { memo, useState } from 'react'
 import type { Node, NodeProps } from '@xyflow/react'
-import { Dumbbell, Pause, Play, Server, SlidersHorizontal, Square, Wifi, WifiOff } from 'lucide-react'
+import { Pause, Play, Server, SlidersHorizontal, Square, Wifi, WifiOff } from 'lucide-react'
 import { LineChart, Line, YAxis } from 'recharts'
 import { clsx } from 'clsx'
 import { useTrainingStore } from '../../../stores'
@@ -253,7 +253,7 @@ export const TrainingRunNode = memo(function TrainingRunNode({ data, selected }:
     <DataNodeShell
       panelId={data.panelId}
       title={data.title}
-      icon={Dumbbell}
+      flowerVariant="training"
       selected={selected}
       hasConnections={data.hasConnections}
       buildContext={() => buildTrainingContext(nodeConfig.runId, nodeConfig)}

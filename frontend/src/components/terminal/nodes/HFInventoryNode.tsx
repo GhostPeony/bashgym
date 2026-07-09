@@ -2,7 +2,6 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Node, NodeProps } from '@xyflow/react'
 import {
   AlertCircle,
-  Cloud,
   Database,
   HardDrive,
   Loader2,
@@ -238,7 +237,7 @@ export const HFInventoryNode = memo(function HFInventoryNode({ data, selected }:
     <DataNodeShell
       panelId={data.panelId}
       title={data.title}
-      icon={Cloud}
+      flowerVariant="huggingface"
       selected={selected}
       hasConnections={data.hasConnections}
       buildContext={() => buildInventoryContext(inventory, error)}

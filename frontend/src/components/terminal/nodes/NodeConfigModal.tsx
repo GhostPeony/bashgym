@@ -31,8 +31,9 @@ export function NodeConfigModal({
       description={description}
       footer={footer}
       size={size}
+      variant="canvas"
     >
-      <div className="space-y-3">{children}</div>
+      <div className="node-config-modal-content">{children}</div>
     </Modal>
   )
 }
@@ -47,16 +48,16 @@ export function ConfigSection({
   className?: string
 }) {
   return (
-    <section className={clsx('node-section space-y-2', className)}>
-      {title ? <div className="node-section-title">{title}</div> : null}
-      {children}
+    <section className={clsx('node-config-section', className)}>
+      {title ? <div className="node-config-section-title">{title}</div> : null}
+      <div className="node-config-section-content">{children}</div>
     </section>
   )
 }
 
 export function ConfigRows({ children }: { children: ReactNode }) {
   return (
-    <div className="divide-y divide-border-subtle border-brutal border-border-subtle rounded-brutal bg-background-card">
+    <div className="node-config-rows">
       {children}
     </div>
   )
@@ -72,9 +73,9 @@ export function ConfigRow({
   title?: string
 }) {
   return (
-    <div className="grid grid-cols-[140px_minmax(0,1fr)] gap-3 px-3 py-2 text-xs font-mono">
-      <span className="text-text-muted uppercase tracking-wider">{label}</span>
-      <span className="min-w-0 break-words text-text-primary" title={title}>
+    <div className="node-config-row">
+      <span className="node-config-row-label">{label}</span>
+      <span className="node-config-row-value" title={title}>
         {value == null || value === '' ? <span className="text-text-muted">-</span> : value}
       </span>
     </div>
@@ -91,12 +92,12 @@ export function ConfigPill({
   return (
     <span
       className={clsx(
-        'inline-flex items-center gap-1 border-brutal rounded-brutal px-2 py-1 text-[10px] font-mono font-bold uppercase tracking-wider',
-        tone === 'neutral' && 'border-border-subtle bg-background-card text-text-secondary',
-        tone === 'accent' && 'border-accent/60 bg-accent/10 text-accent',
-        tone === 'success' && 'border-status-success/60 bg-status-success/10 text-status-success',
-        tone === 'warning' && 'border-status-warning/60 bg-status-warning/10 text-status-warning',
-        tone === 'error' && 'border-status-error/60 bg-status-error/10 text-status-error'
+        'node-config-pill',
+        tone === 'neutral' && 'node-config-pill-neutral',
+        tone === 'accent' && 'node-config-pill-accent',
+        tone === 'success' && 'node-config-pill-success',
+        tone === 'warning' && 'node-config-pill-warning',
+        tone === 'error' && 'node-config-pill-error'
       )}
     >
       {children}

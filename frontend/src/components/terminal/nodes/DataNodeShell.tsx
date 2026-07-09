@@ -1,14 +1,15 @@
 import { memo, useCallback, useState, type ReactNode } from 'react'
 import { Handle, Position } from '@xyflow/react'
 import { Link2, Loader2, Send, X } from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
 import { clsx } from 'clsx'
 import { routeToLinkedTerminals } from '../../../utils/edgeRouting'
+import { NodeFlowerMark } from '../NodeFlowerMark'
+import type { NodeFlowerVariant } from '../nodeFlowerAssets'
 
 export interface DataNodeShellProps {
   panelId: string
   title: string
-  icon: LucideIcon
+  flowerVariant?: NodeFlowerVariant
   selected?: boolean
   hasConnections?: boolean
   /** Builds the markdown for Send-to-terminal; button shown only when linked. May be async (e.g. to fetch analysis at send time). */
@@ -28,7 +29,7 @@ export interface DataNodeShellProps {
 export const DataNodeShell = memo(function DataNodeShell({
   panelId,
   title,
-  icon: Icon,
+  flowerVariant = 'integration',
   selected,
   hasConnections,
   buildContext,
@@ -86,18 +87,14 @@ export const DataNodeShell = memo(function DataNodeShell({
         'flex items-center gap-2 px-3 py-2 bg-background-secondary border-b border-brutal border-border',
         hue == null && 'rounded-t-brutal'
       )}>
-        <div
-          className="p-1.5 border-brutal border-border-subtle rounded-brutal bg-background-tertiary"
-          style={hue != null ? {
-            background: `hsla(${hue}, 40%, 60%, 0.16)`,
-            borderColor: `hsla(${hue}, 35%, 50%, 0.55)`
-          } : undefined}
-        >
-          <Icon
-            className={clsx('w-4 h-4', hue == null && 'text-accent')}
-            style={hue != null ? { color: `hsl(${hue}, 45%, 48%)` } : undefined}
-          />
-        </div>
+        <NodeFlowerMark
+          variant={flowerVariant}
+          hue={hue}
+          size="xl"
+          active={Boolean(selected || visualPhase === 'running' || visualPhase === 'queued')}
+          muted={visualPhase === 'planned'}
+          title={`${title} node`}
+        />
         <span className="flex-1 min-w-0 text-sm font-mono font-semibold text-text-primary truncate">
           {title}
         </span>

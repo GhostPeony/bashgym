@@ -8,6 +8,7 @@ import { FileBrowser } from '../files/FileBrowser'
 import { CanvasViewWrapper } from './CanvasView'
 import { DATA_PANEL_DEFS, DATA_NODE_TYPES } from './nodes/dataPanels'
 import { clsx } from 'clsx'
+import { GhostPeonyIcon, type GhostPeonyIconName } from '../common'
 
 export function TerminalGrid() {
   const {
@@ -103,8 +104,15 @@ export function TerminalGrid() {
       default: {
         const def = DATA_PANEL_DEFS.find((d) => d.type === type)
         if (def) {
-          const DefIcon = def.icon
-          return <DefIcon className="w-3.5 h-3.5 flex-shrink-0" />
+          return (
+            <GhostPeonyIcon
+              name={def.type as GhostPeonyIconName}
+              size="xs"
+              tone="node"
+              hue={def.hue}
+              className="flex-shrink-0"
+            />
+          )
         }
         return <Terminal className="w-3.5 h-3.5 flex-shrink-0" />
       }
@@ -468,7 +476,7 @@ export function TerminalGrid() {
         {/* Canvas popup backdrop - only when popup is open */}
         {viewMode === 'canvas' && canvasPopupPanelId && (
           <div
-            className="absolute inset-0 z-50 bg-black/60 cursor-pointer"
+            className="absolute inset-0 z-50 canvas-popup-backdrop cursor-pointer"
             onClick={closeCanvasPopup}
           />
         )}
@@ -539,7 +547,7 @@ export function TerminalGrid() {
             >
               <div
                 className={needsPopupWrapper
-                  ? 'rounded-brutal shadow-brutal border-brutal border-border overflow-hidden bg-background-primary pointer-events-auto'
+                  ? 'canvas-popup-panel pointer-events-auto'
                   : 'h-full w-full'
                 }
                 style={needsPopupWrapper ? { width: '90%', maxWidth: '1280px', height: '85%' } : undefined}

@@ -1,0 +1,46 @@
+{
+  "schema_version": "ghost-peony.icon-pack.v1",
+  "fallback": "/bashgym-peony.png",
+  "icons": {
+    "toolkit": {
+      "path": "/node-icons/node-toolkit.png",
+      "neutral_path": "/node-icons/node-toolkit-neutral.png",
+      "source": "/node-icons/node-toolkit-source.png",
+      "role": "Tool Kit, tools, skills, capability inventory",
+      "transparent": true,
+      "size_px": 256
+    },
+    "huggingface": {
+      "path": "/node-icons/node-huggingface.png",
+      "neutral_path": "/node-icons/node-huggingface-neutral.png",
+      "source": "/node-icons/node-huggingface-source.png",
+      "role": "Hugging Face, cloud training, model hub, datasets",
+      "transparent": true,
+      "size_px": 256
+    },
+    "designer": {
+      "path": "/node-icons/node-designer.png",
+      "neutral_path": "/node-icons/node-designer-neutral.png",
+      "source": "/node-icons/node-designer-source.png",
+      "role": "Data Designer, synthetic data, dataset authoring",
+      "transparent": true,
+      "size_px": 256
+    },
+    "training": {
+      "path": "/node-icons/node-training.png",
+      "neutral_path": "/node-icons/node-training-neutral.png",
+      "source": "/node-icons/node-training-source.png",
+      "role": "Training, model runs, timing, optimization",
+      "transparent": true,
+      "size_px": 256
+    },
+    "activity": {
+      "path": "/node-icons/node-activity.png",
+      "neutral_path": "/node-icons/node-activity-neutral.png",
+      "source": "/node-icons/node-activity-source.png",
+      "role": "Activity log, history, event feed",
+      "transparent": true,
+      "size_px": 256
+    }
+  }
+}

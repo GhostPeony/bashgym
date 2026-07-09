@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
-import { Cloud, CloudOff, Sparkles, Loader2 } from 'lucide-react'
+import { Sparkles, Loader2 } from 'lucide-react'
 import { hfApi, HFStatus as HFStatusType } from '../../services/api'
 import { clsx } from 'clsx'
+import { GhostPeonyIcon } from '../common/GhostPeonyIcon'
 
 interface HFStatusProps {
   compact?: boolean
@@ -50,7 +51,7 @@ export function HFStatus({ compact = false, onClick }: HFStatusProps) {
         'flex items-center gap-2 text-text-secondary',
         onClick && 'cursor-pointer hover:text-text-primary'
       )} onClick={onClick}>
-        <CloudOff className="w-4 h-4" />
+        <GhostPeonyIcon name="huggingface" size="xs" tone="neutral" muted />
         {!compact && <span className="text-sm font-mono">HF Offline</span>}
       </div>
     )
@@ -62,7 +63,7 @@ export function HFStatus({ compact = false, onClick }: HFStatusProps) {
         'flex items-center gap-2 text-text-secondary',
         onClick && 'cursor-pointer hover:text-text-primary'
       )} onClick={onClick}>
-        <CloudOff className="w-4 h-4" />
+        <GhostPeonyIcon name="huggingface" size="xs" tone="neutral" muted />
         {!compact && <span className="text-sm font-mono">HF Not Configured</span>}
       </div>
     )
@@ -73,10 +74,13 @@ export function HFStatus({ compact = false, onClick }: HFStatusProps) {
       'flex items-center gap-2',
       onClick && 'cursor-pointer hover-press'
     )} onClick={onClick}>
-      <Cloud className={clsx(
-        'w-4 h-4',
-        status.pro_enabled ? 'text-accent' : 'text-status-success'
-      )} />
+      <GhostPeonyIcon
+        name="huggingface"
+        size="xs"
+        tone={status.pro_enabled ? 'accent' : 'neutral'}
+        hue={52}
+        active={status.pro_enabled}
+      />
       {!compact && (
         <>
           <span className="text-sm text-text-primary font-mono">{status.username || 'Connected'}</span>

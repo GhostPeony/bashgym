@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from 'react'
+import { useEffect, useCallback, useId } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { clsx } from 'clsx'
@@ -11,6 +11,7 @@ interface ModalProps {
   children: React.ReactNode
   footer?: React.ReactNode
   size?: 'sm' | 'md' | 'lg' | 'xl'
+  variant?: 'default' | 'canvas'
 }
 
 export function Modal({
@@ -20,8 +21,13 @@ export function Modal({
   description,
   children,
   footer,
-  size = 'md'
+  size = 'md',
+  variant = 'default'
 }: ModalProps) {
+  const titleId = useId()
+  const descriptionId = useId()
+  const isCanvas = variant === 'canvas'
+
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -54,44 +60,65 @@ export function Modal({
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {/* Backdrop — warm navy tint */}
       <div
-        className="absolute inset-0"
-        style={{ backgroundColor: 'rgba(27, 32, 64, 0.5)' }}
+        className={clsx('absolute inset-0', isCanvas && 'modal-canvas-backdrop')}
+        style={isCanvas ? undefined : { backgroundColor: 'rgba(27, 32, 64, 0.5)' }}
         onClick={onClose}
       />
 
-      {/* Modal — brutalist card */}
       <div
         className={clsx(
-          'relative w-full mx-4 bg-background-card overflow-hidden',
+          'relative w-full mx-4 overflow-hidden',
           'max-h-[90vh]',
-          'border-brutal border-border shadow-brutal rounded-brutal',
+          isCanvas
+            ? 'modal-canvas-shell'
+            : 'bg-background-card border-brutal border-border shadow-brutal rounded-brutal',
           sizes[size]
         )}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={description ? descriptionId : undefined}
       >
-        {/* Header */}
-        <div className="flex items-start justify-between px-6 py-4 border-b border-border">
-          <div>
-            <h2 className="text-lg font-brand font-normal text-text-primary">{title}</h2>
+        <div
+          className={clsx(
+            isCanvas
+              ? 'modal-canvas-header'
+              : 'flex items-start justify-between px-6 py-4 border-b border-border'
+          )}
+        >
+          <div className="min-w-0">
+            <h2
+              id={titleId}
+              className={isCanvas ? 'modal-canvas-title' : 'text-lg font-brand font-normal text-text-primary'}
+            >
+              {title}
+            </h2>
             {description && (
-              <p className="text-sm text-text-secondary mt-1">{description}</p>
+              <p
+                id={descriptionId}
+                className={isCanvas ? 'modal-canvas-description' : 'text-sm text-text-secondary mt-1'}
+              >
+                {description}
+              </p>
             )}
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="btn-icon w-8 h-8 text-text-muted hover:text-text-primary"
+            className={isCanvas ? 'node-btn node-btn-danger h-8 w-8' : 'btn-icon w-8 h-8 text-text-muted hover:text-text-primary'}
+            title="Close modal"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Content */}
-        <div className="px-6 py-4 max-h-[70vh] overflow-y-auto">{children}</div>
+        <div className={isCanvas ? 'modal-canvas-body' : 'px-6 py-4 max-h-[70vh] overflow-y-auto'}>
+          {children}
+        </div>
 
-        {/* Footer */}
         {footer && (
-          <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border">
+          <div className={isCanvas ? 'modal-canvas-footer' : 'flex items-center justify-end gap-3 px-6 py-4 border-t border-border'}>
             {footer}
           </div>
         )}

@@ -24,6 +24,7 @@ import {
 import { clsx } from 'clsx'
 import { useCanvasControlStore, useTerminalStore } from '../../stores'
 import { DATA_PANEL_DEFS } from './nodes/dataPanels'
+import { GhostPeonyIcon, type GhostPeonyIconName } from '../common'
 import {
   BUILTIN_PRESETS,
   captureCurrentAsPreset,
@@ -377,7 +378,6 @@ export const MasterControlPanel = memo(function MasterControlPanel({
         {onAddDataPanel && (
           <div className="flex items-center gap-2 mt-2 flex-wrap">
             {DATA_PANEL_DEFS.map((def) => {
-              const DefIcon = def.icon
               return (
                 <button
                   key={def.type}
@@ -385,7 +385,12 @@ export const MasterControlPanel = memo(function MasterControlPanel({
                   className="btn-secondary !py-1.5 !px-3 !text-xs flex-1"
                   style={{ color: `hsl(${def.hue}, 45%, 48%)` }}
                 >
-                  <DefIcon className="w-3 h-3" />
+                  <GhostPeonyIcon
+                    name={def.type as GhostPeonyIconName}
+                    size="xs"
+                    tone="node"
+                    hue={def.hue}
+                  />
                   {def.title}
                 </button>
               )

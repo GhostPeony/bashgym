@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
 import {
-  Cloud,
   Server,
   Layers,
   Database,
@@ -28,6 +27,7 @@ import { BucketsTab } from './BucketsTab'
 import { ResearchTab } from './ResearchTab'
 import { TracesTab } from './TracesTab'
 import { clsx } from 'clsx'
+import { GhostPeonyIcon } from '../common/GhostPeonyIcon'
 
 type Tab = 'training' | 'spaces' | 'datasets' | 'models' | 'buckets' | 'research' | 'traces'
 
@@ -99,7 +99,13 @@ export function HFDashboard() {
       <div className="h-full p-6">
         <div className="max-w-xl mx-auto mt-12">
           <div className="text-center mb-8">
-            <Cloud className="w-16 h-16 mx-auto text-text-secondary mb-4" />
+            <GhostPeonyIcon
+              name="huggingface"
+              size="3xl"
+              tone="neutral"
+              muted
+              className="mx-auto mb-4"
+            />
             <h1 className="text-2xl font-brand text-text-primary">HuggingFace Integration</h1>
             <p className="text-text-secondary mt-2">
               Connect your HuggingFace account to access cloud training, ZeroGPU Spaces, and more.
@@ -264,7 +270,13 @@ export function HFDashboard() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-3">
-              <Cloud className="w-8 h-8 text-accent" />
+              <GhostPeonyIcon
+                name="huggingface"
+                size="xl"
+                tone="accent"
+                hue={52}
+                active
+              />
               <div>
                 <h1 className="text-xl font-brand text-text-primary">HuggingFace</h1>
                 <div className="flex items-center gap-2 mt-0.5">

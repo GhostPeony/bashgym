@@ -1,4 +1,7 @@
 export { Button } from './Button'
+export { GhostPeonyIcon } from './GhostPeonyIcon'
+export { ghostPeonyIconPath } from './ghostPeonyIconAssets'
+export type { GhostPeonyIconName, GhostPeonyIconTone } from './ghostPeonyIconAssets'
 export { MaskedHost } from './MaskedHost'
 export { MaskedValue } from './MaskedValue'
 export { Modal } from './Modal'

@@ -16,7 +16,6 @@ import {
   GitBranch,
   Shield,
   Activity,
-  Cloud,
   Link2,
   Trophy,
   Network,
@@ -31,6 +30,7 @@ import { useTutorialStore } from '../../stores/tutorialStore'
 import { hooksApi, systemApi } from '../../services/api'
 import { clsx } from 'clsx'
 import { isElectron, isWeb } from '../../utils/platform'
+import { GhostPeonyIcon } from '../common/GhostPeonyIcon'
 
 // Agent Sessions feed is Electron-only (reads local CLI session journals);
 // lazy + gated so it tree-shakes out of the web build
@@ -164,7 +164,7 @@ function SecondarySections() {
   ]
 
   const connectionsItems: CollapsibleSectionProps['items'] = [
-    { id: 'huggingface', icon: <Cloud className="w-4 h-4" />, label: 'HuggingFace' },
+    { id: 'huggingface', icon: <GhostPeonyIcon name="huggingface" size="xs" tone="neutral" />, label: 'HuggingFace' },
     // Experimental: Electron-only
     ...(isElectron ? [
       { id: 'integration' as SecondaryViewId, icon: <Link2 className="w-4 h-4" />, label: 'Integration' },

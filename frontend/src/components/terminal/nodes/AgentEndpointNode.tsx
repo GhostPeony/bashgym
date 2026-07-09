@@ -2,7 +2,6 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Node, NodeProps } from '@xyflow/react'
 import {
   AlertCircle,
-  Bot,
   Brain,
   ChevronDown,
   CheckCircle2,
@@ -524,9 +523,9 @@ export const AgentEndpointNode = memo(function AgentEndpointNode({
   }, [buildContext, data.panelId, endpointId, prompt, sending])
 
   const quickPrompts = [
-    'Review active training and suggest next eval.',
-    'Explain what context this canvas gives you.',
-    'Help prepare a BashGym run handoff.'
+    { label: 'Training next step', prompt: 'Review active training and suggest next eval.' },
+    { label: 'Canvas context', prompt: 'Explain what context this canvas gives you.' },
+    { label: 'Run handoff', prompt: 'Help prepare a BashGym run handoff.' }
   ]
 
   const connectedLabel = discovery?.ok
@@ -545,7 +544,7 @@ export const AgentEndpointNode = memo(function AgentEndpointNode({
     <DataNodeShell
       panelId={data.panelId}
       title={data.title}
-      icon={Bot}
+      flowerVariant="agent"
       selected={selected}
       hasConnections={data.hasConnections}
       buildContext={buildContext}
@@ -640,15 +639,15 @@ export const AgentEndpointNode = memo(function AgentEndpointNode({
           description={`Profile: ${endpointId}`}
           size="xl"
         >
-          <div className="space-y-3">
+          <div className="grid gap-2">
             <div className="node-section-title">
               <Settings2 className="w-3 h-3" />
               <span>Endpoint</span>
             </div>
-            <div className="nodrag flex items-center gap-2">
+            <div className="nodrag node-config-action-row">
               <button
                 type="button"
-                className="node-btn node-btn-wide node-btn-accent flex-1 justify-center"
+                className="node-btn node-btn-wide node-btn-accent justify-center"
                 onClick={(event) => {
                   event.stopPropagation()
                   void runQuickSetup()
@@ -748,7 +747,7 @@ export const AgentEndpointNode = memo(function AgentEndpointNode({
             <div className="nodrag node-section !p-2 space-y-2">
               <button
                 type="button"
-                className="node-btn node-btn-wide w-full justify-between"
+                className="node-config-toggle"
                 onClick={(event) => {
                   event.stopPropagation()
                   setShowTunnelDetails((current) => !current)
@@ -801,10 +800,10 @@ export const AgentEndpointNode = memo(function AgentEndpointNode({
                       title="Any SSH config alias or user@host target"
                     />
                   </label>
-                  <div className="flex items-center gap-2">
+                  <div className="node-config-action-row">
                     <button
                       type="button"
-                      className="node-btn node-btn-wide node-btn-accent flex-1 justify-center"
+                      className="node-btn node-btn-wide node-btn-accent justify-center"
                       onClick={() => void connectTunnel()}
                       disabled={tunnelBusy || !sshTarget.trim()}
                       title="Open an SSH port-forward to remote Hermes"
@@ -814,7 +813,7 @@ export const AgentEndpointNode = memo(function AgentEndpointNode({
                     </button>
                     <button
                       type="button"
-                      className="node-btn node-btn-wide flex-1 justify-center"
+                      className="node-btn node-btn-wide justify-center"
                       onClick={() => void disconnectTunnel()}
                       disabled={tunnelBusy || !tunnelStatus?.active}
                       title="Stop the BashGym-managed tunnel"
@@ -847,7 +846,7 @@ export const AgentEndpointNode = memo(function AgentEndpointNode({
             <div className="nodrag node-section !p-2 space-y-2">
               <button
                 type="button"
-                className="node-btn node-btn-wide w-full justify-between"
+                className="node-config-toggle"
                 onClick={(event) => {
                   event.stopPropagation()
                   setShowConnectionDetails((current) => !current)
@@ -898,10 +897,10 @@ export const AgentEndpointNode = memo(function AgentEndpointNode({
               />
               </label>
             </div>
-            <div className="nodrag flex items-center gap-2">
+            <div className="nodrag node-config-action-row">
               <button
                 type="button"
-                className="node-btn node-btn-wide node-btn-accent flex-1 justify-center"
+                className="node-btn node-btn-wide node-btn-accent justify-center"
                 onClick={() => void saveProfile()}
                 disabled={saving || !endpointId}
                 title="Save endpoint profile"
@@ -911,7 +910,7 @@ export const AgentEndpointNode = memo(function AgentEndpointNode({
               </button>
               <button
                 type="button"
-                className="node-btn node-btn-wide flex-1 justify-center"
+                className="node-btn node-btn-wide justify-center"
                 onClick={() => void probeEndpoint(endpointId)}
                 disabled={testing || !loaded || !endpointId}
                 title="Probe health, models, skills, and toolsets"
@@ -975,8 +974,9 @@ export const AgentEndpointNode = memo(function AgentEndpointNode({
       title={`${form.label || 'Hermes'} Chat`}
       description={`Model: ${form.model}`}
       size="xl"
+      variant="canvas"
       footer={
-        <div className="flex items-center gap-2 w-full">
+        <div className="node-config-action-row">
           <button
             type="button"
             className="btn-secondary"
@@ -987,9 +987,10 @@ export const AgentEndpointNode = memo(function AgentEndpointNode({
           >
             Clear
           </button>
+          <span className="node-config-action-spacer" />
           <button
             type="button"
-            className="btn-primary ml-auto"
+            className="btn-primary"
             onClick={() => void sendPrompt()}
             disabled={sending || !prompt.trim()}
           >
@@ -998,12 +999,12 @@ export const AgentEndpointNode = memo(function AgentEndpointNode({
         </div>
       }
     >
-      <div className="space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_220px] gap-3">
+      <div className="grid gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_190px] gap-3">
           <label className="node-field">
             <span className="node-field-label">Message</span>
             <textarea
-              className="input-brutal nowheel text-sm font-mono min-h-[140px]"
+              className="input-brutal nowheel text-sm font-mono min-h-[112px]"
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
               onKeyDown={(event) => {
@@ -1031,15 +1032,15 @@ export const AgentEndpointNode = memo(function AgentEndpointNode({
             </label>
             {quickPrompts.map((quick) => (
               <button
-                key={quick}
+                key={quick.label}
                 type="button"
-                className="node-btn node-btn-wide w-full justify-start"
-                onClick={() => void sendPrompt(quick)}
+                className="node-btn node-btn-wide justify-start"
+                onClick={() => void sendPrompt(quick.prompt)}
                 disabled={sending}
-                title={quick}
+                title={quick.prompt}
               >
                 <Send className="w-3 h-3" />
-                <span>{quick}</span>
+                <span>{quick.label}</span>
               </button>
             ))}
           </div>
@@ -1051,7 +1052,7 @@ export const AgentEndpointNode = memo(function AgentEndpointNode({
           </div>
         ) : null}
 
-        <div className="border-brutal border-border-subtle rounded-brutal bg-background-secondary min-h-[280px] max-h-[44vh] overflow-y-auto p-3 space-y-3">
+        <div className="border-brutal border-border-subtle rounded-brutal bg-background-secondary min-h-[220px] max-h-[38vh] overflow-y-auto p-3 space-y-3">
           {messages.length === 0 ? (
             <div className="text-sm font-mono text-text-muted">
               No messages yet.

@@ -1,6 +1,6 @@
 import { memo, useEffect, useState } from 'react'
 import type { Node, NodeProps } from '@xyflow/react'
-import { ChevronDown, ChevronRight, FlaskConical, Loader2, SlidersHorizontal } from 'lucide-react'
+import { ChevronDown, ChevronRight, Loader2, SlidersHorizontal } from 'lucide-react'
 import { clsx } from 'clsx'
 import { API_BASE, evalAdvancedApi, type HeldoutJobResponse, type HeldoutReport } from '../../../services/api'
 import { DataNodeShell } from './DataNodeShell'
@@ -115,7 +115,7 @@ export const EvalNode = memo(function EvalNode({ data, selected }: NodeProps<Eva
     <DataNodeShell
       panelId={data.panelId}
       title={data.title}
-      icon={FlaskConical}
+      flowerVariant="evals"
       selected={selected}
       hasConnections={data.hasConnections}
       buildContext={buildContext}

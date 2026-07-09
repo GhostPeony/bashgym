@@ -1,10 +1,7 @@
 import { memo, useCallback, useState } from 'react'
 import { Handle, Position, NodeProps, Node } from '@xyflow/react'
 import {
-  Terminal,
-  Globe,
   FileText,
-  FolderTree,
   Loader2,
   MessageSquare,
   Wrench,
@@ -27,6 +24,7 @@ import type { AttentionState, AgentStatus, AgentKind, PanelType, ToolHistoryItem
 import { ToolBreadcrumbs } from './ToolBreadcrumbs'
 import { AgentBadge } from '../sessions/AgentBadge'
 import { useCanvasControlStore } from '../../stores'
+import { NodeFlowerMark } from './NodeFlowerMark'
 
 export interface TerminalNodeData extends Record<string, unknown> {
   panelId: string
@@ -60,22 +58,6 @@ export interface TerminalNodeData extends Record<string, unknown> {
 }
 
 export type TerminalNodeType = Node<TerminalNodeData, 'terminal'>
-
-// Get icon based on panel type
-function getPanelIcon(type: PanelType) {
-  switch (type) {
-    case 'terminal':
-      return <Terminal className="w-4 h-4" />
-    case 'browser':
-      return <Globe className="w-4 h-4" />
-    case 'preview':
-      return <FileText className="w-4 h-4" />
-    case 'files':
-      return <FolderTree className="w-4 h-4" />
-    default:
-      return <Terminal className="w-4 h-4" />
-  }
-}
 
 // Get status icon based on agent status
 function getStatusIcon(status?: AgentStatus, isPaused?: boolean) {
@@ -206,7 +188,6 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: NodeP
         'card !rounded-brutal border-brutal cursor-pointer',
         getAttentionStyle(attention),
         selected && 'border-accent shadow-brutal',
-        isPaused && 'opacity-75',
         !isPaused && status === 'running' && 'terminal-status-running',
         !isPaused && status === 'tool_calling' && 'terminal-status-tool-calling',
         !isPaused && status === 'waiting_input' && 'terminal-status-waiting-input'
@@ -228,15 +209,13 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: NodeP
 
       {/* Header — terminal style */}
       <div className="flex items-center gap-2 px-3 py-2 bg-background-secondary border-b border-brutal border-border rounded-t-brutal">
-        <div className={clsx(
-          'p-1.5 border-brutal rounded-brutal',
-          status === 'running' && !isPaused && 'bg-accent-light border-accent',
-          status === 'waiting_input' && 'bg-status-warning/20 border-status-warning',
-          status === 'tool_calling' && !isPaused && 'bg-accent-light border-accent',
-          (isPaused || !status || status === 'idle') && 'bg-background-tertiary border-border-subtle'
-        )}>
-          {getPanelIcon(type)}
-        </div>
+        <NodeFlowerMark
+          variant={type}
+          size="xl"
+          active={Boolean(!isPaused && (status === 'running' || status === 'tool_calling' || selected))}
+          muted={Boolean(isPaused || !status || status === 'idle')}
+          title={`${type} node`}
+        />
         <div className="flex-1 min-w-0">
           <span className="text-sm font-mono font-semibold text-text-primary truncate flex items-center gap-1.5">
             <span className="truncate">{title}</span>

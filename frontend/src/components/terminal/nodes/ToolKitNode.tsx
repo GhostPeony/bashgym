@@ -2,7 +2,6 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Node, NodeProps } from '@xyflow/react'
 import {
   AlertCircle,
-  Boxes,
   Brain,
   CheckCircle2,
   Filter,
@@ -479,7 +478,7 @@ export const ToolKitNode = memo(function ToolKitNode({
     <DataNodeShell
       panelId={data.panelId}
       title={data.title}
-      icon={Boxes}
+      flowerVariant="toolkit"
       selected={selected}
       hasConnections={data.hasConnections}
       buildContext={buildContext}

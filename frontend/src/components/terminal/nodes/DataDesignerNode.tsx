@@ -1,6 +1,6 @@
 import { memo, useEffect, useState } from 'react'
 import type { Node, NodeProps } from '@xyflow/react'
-import { Factory, Loader2, Send, SlidersHorizontal } from 'lucide-react'
+import { Loader2, Send, SlidersHorizontal } from 'lucide-react'
 import { clsx } from 'clsx'
 import { API_BASE, designerApi, type DesignerJobStatus } from '../../../services/api'
 import { routeToLinkedTerminals } from '../../../utils/edgeRouting'
@@ -83,7 +83,7 @@ export const DataDesignerNode = memo(function DataDesignerNode({ data, selected 
     <DataNodeShell
       panelId={data.panelId}
       title={data.title}
-      icon={Factory}
+      flowerVariant="designer"
       selected={selected}
       hasConnections={data.hasConnections}
       buildContext={buildContext}

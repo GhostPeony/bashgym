@@ -1,6 +1,6 @@
 import { memo, useMemo, useState } from 'react'
 import type { Node, NodeProps } from '@xyflow/react'
-import { Activity, Pause, Play, SlidersHorizontal } from 'lucide-react'
+import { Pause, Play, SlidersHorizontal } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useActivityStore, type ActivityEvent, type ActivitySeverity } from '../../../stores/activityStore'
 import { DataNodeShell } from './DataNodeShell'
@@ -72,7 +72,7 @@ export const ActivityFeedNode = memo(function ActivityFeedNode({ data, selected 
     <DataNodeShell
       panelId={data.panelId}
       title={data.title}
-      icon={Activity}
+      flowerVariant="activity"
       selected={selected}
       hasConnections={data.hasConnections}
       buildContext={buildContext}

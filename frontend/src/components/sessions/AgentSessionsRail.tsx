@@ -125,14 +125,14 @@ export function AgentSessionsRail() {
   }
 
   return (
-    <div className="p-4 space-y-4">
+    <div className="p-3 space-y-3">
       {/* Header */}
       <div className="flex items-center gap-2">
         <button onClick={() => setSidebarMode('nav')} className="node-btn" title="Back to navigation">
           <ArrowLeft className="w-3 h-3" />
         </button>
         <ListTree className="w-4 h-4 text-accent" />
-        <h2 className="font-brand font-semibold text-base flex-1">Agent Sessions</h2>
+        <h2 className="font-brand font-semibold text-sm flex-1">Agent Sessions</h2>
         <button
           onClick={() => void pollOnce()}
           className="node-btn"

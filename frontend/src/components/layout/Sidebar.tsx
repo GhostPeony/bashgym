@@ -224,15 +224,20 @@ export function Sidebar() {
     }
   }
 
+  // Agent Sessions is a Workspace companion — leaving the workspace for any
+  // dashboard page restores the nav panel
+  useEffect(() => {
+    if (overlayView !== null && sidebarMode === 'sessions') {
+      setSidebarMode('nav')
+    }
+  }, [overlayView, sidebarMode, setSidebarMode])
+
   if (!isSidebarOpen) return null
 
   const showSessions = sidebarMode === 'sessions' && AgentSessionsRail !== null
 
   return (
-      <aside className={clsx(
-        'relative z-30 bg-background-card border-r border-border overflow-y-auto flex-shrink-0',
-        showSessions ? 'w-96 min-w-[24rem]' : 'w-64 min-w-[16rem]'
-      )}>
+      <aside className="relative z-30 w-64 min-w-[16rem] bg-background-card border-r border-border overflow-y-auto flex-shrink-0">
         {showSessions && AgentSessionsRail ? (
           <Suspense fallback={<div className="p-4 font-mono text-xs text-text-muted">Loading sessions…</div>}>
             <AgentSessionsRail />
@@ -277,7 +282,9 @@ export function Sidebar() {
                 label="Agent Sessions"
                 onClick={() => {
                   dismissTooltip()
+                  // Sessions live in the Workspace: swap the panel and go there
                   setSidebarMode('sessions')
+                  closeOverlay()
                 }}
                 primary
               />

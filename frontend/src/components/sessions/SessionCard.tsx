@@ -76,7 +76,7 @@ export function SessionCard({
   return (
     <div
       className={clsx(
-        'card p-3 space-y-2 cursor-pointer',
+        'card p-2.5 space-y-2 cursor-pointer',
         !session.isPaused && session.status === 'running' && 'terminal-status-running',
         !session.isPaused && session.status === 'tool_calling' && 'terminal-status-tool-calling',
         !session.isPaused && session.status === 'waiting_input' && 'terminal-status-waiting-input'
@@ -100,8 +100,8 @@ export function SessionCard({
           {session.title}
         </span>
         <span className={clsx('status-dot flex-shrink-0', STATUS_DOT[session.status])} />
-        <span className="font-mono text-[10px] text-text-muted flex-shrink-0">
-          {session.status.replace('_', ' ')} · {timeAgo(session.lastActivity)}
+        <span className="font-mono text-[10px] text-text-muted flex-shrink-0 whitespace-nowrap" title={session.status.replace('_', ' ')}>
+          {timeAgo(session.lastActivity)}
         </span>
       </div>
 

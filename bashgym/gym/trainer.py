@@ -273,6 +273,16 @@ def _parse_session_distillation_metrics(line: str) -> dict[str, float]:
     return metrics
 
 
+def _remote_uploaded_basename(path_value: str | Path) -> str:
+    """Return the uploaded filename for a local path, independent of host OS."""
+
+    normalized = str(path_value).replace("\\", "/").rstrip("/")
+    basename = normalized.rsplit("/", 1)[-1]
+    if not basename:
+        raise ValueError(f"Remote upload path must include a filename: {path_value!r}")
+    return basename
+
+
 def _parse_trl_stats(text: str) -> dict[str, float] | None:
     """Extract all numeric key-value pairs from a TRL-printed dict line.
 
@@ -2778,7 +2788,7 @@ print(f"Student model saved to: {output_path}/final")
             )
         model_literal = json.dumps(model_name)
         if remote:
-            dataset_literal = json.dumps(Path(str(run.dataset_path)).name)
+            dataset_literal = json.dumps(_remote_uploaded_basename(run.dataset_path))
             output_literal = json.dumps(".")
         else:
             dataset_literal = json.dumps(str(run.dataset_path).replace("\\", "/"))

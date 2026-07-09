@@ -1,7 +1,13 @@
 import ast
 from pathlib import Path
 
-from bashgym.gym.trainer import Trainer, TrainerConfig, TrainingRun, TrainingStrategy
+from bashgym.gym.trainer import (
+    Trainer,
+    TrainerConfig,
+    TrainingRun,
+    TrainingStrategy,
+    _remote_uploaded_basename,
+)
 
 
 def test_session_distillation_script_uses_masked_hinted_kl_loss():
@@ -120,6 +126,11 @@ def test_session_distillation_script_uses_relative_paths_when_remote():
     ast.parse(script)
     assert 'DATASET_PATH = "records.jsonl"' in script
     assert 'OUTPUT_DIR = "."' in script
+
+
+def test_remote_uploaded_basename_handles_windows_paths_on_any_host():
+    assert _remote_uploaded_basename(r"C:\Users\Cade\records.jsonl") == "records.jsonl"
+    assert _remote_uploaded_basename("/tmp/bashgym/records.jsonl") == "records.jsonl"
 
 
 def test_remote_launch_spec_runs_session_distillation_script_without_unsloth():

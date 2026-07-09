@@ -33,6 +33,9 @@ import { ActivityFeedNode } from './nodes/ActivityFeedNode'
 import { TrainingRunNode } from './nodes/TrainingRunNode'
 import { EvalNode } from './nodes/EvalNode'
 import { DataDesignerNode } from './nodes/DataDesignerNode'
+import { HFInventoryNode } from './nodes/HFInventoryNode'
+import { AgentEndpointNode } from './nodes/AgentEndpointNode'
+import { ToolKitNode } from './nodes/ToolKitNode'
 import { DATA_NODE_TYPES } from './nodes/dataPanels'
 import type { IntegrationNodeData, DataNodeData } from './nodes/types'
 // Import adapters to trigger registration side effects
@@ -160,6 +163,9 @@ const nodeTypes = {
   training: TrainingRunNode,
   evals: EvalNode,
   designer: DataDesignerNode,
+  huggingface: HFInventoryNode,
+  agent: AgentEndpointNode,
+  toolkit: ToolKitNode,
 }
 
 // Register custom edge types
@@ -651,6 +657,7 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
         onMoveEnd={onMoveEnd}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
+        panActivationKeyCode={null}
         fitView={shouldFitView}
         fitViewOptions={{
           padding: 0.2

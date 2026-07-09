@@ -323,9 +323,13 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
 
       // Force resize sync after banner to update PTY cursor position
       setTimeout(() => {
-        fitAddon.fit()
-        const { cols, rows } = terminal
-        window.bashgym?.terminal.resize(id, cols, rows)
+        try {
+          fitAddon.fit()
+          const { cols, rows } = terminal
+          window.bashgym?.terminal.resize(id, cols, rows)
+        } catch {
+          // Terminal disposed before the banner fit fired
+        }
       }, 50)
     }
 
@@ -354,6 +358,34 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
     terminal.onResize(({ cols, rows }) => {
       window.bashgym?.terminal.resize(id, cols, rows)
     })
+
+    // Track if banner has been shown (only for first terminal)
+    let bannerShown = false
+    const shouldShowBanner = session?.showBanner ?? false
+
+    // Live output listener — registered only AFTER create/attach resolves so
+    // the replayed scrollback (snapshotted at create time in main) is written
+    // before any live chunks. Registering earlier double-writes bytes that
+    // arrive between subscription and the snapshot.
+    let removeDataListener: (() => void) | undefined
+    const ensureDataListener = () => {
+      if (removeDataListener) return
+      removeDataListener = window.bashgym?.terminal.onData(id, (data) => {
+        // Show banner after first output (shell is ready) - only for first terminal
+        if (shouldShowBanner && !bannerShown) {
+          bannerShown = true
+          // Small delay to let shell fully initialize
+          setTimeout(() => {
+            writeBanner()
+          }, 100)
+        }
+
+        terminal.write(data)
+
+        // Parse output for session state detection
+        parseTerminalOutput(data)
+      })
+    }
 
     // Create or re-attach the PTY process (main process keeps PTYs alive across remounts)
     const startPty = () => {
@@ -390,32 +422,12 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
             }
           }, 50)
         }
+        ensureDataListener()
       })
     }
 
     startPty()
     startPtyRef.current = startPty
-
-    // Track if banner has been shown (only for first terminal)
-    let bannerShown = false
-    const shouldShowBanner = session?.showBanner ?? false
-
-    // Listen for output
-    const removeDataListener = window.bashgym?.terminal.onData(id, (data) => {
-      // Show banner after first output (shell is ready) - only for first terminal
-      if (shouldShowBanner && !bannerShown) {
-        bannerShown = true
-        // Small delay to let shell fully initialize
-        setTimeout(() => {
-          writeBanner()
-        }, 100)
-      }
-
-      terminal.write(data)
-
-      // Parse output for session state detection
-      parseTerminalOutput(data)
-    })
 
     // Listen for exit — surface a restart overlay instead of leaving a dead pane
     const removeExitListener = window.bashgym?.terminal.onExit(id, (exitCode) => {
@@ -545,7 +557,13 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
             // Terminal became visible, refit after a short delay
             setTimeout(() => {
               fitWithScrollPreservation()
-              if (isActive) {
+              // Don't yank focus away from an input the user just clicked into
+              const active = document.activeElement as HTMLElement | null
+              const typingElsewhere =
+                active && active !== document.body &&
+                !active.closest('.xterm') &&
+                (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)
+              if (isActive && !typingElsewhere) {
                 terminalRef.current?.focus()
               }
             }, 50)
@@ -563,6 +581,13 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
   // Buffers chunks and strips ANSI codes before matching patterns
   const parseTerminalOutput = (data: string) => {
     outputBufferRef.current += data
+
+    // Sustained streams never hit the 80ms lull — cap the accumulator so a
+    // flood doesn't grow it unbounded and stall the flush. Only the tail
+    // matters for prompt/spinner/status detection.
+    if (outputBufferRef.current.length > 32_768) {
+      outputBufferRef.current = outputBufferRef.current.slice(-8_192)
+    }
 
     // Debounce: flush after 80ms of no new data (handles split PTY chunks)
     if (flushTimerRef.current) clearTimeout(flushTimerRef.current)

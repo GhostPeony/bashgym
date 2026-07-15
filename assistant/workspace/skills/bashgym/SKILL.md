@@ -23,9 +23,9 @@ project at a time; never infer a project from the most recent conversation.
 - Before activating local, SSH, or cloud compute, read [../training/references/compute-target-activation.md](../training/references/compute-target-activation.md).
 - For the general architecture boundary, read [references/architecture-overview.md](references/architecture-overview.md).
 - For evidence and promotion gates, read [references/eval-capabilities.md](references/eval-capabilities.md).
-- For a multi-iteration baseline/hypothesis loop, use the durable campaign
-  AutoResearch contract in `docs/training/autoresearch-campaign.md`; do not start
-  new research on the prototype `/api/autoresearch/*` surface.
+- For a multi-iteration baseline/hypothesis loop, use the durable campaign API,
+  `bashgym campaign doctor`, and campaign ledger surfaces; do not start new
+  research on the prototype `/api/autoresearch/*` surface.
 
 Do not treat this router as live run state. Inspect the API/CLI, run manifests, runtime processes, and current GBrain sources before stating what is active or what happened most recently.
 

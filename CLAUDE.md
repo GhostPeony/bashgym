@@ -538,9 +538,6 @@ nvidia-smi -l 1
 - **Merged model**: `~/.bashgym/models/{run_id}/merged/`, created only by `deployable` or `full_run`
 - **GGUF exports**: created only when the retention policy includes a deployable model and GGUF export is enabled
 
-See `docs/TRAINING_ARTIFACT_STORAGE.md` for the full storage and Hugging Face
-upload contract.
-
 **Training data:**
 - **Source traces**: `data/gold_traces/*.json`
 - **Generated examples**: `~/.bashgym/training_batches/train.jsonl`

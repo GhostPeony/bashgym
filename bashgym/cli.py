@@ -117,12 +117,12 @@ DOCS = {
         "summary": "Machine-readable CLI commands agents can use for setup and replay analysis.",
     },
     "experiment-ledger": {
-        "path": "docs/training/experiment-ledger.md",
-        "summary": "Project-isolated run identities, metrics, evaluations, agent context, and GBrain/cloud boundaries.",
+        "path": "docs/training/agent-cli.md",
+        "summary": "Project-isolated ledger inspection and bounded agent context commands.",
     },
     "artifacts": {
-        "path": "docs/TRAINING_ARTIFACT_STORAGE.md",
-        "summary": "Checkpoint retention, merged/GGUF storage, Hugging Face upload, and cleanup policy.",
+        "path": "docs/training/agent-cli.md",
+        "summary": "Training launch, retention, Hugging Face upload, and cleanup controls.",
     },
     "terminal-rl-recipe": {
         "path": "docs/training/tmax-terminal-rl-recipe.md",

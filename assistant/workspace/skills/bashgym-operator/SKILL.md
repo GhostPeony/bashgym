@@ -99,8 +99,9 @@ be used as the authoritative campaign record.
    an authorized pause/cancel. Preserve the campaign, ledger, branches, and sealed
    evidence for restart and review.
 
-Read `docs/training/autoresearch-campaign.md` for the first-slice contract and
-the remaining real NeMo RL/Gym adapter seams.
+Use `bashgym campaign doctor`, the authenticated campaign API, and the durable
+ledger projection as the executable AutoResearch contract. Do not rely on local
+planning documents as runtime authority.
 
 ## Curate GBrain
 

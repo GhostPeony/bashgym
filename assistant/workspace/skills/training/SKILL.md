@@ -187,8 +187,8 @@ those are separate, explicitly authorized execution lanes.
 For project history and agent synthesis, use `bashgym ledger projects`, `ledger
 context`, `ledger runs`, `ledger run`, `ledger trend`, `ledger evaluations`,
 `ledger compare`, `ledger events`, and `ledger health`. Compare results only when
-they share the exact evaluation-suite ID. Read
-`docs/training/experiment-ledger.md` for the identity and GBrain/cloud boundary.
+they share the exact evaluation-suite ID. Keep detailed evidence in BashGym and
+publish only bounded summaries and artifact references to external knowledge sinks.
 
 After an evaluation or report completes, register its immutable suite, result,
 artifact, and decision records through `/api/ledger/projects/{project_id}/*`,

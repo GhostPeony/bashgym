@@ -1,0 +1,54 @@
+{
+  "proposal_id": "baseline-control-smoke-1",
+  "hypothesis": "The bundled fake executor can complete one sealed, restart-safe campaign action.",
+  "evidence_references": [],
+  "study_family": "autoresearch-control-smoke",
+  "primary_variable": "executor_path",
+  "controlled_variables": [
+    "fake_steps",
+    "data_scope",
+    "metric_source"
+  ],
+  "expected_outcome": "The worker seals artifacts and ingests a bounded loss series.",
+  "falsification_criterion": "No terminal attempt, sealed artifact, or metric series is persisted.",
+  "estimated_cost": 0.01,
+  "priority": 50,
+  "prerequisite_study_ids": [],
+  "dataset_recipe": {
+    "schema_version": "recipe.v1",
+    "data_scope_id": "autoresearch-control-smoke"
+  },
+  "training_recipe": {
+    "schema_version": "recipe.v1",
+    "runtime": {
+      "executor_kind": "fake",
+      "budget_unit": "gpu_hours",
+      "budget_reservation": 0.01,
+      "fake_steps": 4
+    }
+  },
+  "evaluation_recipe": {
+    "schema_version": "recipe.v1",
+    "evaluation_suite_id": "autoresearch-control-smoke-v1",
+    "quality_claim": false
+  },
+  "required_capabilities": [
+    "compute.smoke"
+  ],
+  "stage_plan": {
+    "items": [
+      {
+        "stage": "smoke_training",
+        "disposition": "required",
+        "reason": "Prove orchestration, sealing, and metric ingestion only.",
+        "input_contract": {
+          "quality_claim": false
+        },
+        "output_contract": {
+          "requires_sealed_artifacts": true
+        }
+      }
+    ]
+  },
+  "rationale": "This bounded smoke verifies the durable campaign path without claiming model quality."
+}

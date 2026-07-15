@@ -1,95 +1,155 @@
 import { useState } from 'react'
-import { Plus, X, LayoutGrid } from 'lucide-react'
+import { Check, LayoutGrid, Pencil, Plus, X } from 'lucide-react'
 import { clsx } from 'clsx'
-import { useTerminalStore, useWorkspaceStore } from '../../stores'
+import { useWorkspaceStore } from '../../stores'
+import type { WorkspaceSessionGroup } from '../../stores'
 
-/**
- * Workspace switcher: one chip per named canvas workspace. Click switches,
- * double-click renames inline, hover × deletes (background workspaces only).
- * Background workspaces keep their PTYs alive but render nothing.
- */
-export function WorkspaceStrip() {
+interface WorkspaceStripProps {
+  groups: WorkspaceSessionGroup[]
+}
+
+/** Workspace ownership and health stay visible above the live-session feed. */
+export function WorkspaceStrip({ groups }: WorkspaceStripProps) {
   const { workspaces, activeWorkspaceId, switchWorkspace, createWorkspace, renameWorkspace, deleteWorkspace } =
     useWorkspaceStore()
-  useTerminalStore((s) => s.sessionsVersion)
-  const sessions = useTerminalStore.getState().sessions
-  const hasRunning = Array.from(sessions.values()).some(
-    (s) => s.status === 'running' || s.status === 'tool_calling'
-  )
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [draftName, setDraftName] = useState('')
+  const [creating, setCreating] = useState(false)
 
-  const [renamingId, setRenamingId] = useState<string | null>(null)
-  const [renameValue, setRenameValue] = useState('')
-
-  const handleCreate = () => {
-    const name = window.prompt('Workspace name?')
-    if (name?.trim()) createWorkspace(name, { activate: true })
+  const commitName = () => {
+    const name = draftName.trim()
+    if (name && editingId) renameWorkspace(editingId, name)
+    if (name && creating) createWorkspace(name, { activate: true })
+    setEditingId(null)
+    setCreating(false)
+    setDraftName('')
   }
 
-  const commitRename = () => {
-    if (renamingId && renameValue.trim()) renameWorkspace(renamingId, renameValue)
-    setRenamingId(null)
+  const cancelEdit = () => {
+    setEditingId(null)
+    setCreating(false)
+    setDraftName('')
   }
 
   return (
-    <div className="flex items-center gap-1 flex-wrap">
-      <LayoutGrid className="w-3 h-3 text-text-muted flex-shrink-0" />
-      {workspaces.map((ws) => {
-        const isActive = ws.id === activeWorkspaceId
-        if (renamingId === ws.id) {
+    <section aria-labelledby="workspace-switcher-title" className="space-y-1.5">
+      <div className="flex items-center gap-2">
+        <LayoutGrid className="w-3.5 h-3.5 text-accent" />
+        <h2 id="workspace-switcher-title" className="font-mono text-[10px] font-bold uppercase tracking-widest text-text-primary flex-1">
+          Workspaces
+        </h2>
+        <button
+          type="button"
+          onClick={() => {
+            setCreating(true)
+            setEditingId(null)
+            setDraftName('')
+          }}
+          className="node-btn"
+          title="Create workspace"
+          aria-label="Create workspace"
+        >
+          <Plus className="w-3 h-3" />
+        </button>
+      </div>
+
+      <div className="space-y-1">
+        {workspaces.map((workspace) => {
+          const isActive = workspace.id === activeWorkspaceId
+          const summary = groups.find((group) => group.workspace.id === workspace.id)
+          const total = summary?.sessions.length ?? 0
+          const live = summary?.liveCount ?? 0
+          const waiting = summary?.waitingCount ?? 0
+
+          if (editingId === workspace.id) {
+            return (
+              <div key={workspace.id} className="flex items-center gap-1">
+                <input
+                  value={draftName}
+                  autoFocus
+                  onChange={(event) => setDraftName(event.target.value)}
+                  onBlur={commitName}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') commitName()
+                    if (event.key === 'Escape') cancelEdit()
+                  }}
+                  className="input !py-1 !px-2 !text-[10px] font-mono flex-1 min-w-0"
+                  aria-label={`Rename ${workspace.name}`}
+                />
+                <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={commitName} className="node-btn" aria-label="Save workspace name">
+                  <Check className="w-3 h-3" />
+                </button>
+              </div>
+            )
+          }
+
           return (
-            <input
-              key={ws.id}
-              value={renameValue}
-              autoFocus
-              onChange={(e) => setRenameValue(e.target.value)}
-              onBlur={commitRename}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') commitRename()
-                if (e.key === 'Escape') setRenamingId(null)
-              }}
-              className="input !py-0.5 !px-1.5 !text-[10px] font-mono w-24"
-            />
-          )
-        }
-        return (
-          <div
-            key={ws.id}
-            onClick={() => switchWorkspace(ws.id)}
-            onDoubleClick={() => {
-              setRenamingId(ws.id)
-              setRenameValue(ws.name)
-            }}
-            role="button"
-            tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') switchWorkspace(ws.id)
-            }}
-            className={clsx(
-              'group node-btn node-btn-wide cursor-pointer select-none !inline-flex items-center gap-1',
-              isActive && 'node-btn-accent'
-            )}
-            title={isActive ? `${ws.name} (active) — double-click to rename` : `Switch to ${ws.name}`}
-          >
-            {isActive && hasRunning && <span className="status-dot status-success" />}
-            <span className="truncate max-w-[90px]">{ws.name}</span>
-            {!isActive && workspaces.length > 1 && (
-              <span
-                onClick={(e) => {
-                  e.stopPropagation()
-                  void deleteWorkspace(ws.id)
-                }}
-                className="opacity-0 group-hover:opacity-100 transition-opacity text-text-muted hover:text-status-error"
-                title={`Delete workspace "${ws.name}"`}
+            <div key={workspace.id} className="group flex items-center gap-1 min-w-0">
+              <button
+                type="button"
+                onClick={() => switchWorkspace(workspace.id)}
+                className={clsx(
+                  'node-btn node-btn-wide flex-1 !justify-start min-w-0',
+                  isActive ? 'node-btn-accent' : null
+                )}
+                aria-current={isActive ? 'page' : undefined}
+                title={isActive ? `${workspace.name} is active` : `Switch to ${workspace.name}`}
               >
-                <X className="w-2.5 h-2.5" />
-              </span>
-            )}
+                <span className={clsx('status-dot flex-shrink-0', live > 0 ? 'status-success' : waiting > 0 ? 'status-warning' : '')} />
+                <span className="truncate flex-1 text-left">{workspace.name}</span>
+                <span className="text-[9px] opacity-70 flex-shrink-0">
+                  {live > 0 ? `${live} live` : `${total} saved`}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingId(workspace.id)
+                  setCreating(false)
+                  setDraftName(workspace.name)
+                }}
+                className="node-btn"
+                title={`Rename ${workspace.name}`}
+                aria-label={`Rename ${workspace.name}`}
+              >
+                <Pencil className="w-3 h-3" />
+              </button>
+              {!isActive && workspaces.length > 1 ? (
+                <button
+                  type="button"
+                  onClick={() => void deleteWorkspace(workspace.id)}
+                  className="node-btn hover:!text-status-error"
+                  title={`Delete ${workspace.name}`}
+                  aria-label={`Delete ${workspace.name}`}
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              ) : null}
+            </div>
+          )
+        })}
+
+        {creating ? (
+          <div className="flex items-center gap-1">
+            <input
+              value={draftName}
+              autoFocus
+              onChange={(event) => setDraftName(event.target.value)}
+              onBlur={commitName}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') commitName()
+                if (event.key === 'Escape') cancelEdit()
+              }}
+              className="input !py-1 !px-2 !text-[10px] font-mono flex-1 min-w-0"
+              placeholder="Workspace name"
+              aria-label="New workspace name"
+            />
+            <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={commitName} className="node-btn" aria-label="Create workspace">
+              <Check className="w-3 h-3" />
+            </button>
           </div>
-        )
-      })}
-      <button onClick={handleCreate} className="node-btn" title="New workspace">
-        <Plus className="w-3 h-3" />
-      </button>
-    </div>
+        ) : null}
+      </div>
+    </section>
   )
 }

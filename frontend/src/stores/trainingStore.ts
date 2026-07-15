@@ -1,5 +1,15 @@
 import { create } from 'zustand'
 import { trainingApi } from '../services/api'
+import { useActivityStore } from './activityStore'
+import { useCanvasOrchestratorStore } from './canvasOrchestratorStore'
+import { useTerminalStore } from './terminalStore'
+import {
+  createTrainingCorrelationId,
+  inferTrainingComputeTarget,
+  resolveTrainingOrigin,
+  trainingQueuedPayloadFromResponse,
+  type TrainingOrigin,
+} from './trainingCanvasLifecycle'
 
 export type TrainingStrategy =
   | 'sft'
@@ -10,6 +20,8 @@ export type TrainingStrategy =
   | 'cascade'
 export type TrainingStatus = 'idle' | 'starting' | 'running' | 'paused' | 'completed' | 'failed'
 export type TrainingProfile = 'default' | 'terminal_rl_tmax_like'
+export type ArtifactRetention = 'adapter_only' | 'adapter_checkpoint' | 'deployable' | 'full_run'
+export type HFUploadArtifact = 'auto' | 'adapter' | 'merged'
 
 export interface TrainingMetrics {
   loss: number
@@ -48,6 +60,8 @@ export interface TrainingConfig {
   gradientAccumulationSteps: number
   maxSeqLength: number
   saveSteps: number
+  checkpointLimit?: number
+  artifactRetention?: ArtifactRetention
   // LoRA settings
   loraRank?: number
   loraAlpha?: number
@@ -98,6 +112,8 @@ export interface TrainingConfig {
   // Repo selection
   selectedRepos?: string[]  // Repos to include in training (empty = all)
   // Training backend
+  useNemoCustomizer?: boolean
+  /** @deprecated Compatibility alias for hosted NeMo Customizer. */
   useNemoGym?: boolean
   useRemoteSSH?: boolean
   deviceId?: string
@@ -115,6 +131,9 @@ export interface TrainingConfig {
   autoPushHF?: boolean
   hfRepoName?: string
   hfPrivate?: boolean
+  hfUploadArtifact?: HFUploadArtifact
+  autoExportGGUF?: boolean
+  ggufQuantization?: string
 }
 
 export interface TrainingRun {
@@ -133,6 +152,11 @@ export interface TrainingLog {
   timestamp: number
   message: string
   level: 'info' | 'warning' | 'error'
+}
+
+export interface TrainingLaunchOptions {
+  origin?: TrainingOrigin
+  correlationId?: string
 }
 
 export interface GrpoMetric {
@@ -179,7 +203,7 @@ interface TrainingState {
   datasetPathOverride: string | null
 
   // Actions
-  startTraining: (config: TrainingConfig) => Promise<string>
+  startTraining: (config: TrainingConfig, options?: TrainingLaunchOptions) => Promise<string>
   pauseTraining: () => Promise<void>
   resumeTraining: () => Promise<void>
   stopTraining: () => Promise<void>
@@ -263,7 +287,11 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
   baseModelOverride: null,
   datasetPathOverride: null,
 
-  startTraining: async (config: TrainingConfig) => {
+  startTraining: async (config: TrainingConfig, options) => {
+    const origin = options?.origin ?? resolveTrainingOrigin(useTerminalStore.getState())
+    const correlationId = options?.correlationId || createTrainingCorrelationId()
+    const computeTarget = inferTrainingComputeTarget(config)
+
     // Set initial state
     const tempRunId = `run-${Date.now()}`
     const tempRun: TrainingRun = {
@@ -295,6 +323,8 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
         gradient_accumulation_steps: config.gradientAccumulationSteps,
         max_seq_length: config.maxSeqLength,
         save_steps: config.saveSteps,
+        checkpoint_limit: config.checkpointLimit,
+        artifact_retention: config.artifactRetention,
         // LoRA
         lora_rank: config.loraRank,
         lora_alpha: config.loraAlpha,
@@ -343,9 +373,12 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
         session_distillation_reader: config.sessionDistillationReader,
         // Backend & repos
         selected_repos: config.selectedRepos,
-        use_nemo_gym: config.useNemoGym,
+        use_nemo_customizer: config.useNemoCustomizer ?? config.useNemoGym,
         use_remote_ssh: config.useRemoteSSH,
         device_id: config.deviceId,
+        compute_target: computeTarget,
+        origin,
+        correlation_id: correlationId,
         // Data source
         data_source: config.dataSource,
         security_dataset_type: config.securityDatasetType,
@@ -360,15 +393,40 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
         auto_push_hf: config.autoPushHF,
         hf_repo_name: config.hfRepoName,
         hf_private: config.hfPrivate,
+        hf_upload_artifact: config.hfUploadArtifact,
+        auto_export_gguf: config.autoExportGGUF,
+        gguf_quantization: config.ggufQuantization,
       })
 
       if (response.ok && response.data) {
         const apiRunId = response.data.run_id
+        const status = response.data.status === 'pending' ? 'starting' : response.data.status
         // Update with actual run ID from backend
         set((state) => ({
-          currentRun: state.currentRun ? { ...state.currentRun, id: apiRunId, status: 'running' } : null,
-          runs: state.runs.map(r => r.id === tempRunId ? { ...r, id: apiRunId, status: 'running' } : r)
+          currentRun: state.currentRun ? { ...state.currentRun, id: apiRunId, status } : null,
+          runs: state.runs.map(r => r.id === tempRunId ? { ...r, id: apiRunId, status } : r)
         }))
+
+        const queuedPayload = trainingQueuedPayloadFromResponse(response.data, {
+          strategy: config.strategy,
+          baseModel: config.baseModel,
+          datasetPath: config.datasetPath,
+          origin,
+          correlationId,
+          computeTarget,
+        })
+
+        // The POST itself is authoritative. WebSocket delivery can now miss a
+        // queued event without leaving the canvas or Activity node unaware.
+        useActivityStore.getState().addEvent(
+          'training:queued',
+          queuedPayload as unknown as Record<string, unknown>,
+        )
+        try {
+          useCanvasOrchestratorStore.getState().handleTrainingQueued(queuedPayload)
+        } catch (canvasError) {
+          console.warn('[training] unable to materialize canvas run node', canvasError)
+        }
         return apiRunId
       } else {
         // API call failed

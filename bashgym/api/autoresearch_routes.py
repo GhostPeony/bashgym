@@ -160,16 +160,32 @@ async def start_autoresearch(body: AutoResearchRequest, request: Request):
                         f"[AutoResearch] Real mode: train={dataset_path}, val={val_dataset_path}"
                     )
                 else:
-                    logger.warning(
-                        "[AutoResearch] No examples from gold traces, falling back to simulate"
+                    raise HTTPException(
+                        status_code=422,
+                        detail={
+                            "code": "autoresearch_real_prerequisites_missing",
+                            "message": "Real AutoResearch requires usable gold-trace examples.",
+                        },
                     )
-                    ar_config.mode = "simulate"
             else:
-                logger.warning("[AutoResearch] No gold traces found, falling back to simulate")
-                ar_config.mode = "simulate"
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "autoresearch_real_prerequisites_missing",
+                        "message": "Real AutoResearch requires a configured gold-trace dataset.",
+                    },
+                )
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"[AutoResearch] Failed to generate dataset for real mode: {e}")
-            ar_config.mode = "simulate"
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "autoresearch_real_prerequisites_invalid",
+                    "message": "Real AutoResearch prerequisites could not be prepared.",
+                },
+            ) from e
 
     researcher = AutoResearcher(
         ar_config,
@@ -233,6 +249,8 @@ async def start_autoresearch(body: AutoResearchRequest, request: Request):
         "status": "started",
         "max_experiments": ar_config.max_experiments,
         "search_params": ar_config.search_params,
+        "execution_path": "prototype_compatibility",
+        "durable": False,
     }
 
 

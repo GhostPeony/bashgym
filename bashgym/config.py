@@ -13,11 +13,14 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-# Try to load .env file if python-dotenv is available
+# Load checkout configuration explicitly. A root .env.local is an operator-owned
+# local override; frontend/.env.local remains Vite-only and is never read here.
 try:
     from dotenv import load_dotenv
 
-    load_dotenv()
+    _PROJECT_ROOT = Path(__file__).resolve().parent.parent
+    load_dotenv(_PROJECT_ROOT / ".env")
+    load_dotenv(_PROJECT_ROOT / ".env.local", override=True)
 except ImportError:
     pass
 
@@ -106,9 +109,7 @@ class APISettings:
     nim_endpoint: str = field(
         default_factory=lambda: get_env("NIM_ENDPOINT", "https://integrate.api.nvidia.com/v1")
     )
-    nim_model: str = field(
-        default_factory=lambda: get_env("NIM_MODEL", "qwen/qwen2.5-coder-72b-instruct")
-    )
+    nim_model: str = field(default_factory=lambda: get_env("NIM_MODEL"))
 
     def validate(self) -> list[str]:
         """Validate required API keys are present."""
@@ -151,18 +152,11 @@ class HFHardware(Enum):
 
 
 def get_hf_token() -> str:
-    """Get HuggingFace token from env or stored secrets."""
-    # Environment variable takes precedence
-    env_token = get_env("HF_TOKEN")
-    if env_token:
-        return env_token
-
-    # Check stored secrets
+    """Get the active HuggingFace token through the shared secret resolver."""
     try:
         from bashgym.secrets import get_secret
 
-        stored = get_secret("HF_TOKEN")
-        return stored or ""
+        return get_secret("HF_TOKEN") or ""
     except ImportError:
         return ""
 
@@ -318,7 +312,12 @@ class TrainingSettings:
         default_factory=lambda: get_env_bool("USE_FLASH_ATTENTION", True)
     )
 
-    # Cloud training
+    # Cloud NeMo Customizer. USE_NEMO_GYM remains a compatibility fallback only.
+    use_nemo_customizer: bool = field(
+        default_factory=lambda: get_env_bool(
+            "USE_NEMO_CUSTOMIZER", get_env_bool("USE_NEMO_GYM", False)
+        )
+    )
     use_nemo_gym: bool = field(default_factory=lambda: get_env_bool("USE_NEMO_GYM", False))
 
 
@@ -608,6 +607,9 @@ class Settings:
     orchestration_enabled: bool = field(
         default_factory=lambda: get_env_bool("ORCHESTRATION_ENABLED", False)
     )
+    campaigns_enabled: bool = field(
+        default_factory=lambda: get_env_bool("CAMPAIGNS_ENABLED", True)
+    )
 
     # Web hosting
     mode: str = field(
@@ -714,6 +716,9 @@ ENV_TEMPLATE = """# Bash Gym Configuration
 # Environment
 ENVIRONMENT=development
 DEBUG=false
+
+# Feature flags
+CAMPAIGNS_ENABLED=true
 
 # API Keys (Required)
 ANTHROPIC_API_KEY=your-anthropic-key-here

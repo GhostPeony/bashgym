@@ -44,17 +44,21 @@ $jobs = @()
 
 try {
     # --- Backend ---
-    if (-not $FrontendOnly) {
+    # Electron main owns its authenticated FastAPI child so the per-launch
+    # bootstrap secret never crosses through the renderer or a shell argument.
+    $electronOwnsBackend = $Electron -and -not $BackendOnly
+    if (-not $FrontendOnly -and -not $electronOwnsBackend) {
         Write-Host "  [API]      http://localhost:$Port/api" -ForegroundColor Cyan
         Write-Host "  [Docs]     http://localhost:$Port/docs" -ForegroundColor DarkCyan
         Write-Host "  [WS]       ws://localhost:$Port/ws" -ForegroundColor DarkCyan
 
-        $backendJob = Start-Job -Name "backend" -ScriptBlock {
-            param($root, $port)
-            Set-Location $root
-            $env:PYTHONUTF8 = "1"  # UTF-8 console for emoji/rich output (NeMo Data Designer)
-            & python run_backend.py --port $port 2>&1
-        } -ArgumentList $ProjectRoot, $Port
+            $backendJob = Start-Job -Name "backend" -ScriptBlock {
+                param($root, $port)
+                Set-Location $root
+                $env:PYTHONUTF8 = "1"  # UTF-8 console for emoji/rich output (NeMo Data Designer)
+                & python run_backend.py --port $port 2>&1
+                if ($LASTEXITCODE -ne 0) { throw "Backend exited with code $LASTEXITCODE" }
+            } -ArgumentList $ProjectRoot, $Port
 
         $jobs += $backendJob
     }
@@ -66,16 +70,19 @@ try {
         if ($Electron) {
             Write-Host "  [Electron] starting..." -ForegroundColor Magenta
             $frontendJob = Start-Job -Name "frontend" -ScriptBlock {
-                param($dir)
+                param($dir, $port)
                 Set-Location $dir
+                $env:BASHGYM_API_URL = "http://127.0.0.1:$port"
                 & npm run electron:dev 2>&1
-            } -ArgumentList $frontendDir
+                if ($LASTEXITCODE -ne 0) { throw "Electron host exited with code $LASTEXITCODE" }
+            } -ArgumentList $frontendDir, $Port
         } else {
             Write-Host "  [Frontend] http://localhost:5173" -ForegroundColor Green
             $frontendJob = Start-Job -Name "frontend" -ScriptBlock {
                 param($dir)
                 Set-Location $dir
                 & npm run dev 2>&1
+                if ($LASTEXITCODE -ne 0) { throw "Frontend exited with code $LASTEXITCODE" }
             } -ArgumentList $frontendDir
         }
 
@@ -105,6 +112,14 @@ try {
                 }
             }
         }
+        $activeJobs = @($jobs | Where-Object { $_.State -in @('NotStarted', 'Running', 'Blocked') })
+        if ($jobs.Count -gt 0 -and $activeJobs.Count -eq 0) {
+            $failedJobs = @($jobs | Where-Object { $_.State -eq 'Failed' })
+            if ($failedJobs.Count -gt 0) {
+                throw "One or more BashGym services failed."
+            }
+            break
+        }
         Start-Sleep -Milliseconds 500
     }
 }
@@ -118,10 +133,13 @@ finally {
     }
 
     # Kill any leftover uvicorn on our port
-    $portPid = (Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue).OwningProcess | Select-Object -Unique
-    if ($portPid) {
-        foreach ($pid in $portPid) {
-            Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+    $portProcessIds = (Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue).OwningProcess | Select-Object -Unique
+    if ($portProcessIds) {
+        foreach ($processId in $portProcessIds) {
+            $portProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $processId" -ErrorAction SilentlyContinue
+            if ($portProcess.CommandLine -match '(?i)(run_backend\.py|uvicorn|bashgym\.api\.routes:create_app)') {
+                Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+            }
         }
     }
 

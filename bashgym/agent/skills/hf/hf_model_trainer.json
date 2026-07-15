@@ -11,7 +11,7 @@
         "properties": {
           "model_id": {
             "type": "string",
-            "description": "Base model to fine-tune (e.g. 'Qwen/Qwen2.5-Coder-7B-Instruct')."
+            "description": "Explicit operator-selected trainable base model to fine-tune; never infer a packaged default."
           },
           "dataset_id": {
             "type": "string",

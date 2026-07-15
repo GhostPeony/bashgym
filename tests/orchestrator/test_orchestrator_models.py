@@ -56,6 +56,8 @@ class TestLLMConfig:
     def test_auto_resolve_model_per_provider(self):
         """Each provider should auto-resolve its default model."""
         for provider, defaults in _PROVIDER_DEFAULTS.items():
+            if not defaults["model"]:
+                continue
             config = LLMConfig(provider=LLMProvider(provider))
             assert (
                 config.model == defaults["model"]
@@ -68,13 +70,14 @@ class TestLLMConfig:
 
     def test_get_base_url_from_defaults(self):
         """Should resolve base URL from provider defaults."""
-        config = LLMConfig(provider=LLMProvider.OLLAMA)
+        config = LLMConfig(provider=LLMProvider.OLLAMA, model="installed-model")
         assert config.get_base_url() == "http://localhost:11434/api/chat"
 
     def test_explicit_base_url_overrides(self):
         """Explicit base_url should override provider default."""
         config = LLMConfig(
             provider=LLMProvider.OLLAMA,
+            model="installed-model",
             base_url="http://myserver:11434/api/chat",
         )
         assert config.get_base_url() == "http://myserver:11434/api/chat"
@@ -93,8 +96,16 @@ class TestLLMConfig:
 
     def test_ollama_no_api_key_needed(self):
         """Ollama should return empty string for API key."""
-        config = LLMConfig(provider=LLMProvider.OLLAMA)
+        config = LLMConfig(provider=LLMProvider.OLLAMA, model="installed-model")
         assert config.get_api_key() == ""
+
+    def test_ollama_requires_explicit_or_installed_environment_model(self):
+        with patch.dict("os.environ", {}, clear=True):
+            with pytest.raises(ValueError, match="explicit model"):
+                LLMConfig(provider=LLMProvider.OLLAMA)
+
+        with patch.dict("os.environ", {"OLLAMA_MODEL": "installed-model"}, clear=True):
+            assert LLMConfig(provider=LLMProvider.OLLAMA).model == "installed-model"
 
     def test_to_dict_serialization(self):
         """Should serialize to dict correctly."""

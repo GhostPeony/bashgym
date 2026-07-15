@@ -48,7 +48,7 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
-if $BACKEND; then
+if $BACKEND && { ! $ELECTRON || ! $FRONTEND; }; then
   echo "Starting backend on port $PORT..."
   python run_backend.py --port "$PORT" &
   PIDS+=($!)
@@ -57,7 +57,7 @@ fi
 if $FRONTEND; then
   if $ELECTRON; then
     echo "Starting Electron app..."
-    (cd frontend && npm run electron:dev) &
+    (cd frontend && BASHGYM_API_URL="http://127.0.0.1:$PORT" npm run electron:dev) &
   else
     echo "Starting frontend on port 5173..."
     (cd frontend && npm run dev) &

@@ -2,7 +2,25 @@ import { app, BrowserWindow, ipcMain, shell, Menu, webContents, clipboard, nativ
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
+import { spawn, type ChildProcess } from 'node:child_process'
 import type { IPty } from 'node-pty'
+import { buildAgentBridgeLaunchCommand, type AgentBridgeLaunchRequest } from './agentBridge'
+import {
+  buildBackendChildEnvironment,
+  CampaignBridgeClient,
+  MANAGED_BACKEND_STARTUP_TIMEOUT_MS,
+  type CampaignBody,
+  type CampaignMethod,
+  type CampaignQuery,
+  createDesktopBootstrapToken,
+  resolveCampaignApiOrigin,
+} from './campaignBridge'
+import {
+  buildPowerShellArgs,
+  TerminalIpcBatcher,
+  TerminalScrollbackBuffer,
+  TerminalSizeTracker,
+} from './terminalTransport'
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling
 // This is only needed for production builds with Squirrel installer
@@ -22,9 +40,12 @@ let mainWindow: BrowserWindow | null = null
 // reloads and window close; scrollback is retained for re-attach replay.
 interface PtySession {
   pty: IPty
-  /** Raw output chunks, trimmed to MAX_BUFFER_BYTES — replayed on re-attach */
-  buffer: string[]
-  bufferBytes: number
+  /** Raw output, bounded and replayed on re-attach. */
+  scrollback: TerminalScrollbackBuffer
+  /** Short-frame output batching prevents redraw IPC floods. */
+  outputBatcher: TerminalIpcBatcher
+  /** Last applied ConPTY size, used to suppress duplicate full-screen TUI redraws. */
+  size: TerminalSizeTracker
   cwd: string
   createdAt: number
   exited: boolean
@@ -33,25 +54,139 @@ interface PtySession {
 
 const MAX_BUFFER_BYTES = 400_000 // ~400KB of scrollback per session
 const ptySessions: Map<string, PtySession> = new Map()
+const agentBridgeArtifacts: Map<string, Set<string>> = new Map()
 
-function appendToBuffer(session: PtySession, data: string) {
-  session.buffer.push(data)
-  session.bufferBytes += data.length
-  while (session.bufferBytes > MAX_BUFFER_BYTES && session.buffer.length > 1) {
-    const removed = session.buffer.shift()
-    session.bufferBytes -= removed?.length ?? 0
-  }
+function registerAgentBridgeArtifact(terminalId: string, artifactPath: string) {
+  const artifacts = agentBridgeArtifacts.get(terminalId) ?? new Set<string>()
+  artifacts.add(artifactPath)
+  agentBridgeArtifacts.set(terminalId, artifacts)
+}
+
+function cleanupAgentBridgeArtifacts(terminalId: string) {
+  const artifacts = agentBridgeArtifacts.get(terminalId)
+  if (!artifacts) return
+  artifacts.forEach((artifactPath) => {
+    try { fs.unlinkSync(artifactPath) } catch { /* already removed */ }
+  })
+  agentBridgeArtifacts.delete(terminalId)
 }
 
 function killAllPtys() {
-  ptySessions.forEach((s) => {
+  ptySessions.forEach((s, id) => {
+    s.outputBatcher.dispose()
     try { s.pty.kill() } catch { /* already dead */ }
+    cleanupAgentBridgeArtifacts(id)
   })
   ptySessions.clear()
 }
 
 // Determine if we're in development
 const isDev = !app.isPackaged
+let campaignApiOrigin: string
+try {
+  campaignApiOrigin = resolveCampaignApiOrigin(process.env.BASHGYM_API_URL)
+} catch {
+  // Invalid/non-loopback configuration must not crash unrelated desktop features.
+  // Campaign auth remains bound to a managed loopback child.
+  campaignApiOrigin = resolveCampaignApiOrigin()
+}
+const desktopBootstrapToken = createDesktopBootstrapToken()
+const campaignBridgeClient = new CampaignBridgeClient(
+  campaignApiOrigin,
+  desktopBootstrapToken,
+)
+let backendProcess: ChildProcess | null = null
+let campaignBackendReady: Promise<void> | null = null
+
+function resolveBackendRoot(): string {
+  const candidates = [
+    process.env.BASHGYM_PROJECT_ROOT,
+    path.resolve(process.cwd(), '..'),
+    process.cwd(),
+    path.resolve(__dirname, '../..'),
+    path.resolve(process.resourcesPath, '..'),
+  ].filter((candidate): candidate is string => Boolean(candidate))
+  const root = candidates.find((candidate) => (
+    fs.existsSync(path.join(candidate, 'bashgym', 'api', 'routes.py'))
+  ))
+  if (!root) throw new Error('BashGym backend root is unavailable')
+  return root
+}
+
+async function backendIsReachable(): Promise<boolean> {
+  try {
+    const response = await fetch(`${campaignApiOrigin}/api/health`, {
+      signal: AbortSignal.timeout(500),
+    })
+    return response.ok
+  } catch {
+    return false
+  }
+}
+
+async function startManagedBackend(): Promise<void> {
+  if (await backendIsReachable()) {
+    throw new Error('BashGym managed backend port is already in use')
+  }
+  const root = resolveBackendRoot()
+  const url = new URL(campaignApiOrigin)
+  const pythonCommand = process.env.BASHGYM_PYTHON || 'python'
+  let spawnFailed = false
+  backendProcess = spawn(
+    pythonCommand,
+    [
+      '-m',
+      'uvicorn',
+      'bashgym.api.routes:create_app',
+      '--factory',
+      '--host',
+      url.hostname === 'localhost' ? '127.0.0.1' : url.hostname,
+      '--port',
+      url.port || '8003',
+    ],
+    {
+      cwd: root,
+      env: buildBackendChildEnvironment(process.env, desktopBootstrapToken),
+      stdio: 'ignore',
+      windowsHide: true,
+    },
+  )
+  backendProcess.once('error', () => {
+    spawnFailed = true
+  })
+  backendProcess.once('exit', () => {
+    backendProcess = null
+    campaignBridgeClient.dispose()
+  })
+  const deadline = Date.now() + MANAGED_BACKEND_STARTUP_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    if (spawnFailed || backendProcess?.exitCode !== null) {
+      stopManagedBackend()
+      throw new Error('BashGym managed backend exited during startup')
+    }
+    if (await backendIsReachable()) return
+    await new Promise((resolve) => setTimeout(resolve, 150))
+  }
+  stopManagedBackend()
+  throw new Error('BashGym managed backend did not become ready')
+}
+
+function initializeManagedCampaignBackend(): Promise<void> {
+  if (!campaignBackendReady) {
+    campaignBackendReady = (async () => {
+      await startManagedBackend()
+      await campaignBridgeClient.initialize()
+    })()
+  }
+  return campaignBackendReady
+}
+
+function stopManagedBackend(): void {
+  campaignBridgeClient.dispose()
+  if (!backendProcess) return
+  try { backendProcess.kill() } catch { /* already stopped */ }
+  backendProcess = null
+}
 
 // Credentials directory for secure storage
 const credentialsDir = path.join(app.getPath('userData'), 'credentials')
@@ -150,7 +285,11 @@ function createWindow() {
   if (isDev) {
     const devServerUrl = process.env.BASHGYM_DEV_SERVER_URL || 'http://localhost:5190'
     mainWindow.loadURL(devServerUrl)
-    mainWindow.webContents.openDevTools() // TEMP: debug black screen
+    // DevTools adds substantial input-tail latency to xterm/ConPTY traffic.
+    // Keep it available for targeted debugging without attaching it to every launch.
+    if (process.env.BASHGYM_OPEN_DEVTOOLS === '1') {
+      mainWindow.webContents.openDevTools({ mode: 'detach' })
+    }
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
   }
@@ -208,6 +347,10 @@ if (gotTheLock) {
   app.whenReady().then(() => {
     setupMenu()
     createWindow()
+    void initializeManagedCampaignBackend().catch(() => {
+      // The app remains usable for non-campaign work; campaign IPC fails closed.
+      console.error('BashGym managed campaign backend failed to initialize')
+    })
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
@@ -223,16 +366,136 @@ if (gotTheLock) {
   })
 
   app.on('will-quit', () => {
+    stopManagedBackend()
     killAllPtys()
   })
 
   // Unclean-exit guards: ensure no orphaned PTY processes
-  process.on('exit', () => killAllPtys())
-  process.on('SIGTERM', () => { killAllPtys(); app.quit() })
-  process.on('SIGINT', () => { killAllPtys(); app.quit() })
+  process.on('exit', () => { stopManagedBackend(); killAllPtys() })
+  process.on('SIGTERM', () => { stopManagedBackend(); killAllPtys(); app.quit() })
+  process.on('SIGINT', () => { stopManagedBackend(); killAllPtys(); app.quit() })
 }
 
 // IPC Handlers
+
+ipcMain.handle(
+  'campaign:request',
+  async (
+    event,
+    method: CampaignMethod,
+    route: string,
+    body?: CampaignBody,
+    query?: CampaignQuery,
+  ) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents) {
+      return { ok: false, status: 403, error: 'Campaign request sender is not permitted' }
+    }
+    try {
+      await initializeManagedCampaignBackend()
+    } catch {
+      return { ok: false, status: 503, error: 'Campaign backend is unavailable' }
+    }
+    try {
+      return await campaignBridgeClient.request(method, route, body, query)
+    } catch {
+      return { ok: false, status: 400, error: 'Campaign request was rejected' }
+    }
+  },
+)
+
+function safeBridgeArgument(value: string, label: string): string {
+  if (!value || value.length > 512 || /[\r\n"&|<>^%]/.test(value)) {
+    throw new Error(`Invalid ${label}`)
+  }
+  return value
+}
+
+function writeAgentBridgeWrapper(request: AgentBridgeLaunchRequest): string {
+  const pythonCommand = safeBridgeArgument(
+    request.pythonCommand || process.env.BASHGYM_PYTHON || 'python',
+    'Python command'
+  )
+  const args = [
+    '-m',
+    'bashgym.mcp.skill_lab_server',
+    '--workspace-id',
+    safeBridgeArgument(request.workspaceId || 'default', 'workspace id'),
+    '--origin-terminal-id',
+    safeBridgeArgument(request.terminalId, 'terminal id'),
+    '--agent',
+    request.kind,
+  ]
+  if (request.panelId) {
+    args.push('--origin-panel-id', safeBridgeArgument(request.panelId, 'panel id'))
+  }
+  const apiBase = request.apiBase || process.env.BASHGYM_API_URL || 'http://127.0.0.1:8003'
+  args.push('--api-base', safeBridgeArgument(apiBase, 'API URL'))
+
+  const bridgeDir = path.join(os.homedir(), '.bashgym', 'agent_bridge')
+  fs.mkdirSync(bridgeDir, { recursive: true })
+  const basename = request.terminalId.replace(/[^A-Za-z0-9._-]/g, '_')
+  const wrapperPath = path.join(bridgeDir, `${basename}.${process.platform === 'win32' ? 'cmd' : 'sh'}`)
+  const quote = process.platform === 'win32'
+    ? (value: string) => `"${value}"`
+    : (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`
+  const quotedPython = quote(pythonCommand)
+  const quotedArgs = args.map(quote).join(' ')
+  const body = process.platform === 'win32'
+    ? `@echo off\r\n${quotedPython} ${quotedArgs}\r\n`
+    : `#!/bin/sh\nexec ${quotedPython} ${quotedArgs}\n`
+  fs.writeFileSync(wrapperPath, body, { encoding: 'utf-8', mode: 0o700 })
+  registerAgentBridgeArtifact(request.terminalId, wrapperPath)
+  return wrapperPath
+}
+
+function writeClaudeAgentBridgeConfig(
+  request: AgentBridgeLaunchRequest,
+  wrapperPath: string,
+): string {
+  const bridgeDir = path.dirname(wrapperPath)
+  const basename = request.terminalId.replace(/[^A-Za-z0-9._-]/g, '_')
+  const configPath = path.join(bridgeDir, `${basename}.claude-mcp.json`)
+  fs.writeFileSync(configPath, JSON.stringify({
+    mcpServers: {
+      bashgym: {
+        command: wrapperPath,
+        args: [],
+      },
+    },
+  }, null, 2), 'utf-8')
+  registerAgentBridgeArtifact(request.terminalId, configPath)
+  return configPath
+}
+
+ipcMain.handle('agent-bridge:prepare-launch', (_, request: AgentBridgeLaunchRequest) => {
+  try {
+    if (!request || !['claude', 'codex'].includes(request.kind)) {
+      throw new Error('Unsupported agent bridge kind')
+    }
+    if (!request.terminalId?.trim()) throw new Error('Terminal id is required')
+    const scopedRequest = {
+      ...request,
+      workspaceId: request.workspaceId?.trim() || 'default',
+      apiBase: request.apiBase || process.env.BASHGYM_API_URL || 'http://127.0.0.1:8003',
+      pythonCommand: request.pythonCommand || process.env.BASHGYM_PYTHON || 'python',
+    }
+    const wrapperPath = writeAgentBridgeWrapper(scopedRequest)
+    const claudeConfigPath = scopedRequest.kind === 'claude'
+      ? writeClaudeAgentBridgeConfig(scopedRequest, wrapperPath)
+      : undefined
+    return {
+      success: true,
+      command: buildAgentBridgeLaunchCommand({
+        ...scopedRequest,
+        serverCommand: wrapperPath,
+        serverArgs: [],
+        claudeConfigPath,
+      }),
+    }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  }
+})
 
 // Get fresh environment with updated PATH (especially important on Windows)
 function getFreshEnv(): Record<string, string> {
@@ -240,6 +503,7 @@ function getFreshEnv(): Record<string, string> {
 
   // Remove Claude Code's nesting guard so terminals can launch claude freely
   delete env.CLAUDECODE
+  delete env.BASHGYM_DESKTOP_BOOTSTRAP_SECRET
 
   if (process.platform === 'win32') {
     // On Windows, add common tool paths that might have been installed after app launch
@@ -278,16 +542,21 @@ ipcMain.handle('terminal:create', async (_, id: string, cwd?: string) => {
   try {
     const existing = ptySessions.get(id)
     if (existing && !existing.exited) {
+      existing.outputBatcher.flush()
       return {
         success: true,
         id,
         attached: true,
-        buffer: existing.buffer.join(''),
+        buffer: existing.scrollback.toString(),
         cwd: existing.cwd
       }
     }
     // A dead session being recreated: drop the stale entry
-    if (existing) ptySessions.delete(id)
+    if (existing) {
+      existing.outputBatcher.dispose()
+      ptySessions.delete(id)
+      cleanupAgentBridgeArtifacts(id)
+    }
 
     // Dynamic import for node-pty (native module)
     const pty = await import('node-pty')
@@ -296,9 +565,10 @@ ipcMain.handle('terminal:create', async (_, id: string, cwd?: string) => {
       ? 'powershell.exe'
       : process.env.SHELL || '/bin/bash'
 
-    // Args to pass to shell (-NoLogo removes PowerShell copyright text)
+    // The embedded terminal favors immediate echo. Set
+    // BASHGYM_ENABLE_PSREADLINE=1 to restore PowerShell's advanced line editor.
     const shellArgs = process.platform === 'win32'
-      ? ['-NoLogo']
+      ? buildPowerShellArgs(process.env.BASHGYM_ENABLE_PSREADLINE === '1')
       : []
 
     const resolvedCwd = resolveTerminalCwd(cwd)
@@ -318,8 +588,11 @@ ipcMain.handle('terminal:create', async (_, id: string, cwd?: string) => {
 
     const session: PtySession = {
       pty: ptyProcess,
-      buffer: [],
-      bufferBytes: 0,
+      scrollback: new TerminalScrollbackBuffer(MAX_BUFFER_BYTES),
+      outputBatcher: new TerminalIpcBatcher((data) => {
+        mainWindow?.webContents.send(`terminal:data:${id}`, data)
+      }),
+      size: new TerminalSizeTracker(80, 24),
       cwd: resolvedCwd,
       createdAt: Date.now(),
       exited: false,
@@ -329,11 +602,12 @@ ipcMain.handle('terminal:create', async (_, id: string, cwd?: string) => {
 
     // Forward output to renderer and retain it for re-attach replay
     ptyProcess.onData((data: string) => {
-      appendToBuffer(session, data)
-      mainWindow?.webContents.send(`terminal:data:${id}`, data)
+      session.scrollback.append(data)
+      session.outputBatcher.push(data)
     })
 
     ptyProcess.onExit(({ exitCode }) => {
+      session.outputBatcher.dispose(true)
       session.exited = true
       session.exitCode = exitCode
       mainWindow?.webContents.send(`terminal:exit:${id}`, exitCode)
@@ -348,19 +622,30 @@ ipcMain.handle('terminal:create', async (_, id: string, cwd?: string) => {
   }
 })
 
-ipcMain.handle('terminal:write', (_, id: string, data: string) => {
+function writeTerminalInput(id: string, data: string): boolean {
   const session = ptySessions.get(id)
   if (session && !session.exited) {
     session.pty.write(data)
     return true
   }
   return false
+}
+
+// New preload versions use fire-and-forget input so a renderer under TUI paint
+// load never waits for an IPC response. Keep invoke support for renderer reloads
+// that are still running the previous preload contract.
+ipcMain.on('terminal:write', (_, id: string, data: string) => {
+  writeTerminalInput(id, data)
+})
+
+ipcMain.handle('terminal:write', (_, id: string, data: string) => {
+  return writeTerminalInput(id, data)
 })
 
 ipcMain.handle('terminal:resize', (_, id: string, cols: number, rows: number) => {
   const session = ptySessions.get(id)
   if (session && !session.exited) {
-    session.pty.resize(cols, rows)
+    if (session.size.update(cols, rows)) session.pty.resize(cols, rows)
     return true
   }
   return false
@@ -369,10 +654,13 @@ ipcMain.handle('terminal:resize', (_, id: string, cols: number, rows: number) =>
 ipcMain.handle('terminal:kill', (_, id: string) => {
   const session = ptySessions.get(id)
   if (session) {
+    session.outputBatcher.dispose()
     try { session.pty.kill() } catch { /* already dead */ }
     ptySessions.delete(id)
+    cleanupAgentBridgeArtifacts(id)
     return true
   }
+  cleanupAgentBridgeArtifacts(id)
   return false
 })
 
@@ -394,7 +682,7 @@ ipcMain.handle('terminal:snapshot', (_, id: string, maxBytes?: number) => {
   const cap = Math.min(Math.max(maxBytes ?? 64_000, 1_000), MAX_BUFFER_BYTES)
   return {
     success: true,
-    data: session.buffer.join('').slice(-cap),
+    data: session.scrollback.tail(cap),
     cwd: session.cwd,
     exited: session.exited
   }
@@ -460,11 +748,80 @@ ipcMain.handle('api:fetch', async (_, url: string, options?: RequestInit) => {
       const data = JSON.parse(text)
       return { ok: response.ok, status: response.status, data }
     } catch {
+      if (response.ok) return { ok: true, status: response.status, data: text }
       return { ok: false, status: response.status, error: text || `HTTP ${response.status}` }
     }
   } catch (error) {
     return { ok: false, error: String(error) }
   }
+})
+
+type ApiStreamEvent =
+  | { type: 'headers'; ok: boolean; status: number }
+  | { type: 'chunk'; data: string }
+  | { type: 'done' }
+  | { type: 'aborted' }
+  | { type: 'error'; error: string }
+
+const apiStreamControllers = new Map<string, AbortController>()
+
+ipcMain.on(
+  'api:stream:start',
+  async (event, requestId: string, url: string, options?: RequestInit) => {
+    apiStreamControllers.get(requestId)?.abort()
+    const controller = new AbortController()
+    apiStreamControllers.set(requestId, controller)
+
+    const send = (payload: ApiStreamEvent) => {
+      if (!event.sender.isDestroyed()) {
+        event.sender.send('api:stream:event', requestId, payload)
+      }
+    }
+
+    try {
+      const response = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': process.env.BASHGYM_API_KEY || '',
+          ...(options?.headers || {})
+        }
+      })
+      send({ type: 'headers', ok: response.ok, status: response.status })
+
+      if (!response.body) {
+        send({ type: 'error', error: 'API stream returned no response body' })
+        return
+      }
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        const data = decoder.decode(value, { stream: true })
+        if (data) send({ type: 'chunk', data })
+      }
+      const remaining = decoder.decode()
+      if (remaining) send({ type: 'chunk', data: remaining })
+      send({ type: 'done' })
+    } catch (error) {
+      if (controller.signal.aborted) {
+        send({ type: 'aborted' })
+      } else {
+        send({ type: 'error', error: String(error) })
+      }
+    } finally {
+      if (apiStreamControllers.get(requestId) === controller) {
+        apiStreamControllers.delete(requestId)
+      }
+    }
+  }
+)
+
+ipcMain.on('api:stream:cancel', (_, requestId: string) => {
+  apiStreamControllers.get(requestId)?.abort()
 })
 
 // File system handlers

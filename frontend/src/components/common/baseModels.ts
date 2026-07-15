@@ -25,6 +25,10 @@ export const BASE_MODEL_GROUPS: BaseModelGroup[] = [
   {
     label: 'Gemma 4',
     models: [
+      {
+        value: 'unsloth/gemma-4-12b-it',
+        label: 'Gemma 4 12B Unified (BF16/LoRA training base)',
+      },
       { value: 'google/gemma-4-E2B-it', label: 'Gemma 4 E2B (trains on a consumer GPU)' },
       { value: 'google/gemma-4-E4B-it', label: 'Gemma 4 E4B' },
       { value: 'google/gemma-4-26B-A4B-it', label: 'Gemma 4 26B MoE (4B active)' },

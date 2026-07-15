@@ -5,6 +5,13 @@ export type ViewMode = 'home' | 'workspace' | 'training' | 'autoresearch' | 'rou
 /** What the left sidebar renders: the nav menu or the Agent Sessions feed */
 export type SidebarMode = 'nav' | 'sessions'
 
+export interface PanelPresentationRequest {
+  workspaceId: string
+  panelId: string
+  presentation: 'focus' | 'peek'
+  requestedAt: number
+}
+
 interface UIState {
   // Navigation
   currentView: ViewMode
@@ -15,6 +22,8 @@ interface UIState {
   isOnboardingOpen: boolean
   isKeyboardShortcutsOpen: boolean
   isAgentChatOpen: boolean
+  isAgentStreamOpen: boolean
+  panelPresentationRequest: PanelPresentationRequest | null
 
   // Overlays - terminals persist behind these
   overlayView: ViewMode | null
@@ -32,6 +41,14 @@ interface UIState {
   setKeyboardShortcutsOpen: (open: boolean) => void
   setAgentChatOpen: (open: boolean) => void
   toggleAgentChat: () => void
+  setAgentStreamOpen: (open: boolean) => void
+  toggleAgentStream: () => void
+  presentWorkspacePanel: (
+    workspaceId: string,
+    panelId: string,
+    presentation?: PanelPresentationRequest['presentation']
+  ) => void
+  clearPanelPresentationRequest: (requestedAt: number) => void
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -43,6 +60,8 @@ export const useUIStore = create<UIState>((set) => ({
   isOnboardingOpen: false,
   isKeyboardShortcutsOpen: false,
   isAgentChatOpen: false,
+  isAgentStreamOpen: false,
+  panelPresentationRequest: null,
   overlayView: 'home',
 
   setView: (view) => set({ currentView: view, overlayView: null }),
@@ -68,4 +87,18 @@ export const useUIStore = create<UIState>((set) => ({
   setAgentChatOpen: (open) => set({ isAgentChatOpen: open }),
 
   toggleAgentChat: () => set((state) => ({ isAgentChatOpen: !state.isAgentChatOpen })),
+
+  setAgentStreamOpen: (open) => set({ isAgentStreamOpen: open }),
+
+  toggleAgentStream: () => set((state) => ({ isAgentStreamOpen: !state.isAgentStreamOpen })),
+
+  presentWorkspacePanel: (workspaceId, panelId, presentation = 'focus') => set({
+    panelPresentationRequest: { workspaceId, panelId, presentation, requestedAt: Date.now() }
+  }),
+
+  clearPanelPresentationRequest: (requestedAt) => set((state) => (
+    state.panelPresentationRequest?.requestedAt === requestedAt
+      ? { panelPresentationRequest: null }
+      : state
+  )),
 }))

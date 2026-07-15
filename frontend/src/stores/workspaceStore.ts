@@ -13,6 +13,7 @@ import { useTerminalStore } from './terminalStore'
 import type { Panel, TerminalSession } from './terminalStore'
 import {
   type WorkspaceMeta,
+  appendPanelToWorkspace,
   deleteWorkspaceKeys,
   generateWorkspaceId,
   loadRegistry,
@@ -23,7 +24,9 @@ import {
   savePositionsFor,
   saveRegistry,
   setActiveWorkspaceId,
-  wsKey
+  terminalSessionFromPersistedPanel,
+  removePanelFromWorkspaceSnapshot,
+  toPersistedPanel
 } from './workspacePersistence'
 
 interface WorkspaceState {
@@ -31,13 +34,18 @@ interface WorkspaceState {
   activeWorkspaceId: string
   /** True for the synchronous duration of a switch — gates external event handlers */
   switching: boolean
+  sessionIndexVersion: number
 
   createWorkspace: (name: string, opts?: { activate?: boolean }) => string
   switchWorkspace: (id: string) => void
   renameWorkspace: (id: string, name: string) => void
   /** Refuses the active workspace; confirms before killing a background workspace's live PTYs */
   deleteWorkspace: (id: string) => Promise<boolean>
-  moveLivePanelToWorkspace: (panelId: string, targetWsId: string) => void
+  moveLivePanelToWorkspace: (
+    panelId: string,
+    targetWsId: string,
+    opts?: { switchAfter?: boolean }
+  ) => boolean
 }
 
 function serializeWorkspaceState(wsId: string): void {
@@ -65,17 +73,7 @@ function materializeWorkspace(wsId: string): void {
       adapterConfig: stub.adapterConfig
     })
     if (stub.type === 'terminal' && stub.terminalId) {
-      sessions.set(stub.terminalId, {
-        id: stub.terminalId,
-        title: stub.title,
-        cwd: stub.cwd ?? '~',
-        isActive: false,
-        attention: 'none',
-        showBanner: false,
-        status: 'idle',
-        agentKind: stub.agentKind,
-        lastActivity: Date.now()
-      })
+      sessions.set(stub.terminalId, terminalSessionFromPersistedPanel(stub))
     }
   }
 
@@ -100,6 +98,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   workspaces: initialRegistry.workspaces,
   activeWorkspaceId: initialRegistry.activeWorkspaceId,
   switching: false,
+  sessionIndexVersion: 0,
 
   createWorkspace: (name: string, opts?: { activate?: boolean }) => {
     const id = generateWorkspaceId()
@@ -112,7 +111,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       lastActiveAt: now
     }
     saveRegistry({ ...registry, workspaces: [...registry.workspaces, meta] })
-    set({ workspaces: loadRegistry().workspaces })
+    set((state) => ({
+      workspaces: loadRegistry().workspaces,
+      sessionIndexVersion: state.sessionIndexVersion + 1
+    }))
     if (opts?.activate) get().switchWorkspace(id)
     return id
   },
@@ -125,7 +127,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     try {
       serializeWorkspaceState(activeWorkspaceId)
       setActiveWorkspaceId(id)
-      set({ activeWorkspaceId: id, workspaces: loadRegistry().workspaces })
+      set((state) => ({
+        activeWorkspaceId: id,
+        workspaces: loadRegistry().workspaces,
+        sessionIndexVersion: state.sessionIndexVersion + 1
+      }))
       materializeWorkspace(id)
     } finally {
       set({ switching: false })
@@ -140,7 +146,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       ...registry,
       workspaces: registry.workspaces.map((w) => (w.id === id ? { ...w, name: trimmed } : w))
     })
-    set({ workspaces: loadRegistry().workspaces })
+    set((state) => ({
+      workspaces: loadRegistry().workspaces,
+      sessionIndexVersion: state.sessionIndexVersion + 1
+    }))
   },
 
   deleteWorkspace: async (id: string) => {
@@ -177,34 +186,33 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     deleteWorkspaceKeys(id)
     const after = loadRegistry()
     saveRegistry({ ...after, workspaces: after.workspaces.filter((w) => w.id !== id) })
-    set({ workspaces: loadRegistry().workspaces })
+    set((state) => ({
+      workspaces: loadRegistry().workspaces,
+      sessionIndexVersion: state.sessionIndexVersion + 1
+    }))
     return true
   },
 
-  moveLivePanelToWorkspace: (panelId: string, targetWsId: string) => {
+  moveLivePanelToWorkspace: (panelId, targetWsId, opts) => {
     const { workspaces, activeWorkspaceId } = get()
-    if (targetWsId === activeWorkspaceId || !workspaces.some((w) => w.id === targetWsId)) return
+    if (targetWsId === activeWorkspaceId || !workspaces.some((w) => w.id === targetWsId)) return false
 
-    const detached = useTerminalStore.getState().detachPanel(panelId)
-    if (!detached) return
+    const terminalState = useTerminalStore.getState()
+    const panel = terminalState.panels.find((candidate) => candidate.id === panelId)
+    if (!panel) return false
+    const stub = toPersistedPanel(panel, terminalState.sessions)
+    const position = terminalState.canvasNodes.get(panelId)
 
-    // Append the panel (and its position) to the target workspace's keys
-    try {
-      const rawPanels = localStorage.getItem(wsKey(targetWsId, 'panels'))
-      const panels = rawPanels ? JSON.parse(rawPanels) : []
-      panels.push(detached.stub)
-      localStorage.setItem(wsKey(targetWsId, 'panels'), JSON.stringify(panels))
-      if (detached.position) {
-        const rawPos = localStorage.getItem(wsKey(targetWsId, 'positions'))
-        const positions = rawPos ? JSON.parse(rawPos) : {}
-        positions[panelId] = detached.position
-        localStorage.setItem(wsKey(targetWsId, 'positions'), JSON.stringify(positions))
-      }
-    } catch {
-      // Storage error: the panel is detached but not re-homed; orphan
-      // adoption will recover its PTY on next boot
+    // Commit the destination first. A failed write leaves the source untouched.
+    if (!appendPanelToWorkspace(targetWsId, stub, position)) return false
+    const detached = terminalState.detachPanel(panelId)
+    if (!detached) {
+      removePanelFromWorkspaceSnapshot(targetWsId, panelId)
+      return false
     }
 
-    get().switchWorkspace(targetWsId)
+    set((state) => ({ sessionIndexVersion: state.sessionIndexVersion + 1 }))
+    if (opts?.switchAfter !== false) get().switchWorkspace(targetWsId)
+    return true
   }
 }))

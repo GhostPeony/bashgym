@@ -562,7 +562,10 @@ class SystemInfoService:
             "recommended_models": [],
             "recommended_quantization": "4bit",
             "recommended_batch_size": 1,
-            "warning": None,
+            "warning": (
+                "Select an explicit current trainable base from the live model catalog; "
+                "BashGym does not choose a packaged checkpoint."
+            ),
             # Estimator-driven: largest model (billions of params) per training/serve
             # regime that fits this budget. Hardware-agnostic, computed from VRAM only.
             "regime_capacities": recommend_for_budget(max_vram)["regime_capacities"],
@@ -570,53 +573,31 @@ class SystemInfoService:
         }
 
         if max_vram >= 80:
-            recommendations["recommended_models"] = [
-                "Qwen/Qwen2.5-Coder-32B-Instruct",
-                "Qwen/Qwen2.5-Coder-14B-Instruct",
-                "meta-llama/Llama-3.1-8B-Instruct",
-            ]
             recommendations["recommended_batch_size"] = 8
             recommendations["recommended_quantization"] = "4bit"
         elif max_vram >= 48:
-            recommendations["recommended_models"] = [
-                "Qwen/Qwen2.5-Coder-14B-Instruct",
-                "Qwen/Qwen2.5-Coder-7B-Instruct",
-            ]
             recommendations["recommended_batch_size"] = 4
             recommendations["recommended_quantization"] = "4bit"
         elif max_vram >= 24:
-            recommendations["recommended_models"] = [
-                "Qwen/Qwen2.5-Coder-7B-Instruct",
-                "Qwen/Qwen2.5-Coder-3B-Instruct",
-            ]
             recommendations["recommended_batch_size"] = 4
             recommendations["recommended_quantization"] = "4bit"
         elif max_vram >= 12:
-            recommendations["recommended_models"] = [
-                "Qwen/Qwen2.5-Coder-3B-Instruct",
-                "Qwen/Qwen2.5-Coder-1.5B-Instruct",
-            ]
             recommendations["recommended_batch_size"] = 2
             recommendations["recommended_quantization"] = "4bit"
         elif max_vram >= 8:
-            recommendations["recommended_models"] = [
-                "Qwen/Qwen2.5-Coder-1.5B-Instruct",
-                "meta-llama/Llama-3.2-1B-Instruct",
-            ]
             recommendations["recommended_batch_size"] = 1
             recommendations["recommended_quantization"] = "4bit"
         elif max_vram >= 4:
-            recommendations["recommended_models"] = [
-                "meta-llama/Llama-3.2-1B-Instruct",
-                "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
-            ]
             recommendations["recommended_batch_size"] = 1
             recommendations["recommended_quantization"] = "4bit"
-            recommendations["warning"] = "Limited VRAM - use small models with QLoRA"
-        else:
-            recommendations["recommended_models"] = []
             recommendations["warning"] = (
-                "Insufficient VRAM for local training. Consider cloud training or CPU-only inference."
+                "Limited memory: choose a small current trainable base explicitly and "
+                "prove the method with a bounded smoke first."
+            )
+        else:
+            recommendations["warning"] = (
+                "Insufficient detected GPU memory for training; register a larger "
+                "operator-owned private-compute target or run CPU-only contract validation."
             )
 
         return recommendations

@@ -430,6 +430,16 @@ RECOMMENDED_TRAINING_MODELS = [
         description="Compact Gemma 4 for laptops and small GPUs.",
     ),
     UnifiedModel(
+        id="hf/unsloth/gemma-4-12b-it",
+        name="Gemma 4 12B Unified",
+        provider=ProviderType.HUGGINGFACE,
+        parameter_size="12B",
+        is_code_model=True,
+        supports_training=True,
+        context_length=256000,
+        description="Trainable BF16/LoRA base matching the 12B NVFP4 deployment artifact.",
+    ),
+    UnifiedModel(
         id="hf/google/gemma-4-26B-A4B-it",
         name="Gemma 4 26B MoE",
         provider=ProviderType.HUGGINGFACE,
@@ -506,15 +516,6 @@ TEACHER_MODELS = [
         is_code_model=True,
         supports_inference=True,
         description="Strong general-purpose teacher.",
-    ),
-    UnifiedModel(
-        id="hf/Qwen/Qwen2.5-Coder-32B-Instruct",
-        name="Qwen2.5-Coder-32B-Instruct",
-        provider=ProviderType.HUGGINGFACE,
-        parameter_size="32B",
-        is_code_model=True,
-        supports_inference=True,
-        description="Top-tier open-source code model.",
     ),
 ]
 

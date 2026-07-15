@@ -253,11 +253,13 @@ class SchemaBuilder:
         name: str,
         task_description: str,
         language: str = "python",
-        model: str = "qwen/qwen2.5-coder-72b-instruct",
+        model: str = "",
         depends_on: list[str] | None = None,
         description: str = "",
     ) -> "SchemaBuilder":
         """Add a code generation column."""
+        if not model.strip():
+            raise ValueError("code generation requires an explicit model")
         prompt = f"Write {language} code for the following task:\n\n{{{{ {task_description} }}}}\n\nOutput only the code, no explanations."
         self.schema.columns.append(
             ColumnDefinition(

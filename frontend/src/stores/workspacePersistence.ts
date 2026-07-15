@@ -24,6 +24,18 @@ export interface WorkspaceRegistry {
   workspaces: WorkspaceMeta[]
 }
 
+export interface PersistedSessionState {
+  status: TerminalSession['status']
+  attention: TerminalSession['attention']
+  lastActivity: number
+  currentTool?: string
+  taskSummary?: string
+  gitBranch?: string
+  model?: string
+  errorMessage?: string
+  isPaused?: boolean
+}
+
 /**
  * Terminal panels persist a session stub (cwd/agentKind) so switching in can
  * rebuild session objects immediately, before the PTY re-attach reports its
@@ -36,6 +48,7 @@ export interface WsPersistedPanel {
   terminalId?: string
   cwd?: string
   agentKind?: AgentKind
+  sessionState?: PersistedSessionState
   url?: string
   filePath?: string
   adapterConfig?: Record<string, unknown>
@@ -68,11 +81,12 @@ const readJson = <T>(key: string): T | null => {
   return null
 }
 
-const writeJson = (key: string, value: unknown) => {
+const writeJson = (key: string, value: unknown): boolean => {
   try {
     localStorage.setItem(key, JSON.stringify(value))
+    return true
   } catch {
-    // Ignore storage errors
+    return false
   }
 }
 
@@ -164,9 +178,45 @@ export function toPersistedPanel(panel: Panel, sessions: Map<string, TerminalSes
     terminalId: panel.terminalId,
     cwd: session?.cwd,
     agentKind: session?.agentKind,
+    sessionState: session ? {
+      status: session.status,
+      attention: session.attention,
+      lastActivity: session.lastActivity,
+      currentTool: session.currentTool,
+      taskSummary: session.taskSummary,
+      gitBranch: session.gitBranch,
+      model: session.model,
+      errorMessage: session.errorMessage,
+      isPaused: session.isPaused
+    } : undefined,
     url: panel.url,
     filePath: panel.filePath,
     adapterConfig: panel.adapterConfig
+  }
+}
+
+export function terminalSessionFromPersistedPanel(
+  panel: WsPersistedPanel,
+  overrides: Partial<TerminalSession> = {}
+): TerminalSession {
+  const persisted = panel.sessionState
+  return {
+    id: panel.terminalId ?? panel.id,
+    title: panel.title,
+    cwd: panel.cwd ?? '~',
+    isActive: false,
+    attention: persisted?.attention ?? 'none',
+    showBanner: false,
+    status: persisted?.status ?? 'idle',
+    agentKind: panel.agentKind,
+    lastActivity: persisted?.lastActivity ?? 0,
+    currentTool: persisted?.currentTool,
+    taskSummary: persisted?.taskSummary,
+    gitBranch: persisted?.gitBranch,
+    model: persisted?.model,
+    errorMessage: persisted?.errorMessage,
+    isPaused: persisted?.isPaused,
+    ...overrides
   }
 }
 
@@ -223,4 +273,47 @@ export function collectClaimedTerminalIds(registry: WorkspaceRegistry): Map<stri
     }
   }
   return claimed
+}
+
+/**
+ * Write a panel into a background workspace before removing it from the active
+ * workspace. Both keys roll back together when either write fails.
+ */
+export function appendPanelToWorkspace(
+  id: string,
+  panel: WsPersistedPanel,
+  position?: CanvasNode
+): boolean {
+  const panelsKey = wsKey(id, 'panels')
+  const positionsKey = wsKey(id, 'positions')
+  const previousPanels = localStorage.getItem(panelsKey)
+  const previousPositions = localStorage.getItem(positionsKey)
+
+  try {
+    const panels = previousPanels ? JSON.parse(previousPanels) as WsPersistedPanel[] : []
+    const positions = previousPositions ? JSON.parse(previousPositions) as Record<string, CanvasNode> : {}
+    const nextPanels = [...panels.filter((candidate) => candidate.id !== panel.id), panel]
+    const nextPositions = position ? { ...positions, [panel.id]: position } : positions
+    localStorage.setItem(panelsKey, JSON.stringify(nextPanels))
+    localStorage.setItem(positionsKey, JSON.stringify(nextPositions))
+    return true
+  } catch {
+    try {
+      if (previousPanels === null) localStorage.removeItem(panelsKey)
+      else localStorage.setItem(panelsKey, previousPanels)
+      if (previousPositions === null) localStorage.removeItem(positionsKey)
+      else localStorage.setItem(positionsKey, previousPositions)
+    } catch {
+      // Best-effort rollback; the source panel has not been detached yet.
+    }
+    return false
+  }
+}
+
+export function removePanelFromWorkspaceSnapshot(id: string, panelId: string): void {
+  const snapshot = loadWorkspaceSnapshot(id)
+  writeJson(wsKey(id, 'panels'), snapshot.panels.filter((panel) => panel.id !== panelId))
+  const positions = { ...snapshot.positions }
+  delete positions[panelId]
+  writeJson(wsKey(id, 'positions'), positions)
 }

@@ -1,3 +1,6 @@
+import asyncio
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -102,6 +105,131 @@ class FakeRuntimeFailureThenChatClient(FakeHermesClient):
         return FakeHermesResponse(404, {"error": "not found"})
 
 
+class FakeSkillToolCallingClient(FakeHermesClient):
+    calls = []
+
+    async def post(self, url, headers=None, json=None):
+        self.calls.append(
+            {"method": "POST", "url": url, "headers": headers or {}, "json": json or {}}
+        )
+        if url.endswith("/responses") and "previous_response_id" not in (json or {}):
+            return FakeHermesResponse(
+                200,
+                {
+                    "id": "resp_tool_1",
+                    "status": "completed",
+                    "output": [
+                        {
+                            "type": "function_call",
+                            "call_id": "call_1",
+                            "name": "skill_lab_prepare",
+                            "arguments": '{"skill":"factory"}',
+                        }
+                    ],
+                },
+            )
+        if url.endswith("/responses"):
+            return FakeHermesResponse(
+                200,
+                {
+                    "id": "resp_tool_2",
+                    "status": "completed",
+                    "output_text": "I opened factory in Skill Lab.",
+                },
+            )
+        return FakeHermesResponse(404, {"error": "not found"})
+
+
+class FakeHermesStreamResponse:
+    def __init__(self, status_code: int, lines: list[str], data=None):
+        self.status_code = status_code
+        self._lines = lines
+        self._data = data or {}
+        self.headers = {"content-type": "text/event-stream"}
+        self.text = json.dumps(self._data)
+
+    @property
+    def is_success(self) -> bool:
+        return 200 <= self.status_code < 300
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return None
+
+    async def aiter_lines(self):
+        for line in self._lines:
+            yield line
+
+    async def aread(self):
+        return self.text.encode("utf-8")
+
+    def json(self):
+        return self._data
+
+
+class FakeStreamingHermesClient(FakeHermesClient):
+    calls = []
+
+    def stream(self, method, url, headers=None, json=None):
+        self.calls.append(
+            {"method": method, "url": url, "headers": headers or {}, "json": json or {}}
+        )
+        return FakeHermesStreamResponse(
+            200,
+            [
+                "event: response.created",
+                'data: {"type":"response.created","response":{"id":"resp_stream"}}',
+                "",
+                "event: response.output_text.delta",
+                'data: {"type":"response.output_text.delta","delta":"Hello "}',
+                "",
+                "event: response.output_text.delta",
+                'data: {"type":"response.output_text.delta","delta":"**GhostWork**"}',
+                "",
+                "event: response.completed",
+                ('data: {"type":"response.completed","response":{"id":"resp_stream","output":[]}}'),
+                "",
+            ],
+        )
+
+
+class FakeAuthRejectingHermesClient(FakeHermesClient):
+    calls = []
+
+    async def get(self, url, headers=None):
+        self.calls.append({"method": "GET", "url": url, "headers": headers or {}})
+        if url.endswith("/health"):
+            return FakeHermesResponse(200, {"status": "ok"})
+        return FakeHermesResponse(
+            401,
+            {
+                "error": {
+                    "message": "Invalid API key",
+                    "type": "invalid_request_error",
+                    "code": "invalid_api_key",
+                }
+            },
+        )
+
+    def stream(self, method, url, headers=None, json=None):
+        self.calls.append(
+            {"method": method, "url": url, "headers": headers or {}, "json": json or {}}
+        )
+        return FakeHermesStreamResponse(
+            401,
+            [],
+            {
+                "error": {
+                    "message": "Invalid API key",
+                    "type": "invalid_request_error",
+                    "code": "invalid_api_key",
+                }
+            },
+        )
+
+
 class FakeTunnelProcess:
     pid = 43210
     terminated = False
@@ -119,12 +247,39 @@ class FakeTunnelProcess:
         self.terminated = True
 
 
+class FakeTrainingResponse:
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return {"run_id": "run_agent", "status": "pending", "strategy": "sft"}
+
+
+class FakeTrainingClient:
+    calls = []
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return None
+
+    async def post(self, url, headers=None, json=None):
+        self.calls.append({"url": url, "headers": headers or {}, "json": json or {}})
+        return FakeTrainingResponse()
+
+
 def _client():
     return TestClient(app)
 
 
 @pytest.fixture(autouse=True)
-def clear_agent_endpoint_env(monkeypatch):
+def isolate_agent_endpoint_secrets(monkeypatch, tmp_path):
+    monkeypatch.setenv("BASHGYM_DISABLE_KEYRING", "1")
+    monkeypatch.setattr("bashgym.config.get_bashgym_dir", lambda: tmp_path)
     for key in (
         "HERMES_API_BASE",
         "HERMES_API_KEY",
@@ -141,6 +296,7 @@ def clear_agent_endpoint_env(monkeypatch):
 def test_agent_endpoint_default_profile_is_public(monkeypatch, tmp_path):
     monkeypatch.setattr("bashgym.config.get_bashgym_dir", lambda: tmp_path)
     monkeypatch.setattr("bashgym.secrets.get_secrets_path", lambda: tmp_path / "secrets.json")
+    monkeypatch.setattr(agent_routes, "_get_agent_api_key", lambda _endpoint_id: None)
 
     response = _client().get("/api/agent/endpoints")
 
@@ -244,6 +400,49 @@ def test_agent_endpoint_discovery_uses_official_hermes_surfaces(monkeypatch, tmp
     )
 
 
+def test_agent_endpoint_discovery_does_not_treat_public_health_as_connected(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr("bashgym.config.get_bashgym_dir", lambda: tmp_path)
+    monkeypatch.setattr("bashgym.secrets.get_secrets_path", lambda: tmp_path / "secrets.json")
+    monkeypatch.setattr(agent_routes.httpx, "AsyncClient", FakeAuthRejectingHermesClient)
+    FakeAuthRejectingHermesClient.calls = []
+
+    _client().put(
+        "/api/agent/endpoints/hermes",
+        json={
+            "label": "Remote Hermes",
+            "base_url": "http://127.0.0.1:18642/v1",
+            "model": "hermes-agent",
+            "api_key": "stale-token",
+        },
+    )
+    response = _client().post("/api/agent/endpoints/hermes/discover")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["probes"]["health"]["ok"] is True
+    assert data["probes"]["capabilities"]["status_code"] == 401
+    assert data["ok"] is False
+    assert data["warnings"][0].startswith("Hermes rejected the saved API server key")
+
+
+def test_authenticated_hermes_health_probe_rejects_invalid_key(monkeypatch):
+    monkeypatch.setattr(agent_routes.httpx, "AsyncClient", FakeAuthRejectingHermesClient)
+    FakeAuthRejectingHermesClient.calls = []
+
+    healthy, error = asyncio.run(
+        agent_routes._probe_hermes_health(
+            "http://127.0.0.1:18642/v1",
+            "stale-token",
+        )
+    )
+
+    assert healthy is False
+    assert error == "Saved API server key was rejected"
+    assert FakeAuthRejectingHermesClient.calls[0]["url"].endswith("/v1/capabilities")
+
+
 def test_endpoint_name_extraction_keeps_large_skill_lists():
     data = {"data": [{"name": f"skill-{index}"} for index in range(32)]}
 
@@ -285,9 +484,319 @@ def test_agent_endpoint_chat_sends_workspace_context(monkeypatch, tmp_path):
     post = next(call for call in FakeHermesClient.calls if call["method"] == "POST")
     assert post["url"].endswith("/responses")
     assert post["headers"]["authorization"] == "Bearer secret-token-123"
-    assert post["headers"]["x-hermes-session-key"] == "bashgym-canvas-agent-node"
-    assert "Training run: grpo" in post["json"]["input"]
-    assert "What should I run next?" in post["json"]["input"]
+    assert "x-hermes-session-key" not in post["headers"]
+    assert post["json"]["conversation"] == "bashgym-canvas-agent-node"
+    assert post["json"]["store"] is True
+    user_input = post["json"]["input"][0]
+    assert user_input["role"] == "user"
+    assert user_input["content"][0]["type"] == "input_text"
+    input_text = user_input["content"][0]["text"]
+    assert "<bashgym_authoritative_context>" in input_text
+    assert "Training run: grpo" in input_text
+    assert "What should I run next?" in input_text
+    assert "live runtime, then the durable BashGym ledger" in post["json"]["instructions"]
+    assert "Never blend projects" in post["json"]["instructions"]
+
+
+def test_agent_endpoint_executes_skill_lab_function_calls_with_canvas_scope(monkeypatch, tmp_path):
+    monkeypatch.setattr("bashgym.config.get_bashgym_dir", lambda: tmp_path)
+    monkeypatch.setattr("bashgym.secrets.get_secrets_path", lambda: tmp_path / "secrets.json")
+    monkeypatch.setattr(agent_routes.httpx, "AsyncClient", FakeSkillToolCallingClient)
+    FakeSkillToolCallingClient.calls = []
+    executions = []
+
+    async def fake_execute(name, arguments, **kwargs):
+        executions.append((name, arguments, kwargs))
+        return {"status": "prepared", "skill_id": "skill-1"}
+
+    monkeypatch.setattr(agent_routes, "execute_skill_lab_tool", fake_execute)
+    _client().put(
+        "/api/agent/endpoints/hermes",
+        json={
+            "label": "Local Hermes",
+            "base_url": "http://127.0.0.1:8642/v1",
+            "model": "hermes-agent",
+            "api_key": "secret-token-123",
+        },
+    )
+
+    response = _client().post(
+        "/api/agent/endpoints/hermes/chat",
+        json={
+            "message": "Help me evaluate the factory skill",
+            "workspace_id": "workspace-main",
+            "origin": {"panel_id": "hermes-panel"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["response"] == "I opened factory in Skill Lab."
+    assert executions[0][0] == "skill_lab_prepare"
+    assert executions[0][1]["workspace_id"] == "workspace-main"
+    assert executions[0][1]["origin"]["panel_id"] == "hermes-panel"
+    second_call = FakeSkillToolCallingClient.calls[-1]["json"]
+    assert second_call["previous_response_id"] == "resp_tool_1"
+    assert second_call["input"][0]["type"] == "function_call_output"
+
+
+async def test_hermes_cannot_self_confirm_skill_lab_side_effects(monkeypatch):
+    confirmations = []
+
+    async def fake_execute(name, arguments, **kwargs):
+        confirmations.append(arguments["confirmed"])
+        return {"status": "confirmation_required"}
+
+    monkeypatch.setattr(agent_routes, "execute_skill_lab_tool", fake_execute)
+    await agent_routes._execute_hermes_skill_lab_calls(
+        {
+            "workspace_id": "main",
+            "origin": {"agent": "hermes"},
+            "user_message": "Can you help me evaluate this skill?",
+        },
+        [
+            {
+                "id": "call-1",
+                "name": "skill_lab_run",
+                "arguments": {
+                    "skill": "factory",
+                    "endpoint_id": "hermes",
+                    "confirmed": True,
+                },
+            }
+        ],
+    )
+
+    assert confirmations == [False]
+
+
+def test_agent_endpoint_chat_stream_relays_deltas_and_conversation(monkeypatch, tmp_path):
+    monkeypatch.setattr("bashgym.config.get_bashgym_dir", lambda: tmp_path)
+    monkeypatch.setattr("bashgym.secrets.get_secrets_path", lambda: tmp_path / "secrets.json")
+    monkeypatch.setattr(agent_routes.httpx, "AsyncClient", FakeStreamingHermesClient)
+    FakeStreamingHermesClient.calls = []
+
+    _client().put(
+        "/api/agent/endpoints/hermes",
+        json={
+            "label": "Local Hermes",
+            "base_url": "http://127.0.0.1:8642/v1",
+            "model": "hermes-agent",
+            "session_key": "workspace-memory",
+            "api_key": "secret-token-123",
+        },
+    )
+    response = _client().post(
+        "/api/agent/endpoints/hermes/chat/stream",
+        json={
+            "message": "Render markdown",
+            "context": "Canvas: GhostWork",
+            "conversation": "bashgym-canvas-agent-node",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert 'event: delta\ndata: {"delta": "Hello "}' in response.text
+    assert 'event: delta\ndata: {"delta": "**GhostWork**"}' in response.text
+    assert 'event: done\ndata: {"endpoint_id": "hermes"' in response.text
+    assert "secret-token-123" not in response.text
+
+    call = FakeStreamingHermesClient.calls[0]
+    assert call["url"].endswith("/responses")
+    assert call["json"]["stream"] is True
+    assert call["json"]["store"] is True
+    assert call["json"]["conversation"] == "bashgym-canvas-agent-node"
+    assert call["headers"]["x-hermes-session-key"] == "workspace-memory"
+
+
+def test_agent_endpoint_chat_stream_explains_rejected_gateway_key(monkeypatch, tmp_path):
+    monkeypatch.setattr("bashgym.config.get_bashgym_dir", lambda: tmp_path)
+    monkeypatch.setattr("bashgym.secrets.get_secrets_path", lambda: tmp_path / "secrets.json")
+    monkeypatch.setattr(agent_routes.httpx, "AsyncClient", FakeAuthRejectingHermesClient)
+    FakeAuthRejectingHermesClient.calls = []
+
+    _client().put(
+        "/api/agent/endpoints/hermes",
+        json={
+            "label": "Remote Hermes",
+            "base_url": "http://127.0.0.1:18642/v1",
+            "model": "hermes-agent",
+            "api_key": "stale-token",
+        },
+    )
+    response = _client().post(
+        "/api/agent/endpoints/hermes/chat/stream",
+        json={"message": "Describe your BashGym skillset"},
+    )
+
+    assert response.status_code == 200
+    assert "Hermes rejected the saved API server key" in response.text
+    assert "invalid_api_key" not in response.text
+
+
+def test_agent_training_tool_forwards_canvas_provenance(monkeypatch):
+    monkeypatch.setattr(agent_routes.httpx, "AsyncClient", FakeTrainingClient)
+    FakeTrainingClient.calls = []
+
+    tracking_context = {
+        "workspace_id": "workspace-a",
+        "project_id": "project-a",
+        "project_display_name": "Project A",
+        "experiment_id": "experiment-a",
+        "experiment_name": "Experiment A",
+        "objective": "Improve held-out quality.",
+        "task_type": "terminal-agent",
+        "model_id": "model-a",
+        "model_version_id": "model-a-v1",
+        "model_source_uri": "hf://example/model-a",
+        "model_config_digest": "a" * 64,
+        "dataset_id": "dataset-a",
+        "dataset_version_id": "dataset-a-v1",
+        "dataset_source_uri": "file://data/dataset-a.manifest.json",
+        "dataset_content_digest": "b" * 64,
+        "environment_id": "environment-a",
+        "environment_runtime_digest": "c" * 64,
+    }
+    result = json.loads(
+        asyncio.run(
+            agent_routes._execute_tool(
+                "start_training",
+                {
+                    "strategy": "sft",
+                    "model": "Qwen/Qwen3-Coder",
+                    "dataset_path": "data/train.jsonl",
+                    "compute_target": "ssh:pony0",
+                    "correlation_id": "training-intent-1",
+                    "tracking_context": tracking_context,
+                    "config": {
+                        "checkpoint_limit": 1,
+                        "artifact_retention": "adapter_only",
+                        "auto_push_hf": True,
+                        "hf_private": True,
+                        "hf_upload_artifact": "adapter",
+                    },
+                    "origin": {"panel_id": "panel-1", "terminal_id": "term-1"},
+                },
+            )
+        )
+    )
+
+    assert result["run_id"] == "run_agent"
+    post = FakeTrainingClient.calls[0]
+    assert post["url"] == "http://localhost:8003/api/training/start"
+    assert post["json"] == {
+        "strategy": "sft",
+        "base_model": "Qwen/Qwen3-Coder",
+        "dataset_path": "data/train.jsonl",
+        "compute_target": "ssh:pony0",
+        "use_remote_ssh": True,
+        "device_id": "pony0",
+        "correlation_id": "training-intent-1",
+        "tracking": tracking_context,
+        "checkpoint_limit": 1,
+        "artifact_retention": "adapter_only",
+        "auto_push_hf": True,
+        "hf_private": True,
+        "hf_upload_artifact": "adapter",
+        "origin": {
+            "kind": "agent",
+            "agent": "hermes",
+            "panel_id": "panel-1",
+            "terminal_id": "term-1",
+        },
+    }
+
+
+def test_agent_reads_project_isolated_experiment_context(monkeypatch, tmp_path):
+    from bashgym.ledger.persistence import ExperimentLedgerRepository
+    from tests.ledger.test_persistence import run_spec, seed_project
+
+    database = tmp_path / "campaigns" / "campaigns.sqlite3"
+    repository = ExperimentLedgerRepository(database)
+    repository.initialize()
+    seed_project(repository)
+    repository.register_run(run_spec())
+    monkeypatch.setattr("bashgym.config.get_bashgym_dir", lambda: tmp_path)
+
+    projects = json.loads(
+        asyncio.run(
+            agent_routes._execute_tool(
+                "list_experiment_projects", {"workspace_id": "workspace-a"}
+            )
+        )
+    )
+    context = json.loads(
+        asyncio.run(
+            agent_routes._execute_tool(
+                "get_experiment_context",
+                {
+                    "workspace_id": "workspace-a",
+                    "project_id": "project-a",
+                    "recent_limit": 10,
+                },
+            )
+        )
+    )
+
+    assert projects["projects"][0]["project_id"] == "project-a"
+    assert context["project_id"] == "project-a"
+    assert context["recent_runs"][0]["run_id"] == "run-1"
+
+
+def test_agent_training_tool_rejects_unknown_config_field():
+    result = json.loads(
+        asyncio.run(
+            agent_routes._execute_tool(
+                "start_training",
+                {
+                    "strategy": "sft",
+                    "model": "Qwen/Test",
+                    "config": {"made_up_setting": True},
+                },
+            )
+        )
+    )
+
+    assert result == {"error": "start_training config contains unsupported fields: made_up_setting"}
+
+
+def test_agent_data_designer_tool_forwards_runtime_and_canvas_inputs(monkeypatch):
+    monkeypatch.setattr(agent_routes.httpx, "AsyncClient", FakeTrainingClient)
+    FakeTrainingClient.calls = []
+
+    asyncio.run(
+        agent_routes._execute_tool(
+            "start_data_designer",
+            {
+                "pipeline": "coding_agent_sft",
+                "num_records": 24,
+                "seed_source": "data/gold.jsonl",
+                "seed_type": "file",
+                "model": "Hermes/Test",
+                "provider": "vllm",
+                "provider_endpoint": "http://192.0.2.10:8889/v1",
+                "origin": {"panel_id": "designer-1", "terminal_id": "term-1"},
+            },
+        )
+    )
+
+    post = FakeTrainingClient.calls[0]
+    assert post["url"] == "http://localhost:8003/api/factory/designer/create"
+    assert post["json"] == {
+        "pipeline": "coding_agent_sft",
+        "num_records": 24,
+        "seed_source": "data/gold.jsonl",
+        "seed_type": "file",
+        "text_model": "Hermes/Test",
+        "provider": "vllm",
+        "provider_endpoint": "http://192.0.2.10:8889/v1",
+        "origin": {
+            "kind": "agent",
+            "agent": "hermes",
+            "panel_id": "designer-1",
+            "terminal_id": "term-1",
+        },
+    }
 
 
 def test_agent_endpoint_chat_falls_back_when_responses_returns_runtime_failure(
@@ -487,6 +996,89 @@ def test_toolkit_scan_cap_is_internal_not_user_warning(monkeypatch, tmp_path):
 
     assert root_infos[0].skill_count == 2
     assert not any("Stopped local skill scan" in warning for warning in warnings)
+
+
+def test_toolkit_discovers_active_hermes_skills_without_optional_catalog(monkeypatch, tmp_path):
+    hermes_home = tmp_path / "hermes"
+    active = hermes_home / "skills" / "user-skill"
+    optional = hermes_home / "optional-skills" / "catalog-skill"
+    active.mkdir(parents=True)
+    optional.mkdir(parents=True)
+    (active / "SKILL.md").write_text(
+        "---\nname: user-skill\ndescription: An installed Hermes skill.\n---\n",
+        encoding="utf-8",
+    )
+    (optional / "SKILL.md").write_text(
+        "---\nname: catalog-skill\ndescription: An optional template.\n---\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+    monkeypatch.setattr(agent_routes, "_hermes_command", lambda: None)
+
+    roots = dict(agent_routes._toolkit_skill_root_candidates())
+    assert roots["hermes"] == hermes_home / "skills"
+    monkeypatch.setattr(
+        agent_routes,
+        "_toolkit_skill_root_candidates",
+        lambda: [("hermes", roots["hermes"])],
+    )
+    _root_infos, skills, _warnings = agent_routes._scan_skill_roots()
+    names = {skill.name for skill in skills}
+    assert "user-skill" in names
+    assert "catalog-skill" not in names
+    user_skill = next(skill for skill in skills if skill.name == "user-skill")
+    assert user_skill.source == "hermes"
+    assert user_skill.available_sources == ["hermes"]
+
+
+def test_local_hermes_setup_syncs_live_gateway_key(monkeypatch, tmp_path):
+    monkeypatch.setattr("bashgym.config.get_bashgym_dir", lambda: tmp_path / "state")
+    monkeypatch.setattr("bashgym.secrets.get_secrets_path", lambda: tmp_path / "secrets.json")
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
+    monkeypatch.setattr(agent_routes, "_hermes_command", lambda: None)
+    env_path = tmp_path / "hermes" / ".env"
+    env_path.parent.mkdir(parents=True)
+    env_path.write_text("API_SERVER_KEY=live-local-key\n", encoding="utf-8")
+    agent_routes._set_agent_api_key("hermes", "saved-profile-key")
+
+    async def healthy(_base_url, api_key=None):
+        assert api_key == "live-local-key"
+        return True, None
+
+    monkeypatch.setattr(agent_routes, "_probe_hermes_health", healthy)
+    asyncio.run(agent_routes._hermes_setup_status())
+    headers = agent_routes._agent_headers(
+        {"id": "hermes", "kind": "hermes", "base_url": "http://127.0.0.1:8642/v1"}
+    )
+
+    assert headers["authorization"] == "Bearer live-local-key"
+
+
+def test_local_hermes_setup_does_not_replace_tunnel_key(monkeypatch, tmp_path):
+    monkeypatch.setattr("bashgym.config.get_bashgym_dir", lambda: tmp_path / "state")
+    monkeypatch.setattr("bashgym.secrets.get_secrets_path", lambda: tmp_path / "secrets.json")
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
+    monkeypatch.setattr(agent_routes, "_hermes_command", lambda: None)
+    env_path = tmp_path / "hermes" / ".env"
+    env_path.parent.mkdir(parents=True)
+    env_path.write_text("API_SERVER_KEY=local-key\n", encoding="utf-8")
+    agent_routes._save_agent_endpoint_profile(
+        "hermes",
+        label="Remote Hermes",
+        base_url="http://127.0.0.1:18642/v1",
+        model="hermes-agent",
+        session_key="bashgym-canvas",
+        api_key="tunnel-key",
+    )
+
+    async def healthy(_base_url, api_key=None):
+        assert api_key == "tunnel-key"
+        return True, None
+
+    monkeypatch.setattr(agent_routes, "_probe_hermes_health", healthy)
+    asyncio.run(agent_routes._hermes_setup_status())
+
+    assert agent_routes._get_agent_api_key("hermes") == "tunnel-key"
 
 
 def test_toolkit_inventory_probes_authenticated_endpoint(monkeypatch, tmp_path):

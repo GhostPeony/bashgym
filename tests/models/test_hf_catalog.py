@@ -10,6 +10,8 @@ from types import SimpleNamespace
 import pytest
 
 from bashgym.models.hf_catalog import (
+    DEFAULT_TRAINING_AUTHORS,
+    discover_training_models,
     normalize_training_models,
     params_billions,
     total_and_dominant_dtype,
@@ -51,6 +53,8 @@ def test_normalize_training_models_shapes_each_entry():
     assert out[0]["hf_url"] == "https://huggingface.co/Qwen/Qwen3.6-4B-Instruct"
     # params guessed from the id so the directory can size it without a download
     assert out[0]["params_billions"] == pytest.approx(4.0)
+    assert out[0]["artifact_role"] == "trainable_base"
+    assert out[0]["trainable"] is True
 
 
 def test_normalize_training_models_sorts_by_downloads_desc():
@@ -74,3 +78,50 @@ def test_normalize_training_models_respects_limit():
 
     assert len(out) == 2
     assert out[0]["id"] == "o/m4"
+
+
+def test_normalize_training_models_classifies_nvfp4_as_inference_only():
+    raw = [
+        SimpleNamespace(
+            id="unsloth/gemma-4-12b-it-NVFP4",
+            downloads=10,
+            likes=2,
+            tags=["compressed-tensors", "nvfp4"],
+            pipeline_tag="image-text-to-text",
+        )
+    ]
+
+    out = normalize_training_models(raw)
+
+    assert out[0]["artifact_role"] == "inference_quant"
+    assert out[0]["quantization"] == "nvfp4"
+    assert out[0]["runtime"] == "vllm"
+    assert out[0]["trainable"] is False
+
+
+def test_discovery_includes_unsloth_but_excludes_inference_quants():
+    class FakeApi:
+        def list_models(self, **kwargs):
+            if kwargs["author"] != "unsloth":
+                return []
+            return [
+                SimpleNamespace(
+                    id="unsloth/gemma-4-12b-it-NVFP4",
+                    downloads=100,
+                    likes=10,
+                    tags=["nvfp4"],
+                    pipeline_tag="image-text-to-text",
+                ),
+                SimpleNamespace(
+                    id="unsloth/gemma-4-12b-it",
+                    downloads=90,
+                    likes=9,
+                    tags=[],
+                    pipeline_tag="image-text-to-text",
+                ),
+            ]
+
+    out = discover_training_models(api=FakeApi())
+
+    assert "unsloth" in DEFAULT_TRAINING_AUTHORS
+    assert [model["id"] for model in out] == ["unsloth/gemma-4-12b-it"]

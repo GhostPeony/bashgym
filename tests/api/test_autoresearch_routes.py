@@ -1,6 +1,7 @@
 """Tests for AutoResearch API routes -- schema research endpoints."""
 
 import json
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -78,6 +79,7 @@ def _environment_payloads() -> list[dict]:
 def _clear_schema_researcher():
     """Clear AutoResearch route state before each test."""
     for attr in (
+        "autoresearcher",
         "schema_researcher",
         "data_recipe_researcher",
         "data_recipe_proposal",
@@ -92,6 +94,7 @@ def _clear_schema_researcher():
     yield
     # Cleanup after test too
     for attr in (
+        "autoresearcher",
         "schema_researcher",
         "data_recipe_researcher",
         "data_recipe_proposal",
@@ -214,6 +217,36 @@ class TestHyperparamResearchStatus:
         assert data["status"] == "idle"
         assert data["total_experiments"] == 0
         assert data["completed_experiments"] == 0
+        assert data["execution_path"] == "prototype_compatibility"
+        assert data["durable"] is False
+
+    def test_real_mode_fails_closed_when_training_data_is_missing(self, monkeypatch, tmp_path):
+        settings = SimpleNamespace(
+            data=SimpleNamespace(
+                gold_traces_dir=str(tmp_path / "missing-gold-traces"),
+                training_batches_dir=str(tmp_path / "training-batches"),
+            )
+        )
+        monkeypatch.setattr("bashgym.config.get_settings", lambda: settings)
+
+        response = client.post(
+            "/api/autoresearch/start",
+            json={"mode": "real", "max_experiments": 1, "train_steps": 10},
+        )
+
+        assert response.status_code == 422
+        assert response.json()["detail"]["code"] == (
+            "autoresearch_real_prerequisites_missing"
+        )
+        assert not hasattr(app.state, "autoresearcher")
+
+    def test_invalid_mode_is_rejected(self):
+        response = client.post(
+            "/api/autoresearch/start",
+            json={"mode": "maybe-real", "max_experiments": 1, "train_steps": 10},
+        )
+
+        assert response.status_code == 422
 
     def test_stop_no_session(self):
         if hasattr(app.state, "autoresearcher"):

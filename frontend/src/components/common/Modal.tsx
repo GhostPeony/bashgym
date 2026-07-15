@@ -12,6 +12,7 @@ interface ModalProps {
   footer?: React.ReactNode
   size?: 'sm' | 'md' | 'lg' | 'xl'
   variant?: 'default' | 'canvas'
+  bodyClassName?: string
 }
 
 export function Modal({
@@ -22,7 +23,8 @@ export function Modal({
   children,
   footer,
   size = 'md',
-  variant = 'default'
+  variant = 'default',
+  bodyClassName
 }: ModalProps) {
   const titleId = useId()
   const descriptionId = useId()
@@ -59,7 +61,7 @@ export function Modal({
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="modal-root fixed inset-0 z-50 flex items-center justify-center overflow-hidden">
       <div
         className={clsx('absolute inset-0', isCanvas && 'modal-canvas-backdrop')}
         style={isCanvas ? undefined : { backgroundColor: 'rgba(27, 32, 64, 0.5)' }}
@@ -68,8 +70,7 @@ export function Modal({
 
       <div
         className={clsx(
-          'relative w-full mx-4 overflow-hidden',
-          'max-h-[90vh]',
+          'relative w-full max-h-full overflow-hidden',
           isCanvas
             ? 'modal-canvas-shell'
             : 'bg-background-card border-brutal border-border shadow-brutal rounded-brutal',
@@ -113,7 +114,12 @@ export function Modal({
           </button>
         </div>
 
-        <div className={isCanvas ? 'modal-canvas-body' : 'px-6 py-4 max-h-[70vh] overflow-y-auto'}>
+        <div
+          className={clsx(
+            isCanvas ? 'modal-canvas-body' : 'px-6 py-4 max-h-[70vh] overflow-y-auto',
+            bodyClassName
+          )}
+        >
           {children}
         </div>
 

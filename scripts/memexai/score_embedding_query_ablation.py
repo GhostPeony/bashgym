@@ -6,6 +6,8 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import statistics
+import time
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
@@ -60,6 +62,12 @@ def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
     with path.open("w", encoding="utf-8", newline="\n") as fh:
         for row in rows:
             fh.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def model_footprint_bytes(path: Path) -> int:
+    if path.is_file():
+        return path.stat().st_size
+    return sum(item.stat().st_size for item in path.rglob("*") if item.is_file())
 
 
 def rank_of_any(ranked_ids: list[str], acceptable_ids: set[str]) -> int | None:
@@ -121,6 +129,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--embedding-model-path", type=Path, required=True)
     parser.add_argument("--embedding-device", default="cuda")
     parser.add_argument("--embedding-batch-size", type=int, default=32)
+    parser.add_argument("--latency-repetitions", type=int, default=3)
     parser.add_argument("--corpus-embedding-matrix", type=Path, required=True)
     parser.add_argument("--corpus-embedding-chunk-ids", type=Path, required=True)
     parser.add_argument("--truncate-dim", type=int, default=768)
@@ -129,21 +138,37 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Optional comma-separated query splits to score, e.g. dev,test.",
     )
+    parser.add_argument(
+        "--require-exclusive-split",
+        action="store_true",
+        help="Reject a query file containing rows outside --splits before model imports.",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
-    import numpy as np
-    from sentence_transformers import SentenceTransformer
-
     args = parse_args()
+    if args.latency_repetitions < 1:
+        raise ValueError("--latency-repetitions must be positive")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     base_rows = load_jsonl(args.queries_jsonl)
     selected_splits = {split.strip() for split in args.splits.split(",") if split.strip()}
+    if args.require_exclusive_split:
+        if not selected_splits:
+            raise ValueError("--require-exclusive-split requires --splits")
+        observed_splits = {str(row.get("split") or "") for row in base_rows}
+        if observed_splits != selected_splits:
+            raise ValueError(
+                "query file is not physically exclusive to requested splits: "
+                f"expected {sorted(selected_splits)}, found {sorted(observed_splits)}"
+            )
     if selected_splits:
         base_rows = [row for row in base_rows if row.get("split") in selected_splits]
     if not base_rows:
         raise ValueError(f"no query rows left after split filter: {sorted(selected_splits)}")
+    import numpy as np
+    from sentence_transformers import SentenceTransformer
+
     corpus_rows = load_jsonl(args.corpus_jsonl)
     corpus_matrix = np.load(args.corpus_embedding_matrix)
     corpus_ids = normalize_corpus_ids(
@@ -166,14 +191,21 @@ def main() -> int:
     for mode, prefix in PREFIXES.items():
         rows = copy.deepcopy(base_rows)
         texts = [prefix + row["query"] for row in rows]
-        query_embeddings = model.encode(
-            texts,
-            batch_size=args.embedding_batch_size,
-            convert_to_numpy=True,
-            normalize_embeddings=True,
-            truncate_dim=args.truncate_dim,
-            show_progress_bar=True,
-        )
+        elapsed_per_query_ms = []
+        query_embeddings = None
+        for repetition in range(args.latency_repetitions):
+            started = time.perf_counter()
+            encoded = model.encode(
+                texts,
+                batch_size=args.embedding_batch_size,
+                convert_to_numpy=True,
+                normalize_embeddings=True,
+                truncate_dim=args.truncate_dim,
+                show_progress_bar=repetition == 0,
+            )
+            elapsed_per_query_ms.append((time.perf_counter() - started) * 1000 / len(texts))
+            if query_embeddings is None:
+                query_embeddings = encoded
         if query_embeddings.shape[1] != args.truncate_dim:
             raise ValueError(
                 f"expected {args.truncate_dim}d query embeddings, got {query_embeddings.shape[1]}"
@@ -201,6 +233,9 @@ def main() -> int:
             )
             row["positive_rank_same_video"] = rank_of_any(ranked_ids, same_video_ids)
             row["top_retrieved_chunk_ids"] = ranked_ids[:10]
+            row["top_retrieved_video_id"] = by_chunk_id[ranked_ids[0]].get(
+                "youtube_video_id"
+            )
             row["top_retrieved_scores"] = [
                 round(float(scores[row_idx, int(corpus_idx)]), 6) for corpus_idx in ranked[:10]
             ]
@@ -217,6 +252,7 @@ def main() -> int:
             "prefix": prefix,
             "query_embedding_path": str(npy_path),
             "rows_path": str(rows_path),
+            "median_query_latency_ms": statistics.median(elapsed_per_query_ms),
             "metrics": metrics(rows),
         }
 
@@ -228,6 +264,7 @@ def main() -> int:
         "splits": sorted(selected_splits) if selected_splits else "all",
         "query_types": dict(sorted(Counter(row["query_type"] for row in base_rows).items())),
         "embedding_model_path": str(args.embedding_model_path),
+        "model_footprint_bytes": model_footprint_bytes(args.embedding_model_path),
         "truncate_dim": args.truncate_dim,
         "runs": runs,
     }

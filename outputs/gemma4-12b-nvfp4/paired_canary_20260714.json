@@ -1,0 +1,448 @@
+{
+  "schema_version": "bashgym.nvfp4-canary-benchmark.v1",
+  "created_at": "2026-07-14T19:14:33.505828+00:00",
+  "endpoint": "http://127.0.0.1:8892",
+  "models": [
+    "gemma4-12b-nvfp4-candidate",
+    "bashgym-gemma4-12b-sft"
+  ],
+  "repetitions": 3,
+  "cases": [
+    {
+      "id": "exact_text",
+      "prompt": "Reply with exactly: NVFP4_READY",
+      "expected_text": "NVFP4_READY"
+    },
+    {
+      "id": "short_reasoning",
+      "prompt": "What is 17 multiplied by 19? Reply with the number only.",
+      "expected_text": "323"
+    },
+    {
+      "id": "shell_tool",
+      "prompt": "List Python files in the current working directory. Use the available tool and do not invent results.",
+      "expected_tool": "run_command"
+    },
+    {
+      "id": "file_tool",
+      "prompt": "Read pyproject.toml using the available tool. Do not invent its contents.",
+      "expected_tool": "read_file"
+    }
+  ],
+  "summary": {
+    "gemma4-12b-nvfp4-candidate": {
+      "requests": 12,
+      "successful_requests": 12,
+      "passed_requests": 9,
+      "pass_rate": 0.75,
+      "median_latency_seconds": 0.664666518510785,
+      "median_completion_tokens_per_second": 17.054917274870494
+    },
+    "bashgym-gemma4-12b-sft": {
+      "requests": 12,
+      "successful_requests": 12,
+      "passed_requests": 9,
+      "pass_rate": 0.75,
+      "median_latency_seconds": 1.0323847139952704,
+      "median_completion_tokens_per_second": 14.598499893440586
+    }
+  },
+  "samples": [
+    {
+      "model": "gemma4-12b-nvfp4-candidate",
+      "case_id": "exact_text",
+      "elapsed_seconds": 0.39011523907538503,
+      "prompt_tokens": 22,
+      "completion_tokens": 6,
+      "finish_reason": "stop",
+      "content": "NVFP4_READY",
+      "tool_calls": [],
+      "passed": true,
+      "repetition": 1
+    },
+    {
+      "model": "gemma4-12b-nvfp4-candidate",
+      "case_id": "short_reasoning",
+      "elapsed_seconds": 0.2659470869693905,
+      "prompt_tokens": 30,
+      "completion_tokens": 4,
+      "finish_reason": "stop",
+      "content": "323",
+      "tool_calls": [],
+      "passed": true,
+      "repetition": 1
+    },
+    {
+      "model": "gemma4-12b-nvfp4-candidate",
+      "case_id": "shell_tool",
+      "elapsed_seconds": 0.9560247459448874,
+      "prompt_tokens": 128,
+      "completion_tokens": 17,
+      "finish_reason": "tool_calls",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-8e42aa10ea3f37b8",
+          "type": "function",
+          "function": {
+            "name": "run_command",
+            "arguments": "{\"command\": \"ls *.py\"}"
+          }
+        }
+      ],
+      "passed": true,
+      "repetition": 1
+    },
+    {
+      "model": "gemma4-12b-nvfp4-candidate",
+      "case_id": "file_tool",
+      "elapsed_seconds": 0.9580595230218023,
+      "prompt_tokens": 125,
+      "completion_tokens": 17,
+      "finish_reason": "tool_calls",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-87a33415d14958d5",
+          "type": "function",
+          "function": {
+            "name": "run_command",
+            "arguments": "{\"command\": \"ls -a\"}"
+          }
+        }
+      ],
+      "passed": false,
+      "repetition": 1
+    },
+    {
+      "model": "bashgym-gemma4-12b-sft",
+      "case_id": "exact_text",
+      "elapsed_seconds": 3.306467154994607,
+      "prompt_tokens": 22,
+      "completion_tokens": 6,
+      "finish_reason": "stop",
+      "content": "NVFP4_READY",
+      "tool_calls": [],
+      "passed": true,
+      "repetition": 1
+    },
+    {
+      "model": "bashgym-gemma4-12b-sft",
+      "case_id": "short_reasoning",
+      "elapsed_seconds": 0.29600282898172736,
+      "prompt_tokens": 30,
+      "completion_tokens": 4,
+      "finish_reason": "stop",
+      "content": "323",
+      "tool_calls": [],
+      "passed": true,
+      "repetition": 1
+    },
+    {
+      "model": "bashgym-gemma4-12b-sft",
+      "case_id": "shell_tool",
+      "elapsed_seconds": 1.0789545440347865,
+      "prompt_tokens": 128,
+      "completion_tokens": 17,
+      "finish_reason": "tool_calls",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-8728eb3dbda33650",
+          "type": "function",
+          "function": {
+            "name": "run_command",
+            "arguments": "{\"command\": \"ls *.py\"}"
+          }
+        }
+      ],
+      "passed": true,
+      "repetition": 1
+    },
+    {
+      "model": "bashgym-gemma4-12b-sft",
+      "case_id": "file_tool",
+      "elapsed_seconds": 1.0283284470206127,
+      "prompt_tokens": 125,
+      "completion_tokens": 17,
+      "finish_reason": "tool_calls",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-ac5cf16c24f3fa27",
+          "type": "function",
+          "function": {
+            "name": "run_command",
+            "arguments": "{\"command\": \"ls -a\"}"
+          }
+        }
+      ],
+      "passed": false,
+      "repetition": 1
+    },
+    {
+      "model": "gemma4-12b-nvfp4-candidate",
+      "case_id": "exact_text",
+      "elapsed_seconds": 0.366960262064822,
+      "prompt_tokens": 22,
+      "completion_tokens": 6,
+      "finish_reason": "stop",
+      "content": "NVFP4_READY",
+      "tool_calls": [],
+      "passed": true,
+      "repetition": 2
+    },
+    {
+      "model": "gemma4-12b-nvfp4-candidate",
+      "case_id": "short_reasoning",
+      "elapsed_seconds": 0.26381872000638396,
+      "prompt_tokens": 30,
+      "completion_tokens": 4,
+      "finish_reason": "stop",
+      "content": "323",
+      "tool_calls": [],
+      "passed": true,
+      "repetition": 2
+    },
+    {
+      "model": "gemma4-12b-nvfp4-candidate",
+      "case_id": "shell_tool",
+      "elapsed_seconds": 0.9400042610941455,
+      "prompt_tokens": 128,
+      "completion_tokens": 17,
+      "finish_reason": "tool_calls",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-9b1927d5049b5c38",
+          "type": "function",
+          "function": {
+            "name": "run_command",
+            "arguments": "{\"command\": \"ls *.py\"}"
+          }
+        }
+      ],
+      "passed": true,
+      "repetition": 2
+    },
+    {
+      "model": "gemma4-12b-nvfp4-candidate",
+      "case_id": "file_tool",
+      "elapsed_seconds": 0.954406623961404,
+      "prompt_tokens": 125,
+      "completion_tokens": 17,
+      "finish_reason": "tool_calls",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-8a138492c7e2cb12",
+          "type": "function",
+          "function": {
+            "name": "run_command",
+            "arguments": "{\"command\": \"ls -a\"}"
+          }
+        }
+      ],
+      "passed": false,
+      "repetition": 2
+    },
+    {
+      "model": "bashgym-gemma4-12b-sft",
+      "case_id": "exact_text",
+      "elapsed_seconds": 0.4058578589465469,
+      "prompt_tokens": 22,
+      "completion_tokens": 6,
+      "finish_reason": "stop",
+      "content": "NVFP4_READY",
+      "tool_calls": [],
+      "passed": true,
+      "repetition": 2
+    },
+    {
+      "model": "bashgym-gemma4-12b-sft",
+      "case_id": "short_reasoning",
+      "elapsed_seconds": 0.28999245702289045,
+      "prompt_tokens": 30,
+      "completion_tokens": 4,
+      "finish_reason": "stop",
+      "content": "323",
+      "tool_calls": [],
+      "passed": true,
+      "repetition": 2
+    },
+    {
+      "model": "bashgym-gemma4-12b-sft",
+      "case_id": "shell_tool",
+      "elapsed_seconds": 1.6171792229870334,
+      "prompt_tokens": 128,
+      "completion_tokens": 17,
+      "finish_reason": "tool_calls",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-a41da279febd7d7f",
+          "type": "function",
+          "function": {
+            "name": "run_command",
+            "arguments": "{\"command\": \"ls *.py\"}"
+          }
+        }
+      ],
+      "passed": true,
+      "repetition": 2
+    },
+    {
+      "model": "bashgym-gemma4-12b-sft",
+      "case_id": "file_tool",
+      "elapsed_seconds": 1.0364458549302071,
+      "prompt_tokens": 125,
+      "completion_tokens": 17,
+      "finish_reason": "tool_calls",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-8b2f2a288b789df6",
+          "type": "function",
+          "function": {
+            "name": "run_command",
+            "arguments": "{\"command\": \"ls -a\"}"
+          }
+        }
+      ],
+      "passed": false,
+      "repetition": 2
+    },
+    {
+      "model": "gemma4-12b-nvfp4-candidate",
+      "case_id": "exact_text",
+      "elapsed_seconds": 0.3666219029109925,
+      "prompt_tokens": 22,
+      "completion_tokens": 6,
+      "finish_reason": "stop",
+      "content": "NVFP4_READY",
+      "tool_calls": [],
+      "passed": true,
+      "repetition": 3
+    },
+    {
+      "model": "gemma4-12b-nvfp4-candidate",
+      "case_id": "short_reasoning",
+      "elapsed_seconds": 0.27399528201203793,
+      "prompt_tokens": 30,
+      "completion_tokens": 4,
+      "finish_reason": "stop",
+      "content": "323",
+      "tool_calls": [],
+      "passed": true,
+      "repetition": 3
+    },
+    {
+      "model": "gemma4-12b-nvfp4-candidate",
+      "case_id": "shell_tool",
+      "elapsed_seconds": 0.9392177979461849,
+      "prompt_tokens": 128,
+      "completion_tokens": 17,
+      "finish_reason": "tool_calls",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-a3a2d3c6cc39e93a",
+          "type": "function",
+          "function": {
+            "name": "run_command",
+            "arguments": "{\"command\": \"ls *.py\"}"
+          }
+        }
+      ],
+      "passed": true,
+      "repetition": 3
+    },
+    {
+      "model": "gemma4-12b-nvfp4-candidate",
+      "case_id": "file_tool",
+      "elapsed_seconds": 0.9461036090506241,
+      "prompt_tokens": 125,
+      "completion_tokens": 17,
+      "finish_reason": "tool_calls",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-9cf62df0d69e9513",
+          "type": "function",
+          "function": {
+            "name": "run_command",
+            "arguments": "{\"command\": \"ls -a\"}"
+          }
+        }
+      ],
+      "passed": false,
+      "repetition": 3
+    },
+    {
+      "model": "bashgym-gemma4-12b-sft",
+      "case_id": "exact_text",
+      "elapsed_seconds": 0.41627643804531544,
+      "prompt_tokens": 22,
+      "completion_tokens": 6,
+      "finish_reason": "stop",
+      "content": "NVFP4_READY",
+      "tool_calls": [],
+      "passed": true,
+      "repetition": 3
+    },
+    {
+      "model": "bashgym-gemma4-12b-sft",
+      "case_id": "short_reasoning",
+      "elapsed_seconds": 0.3236559600336477,
+      "prompt_tokens": 30,
+      "completion_tokens": 4,
+      "finish_reason": "stop",
+      "content": "323",
+      "tool_calls": [],
+      "passed": true,
+      "repetition": 3
+    },
+    {
+      "model": "bashgym-gemma4-12b-sft",
+      "case_id": "shell_tool",
+      "elapsed_seconds": 1.0364409809699282,
+      "prompt_tokens": 128,
+      "completion_tokens": 17,
+      "finish_reason": "tool_calls",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-93dd58445b4b174b",
+          "type": "function",
+          "function": {
+            "name": "run_command",
+            "arguments": "{\"command\": \"ls *.py\"}"
+          }
+        }
+      ],
+      "passed": true,
+      "repetition": 3
+    },
+    {
+      "model": "bashgym-gemma4-12b-sft",
+      "case_id": "file_tool",
+      "elapsed_seconds": 1.0411983170779422,
+      "prompt_tokens": 125,
+      "completion_tokens": 17,
+      "finish_reason": "tool_calls",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-b98e1da1468a40d3",
+          "type": "function",
+          "function": {
+            "name": "run_command",
+            "arguments": "{\"command\": \"ls -a\"}"
+          }
+        }
+      ],
+      "passed": false,
+      "repetition": 3
+    }
+  ]
+}

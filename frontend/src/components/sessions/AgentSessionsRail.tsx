@@ -1,68 +1,91 @@
-import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, ListTree, RefreshCw, FolderGit2, ChevronDown, ChevronRight, Plus } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { ArrowLeft, ChevronDown, ChevronRight, Clock3, FolderGit2, Plus, RefreshCw } from 'lucide-react'
 import { clsx } from 'clsx'
-import { useTerminalStore, useUIStore, useWorkspaceStore } from '../../stores'
+import {
+  buildWorkspaceSessionIndex,
+  useTerminalStore,
+  useUIStore,
+  useWorkspaceStore
+} from '../../stores'
+import type { WorkspaceSessionRecord } from '../../stores'
 import { useAgentSessionsStore } from '../../stores/agentSessionsStore'
 import { WorkspaceStrip } from './WorkspaceStrip'
 import { candidatesForTerminal, normPath } from '../../services/agentSessions/matching'
 import type { AgentSessionSnapshot, AgentSessionKind } from '../../services/agentSessions/types'
-import type { Panel, TerminalSession } from '../../stores'
 import { SessionCard } from './SessionCard'
 import { JournalSessionRow } from './JournalSessionRow'
 import { SessionDetailPopover, type SessionDetailTarget } from './SessionDetailPopover'
+import { folderNameFromPath } from './format'
 
 type KindFilter = 'all' | AgentSessionKind
 
-/** Popover target held as ids so the open popover live-updates from the stores */
 type DetailRef =
-  | { type: 'live'; panelId: string; x: number; y: number }
+  | { type: 'live'; workspaceId: string; panelId: string; x: number; y: number }
   | { type: 'journal'; filePath: string; x: number; y: number }
-
-const JOURNALS_COLLAPSED_COUNT = 4
 
 interface ProjectEntry {
   key: string
-  /** Display path — best-cased source we saw */
   path: string
   name: string
   branch?: string
-  live: Array<{ session: TerminalSession; panel: Panel }>
   journals: AgentSessionSnapshot[]
   lastActivity: number
 }
+
+const JOURNALS_COLLAPSED_COUNT = 4
+const JOURNALS_EXPANDED_LIMIT = 50
 
 function projectKeyOf(cwd: string): string {
   return normPath(cwd).toLowerCase()
 }
 
-function basenameOf(p: string): string {
-  const norm = p.replace(/\\/g, '/').replace(/\/+$/, '')
-  return norm.split('/').pop() || norm
+interface NewSessionLauncherProps {
+  cwd?: string
+  onLaunch: (kind: 'claude' | 'codex' | 'shell', cwd?: string) => void
 }
 
-function shortenPath(p: string): string {
-  return p.replace(/^(C:\\Users\\[^\\]+|\/home\/[^/]+|\/Users\/[^/]+)/i, '~')
+function NewSessionLauncher({ cwd, onLaunch }: NewSessionLauncherProps) {
+  return (
+    <div className="grid grid-cols-3 gap-1 py-1">
+      <button type="button" onClick={() => onLaunch('claude', cwd)} className="node-btn node-btn-wide node-btn-accent">CLAUDE</button>
+      <button type="button" onClick={() => onLaunch('codex', cwd)} className="node-btn node-btn-wide">CODEX</button>
+      <button type="button" onClick={() => onLaunch('shell', cwd)} className="node-btn node-btn-wide">SHELL</button>
+    </div>
+  )
 }
 
 /**
- * Master feed of agent work, organized like a project browser: each project is
- * a folder on this machine (discovered from live terminals and the CLIs' own
- * session journals), with live terminals and resumable past sessions beneath.
- * Mounting starts journal polling; unmounting stops it.
+ * Workspace-first companion rail: live processes keep their canvas ownership,
+ * while historical Claude/Codex journals live in a separate project archive.
  */
 export function AgentSessionsRail() {
-  const { setSidebarMode, closeOverlay } = useUIStore()
-  const sessionsVersion = useTerminalStore((s) => s.sessionsVersion)
-  const panels = useTerminalStore((s) => s.panels)
-  const canvasEdges = useTerminalStore((s) => s.canvasEdges)
-  const { snapshots, matches, lastScanAt, error, startPolling, stopPolling, pinSession, pollOnce } =
-    useAgentSessionsStore()
+  const setSidebarMode = useUIStore((state) => state.setSidebarMode)
+  const closeOverlay = useUIStore((state) => state.closeOverlay)
+  const presentWorkspacePanel = useUIStore((state) => state.presentWorkspacePanel)
+  const panels = useTerminalStore((state) => state.panels)
+  const sessionsVersion = useTerminalStore((state) => state.sessionsVersion)
+  const canvasEdges = useTerminalStore((state) => state.canvasEdges)
+  const workspaces = useWorkspaceStore((state) => state.workspaces)
+  const activeWorkspaceId = useWorkspaceStore((state) => state.activeWorkspaceId)
+  const sessionIndexVersion = useWorkspaceStore((state) => state.sessionIndexVersion)
+  const {
+    snapshots,
+    matches,
+    liveTerminalIds,
+    hasLiveTerminalSnapshot,
+    lastScanAt,
+    error,
+    startPolling,
+    stopPolling,
+    pinSession,
+    pollOnce
+  } = useAgentSessionsStore()
 
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
-  const [showAllJournals, setShowAllJournals] = useState<Set<string>>(new Set())
+  const [collapsedWorkspaces, setCollapsedWorkspaces] = useState<Set<string>>(new Set())
+  const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set())
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set())
   const [kindFilter, setKindFilter] = useState<KindFilter>('all')
   const [detail, setDetail] = useState<DetailRef | null>(null)
-  /** Project key showing the new-session launcher ('' = the header-level one) */
   const [launcherFor, setLauncherFor] = useState<string | null>(null)
 
   useEffect(() => {
@@ -70,158 +93,142 @@ export function AgentSessionsRail() {
     return () => stopPolling()
   }, [startPolling, stopPolling])
 
+  const sessionIndexInvalidation = `${sessionIndexVersion}:${sessionsVersion}`
+  const workspaceGroups = useMemo(() => {
+    void sessionIndexInvalidation
+    return buildWorkspaceSessionIndex({
+      workspaces,
+      activeWorkspaceId,
+      activePanels: panels,
+      activeSessions: useTerminalStore.getState().sessions,
+      liveTerminalIds: hasLiveTerminalSnapshot ? liveTerminalIds : undefined
+    })
+  }, [
+    activeWorkspaceId,
+    hasLiveTerminalSnapshot,
+    liveTerminalIds,
+    panels,
+    sessionIndexInvalidation,
+    workspaces
+  ])
+
   const projects = useMemo<ProjectEntry[]>(() => {
-    const terminalSessions = useTerminalStore.getState().sessions
-    const matchedPaths = new Set(Array.from(matches.values()).map((m) => m.filePath))
+    const matchedPaths = new Set(Array.from(matches.values()).map((match) => match.filePath))
     const byKey = new Map<string, ProjectEntry>()
 
-    const ensure = (cwd: string): ProjectEntry | null => {
-      if (!cwd || cwd === '~') return null
-      const key = projectKeyOf(cwd)
-      let entry = byKey.get(key)
-      if (!entry) {
-        entry = { key, path: cwd, name: basenameOf(cwd), live: [], journals: [], lastActivity: 0 }
-        byKey.set(key, entry)
+    for (const snapshot of snapshots.values()) {
+      if (!snapshot.cwd || matchedPaths.has(snapshot.filePath)) continue
+      const key = projectKeyOf(snapshot.cwd)
+      let project = byKey.get(key)
+      if (!project) {
+        project = {
+          key,
+          path: snapshot.cwd,
+          name: folderNameFromPath(snapshot.cwd),
+          branch: snapshot.gitBranch,
+          journals: [],
+          lastActivity: 0
+        }
+        byKey.set(key, project)
       }
-      return entry
+      if (!project.branch && snapshot.gitBranch) project.branch = snapshot.gitBranch
+      project.journals.push(snapshot)
+      project.lastActivity = Math.max(project.lastActivity, snapshot.lastEventAt ?? snapshot.fileMtime)
     }
 
-    // Live terminals anchor their projects (and carry real path casing)
-    for (const panel of panels) {
-      if (panel.type !== 'terminal' || !panel.terminalId) continue
-      const session = terminalSessions.get(panel.terminalId)
-      if (!session) continue
-      const entry = ensure(session.cwd)
-      if (!entry) continue
-      entry.path = session.cwd
-      entry.name = basenameOf(session.cwd)
-      entry.live.push({ session, panel })
-      entry.lastActivity = Math.max(entry.lastActivity, session.lastActivity)
-    }
-
-    // Past sessions from the journals (unmatched ones only — matched journals
-    // render inside their live terminal's card)
-    for (const snap of snapshots.values()) {
-      if (!snap.cwd) continue
-      const entry = ensure(snap.cwd)
-      if (!entry) continue
-      if (!entry.branch && snap.gitBranch) entry.branch = snap.gitBranch
-      if (matchedPaths.has(snap.filePath)) continue
-      entry.journals.push(snap)
-      entry.lastActivity = Math.max(entry.lastActivity, snap.lastEventAt ?? snap.fileMtime)
-    }
-
-    for (const entry of byKey.values()) {
-      entry.live.sort((a, b) => b.session.lastActivity - a.session.lastActivity)
-      entry.journals.sort((a, b) => (b.lastEventAt ?? b.fileMtime) - (a.lastEventAt ?? a.fileMtime))
+    for (const project of byKey.values()) {
+      project.journals.sort((a, b) => (b.lastEventAt ?? b.fileMtime) - (a.lastEventAt ?? a.fileMtime))
     }
     return Array.from(byKey.values()).sort((a, b) => b.lastActivity - a.lastActivity)
-    // sessionsVersion drives recompute when live session state changes
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [panels, matches, snapshots, sessionsVersion])
+  }, [matches, snapshots])
 
-  const handleFocus = (terminalId: string) => {
-    useTerminalStore.getState().setActiveTerminal(terminalId)
+  const toggleSet = useCallback((current: Set<string>, key: string, apply: (next: Set<string>) => void) => {
+    const next = new Set(current)
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    apply(next)
+  }, [])
+
+  const handleFocus = useCallback((panelId: string, workspaceId: string) => {
     closeOverlay()
-  }
+    presentWorkspacePanel(workspaceId, panelId, 'peek')
+  }, [closeOverlay, presentWorkspacePanel])
 
-  const handleResume = (snap: AgentSessionSnapshot) => {
-    if (!snap.sessionId) return
-    const cmd = snap.kind === 'claude' ? `claude --resume ${snap.sessionId}` : `codex resume ${snap.sessionId}`
-    const title = snap.title ?? (snap.cwd ? basenameOf(snap.cwd) : snap.kind)
-    useTerminalStore.getState().createTerminal(undefined, title, cmd, snap.cwd)
+  const handleResume = useCallback((snapshot: AgentSessionSnapshot) => {
+    if (!snapshot.sessionId) return
+    const command = snapshot.kind === 'claude'
+      ? `claude --resume ${snapshot.sessionId}`
+      : `codex resume ${snapshot.sessionId}`
+    const title = snapshot.title ?? folderNameFromPath(snapshot.cwd, snapshot.kind)
+    useTerminalStore.getState().createTerminal(undefined, title, command, snapshot.cwd)
     closeOverlay()
-  }
+  }, [closeOverlay])
 
-  const handleLaunch = (kind: 'claude' | 'codex' | 'shell', cwd?: string) => {
+  const handleLaunch = useCallback((kind: 'claude' | 'codex' | 'shell', cwd?: string) => {
     const title = kind === 'claude' ? 'Claude Code' : kind === 'codex' ? 'Codex' : 'Terminal'
     useTerminalStore.getState().createTerminal(undefined, title, kind === 'shell' ? undefined : kind, cwd)
     setLauncherFor(null)
     closeOverlay()
-  }
+  }, [closeOverlay])
 
-  const handleNewWorkspace = () => {
-    const name = window.prompt('Workspace name?')
-    if (name?.trim()) {
-      useWorkspaceStore.getState().createWorkspace(name, { activate: true })
-      setLauncherFor(null)
-      closeOverlay()
-    }
-  }
-
-  const handleOpenInNewWorkspace = (snap: AgentSessionSnapshot) => {
-    if (!snap.sessionId) return
-    const ws = useWorkspaceStore.getState()
-    const wsId = ws.createWorkspace(snap.cwd ? basenameOf(snap.cwd) : snap.kind)
-    ws.switchWorkspace(wsId)
-    const cmd = snap.kind === 'claude' ? `claude --resume ${snap.sessionId}` : `codex resume ${snap.sessionId}`
-    const title = snap.title ?? (snap.cwd ? basenameOf(snap.cwd) : snap.kind)
-    useTerminalStore.getState().createTerminal(undefined, title, cmd, snap.cwd)
+  const handleOpenInNewWorkspace = useCallback((snapshot: AgentSessionSnapshot) => {
+    if (!snapshot.sessionId) return
+    const workspaceStore = useWorkspaceStore.getState()
+    const workspaceId = workspaceStore.createWorkspace(folderNameFromPath(snapshot.cwd, snapshot.kind))
+    workspaceStore.switchWorkspace(workspaceId)
+    const command = snapshot.kind === 'claude'
+      ? `claude --resume ${snapshot.sessionId}`
+      : `codex resume ${snapshot.sessionId}`
+    const title = snapshot.title ?? folderNameFromPath(snapshot.cwd, snapshot.kind)
+    useTerminalStore.getState().createTerminal(undefined, title, command, snapshot.cwd)
     closeOverlay()
-  }
+  }, [closeOverlay])
 
-  const handleMoveToNewWorkspace = (panelId: string) => {
-    const state = useTerminalStore.getState()
-    const panel = state.panels.find((p) => p.id === panelId)
-    const session = panel?.terminalId ? state.sessions.get(panel.terminalId) : undefined
-    const name = session?.cwd && session.cwd !== '~' ? basenameOf(session.cwd) : panel?.title ?? 'workspace'
-    const ws = useWorkspaceStore.getState()
-    const wsId = ws.createWorkspace(name)
-    ws.moveLivePanelToWorkspace(panelId, wsId)
-    closeOverlay()
-  }
+  const handleMoveToWorkspace = useCallback((panelId: string, workspaceId: string) => {
+    useWorkspaceStore.getState().moveLivePanelToWorkspace(panelId, workspaceId, { switchAfter: false })
+  }, [])
 
-  const NewSessionLauncher = ({ cwd }: { cwd?: string }) => (
-    <div className="flex items-center gap-1 py-1 flex-wrap">
-      <button onClick={() => handleLaunch('claude', cwd)} className="node-btn node-btn-wide node-btn-accent">
-        NEW CLAUDE
-      </button>
-      <button onClick={() => handleLaunch('codex', cwd)} className="node-btn node-btn-wide">
-        NEW CODEX
-      </button>
-      <button onClick={() => handleLaunch('shell', cwd)} className="node-btn node-btn-wide">
-        SHELL
-      </button>
-      <button
-        onClick={handleNewWorkspace}
-        className="node-btn node-btn-wide"
-        title="Create a new named canvas workspace and switch to it"
-      >
-        NEW WORKSPACE
-      </button>
-    </div>
+  const handleMoveToNewWorkspace = useCallback((panelId: string) => {
+    const record = workspaceGroups
+      .flatMap((group) => group.sessions)
+      .find((candidate) => candidate.panel.id === panelId)
+    if (!record || !record.isActiveWorkspace) return
+    const name = folderNameFromPath(record.session.cwd, record.panel.title)
+    const workspaceStore = useWorkspaceStore.getState()
+    const workspaceId = workspaceStore.createWorkspace(name)
+    workspaceStore.moveLivePanelToWorkspace(panelId, workspaceId, { switchAfter: false })
+  }, [workspaceGroups])
+
+  const liveRecords = useMemo(
+    () => workspaceGroups.flatMap((group) => group.sessions),
+    [workspaceGroups]
   )
-
-  const toggle = (set: Set<string>, key: string, apply: (next: Set<string>) => void) => {
-    const next = new Set(set)
-    if (next.has(key)) next.delete(key)
-    else next.add(key)
-    apply(next)
-  }
-
-  // Resolve the modal target fresh each render so it live-updates
   let detailTarget: SessionDetailTarget | null = null
   let detailPinCandidates: AgentSessionSnapshot[] = []
   if (detail?.type === 'live') {
-    const panel = panels.find((p) => p.id === detail.panelId)
-    const session = panel?.terminalId
-      ? useTerminalStore.getState().sessions.get(panel.terminalId)
-      : undefined
-    if (panel && session) {
-      const match = matches.get(session.id)
+    const record = liveRecords.find(
+      (candidate) => candidate.workspaceId === detail.workspaceId && candidate.panel.id === detail.panelId
+    )
+    if (record) {
+      const match = matches.get(record.session.id)
       const snapshot = match ? snapshots.get(match.filePath) : undefined
-      detailTarget = { type: 'live', session, panel, snapshot, match }
-      if (!snapshot) {
-        detailPinCandidates = candidatesForTerminal(
-          {
-            terminalId: session.id,
-            panelId: panel.id,
-            cwd: session.cwd,
-            agentKind: session.agentKind,
-            lastActivity: session.lastActivity
-          },
-          snapshots
-        )
+      detailTarget = {
+        type: 'live',
+        session: record.session,
+        panel: record.panel,
+        workspaceId: record.workspaceId,
+        workspaceName: record.workspaceName,
+        snapshot,
+        match
+      }
+      if (!snapshot && record.isActiveWorkspace) {
+        detailPinCandidates = candidatesForTerminal({
+          terminalId: record.session.id,
+          panelId: record.panel.id,
+          cwd: record.session.cwd,
+          agentKind: record.session.agentKind,
+          lastActivity: record.session.lastActivity
+        }, snapshots)
       }
     }
   } else if (detail?.type === 'journal') {
@@ -229,180 +236,196 @@ export function AgentSessionsRail() {
     if (snapshot) detailTarget = { type: 'journal', snapshot }
   }
 
-  const totalLive = projects.reduce((n, p) => n + p.live.length, 0)
-  const totalJournals = projects.reduce((n, p) => n + p.journals.length, 0)
+  const renderLiveSession = (record: WorkspaceSessionRecord) => {
+    const match = matches.get(record.session.id)
+    const snapshot = match ? snapshots.get(match.filePath) : undefined
+    return (
+      <SessionCard
+        key={`${record.workspaceId}:${record.panel.id}`}
+        session={record.session}
+        snapshot={snapshot}
+        runtimeState={record.runtimeState}
+        onOpenDetail={(event) => setDetail({
+          type: 'live',
+          workspaceId: record.workspaceId,
+          panelId: record.panel.id,
+          x: event.clientX,
+          y: event.clientY
+        })}
+      />
+    )
+  }
 
   return (
-    <div className="p-3 space-y-3">
-      {/* Workspace switcher */}
-      <WorkspaceStrip />
+    <div className="p-3 space-y-4 min-h-full">
+      <WorkspaceStrip groups={workspaceGroups} />
 
-      {/* Header */}
-      <div className="space-y-2.5 pb-1">
-        <div className="flex items-center gap-2">
-          <button onClick={() => setSidebarMode('nav')} className="node-btn" title="Back to navigation">
-            <ArrowLeft className="w-3 h-3" />
+      <header className="space-y-2.5 pt-2 border-t border-border-subtle">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <button type="button" onClick={() => setSidebarMode('nav')} className="node-btn node-btn-wide flex-shrink-0" title="Back to menu" aria-label="Back to menu">
+            <span className="flex items-center gap-1"><ArrowLeft className="w-3 h-3" /> MENU</span>
           </button>
-          <ListTree className="w-3.5 h-3.5 text-accent" />
-          <span className="font-mono text-xs font-bold uppercase tracking-widest text-text-primary flex-1">
-            Agent Sessions
-          </span>
+          <h1 className="min-w-0 flex-1 truncate font-mono text-[11px] font-bold uppercase tracking-wider text-text-primary">Agent Sessions</h1>
+        </div>
+        <div className="flex min-w-0 items-center gap-1">
+          <div className="flex min-w-0 flex-1 items-center gap-1">
+            {(['all', 'claude', 'codex'] as const).map((filter) => (
+              <button
+                type="button"
+                key={filter}
+                onClick={() => setKindFilter(filter)}
+                className={clsx(
+                  'px-2 py-0.5 border-brutal rounded-brutal font-mono text-[9px] font-bold uppercase tracking-wider transition-colors',
+                  kindFilter === filter
+                    ? 'border-accent bg-accent/10 text-accent shadow-brutal-sm'
+                    : 'border-border-subtle text-text-muted hover:text-text-primary'
+                )}
+                aria-pressed={kindFilter === filter}
+              >
+                {filter}
+              </button>
+            ))}
+          </div>
           <button
+            type="button"
             onClick={() => setLauncherFor(launcherFor === '' ? null : '')}
-            className={clsx('node-btn', launcherFor === '' && 'node-btn-accent')}
+            className={clsx('node-btn flex-shrink-0', launcherFor === '' ? 'node-btn-accent' : null)}
             title="Start a new session"
+            aria-expanded={launcherFor === ''}
           >
             <Plus className="w-3 h-3" />
           </button>
           <button
+            type="button"
             onClick={() => void pollOnce()}
-            className="node-btn"
-            title={lastScanAt ? `Last scan ${new Date(lastScanAt).toLocaleTimeString()}` : 'Scan now'}
+            className="node-btn flex-shrink-0"
+            title={lastScanAt ? `Last refreshed ${new Date(lastScanAt).toLocaleTimeString()}` : 'Refresh session index'}
           >
             <RefreshCw className="w-3 h-3" />
           </button>
         </div>
-        {launcherFor === '' && <NewSessionLauncher />}
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1">
-            {(['all', 'claude', 'codex'] as const).map((f) => (
-              <button
-                key={f}
-                onClick={() => setKindFilter(f)}
-                className={clsx(
-                  'px-2 py-0.5 border-brutal rounded-brutal font-mono text-[9px] font-bold uppercase tracking-wider transition-colors',
-                  kindFilter === f
-                    ? 'border-accent bg-accent/10 text-accent shadow-brutal-sm'
-                    : 'border-border-subtle text-text-muted hover:text-text-primary'
-                )}
-              >
-                {f}
-              </button>
-            ))}
-          </div>
-          <span className="font-mono text-[9px] text-text-muted uppercase tracking-wider">
-            {projects.length} proj · {totalLive} live · {totalJournals} past
-          </span>
-        </div>
-      </div>
+        {launcherFor === '' ? <NewSessionLauncher onLaunch={handleLaunch} /> : null}
+      </header>
 
-      {error && (
+      {error ? (
         <div className="card p-2 border-l-2 border-l-status-warning">
           <p className="font-mono text-[10px] text-text-secondary">{error}</p>
         </div>
-      )}
+      ) : null}
 
-      {projects.length === 0 && !error && (
-        <div className="card p-3">
-          <p className="font-mono text-[10px] text-text-muted leading-relaxed">
-            {lastScanAt
-              ? 'No projects yet — sessions appear here as agents work in folders on this machine.'
-              : 'Scanning local agent sessions…'}
-          </p>
+      <section aria-labelledby="live-session-title" className="space-y-2">
+        <div className="flex items-center gap-2">
+          <span className="status-dot status-success" />
+          <h2 id="live-session-title" className="font-mono text-[10px] font-bold uppercase tracking-widest text-text-primary flex-1">Live and saved terminals</h2>
+          <span className="font-mono text-[9px] text-text-muted">{liveRecords.length}</span>
         </div>
-      )}
 
-      {projects.map((project) => {
-        const isCollapsed = collapsed.has(project.key)
-        const live = project.live.filter(
-          ({ session }) => kindFilter === 'all' || (session.agentKind ?? 'shell') === kindFilter
-        )
-        const journals = project.journals.filter((s) => kindFilter === 'all' || s.kind === kindFilter)
-        if (live.length === 0 && journals.length === 0) return null
-        const liveCount = live.filter(
-          ({ session }) => session.status === 'running' || session.status === 'tool_calling'
-        ).length
-        const journalsShown = showAllJournals.has(project.key)
-          ? journals
-          : journals.slice(0, JOURNALS_COLLAPSED_COUNT)
-
-        return (
-          <div key={project.key} className="pt-2 border-t border-border-subtle space-y-1.5">
-            {/* Project header — a folder on this machine */}
-            <div className="flex items-center gap-1 min-w-0">
+        {workspaceGroups.map((group) => {
+          const filtered = group.sessions.filter(({ session }) => (
+            kindFilter === 'all' || session.agentKind === kindFilter
+          ))
+          if (filtered.length === 0) return null
+          const isCollapsed = collapsedWorkspaces.has(group.workspace.id)
+          return (
+            <div key={group.workspace.id} className="border-t border-border-subtle pt-1.5 space-y-1.5">
               <button
-                onClick={() => toggle(collapsed, project.key, setCollapsed)}
-                className="flex-1 flex items-center gap-2 px-1 py-1 text-left hover:bg-accent/[0.06] rounded-brutal transition-colors min-w-0"
-                title={project.path}
+                type="button"
+                onClick={() => toggleSet(collapsedWorkspaces, group.workspace.id, setCollapsedWorkspaces)}
+                className="w-full flex items-center gap-2 px-1 py-1 text-left hover:bg-accent/[0.06] rounded-brutal min-w-0"
+                aria-expanded={!isCollapsed}
               >
-                {isCollapsed ? (
-                  <ChevronRight className="w-3 h-3 text-text-muted flex-shrink-0" />
-                ) : (
-                  <ChevronDown className="w-3 h-3 text-text-muted flex-shrink-0" />
-                )}
-                <FolderGit2 className="w-3.5 h-3.5 text-accent flex-shrink-0" />
-                <span className="flex-1 min-w-0">
-                  <span className="block font-mono text-xs font-bold uppercase tracking-wider text-text-primary truncate">
-                    {project.name}
-                  </span>
-                  <span className="block font-mono text-[9px] text-text-muted truncate">
-                    {shortenPath(project.path)}
-                    {project.branch && <span className="text-accent"> · ⎇ {project.branch}</span>}
-                  </span>
-                </span>
-                {liveCount > 0 && (
-                  <span className="flex items-center gap-1 flex-shrink-0">
-                    <span className="status-dot status-success" />
-                    <span className="font-mono text-[10px] text-status-success">{liveCount}</span>
-                  </span>
-                )}
-                <span className="font-mono text-[10px] text-text-muted flex-shrink-0">
-                  {live.length + journals.length}
-                </span>
+                {isCollapsed ? <ChevronRight className="w-3 h-3 text-text-muted" /> : <ChevronDown className="w-3 h-3 text-text-muted" />}
+                <span className="font-mono text-[11px] font-bold uppercase tracking-wider text-text-primary truncate flex-1">{group.workspace.name}</span>
+                {group.isActive ? <span className="font-mono text-[8px] uppercase tracking-wider text-accent">active</span> : null}
+                {group.waitingCount > 0 ? <span className="font-mono text-[9px] text-status-warning">{group.waitingCount} waiting</span> : null}
+                <span className="font-mono text-[9px] text-text-muted">{filtered.length}</span>
               </button>
-              <button
-                onClick={() => setLauncherFor(launcherFor === project.key ? null : project.key)}
-                className={clsx('node-btn flex-shrink-0', launcherFor === project.key && 'node-btn-accent')}
-                title={`Start a new session in ${project.name}`}
-              >
-                <Plus className="w-3 h-3" />
-              </button>
+              {!isCollapsed ? <div className="space-y-1">{filtered.map(renderLiveSession)}</div> : null}
             </div>
-            {launcherFor === project.key && <NewSessionLauncher cwd={project.path} />}
+          )
+        })}
 
-            {!isCollapsed && (
-              <div className="space-y-1 pb-1">
-                {live.map(({ session, panel }) => {
-                  const match = matches.get(session.id)
-                  const snapshot = match ? snapshots.get(match.filePath) : undefined
-                  return (
-                    <SessionCard
-                      key={panel.id}
-                      session={session}
-                      panel={panel}
-                      snapshot={snapshot}
-                      match={match}
-                      onOpenDetail={(e) => setDetail({ type: 'live', panelId: panel.id, x: e.clientX, y: e.clientY })}
-                    />
-                  )
-                })}
+        {liveRecords.length === 0 ? (
+          <div className="card p-3 font-mono text-[10px] text-text-muted">No terminal sessions are saved in these workspaces.</div>
+        ) : null}
+      </section>
 
-                {journalsShown.length > 0 && (
-                  <div className="divide-y divide-border-subtle border-t border-b border-border-subtle">
-                    {journalsShown.map((snap) => (
-                      <JournalSessionRow
-                        key={snap.filePath}
-                        snapshot={snap}
-                        onOpenDetail={(e) => setDetail({ type: 'journal', filePath: snap.filePath, x: e.clientX, y: e.clientY })}
-                      />
-                    ))}
-                  </div>
-                )}
-                {journals.length > JOURNALS_COLLAPSED_COUNT && (
-                  <button
-                    onClick={() => toggle(showAllJournals, project.key, setShowAllJournals)}
-                    className="font-mono text-[10px] text-text-muted hover:text-text-primary transition-press px-2"
-                  >
-                    {showAllJournals.has(project.key)
-                      ? 'show fewer'
-                      : `+${journals.length - JOURNALS_COLLAPSED_COUNT} more session${journals.length - JOURNALS_COLLAPSED_COUNT !== 1 ? 's' : ''}`}
-                  </button>
-                )}
+      <section aria-labelledby="session-history-title" className="space-y-2 pt-2 border-t border-border-subtle">
+        <div className="flex items-center gap-2">
+          <Clock3 className="w-3.5 h-3.5 text-text-muted" />
+          <h2 id="session-history-title" className="font-mono text-[10px] font-bold uppercase tracking-widest text-text-primary flex-1">Conversation history</h2>
+          <span className="font-mono text-[9px] text-text-muted">by project</span>
+        </div>
+
+        {projects.map((project) => {
+          const journals = project.journals.filter((snapshot) => kindFilter === 'all' || snapshot.kind === kindFilter)
+          if (journals.length === 0) return null
+          const isCollapsed = collapsedProjects.has(project.key)
+          const isExpanded = expandedProjects.has(project.key)
+          const shown = isExpanded
+            ? journals.slice(0, JOURNALS_EXPANDED_LIMIT)
+            : journals.slice(0, JOURNALS_COLLAPSED_COUNT)
+          return (
+            <div key={project.key} className="border-t border-border-subtle pt-1.5 space-y-1.5">
+              <div className="flex items-center gap-1 min-w-0">
+                <button
+                  type="button"
+                  onClick={() => toggleSet(collapsedProjects, project.key, setCollapsedProjects)}
+                  className="flex-1 flex items-center gap-2 px-1 py-1 text-left hover:bg-accent/[0.06] rounded-brutal min-w-0"
+                  title={`Open ${project.name} sessions`}
+                  aria-expanded={!isCollapsed}
+                >
+                  {isCollapsed ? <ChevronRight className="w-3 h-3 text-text-muted" /> : <ChevronDown className="w-3 h-3 text-text-muted" />}
+                  <FolderGit2 className="w-3.5 h-3.5 text-accent" />
+                  <span className="flex-1 min-w-0">
+                    <span className="block font-mono text-[11px] font-bold uppercase tracking-wider text-text-primary truncate">{project.name}</span>
+                    {project.branch ? (
+                      <span className="block truncate font-mono text-[9px] text-accent">⎇ {project.branch}</span>
+                    ) : null}
+                  </span>
+                  <span className="font-mono text-[9px] text-text-muted">{journals.length}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLauncherFor(launcherFor === project.key ? null : project.key)}
+                  className={clsx('node-btn', launcherFor === project.key ? 'node-btn-accent' : null)}
+                  title={`Start a session in ${project.name}`}
+                  aria-expanded={launcherFor === project.key}
+                >
+                  <Plus className="w-3 h-3" />
+                </button>
               </div>
-            )}
+              {launcherFor === project.key ? <NewSessionLauncher cwd={project.path} onLaunch={handleLaunch} /> : null}
+              {!isCollapsed ? (
+                <div className="divide-y divide-border-subtle border-y border-border-subtle">
+                  {shown.map((snapshot) => (
+                    <JournalSessionRow
+                      key={snapshot.filePath}
+                      snapshot={snapshot}
+                      onOpenDetail={(event) => setDetail({ type: 'journal', filePath: snapshot.filePath, x: event.clientX, y: event.clientY })}
+                    />
+                  ))}
+                </div>
+              ) : null}
+              {!isCollapsed && journals.length > JOURNALS_COLLAPSED_COUNT ? (
+                <button
+                  type="button"
+                  onClick={() => toggleSet(expandedProjects, project.key, setExpandedProjects)}
+                  className="font-mono text-[10px] text-text-muted hover:text-text-primary px-2"
+                >
+                  {isExpanded ? 'show fewer' : `show ${Math.min(journals.length, JOURNALS_EXPANDED_LIMIT) - JOURNALS_COLLAPSED_COUNT} more`}
+                </button>
+              ) : null}
+            </div>
+          )
+        })}
+
+        {!lastScanAt && projects.length === 0 ? (
+          <div className="space-y-2" aria-label="Loading session history">
+            {[0, 1, 2].map((item) => <div key={item} className="h-9 border border-border-subtle bg-background-secondary animate-pulse rounded-brutal" />)}
           </div>
-        )
-      })}
+        ) : null}
+      </section>
 
       <SessionDetailPopover
         target={detailTarget}
@@ -412,6 +435,7 @@ export function AgentSessionsRail() {
         onResume={handleResume}
         onPin={pinSession}
         onOpenInNewWorkspace={handleOpenInNewWorkspace}
+        onMoveToWorkspace={handleMoveToWorkspace}
         onMoveToNewWorkspace={handleMoveToNewWorkspace}
         pinCandidates={detailPinCandidates}
         panels={panels}

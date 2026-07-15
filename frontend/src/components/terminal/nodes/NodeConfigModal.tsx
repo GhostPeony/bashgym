@@ -12,6 +12,7 @@ interface NodeConfigModalProps {
   children: ReactNode
   footer?: ReactNode
   size?: ModalSize
+  layout?: 'document' | 'workspace'
 }
 
 export function NodeConfigModal({
@@ -21,7 +22,8 @@ export function NodeConfigModal({
   description,
   children,
   footer,
-  size = 'lg'
+  size = 'lg',
+  layout = 'document'
 }: NodeConfigModalProps) {
   return (
     <Modal
@@ -32,8 +34,16 @@ export function NodeConfigModal({
       footer={footer}
       size={size}
       variant="canvas"
+      bodyClassName={layout === 'workspace' ? 'modal-canvas-body-workspace' : undefined}
     >
-      <div className="node-config-modal-content">{children}</div>
+      <div
+        className={clsx(
+          'node-config-modal-content',
+          layout === 'workspace' && 'node-config-modal-workspace'
+        )}
+      >
+        {children}
+      </div>
     </Modal>
   )
 }

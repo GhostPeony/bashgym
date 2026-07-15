@@ -1,10 +1,19 @@
 from bashgym.api.schemas import TrainingRequest
 
 
+def test_training_request_names_customizer_without_claiming_nemo_gym():
+    request = TrainingRequest(use_nemo_customizer=True)
+
+    assert request.use_nemo_customizer is True
+    assert request.use_nemo_gym is False
+
+
 def test_training_request_accepts_tmax_like_terminal_rl_profile():
     request = TrainingRequest(
         strategy="grpo",
         training_profile="terminal_rl_tmax_like",
+        grpo_ratio_clip_min=0.15,
+        grpo_ratio_clip_max=0.28,
         grpo_num_generations=32,
         grpo_group_size=32,
         prompts_per_rollout_batch=8,
@@ -24,6 +33,8 @@ def test_training_request_accepts_tmax_like_terminal_rl_profile():
     assert request.grpo_num_generations == 32
     assert request.grpo_group_size == 32
     assert request.training_profile == "terminal_rl_tmax_like"
+    assert request.grpo_ratio_clip_min == 0.15
+    assert request.grpo_ratio_clip_max == 0.28
     assert request.dppo_backend == "grpo_fallback"
     assert request.dppo_divergence == "binary_kl"
     assert request.dppo_binary_tv_threshold == 0.12

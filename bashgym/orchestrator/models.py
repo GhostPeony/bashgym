@@ -44,8 +44,9 @@ _PROVIDER_DEFAULTS: dict[str, dict[str, Any]] = {
         "base_url": "https://generativelanguage.googleapis.com/v1beta",
     },
     "ollama": {
-        "model": "qwen2.5-coder:32b",
+        "model": "",
         "env_key": "",
+        "model_env_key": "OLLAMA_MODEL",
         "base_url": "http://localhost:11434/api/chat",
     },
 }
@@ -62,7 +63,7 @@ class LLMConfig:
     - anthropic: claude-opus-4-6
     - openai: gpt-4o
     - gemini: gemini-2.5-pro
-    - ollama: qwen2.5-coder:32b
+    - ollama: explicit `model` or `OLLAMA_MODEL` (no packaged default)
     """
 
     provider: LLMProvider = LLMProvider.ANTHROPIC
@@ -82,6 +83,12 @@ class LLMConfig:
         if not self.model:
             defaults = _PROVIDER_DEFAULTS.get(self.provider.value, {})
             self.model = defaults.get("model", "claude-opus-4-6")
+            if not self.model and defaults.get("model_env_key"):
+                import os
+
+                self.model = os.environ.get(defaults["model_env_key"], "").strip()
+        if not self.model:
+            raise ValueError(f"{self.provider.value} requires an explicit model")
 
     def get_api_key(self) -> str:
         """Resolve API key from config or environment."""

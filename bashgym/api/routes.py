@@ -18,7 +18,7 @@ import os
 import re
 import shutil
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 from bashgym.api.achievements_routes import router as achievements_router  # noqa: E402
 from bashgym.api.agent_routes import router as agent_router  # noqa: E402
 from bashgym.api.autoresearch_routes import router as autoresearch_router  # noqa: E402
+from bashgym.api.campaign_routes import campaign_auth_router, campaign_router  # noqa: E402
 from bashgym.api.cascade_routes import router as cascade_router  # noqa: E402
 from bashgym.api.dev_routes import router as dev_router  # noqa: E402
 from bashgym.api.device_routes import get_registry as get_device_registry  # noqa: E402
@@ -38,14 +39,20 @@ from bashgym.api.device_routes import router as device_router  # noqa: E402
 from bashgym.api.environment_routes import router as environment_router  # noqa: E402
 from bashgym.api.eval_routes import router as eval_router  # noqa: E402
 from bashgym.api.factory_routes import router as factory_router  # noqa: E402
+from bashgym.api.hf_context_routes import router as hf_context_router  # noqa: E402
 from bashgym.api.hf_routes import router as hf_router  # noqa: E402
 from bashgym.api.integration_routes import router as integration_router  # noqa: E402
+from bashgym.api.knowledge_routes import router as knowledge_router  # noqa: E402
+from bashgym.api.ledger_routes import router as ledger_router  # noqa: E402
+from bashgym.api.mcp_routes import router as mcp_router  # noqa: E402
 from bashgym.api.models_routes import router as models_router  # noqa: E402
 from bashgym.api.observability_routes import router as observability_router  # noqa: E402
 from bashgym.api.orchestrator_routes import router as orchestrator_router  # noqa: E402
 from bashgym.api.pipeline_routes import router as pipeline_router  # noqa: E402
 from bashgym.api.pipeline_routes import start_pipeline_watcher, stop_pipeline_watcher  # noqa: E402
 from bashgym.api.research_routes import router as research_router  # noqa: E402
+from bashgym.api.runtime_observer import RuntimeObserver  # noqa: E402
+from bashgym.api.runtime_routes import router as runtime_router  # noqa: E402
 from bashgym.api.schemas import (  # noqa: E402
     AvailableModel,
     BenchmarkResultSchema,
@@ -101,6 +108,7 @@ from bashgym.api.schemas import (  # noqa: E402
 )
 from bashgym.api.security_routes import router as security_router  # noqa: E402
 from bashgym.api.settings_routes import router as settings_router  # noqa: E402
+from bashgym.api.skill_lab_routes import router as skill_lab_router  # noqa: E402
 from bashgym.api.source_routes import router as source_router  # noqa: E402
 from bashgym.api.training_monitor import OrphanedTrainingMonitor  # noqa: E402
 from bashgym.api.training_state import (  # noqa: E402
@@ -130,6 +138,7 @@ from bashgym.api.websocket import (  # noqa: E402
     handle_websocket,
 )
 from bashgym.api.workspace_routes import router as workspace_router  # noqa: E402
+from bashgym.compute import normalize_training_target_payload  # noqa: E402
 from bashgym.factory.quality_calculator import calculate_quality_breakdown  # noqa: E402
 
 
@@ -169,8 +178,11 @@ def create_app() -> FastAPI:
     app.state.data_factory = None
     app.state.tasks = {}  # In-memory task storage
     app.state.training_runs = {}  # In-memory training run storage
+    app.state.experiment_ledger_repository = None
     app.state.workspace_canvas_snapshots = {}  # Live renderer-owned canvas context, keyed by workspace_id
     app.state.workspace_events = {}  # Recent semantic canvas intents, keyed by workspace_id
+    app.state.runtime_observer = RuntimeObserver(Path.cwd())
+    app.state.mcp_workbench = None
     app.state.factory_config = None  # Factory configuration
     app.state.synthesis_jobs = {}  # Synthesis job storage
     app.state.evaluation_jobs = {}  # Evaluation job storage
@@ -312,7 +324,7 @@ def create_app() -> FastAPI:
         # Auto-discover provider models and auto-select Student
         if app.state.provider_registry:
             try:
-                await app.state.provider_registry.discover_models()
+                await asyncio.wait_for(app.state.provider_registry.discover_models(), timeout=20)
                 model_map = app.state.provider_registry.get_model_map()
                 logger.info(f"Discovered models: {model_map}")
 
@@ -443,6 +455,8 @@ def create_app() -> FastAPI:
     @app.on_event("shutdown")
     async def shutdown():
         """Cleanup on shutdown."""
+        if app.state.mcp_workbench:
+            await app.state.mcp_workbench.aclose()
         if hasattr(app.state, "provider_registry") and app.state.provider_registry:
             await app.state.provider_registry.close()
         if app.state.router:
@@ -1104,8 +1118,8 @@ def create_app() -> FastAPI:
             return explicit
         if request.use_remote_ssh:
             return f"ssh:{request.device_id}" if request.device_id else "ssh:remote"
-        if request.use_nemo_gym:
-            return "cloud"
+        if request.use_nemo_customizer or request.use_nemo_gym:
+            return "cloud:nemo-customizer"
         return "local"
 
     def _training_origin(request: TrainingRequest, http_request: Request) -> dict[str, Any]:
@@ -1125,6 +1139,22 @@ def create_app() -> FastAPI:
     def _training_correlation_id(request: TrainingRequest, http_request: Request) -> str | None:
         return request.correlation_id or http_request.headers.get("X-BashGym-Correlation-Id")
 
+    def _training_ledger_repository():
+        from bashgym.config import get_bashgym_dir
+        from bashgym.ledger.persistence import ExperimentLedgerRepository
+
+        repository = getattr(app.state, "experiment_ledger_repository", None)
+        if isinstance(repository, ExperimentLedgerRepository):
+            return repository
+        campaign_repository = getattr(app.state, "campaign_repository", None)
+        database_path = getattr(campaign_repository, "db_path", None)
+        repository = ExperimentLedgerRepository(
+            database_path or get_bashgym_dir() / "campaigns" / "campaigns.sqlite3"
+        )
+        repository.initialize()
+        app.state.experiment_ledger_repository = repository
+        return repository
+
     @app.post("/api/training/start", response_model=TrainingResponse, tags=["Training"])
     async def start_training(
         request: TrainingRequest,
@@ -1132,11 +1162,17 @@ def create_app() -> FastAPI:
         http_request: Request,
     ):
         """Start a new training run."""
-        run_id = f"run_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+        try:
+            request = TrainingRequest.model_validate(
+                normalize_training_target_payload(request.model_dump(mode="json"))
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        run_id = f"run_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
         origin = _training_origin(request, http_request)
         correlation_id = _training_correlation_id(request, http_request)
         compute_target = _training_compute_target(request)
-        request = request.copy(
+        request = request.model_copy(
             update={
                 "origin": origin,
                 "correlation_id": correlation_id,
@@ -1144,16 +1180,36 @@ def create_app() -> FastAPI:
             }
         )
 
+        from bashgym.ledger.persistence import LedgerConflictError, LedgerPersistenceError
+        from bashgym.ledger.training import prepare_training_run
+
+        try:
+            ledger_handle = prepare_training_run(
+                _training_ledger_repository(),
+                run_id=run_id,
+                request_payload=request.model_dump(mode="json"),
+                is_simulation=app.state.trainer is None,
+            )
+        except LedgerConflictError as exc:
+            raise HTTPException(status_code=409, detail={"code": exc.code, "message": str(exc)}) from exc
+        except (LedgerPersistenceError, ValueError) as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "training_tracking_invalid", "message": str(exc)},
+            ) from exc
+
         # Store training run
         app.state.training_runs[run_id] = {
             "run_id": run_id,
             "strategy": request.strategy,
             "status": TrainingStatus.PENDING,
-            "config": request.dict(),
-            "started_at": datetime.utcnow().isoformat(),
+            "config": request.model_dump(mode="json"),
+            "started_at": datetime.now(UTC).isoformat(),
             "origin": origin,
             "correlation_id": correlation_id,
             "compute_target": compute_target,
+            "tracking_ids": ledger_handle.as_dict(),
+            "ledger_handle": ledger_handle,
         }
 
         await broadcast_training_queued(
@@ -1181,6 +1237,7 @@ def create_app() -> FastAPI:
             origin=origin,
             correlation_id=correlation_id,
             compute_target=compute_target,
+            tracking_ids=ledger_handle.as_dict(),
         )
 
     async def run_training(app, run_id: str, request: TrainingRequest):
@@ -1193,11 +1250,25 @@ def create_app() -> FastAPI:
             app.state.training_runs[run_id]["status"] = TrainingStatus.RUNNING
             logger.info(f"[Training] Status set to RUNNING for {run_id}")
 
+            from bashgym.ledger.contracts import RunStatus
+            from bashgym.ledger.training import (
+                finalize_training_run,
+                mark_training_running,
+                record_training_progress,
+            )
+
+            ledger_repository = _training_ledger_repository()
+            ledger_handle = app.state.training_runs[run_id]["ledger_handle"]
+            mark_training_running(ledger_repository, ledger_handle)
+
             # Create progress callback for WebSocket updates
             run_meta = app.state.training_runs.get(run_id, {})
             callback = TrainingProgressCallback(
                 run_id,
                 static_payload={"compute_target": run_meta.get("compute_target")},
+                metric_sink=lambda metrics: record_training_progress(
+                    ledger_repository, ledger_handle, metrics
+                ),
             )
 
             if app.state.trainer:
@@ -1336,6 +1407,8 @@ def create_app() -> FastAPI:
                     gradient_accumulation_steps=request.gradient_accumulation_steps,
                     max_seq_length=request.max_seq_length,
                     save_steps=request.save_steps,
+                    checkpoint_limit=request.checkpoint_limit,
+                    artifact_retention=request.artifact_retention.value,
                     # LoRA
                     use_lora=request.use_lora,
                     lora_r=request.lora_rank or 16,
@@ -1348,6 +1421,8 @@ def create_app() -> FastAPI:
                     grpo_temperature=request.grpo_temperature,
                     grpo_reward_mode=getattr(request, "grpo_reward_mode", "syntax"),
                     grpo_loss_type=getattr(request, "grpo_loss_type", "grpo"),
+                    grpo_ratio_clip_min=getattr(request, "grpo_ratio_clip_min", 0.2),
+                    grpo_ratio_clip_max=getattr(request, "grpo_ratio_clip_max", None),
                     grpo_backend=getattr(request, "grpo_backend", "auto"),
                     grpo_use_vllm=getattr(request, "grpo_use_vllm", False),
                     training_profile=getattr(request, "training_profile", "default"),
@@ -1406,6 +1481,10 @@ def create_app() -> FastAPI:
                     auto_push_hf=getattr(request, "auto_push_hf", False),
                     hf_repo_name=getattr(request, "hf_repo_name", ""),
                     hf_private=getattr(request, "hf_private", True),
+                    hf_upload_artifact=getattr(
+                        getattr(request, "hf_upload_artifact", "auto"), "value", "auto"
+                    ),
+                    use_nemo_customizer=request.use_nemo_customizer,
                     use_nemo_gym=request.use_nemo_gym,
                     use_remote_ssh=request.use_remote_ssh,
                 )
@@ -1450,7 +1529,7 @@ def create_app() -> FastAPI:
                         run_id=run_id,
                         pid=pid,
                         status="running",
-                        config=request.dict(),
+                        config=request.model_dump(mode="json"),
                         started_at=app.state.training_runs[run_id].get("started_at", ""),
                         script_path=str(Path(output_dir) / "train_sft.py"),
                         dataset_path=str(dataset_path),
@@ -1589,12 +1668,26 @@ def create_app() -> FastAPI:
                     raise RuntimeError(run.error_message or "Training failed")
 
                 app.state.training_runs[run_id]["status"] = TrainingStatus.COMPLETED
-                app.state.training_runs[run_id]["completed_at"] = datetime.utcnow().isoformat()
+                app.state.training_runs[run_id]["completed_at"] = datetime.now(UTC).isoformat()
                 app.state.training_runs[run_id]["metrics"] = run.metrics if run else {}
+
+                try:
+                    finalize_training_run(
+                        ledger_repository,
+                        ledger_handle,
+                        status=RunStatus.COMPLETED,
+                        metrics=run.metrics if run else {},
+                    )
+                except Exception as ledger_exc:
+                    app.state.training_runs[run_id]["ledger_error"] = str(ledger_exc)
+                    logger.error(
+                        f"[Training] Completed but ledger finalization failed for {run_id}: "
+                        f"{ledger_exc}"
+                    )
 
                 # Persist completed state to disk
                 update_run_state(
-                    output_dir, status="completed", completed_at=datetime.utcnow().isoformat()
+                    output_dir, status="completed", completed_at=datetime.now(UTC).isoformat()
                 )
 
                 await broadcast_training_complete(run_id, run.metrics if run else {})
@@ -1650,7 +1743,7 @@ def create_app() -> FastAPI:
 
                 final_loss = round(2.5 * (0.6**1.0) + 0.4, 4)
                 app.state.training_runs[run_id]["status"] = TrainingStatus.COMPLETED
-                app.state.training_runs[run_id]["completed_at"] = datetime.utcnow().isoformat()
+                app.state.training_runs[run_id]["completed_at"] = datetime.now(UTC).isoformat()
                 app.state.training_runs[run_id]["metrics"] = {
                     "final_loss": final_loss,
                     "simulation": True,
@@ -1658,6 +1751,19 @@ def create_app() -> FastAPI:
                         "compute_target", "local"
                     ),
                 }
+                try:
+                    finalize_training_run(
+                        ledger_repository,
+                        ledger_handle,
+                        status=RunStatus.COMPLETED,
+                        metrics=app.state.training_runs[run_id]["metrics"],
+                    )
+                except Exception as ledger_exc:
+                    app.state.training_runs[run_id]["ledger_error"] = str(ledger_exc)
+                    logger.error(
+                        f"[Training] Simulation completed but ledger finalization failed for "
+                        f"{run_id}: {ledger_exc}"
+                    )
                 await broadcast_training_complete(
                     run_id,
                     {
@@ -1677,6 +1783,20 @@ def create_app() -> FastAPI:
             print(f"[Training] Traceback:\n{traceback.format_exc()}")
             app.state.training_runs[run_id]["status"] = TrainingStatus.FAILED
             app.state.training_runs[run_id]["error"] = error_msg
+            try:
+                from bashgym.ledger.contracts import RunStatus
+                from bashgym.ledger.training import finalize_training_run
+
+                handle = app.state.training_runs[run_id].get("ledger_handle")
+                if handle is not None:
+                    finalize_training_run(
+                        _training_ledger_repository(),
+                        handle,
+                        status=RunStatus.FAILED,
+                        error=error_msg,
+                    )
+            except Exception as ledger_exc:
+                logger.error(f"[Training] Failed to finalize ledger state for {run_id}: {ledger_exc}")
             # Persist failed state to disk (output_dir may not exist for early failures)
             try:
                 run_output_dir = str(Path("data/models") / run_id)
@@ -1853,6 +1973,7 @@ def create_app() -> FastAPI:
     _CHECKPOINT_ROOTS = (  # noqa: N806
         Path.home() / ".bashgym" / "cascade",
         Path.home() / ".bashgym" / "models",
+        Path.cwd() / "data" / "models",
     )
     _MAX_TAIL_LINES = 5000  # noqa: N806
     _MAX_FULL_LOG_BYTES = 50 * 1024 * 1024  # noqa: N806
@@ -1887,13 +2008,18 @@ def create_app() -> FastAPI:
     def _resolve_checkpoint_path(checkpoint_id: str) -> Path:
         if ".." in checkpoint_id.split("/"):
             raise HTTPException(status_code=403, detail="Invalid checkpoint id")
+        valid_candidates: list[Path] = []
         for root in _CHECKPOINT_ROOTS:
             candidate = (root / checkpoint_id).resolve()
             try:
                 candidate.relative_to(root.resolve())
             except ValueError:
                 continue
-            return candidate
+            valid_candidates.append(candidate)
+            if candidate.exists():
+                return candidate
+        if valid_candidates:
+            return valid_candidates[0]
         raise HTTPException(status_code=403, detail="Checkpoint id outside allowlisted roots")
 
     def _dir_size_mb(path: Path) -> float:
@@ -1934,7 +2060,7 @@ def create_app() -> FastAPI:
         """
         Scan allowlisted roots for saved checkpoints. Directory layout can be
         nested (e.g. cascade/<stage>/<run>/final) — walk with rglob and match
-        any dir named final, merged, or checkpoint-*.
+        any dir named final, merged, gguf/exported_gguf, or checkpoint-*.
         """
         results: list[dict[str, Any]] = []
         for root in _CHECKPOINT_ROOTS:
@@ -1942,7 +2068,7 @@ def create_app() -> FastAPI:
                 continue
             try:
                 candidates: list[Path] = []
-                for name in ("final", "merged"):
+                for name in ("final", "merged", "gguf", "exported_gguf"):
                     candidates.extend(p for p in root.rglob(name) if p.is_dir())
                 candidates.extend(p for p in root.rglob("checkpoint-*") if p.is_dir())
             except OSError:
@@ -1957,6 +2083,8 @@ def create_app() -> FastAPI:
                     kind = "final"
                 elif name == "merged":
                     kind = "merged"
+                elif name in {"gguf", "exported_gguf"}:
+                    kind = "gguf"
                 else:
                     kind = "intermediate"
                 rel = path.relative_to(root)
@@ -2046,6 +2174,7 @@ def create_app() -> FastAPI:
                 origin=run.get("origin"),
                 correlation_id=run.get("correlation_id"),
                 compute_target=run.get("compute_target"),
+                tracking_ids=run.get("tracking_ids"),
             )
 
         # Fallback: check persisted state on disk
@@ -2082,6 +2211,27 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=500, detail="Failed to suspend training process")
 
         app.state.training_runs[run_id]["status"] = TrainingStatus.PAUSED
+        ledger_handle = app.state.training_runs[run_id].get("ledger_handle")
+        if ledger_handle is not None:
+            try:
+                from bashgym.ledger.contracts import RunStatus
+
+                repository = _training_ledger_repository()
+                repository.transition_attempt(
+                    ledger_handle.workspace_id,
+                    ledger_handle.project_id,
+                    ledger_handle.attempt_id,
+                    RunStatus.PAUSED,
+                )
+                repository.transition_run(
+                    ledger_handle.workspace_id,
+                    ledger_handle.project_id,
+                    ledger_handle.run_id,
+                    RunStatus.PAUSED,
+                )
+            except Exception as ledger_exc:
+                app.state.training_runs[run_id]["ledger_error"] = str(ledger_exc)
+                logger.error(f"Failed to pause ledger state for {run_id}: {ledger_exc}")
         update_run_state(str(Path("data/models") / run_id), status="paused")
         return {"success": True, "message": f"Training paused (PID {pid} suspended)"}
 
@@ -2102,6 +2252,27 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=500, detail="Failed to resume training process")
 
         app.state.training_runs[run_id]["status"] = TrainingStatus.RUNNING
+        ledger_handle = app.state.training_runs[run_id].get("ledger_handle")
+        if ledger_handle is not None:
+            try:
+                from bashgym.ledger.contracts import RunStatus
+
+                repository = _training_ledger_repository()
+                repository.transition_attempt(
+                    ledger_handle.workspace_id,
+                    ledger_handle.project_id,
+                    ledger_handle.attempt_id,
+                    RunStatus.RUNNING,
+                )
+                repository.transition_run(
+                    ledger_handle.workspace_id,
+                    ledger_handle.project_id,
+                    ledger_handle.run_id,
+                    RunStatus.RUNNING,
+                )
+            except Exception as ledger_exc:
+                app.state.training_runs[run_id]["ledger_error"] = str(ledger_exc)
+                logger.error(f"Failed to resume ledger state for {run_id}: {ledger_exc}")
         update_run_state(str(Path("data/models") / run_id), status="running")
         return {"success": True, "message": f"Training resumed (PID {pid})"}
 
@@ -2120,11 +2291,26 @@ def create_app() -> FastAPI:
         app.state.training_monitor.stop_monitoring(run_id)
 
         app.state.training_runs[run_id]["status"] = TrainingStatus.FAILED
-        app.state.training_runs[run_id]["completed_at"] = datetime.utcnow().isoformat()
+        app.state.training_runs[run_id]["completed_at"] = datetime.now(UTC).isoformat()
+        ledger_handle = app.state.training_runs[run_id].get("ledger_handle")
+        if ledger_handle is not None:
+            try:
+                from bashgym.ledger.contracts import RunStatus
+                from bashgym.ledger.training import finalize_training_run
+
+                finalize_training_run(
+                    _training_ledger_repository(),
+                    ledger_handle,
+                    status=RunStatus.FAILED,
+                    error="Training stopped by operator.",
+                )
+            except Exception as ledger_exc:
+                app.state.training_runs[run_id]["ledger_error"] = str(ledger_exc)
+                logger.error(f"Failed to stop ledger state for {run_id}: {ledger_exc}")
         update_run_state(
             str(Path("data/models") / run_id),
             status="failed",
-            completed_at=datetime.utcnow().isoformat(),
+            completed_at=datetime.now(UTC).isoformat(),
         )
         return {"success": True, "message": "Training stopped"}
 
@@ -2149,6 +2335,7 @@ def create_app() -> FastAPI:
                     origin=r.get("origin"),
                     correlation_id=r.get("correlation_id"),
                     compute_target=r.get("compute_target"),
+                    tracking_ids=r.get("tracking_ids"),
                 )
             )
 
@@ -5534,6 +5721,12 @@ def create_app() -> FastAPI:
 
     # Include HuggingFace routes
     app.include_router(hf_router)
+    app.include_router(hf_context_router)
+
+    # Campaign routes enforce their own bearer even when desktop middleware is permissive.
+    app.include_router(campaign_auth_router)
+    app.include_router(campaign_router)
+    app.include_router(ledger_router)
 
     # Include Factory routes (synthetic data generation)
     app.include_router(factory_router)
@@ -5572,9 +5765,13 @@ def create_app() -> FastAPI:
         app.include_router(integration_router)
         app.include_router(orchestrator_router)
         app.include_router(agent_router)
+        app.include_router(skill_lab_router)
         app.include_router(pipeline_router)
         app.include_router(dev_router)
         app.include_router(workspace_router)
+        app.include_router(runtime_router)
+        app.include_router(mcp_router)
+        app.include_router(knowledge_router)
 
     # =========================================================================
     # Web-mode endpoints: trace upload, hook receiver, install docs

@@ -27,6 +27,7 @@ export interface CanvasNodeRecipe {
 
 export interface WorkspaceCanvasIntentPayload {
   type: string
+  workspace_id?: string
   source?: {
     kind?: string
     terminal_id?: string
@@ -76,12 +77,57 @@ function trainingVisual(phase: NodeVisualPhase, motion: NodeVisualMotion): NodeV
   }
 }
 
+function skillLabVisual(phase: NodeVisualPhase, motion: NodeVisualMotion): NodeVisualRecipe {
+  return {
+    hue: 'wisteria',
+    phase,
+    intensity: phase === 'failed' ? 'urgent' : phase === 'running' ? 'active' : 'quiet',
+    icon: 'skill-lab',
+    motion,
+  }
+}
+
 export function recipeFromWorkspaceIntent(
   payload: WorkspaceCanvasIntentPayload,
   originPanelId?: string,
 ): CanvasNodeRecipe | null {
-  const explicitTraining = payload.suggested_nodes?.find((node) => node.recipe === 'training.run')
+  const explicitSkillLab = payload.suggested_nodes?.find((node) => node.recipe === 'skill_lab')
   const entityKind = String(payload.entity?.kind ?? '')
+  const looksLikeSkillLab = entityKind === 'skill_lab' || Boolean(explicitSkillLab)
+  if (looksLikeSkillLab) {
+    const config = explicitSkillLab?.config || {}
+    const status = String(config.status || payload.entity?.status || 'prepared')
+    const phase: NodeVisualPhase = status === 'running' || status === 'queued'
+      ? 'running'
+      : status === 'failed'
+        ? 'failed'
+        : status === 'completed'
+          ? 'completed'
+          : 'planned'
+    const correlationId = payload.correlation_id ?? `skill-lab-${Date.now()}`
+    const visual = skillLabVisual(phase, phase === 'running' ? 'state-strip' : 'enter-from-origin')
+    return {
+      key: `skilllab:${payload.workspace_id || 'default'}`,
+      type: 'skilllab',
+      title: explicitSkillLab?.title || payload.title || 'Skill Lab',
+      originPanelId: payload.source?.panel_id || originPanelId,
+      originTerminalId: payload.source?.terminal_id,
+      correlationId,
+      edgeType: 'context',
+      visual,
+      config: {
+        ...config,
+        originPanelId: payload.source?.panel_id || originPanelId,
+        originTerminalId: payload.source?.terminal_id,
+        originAgent: payload.source?.agent,
+        correlationId,
+        summary: payload.summary,
+        visual,
+      },
+    }
+  }
+
+  const explicitTraining = payload.suggested_nodes?.find((node) => node.recipe === 'training.run')
   const looksLikeTraining =
     payload.type === 'training.prep.started' ||
     entityKind === 'training_run' ||
@@ -187,4 +233,13 @@ export function statusVisualForTraining(status: string | undefined): NodeVisualR
               ? 'queued'
               : 'planned'
   return trainingVisual(phase, phase === 'running' ? 'state-strip' : 'none')
+}
+
+/** A configured-but-unbound Training node becomes the run it launches. */
+export function shouldReuseTrainingOrigin(
+  recipe: CanvasNodeRecipe,
+  originPanel?: { type: PanelType; adapterConfig?: Record<string, unknown> },
+): boolean {
+  if (recipe.type !== 'training' || originPanel?.type !== 'training') return false
+  return !originPanel.adapterConfig?.runId
 }

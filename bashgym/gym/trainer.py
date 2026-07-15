@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -361,6 +362,15 @@ class TrainingStrategy(Enum):
     SESSION_DISTILLATION = "session_distillation"  # Hint-injected self-distillation
 
 
+ARTIFACT_RETENTION_POLICIES = {
+    "adapter_only",
+    "adapter_checkpoint",
+    "deployable",
+    "full_run",
+}
+HF_UPLOAD_ARTIFACTS = {"auto", "adapter", "merged"}
+
+
 @dataclass
 class TrainerConfig:
     """Configuration for the trainer."""
@@ -415,10 +425,14 @@ class TrainerConfig:
     dpo_backend: str = "auto"  # auto|unsloth|plain
     use_liger: bool = False  # plain backend: Liger fused-linear-CE (use_liger_kernel) — the
     # 262k-vocab (Gemma) fused-CE OOM fix; requires liger-kernel in the training env
-    # GRPO loss variant (TRL/Unsloth GRPOConfig.loss_type). "gspo" = Qwen's
-    # sequence-level Group Sequence Policy Optimization (more stable for long
-    # sequences/MoE); "dr_grpo" = Dr. GRPO. Default "grpo" matches TRL's default.
+    # GRPO loss variant (TRL/Unsloth GRPOConfig.loss_type). "gspo" uses
+    # sequence-level importance ratios; "dr_grpo" uses constant-length
+    # normalization; "dapo" uses global active-token normalization.
     grpo_loss_type: str = "grpo"
+    # DAPO Clip-Higher bounds. The lower ratio is 1 - min and the upper ratio is
+    # 1 + max. A None max resolves to 0.28 for DAPO and to min otherwise.
+    grpo_ratio_clip_min: float = 0.2
+    grpo_ratio_clip_max: float | None = None
 
     # Terminal-agent RL profile settings. `terminal_rl_tmax_like` applies the
     # defaults exposed by bashgym.gym.terminal_rl while leaving direct overrides
@@ -467,6 +481,8 @@ class TrainerConfig:
     # Output settings
     output_dir: str = "data/models"
     save_steps: int = 100
+    checkpoint_limit: int = 1
+    artifact_retention: str = "adapter_only"
     logging_steps: int = 10
 
     # Auto-export settings
@@ -480,6 +496,7 @@ class TrainerConfig:
     auto_push_hf: bool = False  # Auto-push to HuggingFace Hub after training
     hf_repo_name: str = ""  # Empty = auto-generate from base model + run_id
     hf_private: bool = True  # Private repo by default
+    hf_upload_artifact: str = "auto"  # auto|adapter|merged
 
     # Eval settings
     eval_strategy: str = "steps"  # "steps", "epoch", or "no"
@@ -494,8 +511,13 @@ class TrainerConfig:
     weight_decay: float = 0.01
     use_gradient_checkpointing: bool = True
 
-    # NeMo Gym settings (for cloud training)
+    # NeMo Customizer settings (cloud service; unrelated to NeMo Gym / NeMo RL)
+    use_nemo_customizer: bool = False
+    # Deprecated compatibility alias. New callers must use use_nemo_customizer.
     use_nemo_gym: bool = False
+    nemo_customizer_endpoint: str = ""
+    nemo_customizer_api_key: str | None = None
+    # Deprecated Customizer connection aliases.
     nemo_gym_endpoint: str = "http://localhost:8080"
     nemo_api_key: str | None = None
 
@@ -509,6 +531,21 @@ class TrainerConfig:
 
     def __post_init__(self) -> None:
         """Resolve named recipe defaults after dataclass construction."""
+
+        self.artifact_retention = (self.artifact_retention or "adapter_only").strip().lower()
+        if self.artifact_retention not in ARTIFACT_RETENTION_POLICIES:
+            raise ValueError(
+                f"artifact_retention={self.artifact_retention!r} must be one of "
+                f"{sorted(ARTIFACT_RETENTION_POLICIES)}"
+            )
+        if not 1 <= self.checkpoint_limit <= 20:
+            raise ValueError("checkpoint_limit must be between 1 and 20")
+        self.hf_upload_artifact = (self.hf_upload_artifact or "auto").strip().lower()
+        if self.hf_upload_artifact not in HF_UPLOAD_ARTIFACTS:
+            raise ValueError(
+                f"hf_upload_artifact={self.hf_upload_artifact!r} must be one of "
+                f"{sorted(HF_UPLOAD_ARTIFACTS)}"
+            )
 
         self.training_profile = normalize_training_profile(self.training_profile)
         self.dppo_backend = (self.dppo_backend or "auto").strip().lower()
@@ -526,6 +563,7 @@ class TrainerConfig:
         if self.training_profile != TERMINAL_RL_TMAX_LIKE_PROFILE:
             if self.grpo_group_size is None:
                 self.grpo_group_size = self.grpo_num_generations
+            self._resolve_policy_optimization_settings()
             return
 
         defaults = TMAX_LIKE_DEFAULTS
@@ -549,6 +587,32 @@ class TrainerConfig:
             self.interleaved_thinking = defaults.interleaved_thinking
         if self.sft_warm_start_policy is None:
             self.sft_warm_start_policy = defaults.sft_warm_start_policy
+        self._resolve_policy_optimization_settings()
+
+    def _resolve_policy_optimization_settings(self) -> None:
+        """Resolve and validate provider-neutral GRPO/DAPO clipping bounds."""
+
+        if self.grpo_ratio_clip_max is None:
+            self.grpo_ratio_clip_max = (
+                0.28 if self.grpo_loss_type == "dapo" else self.grpo_ratio_clip_min
+            )
+        if not 0 <= self.grpo_ratio_clip_min < 1:
+            raise ValueError("grpo_ratio_clip_min must be in [0, 1)")
+        if self.grpo_ratio_clip_max < 0:
+            raise ValueError("grpo_ratio_clip_max must be non-negative")
+
+    def artifact_policy_settings(self) -> dict[str, Any]:
+        """Resolve storage behavior shared by generated trainer scripts."""
+
+        keep_checkpoints = self.artifact_retention in {"adapter_checkpoint", "full_run"}
+        save_merged = self.artifact_retention in {"deployable", "full_run"}
+        return {
+            "policy": self.artifact_retention,
+            "checkpoint_limit": self.checkpoint_limit,
+            "keep_checkpoints_after_success": keep_checkpoints,
+            "save_merged": save_merged,
+            "save_gguf": bool(self.auto_export_gguf and save_merged),
+        }
 
     def effective_grpo_group_size(self) -> int:
         """Group size used for GRPO completions per prompt."""
@@ -723,7 +787,7 @@ class Trainer:
 
     Supports:
     - Local training with Unsloth (fast LoRA fine-tuning)
-    - Cloud training with NVIDIA NeMo Gym
+    - Hosted customization with NVIDIA NeMo Customizer
     - Multiple training strategies (SFT, DPO, GRPO)
     """
 
@@ -736,8 +800,12 @@ class Trainer:
         Path(self.config.output_dir).mkdir(parents=True, exist_ok=True)
 
         # Load API key from environment if not provided
-        if not self.config.nemo_api_key:
-            self.config.nemo_api_key = os.environ.get("NEMO_API_KEY")
+        if not self.config.nemo_customizer_api_key:
+            self.config.nemo_customizer_api_key = (
+                self.config.nemo_api_key
+                or os.environ.get("NEMO_CUSTOMIZER_API_KEY")
+                or os.environ.get("NEMO_API_KEY")
+            )
 
     def _generate_run_id(self) -> str:
         """Generate a unique run ID."""
@@ -746,7 +814,7 @@ class Trainer:
 
     @staticmethod
     def _extract_param_count(base_model: str) -> str | None:
-        """Extract parameter count from model name, e.g. '1.5B' from 'Qwen2.5-Coder-1.5B'."""
+        """Extract a parameter count such as ``1.5B`` from a model name."""
         match = re.search(r"(\d+\.?\d*)[Bb]", base_model)
         return f"{match.group(1)}B" if match else None
 
@@ -848,7 +916,12 @@ class Trainer:
                 "use_gradient_checkpointing": self.config.use_gradient_checkpointing,
                 "eval_strategy": self.config.eval_strategy,
                 "eval_steps": self.config.eval_steps,
+                "save_steps": self.config.save_steps,
+                "checkpoint_limit": self.config.checkpoint_limit,
+                "artifact_retention": self.config.artifact_retention,
                 "gguf_quantization": self.config.gguf_quantization,
+                "auto_export_gguf": self.config.auto_export_gguf,
+                "hf_upload_artifact": self.config.hf_upload_artifact,
             }
 
             # Add cascade metadata if present
@@ -961,14 +1034,20 @@ class Trainer:
 
         if platform.system() == "Windows":
             # Prefer Python 3.12 with CUDA support on Windows
+            local_app_data = os.getenv("LOCALAPPDATA")
             py312_paths = [
-                r"C:\Users\Cade\AppData\Local\Programs\Python\Python312\python.exe",
+                shutil.which("python3.12"),
+                (
+                    str(Path(local_app_data) / "Programs" / "Python" / "Python312" / "python.exe")
+                    if local_app_data
+                    else None
+                ),
                 r"C:\Python312\python.exe",
                 r"C:\Program Files\Python312\python.exe",
             ]
             for path in py312_paths:
-                if Path(path).exists():
-                    return path
+                if path and Path(path).exists():
+                    return str(path)
 
         # Fallback to current Python
         return sys.executable
@@ -1039,29 +1118,15 @@ class Trainer:
         try:
             if self.config.use_remote_ssh:
                 self._train_with_remote_ssh(run, callback, log_callback, pid_callback)
-            elif self.config.use_nemo_gym:
-                self._train_with_nemo_gym(run, callback)
+            elif self.config.use_nemo_customizer or self.config.use_nemo_gym:
+                self._train_with_nemo_customizer(run, callback)
             else:
                 self._train_with_unsloth_sft(run, callback, log_callback, pid_callback)
 
             run.status = "completed"
             run.completed_at = datetime.now(timezone.utc).isoformat()
 
-            # Save model profile
-            self._save_model_profile(run)
-
-            # GGUF export now happens in-script (model still in GPU memory)
-
-            # Auto-deploy to Ollama if enabled
-            if self.config.auto_deploy_ollama:
-                self._auto_deploy_to_ollama(run)
-
-            # Auto-push to HuggingFace Hub if enabled
-            if self.config.auto_push_hf:
-                self._auto_push_to_hf(run)
-
-            # Export to bashbros integration if linked
-            self._export_to_bashbros_integration(run)
+            self._finalize_completed_run(run)
 
         except Exception as e:
             run.status = "failed"
@@ -1069,6 +1134,18 @@ class Trainer:
             run.completed_at = datetime.now(timezone.utc).isoformat()
 
         return run
+
+    def _finalize_completed_run(self, run: TrainingRun) -> None:
+        """Apply the same artifact/export lifecycle to every local training strategy."""
+
+        run.metrics["artifact_policy"] = self.config.artifact_policy_settings()
+        self._save_model_profile(run)
+
+        if self.config.auto_deploy_ollama:
+            self._auto_deploy_to_ollama(run)
+        if self.config.auto_push_hf:
+            self._auto_push_to_hf(run)
+        self._export_to_bashbros_integration(run)
 
     def _auto_deploy_to_ollama(self, run: TrainingRun) -> None:
         """Deploy GGUF model to Ollama after training."""
@@ -1126,15 +1203,24 @@ class Trainer:
 
             repo_id = client.get_repo_id(repo_name)
 
-            # Push merged model (preferred) or final adapter
+            # Push the selected artifact. "auto" prefers a deployable merged
+            # model but falls back to the lightweight adapter.
             merged_dir = run.output_path / "merged"
             final_dir = run.output_path / "final"
-            push_dir = (
-                merged_dir if merged_dir.exists() else final_dir if final_dir.exists() else None
-            )
+            if self.config.hf_upload_artifact == "adapter":
+                push_dir = final_dir if final_dir.exists() else None
+            elif self.config.hf_upload_artifact == "merged":
+                push_dir = merged_dir if merged_dir.exists() else None
+            else:
+                push_dir = (
+                    merged_dir if merged_dir.exists() else final_dir if final_dir.exists() else None
+                )
 
             if not push_dir:
-                logger.warning("No merged or final model found, skipping HF push")
+                logger.warning(
+                    "Requested HuggingFace artifact '%s' was not found, skipping push",
+                    self.config.hf_upload_artifact,
+                )
                 return
 
             logger.info(f"Pushing model to HuggingFace Hub as '{repo_id}'...")
@@ -1170,6 +1256,8 @@ class Trainer:
                         "max_seq_length": self.config.max_seq_length,
                         "lora_r": self.config.lora_r,
                         "lora_alpha": self.config.lora_alpha,
+                        "artifact_retention": self.config.artifact_retention,
+                        "hf_upload_artifact": self.config.hf_upload_artifact,
                     },
                 }
                 if run.started_at and run.completed_at:
@@ -1307,8 +1395,7 @@ class Trainer:
             run.status = "completed"
             run.completed_at = datetime.now(timezone.utc).isoformat()
 
-            # Save model profile
-            self._save_model_profile(run)
+            self._finalize_completed_run(run)
 
         except Exception as e:
             run.status = "failed"
@@ -1581,6 +1668,8 @@ Family: {profile.family}; patches: {list(profile.patches)}
 
 import json as _json
 import os
+import shutil
+from pathlib import Path
 
 import torch
 from datasets import load_dataset
@@ -1679,7 +1768,7 @@ if __name__ == "__main__":
         bf16=True,
         logging_steps={self.config.logging_steps},
         save_steps={self.config.save_steps},
-        save_total_limit=3,
+        save_total_limit={self.config.checkpoint_limit},
         optim="adamw_torch",
         seed=42,
         report_to="none",
@@ -1715,10 +1804,15 @@ if __name__ == "__main__":
     model.save_pretrained("{output_path}/final")
     tokenizer.save_pretrained("{output_path}/final")
 
-    print("Merging LoRA into base model...")
-    merged = model.merge_and_unload()
-    merged.save_pretrained("{output_path}/merged")
-    tokenizer.save_pretrained("{output_path}/merged")
+    if {self.config.artifact_policy_settings()["save_merged"]}:
+        print("Merging LoRA into base model...")
+        merged = model.merge_and_unload()
+        merged.save_pretrained("{output_path}/merged")
+        tokenizer.save_pretrained("{output_path}/merged")
+
+    if not {self.config.artifact_policy_settings()["keep_checkpoints_after_success"]}:
+        for checkpoint_dir in Path("{output_path}").glob("checkpoint-*"):
+            shutil.rmtree(checkpoint_dir, ignore_errors=True)
 
     print("SFT training complete (plain backend)!")
 '''
@@ -1745,6 +1839,8 @@ Family: {profile.family}; patches: {list(profile.patches)}
 """
 
 import os
+import shutil
+from pathlib import Path
 
 import torch
 from datasets import load_dataset
@@ -1805,7 +1901,7 @@ if __name__ == "__main__":
         bf16=True,
         logging_steps={self.config.logging_steps},
         save_steps={self.config.save_steps},
-        save_total_limit=3,
+        save_total_limit={self.config.checkpoint_limit},
         optim="adamw_torch",
         seed=42,
         report_to="none",
@@ -1830,10 +1926,15 @@ if __name__ == "__main__":
     model.save_pretrained("{output_path}/final")
     tokenizer.save_pretrained("{output_path}/final")
 
-    print("Merging LoRA into base model...")
-    merged = model.merge_and_unload()
-    merged.save_pretrained("{output_path}/merged")
-    tokenizer.save_pretrained("{output_path}/merged")
+    if {self.config.artifact_policy_settings()["save_merged"]}:
+        print("Merging LoRA into base model...")
+        merged = model.merge_and_unload()
+        merged.save_pretrained("{output_path}/merged")
+        tokenizer.save_pretrained("{output_path}/merged")
+
+    if not {self.config.artifact_policy_settings()["keep_checkpoints_after_success"]}:
+        for checkpoint_dir in Path("{output_path}").glob("checkpoint-*"):
+            shutil.rmtree(checkpoint_dir, ignore_errors=True)
 
     print("DPO training complete (plain backend)!")
 '''
@@ -1857,6 +1958,8 @@ from datasets import load_dataset
 from trl import SFTTrainer, SFTConfig
 from transformers import EarlyStoppingCallback, TrainerCallback, ProcessorMixin
 import os
+import shutil
+from pathlib import Path
 import torch
 
 
@@ -2103,7 +2206,7 @@ if __name__ == "__main__":
         bf16=is_bfloat16_supported(),
         logging_steps={self.config.logging_steps},
         save_steps={self.config.save_steps},
-        save_total_limit=3,
+        save_total_limit={self.config.checkpoint_limit},
         optim="adamw_8bit",
         seed=42,
         report_to="none",
@@ -2158,15 +2261,15 @@ if __name__ == "__main__":
     model.save_pretrained("{output_path}/final")
     tokenizer.save_pretrained("{output_path}/final")
 
-    # Save LoRA adapters separately
-    model.save_pretrained_merged(
-        "{output_path}/merged",
-        tokenizer,
-        save_method="merged_16bit",
-    )
+    if {self.config.artifact_policy_settings()["save_merged"]}:
+        model.save_pretrained_merged(
+            "{output_path}/merged",
+            tokenizer,
+            save_method="merged_16bit",
+        )
 
     # Export to GGUF if enabled
-    if {self.config.auto_export_gguf}:
+    if {self.config.artifact_policy_settings()["save_gguf"]}:
         print("Exporting to GGUF ({self.config.gguf_quantization})...")
         import os
         gguf_dir = "{output_path}/gguf"
@@ -2177,6 +2280,10 @@ if __name__ == "__main__":
             quantization_method="{self.config.gguf_quantization}",
         )
         print(f"GGUF exported to: {{gguf_dir}}")
+
+    if not {self.config.artifact_policy_settings()["keep_checkpoints_after_success"]}:
+        for checkpoint_dir in Path("{output_path}").glob("checkpoint-*"):
+            shutil.rmtree(checkpoint_dir, ignore_errors=True)
 
     print("Training complete!")
 '''
@@ -2427,8 +2534,7 @@ if __name__ == "__main__":
             run.status = "completed"
             run.completed_at = datetime.now(timezone.utc).isoformat()
 
-            # Save model profile
-            self._save_model_profile(run)
+            self._finalize_completed_run(run)
 
             # Auto-export to GGUF if enabled
             if self.config.auto_export_gguf:
@@ -2477,7 +2583,7 @@ if __name__ == "__main__":
                 self._train_with_distillation(run, callback, log_callback, pid_callback)
             run.status = "completed"
             run.completed_at = datetime.now(timezone.utc).isoformat()
-            self._save_model_profile(run)
+            self._finalize_completed_run(run)
 
             if self.config.auto_export_gguf:
                 print(f"Auto-exporting to GGUF ({self.config.gguf_quantization})...")
@@ -3058,6 +3164,8 @@ from datasets import load_dataset
 from trl import DPOTrainer, DPOConfig
 from transformers import TrainerCallback
 import os
+import shutil
+from pathlib import Path
 import torch
 
 
@@ -3155,6 +3263,7 @@ dpo_config = DPOConfig(
     beta={self.config.dpo_beta},
     logging_steps={self.config.logging_steps},
     save_steps={self.config.save_steps},
+    save_total_limit={self.config.checkpoint_limit},
     fp16=True,
     optim="adamw_8bit",
     # Eval settings (active when val_dataset is available)
@@ -3182,15 +3291,16 @@ print("Saving model...")
 model.save_pretrained("{output_path}/final")
 tokenizer.save_pretrained("{output_path}/final")
 
-# Save merged weights
-model.save_pretrained_merged(
-    "{output_path}/merged",
-    tokenizer,
-    save_method="merged_16bit",
-)
+# Save merged weights only for deployable/full-run policies
+if {self.config.artifact_policy_settings()["save_merged"]}:
+    model.save_pretrained_merged(
+        "{output_path}/merged",
+        tokenizer,
+        save_method="merged_16bit",
+    )
 
 # Export to GGUF if enabled
-if {self.config.auto_export_gguf}:
+if {self.config.artifact_policy_settings()["save_gguf"]}:
     print("Exporting to GGUF ({self.config.gguf_quantization})...")
     import os
     gguf_dir = "{output_path}/gguf"
@@ -3201,6 +3311,10 @@ if {self.config.auto_export_gguf}:
         quantization_method="{self.config.gguf_quantization}",
     )
     print(f"GGUF exported to: {{gguf_dir}}")
+
+if not {self.config.artifact_policy_settings()["keep_checkpoints_after_success"]}:
+    for checkpoint_dir in Path("{output_path}").glob("checkpoint-*"):
+        shutil.rmtree(checkpoint_dir, ignore_errors=True)
 
 print("DPO training complete!")
 '''
@@ -3321,7 +3435,7 @@ print("DPO training complete!")
             return (GRPOTrainer(self.config)._generate_grpo_script(run), "train_grpo.py", True)
         return (self._generate_sft_script(run), "train_sft.py", True)
 
-    def _train_with_nemo_gym(
+    def _train_with_nemo_customizer(
         self, run: TrainingRun, callback: Callable[[dict[str, Any]], None] | None = None
     ) -> None:
         """
@@ -3339,8 +3453,8 @@ print("DPO training complete!")
 
         # Initialize NeMo client
         nemo_config = NeMoClientConfig(
-            base_url=self.config.nemo_gym_endpoint,
-            api_key=self.config.nemo_api_key,
+            base_url=self.config.nemo_customizer_endpoint or self.config.nemo_gym_endpoint,
+            api_key=self.config.nemo_customizer_api_key,
         )
 
         with NeMoClient(nemo_config) as client:
@@ -3655,8 +3769,7 @@ class GRPOTrainer(Trainer):
             run.status = "completed"
             run.completed_at = datetime.now(timezone.utc).isoformat()
 
-            # Save model profile
-            self._save_model_profile(run)
+            self._finalize_completed_run(run)
 
         except Exception as e:
             run.status = "failed"
@@ -3927,6 +4040,8 @@ MAX_TOOL_CALLS_PER_EPISODE = {settings["max_tool_calls_per_episode"]}
 TOKEN_LEVEL_LOSS = {settings["token_level_loss"]}
 FILTER_ZERO_STD_GROUPS = {settings["filter_zero_std_groups"]}
 ACTIVE_SAMPLING = {settings["active_sampling"]}
+RATIO_CLIP_MIN = {self.config.grpo_ratio_clip_min}
+RATIO_CLIP_MAX = {self.config.grpo_ratio_clip_max}
 LM_HEAD_FP32 = {settings["lm_head_fp32"]}
 INTERLEAVED_THINKING = {settings["interleaved_thinking"]}
 SFT_WARM_START_POLICY = {settings["sft_warm_start_policy"]!r}
@@ -3959,7 +4074,9 @@ def log_terminal_rl_config():
         f"profile={{TRAINING_PROFILE}} group_size={{GRPO_GROUP_SIZE}} "
         f"prompts_per_rollout_batch={{PROMPTS_PER_ROLLOUT_BATCH}} "
         f"max_tool_calls={{MAX_TOOL_CALLS_PER_EPISODE}} "
-        f"loss_type={self.config.grpo_loss_type} token_level_loss={{TOKEN_LEVEL_LOSS}} "
+        f"loss_type={self.config.grpo_loss_type} "
+        f"ratio_clip=(1-{{RATIO_CLIP_MIN}},1+{{RATIO_CLIP_MAX}}) "
+        f"token_level_loss={{TOKEN_LEVEL_LOSS}} "
         f"filter_zero_std={{FILTER_ZERO_STD_GROUPS}} active_sampling={{ACTIVE_SAMPLING}} "
         f"interleaved_thinking={{INTERLEAVED_THINKING}} "
         f"sft_warm_start={{SFT_WARM_START_POLICY}} "
@@ -4109,9 +4226,11 @@ NOTE: plain HuggingFace transformers + peft + trl (no Unsloth) for GB10/sm_121.
 import ast
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 
 import torch
 from datasets import load_dataset
@@ -4177,10 +4296,13 @@ if __name__ == "__main__":
         learning_rate={self.config.learning_rate},
         logging_steps={self.config.logging_steps},
         save_steps={self.config.save_steps},
+        save_total_limit={self.config.checkpoint_limit},
         max_completion_length={self.config.max_seq_length},
         temperature={self.config.grpo_temperature},
         use_vllm={self.config.grpo_use_vllm},
         loss_type="{self.config.grpo_loss_type}",
+        epsilon={self.config.grpo_ratio_clip_min},
+        epsilon_high={self.config.grpo_ratio_clip_max},
         bf16=True,
         report_to="none",
     )
@@ -4199,14 +4321,20 @@ if __name__ == "__main__":
     model.save_pretrained("{output_path}/final")
     tokenizer.save_pretrained("{output_path}/final")
 
-    print("Merging LoRA into base model...")
-    merged = model.merge_and_unload()
-    merged.save_pretrained("{output_path}/merged")
-    tokenizer.save_pretrained("{output_path}/merged")
+    if {self.config.artifact_policy_settings()["save_merged"]}:
+        print("Merging LoRA into base model...")
+        merged = model.merge_and_unload()
+        merged.save_pretrained("{output_path}/merged")
+        tokenizer.save_pretrained("{output_path}/merged")
+
+    if not {self.config.artifact_policy_settings()["keep_checkpoints_after_success"]}:
+        for checkpoint_dir in Path("{output_path}").glob("checkpoint-*"):
+            shutil.rmtree(checkpoint_dir, ignore_errors=True)
 
     print("GRPO training complete!")
     print(f"Adapter saved to: {output_path}/final")
-    print(f"Merged model saved to: {output_path}/merged")
+    if {self.config.artifact_policy_settings()["save_merged"]}:
+        print(f"Merged model saved to: {output_path}/merged")
 '''
 
     def _generate_grpo_script_unsloth(self, run: TrainingRun, profile) -> str:
@@ -4235,6 +4363,7 @@ from trl import GRPOTrainer as TRLGRPOTrainer, GRPOConfig
 from transformers import TrainerCallback
 from pathlib import Path as _Path
 import ast, subprocess, tempfile, os, sys, re
+import shutil
 import warnings
 
 # Silence cosmetic TRL deprecation: pad_token_id + generation_config double-pass
@@ -4485,12 +4614,15 @@ if __name__ == "__main__":
         learning_rate={self.config.learning_rate},
         logging_steps=1,
         save_steps={self.config.save_steps},
+        save_total_limit={self.config.checkpoint_limit},
         max_completion_length={self.config.max_seq_length},
         temperature={self.config.grpo_temperature},
         bf16=True,
         report_to="none",
         use_vllm={self.config.grpo_use_vllm},
         loss_type="{self.config.grpo_loss_type}",
+        epsilon={self.config.grpo_ratio_clip_min},
+        epsilon_high={self.config.grpo_ratio_clip_max},
     )
 
     # Initialize TRL GRPOTrainer with the degenerate-reward early-stop callback.
@@ -4510,23 +4642,32 @@ if __name__ == "__main__":
     model.save_pretrained("{output_path}/final")
     tokenizer.save_pretrained("{output_path}/final")
 
-    # Merge LoRA into base model and save as standalone
-    print("Merging LoRA into base model...")
-    merged = model.merge_and_unload()
-    merged.save_pretrained("{output_path}/merged")
-    tokenizer.save_pretrained("{output_path}/merged")
+    # Merge LoRA into base model only when the retention policy requests it.
+    if {self.config.artifact_policy_settings()["save_merged"]}:
+        print("Merging LoRA into base model...")
+        merged = model.merge_and_unload()
+        merged.save_pretrained("{output_path}/merged")
+        tokenizer.save_pretrained("{output_path}/merged")
+
+    if not {self.config.artifact_policy_settings()["keep_checkpoints_after_success"]}:
+        for checkpoint_dir in _Path("{output_path}").glob("checkpoint-*"):
+            shutil.rmtree(checkpoint_dir, ignore_errors=True)
 
     print("GRPO training complete!")
     print(f"Adapter saved to: {output_path}/final")
-    print(f"Merged model saved to: {output_path}/merged")
+    if {self.config.artifact_policy_settings()["save_merged"]}:
+        print(f"Merged model saved to: {output_path}/merged")
 '''
 
 
 def main():
     """Example usage of the Trainer."""
+    base_model = os.environ.get("BASHGYM_EXAMPLE_BASE_MODEL", "").strip()
+    if not base_model:
+        raise RuntimeError("Set BASHGYM_EXAMPLE_BASE_MODEL to an explicit trainable base")
     # SFT Training
     config = TrainerConfig(
-        base_model="Qwen/Qwen2.5-Coder-1.5B-Instruct",
+        base_model=base_model,
         strategy=TrainingStrategy.SFT,
         num_epochs=3,
         use_lora=True,

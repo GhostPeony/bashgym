@@ -8,6 +8,14 @@ export default [
   { ignores: ['dist', 'dist-electron', 'release', 'node_modules'] },
   js.configs.recommended,
   {
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      globals: {
+        process: 'readonly'
+      }
+    }
+  },
+  {
     files: ['**/*.{ts,tsx}'],
     languageOptions: {
       parser: tsParser,

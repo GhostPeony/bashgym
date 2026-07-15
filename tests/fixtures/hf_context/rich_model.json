@@ -1,0 +1,42 @@
+{
+  "id": "Qwen/Qwen2.5-Coder-0.5B-Instruct",
+  "sha": "ea3f2471cf1b1f0db85067f1ef93848e38e88c25",
+  "private": false,
+  "gated": false,
+  "downloads": 95554,
+  "likes": 73,
+  "pipeline_tag": "text-generation",
+  "tags": ["transformers", "safetensors", "qwen2", "text-generation", "code"],
+  "card_data": {
+    "license": "apache-2.0",
+    "base_model": "Qwen/Qwen2.5-Coder-0.5B",
+    "library_name": "transformers",
+    "eval_results": [
+      {
+        "task_type": "text-generation",
+        "task_name": "Code generation",
+        "dataset_type": "openai_humaneval",
+        "dataset_name": "HumanEval",
+        "dataset_config": "default",
+        "dataset_split": "test",
+        "dataset_revision": null,
+        "dataset_args": {"num_few_shot": 0},
+        "metric_type": "pass@1",
+        "metric_name": "pass@1",
+        "metric_value": 62.03,
+        "verified": true,
+        "source_name": "model card",
+        "source_url": "https://huggingface.co/Qwen/Qwen2.5-Coder-0.5B-Instruct"
+      }
+    ]
+  },
+  "config": {
+    "architectures": ["Qwen2ForCausalLM"],
+    "model_type": "qwen2",
+    "tokenizer_config": {"chat_template": "{% for message in messages %}...{% endfor %}"}
+  },
+  "safetensors": {
+    "parameters": {"BF16": 494032768},
+    "total": 494032768
+  }
+}

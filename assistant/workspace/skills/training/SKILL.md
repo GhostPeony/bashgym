@@ -13,9 +13,14 @@ Manage training through BashGym, not ad-hoc shell scripts. A run that matters mu
 - Do not start raw Unsloth/HF scripts unless the user explicitly asks for manual debugging.
 - Classify every run by method from `run_state.json`/API config, not by model name.
 - A completed train loss curve is not a full eval. Require heldout, environment, release-evidence, or RunCard artifacts as appropriate.
+- Put the exact request config, including artifact retention and Hugging Face destination, into the durable run record before launch.
+- For an official run, verify and pass a `tracking`/`tracking_context` object with project, experiment, model-version, dataset-version, environment, source revision, and digest IDs. If these are unknown, leave the run explicitly unassigned; never guess from conversational context.
+- Keep Hugging Face repositories private unless the user explicitly approves a public release after license, provenance, and privacy review.
 - Stopping a run is destructive. Confirm with the user before calling `POST /api/training/{run_id}/stop`.
 
 For the full method matrix and eval gates, read `references/bashgym-methods-and-evals.md`.
+Before launching any direct training strategy, read `references/bashgym-launch-recipes.md` and use its exact field names.
+Before activating any local, SSH, or cloud compute, read `references/compute-target-activation.md`. It owns target preflight, executable submission, monitoring, cancellation, and artifact-return guidance.
 For private remote-trainer details, use the operator's local runbook or saved compute-target profile. Do not assume a machine-specific runbook is checked into the repo.
 
 ## Preflight
@@ -33,15 +38,91 @@ On private unified-memory or remote GPU compute targets, prefer BashGym-managed 
 
 ## Start Runs
 
-Plan first when selecting a method:
+Select and prove one activation lane before launch. `bashgym compute launch` is
+dry-run planning only. `ssh:<device_id>` activates BashGym's remote trainer;
+`cloud:nemo-customizer` activates hosted NeMo Customizer. NeMo RL uses a
+registered private-compute campaign recipe. Hugging Face Jobs and managed-provider
+fine-tunes use their own submission surfaces and must not be disguised as a
+direct `/api/training/start` run.
+
+Plan first when selecting a method. The plan output uses `TrainingRequest` field names and includes the default storage policy:
 
 ```bash
 bashgym training plan --strategy sft --hardware private_compute --data traces --json
+bashgym training plan --strategy dpo --hardware private_compute --data preference_pairs --json
 bashgym training plan --strategy grpo --hardware private_compute --data terminal_envs --json
+bashgym training plan --strategy distillation --hardware private_compute --data traces --json
 bashgym training plan --strategy session-distillation --hardware private_compute --data traces --json
 ```
 
-Remote SFT:
+Direct `/api/training/start` strategies are `sft`, `dpo`, `grpo`, `rlvr`, `distillation`, and `session_distillation`. DPPO replay, reward-model training, ECHO/RWML diagnostics, and cascade/MOPD use their own workflows; do not relabel one of them as a direct strategy.
+
+Use the CLI for a tracked launch when it is available. Put method-specific fields in a bounded JSON config and keep strategy, model, dataset, target, and provenance on the command line:
+
+```bash
+bashgym training start \
+  --strategy sft \
+  --model <model-id> \
+  --dataset-path /path/to/train.jsonl \
+  --compute-target ssh:<device-id> \
+  --config run-config.json \
+  --tracking-context tracking-context.json \
+  --checkpoint-limit 1 \
+  --artifact-retention adapter_only \
+  --json
+```
+
+The direct agent tool accepts the same strategies. Put validated `TrainingRequest` overrides under `config`, including the storage and optional Hub fields:
+
+```json
+{
+  "strategy": "sft",
+  "model": "<model-id>",
+  "dataset_path": "/path/to/train.jsonl",
+  "compute_target": "ssh:<device-id>",
+  "tracking_context": {
+    "workspace_id": "<workspace-id>",
+    "project_id": "<project-id>",
+    "project_display_name": "<project name>",
+    "experiment_id": "<experiment-id>",
+    "experiment_name": "<experiment name>",
+    "objective": "<measurable objective>",
+    "task_type": "<task type>",
+    "model_id": "<logical-model-id>",
+    "model_version_id": "<model-version-id>",
+    "model_source_uri": "<model source URI>",
+    "dataset_version_id": "<dataset-version-id>",
+    "dataset_id": "<logical-dataset-id>",
+    "dataset_source_uri": "<dataset manifest URI>",
+    "environment_id": "<environment-id>",
+    "model_config_digest": "<sha256>",
+    "dataset_content_digest": "<sha256>",
+    "environment_runtime_digest": "<sha256>"
+  },
+  "config": {
+    "num_epochs": 1,
+    "checkpoint_limit": 1,
+    "artifact_retention": "adapter_only",
+    "auto_push_hf": false,
+    "hf_private": true,
+    "hf_upload_artifact": "auto"
+  }
+}
+```
+
+## Artifact And Hub Policy
+
+- `adapter_only` is the default for routine experiments. Checkpoints remain available during the run and are pruned only after the final adapter saves successfully.
+- Use `adapter_checkpoint` when a completed run must remain resumable or branchable.
+- Use `deployable` only when a standalone merged model is needed for serving. This can add roughly another base-model-sized artifact.
+- Use `full_run` only for audited/promoted work that must retain checkpoints and deployable artifacts.
+- `checkpoint_limit` controls the maximum retained checkpoints for policies that keep them; start at `1`.
+- `hf_upload_artifact: "adapter"` is the storage-efficient off-device default. `auto` uploads merged weights when present, otherwise the adapter. `merged` must fail if no merged artifact exists.
+- `auto_push_hf: true` requires an approved repo destination. Keep `hf_private: true` unless public release is explicitly authorized.
+
+For exact SFT, DPO, GRPO/RLVR, teacher-distillation, and Session Distillation payloads, use `references/bashgym-launch-recipes.md`. Do not invent aliases such as `epochs`; the API field is `num_epochs`.
+
+API calls remain valid when the CLI is unavailable:
 
 ```bash
 scripts/api.sh POST /api/training/start '{
@@ -49,42 +130,11 @@ scripts/api.sh POST /api/training/start '{
   "dataset_path": "/path/to/train.jsonl",
   "base_model": "<model-id>",
   "num_epochs": 1,
-  "batch_size": 1,
-  "gradient_accumulation_steps": 8,
-  "max_seq_length": 4096,
-  "load_in_4bit": false,
-  "sft_backend": "unsloth",
-  "use_remote_ssh": true
-}'
-```
-
-Terminal RL / RLVR:
-
-```bash
-scripts/api.sh POST /api/training/start '{
-  "strategy": "rlvr",
-  "dataset_path": "/path/to/prompts_or_env_specs.jsonl",
-  "base_model": "<model-id>",
-  "training_profile": "terminal_rl_tmax_like",
-  "grpo_reward_mode": "verification",
-  "grpo_group_size": 32,
-  "filter_zero_std_groups": true,
-  "active_sampling": true,
-  "lm_head_fp32": true,
-  "use_remote_ssh": true
-}'
-```
-
-Session Distillation:
-
-```bash
-scripts/api.sh POST /api/training/start '{
-  "strategy": "session_distillation",
-  "dataset_path": "/path/to/session_distillation_records.jsonl",
-  "base_model": "<model-id>",
-  "session_distillation_mask_policy": "target_span_only",
-  "session_distillation_context_mode": "hint_injected",
-  "session_distillation_min_confidence": 0.6,
+  "checkpoint_limit": 1,
+  "artifact_retention": "adapter_only",
+  "auto_push_hf": false,
+  "hf_private": true,
+  "hf_upload_artifact": "auto",
   "use_remote_ssh": true
 }'
 ```
@@ -116,6 +166,35 @@ Always analyze the saved run:
 ```bash
 bashgym training analyze --run-id <run_id> --models-dir data/models --json
 ```
+
+When the run belongs to a durable AutoResearch campaign, do not infer a campaign
+decision from the training endpoint's completion status. Finish the pinned
+evaluation and register its run/attempt/artifact/evaluation lineage. A completed
+campaign-linked evaluation write automatically attempts ingestion; use
+`campaign autoresearch-result --project <id> --evaluation-result <id>` only when
+the write reports deferred ingestion or for exact replay. Do not author the
+metric, cost, provenance, attempt IDs, or evidence references in a result JSON;
+BashGym derives them from the campaign and experiment ledgers. A fake executor
+or control smoke is derived as simulated and can never be reported as a real
+baseline or quality improvement.
+
+AutoResearch proposals request only `executor_kind: registered_training`. The
+campaign controller resolves that logical request to the installation-owned
+private-compute profile bound to the exact target-model digest. Do not replace
+it with `cloud:nemo-customizer`, Hugging Face Jobs, a raw SSH command, or another fallback;
+those are separate, explicitly authorized execution lanes.
+
+For project history and agent synthesis, use `bashgym ledger projects`, `ledger
+context`, `ledger runs`, `ledger run`, `ledger trend`, `ledger evaluations`,
+`ledger compare`, `ledger events`, and `ledger health`. Compare results only when
+they share the exact evaluation-suite ID. Read
+`docs/training/experiment-ledger.md` for the identity and GBrain/cloud boundary.
+
+After an evaluation or report completes, register its immutable suite, result,
+artifact, and decision records through `/api/ledger/projects/{project_id}/*`,
+then append one bounded cursor event referencing those IDs. Require
+`experiment.ledger_write`; do not treat that capability as permission to open a
+protected evaluation, promote a model, or publish an artifact.
 
 Minimum evidence:
 

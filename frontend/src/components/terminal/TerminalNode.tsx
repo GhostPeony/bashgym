@@ -25,6 +25,7 @@ import { ToolBreadcrumbs } from './ToolBreadcrumbs'
 import { AgentBadge } from '../sessions/AgentBadge'
 import { useCanvasControlStore } from '../../stores'
 import { NodeFlowerMark } from './NodeFlowerMark'
+import { terminalRuntimeLabel } from './terminalAgentRuntime'
 
 export interface TerminalNodeData extends Record<string, unknown> {
   panelId: string
@@ -114,6 +115,15 @@ function shortenPath(path?: string): string {
   return shortened
 }
 
+// A canvas node only needs enough location context to identify the workspace.
+// Keep the full path in the title for inspection without spending node space on it.
+function repositoryLabel(path?: string): string {
+  if (!path) return ''
+  const normalized = path.replace(/[\\/]+$/, '')
+  if (normalized === '~') return 'Home'
+  return normalized.split(/[\\/]/).pop() || normalized
+}
+
 // Format token count
 function formatTokens(count: number): string {
   if (count >= 1000000) return `${(count / 1000000).toFixed(1)}M`
@@ -176,8 +186,9 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: NodeP
   }, [panelId, onTogglePause])
 
   const relativeTime = formatRelativeTime(lastActivity)
-  const shortPath = shortenPath(cwd)
+  const repository = repositoryLabel(cwd)
   const totalTokens = metrics ? metrics.inputTokens + metrics.outputTokens : 0
+  const runtimeLabel = terminalRuntimeLabel(agentKind)
 
   // Calculate width based on expanded state
   const nodeWidth = dataExpanded ? 400 : 320
@@ -217,16 +228,19 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: NodeP
           title={`${type} node`}
         />
         <div className="flex-1 min-w-0">
-          <span className="text-sm font-mono font-semibold text-text-primary truncate flex items-center gap-1.5">
+          <span className="text-sm font-mono font-semibold text-text-primary truncate block">
             <span className="truncate">{title}</span>
-            {agentKind && <AgentBadge kind={agentKind} />}
           </span>
-          {relativeTime && (
-            <span className="text-[10px] text-text-muted flex items-center gap-1 font-mono">
-              <Clock className="w-2.5 h-2.5" />
-              {relativeTime}
-            </span>
-          )}
+          <span className="text-[10px] text-text-muted flex items-center gap-1 font-mono min-w-0">
+            <AgentBadge kind={agentKind} />
+            <span className="truncate">{runtimeLabel}</span>
+            {relativeTime && (
+              <span className="flex items-center gap-1 flex-shrink-0">
+                <Clock className="w-2.5 h-2.5" />
+                {relativeTime}
+              </span>
+            )}
+          </span>
         </div>
         {/* Metrics badge in header */}
         {showMetrics && metrics && totalTokens > 0 && (
@@ -348,28 +362,34 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: NodeP
         )}
 
         {/* Info grid */}
-        <div className="space-y-1.5 text-xs font-mono">
-          {shortPath && (
-            <div className="flex items-center gap-1.5">
+        <div className="space-y-1.5 overflow-hidden text-xs font-mono">
+          {repository && (
+            <div className="flex min-w-0 items-center gap-1.5">
               <Folder className="w-3 h-3 text-text-muted flex-shrink-0" />
-              <span className="text-text-secondary truncate flex-1" title={cwd}>
-                {shortPath}
+              <span className="min-w-0 flex-1 truncate font-semibold text-text-secondary" title={cwd}>
+                {repository}
               </span>
             </div>
           )}
 
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 items-center gap-3 overflow-hidden">
             {gitBranch && (
-              <div className="flex items-center gap-1.5">
+              <div className="flex min-w-0 flex-1 items-center gap-1.5" title={gitBranch}>
                 <GitBranch className="w-3 h-3 text-accent flex-shrink-0" />
-                <span className="text-accent truncate">{gitBranch}</span>
+                <span className="min-w-0 flex-1 truncate text-accent">{gitBranch}</span>
               </div>
             )}
 
             {model && (
-              <div className="flex items-center gap-1.5">
+              <div
+                className={clsx(
+                  'flex min-w-0 items-center gap-1.5',
+                  gitBranch ? 'max-w-[42%] flex-shrink-0' : 'flex-1'
+                )}
+                title={model}
+              >
                 <Cpu className="w-3 h-3 text-text-muted flex-shrink-0" />
-                <span className="text-text-secondary truncate">{model}</span>
+                <span className="min-w-0 truncate text-text-secondary">{model}</span>
               </div>
             )}
           </div>
@@ -440,7 +460,7 @@ export const TerminalNode = memo(function TerminalNode({ data, selected }: NodeP
         )}
 
         {/* Empty state hint */}
-        {!shortPath && !gitBranch && !model && !currentTool && !toolHistory?.length && (
+        {!repository && !gitBranch && !model && !currentTool && !toolHistory?.length && (
           <div className="text-[10px] text-text-muted text-center py-1 font-mono">
             Run a command to see details
           </div>

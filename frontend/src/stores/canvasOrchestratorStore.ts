@@ -1,16 +1,23 @@
 import { create } from 'zustand'
+import type { DesignerJobStatus, RuntimeJob } from '../services/api'
 import { useTerminalStore, type CanvasEdge, type Panel } from './terminalStore'
 import { useWorkspaceStore } from './workspaceStore'
+import {
+  selectDesignerPanelForJob,
+  type DesignerCanvasMetadata,
+} from './designerCanvasLifecycle'
 import {
   recipeFromTrainingProgress,
   recipeFromTrainingQueued,
   recipeFromWorkspaceIntent,
+  shouldReuseTrainingOrigin,
   statusVisualForTraining,
   type CanvasNodeRecipe,
   type TrainingProgressPayload,
   type TrainingQueuedPayload,
   type WorkspaceCanvasIntentPayload,
 } from '../components/terminal/canvasRecipes'
+import { findDynamicNodePosition } from '../components/terminal/canvasPlacement'
 
 interface CanvasOrchestratorState {
   handledKeys: Record<string, number>
@@ -18,10 +25,13 @@ interface CanvasOrchestratorState {
   handleTrainingQueued: (payload: TrainingQueuedPayload) => void
   handleTrainingProgress: (payload: TrainingProgressPayload) => void
   handleTrainingTerminalStatus: (runId: string, status: string) => void
+  handleDesignerJob: (job: DesignerJobStatus, metadata?: DesignerCanvasMetadata) => void
+  handleRuntimeJob: (job: RuntimeJob) => void
 }
 
 function panelMatchesRecipe(panel: Panel, recipe: CanvasNodeRecipe): boolean {
   if (panel.type !== recipe.type) return false
+  if (recipe.type === 'skilllab') return true
   const cfg = panel.adapterConfig || {}
   const runId = recipe.config.runId
   const correlationId = recipe.config.correlationId
@@ -40,6 +50,7 @@ const ORIGIN_ELSEWHERE = Symbol('origin-elsewhere')
 
 function findOriginPanel(recipe: CanvasNodeRecipe): Panel | undefined | typeof ORIGIN_ELSEWHERE {
   const state = useTerminalStore.getState()
+  if (recipe.config.runtimeDiscovered) return undefined
   const hasExplicitOrigin = Boolean(recipe.originPanelId || recipe.originTerminalId)
   if (recipe.originPanelId) {
     const byPanel = state.panels.find((panel) => panel.id === recipe.originPanelId)
@@ -64,27 +75,21 @@ function findOriginPanel(recipe: CanvasNodeRecipe): Panel | undefined | typeof O
 
 function placeNearOrigin(panelId: string, originPanel: Panel | undefined, type: Panel['type']) {
   const state = useTerminalStore.getState()
-  const originPos = originPanel ? state.canvasNodes.get(originPanel.id)?.position : undefined
-  const existingPositions = new Set(
-    Array.from(state.canvasNodes.values()).map((node) => `${node.position.x}:${node.position.y}`)
-  )
-  const laneOffset =
-    type === 'evals'
-      ? { x: 900, y: 40 }
-      : type === 'huggingface'
-        ? { x: 450, y: 260 }
-        : type === 'toolkit'
-          ? { x: 0, y: 300 }
-          : { x: 460, y: -60 }
-  const base = originPos
-    ? { x: originPos.x + laneOffset.x, y: originPos.y + laneOffset.y }
-    : { x: 50 + state.panels.length * 30, y: 50 + state.panels.length * 24 }
+  const activeSessionPanel = Array.from(state.sessions.values())
+    .filter((session) => session.status === 'running' || session.status === 'tool_calling')
+    .sort((left, right) => right.lastActivity - left.lastActivity)
+    .map((session) => state.panels.find((panel) => panel.terminalId === session.id))
+    .find((panel) => panel && state.canvasNodes.has(panel.id))
+  const activePanel = state.activePanelId
+    ? state.panels.find((panel) => panel.id === state.activePanelId)
+    : undefined
+  const anchorPanel = originPanel || activeSessionPanel || activePanel
+  const anchor = anchorPanel ? state.canvasNodes.get(anchorPanel.id)?.position : undefined
+  const occupied = Array.from(state.canvasNodes.values())
+    .filter((node) => node.panelId !== panelId)
+    .map((node) => node.position)
 
-  let pos = base
-  for (let i = 0; i < 8 && existingPositions.has(`${pos.x}:${pos.y}`); i += 1) {
-    pos = { x: base.x + i * 40, y: base.y + i * 34 }
-  }
-  state.updateCanvasNode(panelId, pos)
+  state.updateCanvasNode(panelId, findDynamicNodePosition(type, anchor, occupied))
 }
 
 function upsertEdge(source: string | undefined, target: string): void {
@@ -110,13 +115,16 @@ function materializeRecipe(recipe: CanvasNodeRecipe): string | null {
     return null
   }
   const state = useTerminalStore.getState()
-  const existing = state.panels.find((panel) => panelMatchesRecipe(panel, recipe))
+  const matchingPanel = state.panels.find((panel) => panelMatchesRecipe(panel, recipe))
   const resolved = findOriginPanel(recipe)
-  if (resolved === ORIGIN_ELSEWHERE && !existing) {
+  if (resolved === ORIGIN_ELSEWHERE && !matchingPanel) {
     console.info('[canvas-orchestrator] origin not in active workspace, skipping', recipe.key)
     return null
   }
   const originPanel = resolved === ORIGIN_ELSEWHERE ? undefined : resolved
+  const existing = matchingPanel ?? (
+    shouldReuseTrainingOrigin(recipe, originPanel) ? originPanel : undefined
+  )
   const existingConfig = existing?.adapterConfig || {}
   const visual =
     recipe.type === 'training'
@@ -143,6 +151,7 @@ function materializeRecipe(recipe: CanvasNodeRecipe): string | null {
   }
 
   upsertEdge(originPanel?.id, panelId)
+  if (recipe.type === 'skilllab') state.setActivePanel(panelId)
   return panelId
 }
 
@@ -193,5 +202,112 @@ export const useCanvasOrchestratorStore = create<CanvasOrchestratorState>((set, 
       visual: statusVisualForTraining(status),
     }
     state.updatePanelConfig(panel.id, adapterConfig)
+  },
+
+  handleDesignerJob: (job, metadata = {}) => {
+    if (useWorkspaceStore.getState().switching) return
+    const state = useTerminalStore.getState()
+    const requestedOriginPanelId = metadata.originPanelId || job.origin?.panel_id
+    const originPanel = (
+      requestedOriginPanelId
+        ? state.panels.find((candidate) => candidate.id === requestedOriginPanelId)
+        : undefined
+    ) ?? (
+      job.origin?.terminal_id
+        ? state.panels.find((candidate) => candidate.terminalId === job.origin?.terminal_id)
+        : undefined
+    )
+    const panel = selectDesignerPanelForJob(state.panels, job, originPanel?.id)
+    const adapterConfig = {
+      ...(panel?.adapterConfig || {}),
+      ...(metadata.config || {}),
+      designerJobId: job.job_id,
+      runtimeJobId: metadata.runtimeDiscovered ? job.job_id : undefined,
+      runtimePid: metadata.runtimePid,
+      runtimeStartedAt: job.started_at,
+      runtimeDiscovered: metadata.runtimeDiscovered ?? false,
+      originPanelId: originPanel?.id,
+      originTerminalId: job.origin?.terminal_id,
+      originAgent: job.origin?.agent,
+      correlationId: job.correlation_id,
+      status: job.status,
+      pipeline: job.pipeline,
+      numRecords: job.num_records,
+      jobName: job.job_name,
+      dataset: job.dataset,
+      model: job.model,
+      provider: job.provider,
+      execution: job.execution,
+      outputDir: job.output_dir,
+      progress: job.progress ? { ...job.progress } : undefined,
+      error: job.error,
+    }
+    const panelId = panel?.id ?? state.addPanel({
+      type: 'designer',
+      title: 'Data Designer',
+      adapterConfig,
+    })
+    if (panel) state.updatePanelConfig(panelId, adapterConfig)
+    else placeNearOrigin(panelId, originPanel, 'designer')
+    upsertEdge(originPanel?.id, panelId)
+    set((current) => ({
+      handledKeys: { ...current.handledKeys, [`designer:${job.job_id}`]: Date.now() },
+    }))
+  },
+
+  handleRuntimeJob: (job) => {
+    if (useWorkspaceStore.getState().switching) return
+    const progress = job.progress
+      ? { ...job.progress }
+      : undefined
+    const summary = [
+      `Observed ${job.script} (PID ${job.pid})`,
+      progress?.total ? `${progress.current}/${progress.total} ${progress.unit}` : undefined,
+      job.artifacts.length ? `${job.artifacts.length} recent artifacts` : undefined,
+    ].filter(Boolean).join(' · ')
+
+    if (job.kind === 'designer') {
+      get().handleDesignerJob({
+        job_id: job.job_id,
+        status: job.status,
+        pipeline: job.pipeline || job.script,
+        num_records: job.progress?.total ?? 0,
+        progress: job.progress?.total
+          ? { ...job.progress, total: job.progress.total }
+          : undefined,
+        job_name: job.job_name,
+        dataset: job.dataset,
+        model: job.model,
+        provider: job.provider,
+        execution: job.execution,
+        started_at: job.started_at,
+        output_dir: job.output_dir || undefined,
+      }, {
+        runtimePid: job.pid,
+        runtimeDiscovered: true,
+        config: { summary },
+      })
+      return
+    }
+
+    const recipe = recipeFromTrainingQueued({
+      run_id: job.job_id,
+      status: job.status,
+      strategy: job.strategy || 'training',
+      dataset_path: job.output_dir || undefined,
+      compute_target: 'local',
+    })
+    recipe.config = {
+      ...recipe.config,
+      runtimeJobId: job.job_id,
+      runtimePid: job.pid,
+      runtimeStartedAt: job.started_at,
+      runtimeDiscovered: true,
+      progress,
+      summary,
+      status: job.status,
+    }
+    recipe.visual = statusVisualForTraining(job.status)
+    materializeRecipe(recipe)
   },
 }))

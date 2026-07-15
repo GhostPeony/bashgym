@@ -153,7 +153,6 @@ backend fallback behavior.
 |---|---|---|---|
 | Gemma 4 | Profiled | `gemma4_delimited` | Thinking template, multimodal excludes, Gemma-specific patch. |
 | Qwen3 / Qwen3.6 | Profiled | `qwen_xml` | Family profile for current Qwen3-compatible checkpoints. Prefer the newest compatible Qwen3.6, Qwen3-Coder, or hosted Qwen3 model that fits the target backend and hardware. |
-| Qwen2.5 | Profiled | `qwen_xml` | Stable coder/instruct fallback when the newest Qwen3/Qwen3.6 checkpoint is unavailable or too large. |
 | Llama 3 | Profiled | `openai_json` | General instruct baseline and portable adapter experiments. |
 | Generic HF causal LM | Fallback | `openai_json` | Use for quick compatibility; add a profile for production-quality support. |
 

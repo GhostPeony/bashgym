@@ -3059,6 +3059,63 @@ class TestSecretsModule:
             assert secrets["TEST_KEY"] == "test_value"
             assert secrets["OTHER"] == "data"
 
+    def test_placeholder_env_does_not_override_stored_hf_token(self, tmp_path, monkeypatch):
+        """A dotenv template must not shadow a valid submitted token after reload."""
+        from bashgym.config import reload_settings
+        from bashgym.secrets import save_secrets
+
+        mock_path = tmp_path / "secrets.json"
+        monkeypatch.setenv("HF_TOKEN", "your-huggingface-token-here")
+
+        with (
+            patch("bashgym.secrets.get_secrets_path", return_value=mock_path),
+            patch("bashgym.secrets._get_keyring_module", return_value=None),
+        ):
+            save_secrets({"HF_TOKEN": "hf_persisted_token"})
+
+            assert reload_settings().huggingface.token == "hf_persisted_token"
+
+    def test_legacy_secret_migrates_to_os_keyring(self, tmp_path, monkeypatch):
+        """A verified keyring write removes the plaintext legacy copy."""
+        from bashgym.secrets import (
+            KEYRING_SERVICE,
+            delete_secret,
+            get_secret_with_source,
+            load_secrets,
+            save_secrets,
+        )
+
+        class FakeKeyring:
+            def __init__(self):
+                self.values = {}
+
+            def get_password(self, service, key):
+                return self.values.get((service, key))
+
+            def set_password(self, service, key, value):
+                self.values[(service, key)] = value
+
+            def delete_password(self, service, key):
+                del self.values[(service, key)]
+
+        fake_keyring = FakeKeyring()
+        mock_path = tmp_path / "secrets.json"
+        monkeypatch.delenv("HF_TOKEN", raising=False)
+
+        with (
+            patch("bashgym.secrets.get_secrets_path", return_value=mock_path),
+            patch("bashgym.secrets._get_keyring_module", return_value=fake_keyring),
+        ):
+            save_secrets({"HF_TOKEN": "hf_legacy_token"})
+
+            token, source = get_secret_with_source("HF_TOKEN")
+
+            assert token == "hf_legacy_token"
+            assert source == "keyring"
+            assert fake_keyring.values[(KEYRING_SERVICE, "HF_TOKEN")] == "hf_legacy_token"
+            assert "HF_TOKEN" not in load_secrets()
+            assert delete_secret("HF_TOKEN") is True
+            assert fake_keyring.values == {}
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

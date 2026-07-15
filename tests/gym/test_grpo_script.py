@@ -129,6 +129,19 @@ class TestGRPOLossType:
         script = _generate_script(TrainerConfig(grpo_backend="plain", grpo_loss_type="dr_grpo"))
         assert 'loss_type="dr_grpo"' in script
 
+    def test_dapo_asymmetric_clip_threads_into_both_backends(self):
+        for backend in ("plain", "unsloth"):
+            script = _generate_script(
+                TrainerConfig(
+                    grpo_backend=backend,
+                    grpo_loss_type="dapo",
+                    grpo_ratio_clip_min=0.15,
+                    grpo_ratio_clip_max=0.28,
+                )
+            )
+            assert "epsilon=0.15" in script
+            assert "epsilon_high=0.28" in script
+
     def test_invalid_loss_type_raises(self):
         with pytest.raises(ValueError, match="grpo_loss_type"):
             _generate_script(TrainerConfig(grpo_loss_type="not_a_real_loss"))
@@ -165,6 +178,8 @@ class TestTerminalRLProfile:
             assert "DPPO_BINARY_KL_THRESHOLD = 0.05" in script
             assert "num_generations=GRPO_GROUP_SIZE" in script
             assert 'loss_type="dapo"' in script
+            assert "epsilon=0.2" in script
+            assert "epsilon_high=0.28" in script
             assert "configure_terminal_rl_model(model)" in script
             ast.parse(script)
 

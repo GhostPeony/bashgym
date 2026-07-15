@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <filter id="neutral" color-interpolation-filters="sRGB">
+    <feColorMatrix type="saturate" values="0"/>
+    <feComponentTransfer>
+      <feFuncR type="linear" slope="0.78" intercept="0.12"/>
+      <feFuncG type="linear" slope="0.76" intercept="0.12"/>
+      <feFuncB type="linear" slope="0.82" intercept="0.12"/>
+    </feComponentTransfer>
+  </filter>
+  <image href="node-mcp-source.svg" width="256" height="256" filter="url(#neutral)"/>
+</svg>

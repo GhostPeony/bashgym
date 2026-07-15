@@ -5,6 +5,9 @@ self-awareness capabilities so the agent can introspect on its
 own abilities.
 """
 
+from bashgym.agent.hf_context_tools import HF_CONTEXT_TOOLS
+from bashgym.agent.skill_lab_tools import SKILL_LAB_TOOLS
+
 # ------------------------------------------------------------------
 # Core gym tools
 # ------------------------------------------------------------------
@@ -99,12 +102,213 @@ CORE_TOOLS: list[dict] = [
             "properties": {
                 "strategy": {
                     "type": "string",
-                    "enum": ["sft", "dpo", "grpo"],
-                    "description": "Training strategy to use.",
+                    "enum": [
+                        "sft",
+                        "dpo",
+                        "grpo",
+                        "rlvr",
+                        "distillation",
+                        "session_distillation",
+                    ],
+                    "description": "Direct BashGym training strategy to use.",
                 },
                 "model": {
                     "type": "string",
                     "description": "Base model identifier for fine-tuning.",
+                },
+                "dataset_path": {
+                    "type": "string",
+                    "description": "Optional JSONL dataset path. Omit to use the default trace data.",
+                },
+                "compute_target": {
+                    "type": "string",
+                    "description": "Execution target label such as local, cloud, or ssh:<device>.",
+                },
+                "config": {
+                    "type": "object",
+                    "description": (
+                        "Validated TrainingRequest overrides. Use this for method-specific and "
+                        "storage settings; strategy, base_model, compute_target, correlation_id, "
+                        "and origin must stay at the top level. The API rejects unknown fields."
+                    ),
+                    "properties": {
+                        "num_epochs": {"type": "integer", "minimum": 1, "maximum": 100},
+                        "batch_size": {"type": "integer", "minimum": 1, "maximum": 64},
+                        "learning_rate": {"type": "number", "exclusiveMinimum": 0},
+                        "warmup_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+                        "gradient_accumulation_steps": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 128,
+                        },
+                        "max_seq_length": {"type": "integer", "minimum": 1},
+                        "save_steps": {"type": "integer", "minimum": 10},
+                        "checkpoint_limit": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 20,
+                        },
+                        "artifact_retention": {
+                            "type": "string",
+                            "enum": [
+                                "adapter_only",
+                                "adapter_checkpoint",
+                                "deployable",
+                                "full_run",
+                            ],
+                        },
+                        "use_lora": {"type": "boolean"},
+                        "lora_rank": {"type": "integer", "minimum": 1},
+                        "lora_alpha": {"type": "integer", "minimum": 1},
+                        "lora_dropout": {"type": "number", "minimum": 0, "maximum": 0.5},
+                        "load_in_4bit": {"type": "boolean"},
+                        "sft_backend": {
+                            "type": "string",
+                            "enum": ["auto", "unsloth", "plain"],
+                        },
+                        "dpo_backend": {
+                            "type": "string",
+                            "enum": ["auto", "unsloth", "plain"],
+                        },
+                        "dpo_beta": {"type": "number", "minimum": 0.01, "maximum": 1},
+                        "training_profile": {"type": "string"},
+                        "grpo_backend": {"type": "string"},
+                        "grpo_loss_type": {"type": "string"},
+                        "grpo_ratio_clip_min": {
+                            "type": "number",
+                            "minimum": 0,
+                            "exclusiveMaximum": 1,
+                        },
+                        "grpo_ratio_clip_max": {"type": "number", "minimum": 0},
+                        "grpo_reward_mode": {"type": "string"},
+                        "grpo_group_size": {"type": "integer", "minimum": 2, "maximum": 64},
+                        "grpo_num_generations": {
+                            "type": "integer",
+                            "minimum": 2,
+                            "maximum": 64,
+                        },
+                        "grpo_temperature": {
+                            "type": "number",
+                            "minimum": 0.1,
+                            "maximum": 2,
+                        },
+                        "filter_zero_std_groups": {"type": "boolean"},
+                        "active_sampling": {"type": "boolean"},
+                        "token_level_loss": {"type": "boolean"},
+                        "lm_head_fp32": {"type": "boolean"},
+                        "teacher_model": {"type": "string"},
+                        "teacher_temperature": {
+                            "type": "number",
+                            "minimum": 0.1,
+                            "maximum": 10,
+                        },
+                        "distillation_alpha": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                        },
+                        "session_distillation_alpha": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                        },
+                        "session_distillation_temperature": {
+                            "type": "number",
+                            "exclusiveMinimum": 0,
+                            "maximum": 10,
+                        },
+                        "session_distillation_min_confidence": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                        },
+                        "session_distillation_mask_policy": {"type": "string"},
+                        "session_distillation_context_mode": {"type": "string"},
+                        "session_distillation_reader": {"type": "string"},
+                        "auto_export_gguf": {"type": "boolean"},
+                        "gguf_quantization": {"type": "string"},
+                        "auto_push_hf": {"type": "boolean"},
+                        "hf_repo_name": {"type": "string"},
+                        "hf_private": {"type": "boolean"},
+                        "hf_upload_artifact": {
+                            "type": "string",
+                            "enum": ["auto", "adapter", "merged"],
+                        },
+                        "use_remote_ssh": {"type": "boolean"},
+                        "device_id": {"type": "string"},
+                    },
+                    "additionalProperties": True,
+                },
+                "correlation_id": {
+                    "type": "string",
+                    "description": "Optional workflow id that links planning and training nodes.",
+                },
+                "tracking_context": {
+                    "type": "object",
+                    "description": (
+                        "Exact reproducibility boundary for an official ledger run. Supply this "
+                        "after verifying the project, experiment, model revision, dataset snapshot, "
+                        "and compute environment. Omit only for an explicitly unassigned smoke/ad-hoc run."
+                    ),
+                    "properties": {
+                        "workspace_id": {"type": "string"},
+                        "project_id": {"type": "string"},
+                        "project_display_name": {"type": "string"},
+                        "project_description": {"type": "string"},
+                        "experiment_id": {"type": "string"},
+                        "experiment_name": {"type": "string"},
+                        "objective": {"type": "string"},
+                        "task_type": {"type": "string"},
+                        "model_id": {"type": "string"},
+                        "model_version_id": {"type": "string"},
+                        "model_source_uri": {"type": "string"},
+                        "model_source_revision": {"type": "string"},
+                        "model_config_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "dataset_id": {"type": "string"},
+                        "dataset_version_id": {"type": "string"},
+                        "dataset_source_uri": {"type": "string"},
+                        "dataset_content_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "dataset_split_manifest": {"type": "object"},
+                        "dataset_row_counts": {"type": "object"},
+                        "environment_id": {"type": "string"},
+                        "environment_runtime_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "environment_hardware": {"type": "object"},
+                        "campaign_id": {"type": "string"},
+                        "study_id": {"type": "string"},
+                        "action_id": {"type": "string"},
+                        "owner_actor_id": {"type": "string"},
+                        "tags": {"type": "array", "items": {"type": "string"}},
+                        "metadata": {"type": "object"},
+                    },
+                    "required": [
+                        "workspace_id",
+                        "project_id",
+                        "project_display_name",
+                        "experiment_id",
+                        "experiment_name",
+                        "objective",
+                        "task_type",
+                        "model_id",
+                        "model_version_id",
+                        "model_source_uri",
+                        "model_config_digest",
+                        "dataset_id",
+                        "dataset_version_id",
+                        "dataset_source_uri",
+                        "dataset_content_digest",
+                        "environment_id",
+                        "environment_runtime_digest",
+                    ],
+                    "additionalProperties": False,
+                },
+                "origin": {
+                    "type": "object",
+                    "description": "Source from workspace context. Include panel_id and terminal_id when available.",
+                    "properties": {
+                        "panel_id": {"type": "string"},
+                        "terminal_id": {"type": "string"},
+                        "agent": {"type": "string"},
+                    },
                 },
             },
             "required": ["strategy", "model"],
@@ -117,6 +321,101 @@ CORE_TOOLS: list[dict] = [
             "type": "object",
             "properties": {},
             "required": [],
+        },
+    },
+    {
+        "name": "list_experiment_projects",
+        "description": (
+            "List project-isolated experiment namespaces from BashGym's authoritative local ledger. "
+            "Use this before guessing which project a run belongs to."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "workspace_id": {
+                    "type": "string",
+                    "description": "Ledger workspace. Defaults to desktop-local.",
+                }
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "get_experiment_context",
+        "description": (
+            "Read one project's bounded status, health signals, run history, evaluations, "
+            "decisions, and stable evidence references without crossing project boundaries."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "workspace_id": {"type": "string"},
+                "project_id": {"type": "string"},
+                "recent_limit": {"type": "integer", "minimum": 1, "maximum": 100},
+            },
+            "required": ["workspace_id", "project_id"],
+        },
+    },
+    {
+        "name": "get_experiment_run",
+        "description": (
+            "Inspect one official run with its attempt identities, evaluation results, and artifact references."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "workspace_id": {"type": "string"},
+                "project_id": {"type": "string"},
+                "run_id": {"type": "string"},
+            },
+            "required": ["workspace_id", "project_id", "run_id"],
+        },
+    },
+    {
+        "name": "start_data_designer",
+        "description": "Start a Data Designer synthetic dataset generation job.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "pipeline": {
+                    "type": "string",
+                    "description": "Data Designer pipeline name, such as coding_agent_sft.",
+                },
+                "num_records": {
+                    "type": "integer",
+                    "description": "Number of records to generate.",
+                },
+                "seed_source": {
+                    "type": "string",
+                    "description": "Optional seed file, directory, or Hugging Face dataset.",
+                },
+                "seed_type": {
+                    "type": "string",
+                    "enum": ["traces", "agent_rollouts", "huggingface", "file", "unstructured"],
+                },
+                "model": {
+                    "type": "string",
+                    "description": "Optional text model override.",
+                },
+                "provider": {
+                    "type": "string",
+                    "description": "Provider name. Defaults to nvidia.",
+                },
+                "provider_endpoint": {
+                    "type": "string",
+                    "description": "Optional OpenAI-compatible provider endpoint.",
+                },
+                "origin": {
+                    "type": "object",
+                    "description": "Source canvas panel or terminal from workspace context.",
+                    "properties": {
+                        "panel_id": {"type": "string"},
+                        "terminal_id": {"type": "string"},
+                        "agent": {"type": "string"},
+                    },
+                },
+            },
+            "required": ["pipeline"],
         },
     },
     {
@@ -137,6 +436,8 @@ CORE_TOOLS: list[dict] = [
             "required": ["command", "reason"],
         },
     },
+    *HF_CONTEXT_TOOLS,
+    *SKILL_LAB_TOOLS,
 ]
 
 

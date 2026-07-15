@@ -3,6 +3,7 @@ import type { Node, NodeProps } from '@xyflow/react'
 import { ChevronDown, ChevronRight, Loader2, SlidersHorizontal } from 'lucide-react'
 import { clsx } from 'clsx'
 import { API_BASE, evalAdvancedApi, type HeldoutJobResponse, type HeldoutReport } from '../../../services/api'
+import { useSkillLabStore, useWorkspaceStore } from '../../../stores'
 import { DataNodeShell } from './DataNodeShell'
 import { hueFor } from './dataPanels'
 import { ConfigPill, ConfigRow, ConfigRows, ConfigSection, NodeConfigModal } from './NodeConfigModal'
@@ -54,6 +55,10 @@ function DeltaTable({ report }: { report: HeldoutReport }) {
 }
 
 export const EvalNode = memo(function EvalNode({ data, selected }: NodeProps<EvalNodeType>) {
+  const workspaceId = useWorkspaceStore((state) => state.activeWorkspaceId)
+  const skillRunMap = useSkillLabStore((state) => state.runsByWorkspace)
+  const refreshSkillRuns = useSkillLabStore((state) => state.refresh)
+  const skillRuns = skillRunMap[workspaceId] || []
   const [jobs, setJobs] = useState<HeldoutJobResponse[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
@@ -80,6 +85,19 @@ export const EvalNode = memo(function EvalNode({ data, selected }: NodeProps<Eva
       clearInterval(t)
     }
   }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      if (!cancelled) await refreshSkillRuns(workspaceId)
+    }
+    void load()
+    const timer = window.setInterval(() => void load(), POLL_MS)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [refreshSkillRuns, workspaceId])
 
   const latest = jobs.find((j) => j.report)
 
@@ -118,7 +136,7 @@ export const EvalNode = memo(function EvalNode({ data, selected }: NodeProps<Eva
       flowerVariant="evals"
       selected={selected}
       hasConnections={data.hasConnections}
-      buildContext={buildContext}
+      buildContext={data.hasTerminalConnections ? buildContext : undefined}
       statusBarClass={
         hasFailure ? 'bg-status-error' :
         jobs.some((j) => j.status === 'running') ? 'bg-accent animate-pulse' :
@@ -147,9 +165,9 @@ export const EvalNode = memo(function EvalNode({ data, selected }: NodeProps<Eva
         </div>
       ) : error ? (
         <div className="text-[10px] font-mono text-status-error text-center py-2">{error}</div>
-      ) : jobs.length === 0 ? (
+      ) : jobs.length === 0 && skillRuns.length === 0 ? (
         <div className="text-[10px] font-mono text-text-muted text-center py-3">
-          No held-out eval jobs yet
+          No eval jobs yet
         </div>
       ) : (
         <div className="space-y-1.5">
@@ -204,6 +222,27 @@ export const EvalNode = memo(function EvalNode({ data, selected }: NodeProps<Eva
               </div>
             )
           })}
+          {skillRuns.slice(0, 3).map((run) => (
+            <div key={run.run_id} className="rounded-brutal border-brutal border-border-subtle px-2 py-1.5">
+              <div className="flex min-w-0 items-center gap-1.5 font-mono text-[10px]">
+                <span className={clsx(
+                  'h-1.5 w-1.5 flex-shrink-0 rounded-full',
+                  (run.status === 'queued' || run.status === 'running') && 'bg-accent animate-pulse',
+                  run.status === 'completed' && 'bg-status-success',
+                  run.status === 'failed' && 'bg-status-error',
+                )} />
+                <span className="min-w-0 flex-1 truncate text-text-secondary">{run.skill_name}</span>
+                <span className="flex-shrink-0 text-[8px] font-bold uppercase text-text-muted">
+                  {run.kpis?.verdict || run.status}
+                </span>
+              </div>
+              {run.kpis ? (
+                <div className="mt-0.5 font-mono text-[9px] text-text-muted">
+                  uplift {run.kpis.success_uplift >= 0 ? '+' : ''}{Math.round(run.kpis.success_uplift * 100)}% · route F1 {Math.round(run.kpis.routing_f1 * 100)}%
+                </div>
+              ) : null}
+            </div>
+          ))}
         </div>
       )}
     </DataNodeShell>
@@ -250,6 +289,15 @@ export const EvalNode = memo(function EvalNode({ data, selected }: NodeProps<Eva
           <ConfigRow label="Recent evals" value={`${API_BASE}/eval/heldout?limit=5`} />
           <ConfigRow label="Latest eval" value={latest ? `${API_BASE}/eval/heldout/${latest.job_id}` : undefined} />
           <ConfigRow label="Workspace API" value={`${API_BASE}/workspace/context?format=json`} />
+        </ConfigRows>
+      </ConfigSection>
+
+      <ConfigSection title={`Skill evals (${skillRuns.length})`}>
+        <ConfigRows>
+          <ConfigRow label="Running" value={skillRuns.filter((run) => run.status === 'queued' || run.status === 'running').length} />
+          <ConfigRow label="Latest skill" value={skillRuns[0]?.skill_name} />
+          <ConfigRow label="Latest verdict" value={skillRuns[0]?.kpis?.verdict || skillRuns[0]?.status} />
+          <ConfigRow label="Latest uplift" value={skillRuns[0]?.kpis ? `${Math.round(skillRuns[0].kpis.success_uplift * 100)}%` : undefined} />
         </ConfigRows>
       </ConfigSection>
     </NodeConfigModal>

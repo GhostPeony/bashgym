@@ -28,6 +28,9 @@ const TerminalGrid = isElectron
 const AgentChat = isElectron
   ? lazy(() => import('../agent/AgentChat').then(m => ({ default: m.AgentChat })))
   : null
+const AgentStreamOverlay = isElectron
+  ? lazy(() => import('../sessions/AgentStreamOverlay').then(m => ({ default: m.AgentStreamOverlay })))
+  : null
 const OrchestratorDashboard = isElectron
   ? lazy(() => import('../orchestrator/OrchestratorDashboard').then(m => ({ default: m.OrchestratorDashboard })))
   : null
@@ -254,6 +257,12 @@ export function MainLayout() {
 
       {/* Unified Agent Activity Feed */}
       <ActivityFeed />
+
+      {AgentStreamOverlay && showWorkspace ? (
+        <Suspense fallback={null}>
+          <AgentStreamOverlay />
+        </Suspense>
+      ) : null}
 
       {/* Agent Chat Panel — Electron only (spawns Claude CLI subprocesses) */}
       {AgentChat && (

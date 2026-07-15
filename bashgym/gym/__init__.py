@@ -52,6 +52,15 @@ from bashgym.gym.environment import (
     Observation,
 )
 from bashgym.gym.environment_recipe_search_space import EnvironmentRecipeSearchSpace
+from bashgym.gym.policy_optimization import (
+    ClippedPolicyObjective,
+    GDPOAdvantageResult,
+    RewardShapingResult,
+    clipped_policy_objective,
+    dapo_overlong_reward,
+    gdpo_advantages,
+    global_normalized_microbatch_sum,
+)
 from bashgym.gym.router import ModelConfig, ModelRouter, ModelType, RouterConfig, RoutingStrategy
 from bashgym.gym.rwml import (
     RWMLConfig,
@@ -147,6 +156,14 @@ __all__ = [
     "BatchGymEnv",
     "DataRecipeSearchSpace",
     "EnvironmentRecipeSearchSpace",
+    # Provider-neutral policy optimization
+    "ClippedPolicyObjective",
+    "GDPOAdvantageResult",
+    "RewardShapingResult",
+    "clipped_policy_objective",
+    "dapo_overlong_reward",
+    "gdpo_advantages",
+    "global_normalized_microbatch_sum",
     # Router
     "ModelRouter",
     "RouterConfig",

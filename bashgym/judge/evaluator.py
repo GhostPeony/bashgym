@@ -668,15 +668,16 @@ Output JSON: {{"score": <1-5>, "reasoning": "<explanation>"}}
 
 async def main():
     """Example usage of the NeMo Evaluator."""
+    model_path = os.environ.get("BASHGYM_EXAMPLE_EVAL_MODEL", "").strip()
+    if not model_path:
+        raise RuntimeError("Set BASHGYM_EXAMPLE_EVAL_MODEL to an explicit model")
     config = EvaluatorConfig(benchmarks=["humaneval", "mbpp"], max_samples=10)
 
     evaluator = EvaluatorClient(config)
 
     try:
         # Evaluate a model
-        results = await evaluator.evaluate_model(
-            model_path="Qwen/Qwen2.5-Coder-1.5B-Instruct", benchmarks=["humaneval"]
-        )
+        results = await evaluator.evaluate_model(model_path=model_path, benchmarks=["humaneval"])
 
         for result in results:
             print(f"Benchmark: {result.benchmark}")

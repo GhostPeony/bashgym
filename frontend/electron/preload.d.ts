@@ -1,3 +1,5 @@
+import type { CampaignBody, CampaignMethod, CampaignQuery, CampaignResponse } from './campaignBridge';
+export type CampaignRoute = '/api/campaign-auth/capabilities' | '/api/campaigns' | '/api/campaigns/from-template' | `/api/campaigns/${string}` | `/api/campaigns/${string}/events` | `/api/campaigns/${string}/artifacts` | `/api/campaigns/${string}/attempts` | `/api/campaigns/${string}/comparisons` | `/api/campaigns/${string}/attempts/${string}/metrics` | `/api/campaigns/${string}/start` | `/api/campaigns/${string}/pause` | `/api/campaigns/${string}/resume` | `/api/campaigns/${string}/cancel`;
 export interface TerminalAPI {
     create: (id: string, cwd?: string) => Promise<{
         success: boolean;
@@ -119,6 +121,19 @@ export interface CredentialsAPI {
         error?: string;
     }>;
 }
+export interface AgentBridgeAPI {
+    prepareLaunch: (request: {
+        kind: 'claude' | 'codex';
+        workspaceId: string;
+        terminalId: string;
+        panelId?: string;
+        apiBase?: string;
+    }) => Promise<{
+        success: boolean;
+        command?: string;
+        error?: string;
+    }>;
+}
 export interface BashGymAPI {
     terminal: TerminalAPI;
     theme: ThemeAPI;
@@ -129,6 +144,8 @@ export interface BashGymAPI {
     browser: BrowserAPI;
     clipboard: ClipboardAPI;
     credentials: CredentialsAPI;
+    agentBridge: AgentBridgeAPI;
+    campaignRequest: (method: CampaignMethod, route: CampaignRoute, body?: CampaignBody, query?: CampaignQuery) => Promise<CampaignResponse>;
 }
 declare global {
     interface Window {

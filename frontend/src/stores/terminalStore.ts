@@ -9,10 +9,11 @@ import {
   saveActivePanelFor,
   savePanelsFor,
   savePositionsFor,
+  terminalSessionFromPersistedPanel,
   toPersistedPanel
 } from './workspacePersistence'
 
-export type PanelType = 'terminal' | 'preview' | 'browser' | 'files' | 'context' | 'neon' | 'vercel' | 'activity' | 'training' | 'evals' | 'designer' | 'huggingface' | 'agent' | 'toolkit'
+export type PanelType = 'terminal' | 'preview' | 'browser' | 'files' | 'context' | 'neon' | 'vercel' | 'activity' | 'training' | 'campaign' | 'evals' | 'designer' | 'huggingface' | 'agent' | 'toolkit' | 'skilllab' | 'mcp' | 'knowledge'
 export type AttentionState = 'none' | 'waiting' | 'success' | 'error'
 export type ViewMode = 'grid' | 'single' | 'canvas'
 export type AgentStatus = 'running' | 'idle' | 'waiting_input' | 'tool_calling'
@@ -200,6 +201,11 @@ const saveCanvasPositions = (nodes: Map<string, CanvasNode>) =>
 const persistPanels = (panels: Panel[], sessions: Map<string, TerminalSession>) =>
   savePanelsFor(getActiveWorkspaceId(), panels, sessions)
 
+const samePersistedConfig = (
+  current: Record<string, unknown> | undefined,
+  next: Record<string, unknown>
+): boolean => current === next || JSON.stringify(current || {}) === JSON.stringify(next)
+
 const loadViewMode = (): ViewMode => {
   try {
     const stored = localStorage.getItem(VIEW_MODE_KEY)
@@ -378,17 +384,10 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         // Dead PTYs keep their panel: TerminalPane respawns a fresh shell in
         // the stub's cwd (layout restore after full app quit)
         const info = live.get(stub.terminalId)
-        sessions.set(stub.terminalId, {
-          id: stub.terminalId,
+        sessions.set(stub.terminalId, terminalSessionFromPersistedPanel(stub, {
           title: meta.get(stub.terminalId)?.title || stub.title,
-          cwd: info?.cwd ?? stub.cwd ?? '~',
-          isActive: false,
-          attention: 'none',
-          showBanner: false,
-          status: 'idle',
-          agentKind: stub.agentKind,
-          lastActivity: Date.now()
-        })
+          cwd: info?.cwd ?? stub.cwd ?? '~'
+        }))
       }
     }
 
@@ -452,6 +451,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   },
 
   updateSession: (id: string, updates: Partial<TerminalSession>) => {
+    let shouldPersist = false
     set((state) => {
       const newSessions = new Map(state.sessions)
       const session = newSessions.get(id)
@@ -472,10 +472,12 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
       // Increment version for any significant change to force canvas re-renders
       if (statusChanged || toolChanged || outputChanged || attentionChanged || taskSummaryChanged || agentKindChanged || pausedChanged || cwdChanged || errorChanged) {
+        shouldPersist = true
         return { sessions: newSessions, sessionsVersion: state.sessionsVersion + 1 }
       }
       return { sessions: newSessions }
     })
+    if (shouldPersist) persistPanels(get().panels, get().sessions)
   },
 
   addPanel: (panel: Omit<Panel, 'id'>) => {
@@ -697,11 +699,17 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   },
 
   updatePanelConfig: (panelId: string, adapterConfig: Record<string, unknown>) => {
-    set((state) => ({
-      panels: state.panels.map(p =>
-        p.id === panelId ? { ...p, adapterConfig } : p
-      )
-    }))
-    persistPanels(get().panels, get().sessions)
+    let changed = false
+    set((state) => {
+      const panel = state.panels.find((candidate) => candidate.id === panelId)
+      if (!panel || samePersistedConfig(panel.adapterConfig, adapterConfig)) return state
+      changed = true
+      return {
+        panels: state.panels.map((candidate) =>
+          candidate.id === panelId ? { ...candidate, adapterConfig } : candidate
+        )
+      }
+    })
+    if (changed) persistPanels(get().panels, get().sessions)
   }
 }))

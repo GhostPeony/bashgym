@@ -1,5 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Node, NodeProps } from '@xyflow/react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import {
   AlertCircle,
   Brain,
@@ -14,6 +16,7 @@ import {
   Send,
   Settings2,
   ShieldCheck,
+  Square,
   Wrench,
   Zap
 } from 'lucide-react'
@@ -23,14 +26,25 @@ import {
   agentEndpointApi,
   deviceApi,
   hermesSetupApi,
+  workspaceApi,
   type AgentEndpointDiscovery,
   type AgentEndpointProfile,
   type HermesSetupStatus,
   type HermesTunnelStatus,
   type SSHCandidate
 } from '../../../services/api'
-import { useTerminalStore, useTrainingStore } from '../../../stores'
+import { useTerminalStore, useWorkspaceStore } from '../../../stores'
+import {
+  registerHermesPromptSender,
+  useAgentStreamStore
+} from '../../../stores/agentStreamStore'
+import { GhostPeonyIcon } from '../../common/GhostPeonyIcon'
 import { Modal } from '../../common/Modal'
+import { createAgentChatSurfaceActions } from './agentChatLifecycle'
+import {
+  composeAgentWorkspaceContext,
+  hermesWorkspaceSessionKey,
+} from './agentWorkspaceContext'
 import { DataNodeShell } from './DataNodeShell'
 import { hueFor } from './dataPanels'
 import { NodeConfigModal } from './NodeConfigModal'
@@ -51,6 +65,191 @@ interface FormState {
 interface ChatLine {
   role: 'user' | 'assistant'
   content: string
+}
+
+interface AgentStreamPayload {
+  message: string
+  context?: string
+  conversation?: string
+  session_key?: string | null
+  workspace_id?: string
+  origin?: {
+    panel_id?: string
+    terminal_id?: string
+    agent?: string
+  }
+  history?: ChatLine[]
+}
+
+interface AgentStreamCallbacks {
+  onDelta: (delta: string) => void
+  onActivity: (label: string) => void
+}
+
+function createAgentSseParser(
+  onEvent: (event: string, payload: Record<string, unknown>) => void
+) {
+  let buffer = ''
+
+  const parseFrame = (frame: string) => {
+    let eventName = 'message'
+    const dataLines: string[] = []
+    for (const line of frame.split(/\r?\n/)) {
+      if (line.startsWith(':')) continue
+      if (line.startsWith('event:')) eventName = line.slice(6).trim() || 'message'
+      if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart())
+    }
+    if (dataLines.length === 0) return
+    try {
+      const payload = JSON.parse(dataLines.join('\n'))
+      if (payload && typeof payload === 'object') {
+        onEvent(eventName, payload as Record<string, unknown>)
+      }
+    } catch {
+      // A malformed upstream frame should not discard later valid stream events.
+    }
+  }
+
+  const drain = (flush = false) => {
+    while (true) {
+      const boundary = /\r?\n\r?\n/.exec(buffer)
+      if (!boundary || boundary.index === undefined) break
+      parseFrame(buffer.slice(0, boundary.index))
+      buffer = buffer.slice(boundary.index + boundary[0].length)
+    }
+    if (flush && buffer.trim()) {
+      parseFrame(buffer)
+      buffer = ''
+    }
+  }
+
+  return {
+    push(chunk: string) {
+      buffer += chunk
+      drain()
+    },
+    finish() {
+      drain(true)
+    }
+  }
+}
+
+async function streamAgentChat(
+  endpointId: string,
+  payload: AgentStreamPayload,
+  signal: AbortSignal,
+  callbacks: AgentStreamCallbacks
+): Promise<void> {
+  const url = `${API_BASE}/agent/endpoints/${encodeURIComponent(endpointId)}/chat/stream`
+  let streamError: string | null = null
+  let streamDone = false
+  const parser = createAgentSseParser((event, data) => {
+    if (event === 'delta' && typeof data.delta === 'string') callbacks.onDelta(data.delta)
+    if (event === 'activity' && typeof data.label === 'string') callbacks.onActivity(data.label)
+    if (event === 'error') streamError = typeof data.error === 'string' ? data.error : 'Hermes stream failed'
+    if (event === 'done') streamDone = true
+  })
+  const options: RequestInit = {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  }
+
+  if (window.bashgym?.api?.stream) {
+    await new Promise<void>((resolve, reject) => {
+      let responseOk = true
+      let responseStatus = 200
+      let errorBody = ''
+      let settled = false
+      const settle = (error?: Error) => {
+        if (settled) return
+        settled = true
+        signal.removeEventListener('abort', handleAbort)
+        if (error) reject(error)
+        else resolve()
+      }
+      const unsubscribe = window.bashgym.api.stream(url, options, (event) => {
+        if (event.type === 'headers') {
+          responseOk = event.ok
+          responseStatus = event.status
+        } else if (event.type === 'chunk') {
+          if (responseOk) parser.push(event.data)
+          else errorBody += event.data
+          if (streamError) {
+            unsubscribe()
+            settle(new Error(streamError))
+          }
+        } else if (event.type === 'done') {
+          parser.finish()
+          if (!responseOk) {
+            let detail = errorBody || `HTTP ${responseStatus}`
+            try {
+              const parsed = JSON.parse(errorBody)
+              detail = parsed.detail || detail
+            } catch {
+              // Keep the response text when the backend did not return JSON.
+            }
+            settle(new Error(detail))
+          } else if (streamError) {
+            settle(new Error(streamError))
+          } else if (!streamDone) {
+            settle(new Error('Hermes stream ended before completion'))
+          } else {
+            settle()
+          }
+        } else if (event.type === 'aborted') {
+          settle(new DOMException('The request was stopped', 'AbortError'))
+        } else if (event.type === 'error') {
+          settle(new Error(event.error))
+        }
+      })
+      const handleAbort = () => {
+        unsubscribe()
+        settle(new DOMException('The request was stopped', 'AbortError'))
+      }
+      signal.addEventListener('abort', handleAbort, { once: true })
+      if (signal.aborted) handleAbort()
+    })
+    return
+  }
+
+  const response = await fetch(url, {
+    ...options,
+    signal,
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-API-Key': localStorage.getItem('bashgym_api_key') || '',
+      'X-Requested-With': 'XMLHttpRequest'
+    }
+  })
+  if (!response.ok) {
+    const body = await response.text()
+    let detail = body || `HTTP ${response.status}`
+    try {
+      const parsed = JSON.parse(body)
+      detail = parsed.detail || detail
+    } catch {
+      // Keep the response body when it is not JSON.
+    }
+    throw new Error(detail)
+  }
+  if (!response.body) throw new Error('Hermes stream returned no response body')
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    parser.push(decoder.decode(value, { stream: true }))
+    if (streamError) {
+      await reader.cancel()
+      throw new Error(streamError)
+    }
+  }
+  parser.push(decoder.decode())
+  parser.finish()
+  if (streamError) throw new Error(streamError)
+  if (!streamDone) throw new Error('Hermes stream ended before completion')
 }
 
 const DEFAULT_FORM: FormState = {
@@ -116,15 +315,13 @@ function parseModelOptions(value: string, currentModel: string): string[] {
   )
 }
 
-function buildAgentContext(
+function buildAgentEndpointDetails(
   data: DataNodeData,
   endpointId: string,
   form: FormState,
-  discovery: AgentEndpointDiscovery | null,
-  messages: ChatLine[]
+  discovery: AgentEndpointDiscovery | null
 ): string {
   const terminalState = useTerminalStore.getState()
-  const trainingState = useTrainingStore.getState()
   const panels = terminalState.panels
   const edges = terminalState.canvasEdges
   const currentPanel = panels.find((panel) => panel.id === data.panelId)
@@ -136,9 +333,8 @@ function buildAgentContext(
   }
 
   const linkedPanels = panels.filter((panel) => linkedIds.has(panel.id))
-  const run = trainingState.currentRun
   const lines: string[] = [
-    '## BashGym workspace handoff',
+    '## Hermes endpoint and linked canvas details',
     '',
     `Generated: ${new Date().toISOString()}`,
     `Agent endpoint: ${form.label} (${endpointId})`,
@@ -147,7 +343,7 @@ function buildAgentContext(
     `Memory session key set: ${form.sessionKey ? 'yes' : 'no'}`,
     `Panel: ${currentPanel?.title || data.title}`,
     '',
-    '### Canvas',
+    '### Linked canvas details',
     `- panels: ${panels.length}`,
     `- connected panels: ${linkedPanels.length || 0}`
   ]
@@ -173,37 +369,8 @@ function buildAgentContext(
     }
   }
 
-  if (run) {
-    const metrics = run.currentMetrics
-    lines.push(
-      '',
-      '### Current training run',
-      `- id: ${run.id}`,
-      `- status: ${run.status}`,
-      `- strategy: ${run.config.strategy}`,
-      `- base model: ${run.config.baseModel || '(unset)'}`,
-      `- dataset: ${run.config.datasetPath || '(unset)'}`,
-      `- started: ${new Date(run.startTime).toISOString()}`
-    )
-    if (metrics) {
-      lines.push(
-        `- step: ${metrics.step}/${metrics.totalSteps}`,
-        `- loss: ${metrics.loss}`,
-        `- learning rate: ${metrics.learningRate}`
-      )
-    }
-  } else {
-    lines.push('', '### Current training run', '- no active run in renderer state')
-  }
-
-  if (messages.length) {
-    lines.push('', '### Recent Hermes node chat')
-    for (const msg of messages.slice(-6)) {
-      lines.push(`- ${msg.role}: ${msg.content.slice(0, 500)}`)
-    }
-  }
-
   lines.push('', '### BashGym handles')
+  lines.push(`- workspace context: GET ${API_BASE}/workspace/context`)
   lines.push(`- agent endpoints: GET ${API_BASE}/agent/endpoints`)
   lines.push(`- training runs: GET ${API_BASE}/training/runs`)
   lines.push(`- heldout evals: GET ${API_BASE}/eval/heldout`)
@@ -216,6 +383,9 @@ export const AgentEndpointNode = memo(function AgentEndpointNode({
   data,
   selected
 }: NodeProps<AgentEndpointNodeType>) {
+  const workspaceId = useWorkspaceStore((state) => state.activeWorkspaceId)
+  const publishHermesStream = useAgentStreamStore((state) => state.publishHermesStream)
+  const removeHermesStream = useAgentStreamStore((state) => state.removeHermesStream)
   const [profiles, setProfiles] = useState<AgentEndpointProfile[]>([])
   const [selectedId, setSelectedId] = useState('hermes')
   const [form, setForm] = useState<FormState>(DEFAULT_FORM)
@@ -238,7 +408,13 @@ export const AgentEndpointNode = memo(function AgentEndpointNode({
   const [tunnelStatus, setTunnelStatus] = useState<HermesTunnelStatus | null>(null)
   const [tunnelBusy, setTunnelBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [streamActivity, setStreamActivity] = useState<string | null>(null)
   const mountedRef = useRef(true)
+  const promptRef = useRef<HTMLTextAreaElement>(null)
+  const transcriptEndRef = useRef<HTMLDivElement>(null)
+  const streamControllerRef = useRef<AbortController | null>(null)
+  const streamTokenRef = useRef(0)
+  const conversationRef = useRef(`bashgym-canvas-${data.panelId}`)
 
   const selectedProfile = useMemo(
     () => profiles.find((profile) => profile.id === selectedId) || null,
@@ -251,6 +427,10 @@ export const AgentEndpointNode = memo(function AgentEndpointNode({
     () => uniqueModels([form.model], form.modelOptions, models),
     [form.model, form.modelOptions, models]
   )
+  const modelSelectWidth = `${Math.min(
+    34,
+    Math.max(18, ...modelOptions.map((model) => model.length + 4))
+  )}ch`
   const sshCandidateOptions = useMemo(
     () => sshCandidates.map((candidate) => candidate.ssh_alias).filter(Boolean),
     [sshCandidates]
@@ -328,8 +508,20 @@ export const AgentEndpointNode = memo(function AgentEndpointNode({
     })()
     return () => {
       mountedRef.current = false
+      streamControllerRef.current?.abort()
     }
   }, [loadSetupStatus, loadTunnelStatus, probeEndpoint])
+
+  useEffect(() => {
+    if (!showChatModal) return
+    const focusTimer = window.setTimeout(() => promptRef.current?.focus(), 80)
+    return () => window.clearTimeout(focusTimer)
+  }, [showChatModal])
+
+  useEffect(() => {
+    if (!showChatModal) return
+    transcriptEndRef.current?.scrollIntoView({ behavior: sending ? 'auto' : 'smooth' })
+  }, [messages, sending, showChatModal])
 
   useEffect(() => {
     if (!showConfig) return
@@ -349,10 +541,15 @@ export const AgentEndpointNode = memo(function AgentEndpointNode({
     setForm((prev) => ({ ...prev, [key]: value }))
   }, [])
 
-  const buildContext = useCallback(
-    () => buildAgentContext(data, endpointId, form, discovery, messages),
-    [data, endpointId, form, discovery, messages]
-  )
+  const buildContext = useCallback(async () => {
+    const endpointDetails = buildAgentEndpointDetails(data, endpointId, form, discovery)
+    const response = await workspaceApi.getContext('markdown', workspaceId)
+    return composeAgentWorkspaceContext(
+      response.ok && typeof response.data === 'string' ? response.data : null,
+      endpointDetails,
+      response.error,
+    )
+  }, [data, discovery, endpointId, form, workspaceId])
 
   const persistProfile = useCallback(async (next: FormState) => {
     if (!endpointId) return
@@ -401,7 +598,7 @@ export const AgentEndpointNode = memo(function AgentEndpointNode({
         base_url: form.baseUrl || 'http://127.0.0.1:8642/v1',
         model: form.model || 'hermes-agent',
         model_options: form.modelOptions,
-        session_key: form.sessionKey || 'bashgym-canvas',
+        session_key: hermesWorkspaceSessionKey(form.sessionKey, workspaceId),
         api_key: form.apiKey || null,
         write_env: true,
         start_gateway: true
@@ -425,7 +622,7 @@ export const AgentEndpointNode = memo(function AgentEndpointNode({
     } finally {
       if (mountedRef.current) setSetupBusy(false)
     }
-  }, [endpointId, form, probeEndpoint])
+  }, [endpointId, form, probeEndpoint, workspaceId])
 
   const connectTunnel = useCallback(async () => {
     const target = sshTarget.trim()
@@ -445,7 +642,7 @@ export const AgentEndpointNode = memo(function AgentEndpointNode({
         remote_port: 8642,
         model: form.model || 'hermes-agent',
         model_options: form.modelOptions,
-        session_key: form.sessionKey || 'bashgym-canvas',
+        session_key: hermesWorkspaceSessionKey(form.sessionKey, workspaceId),
         api_key: form.apiKey || null,
         save_profile: true
       })
@@ -472,7 +669,7 @@ export const AgentEndpointNode = memo(function AgentEndpointNode({
     } finally {
       if (mountedRef.current) setTunnelBusy(false)
     }
-  }, [endpointId, form, loadSetupStatus, probeEndpoint, sshTarget])
+  }, [endpointId, form, loadSetupStatus, probeEndpoint, sshTarget, workspaceId])
 
   const disconnectTunnel = useCallback(async () => {
     setTunnelBusy(true)
@@ -497,32 +694,114 @@ export const AgentEndpointNode = memo(function AgentEndpointNode({
     if (selectedProfile) await persistProfile(next)
   }, [form, persistProfile, selectedProfile])
 
+  const { dismiss: closeChat, stop: stopStreaming } = useMemo(
+    () => createAgentChatSurfaceActions({
+      abort: () => streamControllerRef.current?.abort(),
+      hide: () => setShowChatModal(false),
+    }),
+    []
+  )
+
+  const clearChat = useCallback(() => {
+    streamTokenRef.current += 1
+    streamControllerRef.current?.abort()
+    streamControllerRef.current = null
+    conversationRef.current = `bashgym-canvas-${data.panelId}-${Date.now()}`
+    setMessages([])
+    setError(null)
+    setStreamActivity(null)
+    setSending(false)
+  }, [data.panelId])
+
   const sendPrompt = useCallback(async (text: string = prompt) => {
     const trimmed = text.trim()
     if (!trimmed || sending) return
+    const context = await buildContext()
+    const history = messages.map((message) => ({ ...message }))
+    const controller = new AbortController()
+    const streamToken = streamTokenRef.current + 1
+    streamTokenRef.current = streamToken
+    streamControllerRef.current = controller
     setPrompt('')
     setSending(true)
     setError(null)
-    setMessages((prev) => [...prev, { role: 'user', content: trimmed }])
+    setStreamActivity('Hermes is responding')
+    setMessages((prev) => [
+      ...prev,
+      { role: 'user', content: trimmed },
+      { role: 'assistant', content: '' }
+    ])
     try {
-      const res = await agentEndpointApi.chat(endpointId, {
+      await streamAgentChat(endpointId, {
         message: trimmed,
-        context: buildContext(),
-        conversation: `bashgym-canvas-${data.panelId}`
+        context,
+        conversation: conversationRef.current,
+        session_key: hermesWorkspaceSessionKey(form.sessionKey, workspaceId),
+        workspace_id: workspaceId,
+        origin: {
+          panel_id: data.panelId,
+          agent: endpointId,
+        },
+        history
+      }, controller.signal, {
+        onDelta: (delta) => {
+          if (streamTokenRef.current !== streamToken) return
+          setStreamActivity(null)
+          setMessages((prev) => {
+            const last = prev[prev.length - 1]
+            if (!last || last.role !== 'assistant') return prev
+            return [
+              ...prev.slice(0, -1),
+              { ...last, content: last.content + delta }
+            ]
+          })
+        },
+        onActivity: (label) => {
+          if (streamTokenRef.current === streamToken) {
+            setStreamActivity(`Using ${label}`)
+          }
+        }
       })
-      if (res.ok && res.data) {
-        setMessages((prev) => [...prev, { role: 'assistant', content: res.data!.response }])
+    } catch (streamError) {
+      if (streamTokenRef.current !== streamToken) return
+      if (streamError instanceof DOMException && streamError.name === 'AbortError') {
+        setMessages((prev) => {
+          const last = prev[prev.length - 1]
+          return last?.role === 'assistant' && !last.content ? prev.slice(0, -1) : prev
+        })
       } else {
-        const message = res.error || 'Hermes did not return a response'
-        setError(message)
-        setMessages((prev) => [...prev, { role: 'assistant', content: `Error: ${message}` }])
+        setError(streamError instanceof Error ? streamError.message : String(streamError))
       }
     } finally {
-      if (mountedRef.current) setSending(false)
+      if (mountedRef.current && streamTokenRef.current === streamToken) {
+        streamControllerRef.current = null
+        setStreamActivity(null)
+        setSending(false)
+        window.setTimeout(() => promptRef.current?.focus(), 0)
+      }
     }
-  }, [buildContext, data.panelId, endpointId, prompt, sending])
+  }, [buildContext, data.panelId, endpointId, form.sessionKey, messages, prompt, sending, workspaceId])
+
+  useEffect(() => registerHermesPromptSender(data.panelId, sendPrompt), [data.panelId, sendPrompt])
+
+  useEffect(() => {
+    publishHermesStream({
+      panelId: data.panelId,
+      label: form.label || 'Hermes',
+      endpointId,
+      messages,
+      sending,
+      activity: streamActivity,
+      error: shortError(error)
+    })
+  }, [data.panelId, endpointId, error, form.label, messages, publishHermesStream, sending, streamActivity])
+
+  useEffect(() => () => {
+    removeHermesStream(data.panelId)
+  }, [data.panelId, removeHermesStream])
 
   const quickPrompts = [
+    { label: 'Evaluate a skill', prompt: 'Help me evaluate or improve a loaded skill in Skill Lab.' },
     { label: 'Training next step', prompt: 'Review active training and suggest next eval.' },
     { label: 'Canvas context', prompt: 'Explain what context this canvas gives you.' },
     { label: 'Run handoff', prompt: 'Help prepare a BashGym run handoff.' }
@@ -547,7 +826,7 @@ export const AgentEndpointNode = memo(function AgentEndpointNode({
       flowerVariant="agent"
       selected={selected}
       hasConnections={data.hasConnections}
-      buildContext={buildContext}
+      buildContext={data.hasTerminalConnections ? buildContext : undefined}
       statusBarClass={statusBarClass}
       hue={hueFor('agent')}
       onFocus={data.onFocus}
@@ -958,11 +1237,13 @@ export const AgentEndpointNode = memo(function AgentEndpointNode({
               event.stopPropagation()
               setShowChatModal(true)
             }}
-            title="Open latest Hermes reply"
+            title={sending ? 'Hermes is responding — open chat to view progress' : 'Open latest Hermes reply'}
           >
-            <span className="text-accent">Latest:</span>{' '}
+            <span className="text-accent">{sending ? 'Responding:' : 'Latest:'}</span>{' '}
             <span className="break-words">
-              {messages[messages.length - 1]?.content.slice(0, 120)}
+              {sending
+                ? 'Hermes is continuing in the background…'
+                : messages[messages.length - 1]?.content.slice(0, 120)}
             </span>
           </button>
         ) : null}
@@ -970,111 +1251,182 @@ export const AgentEndpointNode = memo(function AgentEndpointNode({
     </DataNodeShell>
     <Modal
       isOpen={showChatModal}
-      onClose={() => setShowChatModal(false)}
+      onClose={closeChat}
       title={`${form.label || 'Hermes'} Chat`}
-      description={`Model: ${form.model}`}
-      size="xl"
+      size="lg"
       variant="canvas"
-      footer={
-        <div className="node-config-action-row">
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() => {
-              setMessages([])
-              setError(null)
-            }}
-          >
-            Clear
-          </button>
-          <span className="node-config-action-spacer" />
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={() => void sendPrompt()}
-            disabled={sending || !prompt.trim()}
-          >
-            {sending ? 'Sending...' : 'Send'}
-          </button>
-        </div>
-      }
     >
-      <div className="grid gap-3">
-        <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_190px] gap-3">
-          <label className="node-field">
-            <span className="node-field-label">Message</span>
-            <textarea
-              className="input-brutal nowheel text-sm font-mono min-h-[112px]"
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-                  event.preventDefault()
-                  void sendPrompt()
-                }
-              }}
-              placeholder="Ask Hermes..."
-              title="Ctrl+Enter to send"
-            />
+      <div className="flex h-[62vh] min-h-[420px] max-h-[620px] flex-col">
+        <div className="flex flex-wrap items-center gap-2 border-b border-border-subtle px-1 pb-2">
+          <label className="flex min-w-0 items-center gap-2">
+            <span className="node-field-label flex-shrink-0">Model</span>
+            <select
+              className="input-brutal min-h-8 max-w-full py-1.5 text-[10px] font-mono"
+              style={{ width: modelSelectWidth }}
+              value={form.model}
+              onChange={(event) => void selectModel(event.target.value)}
+              disabled={sending}
+            >
+              {modelOptions.map((model) => (
+                <option key={model} value={model}>{model}</option>
+              ))}
+            </select>
           </label>
-          <div className="space-y-2">
-            <label className="node-field">
-              <span className="node-field-label">Model</span>
-              <select
-                className="input-brutal text-[11px] font-mono min-h-9"
-                value={form.model}
-                onChange={(event) => void selectModel(event.target.value)}
-              >
-                {modelOptions.map((model) => (
-                  <option key={model} value={model}>{model}</option>
-                ))}
-              </select>
-            </label>
-            {quickPrompts.map((quick) => (
-              <button
-                key={quick.label}
-                type="button"
-                className="node-btn node-btn-wide justify-start"
-                onClick={() => void sendPrompt(quick.prompt)}
-                disabled={sending}
-                title={quick.prompt}
-              >
-                <Send className="w-3 h-3" />
-                <span>{quick.label}</span>
-              </button>
-            ))}
-          </div>
+          <button
+            type="button"
+            className="node-btn node-btn-wide ml-auto"
+            onClick={clearChat}
+            disabled={messages.length === 0 && !error}
+            title="Start a new conversation"
+          >
+            New chat
+          </button>
         </div>
 
-        {shortError(error) ? (
-          <div className="border-brutal border-status-error/50 bg-status-error/10 rounded-brutal px-3 py-2 text-xs font-mono text-status-error">
-            {shortError(error)}
-          </div>
-        ) : null}
-
-        <div className="border-brutal border-border-subtle rounded-brutal bg-background-secondary min-h-[220px] max-h-[38vh] overflow-y-auto p-3 space-y-3">
+        <div
+          className="min-h-0 flex-1 space-y-4 overflow-y-auto px-1 py-3"
+          aria-live="polite"
+        >
           {messages.length === 0 ? (
-            <div className="text-sm font-mono text-text-muted">
-              No messages yet.
+            <div className="flex min-h-full flex-col items-center justify-center gap-3 py-6 text-center">
+              <div className="flex items-center gap-2 text-text-primary">
+                <GhostPeonyIcon name="app" tone="color" size="sm" />
+                <span className="font-mono text-xs font-bold uppercase tracking-wider">Ask Hermes</span>
+              </div>
+              <p className="max-w-md text-sm text-text-muted">
+                Chat with the canvas context already attached.
+              </p>
+              <div className="flex max-w-2xl flex-wrap justify-center gap-2">
+                {quickPrompts.map((quick) => (
+                  <button
+                    key={quick.label}
+                    type="button"
+                    className="node-btn node-btn-wide"
+                    onClick={() => void sendPrompt(quick.prompt)}
+                    disabled={sending}
+                    title={quick.prompt}
+                  >
+                    {quick.label}
+                  </button>
+                ))}
+              </div>
             </div>
           ) : (
             messages.map((message, index) => (
               <div
                 key={`${message.role}-${index}`}
                 className={clsx(
-                  'border-brutal rounded-brutal px-3 py-2 font-mono text-sm',
-                  message.role === 'assistant'
-                    ? 'border-accent/50 bg-accent/10 text-text-primary'
-                    : 'border-border-subtle bg-background-card text-text-secondary'
+                  'flex items-start gap-2.5',
+                  message.role === 'user' ? 'flex-row-reverse justify-start' : 'justify-start'
                 )}
               >
-                <div className="text-[10px] uppercase text-text-muted mb-1">
-                  {message.role === 'assistant' ? 'Hermes' : 'You'}
+                <GhostPeonyIcon
+                  name="app"
+                  tone="color"
+                  size="lg"
+                  className="mt-3 flex-shrink-0"
+                  title={message.role === 'user' ? 'You' : 'Hermes'}
+                />
+                <div
+                  className={clsx(
+                    'text-sm leading-relaxed',
+                    message.role === 'user'
+                      ? 'max-w-[76%]'
+                      : 'max-w-[92%]'
+                  )}
+                >
+                  <div
+                    className={clsx(
+                      'mb-1 font-mono text-[9px] font-bold uppercase tracking-wider',
+                      message.role === 'user' ? 'text-right text-text-muted' : 'text-accent-dark'
+                    )}
+                  >
+                    {message.role === 'user' ? 'You' : 'Hermes'}
+                  </div>
+                  <div
+                    className={clsx(
+                      'px-3 py-2',
+                      message.role === 'user'
+                        ? 'bg-background-secondary text-text-primary'
+                        : 'text-text-primary'
+                    )}
+                  >
+                    <div className="prose-brutal">
+                    {message.content ? (
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+                    ) : (
+                      <div className="flex items-center gap-2 font-mono text-xs text-text-muted">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin text-accent" />
+                        <span>{streamActivity || 'Hermes is responding'}</span>
+                      </div>
+                    )}
+                    </div>
+                  </div>
                 </div>
-                <div className="whitespace-pre-wrap break-words">{message.content}</div>
               </div>
             ))
           )}
+          {sending && messages[messages.length - 1]?.content && streamActivity ? (
+            <div className="flex items-center gap-2 pl-1 font-mono text-[10px] uppercase tracking-wider text-text-muted">
+              <Loader2 className="h-3 w-3 animate-spin text-accent" />
+              {streamActivity}
+            </div>
+          ) : null}
+          <div ref={transcriptEndRef} />
+        </div>
+
+        {shortError(error) ? (
+          <div className="mb-2 flex items-start gap-2 border-l-[3px] border-status-error bg-status-error/10 px-3 py-2 text-xs font-mono text-status-error">
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+            <span>{shortError(error)}</span>
+          </div>
+        ) : null}
+
+        <div className="border-t border-border-subtle pt-2">
+          <div className="rounded-brutal border-brutal border-border bg-background-card px-2 py-1.5 shadow-brutal-sm transition-colors focus-within:border-text-primary">
+          <textarea
+            ref={promptRef}
+            className="nowheel w-full resize-none bg-transparent px-1 py-1 text-sm leading-relaxed text-text-primary outline-none placeholder:text-text-muted"
+            rows={2}
+            value={prompt}
+            onChange={(event) => setPrompt(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                event.preventDefault()
+                if (!sending) void sendPrompt()
+              }
+            }}
+            placeholder="Message Hermes…"
+            title="Enter to send · Shift+Enter for a new line"
+          />
+          <div className="flex items-center gap-3 px-1 pt-1">
+            <span className="min-w-0 flex-1 truncate font-mono text-[9px] uppercase tracking-wider text-text-muted">
+              {sending ? streamActivity || 'Streaming response' : 'Enter to send · Shift+Enter for new line'}
+            </span>
+            {sending ? (
+              <button
+                type="button"
+                className="node-btn node-btn-wide node-btn-danger"
+                onClick={stopStreaming}
+                title="Stop the current response"
+              >
+                <Square className="h-3 w-3 fill-current" />
+                Stop
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="node-btn node-btn-wide node-btn-accent"
+                onClick={() => void sendPrompt()}
+                disabled={!prompt.trim()}
+                title="Send message"
+              >
+                <Send className="h-3 w-3" />
+                Send
+              </button>
+            )}
+          </div>
+          </div>
         </div>
       </div>
     </Modal>

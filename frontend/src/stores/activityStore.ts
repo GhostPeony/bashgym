@@ -11,6 +11,8 @@ export type ActivitySeverity = 'info' | 'success' | 'warning' | 'error'
 
 export interface ActivityEvent {
   id: number
+  /** Stable identity for mutation acknowledgements that may also arrive by WebSocket. */
+  key?: string
   /** Raw WS message type, e.g. "orchestration:task:started" */
   type: string
   /** Top-level category derived from the type prefix, e.g. "orchestration" */
@@ -23,6 +25,17 @@ export interface ActivityEvent {
 
 const MAX_EVENTS = 500
 
+const COMPACTED_EVENT_TYPES = new Set([
+  'training:progress',
+  'training:log',
+  'hf:job:log',
+  'hf:job:metrics',
+  'router:stats',
+  'orchestration:budget:update',
+  'cascade:progress',
+  'campaign:training-metrics-appended',
+])
+
 let nextId = 1
 
 const SEVERITY_RULES: Array<[RegExp, ActivitySeverity]> = [
@@ -32,6 +45,9 @@ const SEVERITY_RULES: Array<[RegExp, ActivitySeverity]> = [
 ]
 
 export function severityFor(type: string): ActivitySeverity {
+  if (type === 'hf-context:stale') return 'warning'
+  if (type === 'hf-context:discovery-cancelled') return 'warning'
+  if (['hf-context:discovery-completed', 'hf-context:pinned', 'hf-context:activated', 'hf-context:sent', 'hf-context:eval-prepared'].includes(type)) return 'success'
   for (const [re, sev] of SEVERITY_RULES) {
     if (re.test(type)) return sev
   }
@@ -42,12 +58,32 @@ export function severityFor(type: string): ActivitySeverity {
 export function titleFor(type: string, payload: Record<string, unknown>): string {
   const p = payload as Record<string, any>
   switch (true) {
+    case type === 'training:queued':
+      return `${String(p.strategy || 'training').toUpperCase()} run queued`
     case type === 'training:progress':
       return `Training step ${p.step ?? '?'} — loss ${typeof p.loss === 'number' ? p.loss.toFixed(4) : '?'}`
     case type === 'training:complete':
       return 'Training run complete'
     case type === 'training:failed':
       return `Training failed${p.error ? `: ${p.error}` : ''}`
+    case type === 'campaign:created':
+      return `Campaign created${p.campaign_id ? ` — ${p.campaign_id}` : ''}`
+    case type === 'campaign:started':
+      return 'Campaign started'
+    case type === 'campaign:paused':
+      return 'Campaign paused'
+    case type === 'campaign:resumed':
+      return 'Campaign resumed'
+    case type === 'campaign:cancelled':
+      return 'Campaign cancelled'
+    case type === 'campaign:action-completed':
+      return `Campaign action complete${p.action_id ? ` — ${p.action_id}` : ''}`
+    case type === 'campaign:action-failed':
+      return `Campaign action failed${p.action_id ? ` — ${p.action_id}` : ''}`
+    case type === 'campaign:gate-decided':
+      return `Campaign gate ${p.verdict || 'decided'}`
+    case type === 'campaign:training-metrics-appended':
+      return 'Campaign training metrics updated'
     case type.startsWith('orchestration:task'):
       return `${p.task_title ?? p.task_id ?? 'task'} — ${type.split(':').pop()}`
     case type === 'trace:added':
@@ -62,9 +98,68 @@ export function titleFor(type: string, payload: Record<string, unknown>): string
       return `Guardrail ${type.split(':')[1]}${p.rule ? ` — ${p.rule}` : ''}`
     case type === 'verification:result':
       return `Verification ${(p.passed ?? p.success) ? 'passed' : 'failed'}${p.task_id ? ` — ${p.task_id}` : ''}`
+    case type === 'designer:queued':
+      return `Data Designer job queued${p.pipeline ? ` — ${p.pipeline}` : ''}`
+    case type === 'designer:completed':
+      return `Data Designer job complete${p.pipeline ? ` — ${p.pipeline}` : ''}`
+    case type === 'designer:failed':
+      return `Data Designer job failed${p.error ? `: ${p.error}` : ''}`
+    case type === 'hf:dataset:completed':
+      return `Dataset published${p.repo_id ? ` — ${p.repo_id}` : ''}`
+    case type === 'hf-context:discovery-completed':
+      return `Hugging Face evidence ready${p.evidence_count != null ? ` — ${p.evidence_count} items` : ''}`
+    case type === 'hf-context:discovery-started':
+      return 'Hugging Face evidence discovery started'
+    case type === 'hf-context:discovery-cancelled':
+      return `Hugging Face evidence discovery cancelled${p.evidence_count != null ? ` — kept ${p.evidence_count} items` : ''}`
+    case type === 'hf-context:pinned':
+      return `Hugging Face context pinned${p.version ? ` — v${p.version}` : ''}`
+    case type === 'hf-context:activated':
+      return `Hugging Face context activated${p.version ? ` — v${p.version}` : ''}`
+    case type === 'hf-context:deactivated':
+      return 'Hugging Face context deactivated'
+    case type === 'hf-context:sent':
+      return 'Hugging Face context sent to terminal'
+    case type === 'hf-context:eval-prepared':
+      return 'Hugging Face Eval preview prepared'
+    case type === 'hf-context:stale':
+      return 'Hugging Face context is stale'
+    case type === 'skill-eval:started':
+      return `Skill eval started${p.skill_name ? ` — ${p.skill_name}` : ''}`
+    case type === 'skill-eval:prepared':
+      return `Skill Lab prepared${p.skill_name ? ` — ${p.skill_name}` : ''}`
+    case type === 'skill-eval:skill-saved':
+      return `Skill saved${p.skill_name ? ` — ${p.skill_name}` : ''}`
+    case type === 'skill-eval:completed':
+      return `Skill eval ${p.verdict || 'completed'}${p.skill_name ? ` — ${p.skill_name}` : ''}`
+    case type === 'skill-eval:failed':
+      return `Skill eval failed${p.skill_name ? ` — ${p.skill_name}` : ''}`
     default:
       return type
   }
+}
+
+export function eventKeyFor(type: string, payload: Record<string, unknown>): string | undefined {
+  const entityId = payload.run_id ?? payload.job_id ?? payload.task_id ?? payload.stage_id
+    ?? payload.attempt_id ?? payload.action_id ?? payload.campaign_id
+  if (COMPACTED_EVENT_TYPES.has(type)) {
+    return `${type}:${typeof entityId === 'string' && entityId ? entityId : 'active'}`
+  }
+  if (typeof payload.idempotency_key === 'string' && payload.idempotency_key) {
+    return payload.idempotency_key
+  }
+  if (typeof entityId !== 'string' || !entityId) return undefined
+  if (
+    type === 'training:queued'
+    || type === 'training:complete'
+    || type === 'training:failed'
+    || type.startsWith('designer:')
+    || type.startsWith('skill-eval:')
+    || type.startsWith('campaign:')
+  ) {
+    return `${type}:${entityId}`
+  }
+  return undefined
 }
 
 interface ActivityState {
@@ -74,6 +169,8 @@ interface ActivityState {
   /** Category filters; empty set = show all */
   enabledCategories: Set<string>
   addEvent: (type: string, payload: Record<string, unknown>) => void
+  removeEvent: (key: string) => void
+  dismissEvent: (id: number) => void
   setOpen: (open: boolean) => void
   toggleCategory: (category: string) => void
   clear: () => void
@@ -81,8 +178,8 @@ interface ActivityState {
 
 const TRACKED_PREFIXES = [
   'training', 'trace', 'orchestration', 'pipeline', 'guardrail',
-  'cascade', 'hf', 'autoresearch', 'integration', 'schema-research',
-  'verification'
+  'cascade', 'hf', 'hf-context', 'autoresearch', 'integration', 'schema-research',
+  'verification', 'designer', 'skill-eval', 'router', 'campaign'
 ]
 
 export function isTrackedType(type: string): boolean {
@@ -99,27 +196,50 @@ export const useActivityStore = create<ActivityState>((set) => ({
     if (!isTrackedType(type)) return
     // training:progress fires every step — keep only the latest one in the feed
     set((state) => {
-      const category = type.split(':')[0]
+      const category = type.startsWith('hf-context:') ? 'hf' : type.split(':')[0]
+      const key = eventKeyFor(type, payload)
+      const existingIndex = key ? state.events.findIndex((event) => event.key === key) : -1
+      const compacted = COMPACTED_EVENT_TYPES.has(type)
+      if (existingIndex >= 0 && !compacted) return state
+      const now = Date.now()
+      const existing = existingIndex >= 0 ? state.events[existingIndex] : undefined
+      // Progress can arrive many times per second. Four feed refreshes per second
+      // is enough for legibility while keeping the canvas main thread available.
+      if (existing && compacted && now - existing.timestamp < 250) return state
       const event: ActivityEvent = {
-        id: nextId++,
+        id: existing?.id ?? nextId++,
+        key,
         type,
         category,
         severity: severityFor(type),
         title: titleFor(type, payload),
         detail: typeof payload === 'object' ? JSON.stringify(payload).slice(0, 500) : undefined,
-        timestamp: Date.now()
+        timestamp: now
       }
       let events = state.events
-      if (type === 'training:progress' && events[0]?.type === 'training:progress') {
-        events = events.slice(1)
-      }
+      if (existingIndex >= 0) events = events.filter((_, index) => index !== existingIndex)
       events = [event, ...events].slice(0, MAX_EVENTS)
       return {
         events,
-        unread: state.isOpen ? 0 : state.unread + (type === 'training:progress' ? 0 : 1)
+        unread: state.isOpen ? 0 : state.unread + (compacted ? 0 : 1)
       }
     })
   },
+
+  removeEvent: (key) => set((state) => {
+    const events = state.events.filter((event) => event.key !== key)
+    const removed = state.events.length - events.length
+    if (removed === 0) return state
+    return {
+      events,
+      unread: state.isOpen ? 0 : Math.max(0, state.unread - removed),
+    }
+  }),
+
+  dismissEvent: (id) => set((state) => {
+    const events = state.events.filter((event) => event.id !== id)
+    return events.length === state.events.length ? state : { events }
+  }),
 
   setOpen: (open) => set((state) => ({ isOpen: open, unread: open ? 0 : state.unread })),
 

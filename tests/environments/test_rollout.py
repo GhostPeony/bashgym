@@ -7,7 +7,11 @@ import sys
 
 import pytest
 
-from bashgym.environments.contracts import EnvironmentSpec, VerifierSpec
+from bashgym.environments.contracts import (
+    EnvironmentSpec,
+    RewardComponentSpec,
+    VerifierSpec,
+)
 from bashgym.environments.rollout import (
     CommandObservation,
     ModelRolloutPlan,
@@ -50,6 +54,61 @@ def test_run_local_environment_attempt_passes_verifier(tmp_path):
     assert result.attempt.action_tokens is not None
     assert result.verifier_observation is not None
     assert result.verifier_observation.exit_code == 0
+
+
+def test_run_local_environment_attempt_preserves_named_reward_components(tmp_path):
+    spec = EnvironmentSpec(
+        id="env_multi_reward",
+        instruction="Produce a correct, well-formatted answer.",
+        verifier=VerifierSpec(
+            command=_py(
+                "import json; print(json.dumps({'reward_components': "
+                "{'correctness': 1.0, 'format': 0.5}, 'total_reward': 1.1}))"
+            ),
+            reward_type="components",
+            success_threshold=1.0,
+            reward_components=[
+                RewardComponentSpec(name="correctness"),
+                RewardComponentSpec(name="format", weight=0.2),
+            ],
+        ),
+    )
+
+    result = run_local_environment_attempt(
+        RolloutCommandPlan(environment=spec, commands=[]),
+        tmp_path,
+    )
+
+    assert result.attempt.passed is True
+    assert result.attempt.reward == pytest.approx(1.1)
+    assert result.attempt.reward_components == {"correctness": 1.0, "format": 0.5}
+    assert result.attempt.to_dict()["reward_components"] == result.attempt.reward_components
+
+
+def test_run_local_environment_attempt_fails_closed_on_missing_component_rewards(tmp_path):
+    spec = EnvironmentSpec(
+        id="env_missing_rewards",
+        instruction="Emit named rewards.",
+        verifier=VerifierSpec(
+            command=_py("print('verifier complete')"),
+            reward_type="components",
+            reward_components=[
+                RewardComponentSpec(name="correctness"),
+                RewardComponentSpec(name="format"),
+            ],
+        ),
+    )
+
+    result = run_local_environment_attempt(
+        RolloutCommandPlan(environment=spec, commands=[]),
+        tmp_path,
+    )
+
+    assert result.attempt.passed is False
+    assert result.attempt.reward is None
+    assert result.attempt.reward_components == {}
+    assert result.attempt.verifier_status == "reward_error"
+    assert "JSON reward object" in result.attempt.metadata["reward_error"]
 
 
 def test_run_local_environment_attempt_fails_verifier(tmp_path):

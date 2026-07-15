@@ -1,0 +1,31 @@
+{
+  "id": "princeton-nlp/SWE-bench_Lite",
+  "sha": "6ec7bb89b9342f664a54a6e0a6ea6501d3437cc2",
+  "private": false,
+  "gated": false,
+  "downloads": 158842,
+  "likes": 64,
+  "tags": ["license:mit", "format:parquet", "modality:text"],
+  "card_data": {
+    "dataset_info": [
+      {
+        "config_name": "default",
+        "features": [
+          {"name": "instance_id", "dtype": "string"},
+          {"name": "problem_statement", "dtype": "string"}
+        ],
+        "splits": [
+          {"name": "dev", "num_examples": 23},
+          {"name": "test", "num_examples": 300}
+        ],
+        "download_size": 1250000,
+        "dataset_size": 6200000
+      },
+      {
+        "config_name": "verified",
+        "features": [{"name": "instance_id", "dtype": "string"}],
+        "splits": [{"name": "test", "num_examples": 50}]
+      }
+    ]
+  }
+}

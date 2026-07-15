@@ -2,6 +2,14 @@
   "schema_version": "ghost-peony.icon-pack.v1",
   "fallback": "/bashgym-peony.png",
   "icons": {
+    "mcp": {
+      "path": "/node-icons/node-mcp.png",
+      "neutral_path": "/node-icons/node-mcp-neutral.png",
+      "source": "/node-icons/node-mcp-source.svg",
+      "role": "MCP server connection, protocol inspection, tool contracts, agent evals",
+      "transparent": true,
+      "size_px": 256
+    },
     "toolkit": {
       "path": "/node-icons/node-toolkit.png",
       "neutral_path": "/node-icons/node-toolkit-neutral.png",
@@ -15,6 +23,23 @@
       "neutral_path": "/node-icons/node-huggingface-neutral.png",
       "source": "/node-icons/node-huggingface-source.png",
       "role": "Hugging Face, cloud training, model hub, datasets",
+      "transparent": true,
+      "size_px": 256
+    },
+    "evals": {
+      "path": "/node-icons/node-evals.png",
+      "neutral_path": "/node-icons/node-evals-neutral.png",
+      "source": "/node-icons/node-evals-source.png",
+      "role": "Evals, benchmarks, held-out gates, metrics",
+      "transparent": true,
+      "size_px": 256
+    },
+    "database": {
+      "path": "/node-icons/node-database.png",
+      "neutral_path": "/node-icons/node-database-neutral.png",
+      "source": "/node-icons/node-database-source.png",
+      "role": "Database, Neon, Supabase, SQL stores",
+      "aliases": ["neon", "supabase"],
       "transparent": true,
       "size_px": 256
     },
@@ -39,6 +64,14 @@
       "neutral_path": "/node-icons/node-activity-neutral.png",
       "source": "/node-icons/node-activity-source.png",
       "role": "Activity log, history, event feed",
+      "transparent": true,
+      "size_px": 256
+    },
+    "terminal": {
+      "path": "/node-icons/node-terminal.png",
+      "neutral_path": "/node-icons/node-terminal-neutral.png",
+      "source": "/node-icons/node-terminal-source.png",
+      "role": "Terminal, Bash shell, Claude Code, Codex",
       "transparent": true,
       "size_px": 256
     }

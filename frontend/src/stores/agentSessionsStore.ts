@@ -14,8 +14,10 @@ import { ingestClaudeFile, resetClaudeFile, encodeClaudeProjectDir } from '../se
 import { ingestCodexFile, resetCodexFile } from '../services/agentSessions/codexSessionAdapter'
 import { matchSessions, type MatchableTerminal } from '../services/agentSessions/matching'
 import { useTerminalStore } from './terminalStore'
+import { loadRegistry } from './workspacePersistence'
+import { buildWorkspaceSessionIndex } from './workspaceSessionIndex'
 
-const POLL_INTERVAL_MS = 4_000
+const POLL_INTERVAL_MS = 15_000
 const MAX_INGESTS_PER_TICK = 10
 const SCAN_LOOKBACK_DAYS = 14
 const PINS_KEY = 'bashgym_session_pins'
@@ -86,6 +88,8 @@ interface AgentSessionsState {
   lastScanAt: number | null
   snapshots: Map<string, AgentSessionSnapshot>
   matches: Map<string, SessionMatch>
+  liveTerminalIds: Set<string>
+  hasLiveTerminalSnapshot: boolean
   pins: Record<string, string>
   accountOptIn: boolean
   account: SessionAccountInfo | null
@@ -104,6 +108,8 @@ export const useAgentSessionsStore = create<AgentSessionsState>((set, get) => ({
   lastScanAt: null,
   snapshots: initialSnapshots,
   matches: new Map(),
+  liveTerminalIds: new Set(),
+  hasLiveTerminalSnapshot: false,
   pins: loadPins(),
   accountOptIn: localStorage.getItem(ACCOUNT_OPTIN_KEY) === 'true',
   account: null,
@@ -133,24 +139,34 @@ export const useAgentSessionsStore = create<AgentSessionsState>((set, get) => ({
     pollInFlight = true
     try {
       const terminalState = useTerminalStore.getState()
-      const terminals: MatchableTerminal[] = []
-      for (const session of terminalState.sessions.values()) {
-        const panel = terminalState.panels.find((p) => p.terminalId === session.id)
-        if (!panel) continue
-        terminals.push({
-          terminalId: session.id,
-          panelId: panel.id,
-          cwd: session.cwd,
-          agentKind: session.agentKind,
-          lastActivity: session.lastActivity
-        })
-      }
-
-      const scan = await api.scan(SCAN_LOOKBACK_DAYS)
+      const [scan, terminalInfos] = await Promise.all([
+        api.scan(SCAN_LOOKBACK_DAYS),
+        window.bashgym?.terminal.list().catch(() => []) ?? Promise.resolve([])
+      ])
       if (!scan.success) {
         set({ error: scan.error ?? 'Session scan failed' })
         return
       }
+      const liveTerminalIds = new Set(terminalInfos.filter((info) => !info.exited).map((info) => info.id))
+      const registry = loadRegistry()
+      const workspaceGroups = buildWorkspaceSessionIndex({
+        workspaces: registry.workspaces,
+        activeWorkspaceId: registry.activeWorkspaceId,
+        activePanels: terminalState.panels,
+        activeSessions: terminalState.sessions,
+        liveTerminalIds
+      })
+      const terminals: MatchableTerminal[] = workspaceGroups.flatMap((group) =>
+        group.sessions
+          .filter((record) => record.runtimeState !== 'saved')
+          .map((record) => ({
+            terminalId: record.session.id,
+            panelId: record.panel.id,
+            cwd: record.session.cwd,
+            agentKind: record.session.agentKind,
+            lastActivity: record.session.lastActivity
+          }))
+      )
 
       const files: Array<SessionFileInfo & { kind: 'claude' | 'codex' }> = [
         ...(scan.claude ?? []).map((f) => ({ ...f, kind: 'claude' as const })),
@@ -226,6 +242,8 @@ export const useAgentSessionsStore = create<AgentSessionsState>((set, get) => ({
       set((state) => ({
         snapshots,
         matches,
+        liveTerminalIds,
+        hasLiveTerminalSnapshot: true,
         version: state.version + 1,
         lastScanAt: Date.now(),
         error: null

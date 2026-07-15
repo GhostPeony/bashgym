@@ -61,3 +61,17 @@ class TestParseArgs:
     def test_missing_required_exits(self):
         with pytest.raises(SystemExit):
             train_model.parse_args(["--train", "t.jsonl"])
+
+
+def test_main_rejects_nvfp4_before_importing_training_runtime():
+    with pytest.raises(SystemExit, match="not a fine-tuning base"):
+        train_model.main(
+            [
+                "--base-model",
+                "unsloth/gemma-4-12b-it-NVFP4",
+                "--train",
+                "t.jsonl",
+                "--output",
+                "o",
+            ]
+        )

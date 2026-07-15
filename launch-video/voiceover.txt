@@ -1,0 +1,15 @@
+Your best coding dataset already exists. It is the work you do every day.
+
+BashGym captures and imports AI coding sessions from Claude Code, Gemini CLI, OpenCode, Codex, and Copilot CLI — tool calls, edits, commands, and outcomes — and turns them into structured traces.
+
+Then it separates signal from noise: six-part quality scoring, verification, segmentation, and PII redaction. Successful traces become supervised training data. Failed attempts can become preference pairs. Gaps can be filled with Data Designer.
+
+From there, train your own open-weight specialist with SFT, DPO, GRPO, RLVR, or distillation — on local, private, or cloud compute.
+
+BashGym can even search for better hyperparameters, trace recipes, and data-generation schemas.
+
+Export adapters, merged weights, or GGUF. Serve locally. Route the right tasks to the student, with teacher fallback when confidence is low.
+
+Code. Verify. Curate. Train. Route. Repeat.
+
+BashGym does not just help you build with AI. It turns the way you build into the system that improves your AI.

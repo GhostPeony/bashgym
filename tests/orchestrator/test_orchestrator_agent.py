@@ -793,12 +793,12 @@ class TestBuildLLMConfig:
 
         req = LLMConfigRequest(
             provider="ollama",
-            model="qwen2.5-coder:32b",
+            model="installed-code-model",
             base_url="http://localhost:11434/api/chat",
         )
         config = _build_llm_config(req)
         assert config.provider == LLMProvider.OLLAMA
-        assert config.model == "qwen2.5-coder:32b"
+        assert config.model == "installed-code-model"
         assert config.base_url == "http://localhost:11434/api/chat"
 
     def test_build_unknown_provider_raises(self):

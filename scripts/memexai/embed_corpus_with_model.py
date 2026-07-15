@@ -34,6 +34,15 @@ def clean_text(text: str) -> str:
     return " ".join((text or "").split())
 
 
+def format_passage_for_embedding(row: dict[str, Any]) -> str:
+    existing = str(row.get("embedding_text") or "").strip()
+    if existing:
+        return existing
+    title = clean_text(str(row.get("title") or ""))
+    text = clean_text(str(row.get("text") or ""))
+    return f"{title}\n\n{text}" if title else text
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--corpus-jsonl", type=Path, required=True)
@@ -58,7 +67,7 @@ def main() -> int:
         raise ValueError("corpus is empty")
 
     ids = [str(row["chunk_id"]) for row in rows]
-    texts = [clean_text(str(row.get("text") or "")) for row in rows]
+    texts = [format_passage_for_embedding(row) for row in rows]
     if any(not text for text in texts):
         empty_count = sum(1 for text in texts if not text)
         raise ValueError(f"{empty_count} corpus rows have empty text")
@@ -94,6 +103,7 @@ def main() -> int:
         "truncate_dim": args.truncate_dim,
         "max_seq_length": args.max_seq_length,
         "normalize_embeddings": True,
+        "passage_format": "embedding_text_or_title_double_newline_text",
         "outputs": {
             "matrix_npy": str(matrix_path),
             "chunk_ids_json": str(ids_path),

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -13,6 +14,7 @@ import shutil
 import socket
 import subprocess
 import time
+from collections.abc import AsyncIterator
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -20,12 +22,26 @@ from urllib.parse import urlparse
 
 import httpx
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 
 from bashgym import secrets as secret_store
+from bashgym.agent.hf_context_tools import (
+    HF_CONTEXT_TOOL_NAMES,
+    HFContextToolError,
+    execute_hf_context_tool,
+)
 from bashgym.agent.memory import PeonyMemory
+from bashgym.agent.skill_lab_tools import (
+    SKILL_LAB_TOOL_NAMES,
+    SKILL_LAB_TOOLS,
+    SkillLabToolError,
+    execute_skill_lab_tool,
+)
 from bashgym.agent.skills.registry import SkillRegistry
 from bashgym.agent.tools import AWARENESS_TOOLS, CORE_TOOLS, MEMORY_TOOLS, ToolRegistry
+from bashgym.api.schemas import TrainingRequest
+from bashgym.compute import normalize_training_target_payload
 
 logger = logging.getLogger(__name__)
 
@@ -229,8 +245,7 @@ def _endpoint_url(profile: dict[str, Any], path: str) -> str:
 
 
 def _agent_headers(profile: dict[str, Any], session_key: str | None = None) -> dict[str, str]:
-    endpoint_id = str(profile["id"])
-    api_key = _get_agent_api_key(endpoint_id)
+    api_key = _get_agent_api_key(str(profile["id"]))
     headers = {"content-type": "application/json"}
     if api_key:
         headers["authorization"] = f"Bearer {api_key}"
@@ -260,6 +275,21 @@ def _sanitize_agent_error(message: str, endpoint_id: str) -> str:
         flags=re.IGNORECASE,
     )
     return scrubbed
+
+
+def _agent_response_error(
+    response: httpx.Response,
+    endpoint_id: str,
+    data: Any | None = None,
+) -> str:
+    """Return a safe, actionable error for an authenticated Hermes response."""
+    if response.status_code in {401, 403}:
+        return (
+            "Hermes rejected the saved API server key. Open Hermes settings, "
+            "update the endpoint API key, then test the connection again."
+        )
+    payload = _json_or_text(response) if data is None else data
+    return _sanitize_agent_error(str(payload), endpoint_id)
 
 
 def _json_or_text(response: httpx.Response) -> Any:
@@ -305,6 +335,239 @@ def _extract_chat_completion_text(data: dict[str, Any]) -> str:
     return ""
 
 
+def _openai_skill_lab_tools() -> list[dict[str, Any]]:
+    return [
+        {
+            "type": "function",
+            "name": tool["name"],
+            "description": tool["description"],
+            "parameters": tool["input_schema"],
+        }
+        for tool in SKILL_LAB_TOOLS
+    ]
+
+
+def _chat_completion_skill_lab_tools() -> list[dict[str, Any]]:
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": tool["name"],
+                "description": tool["description"],
+                "parameters": tool["input_schema"],
+            },
+        }
+        for tool in SKILL_LAB_TOOLS
+    ]
+
+
+def _decode_tool_arguments(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _extract_responses_tool_calls(data: dict[str, Any]) -> list[dict[str, Any]]:
+    calls: list[dict[str, Any]] = []
+    for item in data.get("output", []) or []:
+        if not isinstance(item, dict) or item.get("type") != "function_call":
+            continue
+        name = item.get("name")
+        call_id = item.get("call_id") or item.get("id")
+        if isinstance(name, str) and isinstance(call_id, str):
+            calls.append(
+                {
+                    "id": call_id,
+                    "name": name,
+                    "arguments": _decode_tool_arguments(item.get("arguments")),
+                }
+            )
+    return calls
+
+
+def _extract_chat_tool_calls(data: dict[str, Any]) -> list[dict[str, Any]]:
+    choices = data.get("choices") or []
+    if not choices or not isinstance(choices[0], dict):
+        return []
+    message = choices[0].get("message") or {}
+    calls: list[dict[str, Any]] = []
+    for item in message.get("tool_calls", []) or []:
+        if not isinstance(item, dict):
+            continue
+        function = item.get("function") or {}
+        name = function.get("name")
+        call_id = item.get("id")
+        if isinstance(name, str) and isinstance(call_id, str):
+            calls.append(
+                {
+                    "id": call_id,
+                    "name": name,
+                    "arguments": _decode_tool_arguments(function.get("arguments")),
+                }
+            )
+    return calls
+
+
+def _skill_lab_intent(message: str) -> bool:
+    normalized = message.casefold()
+    return "skill" in normalized and any(
+        word in normalized for word in ("build", "create", "edit", "evaluate", "eval", "test")
+    )
+
+
+def _explicit_action_approval(message: str) -> bool:
+    normalized = message.casefold()
+    if normalized.strip() in {"yes", "y", "approved", "confirm", "confirmed", "proceed"}:
+        return True
+    return any(
+        phrase in normalized
+        for phrase in (
+            "approve",
+            "confirmed",
+            "do it",
+            "go ahead",
+            "launch it",
+            "proceed",
+            "run it",
+            "save it",
+            "start it",
+            "yes,",
+            "yes ",
+        )
+    )
+
+
+def _encode_sse(event: str, payload: dict[str, Any]) -> str:
+    """Encode one normalized SSE event for the GhostWork chat client."""
+    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+async def _iter_sse_frames(response: httpx.Response) -> AsyncIterator[tuple[str, str]]:
+    """Parse SSE frames without assuming network chunks align to event boundaries."""
+    event_name = "message"
+    data_lines: list[str] = []
+
+    async for line in response.aiter_lines():
+        if line == "":
+            if data_lines:
+                yield event_name, "\n".join(data_lines)
+            event_name = "message"
+            data_lines = []
+            continue
+        if line.startswith(":"):
+            continue
+        if line.startswith("event:"):
+            event_name = line[6:].strip() or "message"
+        elif line.startswith("data:"):
+            data_lines.append(line[5:].lstrip())
+
+    if data_lines:
+        yield event_name, "\n".join(data_lines)
+
+
+def _stream_error_message(data: dict[str, Any]) -> str | None:
+    error = data.get("error")
+    if isinstance(error, str):
+        return error
+    if isinstance(error, dict):
+        message = error.get("message") or error.get("detail")
+        if isinstance(message, str):
+            return message
+
+    response = data.get("response")
+    if isinstance(response, dict):
+        nested = response.get("error")
+        if isinstance(nested, dict) and isinstance(nested.get("message"), str):
+            return nested["message"]
+    return None
+
+
+async def _iter_agent_stream_events(
+    response: httpx.Response,
+    protocol: str,
+) -> AsyncIterator[tuple[str, dict[str, Any]]]:
+    """Normalize Hermes Responses/Chat Completions streams for the renderer."""
+    content_type = response.headers.get("content-type", "").lower()
+    if "text/event-stream" not in content_type:
+        await response.aread()
+        data = _json_or_text(response)
+        if not isinstance(data, dict):
+            yield "error", {"error": "Hermes returned an invalid response"}
+            return
+        text = (
+            _extract_responses_text(data)
+            if protocol == "responses"
+            else _extract_chat_completion_text(data)
+        )
+        if text:
+            yield "delta", {"delta": text}
+            return
+        yield "error", {"error": _stream_error_message(data) or "Hermes returned no text"}
+        return
+
+    async for event_name, raw_data in _iter_sse_frames(response):
+        if raw_data == "[DONE]":
+            return
+        try:
+            data = json.loads(raw_data)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(data, dict):
+            continue
+
+        event_type = str(data.get("type") or event_name)
+        if event_type == "response.output_text.delta":
+            delta = data.get("delta")
+            if isinstance(delta, str) and delta:
+                yield "delta", {"delta": delta}
+            continue
+
+        choices = data.get("choices")
+        if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+            delta = choices[0].get("delta")
+            if isinstance(delta, dict):
+                content = delta.get("content")
+                if isinstance(content, str) and content:
+                    yield "delta", {"delta": content}
+            continue
+
+        if event_type == "hermes.tool.progress":
+            label = data.get("tool") or data.get("name") or data.get("message")
+            if isinstance(label, str) and label:
+                yield "activity", {"label": label}
+            continue
+
+        if event_type == "response.output_item.added":
+            item = data.get("item")
+            if isinstance(item, dict) and item.get("type") == "function_call":
+                label = item.get("name")
+                if isinstance(label, str) and label:
+                    yield "activity", {"label": label}
+            continue
+
+        if event_type in {"response.failed", "error"}:
+            yield "error", {"error": _stream_error_message(data) or "Hermes stream failed"}
+            return
+
+        if event_type == "response.completed":
+            completed = data.get("response")
+            payload: dict[str, Any] = {}
+            if isinstance(completed, dict):
+                response_id = completed.get("id")
+                if isinstance(response_id, str):
+                    payload["response_id"] = response_id
+                final_text = _extract_responses_text(completed)
+                if final_text:
+                    payload["final_text"] = final_text
+            yield "terminal", payload
+
+
 def _looks_like_agent_runtime_failure(text: str) -> bool:
     """Detect provider/runtime errors that Hermes may return as assistant text."""
     normalized = text.strip().lower()
@@ -324,9 +587,9 @@ def _looks_like_agent_runtime_failure(text: str) -> bool:
 # In-memory pending actions (shell confirmation gate)
 # ---------------------------------------------------------------------------
 
-PENDING_ACTIONS: dict[str, dict] = (
-    {}
-)  # token → {cmd, reason, messages, tool_use_id, expires_at, tools}
+PENDING_ACTIONS: dict[
+    str, dict
+] = {}  # token → {cmd, reason, messages, tool_use_id, expires_at, tools}
 
 
 # ---------------------------------------------------------------------------
@@ -428,6 +691,10 @@ class AgentEndpointChatRequest(BaseModel):
     context: str | None = None
     conversation: str | None = None
     session_key: str | None = None
+    workspace_id: str = "default"
+    origin: dict[str, Any] = Field(default_factory=dict)
+    history: list[ChatMessage] = Field(default_factory=list)
+    enable_skill_lab_tools: bool = True
 
 
 class AgentEndpointChatResponse(BaseModel):
@@ -517,10 +784,20 @@ class ToolkitSkillResourceCounts(BaseModel):
 
 
 class ToolkitSkill(BaseModel):
+    skill_id: str = ""
     name: str
     description: str = ""
     source: str
+    available_sources: list[str] = Field(default_factory=list)
     path: str | None = None
+    revision: str = ""
+    content_revision: str = ""
+    frontmatter: dict[str, Any] = Field(default_factory=dict)
+    allowed_tools: list[str] = Field(default_factory=list)
+    shadowed_paths: list[str] = Field(default_factory=list)
+    catalog_status: str = "active"
+    canonical_skill_id: str | None = None
+    quality_issues: list[str] = Field(default_factory=list)
     resource_counts: ToolkitSkillResourceCounts = ToolkitSkillResourceCounts()
     tool_count: int = 0
 
@@ -702,10 +979,15 @@ async def _gather_system_context() -> str:
         from bashgym.config import get_settings
 
         settings = get_settings()
+        training_defaults = TrainingRequest()
         sections.append(
             f"**Training Config:**\n"
             f"- Base model: {settings.training.base_model}\n"
-            f"- Default strategy: SFT\n"
+            f"- Direct strategies: SFT, DPO, GRPO, RLVR, distillation, session distillation\n"
+            f"- Default artifact retention: {training_defaults.artifact_retention.value}\n"
+            f"- Default checkpoint limit: {training_defaults.checkpoint_limit}\n"
+            f"- Default HF visibility: {'private' if training_defaults.hf_private else 'public'}\n"
+            f"- Default HF upload artifact: {training_defaults.hf_upload_artifact.value}\n"
             f"- Auto-export GGUF: {settings.training.auto_export_gguf}\n"
             f"- Max sequence length: {settings.training.max_seq_length}"
         )
@@ -772,6 +1054,20 @@ def _build_system_prompt(context: str, memory_prompt: str = "", skill_knowledge:
 
 async def _execute_tool(name: str, tool_input: dict) -> str:
     """Execute a Peony tool and return a string result for the tool_result block."""
+
+    if name in HF_CONTEXT_TOOL_NAMES:
+        try:
+            result = await execute_hf_context_tool(name, tool_input)
+            return json.dumps(result)
+        except HFContextToolError as exc:
+            return json.dumps(exc.as_dict())
+
+    if name in SKILL_LAB_TOOL_NAMES:
+        try:
+            result = await execute_skill_lab_tool(name, tool_input)
+            return json.dumps(result)
+        except SkillLabToolError as exc:
+            return json.dumps(exc.as_dict())
 
     # ----- Memory tools (local, no HTTP needed) -----
     if name == "remember_fact":
@@ -913,17 +1209,48 @@ async def _execute_tool(name: str, tool_input: dict) -> str:
                 payload = {
                     "strategy": tool_input.get("strategy", "sft"),
                 }
+                training_config = tool_input.get("config") or {}
+                if not isinstance(training_config, dict):
+                    raise ValueError("start_training config must be an object")
+                controlled_fields = {
+                    "strategy",
+                    "base_model",
+                    "compute_target",
+                    "correlation_id",
+                    "origin",
+                    "tracking",
+                }
+                blocked_fields = sorted(set(training_config).intersection(controlled_fields))
+                if blocked_fields:
+                    raise ValueError(
+                        "start_training config must not override top-level fields: "
+                        + ", ".join(blocked_fields)
+                    )
+                unknown_fields = sorted(
+                    set(training_config).difference(TrainingRequest.model_fields)
+                )
+                if unknown_fields:
+                    raise ValueError(
+                        "start_training config contains unsupported fields: "
+                        + ", ".join(unknown_fields)
+                    )
+                payload.update(training_config)
                 if tool_input.get("model"):
                     payload["base_model"] = tool_input["model"]
                 if tool_input.get("dataset_path"):
                     payload["dataset_path"] = tool_input["dataset_path"]
                 if tool_input.get("correlation_id"):
                     payload["correlation_id"] = tool_input["correlation_id"]
+                if tool_input.get("compute_target"):
+                    payload["compute_target"] = tool_input["compute_target"]
+                if tool_input.get("tracking_context"):
+                    payload["tracking"] = tool_input["tracking_context"]
                 payload["origin"] = {
                     "kind": "agent",
                     "agent": "hermes",
                     **(tool_input.get("origin") or {}),
                 }
+                payload = normalize_training_target_payload(payload)
                 resp = await client.post(f"{base_url}/api/training/start", json=payload)
                 resp.raise_for_status()
                 data = resp.json()
@@ -931,6 +1258,65 @@ async def _execute_tool(name: str, tool_input: dict) -> str:
 
             elif name == "get_training_status":
                 resp = await client.get(f"{base_url}/api/training")
+                resp.raise_for_status()
+                data = resp.json()
+                return json.dumps(data)
+
+            elif name in {
+                "list_experiment_projects",
+                "get_experiment_context",
+                "get_experiment_run",
+            }:
+                from bashgym.config import get_bashgym_dir
+                from bashgym.ledger.persistence import ExperimentLedgerRepository
+                from bashgym.ledger.synthesis import build_project_context
+
+                repository = ExperimentLedgerRepository(
+                    get_bashgym_dir() / "campaigns" / "campaigns.sqlite3"
+                )
+                repository.initialize()
+                workspace_id = str(tool_input.get("workspace_id") or "desktop-local")
+                if name == "list_experiment_projects":
+                    data = {
+                        "schema_version": "experiment_projects.v1",
+                        "workspace_id": workspace_id,
+                        "projects": repository.list_projects(workspace_id),
+                        "database_health": repository.database_health(workspace_id),
+                    }
+                elif name == "get_experiment_context":
+                    data = build_project_context(
+                        repository,
+                        workspace_id,
+                        str(tool_input["project_id"]),
+                        recent_limit=int(tool_input.get("recent_limit") or 20),
+                    )
+                else:
+                    data = repository.run_details(
+                        workspace_id,
+                        str(tool_input["project_id"]),
+                        str(tool_input["run_id"]),
+                    )
+                return json.dumps(data)
+
+            elif name == "start_data_designer":
+                payload = {
+                    "pipeline": tool_input["pipeline"],
+                    "num_records": tool_input.get("num_records", 100),
+                    "seed_type": tool_input.get("seed_type", "traces"),
+                    "provider": tool_input.get("provider", "nvidia"),
+                    "origin": {
+                        "kind": "agent",
+                        "agent": "hermes",
+                        **(tool_input.get("origin") or {}),
+                    },
+                }
+                if tool_input.get("seed_source"):
+                    payload["seed_source"] = tool_input["seed_source"]
+                if tool_input.get("model"):
+                    payload["text_model"] = tool_input["model"]
+                if tool_input.get("provider_endpoint"):
+                    payload["provider_endpoint"] = tool_input["provider_endpoint"]
+                resp = await client.post(f"{base_url}/api/factory/designer/create", json=payload)
                 resp.raise_for_status()
                 data = resp.json()
                 return json.dumps(data)
@@ -1320,6 +1706,24 @@ def _hermes_home(command: str | None = None) -> Path:
     return Path.home() / ".hermes"
 
 
+def _default_hermes_home() -> Path:
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if os.name == "nt" and local_app_data:
+        return Path(local_app_data) / "hermes"
+    return Path.home() / ".hermes"
+
+
+def _active_hermes_skill_root() -> Path:
+    explicit = os.environ.get("HERMES_HOME")
+    if explicit:
+        return Path(explicit).expanduser() / "skills"
+
+    default_root = _default_hermes_home() / "skills"
+    if default_root.exists():
+        return default_root
+    return _hermes_home(_hermes_command()) / "skills"
+
+
 def _parse_env_file(path: Path) -> dict[str, str]:
     values: dict[str, str] = {}
     if not path.exists():
@@ -1477,11 +1881,14 @@ async def _probe_hermes_health(
     url = _normalize_agent_base_url(base_url)
     health_root = url[:-3] if url.endswith("/v1") else url
     headers = {"authorization": f"Bearer {api_key}"} if api_key else {}
+    probe_url = f"{url}/capabilities" if api_key else f"{health_root}/health"
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(4.0, connect=2.0)) as client:
-            response = await client.get(f"{health_root}/health", headers=headers)
+            response = await client.get(probe_url, headers=headers)
             if response.is_success:
                 return True, None
+            if response.status_code in {401, 403}:
+                return False, "Saved API server key was rejected"
             return False, f"HTTP {response.status_code}"
     except Exception as exc:
         return False, str(exc) or exc.__class__.__name__
@@ -1776,7 +2183,20 @@ async def _hermes_setup_status(
     configured_model, configured_provider = _hermes_config_summary(config_path)
     profile = _get_agent_endpoint_profile(endpoint_id)
     public_profile = _public_agent_profile(profile)
-    api_key = _get_agent_api_key(endpoint_id) or env_values.get("API_SERVER_KEY")
+    stored_api_key = _get_agent_api_key(endpoint_id)
+    env_api_key = env_values.get("API_SERVER_KEY")
+    parsed_base_url = urlparse(_normalize_agent_base_url(base_url))
+    parsed_profile_url = urlparse(_normalize_agent_base_url(str(profile["base_url"])))
+    is_local_gateway = (
+        parsed_base_url.hostname in {"127.0.0.1", "localhost", "::1"}
+        and parsed_base_url.port == 8642
+        and parsed_profile_url.hostname in {"127.0.0.1", "localhost", "::1"}
+        and parsed_profile_url.port == 8642
+    )
+    api_key = env_api_key if is_local_gateway and env_api_key else stored_api_key or env_api_key
+    if is_local_gateway and env_api_key and stored_api_key != env_api_key:
+        _set_agent_api_key(endpoint_id, env_api_key)
+        public_profile = _public_agent_profile(profile)
     healthy, health_error = await _probe_hermes_health(base_url, api_key)
     setup_needed: list[str] = []
 
@@ -1870,7 +2290,17 @@ async def _probe_agent_endpoint_profile(profile: dict[str, Any]) -> dict[str, An
     models_data = probes.get("models", {}).get("data")
     skills_data = probes.get("skills", {}).get("data")
     toolsets_data = probes.get("toolsets", {}).get("data")
-    ok = any(probe.get("ok") for probe in probes.values())
+    authenticated_probe_names = ("capabilities", "models", "skills", "toolsets")
+    rejected_auth = any(
+        probes.get(name, {}).get("status_code") in {401, 403}
+        for name in authenticated_probe_names
+    )
+    if rejected_auth:
+        warnings.insert(
+            0,
+            "Hermes rejected the saved API server key. Update the endpoint API key and test again.",
+        )
+    ok = bool(probes.get("capabilities", {}).get("ok")) and not rejected_auth
 
     return {
         "ok": ok,
@@ -1915,6 +2345,7 @@ def _toolkit_skill_root_candidates() -> list[tuple[str, Path]]:
             ("codex", Path.home() / ".codex" / "skills"),
             ("codex-system", Path.home() / ".codex" / "skills" / ".system"),
             ("claude", Path.home() / ".claude" / "skills"),
+            ("hermes", _active_hermes_skill_root()),
         ]
     )
 
@@ -1928,29 +2359,146 @@ def _toolkit_skill_root_candidates() -> list[tuple[str, Path]]:
     return unique
 
 
-def _read_skill_frontmatter(skill_path: Path) -> tuple[str, str]:
-    name = skill_path.parent.name
-    description = ""
+def _parse_frontmatter(skill_path: Path) -> tuple[dict[str, Any], str]:
+    """Read SKILL.md frontmatter without making YAML a hard dependency."""
     try:
-        lines = skill_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        content = skill_path.read_text(encoding="utf-8", errors="replace")
     except OSError:
-        return name, description
+        return {}, ""
 
+    lines = content.splitlines()
     if not lines or lines[0].strip() != "---":
-        for line in lines[:20]:
-            if line.lower().startswith("# "):
-                name = line[2:].strip() or name
-                break
-        return name, description
+        return {}, content
 
-    for line in lines[1:80]:
-        stripped = line.strip()
-        if stripped == "---":
-            break
-        if stripped.startswith("name:"):
-            name = stripped.split(":", 1)[1].strip().strip("\"'") or name
-        elif stripped.startswith("description:"):
-            description = stripped.split(":", 1)[1].strip().strip("\"'")
+    end = next((index for index, line in enumerate(lines[1:], 1) if line.strip() == "---"), None)
+    if end is None:
+        return {}, content
+
+    raw_frontmatter = "\n".join(lines[1:end])
+    try:
+        import yaml  # type: ignore
+
+        parsed = yaml.safe_load(raw_frontmatter)
+        return (parsed if isinstance(parsed, dict) else {}), content
+    except (ImportError, AttributeError, TypeError, ValueError):
+        pass
+    except Exception:
+        # Malformed optional YAML should not make the whole inventory disappear.
+        pass
+
+    parsed: dict[str, Any] = {}
+    current_list_key: str | None = None
+    for raw_line in raw_frontmatter.splitlines():
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("-") and current_list_key:
+            parsed.setdefault(current_list_key, []).append(stripped[1:].strip().strip("\"'"))
+            continue
+        if ":" not in stripped:
+            continue
+        key, raw_value = stripped.split(":", 1)
+        key = key.strip()
+        value = raw_value.strip().strip("\"'")
+        if not value:
+            parsed[key] = []
+            current_list_key = key
+        else:
+            current_list_key = None
+            if value.lower() in {"true", "false"}:
+                parsed[key] = value.lower() == "true"
+            elif value.startswith("[") and value.endswith("]"):
+                parsed[key] = [
+                    item.strip().strip("\"'") for item in value[1:-1].split(",") if item.strip()
+                ]
+            else:
+                parsed[key] = value
+    return parsed, content
+
+
+def _allowed_tools(frontmatter: dict[str, Any]) -> list[str]:
+    raw_tools = frontmatter.get("allowed_tools", frontmatter.get("allowed-tools", []))
+    if isinstance(raw_tools, str):
+        raw_tools = raw_tools.replace(",", " ").split()
+    if not isinstance(raw_tools, list):
+        return []
+    return list(dict.fromkeys(str(tool).strip() for tool in raw_tools if str(tool).strip()))
+
+
+def _normalized_skill_name(name: str) -> str:
+    return " ".join(name.casefold().split())
+
+
+def _skill_catalog_classification(
+    frontmatter: dict[str, Any],
+    description: str,
+) -> tuple[str, list[str]]:
+    status = str(frontmatter.get("status") or "").strip().casefold()
+    deprecated = frontmatter.get("deprecated") is True or status in {
+        "archived",
+        "deprecated",
+        "disabled",
+        "retired",
+    }
+    if deprecated:
+        return "deprecated", []
+
+    issues: list[str] = []
+    if not frontmatter:
+        issues.append("missing_frontmatter")
+    if not description.strip():
+        issues.append("missing_description")
+    return ("invalid" if issues else "active"), issues
+
+
+def _stable_skill_id(name: str, source: str = "", path: str | Path | None = None) -> str:
+    """Identify one loaded skill independently from its mutable content revision."""
+    location = str(Path(path).resolve()) if path else name.strip().casefold()
+    identity = f"{source.strip().casefold()}:{location.casefold()}"
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    return f"skill-{digest[:20]}"
+
+
+def _skill_content_revision(skill_path: Path) -> str:
+    """Hash the skill instructions and every packaged runtime resource."""
+    digest = hashlib.sha256()
+    skill_dir = skill_path.parent
+    included: list[Path] = [skill_path]
+    for dirname in ("scripts", "references", "assets"):
+        root = skill_dir / dirname
+        if root.is_dir():
+            included.extend(path for path in root.rglob("*") if path.is_file())
+    for path in sorted(set(included), key=lambda item: item.as_posix().casefold()):
+        try:
+            relative = path.relative_to(skill_dir).as_posix()
+            digest.update(relative.encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(path.read_bytes())
+            digest.update(b"\0")
+        except OSError:
+            continue
+    return digest.hexdigest()
+
+
+def _skill_metadata(skill_path: Path) -> tuple[str, str, dict[str, Any], str, list[str]]:
+    frontmatter, content = _parse_frontmatter(skill_path)
+    name = str(frontmatter.get("name") or skill_path.parent.name).strip() or skill_path.parent.name
+    if not frontmatter:
+        name = next(
+            (
+                line[2:].strip()
+                for line in content.splitlines()[:20]
+                if line.lower().startswith("# ") and line[2:].strip()
+            ),
+            name,
+        )
+    description = str(frontmatter.get("description") or "")
+    revision = _skill_content_revision(skill_path)
+    return name, description, frontmatter, revision, _allowed_tools(frontmatter)
+
+
+def _read_skill_frontmatter(skill_path: Path) -> tuple[str, str]:
+    name, description, _frontmatter, _revision, _allowed_tools_value = _skill_metadata(skill_path)
     return name, description
 
 
@@ -1975,15 +2523,52 @@ def _scan_skill_roots(
     skills: list[ToolkitSkill] = []
     warnings: list[str] = []
     seen_paths: set[str] = set()
+    skills_by_name_revision: dict[tuple[str, str], ToolkitSkill] = {}
+    skill_priorities: dict[str, tuple[int, int, str]] = {}
 
-    skip_dirs = {".git", "__pycache__", "node_modules", ".venv", "venv"}
-    for label, root in _toolkit_skill_root_candidates():
+    skip_dirs = {
+        ".git",
+        "__pycache__",
+        "node_modules",
+        ".venv",
+        "venv",
+        "_archive",
+        "archive",
+        "deprecated",
+    }
+    embedded_host_dirs = {
+        ".agents",
+        ".claude",
+        ".codex",
+        ".cursor",
+        ".factory",
+        ".gbrain",
+        ".hermes",
+        ".kiro",
+        ".openclaw",
+        ".opencode",
+        ".slate",
+    }
+    # Keep the cap per root. A global cap lets a large early root hide every
+    # later root from the inventory.
+    per_root_cap = max(1, max_skills)
+    root_candidates = _toolkit_skill_root_candidates()
+    for root_index, (label, root) in enumerate(root_candidates):
         root_count = 0
         exists = root.exists()
         if exists:
             try:
                 for current, dirs, files in os.walk(root):
-                    dirs[:] = [d for d in dirs if d not in skip_dirs]
+                    dirs[:] = [
+                        d
+                        for d in dirs
+                        if d.casefold() not in skip_dirs and d.casefold() not in embedded_host_dirs
+                    ]
+                    dirs.sort()
+                    files.sort()
+                    if root_count >= per_root_cap:
+                        dirs[:] = []
+                        continue
                     depth = len(Path(current).relative_to(root).parts)
                     if depth > 6:
                         dirs[:] = []
@@ -1995,20 +2580,43 @@ def _scan_skill_roots(
                     if key in seen_paths:
                         continue
                     seen_paths.add(key)
-                    name, description = _read_skill_frontmatter(skill_path)
-                    skills.append(
-                        ToolkitSkill(
-                            name=name,
-                            description=description,
-                            source=label,
-                            path=str(skill_path),
-                            resource_counts=_resource_counts(skill_path.parent),
-                        )
+                    name, description, frontmatter, revision, allowed_tools = _skill_metadata(
+                        skill_path
+                    )
+                    catalog_status, quality_issues = _skill_catalog_classification(
+                        frontmatter,
+                        description,
                     )
                     root_count += 1
-                    if len(skills) >= max_skills:
-                        logger.debug("Stopped local skill scan at %s skills", max_skills)
-                        break
+                    duplicate_key = (_normalized_skill_name(name), revision)
+                    existing = skills_by_name_revision.get(duplicate_key)
+                    if existing is not None:
+                        existing.shadowed_paths.append(str(skill_path))
+                        if label not in existing.available_sources:
+                            existing.available_sources.append(label)
+                        continue
+                    skill = ToolkitSkill(
+                        skill_id=_stable_skill_id(name, label, skill_path),
+                        name=name,
+                        description=description,
+                        source=label,
+                        available_sources=[label],
+                        path=str(skill_path),
+                        revision=revision,
+                        content_revision=revision,
+                        frontmatter=frontmatter,
+                        allowed_tools=allowed_tools,
+                        catalog_status=catalog_status,
+                        quality_issues=quality_issues,
+                        resource_counts=_resource_counts(skill_path.parent),
+                    )
+                    skills_by_name_revision[duplicate_key] = skill
+                    skill_priorities[skill.skill_id] = (
+                        root_index,
+                        depth,
+                        str(skill_path).casefold(),
+                    )
+                    skills.append(skill)
             except OSError as exc:
                 warnings.append(f"Could not scan {label}: {exc}")
         root_infos.append(
@@ -2019,23 +2627,68 @@ def _scan_skill_roots(
                 skill_count=root_count,
             )
         )
-        if len(skills) >= max_skills:
-            break
-
     peony_skills = _skill_registry.list_all()
     for skill in peony_skills:
-        skills.append(
-            ToolkitSkill(
-                name=str(skill.get("name") or "unknown"),
-                description=str(skill.get("description") or ""),
-                source="peony",
-                path=None,
-                resource_counts=ToolkitSkillResourceCounts(),
-                tool_count=len(skill.get("tools") or []),
-            )
+        name = str(skill.get("name") or "unknown")
+        revision = hashlib.sha256(
+            json.dumps(skill, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        peony_skill = ToolkitSkill(
+            skill_id=_stable_skill_id(name, "peony"),
+            name=name,
+            description=str(skill.get("description") or ""),
+            source="peony",
+            available_sources=["peony"],
+            path=None,
+            revision=revision,
+            content_revision=revision,
+            frontmatter={"name": name, "description": str(skill.get("description") or "")},
+            allowed_tools=[
+                str(tool.get("name") or "")
+                for tool in skill.get("tools") or []
+                if isinstance(tool, dict) and tool.get("name")
+            ],
+            resource_counts=ToolkitSkillResourceCounts(),
+            tool_count=len(skill.get("tools") or []),
         )
+        skill_priorities[peony_skill.skill_id] = (
+            len(root_candidates),
+            0,
+            peony_skill.name.casefold(),
+        )
+        skills.append(peony_skill)
 
-    skills.sort(key=lambda item: (item.source, item.name.lower()))
+    active_by_name: dict[str, list[ToolkitSkill]] = {}
+    for skill in skills:
+        if skill.catalog_status != "active":
+            continue
+        key = _normalized_skill_name(skill.name)
+        active_by_name.setdefault(key, []).append(skill)
+
+    for candidates in active_by_name.values():
+        canonical = min(
+            candidates,
+            key=lambda item: skill_priorities.get(item.skill_id, (999, 999, item.name)),
+        )
+        for skill in candidates:
+            if skill.skill_id == canonical.skill_id:
+                continue
+            for source in skill.available_sources or [skill.source]:
+                if source not in canonical.available_sources:
+                    canonical.available_sources.append(source)
+            skill.catalog_status = "alternate"
+            skill.canonical_skill_id = canonical.skill_id
+            if skill.path and skill.path not in canonical.shadowed_paths:
+                canonical.shadowed_paths.append(skill.path)
+
+    status_order = {"active": 0, "alternate": 1, "deprecated": 2, "invalid": 3}
+    skills.sort(
+        key=lambda item: (
+            status_order.get(item.catalog_status, 9),
+            item.name.casefold(),
+            item.source,
+        )
+    )
     return root_infos, skills, warnings
 
 
@@ -2159,6 +2812,10 @@ async def _build_toolkit_inventory(include_remote: bool) -> ToolkitInventoryResp
         cache_ttl_seconds=TOOLKIT_CACHE_TTL_SECONDS,
         counts={
             "skills": len(skills),
+            "active_skills": sum(skill.catalog_status == "active" for skill in skills),
+            "alternate_skills": sum(skill.catalog_status == "alternate" for skill in skills),
+            "deprecated_skills": sum(skill.catalog_status == "deprecated" for skill in skills),
+            "invalid_skills": sum(skill.catalog_status == "invalid" for skill in skills),
             "tools": len(tools),
             "skill_roots": len(root_infos),
             "endpoints": len(endpoint_capabilities),
@@ -2197,15 +2854,10 @@ async def get_toolkit_inventory(include_remote: bool = True, refresh: bool = Fal
     return data
 
 
-@router.post(
-    "/endpoints/{endpoint_id}/chat",
-    response_model=AgentEndpointChatResponse,
-)
-async def chat_with_agent_endpoint(
+def _prepare_agent_endpoint_chat(
     endpoint_id: str,
     request: AgentEndpointChatRequest,
-):
-    """Send a workspace-contextual message to a Hermes-compatible endpoint."""
+) -> dict[str, Any]:
     profile = _get_agent_endpoint_profile(endpoint_id)
     if not bool(profile.get("enabled", True)):
         raise HTTPException(status_code=400, detail="Agent endpoint is disabled")
@@ -2219,88 +2871,418 @@ async def chat_with_agent_endpoint(
     full_input = message
     if request.context and request.context.strip():
         full_input = (
-            "BashGym workspace context:\n"
-            f"{request.context.strip()}\n\n"
-            "User request:\n"
-            f"{message}"
+            "<bashgym_authoritative_context>\n"
+            f"{request.context.strip()}\n"
+            "</bashgym_authoritative_context>\n\n"
+            f"<user_request>\n{message}\n</user_request>"
         )
 
     model = str(profile.get("model") or "hermes-agent")
-    session_key = request.session_key or profile.get("session_key") or request.conversation
+    session_key = request.session_key or profile.get("session_key")
     headers = _agent_headers(profile, session_key=session_key)
     instructions = (
         "You are Hermes connected to a BashGym workspace canvas. Use the supplied "
         "workspace context to help manage training runs, evals, datasets, models, "
-        "and connected nodes. Be explicit about actions you can and cannot take."
+        "and connected nodes. For current-state claims, precedence is live runtime, then "
+        "the durable BashGym ledger, then the current workspace snapshot, then curated "
+        "GBrain, then conversation memory. If history conflicts with supplied context, "
+        "use the higher-authority evidence and explicitly report the conflict. Cite run, "
+        "campaign, model, dataset, evaluation, and artifact IDs plus observation times "
+        "when available. Never blend projects or experiments when their identities are "
+        "missing. When terminal tools are available, use `bashgym training "
+        "start` and `bashgym designer start` for executable work so the canvas can "
+        "track it."
     )
-
-    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=5.0)) as client:
-        responses_payload = {
-            "model": model,
-            "input": full_input,
-            "instructions": instructions,
-        }
-        responses_url = _endpoint_url(profile, "responses")
-        try:
-            response = await client.post(
-                responses_url,
-                headers=headers,
-                json=responses_payload,
-            )
-        except Exception as exc:
-            message = _sanitize_agent_error(str(exc), endpoint_id)
-            raise HTTPException(status_code=502, detail=message)
-
-        data = _json_or_text(response)
-        responses_runtime_failure: str | None = None
-        if response.status_code not in {404, 405}:
-            if not response.is_success:
-                detail = _sanitize_agent_error(str(data), endpoint_id)
-                raise HTTPException(status_code=502, detail=detail)
-            if not isinstance(data, dict):
-                raise HTTPException(status_code=502, detail="Agent endpoint returned non-JSON")
-            text = _extract_responses_text(data)
-            if not text:
-                raise HTTPException(status_code=502, detail="Agent endpoint returned no text")
-            if _looks_like_agent_runtime_failure(text):
-                responses_runtime_failure = _sanitize_agent_error(text, endpoint_id)
-            else:
-                return AgentEndpointChatResponse(
-                    response=text,
-                    endpoint_id=endpoint_id,
-                    model=model,
-                    response_id=data.get("id") if isinstance(data.get("id"), str) else None,
-                    raw_status=data.get("status") if isinstance(data.get("status"), str) else None,
-                )
-
-        if response.status_code in {404, 405} or responses_runtime_failure:
-            chat_payload = {
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": instructions},
-                    {"role": "user", "content": full_input},
-                ],
-                "stream": False,
+    if request.enable_skill_lab_tools:
+        instructions += (
+            " You also have direct Skill Lab tools. When a user asks to build or "
+            "evaluate a skill, inspect the workspace, prepare target and negative routing "
+            "cases, and materialize Skill Lab through those tools. Never set confirmed=true "
+            "for file changes or model-call evaluations until the user explicitly approves "
+            "the preview. Be explicit about actions you can and cannot take."
+        )
+    else:
+        instructions += " Do not call workspace tools for this response."
+    conversation = request.conversation.strip() if request.conversation else None
+    history = [
+        {"role": item.role, "content": item.content}
+        for item in request.history
+        if item.role in {"user", "assistant"} and item.content.strip()
+    ]
+    responses_payload: dict[str, Any] = {
+        "model": model,
+        "input": [
+            {
+                "role": "user",
+                "content": [{"type": "input_text", "text": full_input}],
             }
-            chat_url = _endpoint_url(profile, "chat/completions")
+        ],
+        "instructions": instructions,
+        "user_message": message,
+        "store": True,
+    }
+    if request.enable_skill_lab_tools:
+        responses_payload["tools"] = _openai_skill_lab_tools()
+    if conversation:
+        responses_payload["conversation"] = conversation
+
+    return {
+        "profile": profile,
+        "model": model,
+        "headers": headers,
+        "instructions": instructions,
+        "full_input": full_input,
+        "history": history,
+        "workspace_id": request.workspace_id or "default",
+        "origin": {
+            "kind": "agent",
+            "agent": endpoint_id,
+            **request.origin,
+        },
+        "skill_lab_tools_enabled": request.enable_skill_lab_tools,
+        "responses_payload": responses_payload,
+    }
+
+
+async def _execute_hermes_skill_lab_calls(
+    prepared: dict[str, Any],
+    calls: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    outputs: list[dict[str, Any]] = []
+    for call in calls:
+        name = str(call.get("name") or "")
+        arguments = call.get("arguments")
+        if name not in SKILL_LAB_TOOL_NAMES:
+            result: dict[str, Any] = {
+                "error": "tool_not_allowed",
+                "message": f"Hermes cannot call {name!r} through the BashGym bridge.",
+            }
+        else:
+            scoped = dict(arguments) if isinstance(arguments, dict) else {}
+            scoped.setdefault("workspace_id", prepared["workspace_id"])
+            scoped.setdefault("origin", prepared["origin"])
+            if (
+                name in {"skill_lab_run", "skill_lab_save_skill"}
+                and bool(scoped.get("confirmed"))
+                and not _explicit_action_approval(prepared["user_message"])
+            ):
+                scoped["confirmed"] = False
             try:
-                chat_response = await client.post(
+                result = await execute_skill_lab_tool(
+                    name,
+                    scoped,
+                    workspace_id=prepared["workspace_id"],
+                    origin=prepared["origin"],
+                )
+            except SkillLabToolError as exc:
+                result = exc.as_dict()
+        outputs.append(
+            {
+                "call_id": str(call.get("id") or ""),
+                "name": name,
+                "output": json.dumps(result),
+            }
+        )
+    return outputs
+
+
+@router.post("/endpoints/{endpoint_id}/chat/stream")
+async def stream_agent_endpoint_chat(
+    endpoint_id: str,
+    request: AgentEndpointChatRequest,
+):
+    """Stream a workspace-contextual Hermes response as normalized SSE."""
+    if _skill_lab_intent(request.message):
+        prepared_for_tools = _prepare_agent_endpoint_chat(endpoint_id, request)
+
+        async def tool_aware_events() -> AsyncIterator[str]:
+            yield _encode_sse(
+                "meta",
+                {"endpoint_id": endpoint_id, "model": prepared_for_tools["model"]},
+            )
+            yield _encode_sse("activity", {"label": "Skill Lab bridge"})
+            try:
+                result = await chat_with_agent_endpoint(endpoint_id, request)
+            except HTTPException as exc:
+                yield _encode_sse("error", {"error": str(exc.detail)})
+                return
+            yield _encode_sse("delta", {"delta": result.response})
+            yield _encode_sse(
+                "done",
+                {
+                    "endpoint_id": endpoint_id,
+                    "model": result.model,
+                    "response_id": result.response_id,
+                },
+            )
+
+        return StreamingResponse(
+            tool_aware_events(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    prepared = _prepare_agent_endpoint_chat(endpoint_id, request)
+    profile = prepared["profile"]
+    model = prepared["model"]
+    headers = prepared["headers"]
+    responses_url = _endpoint_url(profile, "responses")
+    chat_url = _endpoint_url(profile, "chat/completions")
+
+    async def stream_events() -> AsyncIterator[str]:
+        yield _encode_sse("meta", {"endpoint_id": endpoint_id, "model": model})
+
+        async def relay(response: httpx.Response, protocol: str) -> AsyncIterator[str]:
+            text_parts: list[str] = []
+            response_id: str | None = None
+            async for event_type, payload in _iter_agent_stream_events(response, protocol):
+                if event_type == "delta":
+                    delta = payload.get("delta")
+                    if isinstance(delta, str) and delta:
+                        text_parts.append(delta)
+                        yield _encode_sse("delta", {"delta": delta})
+                elif event_type == "activity":
+                    yield _encode_sse("activity", payload)
+                elif event_type == "terminal":
+                    candidate_id = payload.get("response_id")
+                    if isinstance(candidate_id, str):
+                        response_id = candidate_id
+                    final_text = payload.get("final_text")
+                    if isinstance(final_text, str) and final_text and not text_parts:
+                        text_parts.append(final_text)
+                        yield _encode_sse("delta", {"delta": final_text})
+                elif event_type == "error":
+                    detail = _sanitize_agent_error(
+                        str(payload.get("error") or "Hermes stream failed"),
+                        endpoint_id,
+                    )
+                    yield _encode_sse("error", {"error": detail})
+                    return
+
+            full_text = "".join(text_parts)
+            if not full_text:
+                yield _encode_sse("error", {"error": "Hermes returned no text"})
+                return
+            if _looks_like_agent_runtime_failure(full_text):
+                detail = _sanitize_agent_error(full_text, endpoint_id)
+                yield _encode_sse("error", {"error": detail})
+                return
+            yield _encode_sse(
+                "done",
+                {"endpoint_id": endpoint_id, "model": model, "response_id": response_id},
+            )
+
+        try:
+            timeout = httpx.Timeout(120.0, connect=5.0, read=None)
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                responses_payload = {**prepared["responses_payload"], "stream": True}
+                async with client.stream(
+                    "POST",
+                    responses_url,
+                    headers=headers,
+                    json=responses_payload,
+                ) as response:
+                    fallback_to_chat = response.status_code in {404, 405}
+                    if not fallback_to_chat:
+                        if not response.is_success:
+                            await response.aread()
+                            detail = _agent_response_error(response, endpoint_id)
+                            yield _encode_sse("error", {"error": detail})
+                            return
+                        async for event in relay(response, "responses"):
+                            yield event
+                        return
+
+                chat_payload = {
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": prepared["instructions"]},
+                        *prepared["history"],
+                        {"role": "user", "content": prepared["full_input"]},
+                    ],
+                    "stream": True,
+                }
+                async with client.stream(
+                    "POST",
                     chat_url,
                     headers=headers,
                     json=chat_payload,
+                ) as response:
+                    if not response.is_success:
+                        await response.aread()
+                        detail = _agent_response_error(response, endpoint_id)
+                        yield _encode_sse("error", {"error": detail})
+                        return
+                    async for event in relay(response, "chat.completions"):
+                        yield event
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.exception("Hermes chat stream failed for endpoint %s", endpoint_id)
+            detail = _sanitize_agent_error(
+                str(exc).strip() or exc.__class__.__name__,
+                endpoint_id,
+            )
+            yield _encode_sse("error", {"error": detail})
+
+    return StreamingResponse(
+        stream_events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post(
+    "/endpoints/{endpoint_id}/chat",
+    response_model=AgentEndpointChatResponse,
+)
+async def chat_with_agent_endpoint(
+    endpoint_id: str,
+    request: AgentEndpointChatRequest,
+):
+    """Send a workspace-contextual message to a Hermes-compatible endpoint."""
+    prepared = _prepare_agent_endpoint_chat(endpoint_id, request)
+    profile = prepared["profile"]
+    model = prepared["model"]
+    headers = prepared["headers"]
+    instructions = prepared["instructions"]
+    full_input = prepared["full_input"]
+
+    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=5.0)) as client:
+        responses_payload = dict(prepared["responses_payload"])
+        responses_url = _endpoint_url(profile, "responses")
+        responses_runtime_failure: str | None = None
+        fallback_to_chat = False
+        responses_tools_disabled = False
+
+        for _step in range(4):
+            try:
+                response = await client.post(
+                    responses_url,
+                    headers=headers,
+                    json=responses_payload,
                 )
             except Exception as exc:
                 message = _sanitize_agent_error(str(exc), endpoint_id)
                 raise HTTPException(status_code=502, detail=message)
 
+            data = _json_or_text(response)
+            if response.status_code in {404, 405}:
+                fallback_to_chat = True
+                break
+            if (
+                response.status_code in {400, 422}
+                and "tools" in responses_payload
+                and not responses_tools_disabled
+            ):
+                responses_payload.pop("tools", None)
+                responses_tools_disabled = True
+                continue
+            if not response.is_success:
+                detail = _agent_response_error(response, endpoint_id, data)
+                raise HTTPException(status_code=502, detail=detail)
+            if not isinstance(data, dict):
+                raise HTTPException(status_code=502, detail="Agent endpoint returned non-JSON")
+
+            tool_calls = _extract_responses_tool_calls(data)
+            if tool_calls:
+                outputs = await _execute_hermes_skill_lab_calls(prepared, tool_calls)
+                response_id = data.get("id")
+                if not isinstance(response_id, str):
+                    raise HTTPException(status_code=502, detail="Agent tool response has no id")
+                responses_payload = {
+                    "model": model,
+                    "previous_response_id": response_id,
+                    "input": [
+                        {
+                            "type": "function_call_output",
+                            "call_id": output["call_id"],
+                            "output": output["output"],
+                        }
+                        for output in outputs
+                    ],
+                    "instructions": instructions,
+                    "store": True,
+                    "tools": _openai_skill_lab_tools(),
+                }
+                continue
+
+            text = _extract_responses_text(data)
+            if not text:
+                raise HTTPException(status_code=502, detail="Agent endpoint returned no text")
+            if _looks_like_agent_runtime_failure(text):
+                responses_runtime_failure = _sanitize_agent_error(text, endpoint_id)
+                fallback_to_chat = True
+                break
+
+            return AgentEndpointChatResponse(
+                response=text,
+                endpoint_id=endpoint_id,
+                model=model,
+                response_id=data.get("id") if isinstance(data.get("id"), str) else None,
+                raw_status=data.get("status") if isinstance(data.get("status"), str) else None,
+            )
+
+        if not fallback_to_chat:
+            raise HTTPException(
+                status_code=502, detail="Agent exceeded the Skill Lab tool-call limit"
+            )
+
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": instructions},
+            *prepared["history"],
+            {"role": "user", "content": full_input},
+        ]
+        chat_url = _endpoint_url(profile, "chat/completions")
+        chat_tools_disabled = False
+        for _step in range(4):
+            chat_payload: dict[str, Any] = {
+                "model": model,
+                "messages": messages,
+                "stream": False,
+            }
+            if prepared["skill_lab_tools_enabled"] and not chat_tools_disabled:
+                chat_payload["tools"] = _chat_completion_skill_lab_tools()
+            try:
+                chat_response = await client.post(chat_url, headers=headers, json=chat_payload)
+            except Exception as exc:
+                message = _sanitize_agent_error(str(exc), endpoint_id)
+                raise HTTPException(status_code=502, detail=message)
+
             chat_data = _json_or_text(chat_response)
+            if (
+                chat_response.status_code in {400, 422}
+                and prepared["skill_lab_tools_enabled"]
+                and not chat_tools_disabled
+            ):
+                chat_tools_disabled = True
+                continue
             if not chat_response.is_success:
-                detail = _sanitize_agent_error(str(chat_data), endpoint_id)
+                detail = _agent_response_error(chat_response, endpoint_id, chat_data)
                 if responses_runtime_failure:
                     detail = f"{responses_runtime_failure}; chat fallback failed: {detail}"
                 raise HTTPException(status_code=502, detail=detail)
             if not isinstance(chat_data, dict):
                 raise HTTPException(status_code=502, detail="Agent endpoint returned non-JSON")
+
+            tool_calls = _extract_chat_tool_calls(chat_data)
+            if tool_calls:
+                outputs = await _execute_hermes_skill_lab_calls(prepared, tool_calls)
+                choices = chat_data.get("choices") or []
+                assistant_message = choices[0].get("message") if choices else None
+                if not isinstance(assistant_message, dict):
+                    raise HTTPException(status_code=502, detail="Agent tool response is malformed")
+                messages.append(assistant_message)
+                messages.extend(
+                    {
+                        "role": "tool",
+                        "tool_call_id": output["call_id"],
+                        "content": output["output"],
+                    }
+                    for output in outputs
+                )
+                continue
+
             text = _extract_chat_completion_text(chat_data)
             if not text:
                 detail = "Agent endpoint returned no text"
@@ -2310,7 +3292,6 @@ async def chat_with_agent_endpoint(
             if _looks_like_agent_runtime_failure(text):
                 detail = _sanitize_agent_error(text, endpoint_id)
                 raise HTTPException(status_code=502, detail=detail)
-
             return AgentEndpointChatResponse(
                 response=text,
                 endpoint_id=endpoint_id,
@@ -2318,6 +3299,8 @@ async def chat_with_agent_endpoint(
                 response_id=chat_data.get("id") if isinstance(chat_data.get("id"), str) else None,
                 raw_status="chat.completions",
             )
+
+        raise HTTPException(status_code=502, detail="Agent exceeded the Skill Lab tool-call limit")
 
 
 # ---------------------------------------------------------------------------

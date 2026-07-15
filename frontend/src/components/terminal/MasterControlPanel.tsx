@@ -1,4 +1,4 @@
-import { memo, useCallback, useState } from 'react'
+import { memo, useCallback, useMemo, useState } from 'react'
 import {
   Play,
   Pause,
@@ -8,9 +8,6 @@ import {
   FolderOpen,
   Save,
   LayoutGrid,
-  Grid3X3,
-  Magnet,
-  Map,
   Minus,
   Maximize,
   ChevronUp,
@@ -70,7 +67,10 @@ export const MasterControlPanel = memo(function MasterControlPanel({
   const [selectedPresetId, setSelectedPresetId] = useState<string>(BUILTIN_PRESETS[0].id)
   const { workspaces, activeWorkspaceId, switchWorkspace, createWorkspace, renameWorkspace } = useWorkspaceStore()
 
-  const allPresets = [...BUILTIN_PRESETS, ...customPresets]
+  const allPresets = useMemo(
+    () => [...BUILTIN_PRESETS, ...customPresets],
+    [customPresets]
+  )
 
   const handleOpenPreset = useCallback(() => {
     const preset = [...BUILTIN_PRESETS, ...loadCustomPresets()].find((p) => p.id === selectedPresetId)
@@ -87,17 +87,11 @@ export const MasterControlPanel = memo(function MasterControlPanel({
   }, [])
   const {
     globalPaused,
-    showMetrics,
-    showToolHistory,
-    showRecentFiles,
     gridEnabled,
     snapToGrid,
     showMiniMap,
     isPanelCollapsed,
     setGlobalPaused,
-    setShowMetrics,
-    setShowToolHistory,
-    setShowRecentFiles,
     setGridEnabled,
     setSnapToGrid,
     setShowMiniMap,
@@ -107,18 +101,21 @@ export const MasterControlPanel = memo(function MasterControlPanel({
   const { sessions } = useTerminalStore()
 
   // Count active and waiting sessions
-  const sessionStats = Array.from(sessions.values()).reduce(
-    (acc, session) => {
-      if (session.status === 'running' || session.status === 'tool_calling') {
-        acc.active++
-      } else if (session.status === 'waiting_input') {
-        acc.waiting++
-      } else {
-        acc.idle++
-      }
-      return acc
-    },
-    { active: 0, waiting: 0, idle: 0 }
+  const sessionStats = useMemo(
+    () => Array.from(sessions.values()).reduce(
+      (acc, session) => {
+        if (session.status === 'running' || session.status === 'tool_calling') {
+          acc.active++
+        } else if (session.status === 'waiting_input') {
+          acc.waiting++
+        } else {
+          acc.idle++
+        }
+        return acc
+      },
+      { active: 0, waiting: 0, idle: 0 }
+    ),
+    [sessions]
   )
 
   const handlePauseAll = useCallback(() => {
@@ -206,80 +203,12 @@ export const MasterControlPanel = memo(function MasterControlPanel({
         </div>
       </div>
 
-      {/* View options */}
-      <div className="px-3 py-2 border-b border-brutal border-border">
-        <div className="text-[10px] text-text-muted uppercase tracking-wider mb-2 font-mono font-semibold">View Options</div>
-        <div className="space-y-1.5">
-          <label className="flex items-center gap-2 cursor-pointer group">
-            <input
-              type="checkbox"
-              checked={showMetrics}
-              onChange={(e) => setShowMetrics(e.target.checked)}
-              className="w-3.5 h-3.5 border-brutal border-border bg-background-card accent-accent"
-            />
-            <span className="text-xs font-mono text-text-secondary group-hover:text-text-primary">Metrics</span>
-          </label>
-          <label className="flex items-center gap-2 cursor-pointer group">
-            <input
-              type="checkbox"
-              checked={showToolHistory}
-              onChange={(e) => setShowToolHistory(e.target.checked)}
-              className="w-3.5 h-3.5 border-brutal border-border bg-background-card accent-accent"
-            />
-            <span className="text-xs font-mono text-text-secondary group-hover:text-text-primary">Tool History</span>
-          </label>
-          <label className="flex items-center gap-2 cursor-pointer group">
-            <input
-              type="checkbox"
-              checked={showRecentFiles}
-              onChange={(e) => setShowRecentFiles(e.target.checked)}
-              className="w-3.5 h-3.5 border-brutal border-border bg-background-card accent-accent"
-            />
-            <span className="text-xs font-mono text-text-secondary group-hover:text-text-primary">Recent Files</span>
-          </label>
-        </div>
-      </div>
-
       {/* Canvas settings */}
-      <div className="px-3 py-2 border-b border-brutal border-border">
-        <div className="text-[10px] text-text-muted uppercase tracking-wider mb-2 font-mono font-semibold">Canvas</div>
-        <div className="space-y-1.5">
-          <label className="flex items-center gap-2 cursor-pointer group">
-            <input
-              type="checkbox"
-              checked={gridEnabled}
-              onChange={(e) => setGridEnabled(e.target.checked)}
-              className="w-3.5 h-3.5 border-brutal border-border bg-background-card accent-accent"
-            />
-            <Grid3X3 className="w-3 h-3 text-text-muted" />
-            <span className="text-xs font-mono text-text-secondary group-hover:text-text-primary">Grid</span>
-          </label>
-          <label className="flex items-center gap-2 cursor-pointer group">
-            <input
-              type="checkbox"
-              checked={snapToGrid}
-              onChange={(e) => setSnapToGrid(e.target.checked)}
-              className="w-3.5 h-3.5 border-brutal border-border bg-background-card accent-accent"
-            />
-            <Magnet className="w-3 h-3 text-text-muted" />
-            <span className="text-xs font-mono text-text-secondary group-hover:text-text-primary">Snap</span>
-          </label>
-          <label className="flex items-center gap-2 cursor-pointer group">
-            <input
-              type="checkbox"
-              checked={showMiniMap}
-              onChange={(e) => setShowMiniMap(e.target.checked)}
-              className="w-3.5 h-3.5 border-brutal border-border bg-background-card accent-accent"
-            />
-            <Map className="w-3 h-3 text-text-muted" />
-            <span className="text-xs font-mono text-text-secondary group-hover:text-text-primary">Minimap</span>
-          </label>
-        </div>
-
-        {/* Zoom controls */}
-        <div className="flex items-center gap-2 mt-3">
-          <span className="text-[10px] text-text-muted font-mono">Zoom:</span>
-          <div className="flex items-center gap-1 flex-1">
+      <div className="px-3 py-1.5 border-b border-brutal border-border">
+        <div className="flex items-center justify-between gap-2 mb-1.5">
+          <div className="text-[10px] text-text-muted uppercase tracking-wider font-mono font-semibold">Canvas</div>
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-text-muted font-mono">Zoom:</span>
             <button
               onClick={onZoomOut}
               className="node-btn"
@@ -287,7 +216,7 @@ export const MasterControlPanel = memo(function MasterControlPanel({
             >
               <Minus className="w-3 h-3" />
             </button>
-            <span className="text-xs font-mono text-text-secondary min-w-[40px] text-center">
+            <span className="text-[10px] font-mono text-text-secondary min-w-[34px] text-center">
               {Math.round(currentZoom * 100)}%
             </span>
             <button
@@ -299,12 +228,41 @@ export const MasterControlPanel = memo(function MasterControlPanel({
             </button>
             <button
               onClick={onFitView}
-              className="node-btn node-btn-accent ml-1"
+              className="node-btn node-btn-accent"
               title="Fit view"
             >
               <Maximize className="w-3 h-3" />
             </button>
           </div>
+        </div>
+        <div className="grid grid-cols-3 gap-1.5">
+          <label className="flex min-w-0 items-center justify-center gap-1 cursor-pointer group">
+            <input
+              type="checkbox"
+              checked={gridEnabled}
+              onChange={(e) => setGridEnabled(e.target.checked)}
+              className="w-3.5 h-3.5 border-brutal border-border bg-background-card accent-accent"
+            />
+            <span className="text-[10px] font-mono text-text-secondary group-hover:text-text-primary">Grid</span>
+          </label>
+          <label className="flex min-w-0 items-center justify-center gap-1 cursor-pointer group">
+            <input
+              type="checkbox"
+              checked={snapToGrid}
+              onChange={(e) => setSnapToGrid(e.target.checked)}
+              className="w-3.5 h-3.5 border-brutal border-border bg-background-card accent-accent"
+            />
+            <span className="text-[10px] font-mono text-text-secondary group-hover:text-text-primary">Snap</span>
+          </label>
+          <label className="flex min-w-0 items-center justify-center gap-1 cursor-pointer group">
+            <input
+              type="checkbox"
+              checked={showMiniMap}
+              onChange={(e) => setShowMiniMap(e.target.checked)}
+              className="w-3.5 h-3.5 border-brutal border-border bg-background-card accent-accent"
+            />
+            <span className="text-[10px] font-mono text-text-secondary group-hover:text-text-primary">Minimap</span>
+          </label>
         </div>
       </div>
 
@@ -314,7 +272,7 @@ export const MasterControlPanel = memo(function MasterControlPanel({
           {onNewSession && (
             <button
               onClick={onNewSession}
-              className="btn-primary !py-1.5 !px-3 !text-xs flex-1"
+              className="btn-primary btn-compact flex-1"
             >
               <Plus className="w-3 h-3" />
               New Session
@@ -323,7 +281,7 @@ export const MasterControlPanel = memo(function MasterControlPanel({
           {onAutoArrange && (
             <button
               onClick={onAutoArrange}
-              className="btn-secondary !py-1.5 !px-3 !text-xs flex-1"
+              className="btn-secondary btn-compact flex-1"
             >
               <LayoutGrid className="w-3 h-3" />
               Arrange
@@ -333,13 +291,13 @@ export const MasterControlPanel = memo(function MasterControlPanel({
         {(onLaunchClaude || onLaunchCodex) && (
           <div className="flex items-center gap-2 mt-2">
             {onLaunchClaude && (
-              <button onClick={onLaunchClaude} className="btn-secondary !py-1.5 !px-3 !text-xs flex-1">
+              <button onClick={onLaunchClaude} className="btn-secondary btn-compact flex-1">
                 <Bot className="w-3 h-3" />
                 Claude
               </button>
             )}
             {onLaunchCodex && (
-              <button onClick={onLaunchCodex} className="btn-secondary !py-1.5 !px-3 !text-xs flex-1">
+              <button onClick={onLaunchCodex} className="btn-secondary btn-compact flex-1">
                 <Code2 className="w-3 h-3" />
                 Codex
               </button>
@@ -351,7 +309,7 @@ export const MasterControlPanel = memo(function MasterControlPanel({
             {onAddContext && (
               <button
                 onClick={onAddContext}
-                className="btn-secondary !py-1.5 !px-3 !text-xs flex-1"
+                className="btn-secondary btn-compact flex-1"
               >
                 <StickyNote className="w-3 h-3" />
                 Context
@@ -360,7 +318,7 @@ export const MasterControlPanel = memo(function MasterControlPanel({
             {onAddNeon && (
               <button
                 onClick={onAddNeon}
-                className="btn-secondary !py-1.5 !px-3 !text-xs flex-1"
+                className="btn-secondary btn-compact flex-1"
               >
                 <Database className="w-3 h-3" />
                 Neon
@@ -369,7 +327,7 @@ export const MasterControlPanel = memo(function MasterControlPanel({
             {onAddVercel && (
               <button
                 onClick={onAddVercel}
-                className="btn-secondary !py-1.5 !px-3 !text-xs flex-1"
+                className="btn-secondary btn-compact flex-1"
               >
                 <Triangle className="w-3 h-3" />
                 Vercel
@@ -378,14 +336,15 @@ export const MasterControlPanel = memo(function MasterControlPanel({
           </div>
         )}
         {onAddDataPanel && (
-          <div className="flex items-center gap-2 mt-2 flex-wrap">
+          <div className="master-control-action-grid mt-2">
             {DATA_PANEL_DEFS.map((def) => {
               return (
                 <button
                   key={def.type}
                   onClick={() => onAddDataPanel(def.type, def.title)}
-                  className="btn-secondary !py-1.5 !px-3 !text-xs flex-1"
+                  className="btn-secondary btn-compact master-control-action"
                   style={{ color: `hsl(${def.hue}, 45%, 48%)` }}
+                  title={`Add ${def.title} node`}
                 >
                   <GhostPeonyIcon
                     name={def.type as GhostPeonyIconName}

@@ -7,7 +7,7 @@
  * piping query results into terminals.
  */
 
-import { useTerminalStore } from '../stores'
+import { useTerminalStore } from '../stores/terminalStore'
 
 export interface RouteResult {
   /** Number of terminals the content was routed to */

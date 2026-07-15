@@ -20,34 +20,37 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
-import { useTerminalStore, useCanvasControlStore } from '../../stores'
-import type { Panel, TerminalSession, CanvasEdge, MonitorAutoMode } from '../../stores'
+import { useTerminalStore, useCanvasControlStore, useCanvasOrchestratorStore, useRuntimeStore, useCampaignStore } from '../../stores'
+import type { Panel, TerminalSession, MonitorAutoMode } from '../../stores'
 import { getActiveWorkspaceId, wsKey } from '../../stores/workspacePersistence'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
-import { getMonitorInfo, isMonitorEdge, sendMonitorSnapshot } from '../../utils/monitorRouting'
+import { isMonitorEdge, sendMonitorSnapshot } from '../../utils/monitorRouting'
 import { applyPreset, type CanvasPreset } from './canvasPresets'
 import { TerminalNode, type TerminalNodeData } from './TerminalNode'
 import { MonitorEdge, type MonitorEdgeData } from './edges/MonitorEdge'
 import { PreviewNode, type PreviewNodeData } from './PreviewNode'
 import { BrowserNode, type BrowserNodeData } from './BrowserNode'
-import { IntegrationNode } from './nodes/IntegrationNode'
-import { ActivityFeedNode } from './nodes/ActivityFeedNode'
-import { TrainingRunNode } from './nodes/TrainingRunNode'
-import { EvalNode } from './nodes/EvalNode'
-import { DataDesignerNode } from './nodes/DataDesignerNode'
-import { HFInventoryNode } from './nodes/HFInventoryNode'
-import { AgentEndpointNode } from './nodes/AgentEndpointNode'
-import { ToolKitNode } from './nodes/ToolKitNode'
-import { DATA_NODE_TYPES } from './nodes/dataPanels'
+import { CAMPAIGNS_ENABLED } from './nodes/dataPanels'
+import { configureMcpWorkbenchApi } from './nodes/mcpWorkbenchModel'
+import { DATA_PANEL_DEFS } from './nodes/dataPanels'
+import {
+  buildCustomNodeData,
+  customNodeTypes,
+} from './nodes/customNodeRegistry'
+import { isCustomNodeType } from './nodes/customNodeTypes'
+import { findDynamicNodePosition } from './canvasPlacement'
+import { buildCanvasGraphIndex, reconcileCanvasNodes, type CanvasGraphIndex } from './canvasPerformance'
+import { loadCanvasViewport, saveCanvasViewport } from './canvasViewport'
 import type { IntegrationNodeData, DataNodeData } from './nodes/types'
-import { workspaceApi } from '../../services/api'
-// Import adapters to trigger registration side effects
-import './nodes/adapters/context'
-import './nodes/adapters/neon'
-import './nodes/adapters/vercel'
+import { createMcpWorkbenchApi, designerApi, trainingApi, workspaceApi } from '../../services/api'
+import { useActivityStore } from '../../stores/activityStore'
+import { trainingQueuedPayloadFromResponse } from '../../stores/trainingCanvasLifecycle'
+import { campaignsMissingPanels } from '../../stores/campaignCanvasLifecycle'
 import { MasterControlPanel } from './MasterControlPanel'
 import { useCanvasHotkeys } from '../../hooks/useCanvasHotkeys'
 import { AlertCircle } from 'lucide-react'
+
+configureMcpWorkbenchApi(createMcpWorkbenchApi(getActiveWorkspaceId))
 
 const EDGE_STYLE = { stroke: 'var(--accent)', strokeWidth: 2 }
 
@@ -146,28 +149,6 @@ function decorateMonitorEdges(edges: Edge[], panels: Panel[], handlers: MonitorH
 type CanvasNodeData = TerminalNodeData | PreviewNodeData | BrowserNodeData | IntegrationNodeData | DataNodeData
 type CanvasFlowNode = Node<CanvasNodeData>
 
-// Load saved viewport (per workspace)
-const loadViewport = (wsId: string): Viewport | null => {
-  try {
-    const stored = localStorage.getItem(wsKey(wsId, 'viewport'))
-    if (stored) {
-      return JSON.parse(stored)
-    }
-  } catch {
-    // Ignore
-  }
-  return null
-}
-
-// Save viewport (per workspace)
-const saveViewport = (wsId: string, viewport: Viewport) => {
-  try {
-    localStorage.setItem(wsKey(wsId, 'viewport'), JSON.stringify(viewport))
-  } catch {
-    // Ignore
-  }
-}
-
 const SECRET_KEY_RE = /(api[_-]?key|authorization|bearer|password|secret|token)/i
 
 function sanitizeConfig(value: unknown): unknown {
@@ -224,7 +205,19 @@ function buildWorkspaceSnapshot(state: ReturnType<typeof useTerminalStore.getSta
       'workspace.context.read',
       'workspace.canvas.intent.emit',
       'training.start',
-      'terminal.snapshot.send'
+      'campaign.read',
+      'campaign.start',
+      'campaign.pause',
+      'campaign.resume',
+      'campaign.cancel',
+      'data_designer.start',
+      'terminal.snapshot.send',
+      'hf_context.search',
+      'hf_context.inspect',
+      'hf_context.pin',
+      'hf_context.activate',
+      'hf_context.deactivate',
+      'hf_context.prepare_eval'
     ]
   }
 }
@@ -234,22 +227,18 @@ const nodeTypes = {
   terminal: TerminalNode,
   preview: PreviewNode,
   browser: BrowserNode,
-  context: IntegrationNode,
-  neon: IntegrationNode,
-  vercel: IntegrationNode,
-  activity: ActivityFeedNode,
-  training: TrainingRunNode,
-  evals: EvalNode,
-  designer: DataDesignerNode,
-  huggingface: HFInventoryNode,
-  agent: AgentEndpointNode,
-  toolkit: ToolKitNode,
+  ...customNodeTypes,
 }
 
 // Register custom edge types
 const edgeTypes = {
   monitor: MonitorEdge,
 }
+
+// Active work stays responsive; idle canvases back off and hidden windows stop
+// scanning entirely until visibility returns.
+const ACTIVE_RUNTIME_RECONCILE_MS = 3_000
+const IDLE_RUNTIME_RECONCILE_MS = 12_000
 
 export interface CanvasViewProps {
   onFocusPanel: (panelId: string) => void
@@ -262,31 +251,13 @@ function buildNodeData(
   sessions: Map<string, TerminalSession>,
   onFocus: (id: string) => void,
   onClose: (id: string) => void,
-  canvasEdges: CanvasEdge[] = [],
-  panels: Panel[] = []
+  graph: CanvasGraphIndex,
 ): TerminalNodeData | PreviewNodeData | BrowserNodeData | IntegrationNodeData | DataNodeData {
   const session = panel.terminalId ? sessions.get(panel.terminalId) : undefined
-  const hasConnections = canvasEdges.some(e => e.source === panel.id || e.target === panel.id)
+  const hasConnections = graph.connectedPanelIds.has(panel.id)
 
-  if (panel.type === 'context' || panel.type === 'neon' || panel.type === 'vercel') {
-    return {
-      panelId: panel.id,
-      title: panel.title,
-      adapterType: panel.type,
-      adapterConfig: { ...panel.adapterConfig, _panelId: panel.id },
-      hasConnections,
-      onFocus,
-      onClose,
-    } as IntegrationNodeData
-  } else if (DATA_NODE_TYPES.includes(panel.type)) {
-    return {
-      panelId: panel.id,
-      title: panel.title,
-      adapterConfig: panel.adapterConfig,
-      hasConnections,
-      onFocus,
-      onClose,
-    } as DataNodeData
+  if (isCustomNodeType(panel.type)) {
+    return buildCustomNodeData(panel, graph, onFocus, onClose)
   } else if (panel.type === 'preview') {
     return {
       panelId: panel.id,
@@ -321,11 +292,9 @@ function buildNodeData(
       }
     } as BrowserNodeData
   } else {
-    const monitor = getMonitorInfo(panel.id, canvasEdges, panels)
+    const monitor = graph.monitorByPanelId.get(panel.id) ?? { isWatched: false }
     // Link2 chip stays about data-node routing; monitor edges get their own chips
-    const dataConnections = canvasEdges.some(
-      e => (e.source === panel.id || e.target === panel.id) && !isMonitorEdge(e, panels)
-    )
+    const dataConnections = graph.dataConnectedPanelIds.has(panel.id)
     return {
       panelId: panel.id,
       title: panel.title,
@@ -355,17 +324,12 @@ function buildNodeData(
 }
 
 function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
-  const {
-    panels: _panels,
-    sessions: _sessions,
-    sessionsVersion: _sessionsVersion,
-    activePanelId: _activePanelId,
-    canvasNodes,
-    updateCanvasNode,
-    setActivePanel,
-    createTerminal,
-    setCanvasEdges
-  } = useTerminalStore()
+  const _panels = useTerminalStore((state) => state.panels)
+  const updateCanvasNode = useTerminalStore((state) => state.updateCanvasNode)
+  const setActivePanel = useTerminalStore((state) => state.setActivePanel)
+  const createTerminal = useTerminalStore((state) => state.createTerminal)
+  const setCanvasEdges = useTerminalStore((state) => state.setCanvasEdges)
+  const pollRuntime = useRuntimeStore((state) => state.poll)
 
   const {
     gridEnabled,
@@ -373,8 +337,14 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
     showMiniMap
   } = useCanvasControlStore()
 
+  // This component remounts per workspace, so capture both persistence keys and
+  // the initial zoom before React Flow initializes.
+  const wsIdRef = useRef(getActiveWorkspaceId())
+  const initialViewportRef = useRef(
+    loadCanvasViewport(localStorage, wsKey(wsIdRef.current, 'viewport')),
+  )
   const { fitView, zoomIn, zoomOut, getZoom, getNodes } = useReactFlow()
-  const [currentZoom, setCurrentZoom] = useState(1)
+  const [currentZoom, setCurrentZoom] = useState(initialViewportRef.current?.zoom ?? 1)
 
   // Stable callbacks — consistent references across renders so TerminalNode memo stays effective
   const handleFocusPanel = useCallback((id: string) => {
@@ -388,16 +358,10 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
     useTerminalStore.getState().removePanel(id)
   }, [onClosePopup])
 
-  // Track canvasNodes via ref so the update effect can read current saved positions for new
-  // panels without re-running every time a drag updates canvasNodes
-  const canvasNodesRef = useRef(canvasNodes)
-  canvasNodesRef.current = canvasNodes
   const snapshotTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-
-  // Workspace this component instance belongs to — captured at mount. The
-  // component remounts (keyed) on workspace switch, so this never goes stale,
-  // and unmount-straggler effects can't write into another workspace's keys.
-  const wsIdRef = useRef(getActiveWorkspaceId())
+  const knownPanelIdsRef = useRef(new Set(_panels.map((panel) => panel.id)))
+  const materializingPanelIdsRef = useRef(new Set<string>())
+  const materializeTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>())
 
   const [nodes, setNodes, onNodesChange] = useNodesState<CanvasFlowNode>([])
   const initialEdgesRef = useRef<Edge[] | null>(null)
@@ -405,6 +369,143 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
     initialEdgesRef.current = loadEdges(wsIdRef.current)
   }
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdgesRef.current)
+
+  // Campaigns are durable controller state, so reconstruct their nodes after a
+  // renderer reload even when the creation event was missed while the canvas was closed.
+  useEffect(() => {
+    if (!CAMPAIGNS_ENABLED) return
+    let cancelled = false
+    const workspaceId = wsIdRef.current
+    const reconcileCampaigns = async () => {
+      await useCampaignStore.getState().load(workspaceId)
+      if (cancelled) return
+      const campaigns = useCampaignStore.getState().workspaces[workspaceId]?.campaigns || []
+      const terminal = useTerminalStore.getState()
+      for (const campaign of campaignsMissingPanels(campaigns, terminal.panels)) {
+        const panelId = terminal.addPanel({
+          type: 'campaign',
+          title: campaign.title || 'Experiment Campaign',
+          adapterConfig: { campaignId: campaign.campaign_id },
+        })
+        const latest = useTerminalStore.getState()
+        const anchor = latest.activePanelId
+          ? latest.canvasNodes.get(latest.activePanelId)?.position
+          : undefined
+        latest.updateCanvasNode(
+          panelId,
+          findDynamicNodePosition(
+            'campaign',
+            anchor,
+            Array.from(latest.canvasNodes.values())
+              .filter((node) => node.panelId !== panelId)
+              .map((node) => node.position),
+          ),
+        )
+      }
+    }
+    void reconcileCampaigns()
+    return () => { cancelled = true }
+  }, [])
+
+  // Recover active runs after a renderer reload or a missed WebSocket event.
+  // Completed history stays out of the active canvas unless it was already
+  // materialized when the run launched.
+  useEffect(() => {
+    let cancelled = false
+
+    const reconcileActiveTrainingRuns = async () => {
+      try {
+        const responses = await Promise.all(
+          ['pending', 'running', 'paused'].map((status) => trainingApi.list(status, 20)),
+        )
+        if (cancelled) return
+
+        const seenRunIds = new Set<string>()
+        const orchestrator = useCanvasOrchestratorStore.getState()
+        for (const response of responses) {
+          if (!response.ok || !response.data) continue
+          for (const run of response.data) {
+            if (seenRunIds.has(run.run_id)) continue
+            seenRunIds.add(run.run_id)
+            orchestrator.handleTrainingQueued(trainingQueuedPayloadFromResponse(run))
+            if (run.status !== 'pending') {
+              orchestrator.handleTrainingTerminalStatus(run.run_id, run.status)
+            }
+          }
+        }
+      } catch (error) {
+        console.debug('[canvas] unable to reconcile active training runs', error)
+      }
+    }
+
+    void reconcileActiveTrainingRuns()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Reconcile both process-observed work and Data Designer API jobs so agents
+  // and page launches materialize nodes even when their initial event was missed.
+  useEffect(() => {
+    let cancelled = false
+    let polling = false
+    let timer: number | undefined
+
+    const schedule = (delay: number) => {
+      if (cancelled) return
+      if (timer !== undefined) window.clearTimeout(timer)
+      timer = window.setTimeout(() => void poll(), delay)
+    }
+
+    const poll = async () => {
+      if (cancelled || polling) return
+      if (document.hidden) return
+
+      polling = true
+      let designerActive = false
+      try {
+        const [, response] = await Promise.all([
+          pollRuntime(),
+          designerApi.listJobs(20),
+        ])
+        if (cancelled || !response.ok || !response.data) return
+        const orchestrator = useCanvasOrchestratorStore.getState()
+        for (const job of response.data) {
+          if (job.status !== 'queued' && job.status !== 'running') continue
+          designerActive = true
+          orchestrator.handleDesignerJob(job)
+          useActivityStore.getState().addEvent('designer:queued', {
+            job_id: job.job_id,
+            pipeline: job.pipeline,
+            num_records: job.num_records,
+          })
+        }
+      } catch (error) {
+        console.debug('[canvas] unable to reconcile Data Designer jobs', error)
+      } finally {
+        polling = false
+        const runtimeActive = useRuntimeStore.getState().jobs.some((job) => job.status === 'running')
+        schedule(
+          runtimeActive || designerActive
+            ? ACTIVE_RUNTIME_RECONCILE_MS
+            : IDLE_RUNTIME_RECONCILE_MS,
+        )
+      }
+    }
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        if (timer !== undefined) window.clearTimeout(timer)
+        void poll()
+      }
+    }
+    void poll()
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      cancelled = true
+      if (timer !== undefined) window.clearTimeout(timer)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [pollRuntime])
 
   // Sync React Flow edges to Zustand store for cross-component routing (e.g. BrowserPane
   // screenshot routing, monitor snapshots) and persist them across reloads
@@ -473,29 +574,53 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
   // Fires immediately whenever any display-relevant store state changes.
   useEffect(() => {
     const rebuildNodes = (state: ReturnType<typeof useTerminalStore.getState>) => {
+      const graph = buildCanvasGraphIndex(state.panels, state.canvasEdges)
+      const currentPanelIds = new Set(state.panels.map((panel) => panel.id))
+      for (const knownPanelId of knownPanelIdsRef.current) {
+        if (currentPanelIds.has(knownPanelId)) continue
+        knownPanelIdsRef.current.delete(knownPanelId)
+        materializingPanelIdsRef.current.delete(knownPanelId)
+        const timer = materializeTimersRef.current.get(knownPanelId)
+        if (timer) clearTimeout(timer)
+        materializeTimersRef.current.delete(knownPanelId)
+      }
+      for (const panel of state.panels) {
+        if (knownPanelIdsRef.current.has(panel.id)) continue
+        knownPanelIdsRef.current.add(panel.id)
+        materializingPanelIdsRef.current.add(panel.id)
+        const timer = setTimeout(() => {
+          materializingPanelIdsRef.current.delete(panel.id)
+          materializeTimersRef.current.delete(panel.id)
+          setNodes((current) => current.map((node) => (
+            node.id === panel.id ? { ...node, className: undefined } : node
+          )))
+        }, 420)
+        materializeTimersRef.current.set(panel.id, timer)
+      }
+
       setNodes((prevNodes) => {
         const positionMap = new Map(prevNodes.map(n => [n.id, n.position]))
 
-        return state.panels.map((panel, index) => {
+        const candidates = state.panels.map((panel, index) => {
           const savedPosition = positionMap.get(panel.id)
-          const persistedPosition = canvasNodesRef.current.get(panel.id)?.position
+          const persistedPosition = state.canvasNodes.get(panel.id)?.position
           const defaultPosition = {
             x: 50 + (index % 3) * 380,
             y: 50 + Math.floor(index / 3) * 280
           }
-          const integrationTypes = ['context', 'neon', 'vercel'] as const
           const nodeType = panel.type === 'preview' ? 'preview' :
                            panel.type === 'browser' ? 'browser' :
-                           integrationTypes.includes(panel.type as any) ? panel.type :
-                           DATA_NODE_TYPES.includes(panel.type) ? panel.type : 'terminal'
+                           isCustomNodeType(panel.type) ? panel.type : 'terminal'
           return {
             id: panel.id,
             type: nodeType,
-            position: savedPosition || persistedPosition || defaultPosition,
+            position: persistedPosition || savedPosition || defaultPosition,
             selected: panel.id === state.activePanelId,
-            data: buildNodeData(panel, state.sessions, handleFocusPanelRef.current, handleClosePanelRef.current, state.canvasEdges, state.panels)
+            className: materializingPanelIdsRef.current.has(panel.id) ? 'canvas-node-enter' : undefined,
+            data: buildNodeData(panel, state.sessions, handleFocusPanelRef.current, handleClosePanelRef.current, graph)
           }
         })
+        return reconcileCanvasNodes(prevNodes, candidates)
       })
     }
 
@@ -507,18 +632,39 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
     // sessionsVersion only bumps on render-relevant changes (status/tool/attention/
     // taskSummary/agentKind/isPaused/cwd/errorMessage), so keying on it keeps the
     // canvas from rebuilding all nodes while a terminal is merely streaming output.
+    let queuedState: ReturnType<typeof useTerminalStore.getState> | undefined
+    let frame: number | undefined
+    const scheduleRebuild = (state: ReturnType<typeof useTerminalStore.getState>) => {
+      queuedState = state
+      if (frame !== undefined) return
+      frame = window.requestAnimationFrame(() => {
+        frame = undefined
+        const latest = queuedState
+        queuedState = undefined
+        if (latest) rebuildNodes(latest)
+      })
+    }
     const unsubscribe = useTerminalStore.subscribe((state, prev) => {
       if (
         state.panels === prev.panels &&
         state.sessionsVersion === prev.sessionsVersion &&
         state.activePanelId === prev.activePanelId &&
+        state.canvasNodes === prev.canvasNodes &&
         state.canvasEdges === prev.canvasEdges
       ) return
-      rebuildNodes(state)
+      scheduleRebuild(state)
     })
 
-    return unsubscribe
+    return () => {
+      unsubscribe()
+      if (frame !== undefined) window.cancelAnimationFrame(frame)
+    }
   }, [setNodes]) // setNodes is stable; callbacks accessed via ref
+
+  useEffect(() => () => {
+    for (const timer of materializeTimersRef.current.values()) clearTimeout(timer)
+    materializeTimersRef.current.clear()
+  }, [])
 
   // Sync a sanitized live canvas snapshot for terminal/Hermes agents. Throttled
   // and keyed on render-relevant state so terminal output streaming does not
@@ -619,29 +765,26 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
   }, [setActivePanel])
 
   // Load saved viewport or use default
-  const savedViewport = useRef(loadViewport(wsIdRef.current))
+  const savedViewport = initialViewportRef
   const shouldFitView = !savedViewport.current
 
   // Save viewport on move/zoom
   const onMoveEnd = useCallback((_: any, viewport: Viewport) => {
-    saveViewport(wsIdRef.current, viewport)
+    saveCanvasViewport(localStorage, wsKey(wsIdRef.current, 'viewport'), viewport)
     setCurrentZoom(viewport.zoom)
   }, [])
 
   // Control panel handlers
   const handleZoomIn = useCallback(() => {
-    zoomIn()
-    setCurrentZoom(getZoom())
+    void zoomIn().then(() => setCurrentZoom(getZoom()))
   }, [zoomIn, getZoom])
 
   const handleZoomOut = useCallback(() => {
-    zoomOut()
-    setCurrentZoom(getZoom())
+    void zoomOut().then(() => setCurrentZoom(getZoom()))
   }, [zoomOut, getZoom])
 
   const handleFitView = useCallback(() => {
-    fitView({ padding: 0.2 })
-    setTimeout(() => setCurrentZoom(getZoom()), 100)
+    void fitView({ padding: 0.2 }).then(() => setCurrentZoom(getZoom()))
   }, [fitView, getZoom])
 
   // Canvas keyboard shortcuts (1-9 focus, Tab cycle, F fit, G grid, M minimap, Space pause)
@@ -659,8 +802,7 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
       }))
     })
     setTimeout(() => {
-      fitView({ padding: 0.2 })
-      setCurrentZoom(getZoom())
+      void fitView({ padding: 0.2 }).then(() => setCurrentZoom(getZoom()))
     }, 100)
   }, [setNodes, fitView, getZoom])
 
@@ -682,8 +824,18 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
   }, [])
 
   const addDataPanel = useCallback((type: Panel['type'], title: string) => {
-    const { addPanel } = useTerminalStore.getState()
-    addPanel({ type, title })
+    const state = useTerminalStore.getState()
+    const singleton = DATA_PANEL_DEFS.find((definition) => definition.type === type)?.singleton
+    const existing = singleton ? state.panels.find((panel) => panel.type === type) : undefined
+    if (existing) {
+      state.setActivePanel(existing.id)
+      return
+    }
+    const originPanelId = state.activePanelId
+    const panelId = state.addPanel({ type, title })
+    const anchor = originPanelId ? state.canvasNodes.get(originPanelId)?.position : undefined
+    const occupied = Array.from(state.canvasNodes.values()).map((node) => node.position)
+    state.updateCanvasNode(panelId, findDynamicNodePosition(type, anchor, occupied))
   }, [])
 
   // Spawn a saved/built-in workspace preset: panels at their positions plus edges
@@ -709,8 +861,7 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
       return decorateMonitorEdges(updated, useTerminalStore.getState().panels, monitorHandlers)
     })
     setTimeout(() => {
-      fitView({ padding: 0.2 })
-      setCurrentZoom(getZoom())
+      void fitView({ padding: 0.2 }).then(() => setCurrentZoom(getZoom()))
     }, 150)
   }, [setEdges, setNodes, updateCanvasNode, fitView, getZoom, monitorHandlers])
 

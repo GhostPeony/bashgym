@@ -4,7 +4,7 @@ import {
   type GhostPeonyIconName
 } from '../common/ghostPeonyIconAssets'
 
-export type NodeFlowerVariant = PanelType | 'integration'
+export type NodeFlowerVariant = PanelType | 'database' | 'integration' | 'supabase'
 
 const FLOWER_ASSETS: Record<NodeFlowerVariant, GhostPeonyIconName> = {
   terminal: 'terminal',
@@ -12,16 +12,22 @@ const FLOWER_ASSETS: Record<NodeFlowerVariant, GhostPeonyIconName> = {
   preview: 'preview',
   files: 'preview',
   context: 'context',
+  database: 'database',
   neon: 'neon',
+  supabase: 'supabase',
   vercel: 'vercel',
   integration: 'integration',
   activity: 'activity',
   training: 'training',
+  campaign: 'training',
   evals: 'evals',
   designer: 'designer',
   huggingface: 'huggingface',
   agent: 'agent',
-  toolkit: 'toolkit'
+  toolkit: 'toolkit',
+  skilllab: 'skilllab',
+  mcp: 'mcp',
+  knowledge: 'database'
 }
 
 export function flowerVariantForPanelType(type: PanelType): NodeFlowerVariant {

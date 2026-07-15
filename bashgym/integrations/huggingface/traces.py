@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -107,6 +108,9 @@ class TraceUploader:
 
         datasets = []
         for ds in self.api.list_datasets(author=username, search=prefix):
+            repo_name = str(ds.id).rsplit("/", 1)[-1]
+            if not re.search(r"(?:^|[-_])traces?(?:$|[-_])", repo_name, re.IGNORECASE):
+                continue
             datasets.append(
                 {
                     "id": ds.id,

@@ -1,13 +1,13 @@
 {
   "schema_version": "bashgym.operator-bundle-lock.v1",
   "files": {
-    "SKILL.md": "d5fccaf70138dcc327d88c300a0ae668b116a9ccb0e71dccd84f61deb998ee21",
-    "references/operator-contract.md": "e4cf935517e299d3d812fc8a997daa8533c73f29231c4dd1318972a510f3dd50",
+    "SKILL.md": "946e1cc2d4cbd98fe88d0a86196a9b6d07ec922649ab3bcaf6dc00c3e70a0cd9",
+    "references/operator-contract.md": "a464659fec36fd7a5017f8dbe41e24f94876fe8b1d249b13c15458c2b9d3cd69",
     "scripts/operator_context.py": "1beddb1652823dcbbe143405529112e297b34df1aa26848acb2b3fe44c28d95f",
     "scripts/curate_activity.py": "fa11e0aad8b2ca92372ee09baaec67e268e3406350b655ec41a2f8fb67cc31ba",
     "scripts/gbrain_bridge.py": "66b1bacae2d3f9b92ddc5c3687ad99a853bd64da853bb36f1b90ca39d23f4fa7",
     "../bashgym/SKILL.md": "7703909ea87767287e590080533a4cae530323e3c46efdf66e7f806cd964e7ce",
-    "../training/SKILL.md": "9eaf9ba31e71b6064d8b95fc4a81bc3e244a82ea4adb642c0620837026ae1bc0",
+    "../training/SKILL.md": "f1aa3da66bfc2febcaa5c086531bbd4c573ab9e0cd1ea3b7815624cbe93d310d",
     "../training/references/bashgym-launch-recipes.md": "3ecc67b458b1fe841edf6a4565d46e7c7cc6f2a08d6ef33931b28057d05e9fea",
     "../training/references/compute-target-activation.md": "a1d439eb8102748285e5fc55d7e5715d812e02d15c84b897bb4cd0e1d3c887d7"
   }

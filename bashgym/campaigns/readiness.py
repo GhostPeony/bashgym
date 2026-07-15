@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from pathlib import PurePosixPath
 from typing import Literal
 
 from pydantic import Field
@@ -29,9 +30,7 @@ class AutoResearchDoctorCheck(FrozenContractModel):
 
 
 class AutoResearchDoctorReport(FrozenContractModel):
-    schema_version: Literal["autoresearch_doctor_report.v1"] = (
-        "autoresearch_doctor_report.v1"
-    )
+    schema_version: Literal["autoresearch_doctor_report.v1"] = "autoresearch_doctor_report.v1"
     workspace_id: Identifier
     template_id: Identifier
     definition_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -56,6 +55,19 @@ def _check(
         code=success_code if ready else failure_code,
         guidance="" if ready else guidance,
     )
+
+
+def _source_entrypoint_ready(
+    source_profile: ApprovedSourceRepositoryProfile, entrypoint_path: str
+) -> bool:
+    repository = source_profile.repository_path.expanduser().resolve()
+    candidate = repository.joinpath(*PurePosixPath(entrypoint_path).parts)
+    try:
+        resolved = candidate.resolve(strict=True)
+        resolved.relative_to(repository)
+    except (OSError, ValueError):
+        return False
+    return resolved.is_file() and not candidate.is_symlink()
 
 
 def has_immutable_model_revision(model_ref: str) -> bool:
@@ -109,8 +121,7 @@ def doctor_autoresearch_template(
 
     if quality_claim_eligible:
         model_ready = has_immutable_model_revision(definition.target_model.base_model_ref) and (
-            definition.target_model.representation_contract.get("artifact_role")
-            == "trainable_base"
+            definition.target_model.representation_contract.get("artifact_role") == "trainable_base"
         )
         checks.append(
             _check(
@@ -159,8 +170,7 @@ def doctor_autoresearch_template(
                 evaluator_ready = bool(
                     isinstance(metric_contract, dict)
                     and metric_contract.get("primary_metric") == policy.primary_metric
-                    and metric_contract.get("metric_direction")
-                    == policy.metric_direction.value
+                    and metric_contract.get("metric_direction") == policy.metric_direction.value
                     and suite.get("dataset_version_id") == dataset_binding_id
                 )
             except RecordNotFoundError:
@@ -181,15 +191,13 @@ def doctor_autoresearch_template(
         )
         profile = executor_profiles.get(profile_key)
         compute_ready = profile is not None
+        required_training_stages = _required_training_stages(definition)
         if profile is not None:
-            expected_target_digest = canonical_hash(
-                definition.target_model.model_dump(mode="json")
-            )
-            stages = _required_training_stages(definition)
+            expected_target_digest = canonical_hash(definition.target_model.model_dump(mode="json"))
             compute_ready = bool(
-                stages
+                required_training_stages
                 and profile.target_model_digest == expected_target_digest
-                and stages.issubset({stage.stage for stage in profile.stages})
+                and required_training_stages.issubset({stage.stage for stage in profile.stages})
             )
             if compute_ready:
                 try:
@@ -224,6 +232,33 @@ def doctor_autoresearch_template(
                 "source_repository_binding_ready",
                 "source_repository_binding_unresolved",
                 "Register the logical source profile in the worker configuration with a private Git repository and operator-approved mutation paths.",
+            )
+        )
+        code_execution_ready = bool(
+            profile is not None
+            and source_profile is not None
+            and required_training_stages
+            and all(
+                stage.code_lineage_binding is not None
+                and stage.code_lineage_binding.source_repository_profile_id
+                == source_profile.profile_id
+                and _source_entrypoint_ready(
+                    source_profile, stage.code_lineage_binding.entrypoint_path
+                )
+                for stage in profile.stages
+                if stage.stage in required_training_stages
+            )
+            and required_training_stages.issubset(
+                {stage.stage for stage in profile.stages if stage.code_lineage_binding is not None}
+            )
+        )
+        checks.append(
+            _check(
+                "code_lineage_execution_binding",
+                code_execution_ready,
+                "code_lineage_execution_binding_ready",
+                "code_lineage_execution_binding_unresolved",
+                "Bind each required training stage to the logical source profile and an in-repository Python entrypoint.",
             )
         )
     else:
@@ -262,6 +297,13 @@ def doctor_autoresearch_template(
                     True,
                     "control_template_source_repository_not_required",
                     "source_repository_binding_unresolved",
+                    "",
+                ),
+                _check(
+                    "code_lineage_execution_binding",
+                    True,
+                    "control_template_code_lineage_execution_not_required",
+                    "code_lineage_execution_binding_unresolved",
                     "",
                 ),
             )

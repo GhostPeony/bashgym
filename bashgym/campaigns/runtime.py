@@ -106,9 +106,7 @@ class ActionSpec(ContractModel):
             self.executor_kind == "development_evaluation"
             and self.stage != StageKind.DEVELOPMENT_EVALUATION
         ):
-            raise ValueError(
-                "development evaluation executor is restricted to its approved stage"
-            )
+            raise ValueError("development evaluation executor is restricted to its approved stage")
 
     @property
     def input_digest(self) -> str:
@@ -245,9 +243,7 @@ class CampaignRuntimeRepository(CampaignRepository):
             raise RecordNotFoundError("campaign attempt not found")
         return self._attempt_from_row(row)
 
-    def list_attempts(
-        self, workspace_id: str, campaign_id: str
-    ) -> tuple[ActionAttempt, ...]:
+    def list_attempts(self, workspace_id: str, campaign_id: str) -> tuple[ActionAttempt, ...]:
         self._require_initialized()
         with self._connection() as connection:
             rows = connection.execute(
@@ -291,9 +287,7 @@ class CampaignRuntimeRepository(CampaignRepository):
         campaign_id: str,
         study_id: str,
         *,
-        executor_profiles: Mapping[
-            tuple[str, str], ApprovedRemoteExecutorProfile
-        ] | None = None,
+        executor_profiles: Mapping[tuple[str, str], ApprovedRemoteExecutorProfile] | None = None,
     ) -> ActionSpec:
         """Build a safe controller action from immutable study/manifest evidence.
 
@@ -358,9 +352,7 @@ class CampaignRuntimeRepository(CampaignRepository):
             if code_lineage is None:
                 raise CampaignPersistenceError("campaign_code_lineage_not_registered")
             if code_lineage.mutation_kind != required_lineage_kind:
-                raise CampaignPersistenceError(
-                    "campaign_code_lineage_mutation_kind_mismatch"
-                )
+                raise CampaignPersistenceError("campaign_code_lineage_mutation_kind_mismatch")
         if item.stage == StageKind.DATA_BUILD:
             recipe = dict(proposal["dataset_recipe"])
         elif item.stage in {StageKind.SMOKE_TRAINING, StageKind.FULL_TRAINING}:
@@ -372,13 +364,6 @@ class CampaignRuntimeRepository(CampaignRepository):
             raise CampaignPersistenceError("campaign_recipe_runtime_invalid")
         executor_kind = runtime.get("executor_kind", "fake")
         executor_config: dict[str, Any] = {}
-        if code_lineage is not None and executor_kind in {
-            "registered_training",
-            "ssh_remote",
-        }:
-            raise CampaignPersistenceError(
-                "campaign_code_lineage_execution_binding_required"
-            )
         if executor_kind in {"registered_training", "ssh_remote"}:
             if item.stage not in {StageKind.SMOKE_TRAINING, StageKind.FULL_TRAINING}:
                 raise CampaignPersistenceError("campaign_remote_stage_not_allowed")
@@ -392,22 +377,42 @@ class CampaignRuntimeRepository(CampaignRepository):
             target_model_digest = canonical_hash(campaign.target_model.model_dump(mode="json"))
             if profile.target_model_digest != target_model_digest:
                 raise CampaignPersistenceError("campaign_remote_target_model_mismatch")
+            try:
+                configured_stage = profile.stage_profile(item.stage)
+            except KeyError as exc:
+                raise CampaignPersistenceError("campaign_remote_profile_material_invalid") from exc
+            if code_lineage is not None:
+                binding = configured_stage.code_lineage_binding
+                if binding is None:
+                    raise CampaignPersistenceError(
+                        "campaign_code_lineage_execution_binding_required"
+                    )
+                if (
+                    binding.source_repository_profile_id
+                    != code_lineage.source_repository_profile_id
+                ):
+                    raise CampaignPersistenceError(
+                        "campaign_code_lineage_execution_binding_mismatch"
+                    )
             recipe_digest = canonical_hash(
                 {
                     "training_recipe": proposal["training_recipe"],
                     "profile_digest": profile.profile_digest,
                     "stage": item.stage.value,
+                    "code_lineage_record_digest": (
+                        code_lineage.record_digest if code_lineage is not None else None
+                    ),
                 }
             )
             try:
                 executor_config = remote_executor_config(
-                    profile, item.stage, recipe_digest=recipe_digest
+                    profile,
+                    item.stage,
+                    recipe_digest=recipe_digest,
+                    code_lineage=code_lineage,
                 )
-                configured_stage = profile.stage_profile(item.stage)
             except (KeyError, OSError, ValueError) as exc:
-                raise CampaignPersistenceError(
-                    "campaign_remote_profile_material_invalid"
-                ) from exc
+                raise CampaignPersistenceError("campaign_remote_profile_material_invalid") from exc
             budget_unit = configured_stage.budget_unit
             reservation = configured_stage.budget_reservation
         elif executor_kind == "fake":
@@ -438,9 +443,7 @@ class CampaignRuntimeRepository(CampaignRepository):
                 "lineage_id": code_lineage.lineage_id,
                 "record_digest": code_lineage.record_digest,
                 "mutation_kind": code_lineage.mutation_kind.value,
-                "source_repository_profile_id": (
-                    code_lineage.source_repository_profile_id
-                ),
+                "source_repository_profile_id": (code_lineage.source_repository_profile_id),
                 "base_commit": code_lineage.base_commit,
                 "commit_sha": code_lineage.commit_sha,
                 "patch_sha256": code_lineage.patch_sha256,
@@ -479,8 +482,10 @@ class CampaignRuntimeRepository(CampaignRepository):
         """Append one bounded blocker event without reserving budget or scheduling."""
 
         self._require_initialized()
-        if not code or len(code) > 160 or any(
-            character not in "abcdefghijklmnopqrstuvwxyz0123456789_.-" for character in code
+        if (
+            not code
+            or len(code) > 160
+            or any(character not in "abcdefghijklmnopqrstuvwxyz0123456789_.-" for character in code)
         ):
             code = "campaign_controller_action_blocked"
         observed_at = now or utc_now()
@@ -1062,7 +1067,9 @@ class CampaignRuntimeRepository(CampaignRepository):
             ).fetchone()
         return str(row["request_id"]) if row is not None else None
 
-    def settle_force_stop_request(self, workspace_id: str, request_id: str, *, executed: bool) -> None:
+    def settle_force_stop_request(
+        self, workspace_id: str, request_id: str, *, executed: bool
+    ) -> None:
         settled_at = utc_now()
         with self._connection(immediate=True) as connection:
             connection.execute(
@@ -1070,7 +1077,12 @@ class CampaignRuntimeRepository(CampaignRepository):
                 UPDATE campaign_action_control_requests SET state = ?, updated_at = ?
                 WHERE workspace_id = ? AND request_id = ? AND state = 'pending'
                 """,
-                ("executed" if executed else "identity_mismatch", _iso(settled_at), workspace_id, request_id),
+                (
+                    "executed" if executed else "identity_mismatch",
+                    _iso(settled_at),
+                    workspace_id,
+                    request_id,
+                ),
             )
 
     def append_remote_metrics(
@@ -1152,9 +1164,12 @@ class CampaignRuntimeRepository(CampaignRepository):
             ).fetchone()
             event_identity = f"metrics:{attempt.attempt_id}:{source}:{cursor_end}"
             event_id = f"evt-{hashlib.sha256(event_identity.encode()).hexdigest()[:24]}"
-            if connection.execute(
-                "SELECT 1 FROM campaign_events WHERE event_id = ?", (event_id,)
-            ).fetchone() is None:
+            if (
+                connection.execute(
+                    "SELECT 1 FROM campaign_events WHERE event_id = ?", (event_id,)
+                ).fetchone()
+                is None
+            ):
                 self._insert_event(
                     connection,
                     CampaignEvent(
@@ -1379,8 +1394,7 @@ class CampaignRuntimeRepository(CampaignRepository):
                 (workspace_id, campaign_id),
             ).fetchall()
         return tuple(
-            DevelopmentComparison.model_validate_json(row["decision_json"])
-            for row in rows
+            DevelopmentComparison.model_validate_json(row["decision_json"]) for row in rows
         )
 
     def register_remote_identity(
@@ -2358,8 +2372,7 @@ class CampaignRuntimeRepository(CampaignRepository):
                             "seal_uri": str(sealed_directory),
                             "outcome": manifest.outcome,
                             "resource_usage": [
-                                item.model_dump(mode="json")
-                                for item in manifest.resource_usage
+                                item.model_dump(mode="json") for item in manifest.resource_usage
                             ],
                         }
                     ),
@@ -2480,9 +2493,7 @@ class CampaignRuntimeRepository(CampaignRepository):
                 self._attempt_select() + " WHERE t.workspace_id = ? AND t.attempt_id = ?",
                 (manifest.workspace_id, manifest.attempt_id),
             ).fetchone()
-        return RuntimeCompletion(
-            self._attempt_from_row(updated), campaign.version + 1, event
-        )
+        return RuntimeCompletion(self._attempt_from_row(updated), campaign.version + 1, event)
 
     def complete_from_seal(
         self,

@@ -53,6 +53,13 @@ bashgym campaign --json export ...
 
 If `doctor` reports `mutate_desktop_campaign: false`, do not run or fabricate these commands. A guarded local trainer may still create a real BashGym run manifest, but it does not mutate the desktop campaign ledger.
 
+For a code-mutating AutoResearch proposal, the installation registry must pair
+the registered private-compute stage with an approved code-lineage execution
+binding. The binding names only a logical source-profile ID, an in-repository
+Python entrypoint, and bounded archive policy. A launch is authoritative only
+when its remote manifest records the binding digest, lineage record digest,
+captured commit, patch digest, and uploaded archive digest.
+
 The CLI credential must be a bounded secret reference. Never print or pass a raw refresh/access credential in command arguments or GBrain content.
 
 The `context` command has no implicit project default. Its unscoped output is for

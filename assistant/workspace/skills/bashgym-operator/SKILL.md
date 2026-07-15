@@ -92,7 +92,12 @@ be used as the authoritative campaign record.
    `campaign proposal lineage-prepare`, edit only the returned private worktree,
    then call `campaign proposal lineage-capture`. Never edit the user's branch,
    bypass the approved path scope, or merge the hypothesis branch automatically.
-   Scalar recipe variables remain ledger-native and do not use this flow.
+   Before launch, `campaign doctor` must report
+   `code_lineage_execution_binding_ready`. The installation-owned remote stage
+   profile must bind the same logical source profile to an in-repository Python
+   entrypoint; BashGym packages the exact captured commit and verifies its digest
+   again before upload. Scalar recipe variables remain ledger-native and do not
+   use this flow.
 5. Launch and evaluate through the training skill. The primary metric must come
    from the pinned evaluation suite, not a training-loss proxy. Register exact
    run, attempt, artifact, and evaluation lineage. A completed campaign-linked

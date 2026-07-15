@@ -24,9 +24,21 @@ from bashgym.campaigns.executors import (
     FakeExecutor,
     RemoteOutputSealer,
 )
-from bashgym.campaigns.persistence import CampaignPersistenceError, LeaseBusyError, LeaseRecord
+from bashgym.campaigns.lineage import (
+    ApprovedSourceRepositoryProfile,
+    CodeLineageSnapshotReceipt,
+    GitHypothesisLineageManager,
+    GitLineageError,
+)
+from bashgym.campaigns.persistence import (
+    CampaignPersistenceError,
+    LeaseBusyError,
+    LeaseRecord,
+    RecordNotFoundError,
+)
 from bashgym.campaigns.remote import (
     ApprovedRemoteExecutorProfile,
+    CodeLineageLaunchSnapshot,
     RemoteCapacityPolicy,
     RemoteLaunchRequest,
     RemoteRunState,
@@ -62,9 +74,10 @@ class CampaignWorker:
         leader_ttl: timedelta = timedelta(seconds=15),
         action_ttl: timedelta = timedelta(seconds=15),
         remote_adapters: dict[str, RemoteTrainingAdapter] | None = None,
-        remote_executor_profiles: Mapping[
-            tuple[str, str], ApprovedRemoteExecutorProfile
-        ] | None = None,
+        remote_executor_profiles: Mapping[tuple[str, str], ApprovedRemoteExecutorProfile]
+        | None = None,
+        source_repository_profiles: Mapping[str, ApprovedSourceRepositoryProfile] | None = None,
+        lineage_manager: GitHypothesisLineageManager | None = None,
     ):
         self.repository = repository
         self.artifact_root = artifact_root.resolve()
@@ -82,6 +95,12 @@ class CampaignWorker:
         )
         self.remote_adapters = dict(remote_adapters or {})
         self.remote_executor_profiles = dict(remote_executor_profiles or {})
+        self.source_repository_profiles = dict(source_repository_profiles or {})
+        self.lineage_manager = lineage_manager or GitHypothesisLineageManager(
+            data_directory.resolve() / "campaigns" / "source-worktrees"
+        )
+        self.lineage_snapshot_root = data_directory.resolve() / "campaigns" / "source-snapshots"
+        self._lineage_snapshots: dict[str, CodeLineageSnapshotReceipt] = {}
 
     @property
     def leader(self) -> LeaseRecord | None:
@@ -134,7 +153,9 @@ class CampaignWorker:
             expected_claim_generation=attempt.claim_generation,
         )
 
-    def _ingest_sealed_metrics(self, attempt: ActionAttempt, sealed_path: Path, *, now: datetime) -> None:
+    def _ingest_sealed_metrics(
+        self, attempt: ActionAttempt, sealed_path: Path, *, now: datetime
+    ) -> None:
         metrics_path = sealed_path / "training_metrics.jsonl"
         if not metrics_path.is_file() or metrics_path.is_symlink():
             return
@@ -261,15 +282,73 @@ class CampaignWorker:
         except KeyError as exc:
             raise RuntimeError("campaign_remote_executor_profile_unavailable") from exc
         try:
+            study = self.repository.get_study(
+                attempt.workspace_id, attempt.campaign_id, attempt.study_id
+            )
+        except RecordNotFoundError as exc:
+            raise RuntimeError("campaign_remote_study_unavailable") from exc
+        try:
+            code_lineage = self.repository.get_code_lineage(attempt.workspace_id, study.proposal_id)
+        except RecordNotFoundError as exc:
+            if "code_lineage_execution" in executor:
+                raise RuntimeError("campaign_code_lineage_execution_record_unavailable") from exc
+            code_lineage = None
+        try:
             expected = remote_executor_config(
                 profile,
                 attempt.stage,
                 recipe_digest=executor["recipe_digest"],
+                code_lineage=code_lineage,
             )
         except (KeyError, OSError, ValueError) as exc:
             raise RuntimeError("campaign_remote_executor_material_invalid") from exc
         if executor != {"kind": "ssh_remote", **expected}:
             raise RuntimeError("campaign_remote_executor_profile_mismatch")
+        source_snapshot = None
+        if code_lineage is not None:
+            binding = profile.stage_profile(attempt.stage).code_lineage_binding
+            if binding is None:
+                raise RuntimeError("campaign_code_lineage_execution_binding_unavailable")
+            try:
+                source_profile = self.source_repository_profiles[
+                    binding.source_repository_profile_id
+                ]
+            except KeyError as exc:
+                raise RuntimeError("campaign_code_lineage_source_profile_unavailable") from exc
+            try:
+                receipt = self._lineage_snapshots.get(code_lineage.record_digest)
+                if receipt is None:
+                    receipt = self.lineage_manager.materialize_snapshot(
+                        source_profile,
+                        code_lineage,
+                        self.lineage_snapshot_root,
+                        entrypoint_path=binding.entrypoint_path,
+                        max_archive_bytes=binding.max_archive_bytes,
+                    )
+                    self._lineage_snapshots[code_lineage.record_digest] = receipt
+                else:
+                    self.lineage_manager.verify_snapshot_receipt(
+                        receipt,
+                        code_lineage,
+                        max_archive_bytes=binding.max_archive_bytes,
+                    )
+            except GitLineageError as exc:
+                raise RuntimeError("campaign_code_lineage_snapshot_invalid") from exc
+            source_snapshot = CodeLineageLaunchSnapshot(
+                binding_id=binding.binding_id,
+                binding_revision=binding.binding_revision,
+                binding_digest=binding.binding_digest,
+                source_repository_profile_id=receipt.source_repository_profile_id,
+                lineage_id=receipt.lineage_id,
+                record_digest=receipt.record_digest,
+                commit_sha=receipt.commit_sha,
+                patch_sha256=receipt.patch_sha256,
+                entrypoint_path=receipt.entrypoint_path,
+                working_directory=binding.working_directory,
+                archive_path=receipt.archive_path,
+                archive_sha256=receipt.archive_sha256,
+                archive_size_bytes=receipt.archive_size_bytes,
+            )
         return RemoteLaunchRequest(
             compute_profile_id=executor["compute_profile_id"],
             run_id=attempt.attempt_id,
@@ -284,6 +363,7 @@ class CampaignWorker:
                     ("final", "training_manifest.json", "training_metrics.jsonl"),
                 )
             ),
+            source_snapshot=source_snapshot,
         )
 
     async def _remote_tick(self, attempt: ActionAttempt, *, now: datetime) -> str:
@@ -298,10 +378,8 @@ class CampaignWorker:
             identity = await adapter.discover(request)
             if identity is None:
                 if campaign.status == CampaignStatus.CANCELLING:
-                    sealed_path, manifest = (
-                        self.remote_output_sealer.seal_unlaunched_cancelled(
-                            attempt, compute_profile_id=request.compute_profile_id
-                        )
+                    sealed_path, manifest = self.remote_output_sealer.seal_unlaunched_cancelled(
+                        attempt, compute_profile_id=request.compute_profile_id
                     )
                     verified = self._verify(attempt, sealed_path)
                     self.repository.settle_terminal_from_seal(
@@ -362,7 +440,9 @@ class CampaignWorker:
             cursor_end=metric_cursor.byte_offset,
             now=now,
         )
-        collection_ttl = timedelta(hours=1) if observation.state == RemoteRunState.COMPLETED else self.action_ttl
+        collection_ttl = (
+            timedelta(hours=1) if observation.state == RemoteRunState.COMPLETED else self.action_ttl
+        )
         record = self.repository.update_remote_run(
             record,
             observation,
@@ -396,11 +476,7 @@ class CampaignWorker:
                 temporary,
                 observation=observation,
             )
-            outcome = (
-                "cancelled"
-                if campaign.status == CampaignStatus.CANCELLING
-                else "failed"
-            )
+            outcome = "cancelled" if campaign.status == CampaignStatus.CANCELLING else "failed"
             sealed_path, _manifest = self.remote_output_sealer.seal_terminal(
                 attempt,
                 record.identity,
@@ -418,9 +494,7 @@ class CampaignWorker:
             return "remote_cancelled" if outcome == "cancelled" else "remote_failed"
 
         temporary = (
-            self.artifact_root
-            / ".tmp"
-            / f"{attempt.action_id}.{attempt.attempt_id}.{uuid4().hex}"
+            self.artifact_root / ".tmp" / f"{attempt.action_id}.{attempt.attempt_id}.{uuid4().hex}"
         )
         temporary.mkdir(parents=True, exist_ok=False)
         await adapter.collect_outputs(
@@ -452,9 +526,7 @@ class CampaignWorker:
             if config.champion_evaluation_id
             else None
         )
-        execution = self.development_evaluation_executor.execute(
-            attempt, config, champion=champion
-        )
+        execution = self.development_evaluation_executor.execute(attempt, config, champion=champion)
         self.repository.store_retrieval_evaluation(
             attempt.workspace_id,
             attempt.campaign_id,

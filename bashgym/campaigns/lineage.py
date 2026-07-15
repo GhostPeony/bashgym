@@ -6,10 +6,12 @@ import hashlib
 import os
 import re
 import subprocess
+import tarfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Literal
+from uuid import uuid4
 
 from pydantic import Field, field_validator
 
@@ -100,6 +102,21 @@ class CodeLineageWorkspaceReceipt:
     worktree_path: Path
 
 
+@dataclass(frozen=True)
+class CodeLineageSnapshotReceipt:
+    """Transient local archive proving the exact captured source snapshot."""
+
+    source_repository_profile_id: str
+    lineage_id: str
+    record_digest: str
+    commit_sha: str
+    patch_sha256: str
+    entrypoint_path: str
+    archive_path: Path
+    archive_sha256: str
+    archive_size_bytes: int
+
+
 def code_mutation_kind_for_variable(variable: str) -> CodeMutationKind | None:
     """Classify variables that require Git lineage; recipe scalars return ``None``."""
 
@@ -129,9 +146,7 @@ class GitHypothesisLineageManager:
             command.extend(("-c", f"core.hooksPath={disable_hooks}"))
         command.extend(args)
         environment = {
-            key: value
-            for key, value in os.environ.items()
-            if not key.upper().startswith("GIT_")
+            key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")
         }
         environment["GIT_TERMINAL_PROMPT"] = "0"
         try:
@@ -189,13 +204,9 @@ class GitHypothesisLineageManager:
                     resolved = target.resolve(strict=True)
                     resolved.relative_to(repository)
                 except (OSError, ValueError) as exc:
-                    raise GitLineageError(
-                        "campaign_git_lineage_approved_path_unavailable"
-                    ) from exc
+                    raise GitLineageError("campaign_git_lineage_approved_path_unavailable") from exc
                 if target.is_symlink():
-                    raise GitLineageError(
-                        "campaign_git_lineage_approved_path_unsafe"
-                    )
+                    raise GitLineageError("campaign_git_lineage_approved_path_unsafe")
 
     @staticmethod
     def _validate_profile_binding(
@@ -334,11 +345,7 @@ class GitHypothesisLineageManager:
         result = cls._invoke(cwd, *args, binary=True)
         assert isinstance(result.stdout, bytes)
         try:
-            paths = {
-                item.decode("utf-8")
-                for item in result.stdout.split(b"\0")
-                if item
-            }
+            paths = {item.decode("utf-8") for item in result.stdout.split(b"\0") if item}
         except UnicodeDecodeError as exc:
             raise GitLineageError("campaign_git_lineage_path_encoding_invalid") from exc
         try:
@@ -387,16 +394,11 @@ class GitHypothesisLineageManager:
             if not worktree.is_dir() or worktree.is_symlink():
                 raise GitLineageError("campaign_git_lineage_worktree_unavailable")
             if (
-                self._text(worktree, "symbolic-ref", "--short", "HEAD")
-                != record.branch_name
+                self._text(worktree, "symbolic-ref", "--short", "HEAD") != record.branch_name
                 or self._text(worktree, "rev-parse", "HEAD") != branch_commit
             ):
-                raise GitLineageError(
-                    "campaign_git_lineage_worktree_identity_mismatch"
-                )
-            recovered = self._captured_record_from_commit(
-                profile, record, worktree, branch_commit
-            )
+                raise GitLineageError("campaign_git_lineage_worktree_identity_mismatch")
+            recovered = self._captured_record_from_commit(profile, record, worktree, branch_commit)
             self._verify_captured(profile, recovered)
             return recovered
         self._verify_prepared_worktree(worktree, record.branch_name, record.base_commit)
@@ -448,9 +450,7 @@ class GitHypothesisLineageManager:
         if not changed_paths:
             raise GitLineageError("campaign_git_lineage_empty_change")
         approved_roots = profile.allowed_mutation_paths[record.mutation_kind]
-        if any(
-            not self._path_is_approved(path, approved_roots) for path in changed_paths
-        ):
+        if any(not self._path_is_approved(path, approved_roots) for path in changed_paths):
             raise GitLineageError("campaign_git_lineage_path_not_approved")
         for path in changed_paths:
             self._reject_special_entries(worktree, record.base_commit, path)
@@ -484,9 +484,7 @@ class GitHypothesisLineageManager:
             disable_hooks=hooks,
         )
         commit_sha = self._text(worktree, "rev-parse", "HEAD")
-        captured = self._captured_record_from_commit(
-            profile, record, worktree, commit_sha
-        )
+        captured = self._captured_record_from_commit(profile, record, worktree, commit_sha)
         self._verify_captured(profile, captured)
         return captured
 
@@ -516,10 +514,7 @@ class GitHypothesisLineageManager:
         if not committed_paths:
             raise GitLineageError("campaign_git_lineage_empty_change")
         approved_roots = profile.allowed_mutation_paths[record.mutation_kind]
-        if any(
-            not self._path_is_approved(path, approved_roots)
-            for path in committed_paths
-        ):
+        if any(not self._path_is_approved(path, approved_roots) for path in committed_paths):
             raise GitLineageError("campaign_git_lineage_path_not_approved")
         patch = self._invoke(
             worktree,
@@ -551,9 +546,7 @@ class GitHypothesisLineageManager:
     def _verify_single_child_commit(
         cls, repository: Path, base_commit: str, commit_sha: str
     ) -> None:
-        parents = cls._text(
-            repository, "rev-list", "--parents", "-n", "1", commit_sha
-        ).split()
+        parents = cls._text(repository, "rev-list", "--parents", "-n", "1", commit_sha).split()
         if parents != [commit_sha, base_commit]:
             raise GitLineageError("campaign_git_lineage_commit_parent_invalid")
 
@@ -571,12 +564,8 @@ class GitHypothesisLineageManager:
         repository = self._repository(profile)
         if self._branch_commit(repository, record.branch_name) != record.commit_sha:
             raise GitLineageError("campaign_git_lineage_branch_identity_mismatch")
-        self._verify_single_child_commit(
-            repository, record.base_commit, record.commit_sha
-        )
-        message = self._text(
-            repository, "show", "-s", "--format=%B", record.commit_sha
-        )
+        self._verify_single_child_commit(repository, record.base_commit, record.commit_sha)
+        message = self._text(repository, "show", "-s", "--format=%B", record.commit_sha)
         if f"BashGym-Lineage: {record.lineage_id}" not in message.splitlines():
             raise GitLineageError("campaign_git_lineage_commit_identity_mismatch")
         paths = self._nul_paths(
@@ -612,9 +601,140 @@ class GitHypothesisLineageManager:
         if hashlib.sha256(patch.stdout).hexdigest() != record.patch_sha256:
             raise GitLineageError("campaign_git_lineage_patch_digest_mismatch")
 
+    @staticmethod
+    def _sha256_file(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            while block := handle.read(1024 * 1024):
+                digest.update(block)
+        return digest.hexdigest()
+
+    @staticmethod
+    def _verify_snapshot_archive(path: Path, *, max_archive_bytes: int) -> None:
+        if path.is_symlink() or not path.is_file():
+            raise GitLineageError("campaign_git_lineage_snapshot_unavailable")
+        if path.stat().st_size > max_archive_bytes:
+            raise GitLineageError("campaign_git_lineage_snapshot_too_large")
+        try:
+            with tarfile.open(path, mode="r:") as archive:
+                members = archive.getmembers()
+                if not members or len(members) > 100_000:
+                    raise GitLineageError("campaign_git_lineage_snapshot_unsafe")
+                expanded_bytes = 0
+                for member in members:
+                    member_path = PurePosixPath(member.name)
+                    if (
+                        member_path.is_absolute()
+                        or not member_path.parts
+                        or member_path.parts[0] != "source"
+                        or any(part in {"", ".", ".."} for part in member_path.parts)
+                        or member.issym()
+                        or member.islnk()
+                        or member.isdev()
+                        or member.isfifo()
+                    ):
+                        raise GitLineageError("campaign_git_lineage_snapshot_unsafe")
+                    expanded_bytes += member.size
+                    if expanded_bytes > max_archive_bytes:
+                        raise GitLineageError("campaign_git_lineage_snapshot_too_large")
+        except (OSError, tarfile.TarError) as exc:
+            raise GitLineageError("campaign_git_lineage_snapshot_invalid") from exc
+
+    def materialize_snapshot(
+        self,
+        profile: ApprovedSourceRepositoryProfile,
+        record: CodeLineageRecord,
+        snapshot_root: Path,
+        *,
+        entrypoint_path: str,
+        max_archive_bytes: int,
+    ) -> CodeLineageSnapshotReceipt:
+        """Archive one verified captured commit without persisting repository paths."""
+
+        self._validate_profile_binding(profile, record)
+        self._verify_captured(profile, record)
+        assert record.commit_sha is not None and record.patch_sha256 is not None
+        try:
+            entrypoint = _safe_relative_path(entrypoint_path)
+        except ValueError as exc:
+            raise GitLineageError("campaign_git_lineage_entrypoint_unsafe") from exc
+        repository = self._repository(profile)
+        entry = self._text(repository, "ls-tree", record.commit_sha, "--", entrypoint)
+        if not entry.startswith(("100644 blob ", "100755 blob ")) or not entry.endswith(
+            f"\t{entrypoint}"
+        ):
+            raise GitLineageError("campaign_git_lineage_entrypoint_unavailable")
+
+        requested_root = snapshot_root.expanduser()
+        if not requested_root.is_absolute():
+            raise GitLineageError("campaign_git_lineage_snapshot_root_unsafe")
+        requested_root.mkdir(parents=True, exist_ok=True)
+        root = requested_root.resolve()
+        authority_root = self.worktree_root.expanduser().resolve().parent
+        try:
+            root.relative_to(authority_root)
+        except ValueError as exc:
+            raise GitLineageError("campaign_git_lineage_snapshot_root_unsafe") from exc
+        if requested_root.is_symlink() or not root.is_dir():
+            raise GitLineageError("campaign_git_lineage_snapshot_root_unsafe")
+
+        archive_path = root / f"{record.record_digest}.tar"
+        temporary_path = root / f".{record.record_digest}.{uuid4().hex}.tmp"
+        try:
+            self._invoke(
+                repository,
+                "archive",
+                "--format=tar",
+                "--prefix=source/",
+                f"--output={temporary_path}",
+                record.commit_sha,
+            )
+            self._verify_snapshot_archive(temporary_path, max_archive_bytes=max_archive_bytes)
+            os.replace(temporary_path, archive_path)
+        finally:
+            temporary_path.unlink(missing_ok=True)
+
+        return CodeLineageSnapshotReceipt(
+            source_repository_profile_id=record.source_repository_profile_id,
+            lineage_id=record.lineage_id,
+            record_digest=record.record_digest,
+            commit_sha=record.commit_sha,
+            patch_sha256=record.patch_sha256,
+            entrypoint_path=entrypoint,
+            archive_path=archive_path,
+            archive_sha256=self._sha256_file(archive_path),
+            archive_size_bytes=archive_path.stat().st_size,
+        )
+
+    def verify_snapshot_receipt(
+        self,
+        receipt: CodeLineageSnapshotReceipt,
+        record: CodeLineageRecord,
+        *,
+        max_archive_bytes: int,
+    ) -> None:
+        """Fail closed if a cached snapshot changes before upload."""
+
+        if (
+            record.state != CodeLineageState.CAPTURED
+            or record.commit_sha != receipt.commit_sha
+            or record.patch_sha256 != receipt.patch_sha256
+            or record.record_digest != receipt.record_digest
+            or record.lineage_id != receipt.lineage_id
+            or record.source_repository_profile_id != receipt.source_repository_profile_id
+        ):
+            raise GitLineageError("campaign_git_lineage_snapshot_identity_mismatch")
+        self._verify_snapshot_archive(receipt.archive_path, max_archive_bytes=max_archive_bytes)
+        if (
+            receipt.archive_path.stat().st_size != receipt.archive_size_bytes
+            or self._sha256_file(receipt.archive_path) != receipt.archive_sha256
+        ):
+            raise GitLineageError("campaign_git_lineage_snapshot_digest_mismatch")
+
 
 __all__ = [
     "ApprovedSourceRepositoryProfile",
+    "CodeLineageSnapshotReceipt",
     "CodeLineageWorkspaceReceipt",
     "GitHypothesisLineageManager",
     "GitLineageError",

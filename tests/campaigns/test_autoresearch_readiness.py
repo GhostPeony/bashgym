@@ -20,7 +20,11 @@ from bashgym.campaigns.contracts import (
     canonical_hash,
 )
 from bashgym.campaigns.readiness import doctor_autoresearch_template
-from bashgym.campaigns.remote import ApprovedRemoteExecutorProfile, PinnedRemoteStageProfile
+from bashgym.campaigns.remote import (
+    ApprovedCodeLineageExecutionBinding,
+    ApprovedRemoteExecutorProfile,
+    PinnedRemoteStageProfile,
+)
 from bashgym.campaigns.worker_service import ControllerStatusProjection
 from bashgym.ledger.contracts import (
     DatasetSpec,
@@ -157,7 +161,12 @@ def register_scientific_bindings(ledger: ExperimentLedgerRepository) -> None:
     )
 
 
-def registered_profile(tmp_path: Path, template: AutoResearchTemplateDefinition):
+def registered_profile(
+    tmp_path: Path,
+    template: AutoResearchTemplateDefinition,
+    *,
+    entrypoint_path: str = "bashgym/gym/trainer.py",
+):
     key = tmp_path / "worker-key"
     data = tmp_path / "train.jsonl"
     key.write_text("test-only-key\n", encoding="utf-8")
@@ -172,11 +181,15 @@ def registered_profile(tmp_path: Path, template: AutoResearchTemplateDefinition)
                 script_path=script,
                 script_sha256=hashlib.sha256(script.read_bytes()).hexdigest(),
                 input_files=(data,),
-                input_sha256={
-                    data.name: hashlib.sha256(data.read_bytes()).hexdigest()
-                },
+                input_sha256={data.name: hashlib.sha256(data.read_bytes()).hexdigest()},
                 budget_unit="gpu_hours",
                 budget_reservation=0.25,
+                code_lineage_binding=ApprovedCodeLineageExecutionBinding(
+                    binding_id=f"bashgym-{stage_kind.value}-entrypoint-v1",
+                    binding_revision=1,
+                    source_repository_profile_id="bashgym-source-v1",
+                    entrypoint_path=entrypoint_path,
+                ),
             )
         )
     profile = ApprovedRemoteExecutorProfile(
@@ -224,6 +237,7 @@ def test_real_template_fails_closed_when_installation_bindings_are_missing(tmp_p
         "evaluator_binding_unresolved",
         "compute_binding_unresolved",
         "source_repository_binding_unresolved",
+        "code_lineage_execution_binding_unresolved",
     )
 
 
@@ -251,6 +265,24 @@ def test_real_template_requires_exact_ledger_profile_and_material_hashes(tmp_pat
     assert ready.launch_ready is True
     assert ready.available is True
     assert ready.blocking_codes == ()
+
+    missing_entrypoint_profile, _missing_script = registered_profile(
+        tmp_path, template, entrypoint_path="scripts/missing.py"
+    )
+    missing_entrypoint = doctor_autoresearch_template(
+        template,
+        workspace_id=WORKSPACE,
+        ledger=ledger,
+        executor_profiles={
+            (
+                missing_entrypoint_profile.compute_profile_id,
+                missing_entrypoint_profile.target_contract_key,
+            ): missing_entrypoint_profile
+        },
+        controller=online_controller(),
+        source_profiles=source_registry,
+    )
+    assert missing_entrypoint.blocking_codes == ("code_lineage_execution_binding_unresolved",)
 
     script.write_text("print('mutated')\n", encoding="utf-8")
     stale = doctor_autoresearch_template(

@@ -23,6 +23,7 @@ from bashgym.campaigns.contracts import (
 from bashgym.campaigns.evaluation import load_retrieval_evaluation_artifact
 from bashgym.campaigns.executors import FakeExecutionRequest, fake_digest
 from bashgym.campaigns.remote import (
+    ApprovedCodeLineageExecutionBinding,
     ApprovedRemoteExecutorProfile,
     PinnedRemoteStageProfile,
     RemoteCapacitySnapshot,
@@ -231,9 +232,7 @@ class FakeRemoteAdapter:
         (local_directory / "launch_manifest.json").write_text("{}", encoding="utf-8")
         return tuple(path for path in local_directory.rglob("*") if path.is_file())
 
-    async def collect_terminal_evidence(
-        self, identity, local_directory, *, observation
-    ):
+    async def collect_terminal_evidence(self, identity, local_directory, *, observation):
         self.collect_count += 1
         (local_directory / "training.log").write_text("failed\n", encoding="utf-8")
         (local_directory / "exit_code").write_text("7\n", encoding="utf-8")
@@ -248,7 +247,12 @@ class FakeRemoteAdapter:
         return True
 
 
-def approved_remote_profile(tmp_path, *, stage=StageKind.FULL_TRAINING):
+def approved_remote_profile(
+    tmp_path,
+    *,
+    stage=StageKind.FULL_TRAINING,
+    code_lineage_binding: ApprovedCodeLineageExecutionBinding | None = None,
+):
     script = tmp_path / "train.py"
     data = tmp_path / "train.jsonl"
     key = tmp_path / "campaign-key"
@@ -266,6 +270,7 @@ def approved_remote_profile(tmp_path, *, stage=StageKind.FULL_TRAINING):
         budget_unit="gpu_hours",
         budget_reservation=0.25,
         python_executable="/approved/venv/bin/python",
+        code_lineage_binding=code_lineage_binding,
     )
     return ApprovedRemoteExecutorProfile(
         profile_id="memexai-approved-v1",
@@ -283,9 +288,9 @@ def approved_remote_profile(tmp_path, *, stage=StageKind.FULL_TRAINING):
 
 def schedule_remote(repository, worker, plan, tmp_path):
     profile = approved_remote_profile(tmp_path)
-    worker.remote_executor_profiles[
-        (profile.compute_profile_id, profile.target_contract_key)
-    ] = profile
+    worker.remote_executor_profiles[(profile.compute_profile_id, profile.target_contract_key)] = (
+        profile
+    )
     if worker.leader is None:
         assert worker.run_once(now=START) == "idle"
     return repository.schedule_action_under_leader(
@@ -430,9 +435,7 @@ def test_controller_skips_not_applicable_stage_then_executes_next_required_stage
     events = repository.list_events("workspace-a", "campaign-1")
     skipped = [event for _, event in events if event.event_type == "campaign:stages-skipped"]
     assert len(skipped) == 1
-    assert skipped[0].payload["skipped"] == [
-        {"stage_index": 0, "stage": "contract_evaluation"}
-    ]
+    assert skipped[0].payload["skipped"] == [{"stage_index": 0, "stage": "contract_evaluation"}]
 
 
 def test_restart_registers_sealed_result_without_reexecution(tmp_path):
@@ -599,9 +602,7 @@ def test_controller_missing_profile_blocks_once_without_budget_or_launch(tmp_pat
     assert worker.run_once(now=START) == "action_blocked"
     assert worker.run_once(now=START + timedelta(seconds=1)) == "action_blocked"
     assert repository.list_attempts("workspace-a", "campaign-1") == ()
-    assert repository.budget_totals("workspace-a", "campaign-1", "gpu_hours")[
-        "reserved"
-    ] == 0.0
+    assert repository.budget_totals("workspace-a", "campaign-1", "gpu_hours")["reserved"] == 0.0
     assert adapter.launch_count == 0
     blocked = [
         event
@@ -669,9 +670,7 @@ def test_remote_worker_executes_only_persisted_exact_identity_force_stop(tmp_pat
     assert worker.run_once(now=START + timedelta(seconds=2)) == "remote_force_stopping"
     assert adapter.force_stop_count == 1
     assert (
-        repository.pending_force_stop_request(
-            "workspace-a", scheduled.action_id, remote.identity
-        )
+        repository.pending_force_stop_request("workspace-a", scheduled.action_id, remote.identity)
         is None
     )
     with repository._connection() as connection:
@@ -898,9 +897,7 @@ def test_development_evaluation_stage_validates_seals_and_persists_rows(tmp_path
         ).fetchone()[0]
     evaluation = repository.get_retrieval_evaluation("workspace-a", row["evaluation_id"])
     assert len(evaluation.rows) == 18
-    assert {item.eval_id for item in evaluation.rows} == {
-        f"dev-{index}" for index in range(18)
-    }
+    assert {item.eval_id for item in evaluation.rows} == {f"dev-{index}" for index in range(18)}
     assert decision_count == 1
 
 

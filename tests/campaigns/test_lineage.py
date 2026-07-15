@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
 import subprocess
+import tarfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
+from bashgym.campaigns.artifacts import ArtifactSealer
 from bashgym.campaigns.contracts import (
+    ActionAttempt,
     Capability,
     CodeLineageRecord,
     CodeLineageState,
@@ -17,6 +21,7 @@ from bashgym.campaigns.contracts import (
     StageKind,
     StagePlan,
     StagePlanItem,
+    canonical_hash,
 )
 from bashgym.campaigns.lineage import (
     ApprovedSourceRepositoryProfile,
@@ -25,8 +30,15 @@ from bashgym.campaigns.lineage import (
     code_mutation_kind_for_variable,
 )
 from bashgym.campaigns.persistence import CampaignPersistenceError, CampaignRepository
+from bashgym.campaigns.remote import (
+    ApprovedCodeLineageExecutionBinding,
+    ApprovedRemoteExecutorProfile,
+    PinnedRemoteStageProfile,
+)
 from bashgym.campaigns.runtime import CampaignRuntimeRepository
 from bashgym.campaigns.service import CampaignControllerService, CampaignService
+from bashgym.campaigns.worker import CampaignWorker
+from tests.campaigns.test_persistence import campaign
 from tests.campaigns.test_proposals import activate, principal, proposal
 
 NOW = datetime(2026, 7, 15, 12, 0, tzinfo=UTC)
@@ -93,6 +105,37 @@ def requirement(kind: CodeMutationKind = CodeMutationKind.TRAINER) -> CodeLineag
     )
 
 
+def approved_lineage_remote_profile(
+    tmp_path: Path, binding: ApprovedCodeLineageExecutionBinding | None = None
+) -> ApprovedRemoteExecutorProfile:
+    script = tmp_path / "train.py"
+    data = tmp_path / "train.jsonl"
+    key = tmp_path / "campaign-key"
+    script.write_text("print('training')\n", encoding="utf-8")
+    data.write_text("{}\n", encoding="utf-8")
+    key.write_text("test-only-key\n", encoding="utf-8")
+    stage = PinnedRemoteStageProfile(
+        stage=StageKind.FULL_TRAINING,
+        script_path=script,
+        script_sha256=hashlib.sha256(script.read_bytes()).hexdigest(),
+        input_files=(data,),
+        input_sha256={data.name: hashlib.sha256(data.read_bytes()).hexdigest()},
+        budget_reservation=0.25,
+        code_lineage_binding=binding,
+    )
+    return ApprovedRemoteExecutorProfile(
+        profile_id="memexai-approved-v1",
+        profile_revision=1,
+        compute_profile_id="ssh-gpu-lab",
+        target_contract_key="memexai-embedding-v1",
+        target_model_digest=canonical_hash(campaign().target_model.model_dump(mode="json")),
+        host="192.0.2.10",
+        username="trainer",
+        key_path=str(key),
+        stages=(stage,),
+    )
+
+
 @pytest.mark.parametrize(
     ("variable", "expected"),
     [
@@ -144,6 +187,60 @@ def test_prepare_capture_and_replay_preserve_one_scoped_commit(tmp_path: Path) -
     assert recovered_after_unpersisted_commit == captured
 
 
+def test_materialized_snapshot_is_exact_bounded_and_tamper_evident(tmp_path: Path) -> None:
+    repository, _base_commit = initialized_repository(tmp_path)
+    manager = GitHypothesisLineageManager(tmp_path / "worktrees")
+    profile = source_profile(repository)
+    prepared = manager.prepare(profile, requirement())
+    (prepared.worktree_path / "bashgym" / "gym" / "trainer.py").write_text(
+        "LEARNING_RATE = 3e-4\n", encoding="utf-8"
+    )
+    captured = manager.capture(profile, prepared.record)
+
+    receipt = manager.materialize_snapshot(
+        profile,
+        captured,
+        tmp_path / "snapshots",
+        entrypoint_path="bashgym/gym/trainer.py",
+        max_archive_bytes=1024 * 1024,
+    )
+
+    assert receipt.record_digest == captured.record_digest
+    assert receipt.commit_sha == captured.commit_sha
+    assert receipt.archive_path.parent == (tmp_path / "snapshots").resolve()
+    assert str(repository) not in repr(receipt)
+    with tarfile.open(receipt.archive_path, mode="r:") as archive:
+        assert archive.extractfile("source/bashgym/gym/trainer.py").read() == (
+            b"LEARNING_RATE = 3e-4\n"
+        )
+        assert all(not member.issym() and not member.islnk() for member in archive.getmembers())
+    manager.verify_snapshot_receipt(receipt, captured, max_archive_bytes=1024 * 1024)
+
+    receipt.archive_path.write_bytes(receipt.archive_path.read_bytes() + b"tampered")
+    with pytest.raises(GitLineageError, match="campaign_git_lineage_snapshot_digest_mismatch"):
+        manager.verify_snapshot_receipt(receipt, captured, max_archive_bytes=1024 * 1024)
+
+
+def test_snapshot_requires_an_entrypoint_from_the_captured_commit(tmp_path: Path) -> None:
+    repository, _base_commit = initialized_repository(tmp_path)
+    manager = GitHypothesisLineageManager(tmp_path / "worktrees")
+    profile = source_profile(repository)
+    prepared = manager.prepare(profile, requirement())
+    (prepared.worktree_path / "bashgym" / "gym" / "trainer.py").write_text(
+        "LEARNING_RATE = 4e-4\n", encoding="utf-8"
+    )
+    captured = manager.capture(profile, prepared.record)
+
+    with pytest.raises(GitLineageError, match="campaign_git_lineage_entrypoint_unavailable"):
+        manager.materialize_snapshot(
+            profile,
+            captured,
+            tmp_path / "snapshots",
+            entrypoint_path="scripts/missing.py",
+            max_archive_bytes=1024 * 1024,
+        )
+
+
 def test_git_lineage_ignores_inherited_git_repository_and_diff_overrides(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -168,9 +265,7 @@ def test_capture_timestamp_never_precedes_prepared_timestamp(tmp_path: Path) -> 
     profile = source_profile(repository)
     prepared = manager.prepare(profile, requirement())
     future_prepared_at = prepared.record.updated_at + timedelta(days=1)
-    prepared_record = prepared.record.model_copy(
-        update={"updated_at": future_prepared_at}
-    )
+    prepared_record = prepared.record.model_copy(update={"updated_at": future_prepared_at})
     trainer = prepared.worktree_path / "bashgym" / "gym" / "trainer.py"
     trainer.write_text("LEARNING_RATE = 2e-4\n", encoding="utf-8")
 
@@ -231,9 +326,7 @@ def test_capture_rejects_orphan_commit_that_is_not_based_on_approved_head(
     git(worktree, "branch", "-f", prepared.record.branch_name, "HEAD")
     git(worktree, "checkout", prepared.record.branch_name)
 
-    with pytest.raises(
-        GitLineageError, match="campaign_git_lineage_commit_parent_invalid"
-    ):
+    with pytest.raises(GitLineageError, match="campaign_git_lineage_commit_parent_invalid"):
         manager.capture(profile, prepared.record)
 
 
@@ -333,9 +426,7 @@ def test_action_spec_fails_closed_then_binds_captured_lineage(tmp_path: Path) ->
     )
     repository.advance_code_lineage(captured)
 
-    action = repository.next_action_spec(
-        "workspace-a", "campaign-1", selected.study.study_id
-    )
+    action = repository.next_action_spec("workspace-a", "campaign-1", selected.study.study_id)
     evidence = action.input_contract["code_lineage"]
     assert evidence["record_digest"] == captured.record_digest
     assert evidence["commit_sha"] == "b" * 40
@@ -349,9 +440,7 @@ def test_code_mutation_cannot_schedule_before_lineage_registration(
     repository.initialize()
     activate(repository)
     submitted = CampaignService(repository).submit_proposal(
-        proposal("candidate-1").model_copy(
-            update={"primary_variable": "trainer.optimizer"}
-        ),
+        proposal("candidate-1").model_copy(update={"primary_variable": "trainer.optimizer"}),
         expected_version=4,
         principal=principal(repository),
         correlation_id="submit-candidate",
@@ -372,9 +461,7 @@ def test_code_mutation_cannot_schedule_before_lineage_registration(
         CampaignPersistenceError,
         match="campaign_code_lineage_not_registered",
     ):
-        repository.next_action_spec(
-            "workspace-a", "campaign-1", selected.study.study_id
-        )
+        repository.next_action_spec("workspace-a", "campaign-1", selected.study.study_id)
 
 
 def test_code_mutation_rejects_lineage_for_a_different_code_surface(
@@ -384,9 +471,7 @@ def test_code_mutation_rejects_lineage_for_a_different_code_surface(
     repository.initialize()
     activate(repository)
     submitted = CampaignService(repository).submit_proposal(
-        proposal("candidate-1").model_copy(
-            update={"primary_variable": "trainer.optimizer"}
-        ),
+        proposal("candidate-1").model_copy(update={"primary_variable": "trainer.optimizer"}),
         expected_version=4,
         principal=principal(repository),
         correlation_id="submit-candidate",
@@ -428,12 +513,12 @@ def test_code_mutation_rejects_lineage_for_a_different_code_surface(
         CampaignPersistenceError,
         match="campaign_code_lineage_mutation_kind_mismatch",
     ):
-        repository.next_action_spec(
-            "workspace-a", "campaign-1", selected.study.study_id
-        )
+        repository.next_action_spec("workspace-a", "campaign-1", selected.study.study_id)
 
 
-def test_captured_lineage_cannot_claim_unbound_registered_trainer(tmp_path: Path) -> None:
+def test_captured_lineage_requires_then_uses_registered_executor_binding(
+    tmp_path: Path,
+) -> None:
     repository = CampaignRuntimeRepository(tmp_path / "campaigns.sqlite3")
     repository.initialize()
     activate(repository)
@@ -443,9 +528,7 @@ def test_captured_lineage_cannot_claim_unbound_registered_trainer(tmp_path: Path
                 "schema_version": "recipe.v1",
                 "runtime": {"executor_kind": "registered_training"},
             },
-            "required_capabilities": frozenset(
-                {Capability.COMPUTE_TRAIN_WITHIN_BUDGET}
-            ),
+            "required_capabilities": frozenset({Capability.COMPUTE_TRAIN_WITHIN_BUDGET}),
             "stage_plan": StagePlan(
                 items=(
                     StagePlanItem(
@@ -501,6 +584,151 @@ def test_captured_lineage_cannot_claim_unbound_registered_trainer(tmp_path: Path
         CampaignPersistenceError,
         match="campaign_code_lineage_execution_binding_required",
     ):
+        unbound_profile = approved_lineage_remote_profile(tmp_path)
         repository.next_action_spec(
-            "workspace-a", "campaign-1", selected.study.study_id
+            "workspace-a",
+            "campaign-1",
+            selected.study.study_id,
+            executor_profiles={
+                (
+                    unbound_profile.compute_profile_id,
+                    unbound_profile.target_contract_key,
+                ): unbound_profile
+            },
         )
+
+    binding = ApprovedCodeLineageExecutionBinding(
+        binding_id="bashgym-trainer-entrypoint-v1",
+        binding_revision=1,
+        source_repository_profile_id="bashgym-source-v1",
+        entrypoint_path="bashgym/gym/trainer.py",
+        working_directory="source",
+        max_archive_bytes=1024 * 1024,
+    )
+    profile = approved_lineage_remote_profile(tmp_path, binding)
+    action = repository.next_action_spec(
+        "workspace-a",
+        "campaign-1",
+        selected.study.study_id,
+        executor_profiles={(profile.compute_profile_id, profile.target_contract_key): profile},
+    )
+
+    assert action.executor_kind == "ssh_remote"
+    execution = action.executor_config["code_lineage_execution"]
+    assert execution["binding_digest"] == binding.binding_digest
+    assert execution["record_digest"] == captured.record_digest
+    assert execution["commit_sha"] == captured.commit_sha
+
+
+def test_worker_materializes_captured_commit_into_remote_launch_request(
+    tmp_path: Path,
+) -> None:
+    source_repository, _base_commit = initialized_repository(tmp_path)
+    source = source_profile(source_repository)
+    manager = GitHypothesisLineageManager(tmp_path / "data" / "campaigns" / "source-worktrees")
+    repository = CampaignRuntimeRepository(tmp_path / "campaigns.sqlite3")
+    repository.initialize()
+    activate(repository)
+    training_proposal = proposal("candidate-1").model_copy(
+        update={
+            "primary_variable": "trainer.optimizer",
+            "training_recipe": {
+                "schema_version": "recipe.v1",
+                "runtime": {"executor_kind": "registered_training"},
+            },
+            "required_capabilities": frozenset({Capability.COMPUTE_TRAIN_WITHIN_BUDGET}),
+            "stage_plan": StagePlan(
+                items=(
+                    StagePlanItem(
+                        stage=StageKind.FULL_TRAINING,
+                        disposition=StageDisposition.REQUIRED,
+                        reason="Run the captured code hypothesis.",
+                    ),
+                )
+            ),
+        }
+    )
+    submitted = CampaignService(repository).submit_proposal(
+        training_proposal,
+        expected_version=4,
+        principal=principal(repository),
+        correlation_id="submit-worker-candidate",
+        idempotency_key="submit-worker-candidate",
+    )
+    required = requirement()
+    repository.register_code_lineage_requirement(required)
+    prepared = manager.prepare(source, required)
+    repository.advance_code_lineage(prepared.record)
+    (prepared.worktree_path / "bashgym" / "gym" / "trainer.py").write_text(
+        "LEARNING_RATE = 5e-4\n", encoding="utf-8"
+    )
+    captured = manager.capture(source, prepared.record)
+    repository.advance_code_lineage(captured)
+    selected = CampaignControllerService(
+        repository, controller_id="campaign-controller"
+    ).select_next_proposal(
+        "workspace-a",
+        "campaign-1",
+        expected_version=submitted.campaign.version,
+        correlation_id="select-worker-candidate",
+        idempotency_key="select-worker-candidate",
+    )
+    assert selected is not None
+    binding = ApprovedCodeLineageExecutionBinding(
+        binding_id="bashgym-trainer-entrypoint-v1",
+        binding_revision=1,
+        source_repository_profile_id=source.profile_id,
+        entrypoint_path="bashgym/gym/trainer.py",
+        max_archive_bytes=1024 * 1024,
+    )
+    remote_profile = approved_lineage_remote_profile(tmp_path, binding)
+    profiles = {
+        (remote_profile.compute_profile_id, remote_profile.target_contract_key): remote_profile
+    }
+    action = repository.next_action_spec(
+        "workspace-a",
+        "campaign-1",
+        selected.study.study_id,
+        executor_profiles=profiles,
+    )
+    attempt = ActionAttempt(
+        attempt_id="attempt-lineage-worker-1",
+        workspace_id="workspace-a",
+        campaign_id="campaign-1",
+        study_id=selected.study.study_id,
+        action_id="action-lineage-worker-1",
+        attempt_number=1,
+        input_digest=action.input_digest,
+        candidate_digest=action.candidate_digest,
+        manifest_revision=action.manifest_revision,
+        stage=action.stage,
+        executor={"kind": action.executor_kind, **action.executor_config},
+    )
+    worker = CampaignWorker(
+        repository,
+        tmp_path / "artifacts",
+        ArtifactSealer(b"l" * 32, key_version="lineage-worker-v1"),
+        data_directory=tmp_path / "data",
+        remote_executor_profiles=profiles,
+        source_repository_profiles={source.profile_id: source},
+        lineage_manager=manager,
+    )
+
+    request = worker._remote_request(attempt)
+
+    assert request.source_snapshot is not None
+    assert request.source_snapshot.commit_sha == captured.commit_sha
+    assert request.source_snapshot.record_digest == captured.record_digest
+    assert request.source_snapshot.archive_path.is_file()
+    assert worker._remote_request(attempt).source_snapshot == request.source_snapshot
+
+    stripped_executor = dict(attempt.executor)
+    stripped_executor.pop("code_lineage_execution")
+    with pytest.raises(RuntimeError, match="campaign_remote_executor_profile_mismatch"):
+        worker._remote_request(attempt.model_copy(update={"executor": stripped_executor}))
+
+    request.source_snapshot.archive_path.write_bytes(
+        request.source_snapshot.archive_path.read_bytes() + b"tampered"
+    )
+    with pytest.raises(RuntimeError, match="campaign_code_lineage_snapshot_invalid"):
+        worker._remote_request(attempt)

@@ -158,9 +158,7 @@ class RemoteOutputSealer:
         if not schemas:
             raise ValueError("remote completion has no downloaded evidence")
         outputs = self.sealer.describe_outputs(temporary, schemas)
-        elapsed_seconds = max(
-            0.0, (observation.observed_at - identity.launched_at).total_seconds()
-        )
+        elapsed_seconds = max(0.0, (observation.observed_at - identity.launched_at).total_seconds())
         manifest = SealedActionResult(
             workspace_id=attempt.workspace_id,
             campaign_id=attempt.campaign_id,
@@ -223,9 +221,7 @@ class RemoteOutputSealer:
         if not required.issubset(schemas):
             raise ValueError("remote terminal evidence is incomplete")
         outputs = self.sealer.describe_outputs(temporary, schemas)
-        elapsed_seconds = max(
-            0.0, (observation.observed_at - identity.launched_at).total_seconds()
-        )
+        elapsed_seconds = max(0.0, (observation.observed_at - identity.launched_at).total_seconds())
         manifest = SealedActionResult(
             workspace_id=attempt.workspace_id,
             campaign_id=attempt.campaign_id,
@@ -277,9 +273,7 @@ class RemoteOutputSealer:
 
         observed_at = utc_now()
         temporary = (
-            self.artifact_root
-            / ".tmp"
-            / f"{attempt.action_id}.{attempt.attempt_id}.{uuid4().hex}"
+            self.artifact_root / ".tmp" / f"{attempt.action_id}.{attempt.attempt_id}.{uuid4().hex}"
         )
         temporary.mkdir(parents=True, exist_ok=False)
         evidence = {
@@ -333,7 +327,7 @@ class RemoteOutputSealer:
         if relative == "training_manifest.json":
             return "embedding_training_manifest.v1"
         if relative == "launch_manifest.json":
-            return "campaign_remote_launch_manifest.v1"
+            return "campaign_remote_launch_manifest.v2"
         if relative == "training.log":
             return "campaign_training_log.v1"
         if relative == "exit_code":
@@ -356,9 +350,7 @@ class DevelopmentScorerConfig(ContractModel):
     expected_matrix_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     corpus_embedding_chunk_ids: Path
     expected_chunk_ids_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    query_prefix_mode: Literal["raw", "qwen_retrieval", "memexai_youtube"] = (
-        "memexai_youtube"
-    )
+    query_prefix_mode: Literal["raw", "qwen_retrieval", "memexai_youtube"] = "memexai_youtube"
     embedding_device: str = Field(default="cuda", min_length=1, max_length=80)
     embedding_batch_size: int = Field(default=32, ge=1, le=4096)
     latency_repetitions: int = Field(default=3, ge=1, le=100)
@@ -523,9 +515,7 @@ class DevelopmentEvaluationExecutor:
             minimum_videos=config.gate_contract.minimum_videos,
         ).validate_file(config.development_path)
         temporary = (
-            self.artifact_root
-            / ".tmp"
-            / f"{attempt.action_id}.{attempt.attempt_id}.{uuid4().hex}"
+            self.artifact_root / ".tmp" / f"{attempt.action_id}.{attempt.attempt_id}.{uuid4().hex}"
         )
         temporary.mkdir(parents=True, exist_ok=False)
         scored_rows_path = config.scored_rows_path

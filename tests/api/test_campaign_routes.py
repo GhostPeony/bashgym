@@ -210,9 +210,7 @@ def test_builtin_autoresearch_template_prepares_to_authorized_start_gate(tmp_pat
     assert state.json()["state"]["next_action"] == "start_campaign"
     event_types = [
         event.event_type
-        for _cursor, event in repository.list_events(
-            "workspace-a", "autoresearch-smoke-1"
-        )
+        for _cursor, event in repository.list_events("workspace-a", "autoresearch-smoke-1")
     ]
     assert event_types[-2:] == ["campaign:validation-started", "campaign:ready"]
 
@@ -221,9 +219,7 @@ def test_installed_real_template_fails_closed_before_campaign_creation(tmp_path)
     http, repository, refresh = campaign_client(tmp_path)
     access = exchange(http, refresh.raw_token)
     installed = readiness_definition()
-    http.app.state.campaign_autoresearch_templates = {
-        installed.template_id: installed
-    }
+    http.app.state.campaign_autoresearch_templates = {installed.template_id: installed}
 
     doctor = http.get(
         f"/api/campaigns/templates/{installed.template_id}/doctor",
@@ -237,6 +233,7 @@ def test_installed_real_template_fails_closed_before_campaign_creation(tmp_path)
         "evaluator_binding_unresolved",
         "compute_binding_unresolved",
         "source_repository_binding_unresolved",
+        "code_lineage_execution_binding_unresolved",
         "controller_offline",
     ]
 
@@ -396,9 +393,7 @@ def test_code_lineage_routes_prepare_private_worktree_and_capture_safe_record(tm
     )
     assert captured.status_code == 200
     assert captured.json()["record"]["state"] == "captured"
-    assert captured.json()["record"]["changed_paths"] == [
-        "bashgym/gym/trainer.py"
-    ]
+    assert captured.json()["record"]["changed_paths"] == ["bashgym/gym/trainer.py"]
     assert "worktree_path" not in captured.json()
 
 
@@ -632,9 +627,7 @@ def test_campaign_feature_flag_fails_closed_before_initializing_state(monkeypatc
     app = FastAPI()
     app.include_router(campaign_auth_router)
     app.include_router(campaign_router)
-    response = TestClient(app).get(
-        "/api/campaigns", params={"workspace_id": "workspace-a"}
-    )
+    response = TestClient(app).get("/api/campaigns", params={"workspace_id": "workspace-a"})
     assert response.status_code == 404
     assert response.json()["detail"]["code"] == "campaigns_disabled"
     assert not hasattr(app.state, "campaign_repository")
@@ -1029,9 +1022,7 @@ def test_protected_result_is_candidate_locked_replayable_and_promotable(tmp_path
 
 
 def test_hermes_cannot_revise_budget_approve_source_or_promote(tmp_path):
-    http, _repository, refresh = campaign_client(
-        tmp_path, profile=AutonomyProfile.HERMES_BOUNDED
-    )
+    http, _repository, refresh = campaign_client(tmp_path, profile=AutonomyProfile.HERMES_BOUNDED)
     access = exchange(http, refresh.raw_token)
     assert create_from_template(http, access).status_code == 200
     headers = {**bearer(access), "Idempotency-Key": "hermes-denied"}

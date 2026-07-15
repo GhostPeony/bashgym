@@ -19,11 +19,11 @@ import subprocess
 import sys
 import threading
 import xml.etree.ElementTree as ET
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from secrets import token_urlsafe
 from time import monotonic
 from typing import Any, Literal, Protocol
@@ -131,9 +131,14 @@ class WorkerRunConfig(BaseModel):
         if tuple(sorted(set(value))) != value:
             raise ValueError("compute_profile_ids must be sorted and unique")
         for profile_id in value:
-            if not profile_id or len(profile_id) > 128 or any(
-                character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
-                for character in profile_id
+            if (
+                not profile_id
+                or len(profile_id) > 128
+                or any(
+                    character
+                    not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
+                    for character in profile_id
+                )
             ):
                 raise ValueError("compute profile IDs must be simple identifiers")
         return value
@@ -418,9 +423,7 @@ def project_controller_status(
             observed_at=observed_at,
             guidance=CONTROLLER_OFFLINE_GUIDANCE,
         )
-    heartbeat_age_seconds = max(
-        0.0, (observed_at - lease.heartbeat_at).total_seconds()
-    )
+    heartbeat_age_seconds = max(0.0, (observed_at - lease.heartbeat_at).total_seconds())
     if lease.expires_at <= observed_at or heartbeat_age_seconds > stale_after.total_seconds():
         return ControllerStatusProjection(
             online=False,
@@ -471,9 +474,7 @@ def load_approved_source_profiles(
     """Load and verify installation-owned source repositories and path scopes."""
 
     registry: dict[str, ApprovedSourceRepositoryProfile] = {}
-    manager = GitHypothesisLineageManager(
-        config.data_directory / "campaigns" / "source-worktrees"
-    )
+    manager = GitHypothesisLineageManager(config.data_directory / "campaigns" / "source-worktrees")
     try:
         for profile in config.approved_source_profiles:
             manager.verify_profile(profile)
@@ -483,6 +484,29 @@ def load_approved_source_profiles(
     except (GitLineageError, OSError, ValueError) as exc:
         raise WorkerServiceError("campaign_worker_source_profile_material_invalid") from exc
     return registry
+
+
+def validate_code_lineage_execution_bindings(
+    remote_profiles: Mapping[tuple[str, str], ApprovedRemoteExecutorProfile],
+    source_profiles: Mapping[str, ApprovedSourceRepositoryProfile],
+) -> None:
+    """Cross-check every optional code entrypoint against its logical source profile."""
+
+    try:
+        for profile in remote_profiles.values():
+            for stage in profile.stages:
+                binding = stage.code_lineage_binding
+                if binding is None:
+                    continue
+                source = source_profiles[binding.source_repository_profile_id]
+                repository = source.repository_path.expanduser().resolve()
+                entrypoint = repository.joinpath(*PurePosixPath(binding.entrypoint_path).parts)
+                resolved = entrypoint.resolve(strict=True)
+                resolved.relative_to(repository)
+                if entrypoint.is_symlink() or not resolved.is_file():
+                    raise ValueError("code lineage entrypoint is not a regular file")
+    except (KeyError, OSError, ValueError) as exc:
+        raise WorkerServiceError("campaign_worker_code_lineage_execution_binding_invalid") from exc
 
 
 def _load_remote_adapters(config: WorkerRunConfig) -> dict[str, RemoteTrainingAdapter]:
@@ -533,6 +557,8 @@ def build_worker(
     repository.initialize()
     config.artifact_root.mkdir(parents=True, exist_ok=True)
     remote_executor_profiles = load_approved_remote_profiles(config)
+    source_repository_profiles = load_approved_source_profiles(config)
+    validate_code_lineage_execution_bindings(remote_executor_profiles, source_repository_profiles)
     return CampaignWorker(
         repository,
         config.artifact_root,
@@ -542,6 +568,10 @@ def build_worker(
         action_ttl=timedelta(seconds=config.action_ttl_seconds),
         remote_adapters=adapter_loader(config),
         remote_executor_profiles=remote_executor_profiles,
+        source_repository_profiles=source_repository_profiles,
+        lineage_manager=GitHypothesisLineageManager(
+            config.data_directory / "campaigns" / "source-worktrees"
+        ),
     )
 
 
@@ -846,12 +876,7 @@ def _reject_controls(value: str) -> str:
 
 def _systemd_quote(value: str) -> str:
     value = _reject_controls(value)
-    escaped = (
-        value.replace("\\", "\\\\")
-        .replace('"', '\\"')
-        .replace("%", "%%")
-        .replace("$", "$$")
-    )
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%").replace("$", "$$")
     return f'"{escaped}"'
 
 
@@ -869,9 +894,9 @@ def _windows_xml(launch_argv: tuple[str, ...], username: str) -> bytes:
     ET.register_namespace("", namespace)
     task = ET.Element(f"{{{namespace}}}Task", {"version": "1.4"})
     registration = ET.SubElement(task, f"{{{namespace}}}RegistrationInfo")
-    ET.SubElement(registration, f"{{{namespace}}}Description").text = (
-        "BashGym resident campaign worker"
-    )
+    ET.SubElement(
+        registration, f"{{{namespace}}}Description"
+    ).text = "BashGym resident campaign worker"
     triggers = ET.SubElement(task, f"{{{namespace}}}Triggers")
     logon = ET.SubElement(triggers, f"{{{namespace}}}LogonTrigger")
     ET.SubElement(logon, f"{{{namespace}}}Enabled").text = "true"
@@ -930,15 +955,17 @@ def build_service_definition(
             definition_path=definition_path,
             launch_argv=launch_argv,
             definition_payload=_windows_xml(launch_argv, username or getpass.getuser()),
-            install_argvs=((
-                "schtasks.exe",
-                "/Create",
-                "/TN",
-                TASK_NAME,
-                "/XML",
-                str(definition_path),
-                "/F",
-            ),),
+            install_argvs=(
+                (
+                    "schtasks.exe",
+                    "/Create",
+                    "/TN",
+                    TASK_NAME,
+                    "/XML",
+                    str(definition_path),
+                    "/F",
+                ),
+            ),
             status_argv=("schtasks.exe", "/Query", "/TN", TASK_NAME, "/FO", "LIST", "/V"),
             uninstall_argvs=(("schtasks.exe", "/Delete", "/TN", TASK_NAME, "/F"),),
         )
@@ -971,9 +998,7 @@ def build_service_definition(
                 "--no-pager",
                 "--property=ActiveState,SubState,MainPID,NRestarts,ExecMainStatus",
             ),
-            uninstall_argvs=(
-                ("systemctl", "--user", "disable", "--now", SYSTEMD_UNIT_NAME),
-            ),
+            uninstall_argvs=(("systemctl", "--user", "disable", "--now", SYSTEMD_UNIT_NAME),),
             post_uninstall_argvs=(("systemctl", "--user", "daemon-reload"),),
         )
 
@@ -1156,6 +1181,7 @@ __all__ = [
     "ensure_worker_bootstrap",
     "load_approved_remote_profiles",
     "load_approved_source_profiles",
+    "validate_code_lineage_execution_bindings",
     "main",
     "project_controller_status",
     "read_worker_config",

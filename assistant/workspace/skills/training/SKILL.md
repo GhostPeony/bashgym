@@ -191,8 +191,11 @@ one BashGym lineage commit. Confirm that the resulting action input contains the
 lineage record digest and commit SHA. Never treat an uncaptured worktree or a
 recipe-only change as executed code evidence.
 If BashGym reports `campaign_code_lineage_execution_binding_required`, stop and
-hand off the captured branch for an executor-profile update; do not launch the
-pinned trainer and claim it consumed the commit.
+hand off the captured branch for an executor-profile update. Each required
+training stage must name the logical source profile, an in-repository Python
+entrypoint, and a bounded archive size. On launch, require the remote manifest's
+`code_lineage` block to match the captured record and binding digests; do not
+claim the training run consumed the commit when that evidence is absent.
 
 For project history and agent synthesis, use `bashgym ledger projects`, `ledger
 context`, `ledger runs`, `ledger run`, `ledger trend`, `ledger evaluations`,

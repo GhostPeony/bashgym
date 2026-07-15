@@ -77,6 +77,7 @@ def campaign_client(tmp_path, *, profile=AutonomyProfile.CODEX_TRUSTED):
     app.state.campaign_auth_service = auth
     app.state.campaign_service = service
     app.state.campaign_templates = {"memexai-approved-v1": template}
+    app.state.campaign_worker_config_path = tmp_path / "worker-config.v1.json"
     app.include_router(campaign_auth_router)
     app.include_router(campaign_router)
     return TestClient(app), repository, refresh

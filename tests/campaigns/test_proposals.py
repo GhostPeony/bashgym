@@ -227,6 +227,45 @@ def test_live_training_accepts_mode_only_with_declared_capabilities(repository):
     assert result.record.proposal.status == ProposalStatus.SUBMITTED
 
 
+def test_registered_compute_evaluation_requires_declared_capability(repository):
+    service = CampaignService(repository)
+    value = proposal("proposal-live-evaluation").model_copy(
+        update={
+            "evaluation_recipe": {
+                "schema_version": "recipe.v1",
+                "runtime": {"executor_kind": "registered_compute"},
+            },
+            "stage_plan": StagePlan(
+                items=(
+                    StagePlanItem(
+                        stage=StageKind.DEVELOPMENT_EVALUATION,
+                        disposition=StageDisposition.REQUIRED,
+                        reason="Evaluate the immutable base on approved private compute.",
+                    ),
+                )
+            ),
+        }
+    )
+    missing = submit(service, value, principal(repository), 4, "live-eval-missing")
+    assert missing.record.validation.reason_codes == (
+        "proposal_development_evaluation_capability_missing",
+    )
+
+    accepted = submit(
+        service,
+        value.model_copy(
+            update={
+                "proposal_id": "proposal-live-evaluation-valid",
+                "required_capabilities": frozenset({Capability.EVAL_DEVELOPMENT}),
+            }
+        ),
+        principal(repository),
+        missing.campaign.version,
+        "live-eval-valid",
+    )
+    assert accepted.record.validation.valid is True
+
+
 def test_withdraw_requires_submitted_status_and_expected_version(repository):
     service = CampaignService(repository)
     actor = principal(repository)

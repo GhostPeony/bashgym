@@ -613,6 +613,39 @@ def test_controller_missing_profile_blocks_once_without_budget_or_launch(tmp_pat
     assert blocked[0].payload["code"] == "campaign_remote_profile_unavailable"
 
 
+def test_registered_compute_resolves_remote_development_evaluation(tmp_path):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plan = seed_validated_study(repository, stage=StageKind.DEVELOPMENT_EVALUATION)
+    activate_controller_live_study(repository, plan)
+    proposal_payload = {
+        "dataset_recipe": {"schema_version": "recipe.v1"},
+        "training_recipe": {"schema_version": "recipe.v1"},
+        "evaluation_recipe": {
+            "schema_version": "recipe.v1",
+            "runtime": {"executor_kind": "registered_compute"},
+        },
+    }
+    with repository._connection(immediate=True) as connection:
+        connection.execute(
+            "UPDATE campaign_proposals SET proposal_json = ? WHERE proposal_id = ?",
+            (json.dumps(proposal_payload), "proposal-study-1"),
+        )
+    profile = approved_remote_profile(tmp_path, stage=StageKind.DEVELOPMENT_EVALUATION)
+
+    action = repository.next_action_spec(
+        "workspace-a",
+        "campaign-1",
+        "study-1",
+        executor_profiles={
+            (profile.compute_profile_id, profile.target_contract_key): profile
+        },
+    )
+
+    assert action.stage == StageKind.DEVELOPMENT_EVALUATION
+    assert action.executor_kind == "ssh_remote"
+    assert action.executor_config["stage"] == "development_evaluation"
+
+
 def test_controller_profile_hash_change_blocks_before_remote_side_effect(tmp_path):
     repository = active_repository(tmp_path / "campaigns.sqlite3")
     plan = seed_validated_study(repository)

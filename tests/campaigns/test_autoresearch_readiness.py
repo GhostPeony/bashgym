@@ -295,3 +295,30 @@ def test_real_template_requires_exact_ledger_profile_and_material_hashes(tmp_pat
     )
     assert stale.materializable is False
     assert stale.blocking_codes == ("compute_binding_unresolved",)
+
+
+def test_doctor_requires_declared_remote_evaluation_stage(tmp_path: Path):
+    configured = definition().model_dump(mode="python", exclude={"definition_digest"})
+    configured["manifest"]["evaluation_plan"]["required_compute_stages"] = [
+        "development_evaluation",
+        "full_training",
+        "smoke_training",
+    ]
+    template = AutoResearchTemplateDefinition.model_validate(configured)
+    ledger = initialized_ledger(tmp_path)
+    register_scientific_bindings(ledger)
+    profile, _script = registered_profile(tmp_path, template)
+
+    report = doctor_autoresearch_template(
+        template,
+        workspace_id=WORKSPACE,
+        ledger=ledger,
+        executor_profiles={
+            (profile.compute_profile_id, profile.target_contract_key): profile
+        },
+        controller=offline_controller(),
+        source_profiles={},
+    )
+
+    compute = next(check for check in report.checks if check.check_id == "compute_binding")
+    assert compute.ready is False

@@ -328,7 +328,7 @@ def _sha256_file(path: Path) -> str:
 
 
 class PinnedRemoteStageProfile(FrozenContractModel):
-    """Exact server-owned launch material for one approved training stage."""
+    """Exact server-owned launch material for one approved private-compute stage."""
 
     schema_version: Literal["campaign_pinned_remote_stage_profile.v1"] = (
         "campaign_pinned_remote_stage_profile.v1"
@@ -352,9 +352,13 @@ class PinnedRemoteStageProfile(FrozenContractModel):
 
     @field_validator("stage")
     @classmethod
-    def training_stage_only(cls, value: StageKind) -> StageKind:
-        if value not in {StageKind.SMOKE_TRAINING, StageKind.FULL_TRAINING}:
-            raise ValueError("remote executor profiles are restricted to training stages")
+    def approved_compute_stage_only(cls, value: StageKind) -> StageKind:
+        if value not in {
+            StageKind.SMOKE_TRAINING,
+            StageKind.FULL_TRAINING,
+            StageKind.DEVELOPMENT_EVALUATION,
+        }:
+            raise ValueError("remote executor profiles are restricted to approved compute stages")
         return value
 
     @field_validator("script_path")
@@ -362,9 +366,9 @@ class PinnedRemoteStageProfile(FrozenContractModel):
     def pinned_script(cls, value: Path) -> Path:
         candidate = value.expanduser()
         if candidate.is_symlink() or not candidate.is_file():
-            raise ValueError("approved training script must be a regular non-symlink file")
+            raise ValueError("approved compute script must be a regular non-symlink file")
         if candidate.suffix.casefold() != ".py":
-            raise ValueError("approved training script must be a Python file")
+            raise ValueError("approved compute script must be a Python file")
         return candidate.resolve()
 
     @field_validator("input_files")
@@ -493,7 +497,7 @@ class ApprovedRemoteExecutorProfile(FrozenContractModel):
         cls, value: tuple[PinnedRemoteStageProfile, ...]
     ) -> tuple[PinnedRemoteStageProfile, ...]:
         if not value:
-            raise ValueError("approved remote executor profile requires a training stage")
+            raise ValueError("approved remote executor profile requires a compute stage")
         keys = tuple(stage.stage.value for stage in value)
         if tuple(sorted(set(keys))) != keys:
             raise ValueError("approved remote stages must be sorted and unique")

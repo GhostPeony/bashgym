@@ -18,7 +18,12 @@ from bashgym.campaigns.worker_service import ControllerStatusProjection
 from bashgym.ledger.persistence import ExperimentLedgerRepository
 
 _IMMUTABLE_REVISION = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64}|sha256:[0-9a-f]{64})$")
-_TRAINING_STAGES = frozenset({StageKind.SMOKE_TRAINING, StageKind.FULL_TRAINING})
+_DEFAULT_COMPUTE_STAGES = frozenset(
+    {StageKind.SMOKE_TRAINING, StageKind.FULL_TRAINING}
+)
+_REMOTE_COMPUTE_STAGES = frozenset(
+    {*_DEFAULT_COMPUTE_STAGES, StageKind.DEVELOPMENT_EVALUATION}
+)
 
 
 class AutoResearchDoctorCheck(FrozenContractModel):
@@ -79,17 +84,20 @@ def has_immutable_model_revision(model_ref: str) -> bool:
     return bool(_IMMUTABLE_REVISION.fullmatch(revision.casefold()))
 
 
-def _required_training_stages(definition: AutoResearchTemplateDefinition) -> frozenset[StageKind]:
-    configured = definition.manifest.evaluation_plan.get("required_training_stages")
+def _required_compute_stages(definition: AutoResearchTemplateDefinition) -> frozenset[StageKind]:
+    evaluation_plan = definition.manifest.evaluation_plan
+    configured = evaluation_plan.get(
+        "required_compute_stages", evaluation_plan.get("required_training_stages")
+    )
     if configured is None:
-        return _TRAINING_STAGES
+        return _DEFAULT_COMPUTE_STAGES
     if not isinstance(configured, (list, tuple)):
         return frozenset()
     try:
         stages = frozenset(StageKind(str(value)) for value in configured)
     except ValueError:
         return frozenset()
-    return stages if stages and stages.issubset(_TRAINING_STAGES) else frozenset()
+    return stages if stages and stages.issubset(_REMOTE_COMPUTE_STAGES) else frozenset()
 
 
 def doctor_autoresearch_template(
@@ -191,13 +199,13 @@ def doctor_autoresearch_template(
         )
         profile = executor_profiles.get(profile_key)
         compute_ready = profile is not None
-        required_training_stages = _required_training_stages(definition)
+        required_compute_stages = _required_compute_stages(definition)
         if profile is not None:
             expected_target_digest = canonical_hash(definition.target_model.model_dump(mode="json"))
             compute_ready = bool(
-                required_training_stages
+                required_compute_stages
                 and profile.target_model_digest == expected_target_digest
-                and required_training_stages.issubset({stage.stage for stage in profile.stages})
+                and required_compute_stages.issubset({stage.stage for stage in profile.stages})
             )
             if compute_ready:
                 try:
@@ -237,7 +245,7 @@ def doctor_autoresearch_template(
         code_execution_ready = bool(
             profile is not None
             and source_profile is not None
-            and required_training_stages
+            and required_compute_stages
             and all(
                 stage.code_lineage_binding is not None
                 and stage.code_lineage_binding.source_repository_profile_id
@@ -246,9 +254,9 @@ def doctor_autoresearch_template(
                     source_profile, stage.code_lineage_binding.entrypoint_path
                 )
                 for stage in profile.stages
-                if stage.stage in required_training_stages
+                if stage.stage in required_compute_stages
             )
-            and required_training_stages.issubset(
+            and required_compute_stages.issubset(
                 {stage.stage for stage in profile.stages if stage.code_lineage_binding is not None}
             )
         )

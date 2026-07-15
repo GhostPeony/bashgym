@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import hashlib
 import json
 import re
@@ -428,6 +429,8 @@ def main(argv: list[str] | None = None) -> int:
     train.add_argument("--dataset-archive")
     train.add_argument("--output", required=True)
     train.add_argument("--max-steps", type=int, default=160)
+    train.add_argument("--evaluate-heldout", action="store_true")
+    train.add_argument("--evaluation-output")
     evaluate = subparsers.choices["evaluate"]
     evaluate.add_argument("--heldout-jsonl")
     evaluate.add_argument("--dataset-archive")
@@ -447,17 +450,39 @@ def main(argv: list[str] | None = None) -> int:
             )
             train_jsonl = dataset_root / "train.jsonl"
             validation_jsonl = dataset_root / "validation.jsonl"
+            heldout_jsonl = dataset_root / "heldout.jsonl"
         else:
             if not args.train_jsonl or not args.validation_jsonl:
                 parser.error("train requires --dataset-archive or both split JSONL paths")
             train_jsonl = args.train_jsonl
             validation_jsonl = args.validation_jsonl
+            heldout_jsonl = None
         result = train_star_count_lora(
             recipe,
             train_jsonl=train_jsonl,
             validation_jsonl=validation_jsonl,
             output_dir=args.output,
         )
+        if args.evaluate_heldout:
+            if heldout_jsonl is None:
+                parser.error("--evaluate-heldout requires --dataset-archive")
+            gc.collect()
+            try:
+                import torch
+
+                torch.cuda.empty_cache()
+            except (ImportError, RuntimeError):
+                pass
+            evaluation_output = args.evaluation_output or str(
+                Path(args.output) / "evaluation_result.json"
+            )
+            evaluation = evaluate_star_count_model(
+                recipe,
+                heldout_jsonl=heldout_jsonl,
+                output_path=evaluation_output,
+                adapter_path=Path(args.output) / "final_adapter",
+            )
+            result = {"training": result, "evaluation": evaluation}
     else:
         heldout_jsonl = args.heldout_jsonl
         if args.dataset_archive:

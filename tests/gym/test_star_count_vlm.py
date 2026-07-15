@@ -17,6 +17,7 @@ from bashgym.gym.star_count_vlm import (
     StarCountVLMRecipe,
     extract_star_count_archive,
     load_star_count_records,
+    main,
     summarize_star_count_predictions,
 )
 
@@ -143,3 +144,49 @@ def test_archive_extraction_verifies_manifest_and_member_hashes(tmp_path):
 
     with pytest.raises(ValueError, match="manifest verification failed"):
         extract_star_count_archive(corrupt, tmp_path / "corrupt-output")
+
+
+def test_train_command_can_evaluate_the_sealed_candidate(monkeypatch, tmp_path):
+    dataset = tmp_path / "dataset"
+    dataset.mkdir()
+    for split in ("train", "validation", "heldout"):
+        (dataset / f"{split}.jsonl").write_text("{}\n", encoding="utf-8")
+    output = tmp_path / "candidate"
+    calls = {}
+
+    monkeypatch.setattr(
+        "bashgym.gym.star_count_vlm.extract_star_count_archive",
+        lambda *_args: dataset,
+    )
+    def fake_train(_recipe, **kwargs):
+        calls["training"] = kwargs
+        return {"train_loss": 1.0}
+
+    monkeypatch.setattr("bashgym.gym.star_count_vlm.train_star_count_lora", fake_train)
+
+    def fake_evaluate(_recipe, **kwargs):
+        calls["evaluation"] = kwargs
+        return {"metrics": {"exact_count_accuracy": 0.5}}
+
+    monkeypatch.setattr("bashgym.gym.star_count_vlm.evaluate_star_count_model", fake_evaluate)
+
+    assert (
+        main(
+            [
+                "train",
+                "--model-id",
+                "example/model",
+                "--model-revision",
+                "a" * 40,
+                "--dataset-archive",
+                str(tmp_path / "dataset.zip"),
+                "--output",
+                str(output),
+                "--evaluate-heldout",
+            ]
+        )
+        == 0
+    )
+    assert calls["evaluation"]["heldout_jsonl"] == dataset / "heldout.jsonl"
+    assert calls["evaluation"]["adapter_path"] == output / "final_adapter"
+    assert calls["evaluation"]["output_path"] == str(output / "evaluation_result.json")

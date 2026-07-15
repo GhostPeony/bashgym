@@ -100,8 +100,9 @@ class ActionSpec(ContractModel):
         if self.executor_kind == "ssh_remote" and self.stage not in {
             StageKind.SMOKE_TRAINING,
             StageKind.FULL_TRAINING,
+            StageKind.DEVELOPMENT_EVALUATION,
         }:
-            raise ValueError("remote executor is restricted to approved training stages")
+            raise ValueError("remote executor is restricted to approved compute stages")
         if (
             self.executor_kind == "development_evaluation"
             and self.stage != StageKind.DEVELOPMENT_EVALUATION
@@ -364,8 +365,12 @@ class CampaignRuntimeRepository(CampaignRepository):
             raise CampaignPersistenceError("campaign_recipe_runtime_invalid")
         executor_kind = runtime.get("executor_kind", "fake")
         executor_config: dict[str, Any] = {}
-        if executor_kind in {"registered_training", "ssh_remote"}:
-            if item.stage not in {StageKind.SMOKE_TRAINING, StageKind.FULL_TRAINING}:
+        if executor_kind in {"registered_compute", "registered_training", "ssh_remote"}:
+            if item.stage not in {
+                StageKind.SMOKE_TRAINING,
+                StageKind.FULL_TRAINING,
+                StageKind.DEVELOPMENT_EVALUATION,
+            }:
                 raise CampaignPersistenceError("campaign_remote_stage_not_allowed")
             profile_key = (
                 manifest.compute_profile_id,
@@ -462,7 +467,8 @@ class CampaignRuntimeRepository(CampaignRepository):
             budget_reservation=reservation,
             executor_kind=(
                 "ssh_remote"
-                if executor_kind in {"registered_training", "ssh_remote"}
+                if executor_kind
+                in {"registered_compute", "registered_training", "ssh_remote"}
                 else executor_kind
             ),
             executor_config=executor_config,

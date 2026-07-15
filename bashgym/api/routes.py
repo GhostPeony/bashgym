@@ -18,6 +18,7 @@ import os
 import re
 import shutil
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -142,6 +143,107 @@ from bashgym.compute import normalize_training_target_payload  # noqa: E402
 from bashgym.factory.quality_calculator import calculate_quality_breakdown  # noqa: E402
 
 
+def _start_desktop_campaign_worker(
+    app: FastAPI,
+    settings: Any,
+    *,
+    data_directory: Path | None = None,
+    bootstrapper: Callable[[Path], Any] | None = None,
+    supervisor_factory: Callable[[Any], Any] | None = None,
+    ready_timeout_seconds: float = 3.0,
+) -> bool:
+    """Attach one worker supervisor to an Electron-owned desktop backend."""
+
+    desktop_bootstrap = os.environ.get("BASHGYM_DESKTOP_BOOTSTRAP_SECRET", "").strip()
+    if (
+        str(getattr(settings, "mode", "")).casefold() != "desktop"
+        or not bool(getattr(settings, "campaigns_enabled", False))
+        or not desktop_bootstrap
+    ):
+        app.state.campaign_worker_managed = False
+        return False
+
+    existing = getattr(app.state, "campaign_worker_supervisor", None)
+    if existing is not None:
+        app.state.campaign_worker_managed = True
+        try:
+            if getattr(existing, "is_alive", True) is False and not existing.start():
+                app.state.campaign_worker_bootstrap_failure_code = (
+                    "campaign_worker_duplicate_start"
+                )
+                return False
+            return bool(
+                existing.wait_until_ready(timeout_seconds=ready_timeout_seconds)
+            )
+        except Exception:
+            app.state.campaign_worker_bootstrap_failure_code = (
+                "campaign_worker_readiness_failed"
+            )
+            return False
+
+    from bashgym.campaigns.worker_service import (
+        DesktopWorkerSupervisor,
+        WorkerServiceError,
+        ensure_worker_bootstrap,
+    )
+    from bashgym.config import get_bashgym_dir
+
+    app.state.campaign_worker_managed = True
+    app.state.campaign_worker_bootstrap_failure_code = None
+    root = (data_directory or get_bashgym_dir()).expanduser().resolve()
+    prepare = bootstrapper or ensure_worker_bootstrap
+    make_supervisor = supervisor_factory or DesktopWorkerSupervisor
+    supervisor = None
+    try:
+        result = prepare(root)
+        supervisor = make_supervisor(result.config)
+        if not supervisor.start():
+            app.state.campaign_worker_bootstrap_failure_code = (
+                "campaign_worker_duplicate_start"
+            )
+            return False
+        app.state.campaign_worker_config_path = result.config_path
+        app.state.campaign_worker_supervisor = supervisor
+        ready = bool(
+            supervisor.wait_until_ready(timeout_seconds=ready_timeout_seconds)
+        )
+        if not ready:
+            logger.warning("Desktop campaign worker has not acquired its scheduler lease")
+        return ready
+    except WorkerServiceError as exc:
+        code = exc.code
+    except Exception:
+        code = "campaign_worker_bootstrap_failed"
+    if supervisor is not None:
+        try:
+            supervisor.stop(timeout_seconds=ready_timeout_seconds)
+        except Exception:
+            pass
+    app.state.campaign_worker_supervisor = None
+    app.state.campaign_worker_bootstrap_failure_code = code
+    logger.error("Desktop campaign worker bootstrap failed: %s", code)
+    return False
+
+
+def _stop_desktop_campaign_worker(
+    app: FastAPI,
+    *,
+    timeout_seconds: float = 10.0,
+) -> bool:
+    """Stop the worker owned by this backend without touching external services."""
+
+    supervisor = getattr(app.state, "campaign_worker_supervisor", None)
+    if supervisor is None:
+        return True
+    stopped = bool(supervisor.stop(timeout_seconds=timeout_seconds))
+    if not stopped:
+        app.state.campaign_worker_bootstrap_failure_code = (
+            "campaign_worker_shutdown_timeout"
+        )
+        logger.error("Desktop campaign worker did not stop before the shutdown deadline")
+    return stopped
+
+
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
 
@@ -190,6 +292,9 @@ def create_app() -> FastAPI:
     app.state.provider_registry = None
     app.state.autoresearcher = None  # AutoResearch hyperparameter search
     app.state.trace_researcher = None  # Trace Research data curation search
+    app.state.campaign_worker_supervisor = None
+    app.state.campaign_worker_bootstrap_failure_code = None
+    app.state.campaign_worker_managed = False
     from bashgym.api.trace_cache import TraceIndexCache
 
     app.state.trace_cache = TraceIndexCache()
@@ -452,9 +557,12 @@ def create_app() -> FastAPI:
         except Exception as e:
             logger.error(f"Failed to build trace index: {e}")
 
+        await asyncio.to_thread(_start_desktop_campaign_worker, app, settings)
+
     @app.on_event("shutdown")
     async def shutdown():
         """Cleanup on shutdown."""
+        await asyncio.to_thread(_stop_desktop_campaign_worker, app)
         if app.state.mcp_workbench:
             await app.state.mcp_workbench.aclose()
         if hasattr(app.state, "provider_registry") and app.state.provider_registry:

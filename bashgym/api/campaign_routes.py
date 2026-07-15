@@ -63,6 +63,8 @@ from bashgym.campaigns.runtime import (
 from bashgym.campaigns.service import CampaignService
 from bashgym.campaigns.transitions import InvalidCampaignTransitionError
 from bashgym.campaigns.worker_service import (
+    CONTROLLER_OFFLINE_GUIDANCE,
+    DesktopWorkerStatusProjection,
     WorkerServiceError,
     load_approved_remote_profiles,
     project_controller_status,
@@ -414,6 +416,44 @@ def _principal(request: Request) -> ActorPrincipal:
     return auth.authenticate_access(_bearer(request))
 
 
+def _desktop_worker_status(
+    request: Request,
+    repository: CampaignRuntimeRepository,
+) -> DesktopWorkerStatusProjection:
+    """Return authenticated, secret-free worker readiness for the renderer."""
+
+    supervisor = getattr(request.app.state, "campaign_worker_supervisor", None)
+    if supervisor is not None:
+        try:
+            return supervisor.status(repository=repository)
+        except Exception:
+            failure_code = "campaign_worker_status_unavailable"
+            managed = True
+    else:
+        failure_code = getattr(
+            request.app.state,
+            "campaign_worker_bootstrap_failure_code",
+            None,
+        )
+        managed = bool(getattr(request.app.state, "campaign_worker_managed", False))
+    observed_at = datetime.now(UTC)
+    controller = project_controller_status(
+        repository,
+        get_bashgym_dir(),
+        now=observed_at,
+    )
+    return DesktopWorkerStatusProjection(
+        managed=managed,
+        online=False,
+        state="failed" if failure_code else "offline",
+        code=failure_code or ("worker_offline" if managed else "worker_not_managed"),
+        observed_at=observed_at,
+        thread_alive=False,
+        controller=controller,
+        guidance=CONTROLLER_OFFLINE_GUIDANCE,
+    )
+
+
 def _raise_api(exc: Exception) -> Never:
     if isinstance(exc, CampaignAuthenticationError):
         raise HTTPException(
@@ -541,13 +581,15 @@ def exchange_campaign_refresh(request: Request):
 @campaign_auth_router.get("/capabilities")
 def campaign_capabilities(request: Request):
     try:
-        principal = _principal(request)
+        repository, auth, _service = _services(request)
+        principal = auth.authenticate_access(_bearer(request))
         return {
             "actor_id": principal.actor_id,
             "autonomy_profile": principal.autonomy_profile.value,
             "workspace_ids": list(principal.workspace_ids),
             "capabilities": sorted(item.value for item in principal.capabilities),
             "expires_at": principal.expires_at.isoformat(),
+            "worker": _desktop_worker_status(request, repository).model_dump(mode="json"),
         }
     except Exception as exc:
         _raise_api(exc)

@@ -17,12 +17,15 @@ import plistlib
 import signal
 import subprocess
 import sys
+import threading
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
+from secrets import token_urlsafe
+from time import monotonic
 from typing import Any, Literal, Protocol
 from uuid import uuid4
 
@@ -36,7 +39,7 @@ from bashgym.campaigns.runtime import CampaignRuntimeRepository
 from bashgym.campaigns.worker import CampaignWorker, scheduler_lease_key
 from bashgym.gym.remote_trainer import SSHConfig
 from bashgym.mcp.policy import resolve_secret_reference, validate_secret_ref_name
-from bashgym.secrets import get_secret
+from bashgym.secrets import get_secret, set_secret
 
 MAX_CONFIG_BYTES = 64 * 1024
 TASK_NAME = r"\BashGym\Campaign Worker"
@@ -49,6 +52,14 @@ CONTROLLER_OFFLINE_GUIDANCE = (
 CONTROLLER_STALE_GUIDANCE = (
     "The campaign worker stopped renewing its scheduler lease. Restart it and inspect "
     "the bounded lifecycle status before advancing durable campaigns."
+)
+WORKER_STARTING_GUIDANCE = (
+    "The desktop-managed campaign worker is starting. Durable campaigns remain paused "
+    "until its scheduler lease is online."
+)
+WORKER_RESTARTING_GUIDANCE = (
+    "The desktop-managed campaign worker is restarting. Durable campaigns remain paused "
+    "until readiness is restored."
 )
 
 
@@ -179,6 +190,16 @@ class WorkerRunConfig(BaseModel):
         return self.data_directory / "campaigns" / "worker-status.v1.json"
 
 
+@dataclass(frozen=True)
+class WorkerBootstrapResult:
+    """Secret-free result of preparing one installation-owned worker config."""
+
+    config: WorkerRunConfig
+    config_path: Path
+    config_created: bool
+    seal_key_created: bool
+
+
 class WorkerLifecycleStatus(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -204,6 +225,31 @@ class ControllerStatusProjection(BaseModel):
     generation: int | None = None
     heartbeat_at: datetime | None = None
     expires_at: datetime | None = None
+
+
+class DesktopWorkerStatusProjection(BaseModel):
+    """Bounded runtime health safe for authenticated renderer projection."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: str = "campaign_desktop_worker_status.v1"
+    managed: bool
+    online: bool
+    state: Literal[
+        "online",
+        "starting",
+        "restarting",
+        "stale",
+        "offline",
+        "stopped",
+        "failed",
+    ]
+    code: str
+    observed_at: datetime
+    thread_alive: bool
+    restart_count: int = Field(default=0, ge=0)
+    controller: ControllerStatusProjection
+    guidance: str | None = None
 
 
 def _read_restricted_json(path: Path, *, maximum_bytes: int = MAX_CONFIG_BYTES) -> dict[str, Any]:
@@ -252,6 +298,74 @@ def read_worker_config(path: Path) -> WorkerRunConfig:
 def write_worker_config(path: Path, config: WorkerRunConfig) -> None:
     payload = config.model_dump_json(indent=2).encode("utf-8") + b"\n"
     _atomic_write(path.expanduser(), payload)
+
+
+def ensure_worker_bootstrap(
+    data_directory: Path,
+    *,
+    config_path: Path | None = None,
+    secret_resolver: Callable[[str], str | None] = get_secret,
+    secret_writer: Callable[[str, str], None] = set_secret,
+    key_factory: Callable[[], str] = token_urlsafe,
+) -> WorkerBootstrapResult:
+    """Prepare an idempotent worker config and seal key for one installation.
+
+    Existing installation-owned configuration is preserved verbatim. A config
+    bound to another data directory is rejected instead of being silently
+    rewritten, and no secret value is ever returned or written into the config.
+    """
+
+    root = data_directory.expanduser().resolve()
+    resolved_path = (
+        config_path.expanduser().resolve()
+        if config_path is not None
+        else root / "campaigns" / "worker-config.v1.json"
+    )
+    if resolved_path.is_symlink():
+        raise WorkerServiceError("campaign_worker_config_not_regular")
+    if resolved_path.exists():
+        config = read_worker_config(resolved_path)
+        config_created = False
+    else:
+        config = WorkerRunConfig.for_data_directory(root)
+        write_worker_config(resolved_path, config)
+        config_created = True
+    if config.data_directory != root:
+        raise WorkerServiceError("campaign_worker_config_data_directory_mismatch")
+
+    try:
+        existing_key = secret_resolver(config.seal_key_ref)
+    except Exception as exc:
+        raise WorkerServiceError("campaign_worker_seal_key_unavailable") from exc
+    seal_key_created = False
+    if existing_key and len(existing_key.encode("utf-8")) < 32:
+        raise WorkerServiceError("campaign_worker_seal_key_invalid")
+    if not existing_key or not existing_key.strip():
+        material = key_factory()
+        if (
+            not isinstance(material, str)
+            or not material.strip()
+            or len(material.encode("utf-8")) < 32
+        ):
+            raise WorkerServiceError("campaign_worker_seal_key_generation_failed")
+        try:
+            secret_writer(config.seal_key_ref, material)
+            persisted_key = secret_resolver(config.seal_key_ref)
+        except Exception as exc:
+            raise WorkerServiceError("campaign_worker_seal_key_persistence_failed") from exc
+        if (
+            not persisted_key
+            or not persisted_key.strip()
+            or len(persisted_key.encode("utf-8")) < 32
+        ):
+            raise WorkerServiceError("campaign_worker_seal_key_persistence_failed")
+        seal_key_created = True
+    return WorkerBootstrapResult(
+        config=config,
+        config_path=resolved_path,
+        config_created=config_created,
+        seal_key_created=seal_key_created,
+    )
 
 
 def _read_lifecycle_status(path: Path) -> WorkerLifecycleStatus | None:
@@ -468,6 +582,209 @@ def run_foreground(
     finally:
         for signum, handler in prior_handlers.items():
             signal.signal(signum, handler)
+
+
+class DesktopWorkerSupervisor:
+    """Own exactly one restartable campaign-worker thread for a desktop backend."""
+
+    def __init__(
+        self,
+        config: WorkerRunConfig,
+        *,
+        worker_factory: Callable[[WorkerRunConfig], ForegroundWorker] = build_worker,
+        foreground_runner: Callable[..., None] = run_foreground,
+        restart_delay_seconds: float = 1.0,
+    ) -> None:
+        if restart_delay_seconds <= 0:
+            raise ValueError("restart_delay_seconds must be positive")
+        self.config = config
+        self._worker_factory = worker_factory
+        self._foreground_runner = foreground_runner
+        self._restart_delay_seconds = restart_delay_seconds
+        self._lock = threading.RLock()
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._worker: ForegroundWorker | None = None
+        self._started = False
+        self._stopped = False
+        self._restart_count = 0
+        self._last_failure_code: str | None = None
+
+    @property
+    def is_alive(self) -> bool:
+        with self._lock:
+            return bool(self._thread and self._thread.is_alive())
+
+    @property
+    def restart_count(self) -> int:
+        with self._lock:
+            return self._restart_count
+
+    def _capture_worker(self, config: WorkerRunConfig) -> ForegroundWorker:
+        worker = self._worker_factory(config)
+        with self._lock:
+            self._worker = worker
+            stop_requested = self._stop_event.is_set()
+        if stop_requested:
+            worker.request_stop()
+        return worker
+
+    def _run(self) -> None:
+        try:
+            while not self._stop_event.is_set():
+                try:
+                    self._foreground_runner(
+                        self.config,
+                        worker_factory=self._capture_worker,
+                        install_signal_handlers=False,
+                    )
+                    if self._stop_event.is_set():
+                        break
+                    failure_code = "campaign_worker_exited_unexpectedly"
+                except Exception:
+                    if self._stop_event.is_set():
+                        break
+                    failure_code = "campaign_worker_crashed"
+                finally:
+                    with self._lock:
+                        self._worker = None
+                with self._lock:
+                    self._restart_count += 1
+                    self._last_failure_code = failure_code
+                    restart_count = self._restart_count
+                restart_delay = min(
+                    self._restart_delay_seconds * (2 ** min(restart_count - 1, 5)),
+                    30.0,
+                )
+                if self._stop_event.wait(restart_delay):
+                    break
+        finally:
+            with self._lock:
+                self._worker = None
+                self._stopped = True
+
+    def start(self) -> bool:
+        """Start the owned thread once; return False for a duplicate live start."""
+
+        with self._lock:
+            if self._thread is not None and self._thread.is_alive():
+                return False
+            self._stop_event.clear()
+            self._started = True
+            self._stopped = False
+            self._last_failure_code = None
+            self._thread = threading.Thread(
+                target=self._run,
+                name="bashgym-campaign-worker",
+                daemon=True,
+            )
+            self._thread.start()
+            return True
+
+    def stop(self, *, timeout_seconds: float = 10.0) -> bool:
+        """Request graceful shutdown and report whether the owned thread exited."""
+
+        if timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive")
+        with self._lock:
+            thread = self._thread
+            worker = self._worker
+            self._stop_event.set()
+        if worker is not None:
+            worker.request_stop()
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout_seconds)
+        stopped = thread is None or not thread.is_alive()
+        if stopped:
+            with self._lock:
+                self._stopped = True
+        return stopped
+
+    def wait_until_ready(
+        self,
+        *,
+        timeout_seconds: float = 3.0,
+        poll_seconds: float = 0.05,
+    ) -> bool:
+        """Wait for the real scheduler lease, never merely for a live thread."""
+
+        if timeout_seconds <= 0 or poll_seconds <= 0:
+            raise ValueError("readiness timing must be positive")
+        repository = CampaignRuntimeRepository(self.config.database_path)
+        repository.initialize()
+        deadline = monotonic() + timeout_seconds
+        while True:
+            if project_controller_status(repository, self.config.data_directory).online:
+                return True
+            remaining = deadline - monotonic()
+            with self._lock:
+                stopped = self._stopped
+            if remaining <= 0 or (stopped and not self.is_alive):
+                return False
+            self._stop_event.wait(min(poll_seconds, remaining))
+
+    def status(
+        self,
+        *,
+        repository: CampaignRepository | None = None,
+    ) -> DesktopWorkerStatusProjection:
+        """Project thread and lease state without paths, secrets, or exception text."""
+
+        if repository is None:
+            runtime_repository = CampaignRuntimeRepository(self.config.database_path)
+            runtime_repository.initialize()
+            repository = runtime_repository
+        observed_at = utc_now()
+        controller = project_controller_status(
+            repository,
+            self.config.data_directory,
+            now=observed_at,
+        )
+        with self._lock:
+            thread_alive = bool(self._thread and self._thread.is_alive())
+            restart_count = self._restart_count
+            last_failure_code = self._last_failure_code
+            started = self._started
+            stopped = self._stopped
+        if controller.online:
+            state = "online"
+            code = "worker_online"
+            guidance = None
+        elif started and stopped and not thread_alive:
+            state = "stopped"
+            code = "worker_stopped"
+            guidance = CONTROLLER_OFFLINE_GUIDANCE
+        elif controller.state == "stale":
+            state = "stale"
+            code = "worker_controller_stale"
+            guidance = controller.guidance
+        elif thread_alive and last_failure_code:
+            state = "restarting"
+            code = "worker_restarting"
+            guidance = WORKER_RESTARTING_GUIDANCE
+        elif thread_alive:
+            state = "starting"
+            code = "worker_starting"
+            guidance = WORKER_STARTING_GUIDANCE
+        elif last_failure_code:
+            state = "failed"
+            code = "worker_failed"
+            guidance = CONTROLLER_OFFLINE_GUIDANCE
+        else:
+            state = "offline"
+            code = "worker_offline"
+            guidance = CONTROLLER_OFFLINE_GUIDANCE
+        return DesktopWorkerStatusProjection(
+            managed=True,
+            online=controller.online,
+            state=state,
+            code=code,
+            observed_at=observed_at,
+            thread_alive=thread_alive,
+            restart_count=restart_count,
+            controller=controller,
+            guidance=guidance,
+        )
 
 
 @dataclass(frozen=True)
@@ -787,6 +1104,9 @@ __all__ = [
     "CONTROLLER_STALE_GUIDANCE",
     "CommandResult",
     "ControllerStatusProjection",
+    "DesktopWorkerStatusProjection",
+    "DesktopWorkerSupervisor",
+    "WorkerBootstrapResult",
     "WorkerLifecycleStatus",
     "WorkerPlatform",
     "WorkerRunConfig",
@@ -795,6 +1115,7 @@ __all__ = [
     "WorkerServiceManager",
     "build_service_definition",
     "build_worker",
+    "ensure_worker_bootstrap",
     "load_approved_remote_profiles",
     "main",
     "project_controller_status",

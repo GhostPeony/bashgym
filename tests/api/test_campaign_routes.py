@@ -27,6 +27,7 @@ from bashgym.campaigns.contracts import (
 from bashgym.campaigns.runtime import CampaignRuntimeRepository
 from bashgym.campaigns.service import CampaignService
 from bashgym.campaigns.worker import scheduler_lease_key
+from bashgym.campaigns.worker_service import DesktopWorkerStatusProjection
 from bashgym.ledger.contracts import (
     ArtifactSpec,
     DecisionSpec,
@@ -344,6 +345,45 @@ def test_desktop_bootstrap_env_is_required_and_exchanges_without_renderer_identi
     )
     assert denied.status_code == 401
     assert denied.json()["detail"]["code"] == "campaign_auth_required"
+
+
+def test_authenticated_capabilities_expose_only_safe_worker_readiness(tmp_path) -> None:
+    http, repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    observed_at = datetime.now(UTC)
+
+    class SafeSupervisor:
+        def status(self, *, repository=None):
+            assert repository is not None
+            return DesktopWorkerStatusProjection(
+                managed=True,
+                online=False,
+                state="restarting",
+                code="worker_restarting",
+                observed_at=observed_at,
+                thread_alive=True,
+                restart_count=2,
+                controller=campaign_routes.project_controller_status(
+                    repository,
+                    tmp_path / "managed",
+                    now=observed_at,
+                ),
+                guidance="The desktop worker is restarting; campaigns remain paused.",
+            )
+
+    http.app.state.campaign_worker_supervisor = SafeSupervisor()
+    http.app.state.campaign_worker_managed = True
+    http.app.state.campaign_worker_bootstrap_failure_code = None
+    response = http.get("/api/campaign-auth/capabilities", headers=bearer(access))
+
+    assert response.status_code == 200
+    worker = response.json()["worker"]
+    assert worker["state"] == "restarting"
+    assert worker["code"] == "worker_restarting"
+    assert worker["restart_count"] == 2
+    rendered = json.dumps(worker)
+    assert str(tmp_path) not in rendered
+    assert "seal" not in rendered.casefold()
 
 
 def test_every_campaign_read_requires_campaign_bearer_even_in_desktop_app(tmp_path):

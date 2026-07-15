@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import plistlib
+import threading
 import xml.etree.ElementTree as ET
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -24,6 +25,7 @@ from bashgym.campaigns.worker_service import (
     CONTROLLER_OFFLINE_GUIDANCE,
     CONTROLLER_STALE_GUIDANCE,
     CommandResult,
+    DesktopWorkerSupervisor,
     WorkerLifecycleStatus,
     WorkerPlatform,
     WorkerRunConfig,
@@ -31,10 +33,12 @@ from bashgym.campaigns.worker_service import (
     WorkerServiceManager,
     build_service_definition,
     build_worker,
+    ensure_worker_bootstrap,
     load_approved_remote_profiles,
     project_controller_status,
     read_worker_config,
     run_foreground,
+    write_worker_config,
 )
 
 NOW = datetime(2026, 7, 13, 12, 0, tzinfo=UTC)
@@ -285,6 +289,179 @@ def test_foreground_crash_is_restartable_and_next_run_records_recovery(tmp_path:
     assert second_status.restart_count == 1
     assert second_status.last_error_code is None
     assert recovered.intervals == (5.0, 2.0, 30.0)
+
+
+def test_desktop_bootstrap_creates_idempotent_config_and_seal_material(
+    tmp_path: Path,
+) -> None:
+    data_directory = tmp_path / "managed data"
+    stored_secrets: dict[str, str] = {}
+
+    first = ensure_worker_bootstrap(
+        data_directory,
+        secret_resolver=stored_secrets.get,
+        secret_writer=stored_secrets.__setitem__,
+        key_factory=lambda: "generated-seal-material" * 2,
+    )
+
+    assert first.config_created is True
+    assert first.seal_key_created is True
+    assert first.config_path == data_directory.resolve() / "campaigns" / "worker-config.v1.json"
+    assert read_worker_config(first.config_path) == first.config
+    assert stored_secrets == {first.config.seal_key_ref: "generated-seal-material" * 2}
+    assert "generated-seal-material" not in first.config_path.read_text(encoding="utf-8")
+    original_config = first.config_path.read_bytes()
+
+    second = ensure_worker_bootstrap(
+        data_directory,
+        secret_resolver=stored_secrets.get,
+        secret_writer=stored_secrets.__setitem__,
+        key_factory=lambda: "must-not-replace-existing-material",
+    )
+
+    assert second.config == first.config
+    assert second.config_created is False
+    assert second.seal_key_created is False
+    assert second.config_path.read_bytes() == original_config
+    assert stored_secrets == {first.config.seal_key_ref: "generated-seal-material" * 2}
+
+
+def test_desktop_bootstrap_rejects_config_for_another_data_directory(tmp_path: Path) -> None:
+    data_directory = tmp_path / "managed"
+    config_path = data_directory / "campaigns" / "worker-config.v1.json"
+    write_worker_config(
+        config_path,
+        WorkerRunConfig.for_data_directory(tmp_path / "different-installation"),
+    )
+
+    with pytest.raises(
+        WorkerServiceError,
+        match="campaign_worker_config_data_directory_mismatch",
+    ):
+        ensure_worker_bootstrap(
+            data_directory,
+            secret_resolver=lambda _reference: "existing-material",
+            secret_writer=lambda _reference, _value: None,
+        )
+
+
+def test_desktop_supervisor_starts_once_becomes_ready_and_releases_lease(
+    tmp_path: Path,
+) -> None:
+    config = WorkerRunConfig.model_validate(
+        {
+            **WorkerRunConfig.for_data_directory(tmp_path / "managed").model_dump(),
+            "leader_ttl_seconds": 0.3,
+            "action_ttl_seconds": 0.3,
+            "heartbeat_seconds": 0.02,
+            "ready_poll_seconds": 0.02,
+            "idle_poll_seconds": 0.05,
+        }
+    )
+    supervisor = DesktopWorkerSupervisor(
+        config,
+        worker_factory=lambda value: build_worker(
+            value,
+            secret_resolver=lambda _reference: "s" * 32,
+        ),
+        restart_delay_seconds=0.01,
+    )
+    try:
+        assert supervisor.start() is True
+        assert supervisor.start() is False
+        assert supervisor.wait_until_ready(timeout_seconds=2, poll_seconds=0.01) is True
+        status = supervisor.status()
+        assert status.managed is True
+        assert status.state == "online"
+        assert status.code == "worker_online"
+        assert status.thread_alive is True
+    finally:
+        assert supervisor.stop(timeout_seconds=2) is True
+
+    repository = CampaignRepository(config.database_path)
+    repository.initialize()
+    released = repository.get_lease(scheduler_lease_key(config.data_directory))
+    assert released is not None
+    assert released.expires_at <= datetime.now(UTC)
+    stopped = supervisor.status(repository=repository)
+    assert stopped.state == "stopped"
+    assert stopped.thread_alive is False
+
+
+def test_desktop_supervisor_restarts_a_crashed_worker_and_stops_replacement(
+    tmp_path: Path,
+) -> None:
+    config = config_for(tmp_path)
+    replacement_started = threading.Event()
+    replacement_stopped = threading.Event()
+    created: list[FakeWorker] = []
+
+    class BlockingWorker(FakeWorker):
+        def run_forever(
+            self,
+            *,
+            heartbeat_seconds: float,
+            ready_poll_seconds: float,
+            idle_poll_seconds: float,
+        ) -> None:
+            self.intervals = (heartbeat_seconds, ready_poll_seconds, idle_poll_seconds)
+            replacement_started.set()
+            replacement_stopped.wait(timeout=3)
+
+        def request_stop(self) -> None:
+            super().request_stop()
+            replacement_stopped.set()
+
+    def factory(_config: WorkerRunConfig) -> FakeWorker:
+        worker: FakeWorker = FakeWorker(crash=True) if not created else BlockingWorker(crash=False)
+        created.append(worker)
+        return worker
+
+    supervisor = DesktopWorkerSupervisor(
+        config,
+        worker_factory=factory,
+        restart_delay_seconds=0.01,
+    )
+    assert supervisor.start() is True
+    assert replacement_started.wait(timeout=2), "replacement worker did not start"
+    assert supervisor.restart_count == 1
+    assert len(created) == 2
+    assert supervisor.stop(timeout_seconds=2) is True
+    assert created[1].stop_requested is True
+    assert supervisor.is_alive is False
+
+
+def test_desktop_supervisor_stop_during_construction_stops_late_worker(
+    tmp_path: Path,
+) -> None:
+    config = config_for(tmp_path)
+    construction_started = threading.Event()
+    allow_construction = threading.Event()
+    worker = FakeWorker(crash=False)
+
+    def delayed_factory(_config: WorkerRunConfig) -> FakeWorker:
+        construction_started.set()
+        allow_construction.wait(timeout=2)
+        return worker
+
+    supervisor = DesktopWorkerSupervisor(
+        config,
+        worker_factory=delayed_factory,
+        restart_delay_seconds=0.01,
+    )
+    assert supervisor.start() is True
+    assert construction_started.wait(timeout=2)
+    stop_result: list[bool] = []
+    stopper = threading.Thread(
+        target=lambda: stop_result.append(supervisor.stop(timeout_seconds=2))
+    )
+    stopper.start()
+    allow_construction.set()
+    stopper.join(timeout=3)
+
+    assert stop_result == [True]
+    assert worker.stop_requested is True
+    assert supervisor.is_alive is False
 
 
 def test_config_rejects_unsafe_boundaries_and_secret_values(tmp_path: Path) -> None:

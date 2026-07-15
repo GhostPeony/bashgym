@@ -38,10 +38,24 @@ from bashgym.campaigns.runtime import (
     ActionSpec,
     CampaignRuntimeRepository,
 )
-from bashgym.campaigns.worker import CampaignWorker, SimulatedWorkerCrashError
+from bashgym.campaigns.worker import (
+    CampaignWorker,
+    SimulatedWorkerCrashError,
+    _controller_selection_idempotency_key,
+)
 from tests.campaigns.test_persistence import campaign, create, transition
 
 START = datetime(2026, 7, 13, 12, 0, tzinfo=UTC)
+
+
+def test_controller_selection_idempotency_is_campaign_scoped():
+    first = _controller_selection_idempotency_key("workspace-a", "campaign-1", 5)
+    replay = _controller_selection_idempotency_key("workspace-a", "campaign-1", 5)
+    second = _controller_selection_idempotency_key("workspace-a", "campaign-2", 5)
+
+    assert first == replay
+    assert first != second
+    assert len(first) <= 160
 
 
 def active_repository(path) -> CampaignRuntimeRepository:

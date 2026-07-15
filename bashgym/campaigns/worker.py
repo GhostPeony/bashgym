@@ -15,6 +15,7 @@ from bashgym.campaigns.contracts import (
     ActionAttempt,
     AttemptStatus,
     CampaignStatus,
+    canonical_hash,
     utc_now,
 )
 from bashgym.campaigns.executors import (
@@ -58,6 +59,13 @@ def scheduler_lease_key(data_directory: Path) -> str:
     canonical = str(data_directory.resolve()).casefold()
     directory_digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     return f"scheduler:{directory_digest}"
+
+
+def _controller_selection_idempotency_key(
+    workspace_id: str, campaign_id: str, version: int
+) -> str:
+    identity = canonical_hash([workspace_id, campaign_id, version])[:32]
+    return f"controller-select-{identity}"
 
 
 class CampaignWorker:
@@ -219,7 +227,9 @@ class CampaignWorker:
                 expected_version=campaign.version,
                 controller_id="campaign-controller",
                 correlation_id=f"worker-{self.worker_id}",
-                idempotency_key=f"controller-select-v{campaign.version}",
+                idempotency_key=_controller_selection_idempotency_key(
+                    campaign.workspace_id, campaign.campaign_id, campaign.version
+                ),
             )
             if selected is None:
                 return None

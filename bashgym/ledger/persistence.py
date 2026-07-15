@@ -793,94 +793,113 @@ class ExperimentLedgerRepository(CampaignRuntimeRepository):
 
     def record_decision(self, spec: DecisionSpec) -> tuple[dict[str, Any], bool]:
         self._require_initialized()
-        digest = self._identity_digest(spec)
         with self._connection(immediate=True) as connection:
-            self._require_row(
-                connection,
-                """SELECT 1 FROM ledger_experiments
-                   WHERE workspace_id = ? AND project_id = ? AND experiment_id = ?""",
-                (spec.workspace_id, spec.project_id, spec.experiment_id),
-                "ledger experiment not found",
+            return self._record_decision_in_connection(connection, spec)
+
+    def _record_decision_in_connection(
+        self, connection: sqlite3.Connection, spec: DecisionSpec
+    ) -> tuple[dict[str, Any], bool]:
+        """Record a decision inside a caller-owned transaction."""
+
+        digest = self._identity_digest(spec)
+        self._require_row(
+            connection,
+            """SELECT 1 FROM ledger_experiments
+               WHERE workspace_id = ? AND project_id = ? AND experiment_id = ?""",
+            (spec.workspace_id, spec.project_id, spec.experiment_id),
+            "ledger experiment not found",
+        )
+        existing = connection.execute(
+            """SELECT identity_digest FROM ledger_decisions
+               WHERE workspace_id = ? AND project_id = ? AND decision_id = ?""",
+            (spec.workspace_id, spec.project_id, spec.decision_id),
+        ).fetchone()
+        replayed = self._replay_or_conflict(existing, digest, entity="decision")
+        if not replayed:
+            connection.execute(
+                """
+                INSERT INTO ledger_decisions(
+                    workspace_id, project_id, decision_id, experiment_id, run_id,
+                    decision_type, outcome, rationale, evidence_refs_json, actor_id,
+                    identity_digest, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    spec.workspace_id,
+                    spec.project_id,
+                    spec.decision_id,
+                    spec.experiment_id,
+                    spec.run_id,
+                    spec.decision_type,
+                    spec.outcome,
+                    spec.rationale,
+                    _json(list(spec.evidence_refs)),
+                    spec.actor_id,
+                    digest,
+                    _iso(spec.created_at),
+                ),
             )
-            existing = connection.execute(
-                """SELECT identity_digest FROM ledger_decisions
-                   WHERE workspace_id = ? AND project_id = ? AND decision_id = ?""",
-                (spec.workspace_id, spec.project_id, spec.decision_id),
-            ).fetchone()
-            replayed = self._replay_or_conflict(existing, digest, entity="decision")
-            if not replayed:
-                connection.execute(
-                    """
-                    INSERT INTO ledger_decisions(
-                        workspace_id, project_id, decision_id, experiment_id, run_id,
-                        decision_type, outcome, rationale, evidence_refs_json, actor_id,
-                        identity_digest, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        spec.workspace_id,
-                        spec.project_id,
-                        spec.decision_id,
-                        spec.experiment_id,
-                        spec.run_id,
-                        spec.decision_type,
-                        spec.outcome,
-                        spec.rationale,
-                        _json(list(spec.evidence_refs)),
-                        spec.actor_id,
-                        digest,
-                        _iso(spec.created_at),
-                    ),
-                )
-        return self.get_decision(spec.workspace_id, spec.project_id, spec.decision_id), replayed
+        row = connection.execute(
+            """SELECT * FROM ledger_decisions
+               WHERE workspace_id = ? AND project_id = ? AND decision_id = ?""",
+            (spec.workspace_id, spec.project_id, spec.decision_id),
+        ).fetchone()
+        return _decode_row(row, "evidence_refs_json") or {}, replayed
 
     def append_event(self, spec: LedgerEventSpec) -> tuple[dict[str, Any], bool]:
         self._require_initialized()
+        with self._connection(immediate=True) as connection:
+            return self._append_event_in_connection(connection, spec)
+
+    def _append_event_in_connection(
+        self, connection: sqlite3.Connection, spec: LedgerEventSpec
+    ) -> tuple[dict[str, Any], bool]:
+        """Append an event inside a caller-owned transaction."""
+
         digest = self._identity_digest(spec)
         event_id = stable_ledger_id(
             "event", spec.workspace_id, spec.source_system, spec.source_event_id
         )
-        with self._connection(immediate=True) as connection:
-            self._require_row(
-                connection,
-                "SELECT 1 FROM ledger_projects WHERE workspace_id = ? AND project_id = ?",
-                (spec.workspace_id, spec.project_id),
-                "ledger project not found",
+        self._require_row(
+            connection,
+            "SELECT 1 FROM ledger_projects WHERE workspace_id = ? AND project_id = ?",
+            (spec.workspace_id, spec.project_id),
+            "ledger project not found",
+        )
+        existing = connection.execute(
+            """SELECT identity_digest FROM ledger_events
+               WHERE workspace_id = ? AND source_system = ? AND source_event_id = ?""",
+            (spec.workspace_id, spec.source_system, spec.source_event_id),
+        ).fetchone()
+        replayed = self._replay_or_conflict(existing, digest, entity="event")
+        if not replayed:
+            connection.execute(
+                """
+                INSERT INTO ledger_events(
+                    event_id, workspace_id, project_id, experiment_id, run_id,
+                    attempt_id, event_type, source_system, source_event_id, payload_json,
+                    correlation_id, identity_digest, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event_id,
+                    spec.workspace_id,
+                    spec.project_id,
+                    spec.experiment_id,
+                    spec.run_id,
+                    spec.attempt_id,
+                    spec.event_type,
+                    spec.source_system,
+                    spec.source_event_id,
+                    _json(spec.payload),
+                    spec.correlation_id,
+                    digest,
+                    _iso(spec.created_at),
+                ),
             )
-            existing = connection.execute(
-                """SELECT identity_digest FROM ledger_events
-                   WHERE workspace_id = ? AND source_system = ? AND source_event_id = ?""",
-                (spec.workspace_id, spec.source_system, spec.source_event_id),
-            ).fetchone()
-            replayed = self._replay_or_conflict(existing, digest, entity="event")
-            if not replayed:
-                connection.execute(
-                    """
-                    INSERT INTO ledger_events(
-                        event_id, workspace_id, project_id, experiment_id, run_id,
-                        attempt_id, event_type, source_system, source_event_id, payload_json,
-                        correlation_id, identity_digest, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        event_id,
-                        spec.workspace_id,
-                        spec.project_id,
-                        spec.experiment_id,
-                        spec.run_id,
-                        spec.attempt_id,
-                        spec.event_type,
-                        spec.source_system,
-                        spec.source_event_id,
-                        _json(spec.payload),
-                        spec.correlation_id,
-                        digest,
-                        _iso(spec.created_at),
-                    ),
-                )
-            row = connection.execute(
-                "SELECT * FROM ledger_events WHERE event_id = ?", (event_id,)
-            ).fetchone()
+        row = connection.execute(
+            "SELECT * FROM ledger_events WHERE event_id = ?", (event_id,)
+        ).fetchone()
         return _decode_row(row, "payload_json") or {}, replayed
 
     def _record_run_entity(

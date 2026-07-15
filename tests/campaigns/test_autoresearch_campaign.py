@@ -287,7 +287,9 @@ def test_fresh_draft_campaign_has_controller_owned_preparation_and_source_templa
     )
 
 
-def test_authoritative_evaluation_derives_metric_cost_attempts_and_evidence(tmp_path):
+def test_authoritative_evaluation_derives_metric_cost_attempts_and_evidence(
+    tmp_path, monkeypatch
+):
     _path, repository, core = fresh_core(tmp_path, evaluation_binding=True)
     activate(core)
     actor = principal(repository)
@@ -484,6 +486,24 @@ def test_authoritative_evaluation_derives_metric_cost_attempts_and_evidence(tmp_
         )
     )
 
+    original_append_event = repository._append_event_in_connection
+
+    def fail_event_write(*_args, **_kwargs):
+        raise RuntimeError("injected ledger event failure")
+
+    monkeypatch.setattr(repository, "_append_event_in_connection", fail_event_write)
+    with pytest.raises(RuntimeError, match="injected ledger event failure"):
+        core.ingest_evaluation_result(
+            workspace_id="workspace-a",
+            campaign_id="campaign-1",
+            project_id="project-a",
+            evaluation_result_id="evaluation-baseline-ledger",
+        )
+    assert repository.list_autoresearch_outcomes("workspace-a", "campaign-1") == ()
+    assert ledger.list_decisions("workspace-a", "project-a") == []
+    assert ledger.list_events("workspace-a", "project-a") == []
+
+    monkeypatch.setattr(repository, "_append_event_in_connection", original_append_event)
     outcome = core.ingest_evaluation_result(
         workspace_id="workspace-a",
         campaign_id="campaign-1",
@@ -500,6 +520,24 @@ def test_authoritative_evaluation_derives_metric_cost_attempts_and_evidence(tmp_
         "ledger-eval-artifact",
         "campaign-eval-artifact",
     }
+    decisions = ledger.list_decisions("workspace-a", "project-a")
+    assert len(decisions) == 1
+    assert decisions[0]["experiment_id"] == "experiment-baseline-ledger"
+    assert decisions[0]["run_id"] == "run-baseline-ledger"
+    assert decisions[0]["decision_type"] == "autoresearch_outcome"
+    assert decisions[0]["outcome"] == ResultDecision.BASELINE.value
+    assert decisions[0]["evidence_refs"] == [
+        outcome.result.result_id,
+        *outcome.result.evidence_references,
+    ]
+    events = ledger.list_events("workspace-a", "project-a")
+    assert len(events) == 1
+    assert events[0]["experiment_id"] == "experiment-baseline-ledger"
+    assert events[0]["run_id"] == "run-baseline-ledger"
+    assert events[0]["attempt_id"] == "ledger-attempt-baseline"
+    assert events[0]["event_type"] == "autoresearch_outcome_recorded"
+    assert events[0]["payload"]["result_digest"] == outcome.result.result_digest
+    assert events[0]["payload"]["decision"] == ResultDecision.BASELINE.value
     replay = core.ingest_evaluation_result(
         workspace_id="workspace-a",
         campaign_id="campaign-1",
@@ -507,6 +545,8 @@ def test_authoritative_evaluation_derives_metric_cost_attempts_and_evidence(tmp_
         evaluation_result_id="evaluation-baseline-ledger",
     )
     assert replay.replayed is True
+    assert len(ledger.list_decisions("workspace-a", "project-a")) == 1
+    assert len(ledger.list_events("workspace-a", "project-a")) == 1
 
 
 def test_code_candidate_registers_required_source_lineage(tmp_path):

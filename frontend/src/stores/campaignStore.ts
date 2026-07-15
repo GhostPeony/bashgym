@@ -266,6 +266,23 @@ export interface CampaignAutoResearchOutcome {
   }
 }
 
+export interface CampaignCodeLineage {
+  lineage_id: string
+  campaign_id: string
+  proposal_id: string
+  mutation_kind: 'trainer' | 'gym' | 'reward' | 'evaluator'
+  source_repository_profile_id: string
+  state: 'required' | 'prepared' | 'captured'
+  base_commit?: string | null
+  branch_name?: string | null
+  commit_sha?: string | null
+  changed_paths: string[]
+  patch_sha256?: string | null
+  created_at: string
+  updated_at: string
+  captured_at?: string | null
+}
+
 export interface CampaignAutoResearchProjection {
   spec: {
     primary_metric: string
@@ -275,6 +292,7 @@ export interface CampaignAutoResearchProjection {
   state: CampaignAutoResearchState
   proposals: Array<Record<string, unknown>>
   outcomes: CampaignAutoResearchOutcome[]
+  code_lineages?: CampaignCodeLineage[]
 }
 
 export interface CampaignLedgerProjection {

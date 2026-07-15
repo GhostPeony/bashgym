@@ -21,6 +21,8 @@ from bashgym.campaigns.contracts import (
     CampaignManifest,
     CampaignStatus,
     CampaignTrigger,
+    CodeLineageRecord,
+    CodeLineageState,
     CompletedHypothesisSummary,
     CredentialKind,
     ManifestRevision,
@@ -936,6 +938,32 @@ MIGRATIONS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             "CREATE INDEX idx_ledger_decisions_project ON ledger_decisions(workspace_id, project_id, experiment_id, created_at)",
         ),
     ),
+    (
+        9,
+        "autoresearch_code_lineage",
+        (
+            """
+            CREATE TABLE campaign_code_lineages (
+                workspace_id TEXT NOT NULL,
+                campaign_id TEXT NOT NULL,
+                proposal_id TEXT NOT NULL,
+                lineage_id TEXT NOT NULL,
+                state TEXT NOT NULL,
+                record_json TEXT NOT NULL,
+                record_digest TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(workspace_id, proposal_id),
+                UNIQUE(workspace_id, lineage_id),
+                FOREIGN KEY(workspace_id, campaign_id)
+                    REFERENCES campaigns(workspace_id, campaign_id) ON DELETE RESTRICT,
+                FOREIGN KEY(workspace_id, proposal_id)
+                    REFERENCES campaign_proposals(workspace_id, proposal_id) ON DELETE RESTRICT
+            )
+            """,
+            "CREATE INDEX idx_campaign_code_lineages_campaign ON campaign_code_lineages(workspace_id, campaign_id, state, created_at)",
+        ),
+    ),
 )
 
 
@@ -1036,6 +1064,164 @@ class CampaignRepository:
         self._require_initialized()
         with self._connection() as connection:
             return bool(connection.execute("PRAGMA foreign_keys").fetchone()[0])
+
+    @staticmethod
+    def _code_lineage_from_row(row: sqlite3.Row) -> CodeLineageRecord:
+        record = CodeLineageRecord.model_validate_json(row["record_json"])
+        if record.record_digest != row["record_digest"] or record.state.value != row["state"]:
+            raise CampaignPersistenceError("campaign_code_lineage_record_corrupt")
+        return record
+
+    def register_code_lineage_requirement(
+        self, value: CodeLineageRecord
+    ) -> CodeLineageRecord:
+        """Persist one required lineage record with exact replay semantics."""
+
+        self._require_initialized()
+        record = CodeLineageRecord.model_validate(value.model_dump(mode="python"))
+        if record.state != CodeLineageState.REQUIRED:
+            raise ValueError("campaign_code_lineage_requirement_state_invalid")
+        with self._connection(immediate=True) as connection:
+            proposal = connection.execute(
+                """
+                SELECT campaign_id FROM campaign_proposals
+                WHERE workspace_id = ? AND proposal_id = ?
+                """,
+                (record.workspace_id, record.proposal_id),
+            ).fetchone()
+            if proposal is None:
+                raise RecordNotFoundError("campaign proposal not found")
+            if proposal["campaign_id"] != record.campaign_id:
+                raise ValueError("campaign_code_lineage_proposal_campaign_mismatch")
+            existing = connection.execute(
+                """
+                SELECT * FROM campaign_code_lineages
+                WHERE workspace_id = ? AND proposal_id = ?
+                """,
+                (record.workspace_id, record.proposal_id),
+            ).fetchone()
+            if existing is not None:
+                current = self._code_lineage_from_row(existing)
+                if current == record:
+                    return current
+                raise ValueError("campaign_code_lineage_identity_conflict")
+            connection.execute(
+                """
+                INSERT INTO campaign_code_lineages(
+                    workspace_id, campaign_id, proposal_id, lineage_id, state,
+                    record_json, record_digest, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.workspace_id,
+                    record.campaign_id,
+                    record.proposal_id,
+                    record.lineage_id,
+                    record.state.value,
+                    _json(record.model_dump(mode="json")),
+                    record.record_digest,
+                    _iso(record.created_at),
+                    _iso(record.updated_at),
+                ),
+            )
+        return record
+
+    def advance_code_lineage(self, value: CodeLineageRecord) -> CodeLineageRecord:
+        """Advance required -> prepared -> captured without mutable evidence."""
+
+        self._require_initialized()
+        record = CodeLineageRecord.model_validate(value.model_dump(mode="python"))
+        ranks = {
+            CodeLineageState.REQUIRED: 0,
+            CodeLineageState.PREPARED: 1,
+            CodeLineageState.CAPTURED: 2,
+        }
+        with self._connection(immediate=True) as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM campaign_code_lineages
+                WHERE workspace_id = ? AND proposal_id = ?
+                """,
+                (record.workspace_id, record.proposal_id),
+            ).fetchone()
+            if row is None:
+                raise RecordNotFoundError("campaign code lineage not found")
+            current = self._code_lineage_from_row(row)
+            if current == record:
+                return current
+            immutable_fields = (
+                "lineage_id",
+                "workspace_id",
+                "campaign_id",
+                "proposal_id",
+                "mutation_kind",
+                "source_repository_profile_id",
+                "created_at",
+            )
+            immutable_changed = any(
+                getattr(current, field) != getattr(record, field)
+                for field in immutable_fields
+            )
+            evidence_rewritten = (
+                current.state != CodeLineageState.REQUIRED
+                and (
+                    current.base_commit != record.base_commit
+                    or current.branch_name != record.branch_name
+                )
+            )
+            if (
+                immutable_changed
+                or evidence_rewritten
+                or ranks[record.state] != ranks[current.state] + 1
+                or record.updated_at < current.updated_at
+            ):
+                raise ValueError("campaign_code_lineage_transition_invalid")
+            connection.execute(
+                """
+                UPDATE campaign_code_lineages
+                SET state = ?, record_json = ?, record_digest = ?, updated_at = ?
+                WHERE workspace_id = ? AND proposal_id = ? AND record_digest = ?
+                """,
+                (
+                    record.state.value,
+                    _json(record.model_dump(mode="json")),
+                    record.record_digest,
+                    _iso(record.updated_at),
+                    record.workspace_id,
+                    record.proposal_id,
+                    current.record_digest,
+                ),
+            )
+        return record
+
+    def get_code_lineage(self, workspace_id: str, proposal_id: str) -> CodeLineageRecord:
+        self._require_initialized()
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM campaign_code_lineages
+                WHERE workspace_id = ? AND proposal_id = ?
+                """,
+                (workspace_id, proposal_id),
+            ).fetchone()
+        if row is None:
+            raise RecordNotFoundError("campaign code lineage not found")
+        return self._code_lineage_from_row(row)
+
+    def list_code_lineages(
+        self, workspace_id: str, campaign_id: str
+    ) -> tuple[CodeLineageRecord, ...]:
+        self._require_initialized()
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM campaign_code_lineages
+                WHERE workspace_id = ? AND campaign_id = ?
+                ORDER BY created_at, lineage_id
+                """,
+                (workspace_id, campaign_id),
+            ).fetchall()
+        return tuple(self._code_lineage_from_row(row) for row in rows)
 
     @staticmethod
     def _campaign_from_row(row: sqlite3.Row) -> Campaign:

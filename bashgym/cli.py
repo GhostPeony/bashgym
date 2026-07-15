@@ -3203,6 +3203,7 @@ def cmd_campaign_setup_autoresearch(args: argparse.Namespace) -> int:
         task=args.task,
         dataset_version_id=args.dataset_version_id,
         compute_profile_id=args.compute_profile_id,
+        source_repository_profile_id=args.source_repository_profile_id,
         ledger_project_id=args.ledger_project_id,
         evaluation_suite_id=args.evaluation_suite_id,
         primary_metric=args.primary_metric,
@@ -3596,6 +3597,18 @@ def cmd_campaign_autoresearch_result(args: argparse.Namespace) -> int:
     )
 
 
+def cmd_campaign_code_lineage(args: argparse.Namespace) -> int:
+    return _campaign_post(
+        args,
+        (
+            f"/campaigns/{_quoted_identifier(args.campaign_id)}/proposals/"
+            f"{_quoted_identifier(args.proposal_id)}/code-lineage/"
+            f"{args.lineage_operation}"
+        ),
+        {"workspace_id": args.workspace_id},
+    )
+
+
 def cmd_campaign_withdraw_proposal(args: argparse.Namespace) -> int:
     return _campaign_post(
         args,
@@ -3937,6 +3950,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     campaign_setup.add_argument(
         "--compute-profile", dest="compute_profile_id", required=True
+    )
+    campaign_setup.add_argument(
+        "--source-repository-profile",
+        dest="source_repository_profile_id",
+        required=True,
+        help="Logical installation-owned source repository binding for code hypotheses",
     )
     campaign_setup.add_argument("--project", dest="ledger_project_id", required=True)
     campaign_setup.add_argument(
@@ -4301,6 +4320,25 @@ def build_parser() -> argparse.ArgumentParser:
     add_campaign_mutation_arguments(campaign_withdraw)
     campaign_withdraw.add_argument("--proposal", dest="proposal_id", required=True)
     campaign_withdraw.set_defaults(func=cmd_campaign_withdraw_proposal)
+
+    for operation in ("prepare", "capture"):
+        lineage = campaign_proposal_sub.add_parser(
+            f"lineage-{operation}",
+            help=(
+                "Prepare the private code-hypothesis worktree"
+                if operation == "prepare"
+                else "Capture one approved code-hypothesis commit"
+            ),
+            parents=[json_parent, campaign_connection],
+        )
+        lineage.add_argument("--campaign", dest="campaign_id", required=True)
+        lineage.add_argument("--proposal", dest="proposal_id", required=True)
+        lineage.add_argument("--idempotency-key", required=True)
+        lineage.add_argument("--correlation-id")
+        lineage.set_defaults(
+            func=cmd_campaign_code_lineage,
+            lineage_operation=operation,
+        )
 
     campaign_study = campaign_sub.add_parser("study", help="Manage campaign studies")
     campaign_study_sub = campaign_study.add_subparsers(dest="campaign_study_command", required=True)

@@ -84,6 +84,11 @@ test('campaign bridge allowlists exact REST routes and rejects renderer escape h
     expected_version: 4,
     proposal_id: 'baseline-1',
   })
+  validateCampaignRequest(
+    'POST',
+    '/api/campaigns/campaign-1/proposals/proposal-1/code-lineage/prepare',
+    { workspace_id: 'workspace-a' },
+  )
 
   assert.throws(
     () => validateCampaignRequest('POST', '/api/campaign-auth/exchange', {}),

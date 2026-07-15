@@ -107,6 +107,7 @@ def test_hermes_profile_cannot_cross_privileged_boundaries():
     assert Capability.COMPUTE_TRAIN_WITHIN_BUDGET in HERMES_CAPABILITIES
     assert Capability.EVAL_DEVELOPMENT in HERMES_CAPABILITIES
     assert Capability.EXPERIMENT_LEDGER_WRITE in HERMES_CAPABILITIES
+    assert Capability.EXPERIMENT_CODE_MUTATE not in HERMES_CAPABILITIES
     assert Capability.COMPUTE_AMEND_BUDGET not in HERMES_CAPABILITIES
     assert Capability.EVAL_PROTECTED_ACQUIRE not in HERMES_CAPABILITIES
     assert Capability.PROMOTION_DECIDE not in HERMES_CAPABILITIES

@@ -2,6 +2,7 @@
 
 import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 
 from fastapi import FastAPI
@@ -21,6 +22,9 @@ from bashgym.campaigns.autoresearch import (
 from bashgym.campaigns.contracts import (
     AutonomyProfile,
     CampaignTrigger,
+    CodeLineageRecord,
+    CodeLineageState,
+    CodeMutationKind,
     CredentialKind,
     canonical_hash,
 )
@@ -40,6 +44,7 @@ from bashgym.ledger.contracts import (
 )
 from bashgym.ledger.persistence import ExperimentLedgerRepository
 from tests.campaigns.test_autoresearch_readiness import definition as readiness_definition
+from tests.campaigns.test_lineage import initialized_repository, source_profile
 from tests.campaigns.test_persistence import campaign, manifest
 from tests.campaigns.test_proposals import proposal as study_proposal
 from tests.campaigns.test_remote_persistence import _claimed_attempt
@@ -125,6 +130,8 @@ def test_create_app_registers_campaign_auth_and_campaign_routes():
         "/api/campaigns/{campaign_id}/studies",
         "/api/campaigns/{campaign_id}/studies/{study_id}",
         "/api/campaigns/{campaign_id}/proposals/{proposal_id}/withdraw",
+        "/api/campaigns/{campaign_id}/proposals/{proposal_id}/code-lineage/prepare",
+        "/api/campaigns/{campaign_id}/proposals/{proposal_id}/code-lineage/capture",
         "/api/campaigns/{campaign_id}/evidence",
         "/api/campaigns/{campaign_id}/advance",
         "/api/campaigns/{campaign_id}/actions/{action_id}/retry",
@@ -229,6 +236,7 @@ def test_installed_real_template_fails_closed_before_campaign_creation(tmp_path)
         "data_binding_unresolved",
         "evaluator_binding_unresolved",
         "compute_binding_unresolved",
+        "source_repository_binding_unresolved",
         "controller_offline",
     ]
 
@@ -314,6 +322,84 @@ def test_autoresearch_requires_explicit_role_and_accepts_bounded_baseline(tmp_pa
         params={"workspace_id": "workspace-a"},
     )
     assert state.json()["state"]["next_action"] == "wait_for_result"
+
+
+def test_code_lineage_routes_prepare_private_worktree_and_capture_safe_record(tmp_path):
+    http, repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    assert create_from_template(http, access).status_code == 200
+    version = repository.get_campaign("workspace-a", "campaign-1").version
+    for trigger, key in (
+        (CampaignTrigger.VALIDATE, "lineage-validate"),
+        (CampaignTrigger.VALIDATION_PASSED, "lineage-ready"),
+        (CampaignTrigger.START, "lineage-start"),
+    ):
+        version = repository.transition_campaign(
+            "workspace-a",
+            "campaign-1",
+            trigger,
+            expected_version=version,
+            actor_id="campaign-controller",
+            credential_kind=CredentialKind.CONTROLLER,
+            correlation_id=key,
+            idempotency_key=key,
+        ).campaign.version
+    proposal_body = study_proposal("candidate-code").model_dump(
+        mode="json", exclude={"schema_version", "workspace_id", "campaign_id"}
+    )
+    proposal_body.update({"workspace_id": "workspace-a", "expected_version": version})
+    submitted = http.post(
+        "/api/campaigns/campaign-1/proposals",
+        headers={**bearer(access), "Idempotency-Key": "lineage-proposal"},
+        json=proposal_body,
+    )
+    assert submitted.status_code == 200
+    observed_at = datetime.now(UTC)
+    repository.register_code_lineage_requirement(
+        CodeLineageRecord(
+            lineage_id="lineage-candidate-code",
+            workspace_id="workspace-a",
+            campaign_id="campaign-1",
+            proposal_id="candidate-code",
+            mutation_kind=CodeMutationKind.TRAINER,
+            source_repository_profile_id="bashgym-source-v1",
+            state=CodeLineageState.REQUIRED,
+            created_at=observed_at,
+            updated_at=observed_at,
+        )
+    )
+    source_root = tmp_path / "source-fixture"
+    source_root.mkdir()
+    source_repository, _base_commit = initialized_repository(source_root)
+    http.app.state.campaign_source_profiles = {
+        "bashgym-source-v1": source_profile(source_repository)
+    }
+    http.app.state.campaign_lineage_worktree_root = tmp_path / "lineage-worktrees"
+
+    prepared = http.post(
+        "/api/campaigns/campaign-1/proposals/candidate-code/code-lineage/prepare",
+        headers=bearer(access),
+        json={"workspace_id": "workspace-a"},
+    )
+    assert prepared.status_code == 200
+    worktree = Path(prepared.json()["worktree_path"])
+    assert worktree.is_dir()
+    assert str(source_repository) not in json.dumps(prepared.json()["record"])
+    (worktree / "bashgym" / "gym" / "trainer.py").write_text(
+        "LEARNING_RATE = 2e-4\n", encoding="utf-8"
+    )
+
+    captured = http.post(
+        "/api/campaigns/campaign-1/proposals/candidate-code/code-lineage/capture",
+        headers=bearer(access),
+        json={"workspace_id": "workspace-a"},
+    )
+    assert captured.status_code == 200
+    assert captured.json()["record"]["state"] == "captured"
+    assert captured.json()["record"]["changed_paths"] == [
+        "bashgym/gym/trainer.py"
+    ]
+    assert "worktree_path" not in captured.json()
 
 
 def test_desktop_bootstrap_env_is_required_and_exchanges_without_renderer_identity(

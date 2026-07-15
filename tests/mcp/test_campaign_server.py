@@ -135,6 +135,8 @@ async def test_campaign_stdio_server_exposes_only_launch_scoped_contract():
             "campaign_revise",
             "campaign_propose_study",
             "campaign_withdraw_proposal",
+            "campaign_prepare_code_lineage",
+            "campaign_capture_code_lineage",
             "campaign_start",
             "campaign_advance",
             "campaign_pause",
@@ -368,6 +370,34 @@ async def test_campaign_extended_tools_use_strict_paths_bodies_and_persisted_ide
     }
     for call in client.calls:
         assert set(call["headers"]) == {"Idempotency-Key", "X-Correlation-ID"}
+
+
+async def test_campaign_code_lineage_tools_bind_workspace_and_proposal_path():
+    client = RecordingClient()
+    server = build_server(
+        workspace_id="workspace-a",
+        credential_ref="BASHGYM_CAMPAIGN_REFRESH",
+        agent="codex",
+        client=client,
+    )
+
+    prepared = await call_tool(
+        server,
+        "campaign_prepare_code_lineage",
+        {"campaign_id": "campaign-2", "proposal_id": "proposal-7"},
+    )
+    captured = await call_tool(
+        server,
+        "campaign_capture_code_lineage",
+        {"campaign_id": "campaign-2", "proposal_id": "proposal-7"},
+    )
+
+    assert prepared["ok"] is True and captured["ok"] is True
+    assert [call["path"] for call in client.calls] == [
+        "/campaigns/campaign-2/proposals/proposal-7/code-lineage/prepare",
+        "/campaigns/campaign-2/proposals/proposal-7/code-lineage/capture",
+    ]
+    assert all(call["payload"] == {"workspace_id": "workspace-a"} for call in client.calls)
 
 
 @pytest.mark.parametrize("scope_field", sorted(PROHIBITED_SCOPE_FIELDS))

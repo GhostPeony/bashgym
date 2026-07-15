@@ -69,7 +69,7 @@ be used as the authoritative campaign record.
 1. Discover source-managed templates with `bashgym campaign templates ... --json`.
    For real research, run `bashgym campaign setup-autoresearch --help`, supply
    the explicitly approved immutable trainable-base revision and logical
-   model/data/evaluator/private-compute IDs, then run `bashgym campaign doctor`
+   model/data/evaluator/private-compute/source-repository IDs, then run `bashgym campaign doctor`
    on the installed template. Never select a packaged example model or put
    private transport/credential details in the definition.
 2. For a no-GPU orchestration proof, create from
@@ -85,6 +85,14 @@ be used as the authoritative campaign record.
    After a real baseline is accepted, submit exactly one candidate at a time with
    `--autoresearch-role candidate --parent-proposal <incumbent-id>`. Do not use
    the generic proposal route for an AutoResearch campaign.
+   If the candidate's primary variable starts with `trainer.`, `algorithm.`,
+   `gym.`, `environment.`, `reward.`, `evaluator.`, or `verifier.`, Git lineage
+   is mandatory. Hermes does not receive `experiment.code_mutate`; hand the
+   proposal to a capability-authorized Codex operator. That operator must call
+   `campaign proposal lineage-prepare`, edit only the returned private worktree,
+   then call `campaign proposal lineage-capture`. Never edit the user's branch,
+   bypass the approved path scope, or merge the hypothesis branch automatically.
+   Scalar recipe variables remain ledger-native and do not use this flow.
 5. Launch and evaluate through the training skill. The primary metric must come
    from the pinned evaluation suite, not a training-loss proxy. Register exact
    run, attempt, artifact, and evaluation lineage. A completed campaign-linked

@@ -33,6 +33,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from bashgym.campaigns.artifacts import ArtifactSealer
 from bashgym.campaigns.contracts import utc_now
+from bashgym.campaigns.lineage import (
+    ApprovedSourceRepositoryProfile,
+    GitHypothesisLineageManager,
+    GitLineageError,
+)
 from bashgym.campaigns.persistence import CampaignRepository
 from bashgym.campaigns.remote import ApprovedRemoteExecutorProfile, RemoteTrainingAdapter
 from bashgym.campaigns.runtime import CampaignRuntimeRepository
@@ -100,6 +105,7 @@ class WorkerRunConfig(BaseModel):
     seal_key_ref: str = "BASHGYM_CAMPAIGN_SEAL_KEY"
     seal_key_version: str = Field(default="v1", min_length=1, max_length=64)
     approved_remote_profiles: tuple[ApprovedRemoteExecutorProfile, ...] = ()
+    approved_source_profiles: tuple[ApprovedSourceRepositoryProfile, ...] = ()
     # Legacy discovery IDs remain parseable so existing service configuration can
     # be inspected or replaced. They never authorize campaign remote execution.
     compute_profile_ids: tuple[str, ...] = ()
@@ -157,6 +163,16 @@ class WorkerRunConfig(BaseModel):
             )
         return value
 
+    @field_validator("approved_source_profiles")
+    @classmethod
+    def canonical_source_profiles(
+        cls, value: tuple[ApprovedSourceRepositoryProfile, ...]
+    ) -> tuple[ApprovedSourceRepositoryProfile, ...]:
+        ordering = tuple(profile.profile_id for profile in value)
+        if tuple(sorted(ordering)) != ordering or len(set(ordering)) != len(ordering):
+            raise ValueError("approved source profiles must be sorted and unique")
+        return value
+
     @model_validator(mode="after")
     def confine_runtime_paths(self) -> WorkerRunConfig:
         for path in (self.database_path, self.artifact_root):
@@ -174,6 +190,7 @@ class WorkerRunConfig(BaseModel):
         data_directory: Path,
         *,
         approved_remote_profiles: tuple[ApprovedRemoteExecutorProfile, ...] = (),
+        approved_source_profiles: tuple[ApprovedSourceRepositoryProfile, ...] = (),
         compute_profile_ids: tuple[str, ...] = (),
     ) -> WorkerRunConfig:
         root = data_directory.expanduser().resolve()
@@ -182,6 +199,7 @@ class WorkerRunConfig(BaseModel):
             database_path=root / "campaigns" / "campaigns.sqlite3",
             artifact_root=root / "campaigns" / "artifacts",
             approved_remote_profiles=approved_remote_profiles,
+            approved_source_profiles=approved_source_profiles,
             compute_profile_ids=compute_profile_ids,
         )
 
@@ -444,6 +462,26 @@ def load_approved_remote_profiles(
             registry[key] = profile
     except (OSError, ValueError) as exc:
         raise WorkerServiceError("campaign_worker_remote_profile_material_invalid") from exc
+    return registry
+
+
+def load_approved_source_profiles(
+    config: WorkerRunConfig,
+) -> dict[str, ApprovedSourceRepositoryProfile]:
+    """Load and verify installation-owned source repositories and path scopes."""
+
+    registry: dict[str, ApprovedSourceRepositoryProfile] = {}
+    manager = GitHypothesisLineageManager(
+        config.data_directory / "campaigns" / "source-worktrees"
+    )
+    try:
+        for profile in config.approved_source_profiles:
+            manager.verify_profile(profile)
+            if profile.profile_id in registry:
+                raise ValueError("duplicate approved source profile resolution key")
+            registry[profile.profile_id] = profile
+    except (GitLineageError, OSError, ValueError) as exc:
+        raise WorkerServiceError("campaign_worker_source_profile_material_invalid") from exc
     return registry
 
 
@@ -1117,6 +1155,7 @@ __all__ = [
     "build_worker",
     "ensure_worker_bootstrap",
     "load_approved_remote_profiles",
+    "load_approved_source_profiles",
     "main",
     "project_controller_status",
     "read_worker_config",

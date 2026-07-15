@@ -45,7 +45,10 @@ def manifest() -> CampaignManifest:
         approved_data_scopes=("memexai-approved-training",),
         compute_profile_id="ssh-gpu-lab",
         budget_limits={"gpu_hours": 12.0, "study_count": 5.0},
-        evaluation_plan={"development_query_set": "dev-18-v1"},
+        evaluation_plan={
+            "development_query_set": "dev-18-v1",
+            "source_repository_binding_id": "bashgym-source-v1",
+        },
         promotion_gates={"mrr_at_10_delta_min": 0.0},
         protected_artifact_refs=("frozen-test-36-v1",),
     )
@@ -96,7 +99,7 @@ def transition(repository, trigger, version, *, key, payload=None):
 
 
 def test_initialize_applies_checksum_migration_and_all_owned_tables(repository):
-    assert repository.schema_versions() == [1, 2, 3, 4, 5, 6, 7, 8]
+    assert repository.schema_versions() == [1, 2, 3, 4, 5, 6, 7, 8, 9]
     assert repository.journal_mode() == "wal"
     assert repository.foreign_keys_enabled() is True
 
@@ -127,6 +130,7 @@ def test_initialize_applies_checksum_migration_and_all_owned_tables(repository):
         "campaign_source_approvals",
         "campaign_action_control_requests",
         "campaign_exports",
+        "campaign_code_lineages",
     } <= tables
 
 

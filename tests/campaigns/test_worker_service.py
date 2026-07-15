@@ -35,11 +35,13 @@ from bashgym.campaigns.worker_service import (
     build_worker,
     ensure_worker_bootstrap,
     load_approved_remote_profiles,
+    load_approved_source_profiles,
     project_controller_status,
     read_worker_config,
     run_foreground,
     write_worker_config,
 )
+from tests.campaigns.test_lineage import initialized_repository, source_profile
 
 NOW = datetime(2026, 7, 13, 12, 0, tzinfo=UTC)
 
@@ -485,9 +487,14 @@ def test_config_rejects_unsafe_boundaries_and_secret_values(tmp_path: Path) -> N
 
 def test_protected_profile_round_trips_and_is_the_only_adapter_authority(tmp_path: Path) -> None:
     profile = approved_profile(tmp_path)
+    source_root = tmp_path / "source-fixture"
+    source_root.mkdir()
+    source_repository, _base_commit = initialized_repository(source_root)
+    source = source_profile(source_repository)
     config = WorkerRunConfig.for_data_directory(
         tmp_path / "data",
         approved_remote_profiles=(profile,),
+        approved_source_profiles=(source,),
         # A legacy ID remains loadable but does not create an adapter.
         compute_profile_ids=("actor-mutated-device",),
     )
@@ -499,6 +506,8 @@ def test_protected_profile_round_trips_and_is_the_only_adapter_authority(tmp_pat
     assert registry[("ssh-gpu-lab", "memexai-embedding-v1")].profile_digest == (
         profile.profile_digest
     )
+    source_registry = load_approved_source_profiles(loaded)
+    assert source_registry["bashgym-source-v1"].profile_digest == source.profile_digest
     with pytest.raises(ValidationError, match="profile digest mismatch"):
         ApprovedRemoteExecutorProfile(
             **profile.model_dump(exclude={"profile_digest"}),

@@ -29,6 +29,7 @@ from bashgym.ledger.contracts import (
     ProjectSpec,
 )
 from bashgym.ledger.persistence import ExperimentLedgerRepository
+from tests.campaigns.test_lineage import initialized_repository, source_profile
 
 NOW = datetime(2026, 7, 14, 12, 0, tzinfo=UTC)
 WORKSPACE = "workspace-a"
@@ -63,6 +64,7 @@ def definition() -> AutoResearchTemplateDefinition:
                 "ledger_project_id": PROJECT,
                 "evaluation_suite_id": SUITE,
                 "dataset_binding_id": DATASET_VERSION,
+                "source_repository_binding_id": "bashgym-source-v1",
                 "required_training_stages": ["smoke_training", "full_training"],
             },
             promotion_gates={"quality_claim_eligible": True},
@@ -221,6 +223,7 @@ def test_real_template_fails_closed_when_installation_bindings_are_missing(tmp_p
         "data_binding_unresolved",
         "evaluator_binding_unresolved",
         "compute_binding_unresolved",
+        "source_repository_binding_unresolved",
     )
 
 
@@ -230,6 +233,11 @@ def test_real_template_requires_exact_ledger_profile_and_material_hashes(tmp_pat
     register_scientific_bindings(ledger)
     profile, script = registered_profile(tmp_path, template)
     registry = {(profile.compute_profile_id, profile.target_contract_key): profile}
+    source_root = tmp_path / "source-fixture"
+    source_root.mkdir()
+    source_repository, _base_commit = initialized_repository(source_root)
+    source = source_profile(source_repository)
+    source_registry = {source.profile_id: source}
 
     ready = doctor_autoresearch_template(
         template,
@@ -237,6 +245,7 @@ def test_real_template_requires_exact_ledger_profile_and_material_hashes(tmp_pat
         ledger=ledger,
         executor_profiles=registry,
         controller=online_controller(),
+        source_profiles=source_registry,
     )
     assert ready.materializable is True
     assert ready.launch_ready is True
@@ -250,6 +259,7 @@ def test_real_template_requires_exact_ledger_profile_and_material_hashes(tmp_pat
         ledger=ledger,
         executor_profiles=registry,
         controller=online_controller(),
+        source_profiles=source_registry,
     )
     assert stale.materializable is False
     assert stale.blocking_codes == ("compute_binding_unresolved",)

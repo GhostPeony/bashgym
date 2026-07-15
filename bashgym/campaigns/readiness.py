@@ -10,6 +10,7 @@ from pydantic import Field
 
 from bashgym.campaigns.autoresearch import AutoResearchTemplateDefinition
 from bashgym.campaigns.contracts import FrozenContractModel, Identifier, StageKind, canonical_hash
+from bashgym.campaigns.lineage import ApprovedSourceRepositoryProfile
 from bashgym.campaigns.persistence import RecordNotFoundError
 from bashgym.campaigns.remote import ApprovedRemoteExecutorProfile
 from bashgym.campaigns.worker_service import ControllerStatusProjection
@@ -86,6 +87,7 @@ def doctor_autoresearch_template(
     ledger: ExperimentLedgerRepository,
     executor_profiles: Mapping[tuple[str, str], ApprovedRemoteExecutorProfile],
     controller: ControllerStatusProjection,
+    source_profiles: Mapping[str, ApprovedSourceRepositoryProfile] | None = None,
 ) -> AutoResearchDoctorReport:
     """Return a secret-free report; every quality binding must resolve exactly."""
 
@@ -203,6 +205,27 @@ def doctor_autoresearch_template(
                 "Install an exact registered-training profile for this model contract and verify every pinned script, input, credential, and stage.",
             )
         )
+        source_profile_id = evaluation_plan.get("source_repository_binding_id")
+        source_profile = (
+            source_profiles.get(source_profile_id)
+            if isinstance(source_profile_id, str) and source_profiles is not None
+            else None
+        )
+        source_ready = bool(
+            source_profile is not None
+            and source_profile.repository_path.is_dir()
+            and not source_profile.repository_path.is_symlink()
+            and source_profile.allowed_mutation_paths
+        )
+        checks.append(
+            _check(
+                "source_repository_binding",
+                source_ready,
+                "source_repository_binding_ready",
+                "source_repository_binding_unresolved",
+                "Register the logical source profile in the worker configuration with a private Git repository and operator-approved mutation paths.",
+            )
+        )
     else:
         checks.extend(
             (
@@ -232,6 +255,13 @@ def doctor_autoresearch_template(
                     True,
                     "control_template_compute_not_required",
                     "compute_binding_unresolved",
+                    "",
+                ),
+                _check(
+                    "source_repository_binding",
+                    True,
+                    "control_template_source_repository_not_required",
+                    "source_repository_binding_unresolved",
                     "",
                 ),
             )

@@ -184,6 +184,16 @@ private-compute profile bound to the exact target-model digest. Do not replace
 it with `cloud:nemo-customizer`, Hugging Face Jobs, a raw SSH command, or another fallback;
 those are separate, explicitly authorized execution lanes.
 
+For an AutoResearch code hypothesis, require captured Git lineage before launch.
+The capability-authorized operator prepares the isolated worktree, edits only the
+source profile's approved trainer/gym/reward/evaluator paths, and captures exactly
+one BashGym lineage commit. Confirm that the resulting action input contains the
+lineage record digest and commit SHA. Never treat an uncaptured worktree or a
+recipe-only change as executed code evidence.
+If BashGym reports `campaign_code_lineage_execution_binding_required`, stop and
+hand off the captured branch for an executor-profile update; do not launch the
+pinned trainer and claim it consumed the commit.
+
 For project history and agent synthesis, use `bashgym ledger projects`, `ledger
 context`, `ledger runs`, `ledger run`, `ledger trend`, `ledger evaluations`,
 `ledger compare`, `ledger events`, and `ledger health`. Compare results only when

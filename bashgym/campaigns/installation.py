@@ -55,6 +55,7 @@ class AutoResearchBindingPlan(FrozenContractModel):
     primary_metric: Identifier
     metric_direction: MetricDirection
     compute_profile_id: Identifier
+    source_repository_profile_id: Identifier
     required_training_stages: tuple[StageKind, ...] = _REQUIRED_TRAINING_STAGES
 
 
@@ -80,6 +81,7 @@ def build_quality_autoresearch_definition(
     task: str,
     dataset_version_id: str,
     compute_profile_id: str,
+    source_repository_profile_id: str,
     ledger_project_id: str,
     evaluation_suite_id: str,
     primary_metric: str,
@@ -140,6 +142,7 @@ def build_quality_autoresearch_definition(
             budget_limits={budget_unit: budget_limit},
             evaluation_plan={
                 "dataset_binding_id": dataset_version_id,
+                "source_repository_binding_id": source_repository_profile_id,
                 "ledger_project_id": ledger_project_id,
                 "evaluation_suite_id": evaluation_suite_id,
                 "primary_metric": primary_metric,
@@ -171,6 +174,13 @@ def autoresearch_binding_plan(
     dataset_version_id = definition.manifest.evaluation_plan.get("dataset_binding_id")
     if not isinstance(dataset_version_id, str):
         raise AutoResearchInstallationError("definition is missing dataset_binding_id")
+    source_repository_profile_id = definition.manifest.evaluation_plan.get(
+        "source_repository_binding_id"
+    )
+    if not isinstance(source_repository_profile_id, str):
+        raise AutoResearchInstallationError(
+            "definition is missing source_repository_binding_id"
+        )
     return AutoResearchBindingPlan(
         template_id=definition.template_id,
         definition_digest=definition.definition_digest,
@@ -183,6 +193,7 @@ def autoresearch_binding_plan(
         primary_metric=policy.primary_metric,
         metric_direction=policy.metric_direction,
         compute_profile_id=definition.manifest.compute_profile_id,
+        source_repository_profile_id=source_repository_profile_id,
     )
 
 

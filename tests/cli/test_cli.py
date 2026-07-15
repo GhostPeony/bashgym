@@ -867,6 +867,8 @@ def test_campaign_setup_autoresearch_installs_explicit_binding_without_credentia
         "dataset-version-1",
         "--compute-profile",
         "private-training-1",
+        "--source-repository-profile",
+        "bashgym-source-1",
         "--project",
         "project-1",
         "--evaluation-suite",
@@ -890,11 +892,54 @@ def test_campaign_setup_autoresearch_installs_explicit_binding_without_credentia
     assert payload["created"] is True
     assert payload["binding_plan"]["model_ref"].endswith(f"@{revision}")
     assert payload["binding_plan"]["compute_profile_id"] == "private-training-1"
+    assert payload["binding_plan"]["source_repository_profile_id"] == "bashgym-source-1"
     assert payload["binding_plan"]["required_training_stages"] == [
         "smoke_training",
         "full_training",
     ]
     assert (install_dir / "autoresearch-installed-v1.json").is_file()
+
+
+def test_campaign_code_lineage_cli_routes_prepare_and_capture(monkeypatch, capsys):
+    class Client:
+        def __init__(self):
+            self.calls = []
+
+        def request_json(self, method, path, *, query=None, payload=None, headers=None):
+            self.calls.append((method, path, payload, headers))
+            return {"record": {"state": path.rsplit("/", 1)[-1]}}
+
+    client = Client()
+    monkeypatch.setattr("bashgym.cli._campaign_client", lambda _args: client)
+    common = [
+        "--campaign",
+        "campaign-1",
+        "--proposal",
+        "proposal-1",
+        "--workspace-id",
+        "workspace-a",
+        "--credential-ref",
+        "CAMPAIGN_REFRESH",
+        "--json",
+    ]
+    for operation in ("prepare", "capture"):
+        assert main(
+            [
+                "campaign",
+                "proposal",
+                f"lineage-{operation}",
+                *common,
+                "--idempotency-key",
+                f"lineage-{operation}-1",
+            ]
+        ) == 0
+        json.loads(capsys.readouterr().out)
+
+    assert [call[1] for call in client.calls] == [
+        "/campaigns/campaign-1/proposals/proposal-1/code-lineage/prepare",
+        "/campaigns/campaign-1/proposals/proposal-1/code-lineage/capture",
+    ]
+    assert all(call[2] == {"workspace_id": "workspace-a"} for call in client.calls)
 
 
 def test_campaign_autoresearch_cli_routes_explicit_roles_and_result_identity(

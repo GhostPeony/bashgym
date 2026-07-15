@@ -28,6 +28,9 @@ from bashgym.campaigns.contracts import (
     CampaignManifest,
     CampaignStatus,
     CampaignTrigger,
+    Capability,
+    CodeLineageRecord,
+    CodeMutationKind,
     CredentialKind,
     FrozenContractModel,
     Identifier,
@@ -39,6 +42,7 @@ from bashgym.campaigns.contracts import (
     canonical_hash,
     utc_now,
 )
+from bashgym.campaigns.lineage import code_mutation_kind_for_variable
 from bashgym.campaigns.persistence import (
     CampaignPersistenceError,
     MigrationChecksumError,
@@ -1121,6 +1125,8 @@ class AutoResearchCampaignCore:
             raise AutoResearchInvariantError(f"autoresearch_proposal_not_ready:{state.reason_code}")
         if submission.estimated_cost > state.budget_remaining:
             raise AutoResearchBudgetError("autoresearch_estimated_cost_exceeds_remaining_budget")
+        lineage_kind: CodeMutationKind | None = None
+        source_repository_profile_id: str | None = None
         if control.role == ExperimentRole.BASELINE:
             if submission.prerequisite_study_ids:
                 raise AutoResearchInvariantError("autoresearch_baseline_cannot_have_prerequisite")
@@ -1139,6 +1145,33 @@ class AutoResearchCampaignCore:
                 raise AutoResearchInvariantError(
                     "autoresearch_candidate_must_depend_on_incumbent_study"
                 )
+            lineage_kind = code_mutation_kind_for_variable(control.changed_variables[0])
+            if lineage_kind is not None:
+                principal.require(submission.workspace_id, Capability.EXPERIMENT_CODE_MUTATE)
+                campaign = self.repository.get_campaign(
+                    submission.workspace_id, submission.campaign_id
+                )
+                manifest = self.repository.get_manifest_revision(
+                    submission.workspace_id,
+                    submission.campaign_id,
+                    campaign.manifest_revision,
+                ).manifest
+                binding = manifest.evaluation_plan.get("source_repository_binding_id")
+                if (
+                    not isinstance(binding, str)
+                    or not binding
+                    or len(binding) > 160
+                    or not binding[0].isalnum()
+                    or any(
+                        character
+                        not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:-"
+                        for character in binding
+                    )
+                ):
+                    raise AutoResearchInvariantError(
+                        "autoresearch_source_repository_binding_required"
+                    )
+                source_repository_profile_id = binding
 
         mutation = self.service.submit_proposal(
             submission,
@@ -1152,7 +1185,29 @@ class AutoResearchCampaignCore:
                 "autoresearch_proposal_rejected:"
                 + ",".join(mutation.record.validation.reason_codes)
             )
-        self.repository.register_autoresearch_proposal(control)
+        registered_control = self.repository.register_autoresearch_proposal(control)
+        if lineage_kind is not None:
+            assert source_repository_profile_id is not None
+            lineage_id = "lineage-" + canonical_hash(
+                [
+                    registered_control.control_digest,
+                    lineage_kind.value,
+                    source_repository_profile_id,
+                ]
+            )[:32]
+            self.repository.register_code_lineage_requirement(
+                CodeLineageRecord(
+                    lineage_id=lineage_id,
+                    workspace_id=submission.workspace_id,
+                    campaign_id=submission.campaign_id,
+                    proposal_id=submission.proposal_id,
+                    mutation_kind=lineage_kind,
+                    source_repository_profile_id=source_repository_profile_id,
+                    state="required",
+                    created_at=registered_control.created_at,
+                    updated_at=registered_control.created_at,
+                )
+            )
         return mutation
 
     def submit_baseline(

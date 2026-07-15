@@ -39,6 +39,11 @@ from bashgym.campaigns.contracts import (
     TargetModelContract,
     canonical_hash,
 )
+from bashgym.campaigns.lineage import (
+    ApprovedSourceRepositoryProfile,
+    GitHypothesisLineageManager,
+    GitLineageError,
+)
 from bashgym.campaigns.persistence import (
     BudgetExceededError,
     BudgetInvariantError,
@@ -67,6 +72,7 @@ from bashgym.campaigns.worker_service import (
     DesktopWorkerStatusProjection,
     WorkerServiceError,
     load_approved_remote_profiles,
+    load_approved_source_profiles,
     project_controller_status,
     read_worker_config,
 )
@@ -149,6 +155,10 @@ class AutoResearchEvaluationIngestInput(ApiModel):
     workspace_id: str = Field(min_length=1, max_length=160)
     project_id: str = Field(min_length=1, max_length=160)
     evaluation_result_id: str = Field(min_length=1, max_length=160)
+
+
+class CodeLineageInput(ApiModel):
+    workspace_id: str = Field(min_length=1, max_length=160)
 
 
 class CampaignManifestReviseInput(CampaignExpectedVersionInput):
@@ -353,6 +363,49 @@ def _approved_executor_profiles(
     return profiles
 
 
+def _approved_source_profiles(
+    request: Request,
+) -> dict[str, ApprovedSourceRepositoryProfile]:
+    raw = getattr(request.app.state, "campaign_source_profiles", None)
+    if raw is None:
+        config_path = Path(
+            getattr(
+                request.app.state,
+                "campaign_worker_config_path",
+                get_bashgym_dir() / "campaigns" / "worker-config.v1.json",
+            )
+        )
+        if not config_path.is_file():
+            return {}
+        try:
+            return load_approved_source_profiles(read_worker_config(config_path))
+        except (WorkerServiceError, ValueError):
+            return {}
+    values = raw.values() if isinstance(raw, Mapping) else raw
+    profiles: dict[str, ApprovedSourceRepositoryProfile] = {}
+    for value in values:
+        profile = (
+            value
+            if isinstance(value, ApprovedSourceRepositoryProfile)
+            else ApprovedSourceRepositoryProfile.model_validate(value)
+        )
+        if profile.profile_id in profiles:
+            raise ValueError("duplicate campaign source profile binding")
+        profiles[profile.profile_id] = profile
+    return profiles
+
+
+def _lineage_manager(request: Request) -> GitHypothesisLineageManager:
+    root = Path(
+        getattr(
+            request.app.state,
+            "campaign_lineage_worktree_root",
+            get_bashgym_dir() / "campaigns" / "source-worktrees",
+        )
+    )
+    return GitHypothesisLineageManager(root)
+
+
 def _autoresearch_doctor_report(
     request: Request,
     repository: CampaignRuntimeRepository,
@@ -367,6 +420,7 @@ def _autoresearch_doctor_report(
         ledger=ledger,
         executor_profiles=_approved_executor_profiles(request),
         controller=project_controller_status(repository, get_bashgym_dir()),
+        source_profiles=_approved_source_profiles(request),
     )
 
 
@@ -469,6 +523,11 @@ def _raise_api(exc: Exception) -> Never:
         raise HTTPException(
             status_code=403,
             detail={"code": code, "message": "Campaign operation is not permitted."},
+        ) from exc
+    if isinstance(exc, GitLineageError):
+        raise HTTPException(
+            status_code=422,
+            detail={"code": exc.code, "message": "Git lineage policy rejected the operation."},
         ) from exc
     if isinstance(exc, RecordNotFoundError):
         raise HTTPException(
@@ -682,6 +741,10 @@ def _campaign_ledger_projection(
                     workspace_id, campaign_id
                 )
             ],
+            "code_lineages": [
+                item.model_dump(mode="json")
+                for item in core.repository.list_code_lineages(workspace_id, campaign_id)
+            ],
         }
     except RecordNotFoundError:
         projection["autoresearch"] = None
@@ -892,6 +955,10 @@ def get_autoresearch_campaign(
                     workspace_id, campaign_id
                 )
             ],
+            "code_lineages": [
+                item.model_dump(mode="json")
+                for item in core.repository.list_code_lineages(workspace_id, campaign_id)
+            ],
         }
     except Exception as exc:
         _raise_api(exc)
@@ -1055,6 +1122,70 @@ def record_autoresearch_result(
         return _autoresearch_core(repository).record_result(body.result).model_dump(
             mode="json"
         )
+    except Exception as exc:
+        _raise_api(exc)
+
+
+@campaign_router.post(
+    "/{campaign_id}/proposals/{proposal_id}/code-lineage/prepare"
+)
+def prepare_campaign_code_lineage(
+    campaign_id: str,
+    proposal_id: str,
+    body: CodeLineageInput,
+    request: Request,
+):
+    """Prepare a private worktree; only the authorized caller receives its path."""
+
+    try:
+        repository, _auth, service = _services(request)
+        principal = _principal(request)
+        principal.require(body.workspace_id, Capability.EXPERIMENT_CODE_MUTATE)
+        service.get(body.workspace_id, campaign_id, principal)
+        record = repository.get_code_lineage(body.workspace_id, proposal_id)
+        if record.campaign_id != campaign_id:
+            raise RecordNotFoundError("campaign code lineage not found")
+        profile = _approved_source_profiles(request).get(
+            record.source_repository_profile_id
+        )
+        if profile is None:
+            raise GitLineageError("campaign_git_lineage_source_profile_unavailable")
+        receipt = _lineage_manager(request).prepare(profile, record)
+        saved = repository.advance_code_lineage(receipt.record)
+        return {
+            "record": saved.model_dump(mode="json"),
+            "worktree_path": str(receipt.worktree_path),
+        }
+    except Exception as exc:
+        _raise_api(exc)
+
+
+@campaign_router.post(
+    "/{campaign_id}/proposals/{proposal_id}/code-lineage/capture"
+)
+def capture_campaign_code_lineage(
+    campaign_id: str,
+    proposal_id: str,
+    body: CodeLineageInput,
+    request: Request,
+):
+    """Capture exactly one approved commit without returning private path material."""
+
+    try:
+        repository, _auth, service = _services(request)
+        principal = _principal(request)
+        principal.require(body.workspace_id, Capability.EXPERIMENT_CODE_MUTATE)
+        service.get(body.workspace_id, campaign_id, principal)
+        record = repository.get_code_lineage(body.workspace_id, proposal_id)
+        if record.campaign_id != campaign_id:
+            raise RecordNotFoundError("campaign code lineage not found")
+        profile = _approved_source_profiles(request).get(
+            record.source_repository_profile_id
+        )
+        if profile is None:
+            raise GitLineageError("campaign_git_lineage_source_profile_unavailable")
+        captured = _lineage_manager(request).capture(profile, record)
+        return {"record": repository.advance_code_lineage(captured).model_dump(mode="json")}
     except Exception as exc:
         _raise_api(exc)
 

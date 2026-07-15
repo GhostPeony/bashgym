@@ -26,6 +26,8 @@ from bashgym.campaigns.autoresearch import (
 from bashgym.campaigns.contracts import (
     CampaignStatus,
     CampaignTrigger,
+    CodeLineageState,
+    CodeMutationKind,
     StageDisposition,
     StageKind,
     StagePlan,
@@ -505,6 +507,52 @@ def test_authoritative_evaluation_derives_metric_cost_attempts_and_evidence(tmp_
         evaluation_result_id="evaluation-baseline-ledger",
     )
     assert replay.replayed is True
+
+
+def test_code_candidate_registers_required_source_lineage(tmp_path):
+    _path, repository, core = fresh_core(tmp_path)
+    activate(core)
+    actor = principal(repository)
+    core.submit_baseline(
+        proposal("baseline-lineage", estimated_cost=0.5),
+        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        principal=actor,
+        correlation_id="baseline-lineage-submit",
+        idempotency_key="baseline-lineage-submit",
+    )
+    baseline_study, baseline_attempt = select_and_finish(
+        repository, "baseline-lineage"
+    )
+    core.record_result(
+        result(
+            "baseline-lineage",
+            baseline_study,
+            baseline_attempt,
+            0.50,
+            role=ExperimentRole.BASELINE,
+        )
+    )
+    candidate = proposal("candidate-code", estimated_cost=0.5).model_copy(
+        update={
+            "primary_variable": "trainer.optimizer",
+            "prerequisite_study_ids": (baseline_study,),
+        }
+    )
+
+    core.submit_controlled_candidate(
+        candidate,
+        parent_proposal_id="baseline-lineage",
+        changed_variable="trainer.optimizer",
+        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        principal=actor,
+        correlation_id="candidate-code-submit",
+        idempotency_key="candidate-code-submit",
+    )
+
+    lineage = repository.get_code_lineage("workspace-a", "candidate-code")
+    assert lineage.state == CodeLineageState.REQUIRED
+    assert lineage.mutation_kind == CodeMutationKind.TRAINER
+    assert lineage.source_repository_profile_id == "bashgym-source-v1"
 
 
 def test_baseline_candidate_decisions_persist_and_stop_at_attempt_limit(tmp_path):

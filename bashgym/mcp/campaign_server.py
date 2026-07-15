@@ -642,6 +642,34 @@ def build_server(
         )
 
     @server.tool(structured_output=True, annotations=state_change)
+    async def campaign_prepare_code_lineage(
+        campaign_id: CampaignId,
+        proposal_id: ProposalId,
+    ) -> dict[str, Any]:
+        """Prepare the capability-gated private worktree for a code hypothesis."""
+
+        return await mutate(
+            "prepare-code-lineage",
+            campaign_id,
+            f"/campaigns/{campaign_id}/proposals/{proposal_id}/code-lineage/prepare",
+            {},
+        )
+
+    @server.tool(structured_output=True, annotations=state_change)
+    async def campaign_capture_code_lineage(
+        campaign_id: CampaignId,
+        proposal_id: ProposalId,
+    ) -> dict[str, Any]:
+        """Capture one approved code commit after editing the prepared worktree."""
+
+        return await mutate(
+            "capture-code-lineage",
+            campaign_id,
+            f"/campaigns/{campaign_id}/proposals/{proposal_id}/code-lineage/capture",
+            {},
+        )
+
+    @server.tool(structured_output=True, annotations=state_change)
     async def campaign_start(
         campaign_id: CampaignId,
         expected_version: ExpectedVersion,

@@ -8,6 +8,7 @@ import math
 import re
 from datetime import UTC, datetime
 from enum import Enum
+from pathlib import PurePosixPath
 from typing import Annotated, Any, Literal
 
 from pydantic import (
@@ -36,6 +37,10 @@ Identifier = Annotated[
     ),
 ]
 HexDigest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
+GitObjectId = Annotated[
+    str,
+    StringConstraints(pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$"),
+]
 
 
 class ContractModel(BaseModel):
@@ -182,6 +187,23 @@ class BudgetEntryKind(str, Enum):
     CORRECTION = "correction"
 
 
+class CodeMutationKind(str, Enum):
+    """Operator-approved experiment-code surface changed by a hypothesis."""
+
+    TRAINER = "trainer"
+    GYM = "gym"
+    REWARD = "reward"
+    EVALUATOR = "evaluator"
+
+
+class CodeLineageState(str, Enum):
+    """Monotonic lifecycle for one isolated hypothesis branch."""
+
+    REQUIRED = "required"
+    PREPARED = "prepared"
+    CAPTURED = "captured"
+
+
 class AutonomyProfile(str, Enum):
     DESKTOP_USER = "desktop_user"
     HERMES_BOUNDED = "hermes_bounded"
@@ -220,6 +242,7 @@ class Capability(str, Enum):
     EVAL_PROTECTED_ACQUIRE = "eval.protected_acquire"
     EVAL_PROTECTED_EXECUTE = "eval.protected_execute"
     EXPERIMENT_LEDGER_WRITE = "experiment.ledger_write"
+    EXPERIMENT_CODE_MUTATE = "experiment.code_mutate"
     PROMOTION_DECIDE = "promotion.decide"
     PROMOTION_OVERRIDE = "promotion.override"
     ARTIFACT_PUBLISH_HF = "artifact.publish_hf"
@@ -433,6 +456,100 @@ class ProposalRecord(FrozenContractModel):
     validation: ProposalValidation
     study_id: Identifier | None = None
     updated_at: datetime
+
+
+class CodeLineageRecord(FrozenContractModel):
+    """Secret-free, durable Git evidence for a code-mutating proposal."""
+
+    schema_version: Literal["campaign_code_lineage.v1"] = "campaign_code_lineage.v1"
+    lineage_id: Identifier
+    workspace_id: Identifier
+    campaign_id: Identifier
+    proposal_id: Identifier
+    mutation_kind: CodeMutationKind
+    source_repository_profile_id: Identifier
+    state: CodeLineageState
+    base_commit: GitObjectId | None = None
+    branch_name: str | None = Field(default=None, min_length=1, max_length=240)
+    commit_sha: GitObjectId | None = None
+    changed_paths: tuple[str, ...] = ()
+    patch_sha256: HexDigest | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+    captured_at: datetime | None = None
+
+    @field_validator("branch_name")
+    @classmethod
+    def validate_branch_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if (
+            not value.startswith("bashgym/autoresearch/")
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", value) is None
+            or ".." in value
+            or "//" in value
+            or value.endswith(("/", ".", ".lock"))
+            or any(part.startswith(".") for part in value.split("/"))
+        ):
+            raise ValueError("code lineage branch name is not safe")
+        return value
+
+    @field_validator("changed_paths")
+    @classmethod
+    def validate_changed_paths(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if tuple(sorted(set(value))) != value:
+            raise ValueError("code lineage changed paths must be sorted and unique")
+        for raw_path in value:
+            path = PurePosixPath(raw_path)
+            if (
+                not raw_path
+                or raw_path.startswith("/")
+                or "\\" in raw_path
+                or path.as_posix() != raw_path
+                or any(part in {"", ".", ".."} for part in path.parts)
+                or any(ord(character) < 32 for character in raw_path)
+            ):
+                raise ValueError("code lineage changed path is not a safe relative path")
+        return value
+
+    @model_validator(mode="after")
+    def validate_state(self) -> CodeLineageRecord:
+        has_preparation_evidence = self.base_commit is not None or self.branch_name is not None
+        prepared = self.base_commit is not None and self.branch_name is not None
+        captured = (
+            self.commit_sha is not None
+            and self.patch_sha256 is not None
+            and bool(self.changed_paths)
+            and self.captured_at is not None
+        )
+        if self.updated_at < self.created_at:
+            raise ValueError("code lineage updated_at cannot precede created_at")
+        if self.captured_at is not None and self.captured_at < self.created_at:
+            raise ValueError("code lineage captured_at cannot precede created_at")
+        if self.state == CodeLineageState.REQUIRED and (
+            has_preparation_evidence
+            or captured
+            or self.commit_sha is not None
+            or self.patch_sha256 is not None
+            or self.changed_paths
+            or self.captured_at is not None
+        ):
+            raise ValueError("required code lineage cannot contain Git evidence")
+        if self.state == CodeLineageState.PREPARED and (
+            not prepared
+            or self.commit_sha is not None
+            or self.patch_sha256 is not None
+            or self.changed_paths
+            or self.captured_at is not None
+        ):
+            raise ValueError("prepared code lineage requires only base and branch evidence")
+        if self.state == CodeLineageState.CAPTURED and (not prepared or not captured):
+            raise ValueError("captured code lineage requires complete Git evidence")
+        return self
+
+    @property
+    def record_digest(self) -> str:
+        return canonical_hash(self.model_dump(mode="json"))
 
 
 class CampaignArtifactReference(FrozenContractModel):
@@ -757,6 +874,9 @@ __all__ = [
     "CampaignStatus",
     "CampaignTrigger",
     "Capability",
+    "CodeLineageRecord",
+    "CodeLineageState",
+    "CodeMutationKind",
     "CredentialKind",
     "HERMES_CAPABILITIES",
     "IssuedCredential",

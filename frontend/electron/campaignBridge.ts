@@ -34,6 +34,7 @@ const POST_ROUTES = [
   new RegExp(`^/api/campaigns/${IDENTIFIER}/proposals$`),
   new RegExp(`^/api/campaigns/${IDENTIFIER}/autoresearch/(?:baseline|candidates|results)$`),
   new RegExp(`^/api/campaigns/${IDENTIFIER}/proposals/${IDENTIFIER}/withdraw$`),
+  new RegExp(`^/api/campaigns/${IDENTIFIER}/proposals/${IDENTIFIER}/code-lineage/(?:prepare|capture)$`),
   new RegExp(`^/api/campaigns/${IDENTIFIER}/actions/${IDENTIFIER}/(?:retry|force-stop)$`),
   new RegExp(`^/api/campaigns/${IDENTIFIER}/studies/${IDENTIFIER}/abandon$`),
   new RegExp(`^/api/campaigns/${IDENTIFIER}/budget/amend$`),

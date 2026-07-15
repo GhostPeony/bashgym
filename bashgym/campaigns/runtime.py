@@ -23,6 +23,7 @@ from bashgym.campaigns.contracts import (
     CampaignEvent,
     CampaignManifest,
     CampaignStatus,
+    CodeLineageState,
     ContractModel,
     CredentialKind,
     FrozenContractModel,
@@ -37,6 +38,7 @@ from bashgym.campaigns.evaluation import (
     DevelopmentComparison,
     RetrievalEvaluationArtifact,
 )
+from bashgym.campaigns.lineage import code_mutation_kind_for_variable
 from bashgym.campaigns.metrics import (
     MetricSeriesValue,
     TrainingAlert,
@@ -328,6 +330,13 @@ class CampaignRuntimeRepository(CampaignRepository):
                 """,
                 (workspace_id, campaign_id, study.proposal_id),
             ).fetchone()
+            lineage_row = connection.execute(
+                """
+                SELECT * FROM campaign_code_lineages
+                WHERE workspace_id = ? AND campaign_id = ? AND proposal_id = ?
+                """,
+                (workspace_id, campaign_id, study.proposal_id),
+            ).fetchone()
             manifest_row = connection.execute(
                 """
                 SELECT manifest_json FROM campaign_manifest_revisions
@@ -337,6 +346,21 @@ class CampaignRuntimeRepository(CampaignRepository):
             ).fetchone()
         proposal = json.loads(proposal_row["proposal_json"])
         manifest = CampaignManifest.model_validate_json(manifest_row["manifest_json"])
+        required_lineage_kind = code_mutation_kind_for_variable(
+            str(proposal.get("primary_variable", ""))
+        )
+        code_lineage = None
+        if lineage_row is not None:
+            code_lineage = self._code_lineage_from_row(lineage_row)
+            if code_lineage.state != CodeLineageState.CAPTURED:
+                raise CampaignPersistenceError("campaign_code_lineage_not_captured")
+        if required_lineage_kind is not None:
+            if code_lineage is None:
+                raise CampaignPersistenceError("campaign_code_lineage_not_registered")
+            if code_lineage.mutation_kind != required_lineage_kind:
+                raise CampaignPersistenceError(
+                    "campaign_code_lineage_mutation_kind_mismatch"
+                )
         if item.stage == StageKind.DATA_BUILD:
             recipe = dict(proposal["dataset_recipe"])
         elif item.stage in {StageKind.SMOKE_TRAINING, StageKind.FULL_TRAINING}:
@@ -348,6 +372,13 @@ class CampaignRuntimeRepository(CampaignRepository):
             raise CampaignPersistenceError("campaign_recipe_runtime_invalid")
         executor_kind = runtime.get("executor_kind", "fake")
         executor_config: dict[str, Any] = {}
+        if code_lineage is not None and executor_kind in {
+            "registered_training",
+            "ssh_remote",
+        }:
+            raise CampaignPersistenceError(
+                "campaign_code_lineage_execution_binding_required"
+            )
         if executor_kind in {"registered_training", "ssh_remote"}:
             if item.stage not in {StageKind.SMOKE_TRAINING, StageKind.FULL_TRAINING}:
                 raise CampaignPersistenceError("campaign_remote_stage_not_allowed")
@@ -396,18 +427,32 @@ class CampaignRuntimeRepository(CampaignRepository):
         if budget_unit not in manifest.budget_limits:
             raise CampaignPersistenceError("campaign_budget_unit_not_approved")
         fake_steps = int(runtime.get("fake_steps", 8))
+        input_contract = {
+            "stage_input": item.input_contract,
+            "dataset_recipe_digest": canonical_hash(proposal["dataset_recipe"]),
+            "training_recipe_digest": canonical_hash(proposal["training_recipe"]),
+            "evaluation_recipe_digest": canonical_hash(proposal["evaluation_recipe"]),
+        }
+        if code_lineage is not None:
+            input_contract["code_lineage"] = {
+                "lineage_id": code_lineage.lineage_id,
+                "record_digest": code_lineage.record_digest,
+                "mutation_kind": code_lineage.mutation_kind.value,
+                "source_repository_profile_id": (
+                    code_lineage.source_repository_profile_id
+                ),
+                "base_commit": code_lineage.base_commit,
+                "commit_sha": code_lineage.commit_sha,
+                "patch_sha256": code_lineage.patch_sha256,
+                "changed_paths": list(code_lineage.changed_paths),
+            }
         return ActionSpec(
             workspace_id=workspace_id,
             campaign_id=campaign_id,
             study_id=study_id,
             stage_index=study.current_stage_index,
             stage=item.stage,
-            input_contract={
-                "stage_input": item.input_contract,
-                "dataset_recipe_digest": canonical_hash(proposal["dataset_recipe"]),
-                "training_recipe_digest": canonical_hash(proposal["training_recipe"]),
-                "evaluation_recipe_digest": canonical_hash(proposal["evaluation_recipe"]),
-            },
+            input_contract=input_contract,
             candidate_digest=study.candidate_digest,
             manifest_revision=campaign.manifest_revision,
             budget_unit=budget_unit,

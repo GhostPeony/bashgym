@@ -140,8 +140,7 @@ For an official experiment, also pass `--tracking-context tracking-context.json`
 That file pins the workspace, project, experiment, model version, dataset version,
 environment, source revisions, and content/runtime digests. Runs without it are
 retained under an explicit unassigned project instead of being silently attached
-to whichever project an agent last discussed. See
-[Project-Isolated Experiment Ledger](experiment-ledger.md).
+to whichever project an agent last discussed.
 
 ## Inspect experiment history
 
@@ -180,8 +179,7 @@ For approved off-device storage, add `--auto-push-hf --hf-repo-name <repo>
 --hf-private --hf-upload-artifact adapter`. `--hf-public` is available but must
 not be used without explicit public-release authority and license, provenance,
 and privacy review. Use `deployable` or `full_run` only when the extra merged
-model/checkpoint storage is intentional. See
-[Training artifact storage](../TRAINING_ARTIFACT_STORAGE.md).
+model/checkpoint storage is intentional.
 
 For a private device, `--compute-target ssh:<device_id>` now activates
 `use_remote_ssh` and selects the matching registered device.
@@ -351,7 +349,6 @@ The wrapper accepts `--host`, `--port`, `--reload`, `--workers`,
 - [training-methods-reference.md](training-methods-reference.md)
 - [external-review-packet.md](external-review-packet.md)
 - [strategy-guide.md](strategy-guide.md)
-- [Training artifact storage](../TRAINING_ARTIFACT_STORAGE.md)
 - [world-models.md](world-models.md)
 - [metrics-runbook.md](metrics-runbook.md)
 - [tmax-terminal-rl-recipe.md](tmax-terminal-rl-recipe.md)

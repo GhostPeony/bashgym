@@ -19,7 +19,6 @@ Every AI coding session is a chain-of-thought reasoning trace — step-by-step p
 - **[docs/training/capability-map.md](docs/training/capability-map.md)** — full training/eval spread, including ready, backend-dependent, and diagnostic surfaces.
 - **[docs/training/tmax-terminal-rl-recipe.md](docs/training/tmax-terminal-rl-recipe.md)** — TMax-style terminal RL recipe from environment pool to backend smoke and release gates.
 - **[docs/training/private-compute-eval-checklist.md](docs/training/private-compute-eval-checklist.md)** — private/cloud compute backend-smoke and eval checklist for DPPO/ECHO/RWML runs.
-- **[docs/training/bashgym-autoresearch-nvidia-brief.md](docs/training/bashgym-autoresearch-nvidia-brief.md)** — durable AutoResearch capability, NVIDIA NeMo comparison, productization status, and integration roadmap.
 - **[docs/TRAINING_DATA_GUIDE.md](docs/TRAINING_DATA_GUIDE.md)** — trace format, quality tiers, and example generation.
 - **[docs/training/strategy-guide.md](docs/training/strategy-guide.md)** — concrete SFT, DPO, GRPO/RLVR, distillation, cascade, and DPPO starting recipes.
 - **[docs/API.md](docs/API.md)** — REST API reference.

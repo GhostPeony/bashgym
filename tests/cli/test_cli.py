@@ -51,7 +51,7 @@ def test_manifest_json_is_agent_readable(capsys):
     assert any(doc["topic"] == "rlhf-handbook-comparison" for doc in payload["docs"])
     assert any(doc["topic"] == "terminal-rl-recipe" for doc in payload["docs"])
     assert any(doc["topic"] == "private-compute-checklist" for doc in payload["docs"])
-    assert any(doc["topic"] == "experiment-ledger" for doc in payload["docs"])
+    assert all("experiment-ledger.md" not in doc["path"] for doc in payload["docs"])
     assert any(doc["topic"] == "session-distillation" for doc in payload["docs"])
     assert any(doc["topic"] == "artifacts" for doc in payload["docs"])
     assert any(doc["topic"] == "world-models" for doc in payload["docs"])

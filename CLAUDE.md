@@ -4,6 +4,13 @@
 
 This document provides comprehensive guidance for AI agents working with this codebase.
 
+Before planning or launching training, read
+`assistant/workspace/skills/training/SKILL.md`,
+`assistant/workspace/skills/training/references/bashgym-launch-recipes.md`, and
+`assistant/workspace/skills/training/references/compute-target-activation.md`.
+Those files are the executable source for current strategy, artifact-retention,
+Hugging Face destination, and local/SSH/cloud activation guidance.
+
 ## Quick Reference
 
 ```bash
@@ -48,7 +55,7 @@ pytest tests/ -v
 | **Arena** | `sandbox.py`, `agent_runner.py` | Docker sandbox execution, Claude CLI wrapper |
 | **Judge** | `verifier.py`, `verify.sh` | Test execution, solution validation |
 | **Factory** | `data_factory.py`, `trace_processor.py`, `example_generator.py` | Training data synthesis from traces |
-| **Gym** | `trainer.py`, `gym_env.py`, `model_router.py` | SFT/DPO/GRPO training, RL environment |
+| **Gym** | `trainer.py`, `gym_env.py`, `model_router.py` | SFT/DPO/GRPO/RLVR/distillation training, RL environment, artifact lifecycle |
 | **Config** | `settings.py` | Centralized configuration |
 | **Hooks** | `post_tool_use.py`, `session_end.py` | Claude Code instrumentation |
 
@@ -90,12 +97,12 @@ Key classes:
 Supports: pytest, bats, npm test, Makefile, custom verify.sh
 
 #### `trainer.py` - Model Fine-Tuning
-Handles SFT, DPO, and GRPO training strategies.
+Handles SFT, DPO, GRPO, RLVR, teacher distillation, and Session Distillation.
 
 Key classes:
 - `TrainerConfig` - Training hyperparameters
 - `TrainingRun` - Training run state
-- `Trainer` - Main SFT/DPO trainer
+- `Trainer` - SFT, DPO, RLVR, teacher-distillation, and Session-Distillation entry points
 - `GRPOTrainer` - GRPO-specific trainer
 
 #### `gym_env.py` - RL Environment
@@ -162,7 +169,7 @@ Remote SSH training enables executing training runs on a DGX Spark via SSH, stre
 - `bashgym/gym/remote_trainer.py` — SSH-based remote training execution
 - `bashgym/config.py` — `SSHSettings` reads `SSH_REMOTE_*` env vars
 
-**Flow:** Generate script locally → SFTP upload → SSH exec with nohup → stream logs → SFTP download artifacts
+**Flow:** Persist exact request → generate script locally → SFTP upload → SSH exec with nohup → stream logs/metrics → apply retention policy after final save → download selected artifacts
 
 **API:**
 - `GET /api/ssh/preflight` — verify remote machine is ready
@@ -274,7 +281,9 @@ pytest tests/ --cov=bashgym --cov-report=html
 1. Add strategy to `TrainingStrategy` enum in `trainer.py`
 2. Implement `train_{strategy}()` method in `Trainer` class
 3. Add script generation in `_generate_{strategy}_script()`
-4. Add tests in `tests/gym/`
+4. Add/validate the strategy in `bashgym/api/schemas.py` and `/api/training/start`
+5. Update `bashgym training plan/start`, the `start_training` agent tool, the canonical training/operator skills, and their deployed Hermes copies
+6. Add method, artifact-retention, forwarding, and eval-gate tests
 
 ### Modifying Sandbox Security
 
@@ -381,7 +390,8 @@ The Workspace canvas (`frontend/src/components/terminal/CanvasView.tsx`, React F
 - **Data nodes** (`frontend/src/components/terminal/nodes/`): `TrainingRunNode` (live `useTrainingStore` metrics + pause/resume/stop), `EvalNode` (polls `GET /api/eval/heldout`), `DataDesignerNode` (polls `GET /api/factory/designer/jobs`), `ActivityFeedNode` (WebSocket activity feed). All share `DataNodeShell`; registry in `nodes/dataPanels.ts`.
 - **Edge routing** — connect any data node to a terminal and press Send to write a markdown context file path into the agent's input (`utils/edgeRouting.ts`).
 - **Monitor edges** — a terminal→terminal edge makes the source the *watched* terminal and the target the *watcher* (`edges/MonitorEdge.tsx`, `utils/monitorRouting.ts`). Selecting the edge exposes Send Snapshot (prefills an ANSI-stripped scrollback markdown file path into the watcher's input), a per-edge AUTO toggle (off → prefill → send; fires when the watched agent finishes a step, ≥20s apart, skips a busy watcher), and Swap. Scrollback is read on demand from the main process via `terminal:snapshot` IPC — zero overhead when no monitor edges exist.
-- Non-terminal panels persist across reloads via `bashgym_saved_panels`; canvas hotkeys live in `hooks/useCanvasHotkeys.ts`.
+- **Workspace instances** — named, isolated canvas workspaces (`stores/workspaceStore.ts` + `stores/workspacePersistence.ts`). Exactly one workspace is materialized in the terminalStore globals; switching serializes out / loads in synchronously and remounts the canvas (`<CanvasViewWrapper key={activeWorkspaceId}>`). Background workspaces render and poll nothing, but their PTYs stay alive in the Electron main process and re-attach with scrollback replay on switch-back. State persists per workspace under `bashgym_ws_<id>_*` keys (registry: `bashgym_workspaces`; legacy single-canvas keys migrate once into the default `MAIN` workspace). Switchers: WorkspaceStrip chips in the Agent Sessions rail, a Workspace section in the Master Control Panel, and popover actions (OPEN/MOVE TO NEW WORKSPACE). Backend workspace context is keyed by `workspace_id` (`bashgym/api/workspace_routes.py`; `GET /api/workspace/context?workspace_id=`), and orchestrator events only materialize nodes when their origin lives in the active workspace.
+- Non-terminal panels persist per workspace (see above); canvas hotkeys live in `hooks/useCanvasHotkeys.ts`.
 - **Agent Sessions rail** — the sidebar nav swaps into a live feed of all agent terminals (`components/sessions/`, `stores/agentSessionsStore.ts`). Repo-grouped cards show agent badge, status, session identity, context-window meter, token totals/cost, connections, and a quick-prompt. Intel comes from tailing the local CLI session journals (`~/.claude/projects`, `~/.codex/sessions`) via path-restricted `sessions:*` IPC (`services/agentSessions/` adapters port `trace_capture` parsing knowledge; keep the pricing table in sync with `bashgym/trace_capture/core.py`). Polling runs only while the rail is mounted; account info is opt-in, whitelisted in the main process, and masked by default. Electron-only — the web build tree-shakes it (do not re-export `agentSessionsStore` from the stores barrel).
 
 ---
@@ -470,6 +480,27 @@ POST /api/training/export
 POST /api/training/start
 ```
 
+Direct strategies are `sft`, `dpo`, `grpo`, `rlvr`, `distillation`, and
+`session_distillation`. The agent-readable CLI uses the same contract:
+
+```bash
+bashgym training plan --strategy <strategy> --json
+bashgym training start --strategy <strategy> --model <model-id> \
+  --dataset-path <path> --config <config.json> \
+  --checkpoint-limit 1 --artifact-retention adapter_only --json
+```
+
+Every direct request must deliberately set or accept the defaults for
+`checkpoint_limit`, `artifact_retention`, `auto_push_hf`, `hf_repo_name`,
+`hf_private`, and `hf_upload_artifact`. Routine experiments default to one
+checkpoint during training, `adapter_only` after success, no automatic Hub
+push, private visibility, and automatic merged-then-adapter selection if upload
+is later enabled. Public Hugging Face repositories require explicit approval.
+
+DPPO, reward-model, ECHO/RWML, cascade/MOPD, and embedding-retrieval work use
+their method-specific workflows. Do not send those names as unsupported direct
+strategies or make the embedding experiment BashGym's general default.
+
 ### Programmatic Export with Repo Filter
 
 ```python
@@ -485,10 +516,10 @@ gen.export_for_nemo(examples, Path("output"), repo_filter=["ghostwork"])
 **Check if training is running:**
 ```bash
 # Find training processes
-wmic process where "commandline like '%train_sft%'" get processid,commandline
+wmic process where "commandline like '%train_%'" get processid,commandline
 
 # Or on Unix
-ps aux | grep train_sft
+ps aux | grep -E 'train_(sft|dpo|grpo|rlvr|distillation|session_distillation)'
 ```
 
 **Check GPU utilization:**
@@ -500,11 +531,15 @@ nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv
 nvidia-smi -l 1
 ```
 
-**Training output locations:**
-- **Training scripts**: `~/.bashgym/models/{run_id}/train_sft.py`
-- **Checkpoints**: `~/.bashgym/models/{run_id}/checkpoint-*`
-- **Final model**: `~/.bashgym/models/{run_id}/final/`
-- **Merged model**: `~/.bashgym/models/{run_id}/merged/`
+**Training output locations and retention:**
+- **Training script**: `~/.bashgym/models/{run_id}/train_<strategy>.py`
+- **Checkpoints**: `~/.bashgym/models/{run_id}/checkpoint-*`, bounded by `checkpoint_limit` and removed after success unless the policy retains them
+- **Final adapter/model**: `~/.bashgym/models/{run_id}/final/`, retained by every policy
+- **Merged model**: `~/.bashgym/models/{run_id}/merged/`, created only by `deployable` or `full_run`
+- **GGUF exports**: created only when the retention policy includes a deployable model and GGUF export is enabled
+
+See `docs/TRAINING_ARTIFACT_STORAGE.md` for the full storage and Hugging Face
+upload contract.
 
 **Training data:**
 - **Source traces**: `data/gold_traces/*.json`

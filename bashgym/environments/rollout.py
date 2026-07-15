@@ -12,6 +12,7 @@ plug in later behind the same result shape.
 from __future__ import annotations
 
 import json
+import math
 import shutil
 import subprocess
 import time
@@ -23,7 +24,7 @@ from typing import Any
 
 from bashgym.arena.sandbox import is_dangerous_command
 from bashgym.environments.builder import audit_environment_manifest, materialize_environment
-from bashgym.environments.contracts import EnvironmentSpec
+from bashgym.environments.contracts import EnvironmentSpec, VerifierSpec
 
 ModelCompleter = Callable[[list[dict[str, str]]], Any]
 
@@ -92,6 +93,63 @@ def _json_from_text(text: str) -> Any | None:
                 except json.JSONDecodeError:
                     return None
     return None
+
+
+def extract_verifier_rewards(
+    stdout: str,
+    verifier: VerifierSpec,
+) -> tuple[float, dict[str, float]]:
+    """Read a declared multi-reward verifier result from JSON output.
+
+    A verifier with ``reward_components`` must emit a JSON object on stdout:
+    ``{"reward_components": {"correctness": 1.0, "format": 0.5}}``.
+    It may optionally include ``total_reward``; when present, the value must
+    match the component weights declared by the environment contract.
+    """
+
+    if not verifier.reward_components:
+        raise ValueError("verifier does not declare reward_components")
+
+    payload = None
+    for line in reversed(stdout.splitlines()):
+        try:
+            candidate = json.loads(line.strip())
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if isinstance(candidate, dict):
+            payload = candidate
+            break
+    if payload is None:
+        candidate = _json_from_text(stdout)
+        if isinstance(candidate, dict):
+            payload = candidate
+    if payload is None:
+        raise ValueError("verifier stdout must contain a JSON reward object")
+
+    if isinstance(payload.get("bashgym_reward"), dict):
+        payload = payload["bashgym_reward"]
+    raw_components = payload.get("reward_components", payload.get("components"))
+    if not isinstance(raw_components, dict):
+        raise ValueError("verifier JSON must contain a reward_components object")
+    components: dict[str, float] = {}
+    for raw_name, raw_value in raw_components.items():
+        try:
+            components[str(raw_name)] = float(raw_value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"reward component {raw_name!r} must be numeric") from exc
+
+    computed_total = verifier.combine_reward_components(components)
+    declared_total = payload.get("total_reward", payload.get("reward"))
+    if declared_total is not None:
+        try:
+            declared_total_value = float(declared_total)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("declared total_reward must be numeric") from exc
+        if not math.isclose(declared_total_value, computed_total, rel_tol=1e-9, abs_tol=1e-9):
+            raise ValueError(
+                "declared total_reward does not match the weighted reward components"
+            )
+    return computed_total, components
 
 
 def _command_from_args(arguments: Any) -> str | None:
@@ -288,6 +346,7 @@ class RolloutAttempt:
     attempt_index: int
     passed: bool
     reward: float | None = None
+    reward_components: dict[str, float] = field(default_factory=dict)
     verifier_status: str | None = None
     timeout: bool = False
     tool_calls: int | None = None
@@ -297,7 +356,7 @@ class RolloutAttempt:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "environment_id": self.environment_id,
             "attempt_index": self.attempt_index,
             "passed": self.passed,
@@ -310,6 +369,9 @@ class RolloutAttempt:
             "observation_tokens": self.observation_tokens,
             "metadata": self.metadata,
         }
+        if self.reward_components:
+            payload["reward_components"] = self.reward_components
+        return payload
 
 
 @dataclass
@@ -344,6 +406,28 @@ class EnvironmentRolloutResult:
                 self.verifier_observation.to_dict() if self.verifier_observation else None
             ),
         }
+
+
+def _resolve_verifier_reward(
+    environment: EnvironmentSpec,
+    verifier_observation: CommandObservation,
+    *,
+    verifier_passed: bool,
+) -> tuple[float | None, dict[str, float], str | None]:
+    """Resolve scalar and component rewards without making NeMo Gym mandatory."""
+
+    if not verifier_passed:
+        return 0.0, {}, None
+    if not environment.verifier.reward_components:
+        return 1.0, {}, None
+    try:
+        total, components = extract_verifier_rewards(
+            verifier_observation.stdout,
+            environment.verifier,
+        )
+    except ValueError as exc:
+        return None, {}, str(exc)
+    return total, components, None
 
 
 class LocalPersistentShell:
@@ -482,7 +566,15 @@ def run_local_environment_attempt(
     else:
         verifier_observation = shell.run(plan.environment.verifier.command)
 
-    passed = verifier_observation.exit_code == 0 and not tamper_detected
+    verifier_passed = verifier_observation.exit_code == 0 and not tamper_detected
+    reward, reward_components, reward_error = _resolve_verifier_reward(
+        plan.environment,
+        verifier_observation,
+        verifier_passed=verifier_passed,
+    )
+    passed = verifier_passed and reward_error is None
+    if passed and plan.environment.verifier.reward_components:
+        passed = reward is not None and reward >= plan.environment.verifier.success_threshold
     timeout = (
         any(observation.timeout for observation in observations) or verifier_observation.timeout
     )
@@ -496,6 +588,8 @@ def run_local_environment_attempt(
     verifier_status = "passed" if passed else "failed"
     if tamper_detected:
         verifier_status = "tampered"
+    elif reward_error:
+        verifier_status = "reward_error"
     elif blocked:
         verifier_status = "blocked"
     elif timeout:
@@ -505,7 +599,8 @@ def run_local_environment_attempt(
         environment_id=plan.environment.id,
         attempt_index=plan.attempt_index,
         passed=passed,
-        reward=1.0 if passed else 0.0,
+        reward=reward,
+        reward_components=reward_components,
         verifier_status=verifier_status,
         timeout=timeout,
         tool_calls=len(observations),
@@ -519,6 +614,7 @@ def run_local_environment_attempt(
             "verifier_exit_code": verifier_observation.exit_code,
             "tamper_detected": tamper_detected,
             "tamper_audit": tamper_audit,
+            **({"reward_error": reward_error} if reward_error else {}),
         },
     )
     result = EnvironmentRolloutResult(
@@ -614,7 +710,15 @@ def run_local_model_environment_attempt(
     else:
         verifier_observation = shell.run(plan.environment.verifier.command)
 
-    passed = verifier_observation.exit_code == 0 and not tamper_detected
+    verifier_passed = verifier_observation.exit_code == 0 and not tamper_detected
+    reward, reward_components, reward_error = _resolve_verifier_reward(
+        plan.environment,
+        verifier_observation,
+        verifier_passed=verifier_passed,
+    )
+    passed = verifier_passed and reward_error is None
+    if passed and plan.environment.verifier.reward_components:
+        passed = reward is not None and reward >= plan.environment.verifier.success_threshold
     timeout = (
         any(observation.timeout for observation in observations) or verifier_observation.timeout
     )
@@ -628,6 +732,8 @@ def run_local_model_environment_attempt(
     verifier_status = "passed" if passed else "failed"
     if tamper_detected:
         verifier_status = "tampered"
+    elif reward_error:
+        verifier_status = "reward_error"
     elif format_errors:
         verifier_status = "format_error"
     elif blocked:
@@ -644,7 +750,8 @@ def run_local_model_environment_attempt(
         environment_id=plan.environment.id,
         attempt_index=plan.attempt_index,
         passed=passed,
-        reward=1.0 if passed else 0.0,
+        reward=reward,
+        reward_components=reward_components,
         verifier_status=verifier_status,
         timeout=timeout,
         tool_calls=len([observation for observation in observations if observation.command]),
@@ -666,6 +773,7 @@ def run_local_model_environment_attempt(
             ),
             "tamper_detected": tamper_detected,
             "tamper_audit": tamper_audit,
+            **({"reward_error": reward_error} if reward_error else {}),
         },
     )
     result = EnvironmentRolloutResult(

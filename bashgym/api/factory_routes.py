@@ -3,7 +3,10 @@
 
 import logging
 import uuid
+from datetime import datetime, timezone
+from ipaddress import ip_address
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
@@ -445,6 +448,8 @@ class DesignerCreateRequest(BaseModel):
     export_nemo: bool = True
     keep_only_passing: bool = True  # quality gate at export (passes_quality / recommended_for_sft)
     train_val_split: float = 0.9
+    origin: dict[str, str] | None = None
+    correlation_id: str | None = None
 
 
 class DesignerValidateRequest(BaseModel):
@@ -460,7 +465,15 @@ class DesignerJobResponse(BaseModel):
     status: str
     pipeline: str
     num_records: int
-    progress: dict[str, int] | None = None
+    progress: dict[str, int | str] | None = None
+    job_name: str | None = None
+    dataset: str | None = None
+    model: str | None = None
+    provider: str | None = None
+    execution: str | None = None
+    started_at: str | None = None
+    origin: dict[str, str] | None = None
+    correlation_id: str | None = None
     output_dir: str | None = None
     export_result: dict | None = None
     error: str | None = None
@@ -496,6 +509,53 @@ class DesignerPushToHubRequest(BaseModel):
 
 # DataDesigner job tracking
 designer_jobs: dict[str, dict] = {}
+
+
+def _designer_execution(config: dict) -> str:
+    endpoint = str(config.get("provider_endpoint") or "").strip()
+    provider = str(config.get("provider") or "").strip().lower()
+    if not endpoint:
+        if provider in {"local", "ollama", "vllm", "lmstudio"}:
+            return "local"
+        if provider in {"nvidia", "openai", "anthropic", "together", "groq"}:
+            return "cloud"
+        return "unknown"
+
+    host = (urlparse(endpoint).hostname or "").lower()
+    if host in {"localhost", "127.0.0.1", "::1"}:
+        return "local"
+    try:
+        if ip_address(host).is_private:
+            return "private"
+    except ValueError:
+        pass
+    return "cloud"
+
+
+def _designer_job_response(job_id: str, job: dict) -> DesignerJobResponse:
+    config = job.get("config") if isinstance(job.get("config"), dict) else {}
+    model = config.get("code_model") or config.get("text_model") or config.get("judge_model")
+    dataset = config.get("seed_source") or config.get("dataset")
+    if not dataset and config.get("seed_type"):
+        dataset = f"default:{config['seed_type']}"
+    return DesignerJobResponse(
+        job_id=job_id,
+        status=job["status"],
+        pipeline=job["pipeline"],
+        num_records=job["num_records"],
+        progress=job.get("progress"),
+        job_name=str(job.get("job_name") or f"{job['pipeline']} / {job_id}"),
+        dataset=str(dataset) if dataset else None,
+        model=str(model) if model else None,
+        provider=str(config.get("provider")) if config.get("provider") else None,
+        execution=_designer_execution(config),
+        started_at=job.get("started_at"),
+        origin=config.get("origin") if isinstance(config.get("origin"), dict) else None,
+        correlation_id=str(config.get("correlation_id")) if config.get("correlation_id") else None,
+        output_dir=job.get("output_dir"),
+        export_result=job.get("export_result"),
+        error=job.get("error"),
+    )
 
 
 @router.post("/designer/preview")
@@ -551,18 +611,14 @@ async def designer_create(
         "status": "queued",
         "pipeline": request.pipeline,
         "num_records": request.num_records,
-        "progress": {"current": 0, "total": request.num_records},
+        "progress": {"current": 0, "total": request.num_records, "phase": "queued"},
         "config": request.model_dump(),
+        "started_at": datetime.now(timezone.utc).isoformat(),
     }
 
     background_tasks.add_task(run_designer_job, job_id, request)
 
-    return DesignerJobResponse(
-        job_id=job_id,
-        status="queued",
-        pipeline=request.pipeline,
-        num_records=request.num_records,
-    )
+    return _designer_job_response(job_id, designer_jobs[job_id])
 
 
 @router.get("/designer/jobs", response_model=list[DesignerJobResponse])
@@ -571,18 +627,7 @@ async def list_designer_jobs(limit: int = 20):
     jobs: list[DesignerJobResponse] = []
     for job_id in reversed(list(designer_jobs.keys())):
         job = designer_jobs[job_id]
-        jobs.append(
-            DesignerJobResponse(
-                job_id=job_id,
-                status=job["status"],
-                pipeline=job["pipeline"],
-                num_records=job["num_records"],
-                progress=job.get("progress"),
-                output_dir=job.get("output_dir"),
-                export_result=job.get("export_result"),
-                error=job.get("error"),
-            )
-        )
+        jobs.append(_designer_job_response(job_id, job))
         if len(jobs) >= limit:
             break
     return jobs
@@ -595,16 +640,7 @@ async def designer_job_status(job_id: str):
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
     job = designer_jobs[job_id]
-    return DesignerJobResponse(
-        job_id=job_id,
-        status=job["status"],
-        pipeline=job["pipeline"],
-        num_records=job["num_records"],
-        progress=job.get("progress"),
-        output_dir=job.get("output_dir"),
-        export_result=job.get("export_result"),
-        error=job.get("error"),
-    )
+    return _designer_job_response(job_id, job)
 
 
 @router.get("/designer/pipelines")
@@ -694,18 +730,14 @@ async def designer_from_huggingface(
         "status": "queued",
         "pipeline": request.pipeline,
         "num_records": request.num_records,
-        "progress": {"current": 0, "total": request.num_records},
+        "progress": {"current": 0, "total": request.num_records, "phase": "queued"},
         "config": request.model_dump(),
+        "started_at": datetime.now(timezone.utc).isoformat(),
     }
 
     background_tasks.add_task(run_designer_hf_job, job_id, request)
 
-    return DesignerJobResponse(
-        job_id=job_id,
-        status="queued",
-        pipeline=request.pipeline,
-        num_records=request.num_records,
-    )
+    return _designer_job_response(job_id, designer_jobs[job_id])
 
 
 @router.post("/designer/push-to-hub")
@@ -842,6 +874,7 @@ async def run_designer_job(job_id: str, request: DesignerCreateRequest):
         from bashgym.factory.data_designer import DataDesignerPipeline, PipelineConfig
 
         designer_jobs[job_id]["status"] = "running"
+        designer_jobs[job_id]["progress"]["phase"] = "generating"
 
         config = PipelineConfig(
             pipeline=request.pipeline,
@@ -889,6 +922,7 @@ async def run_designer_job(job_id: str, request: DesignerCreateRequest):
             raise ValueError(f"Unknown seed_type: {request.seed_type}")
 
         designer_jobs[job_id]["progress"]["current"] = len(df)
+        designer_jobs[job_id]["progress"]["phase"] = "exporting"
 
         # Export to NeMo format if requested (with the quality gate)
         export_result = None
@@ -897,6 +931,7 @@ async def run_designer_job(job_id: str, request: DesignerCreateRequest):
             designer_jobs[job_id]["export_result"] = export_result
 
         designer_jobs[job_id]["status"] = "completed"
+        designer_jobs[job_id]["progress"]["phase"] = "completed"
         designer_jobs[job_id]["output_dir"] = str(config.output_dir)
 
         logger.info(f"Designer job {job_id} completed: {len(df)} records generated")
@@ -904,6 +939,7 @@ async def run_designer_job(job_id: str, request: DesignerCreateRequest):
     except Exception as e:
         logger.error(f"Designer job {job_id} failed: {e}")
         designer_jobs[job_id]["status"] = "failed"
+        designer_jobs[job_id]["progress"]["phase"] = "failed"
         designer_jobs[job_id]["error"] = str(e)
 
 
@@ -913,6 +949,7 @@ async def run_designer_hf_job(job_id: str, request: DesignerHuggingFaceRequest):
         from bashgym.factory.data_designer import DataDesignerPipeline, PipelineConfig
 
         designer_jobs[job_id]["status"] = "running"
+        designer_jobs[job_id]["progress"]["phase"] = "generating"
 
         config = PipelineConfig(
             pipeline=request.pipeline,
@@ -931,12 +968,14 @@ async def run_designer_hf_job(job_id: str, request: DesignerHuggingFaceRequest):
         )
 
         designer_jobs[job_id]["progress"]["current"] = len(df)
+        designer_jobs[job_id]["progress"]["phase"] = "exporting"
 
         # Export to NeMo format
         export_result = pipeline.export_nemo(df)
         designer_jobs[job_id]["export_result"] = export_result
 
         designer_jobs[job_id]["status"] = "completed"
+        designer_jobs[job_id]["progress"]["phase"] = "completed"
         designer_jobs[job_id]["output_dir"] = str(config.output_dir)
 
         logger.info(f"Designer HF job {job_id} completed: {len(df)} records")
@@ -944,4 +983,5 @@ async def run_designer_hf_job(job_id: str, request: DesignerHuggingFaceRequest):
     except Exception as e:
         logger.error(f"Designer HF job {job_id} failed: {e}")
         designer_jobs[job_id]["status"] = "failed"
+        designer_jobs[job_id]["progress"]["phase"] = "failed"
         designer_jobs[job_id]["error"] = str(e)

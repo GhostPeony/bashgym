@@ -14,6 +14,7 @@ import type { ConfigField, IntegrationNodeData, NodeAdapter } from './types'
 import { routeToLinkedTerminals } from '../../../utils/edgeRouting'
 import { useTerminalStore } from '../../../stores/terminalStore'
 import { ConfigRow, ConfigRows, ConfigSection, NodeConfigModal } from './NodeConfigModal'
+import { useNodeSurface } from './nodeSurface'
 
 // ---------------------------------------------------------------------------
 // Adapter registry
@@ -212,8 +213,10 @@ export const IntegrationNode = memo(function IntegrationNode({
   } = data
 
   // Local UI state — open config when node is freshly created (no meaningful config yet)
+  const surface = useNodeSurface()
+  const isGrid = surface === 'grid'
   const hasExistingConfig = Object.keys(adapterConfig).some(k => k !== '_panelId' && adapterConfig[k] !== undefined && adapterConfig[k] !== '')
-  const [configOpen, setConfigOpen] = useState(!hasExistingConfig)
+  const [configOpen, setConfigOpen] = useState(!isGrid && !hasExistingConfig)
   const [config, setConfig] = useState<Record<string, unknown>>(
     () => ({ ...adapterConfig })
   )
@@ -326,22 +329,30 @@ export const IntegrationNode = memo(function IntegrationNode({
     <>
     <div
       className={clsx(
-        'w-[300px] card !rounded-brutal border-brutal cursor-pointer',
+        'card !rounded-brutal border-brutal cursor-pointer',
+        isGrid
+          ? 'flex h-full w-full min-w-0 flex-col overflow-hidden'
+          : 'w-[300px]',
         selected ? 'border-accent shadow-brutal' : 'border-border hover:border-border'
       )}
       onClick={handleFocus}
+      data-node-surface={surface}
     >
       {/* Connection handles */}
-      <Handle
-        type="target"
-        position={Position.Left}
-        className="!bg-accent !w-2 !h-2 !border-brutal !border-border"
-      />
-      <Handle
-        type="source"
-        position={Position.Right}
-        className="!bg-accent !w-2 !h-2 !border-brutal !border-border"
-      />
+      {!isGrid && (
+        <>
+          <Handle
+            type="target"
+            position={Position.Left}
+            className="!bg-accent !w-2 !h-2 !border-brutal !border-border"
+          />
+          <Handle
+            type="source"
+            position={Position.Right}
+            className="!bg-accent !w-2 !h-2 !border-brutal !border-border"
+          />
+        </>
+      )}
 
       {/* Header bar */}
       <div className="flex items-center gap-2 px-3 py-2 bg-background-secondary border-b border-brutal border-border rounded-t-brutal">
@@ -378,14 +389,16 @@ export const IntegrationNode = memo(function IntegrationNode({
           >
             <Settings2 className="w-3 h-3" />
           </button>
-          <button
-            type="button"
-            onClick={handleClose}
-            className="node-btn node-btn-danger"
-            title="Close"
-          >
-            <X className="w-3 h-3" />
-          </button>
+          {!isGrid && (
+            <button
+              type="button"
+              onClick={handleClose}
+              className="node-btn node-btn-danger"
+              title="Close"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          )}
         </div>
       </div>
 

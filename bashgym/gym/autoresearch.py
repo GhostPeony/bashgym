@@ -408,11 +408,10 @@ class HyperparamSearchSpace(SearchSpace):
             val_path = self._val_dataset_path
 
             if not dataset_path or not dataset_path.exists():
-                logger.error(
-                    f"[AutoResearch] Real mode: dataset_path={dataset_path} not found, "
-                    "falling back to simulation"
+                raise RuntimeError(
+                    "autoresearch_real_prerequisites_missing: "
+                    f"dataset_path={dataset_path} is unavailable"
                 )
-                return _simulate_loss(config, experiment_number, total_experiments)
 
             try:
                 run = trainer.train_sft(

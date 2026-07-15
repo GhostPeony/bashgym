@@ -13,6 +13,8 @@ A run is evidence-bearing only when it has:
 
 Train loss alone is not sufficient. If `eval_loss` is null and `evaluation_history`, `heldout_evals`, and `environment_holdout_evals` are empty, report the run as trained but unevaluated.
 
+For every direct strategy, store the exact `checkpoint_limit`, `artifact_retention`, `auto_push_hf`, `hf_repo_name`, `hf_private`, and `hf_upload_artifact` values with the run. Routine experiments default to one checkpoint during training, `adapter_only` after success, no automatic Hub push, private visibility, and automatic merged-then-adapter selection if upload is later enabled. Read `bashgym-launch-recipes.md` for exact payloads.
+
 ## Method Matrix
 
 ### SFT

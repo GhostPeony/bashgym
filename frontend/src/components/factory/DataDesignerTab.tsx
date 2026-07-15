@@ -18,6 +18,8 @@ import {
   type DesignerJobStatus,
 } from '../../services/api'
 import { useTrainingStore } from '../../stores'
+import { useActivityStore } from '../../stores/activityStore'
+import { useCanvasOrchestratorStore } from '../../stores/canvasOrchestratorStore'
 
 const ROLLOUT_FORMATS = [
   { value: 'claude_code', label: 'Claude Code' },
@@ -154,7 +156,14 @@ export function DataDesignerTab() {
       const res = await designerApi.getJob(jobId)
       if (res.ok && res.data) {
         setJob(res.data)
+        useCanvasOrchestratorStore.getState().handleDesignerJob(res.data)
         if (res.data.status === 'completed' || res.data.status === 'failed') {
+          useActivityStore.getState().addEvent(`designer:${res.data.status}`, {
+            job_id: res.data.job_id,
+            pipeline: res.data.pipeline,
+            output_dir: res.data.output_dir,
+            error: res.data.error,
+          })
           clearJobPolling()
           if (res.data.status === 'failed') setJobError(res.data.error || 'Job failed')
           return
@@ -184,6 +193,12 @@ export function DataDesignerTab() {
     })
     if (res.ok && res.data) {
       setJob(res.data)
+      useCanvasOrchestratorStore.getState().handleDesignerJob(res.data)
+      useActivityStore.getState().addEvent('designer:queued', {
+        job_id: res.data.job_id,
+        pipeline: res.data.pipeline,
+        num_records: res.data.num_records,
+      })
       pollRef.current = window.setTimeout(() => pollJob(res.data!.job_id), 2000)
     } else {
       setJobError(res.error || 'Failed to start job')

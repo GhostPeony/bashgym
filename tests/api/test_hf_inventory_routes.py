@@ -12,8 +12,8 @@ class DummyHFClient:
         self,
         enabled: bool = True,
         pro: bool = True,
-        username: str = "cade",
-        namespace: str = "cade",
+        username: str = "example-org",
+        namespace: str = "example-org",
         token: str = "hf_secret_token_123",
     ):
         self.is_enabled = enabled
@@ -40,13 +40,14 @@ def install_inventory_fakes(
     monkeypatch, calls: dict[str, int], *, model_error: Exception | None = None
 ):
     dummy = DummyHFClient()
+    dummy.api = SimpleNamespace()
     monkeypatch.setenv("HF_TOKEN", dummy.token)
     monkeypatch.setattr("bashgym.integrations.huggingface.get_hf_client", lambda: dummy)
     monkeypatch.setattr(
         hf_routes,
         "_local_model_links",
         lambda: {
-            "cade/bashgym-model-a": {
+            "example-org/bashgym-model-a": {
                 "model_id": "run-123",
                 "display_name": "BashGym Model A",
                 "training_strategy": "sft",
@@ -66,7 +67,7 @@ def install_inventory_fakes(
                 raise model_error
             return [
                 SimpleNamespace(
-                    id="cade/bashgym-model-a",
+                    id="example-org/bashgym-model-a",
                     url="",
                     downloads=12,
                     likes=3,
@@ -82,38 +83,23 @@ def install_inventory_fakes(
             assert client is dummy
 
         def list_datasets(self, prefix="bashgym"):
+            return [row["id"] for row in self.list_dataset_details(prefix)]
+
+        def list_dataset_details(self, prefix="", limit=50):
             calls["datasets"] = calls.get("datasets", 0) + 1
             assert prefix == "bashgym"
-            return ["cade/bashgym-youtube-retrieval"]
-
-    class FakeTraceUploader:
-        def __init__(self, token=None):
-            assert token == dummy.token
-
-        def list_trace_datasets(self, prefix="bashgym"):
-            calls["trace_datasets"] = calls.get("trace_datasets", 0) + 1
+            assert limit == 2
             return [
                 {
-                    "id": "cade/bashgym-gold-traces",
+                    "id": "example-org/bashgym-youtube-retrieval",
+                    "url": "https://huggingface.co/datasets/example-org/bashgym-youtube-retrieval",
                     "private": True,
-                    "downloads": 4,
-                    "last_modified": "2026-07-08T00:00:00+00:00",
-                }
-            ]
-
-    class FakeBucketManager:
-        def __init__(self, token=None):
-            assert token == dummy.token
-
-        def list_buckets(self, namespace=None):
-            calls["buckets"] = calls.get("buckets", 0) + 1
-            assert namespace == "cade"
-            return [
-                {
-                    "id": "cade/bashgym-checkpoints",
-                    "private": True,
-                    "created_at": "2026-07-07T00:00:00+00:00",
-                    "updated_at": "2026-07-09T00:00:00+00:00",
+                    "downloads": 8,
+                    "likes": 2,
+                    "last_modified": "2026-07-09T00:00:00+00:00",
+                    "created_at": "2026-07-01T00:00:00+00:00",
+                    "used_storage": 2048,
+                    "tags": ["bashgym", "retrieval"],
                 }
             ]
 
@@ -123,8 +109,6 @@ def install_inventory_fakes(
     monkeypatch.setattr(
         "bashgym.integrations.huggingface.datasets.HFDatasetManager", FakeDatasetManager
     )
-    monkeypatch.setattr("bashgym.integrations.huggingface.traces.TraceUploader", FakeTraceUploader)
-    monkeypatch.setattr("bashgym.integrations.huggingface.buckets.BucketManager", FakeBucketManager)
 
 
 def test_hf_inventory_returns_normalized_snapshot_without_token(client, monkeypatch):
@@ -139,19 +123,23 @@ def test_hf_inventory_returns_normalized_snapshot_without_token(client, monkeypa
     assert data["cached"] is False
     assert data["status"]["enabled"] is True
     assert data["status"]["token_source"] == "env"
-    assert data["namespace"] == "cade"
+    assert data["namespace"] == "example-org"
     assert data["counts"] == {
         "models": 1,
         "datasets": 1,
-        "trace_datasets": 1,
-        "buckets": 1,
+        "trace_datasets": 0,
+        "buckets": 0,
         "spaces": 0,
     }
-    assert data["models"][0]["id"] == "cade/bashgym-model-a"
+    assert data["models"][0]["id"] == "example-org/bashgym-model-a"
     assert data["models"][0]["local"]["model_id"] == "run-123"
-    assert data["datasets"][0]["url"].endswith("/datasets/cade/bashgym-youtube-retrieval")
-    assert data["trace_datasets"][0]["id"] == "cade/bashgym-gold-traces"
-    assert data["buckets"][0]["id"] == "cade/bashgym-checkpoints"
+    assert data["datasets"][0]["url"].endswith(
+        "/datasets/example-org/bashgym-youtube-retrieval"
+    )
+    assert data["datasets"][0]["private"] is True
+    assert data["datasets"][0]["used_storage"] == 2048
+    assert data["trace_datasets"] == []
+    assert data["buckets"] == []
     assert data["warnings"] == []
 
 
@@ -169,8 +157,6 @@ def test_hf_inventory_uses_server_side_cache(client, monkeypatch):
     assert calls == {
         "models": 1,
         "datasets": 1,
-        "trace_datasets": 1,
-        "buckets": 1,
     }
 
 
@@ -214,3 +200,67 @@ def test_hf_inventory_section_errors_fail_soft_and_redact_tokens(client, monkeyp
     assert data["counts"]["datasets"] == 1
     assert data["warnings"][0]["section"] == "models"
     assert data["warnings"][0]["message"] == "boom for hf_***"
+
+
+@pytest.mark.asyncio
+async def test_invalid_hf_replacement_does_not_overwrite_working_secret(monkeypatch):
+    """Validation must happen before the submitted token reaches durable storage."""
+    writes = []
+    resets = []
+    disabled_client = DummyHFClient(
+        enabled=False,
+        pro=False,
+        username="",
+        namespace="",
+        token="",
+    )
+    monkeypatch.setattr(
+        "bashgym.secrets.set_secret", lambda key, value: writes.append((key, value))
+    )
+    monkeypatch.setattr(
+        "bashgym.integrations.huggingface.get_hf_client",
+        lambda **_: disabled_client,
+    )
+    monkeypatch.setattr(
+        "bashgym.integrations.huggingface.reset_hf_client",
+        lambda: resets.append(True),
+    )
+
+    with pytest.raises(hf_routes.HTTPException) as exc_info:
+        await hf_routes.configure_hf_token(
+            hf_routes.HFConfigureRequest(token="hf_invalid_replacement")
+        )
+
+    assert exc_info.value.status_code == 401
+    assert writes == []
+    assert resets == [True]
+
+
+@pytest.mark.asyncio
+async def test_valid_hf_submission_persists_after_validation(monkeypatch):
+    """Electron submissions validate first, then enter the shared durable store."""
+    writes = []
+    reloads = []
+    resets = []
+    enabled_client = DummyHFClient()
+    monkeypatch.setattr(
+        "bashgym.secrets.set_secret", lambda key, value: writes.append((key, value))
+    )
+    monkeypatch.setattr(
+        "bashgym.integrations.huggingface.get_hf_client",
+        lambda **_: enabled_client,
+    )
+    monkeypatch.setattr(
+        "bashgym.integrations.huggingface.reset_hf_client",
+        lambda: resets.append(True),
+    )
+    monkeypatch.setattr("bashgym.config.reload_settings", lambda: reloads.append(True))
+
+    result = await hf_routes.configure_hf_token(
+        hf_routes.HFConfigureRequest(token="hf_valid_replacement")
+    )
+
+    assert result["success"] is True
+    assert writes == [("HF_TOKEN", "hf_valid_replacement")]
+    assert reloads == [True]
+    assert resets == [True]

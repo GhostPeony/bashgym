@@ -1,4 +1,11 @@
-from bashgym.compute import get_compute_target, launch_plan, preflight_compute_target
+import pytest
+
+from bashgym.compute import (
+    get_compute_target,
+    launch_plan,
+    normalize_training_target_payload,
+    preflight_compute_target,
+)
 
 
 def test_private_gpu_preflight_reports_missing_host_env(monkeypatch):
@@ -43,3 +50,50 @@ def test_dstack_launch_plan_generates_task_yaml():
         "python scripts/train_model.py --config runs/demo/plan.json"
         in plan["provider_config"]["content"]
     )
+
+
+def test_ssh_target_activates_remote_training_flags():
+    payload = normalize_training_target_payload(
+        {"compute_target": "ssh:lab-box", "strategy": "sft"}
+    )
+
+    assert payload["use_remote_ssh"] is True
+    assert payload["device_id"] == "lab-box"
+    assert payload["compute_target"] == "ssh:lab-box"
+
+
+def test_private_alias_activates_default_remote_target():
+    payload = normalize_training_target_payload({"compute_target": "private"})
+
+    assert payload["use_remote_ssh"] is True
+    assert payload["compute_target"] == "ssh:remote"
+
+
+def test_cloud_target_cannot_masquerade_as_local_training():
+    with pytest.raises(ValueError, match="ambiguous"):
+        normalize_training_target_payload({"compute_target": "cloud"})
+
+    with pytest.raises(ValueError, match="not launched by /api/training/start"):
+        normalize_training_target_payload({"compute_target": "hf-jobs"})
+
+
+def test_nemo_customizer_target_activates_only_customizer_backend():
+    payload = normalize_training_target_payload({"compute_target": "cloud:nemo-customizer"})
+
+    assert payload["use_nemo_customizer"] is True
+    assert payload.get("use_nemo_gym", False) is False
+    assert payload["compute_target"] == "cloud:nemo-customizer"
+
+
+def test_legacy_nemo_target_is_canonicalized_without_claiming_gym():
+    payload = normalize_training_target_payload({"compute_target": "cloud:nemo"})
+
+    assert payload["use_nemo_customizer"] is True
+    assert payload["compute_target"] == "cloud:nemo-customizer"
+
+
+def test_deprecated_nemo_gym_flag_remains_a_customizer_alias():
+    payload = normalize_training_target_payload({"use_nemo_gym": True})
+
+    assert payload["use_nemo_customizer"] is True
+    assert payload["compute_target"] == "cloud:nemo-customizer"

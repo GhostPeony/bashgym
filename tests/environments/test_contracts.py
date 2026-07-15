@@ -4,6 +4,7 @@ from bashgym.environments.contracts import (
     BuildSpec,
     EnvironmentAxis,
     EnvironmentSpec,
+    RewardComponentSpec,
     RolloutSpec,
     VerifierSpec,
 )
@@ -20,7 +21,16 @@ def test_environment_spec_round_trips():
             EnvironmentAxis(name="task_complexity", value="moderate"),
             EnvironmentAxis(name="command_complexity", value="bash+python"),
         ],
-        verifier=VerifierSpec(kind="pytest", command="pytest tests", path="tests/test_parser.py"),
+        verifier=VerifierSpec(
+            kind="pytest",
+            command="pytest tests",
+            path="tests/test_parser.py",
+            reward_type="components",
+            reward_components=[
+                RewardComponentSpec(name="correctness"),
+                RewardComponentSpec(name="format", weight=0.25),
+            ],
+        ),
         build=BuildSpec(base_image="python:3.11-slim"),
         rollout=RolloutSpec(max_tool_calls=32),
         files={"tests/test_parser.py": "def test_parser():\n    assert True\n"},
@@ -33,6 +43,11 @@ def test_environment_spec_round_trips():
     assert restored.axis_value("task_complexity") == "moderate"
     assert restored.axis_value("skills") == "debugging,testing"
     assert restored.verifier.command == "pytest tests"
+    assert restored.verifier.is_multi_reward is True
+    assert restored.verifier.reward_components[1].weight == 0.25
+    assert restored.verifier.combine_reward_components(
+        {"correctness": 1.0, "format": 0.5}
+    ) == 1.125
     assert restored.build.base_image == "python:3.11-slim"
     assert restored.validation_errors() == []
 
@@ -52,3 +67,24 @@ def test_environment_spec_reports_missing_required_fields():
     assert "missing verifier command/path" in errors
     assert "rollout.max_tool_calls must be positive" in errors
     assert "verifier.timeout_sec must be positive" in errors
+
+
+def test_environment_spec_rejects_ambiguous_reward_components():
+    spec = EnvironmentSpec(
+        id="env_rewards",
+        instruction="Return component rewards.",
+        verifier=VerifierSpec(
+            command="./verify.sh",
+            reward_components=[
+                RewardComponentSpec(name="correctness"),
+                RewardComponentSpec(name="correctness"),
+                RewardComponentSpec(name="", weight=float("inf")),
+            ],
+        ),
+    )
+
+    errors = spec.validation_errors()
+
+    assert "verifier.reward_components names must be non-empty" in errors
+    assert "verifier.reward_components names must be unique" in errors
+    assert "verifier.reward_components weights must be finite" in errors

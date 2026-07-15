@@ -179,7 +179,7 @@ class OllamaProvider(InferenceProvider):
         Pull (download) a model from Ollama registry.
 
         Args:
-            name: Model name (e.g., "qwen2.5-coder:7b")
+            name: Exact model name returned by the configured Ollama installation.
             on_progress: Optional callback for progress updates
 
         Returns:

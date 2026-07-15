@@ -3,9 +3,9 @@ Bash Gym API Schemas - Pydantic models for request/response validation
 """
 
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # =============================================================================
 # Enums
@@ -49,6 +49,23 @@ class ExportFormat(str, Enum):
     GGUF = "gguf"
     SAFETENSORS = "safetensors"
     LORA = "lora"
+
+
+class ArtifactRetention(str, Enum):
+    """Artifacts retained after a successful training run."""
+
+    ADAPTER_ONLY = "adapter_only"
+    ADAPTER_CHECKPOINT = "adapter_checkpoint"
+    DEPLOYABLE = "deployable"
+    FULL_RUN = "full_run"
+
+
+class HFUploadArtifact(str, Enum):
+    """Which trained artifact is published to a Hugging Face model repo."""
+
+    AUTO = "auto"
+    ADAPTER = "adapter"
+    MERGED = "merged"
 
 
 class TraceStatus(str, Enum):
@@ -136,6 +153,41 @@ class DataSource(str, Enum):
     SECURITY_DATASET = "security_dataset"
 
 
+class TrainingTrackingContext(BaseModel):
+    """Exact project and lineage identity for an official tracked training run."""
+
+    workspace_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+    project_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+    project_display_name: str = Field(min_length=1, max_length=240)
+    project_description: str = Field(default="", max_length=4000)
+    experiment_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+    experiment_name: str = Field(min_length=1, max_length=240)
+    objective: str = Field(min_length=1, max_length=8000)
+    task_type: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+    model_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+    model_version_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+    model_source_uri: str = Field(min_length=1, max_length=2000)
+    model_source_revision: str = Field(default="", max_length=500)
+    model_config_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    dataset_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+    dataset_version_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+    dataset_source_uri: str = Field(min_length=1, max_length=2000)
+    dataset_content_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    dataset_split_manifest: dict[str, Any] = Field(default_factory=dict)
+    dataset_row_counts: dict[str, int] = Field(default_factory=dict)
+    environment_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+    environment_runtime_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    environment_hardware: dict[str, Any] = Field(default_factory=dict)
+    campaign_id: str | None = Field(default=None, max_length=160)
+    study_id: str | None = Field(default=None, max_length=160)
+    action_id: str | None = Field(default=None, max_length=160)
+    owner_actor_id: str = Field(default="bashgym", min_length=1, max_length=160)
+    tags: list[str] = Field(default_factory=list, max_length=100)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class TrainingRequest(BaseModel):
     """Request to start a training run."""
 
@@ -160,6 +212,13 @@ class TrainingRequest(BaseModel):
     )
     max_seq_length: int = Field(2048, description="Maximum sequence length")
     save_steps: int = Field(100, description="Save checkpoint every N steps", ge=10)
+    checkpoint_limit: int = Field(
+        1, description="Maximum resumable checkpoints retained during training", ge=1, le=20
+    )
+    artifact_retention: ArtifactRetention = Field(
+        ArtifactRetention.ADAPTER_ONLY,
+        description="Post-run storage policy: adapter_only, adapter_checkpoint, deployable, full_run",
+    )
     # LoRA settings
     use_lora: bool = Field(True, description="Use LoRA for efficient fine-tuning")
     lora_rank: int | None = Field(16, description="LoRA rank")
@@ -180,6 +239,17 @@ class TrainingRequest(BaseModel):
     grpo_loss_type: str = Field(
         "grpo",
         description="GRPO loss variant: grpo, gspo (sequence-level), dr_grpo, dapo, bnpo",
+    )
+    grpo_ratio_clip_min: float = Field(
+        0.2,
+        description="GRPO/DAPO lower clipping distance from probability ratio 1.0",
+        ge=0.0,
+        lt=1.0,
+    )
+    grpo_ratio_clip_max: float | None = Field(
+        None,
+        description="GRPO/DAPO upper clipping distance; DAPO resolves to 0.28 when omitted",
+        ge=0.0,
     )
     grpo_backend: str = Field(
         "auto", description="GRPO training backend: auto, unsloth, plain, trl_vllm"
@@ -342,8 +412,23 @@ class TrainingRequest(BaseModel):
     auto_push_hf: bool = Field(False, description="Auto-push to HuggingFace Hub after training")
     hf_repo_name: str = Field("", description="HF repo name (empty = auto-generate)")
     hf_private: bool = Field(True, description="Make HF repo private")
+    hf_upload_artifact: HFUploadArtifact = Field(
+        HFUploadArtifact.AUTO,
+        description="Artifact to upload: auto prefers merged then adapter, or require a specific type",
+    )
     # Backend selection
-    use_nemo_gym: bool = Field(False, description="Use NVIDIA NeMo cloud training instead of local")
+    use_nemo_customizer: bool = Field(
+        False,
+        description="Use NVIDIA NeMo Customizer through NeMo Microservices",
+    )
+    use_nemo_gym: bool = Field(
+        False,
+        description=(
+            "Deprecated compatibility alias for use_nemo_customizer; this does not activate "
+            "NeMo Gym or NeMo RL"
+        ),
+        json_schema_extra={"deprecated": True},
+    )
     use_remote_ssh: bool = Field(False, description="Execute training on a private compute target")
     device_id: str | None = Field(
         None, description="Target device ID for private compute training (uses default if omitted)"
@@ -359,6 +444,13 @@ class TrainingRequest(BaseModel):
     correlation_id: str | None = Field(
         None,
         description="Optional workspace intent correlation id that links prep and run events",
+    )
+    tracking: TrainingTrackingContext | None = Field(
+        None,
+        description=(
+            "Exact project/model/dataset/environment lineage for an official ledger run. "
+            "Omitted requests are retained under an explicit unassigned context."
+        ),
     )
     selected_repos: list[str] | None = Field(
         None, description="Repos to include (None or empty = all repos)"
@@ -383,7 +475,11 @@ class TrainingRequest(BaseModel):
                 "strategy": "sft",
                 "num_epochs": 3,
                 "batch_size": 4,
-                "auto_export_gguf": True,
+                "checkpoint_limit": 1,
+                "artifact_retention": "adapter_only",
+                "auto_push_hf": False,
+                "hf_private": True,
+                "hf_upload_artifact": "auto",
                 "data_source": "traces",
             }
         }
@@ -406,6 +502,7 @@ class TrainingResponse(BaseModel):
     origin: dict[str, Any] | None = None
     correlation_id: str | None = None
     compute_target: str | None = None
+    tracking_ids: dict[str, str] | None = None
 
 
 # =============================================================================
@@ -1130,7 +1227,7 @@ class AutoResearchRequest(BaseModel):
         0.3, ge=0.05, le=1.0, description="Probability of mutating each param"
     )
     mutation_scale: float = Field(0.2, ge=0.01, le=1.0, description="Scale of mutations")
-    mode: str = Field(
+    mode: Literal["simulate", "real"] = Field(
         "simulate",
         description="Experiment mode: 'simulate' for fast heuristic, 'real' for actual short training",
     )
@@ -1176,6 +1273,14 @@ class AutoResearchStatusResponse(BaseModel):
     )
     search_params: list[str] = Field(default_factory=list, description="Parameters being searched")
     mode: str = Field("simulate", description="Experiment mode: simulate or real")
+    execution_path: Literal["prototype_compatibility"] = Field(
+        "prototype_compatibility",
+        description="Legacy in-memory AutoResearch compatibility surface",
+    )
+    durable: Literal[False] = Field(
+        False,
+        description="Legacy AutoResearch state does not survive a backend restart",
+    )
     experiments: list[ExperimentResultSchema] = Field(
         default_factory=list, description="All experiment results"
     )

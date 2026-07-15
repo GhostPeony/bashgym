@@ -212,7 +212,7 @@ class ModelProfile:
     created_at: datetime = field(default_factory=datetime.now)
 
     # Lineage
-    base_model: str = ""  # e.g., "Qwen2.5-Coder-1.5B"
+    base_model: str = ""  # Exact operator-selected trainable base model.
     training_strategy: str = "sft"  # sft, dpo, grpo, distillation
     teacher_model: str | None = None  # If distillation
     training_traces: list[str] = field(default_factory=list)  # Gold trace IDs used

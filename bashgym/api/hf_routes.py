@@ -9,6 +9,7 @@ Provides REST endpoints for HuggingFace Pro features:
 - Dataset management
 """
 
+import asyncio
 import logging
 import re
 import time
@@ -133,7 +134,7 @@ class SpaceResponse(BaseModel):
 class DatasetUploadRequest(BaseModel):
     """Request to upload dataset."""
 
-    local_path: str = Field(description="Local path to dataset directory")
+    local_path: str = Field(description="Local path to a dataset directory or JSONL file")
     repo_name: str = Field(description="Name for the dataset repo")
     private: bool = Field(default=True)
     metadata: dict[str, Any] | None = None
@@ -154,6 +155,7 @@ class ModelPushRequest(BaseModel):
     model_id: str = Field(..., description="Local model ID from /api/models")
     repo_name: str = Field("", description="HF repo name (auto-generated if empty)")
     private: bool = Field(True, description="Private repository")
+    artifact: str = Field("auto", pattern="^(auto|adapter|merged)$")
     push_gguf: bool = Field(True, description="Also push GGUF exports")
     generate_card: bool = Field(True, description="Auto-generate model card")
 
@@ -223,9 +225,10 @@ def _get_token_metadata() -> tuple[bool, str]:
     """Return whether a token exists and where it was found, without exposing it."""
     import os
 
-    from bashgym.secrets import get_secret
+    from bashgym.secrets import get_secret, is_placeholder_secret
 
-    if os.environ.get("HF_TOKEN"):
+    environment_token = os.environ.get("HF_TOKEN")
+    if environment_token and not is_placeholder_secret(environment_token):
         return True, "env"
     if get_secret("HF_TOKEN"):
         return True, "stored"
@@ -398,55 +401,14 @@ async def get_hf_inventory(
         from bashgym.integrations.huggingface.datasets import HFDatasetManager
 
         manager = HFDatasetManager(client=client)
-        return [
-            {"id": repo_id, "url": _repo_url(repo_id, repo_type="dataset")}
-            for repo_id in manager.list_datasets(prefix=prefix)[:limit]
-            if repo_id
-        ]
+        return manager.list_dataset_details(prefix=prefix, limit=limit)
 
-    def load_trace_datasets() -> list[dict[str, Any]]:
-        from bashgym.integrations.huggingface.traces import TraceUploader
-
-        uploader = TraceUploader(token=client.token)
-        rows: list[dict[str, Any]] = []
-        for item in uploader.list_trace_datasets(prefix=prefix)[:limit]:
-            repo_id = str(item.get("id", ""))
-            if not repo_id:
-                continue
-            rows.append(
-                {
-                    "id": repo_id,
-                    "url": _repo_url(repo_id, repo_type="dataset"),
-                    "private": item.get("private"),
-                    "downloads": item.get("downloads", 0) or 0,
-                    "last_modified": item.get("last_modified", "") or "",
-                }
-            )
-        return rows
-
-    def load_buckets() -> list[dict[str, Any]]:
-        from bashgym.integrations.huggingface.buckets import BucketManager
-
-        manager = BucketManager(token=client.token)
-        rows: list[dict[str, Any]] = []
-        for item in manager.list_buckets(namespace=resolved_namespace or None)[:limit]:
-            bucket_id = str(item.get("id", ""))
-            if not bucket_id:
-                continue
-            rows.append(
-                {
-                    "id": bucket_id,
-                    "private": item.get("private"),
-                    "created_at": item.get("created_at", "") or "",
-                    "updated_at": item.get("updated_at", "") or "",
-                }
-            )
-        return rows
-
-    models = guarded("models", [], load_models)
-    datasets = guarded("datasets", [], load_datasets)
-    trace_datasets = guarded("trace_datasets", [], load_trace_datasets)
-    buckets = guarded("buckets", [], load_buckets)
+    models, datasets = await asyncio.gather(
+        asyncio.to_thread(guarded, "models", [], load_models),
+        asyncio.to_thread(guarded, "datasets", [], load_datasets),
+    )
+    trace_datasets: list[dict[str, Any]] = []
+    buckets: list[dict[str, Any]] = []
 
     response = HFInventoryResponse(
         status=status,
@@ -495,27 +457,21 @@ async def configure_hf_token(request: HFConfigureRequest):
             status_code=400, detail="Invalid token format. HuggingFace tokens start with 'hf_'"
         )
 
-    # Save the token
-    set_secret("HF_TOKEN", request.token)
+    token = request.token.strip()
 
-    # Reset the settings cache so it picks up the new token
-    reload_settings()
-
-    # Reset the HF client to pick up the new token
-    reset_hf_client()
-
-    # Validate the token by getting the client (pass token directly to avoid any caching issues)
-    client = get_hf_client(token=request.token, force_new=True)
+    # Validate before replacing a working credential. The direct token avoids
+    # settings/env precedence while validation is in progress.
+    client = get_hf_client(token=token, force_new=True)
 
     if not client.is_enabled:
-        # Token is invalid - remove it
-        from bashgym.secrets import delete_secret
-
-        delete_secret("HF_TOKEN")
         reset_hf_client()
         raise HTTPException(
             status_code=401, detail="Invalid token. Please check your token and try again."
         )
+
+    set_secret("HF_TOKEN", token)
+    reload_settings()
+    reset_hf_client()
 
     return {
         "success": True,
@@ -527,16 +483,15 @@ async def configure_hf_token(request: HFConfigureRequest):
 @router.delete("/configure")
 async def remove_hf_token():
     """Remove stored HuggingFace token."""
-    import os
-
     from bashgym.integrations.huggingface import reset_hf_client
-    from bashgym.secrets import delete_secret
+    from bashgym.secrets import delete_secret, get_secret_with_source
 
-    # Check if there's an env var (can't remove that)
-    if os.environ.get("HF_TOKEN"):
+    # Real operator-owned environment values cannot be removed from the UI.
+    _, source = get_secret_with_source("HF_TOKEN")
+    if source == "env":
         raise HTTPException(
             status_code=400,
-            detail="Token is set via HF_TOKEN environment variable. Remove it from your environment to disable.",
+            detail="Token is set via HF_TOKEN environment configuration. Remove it there to disable.",
         )
 
     # Delete stored secret
@@ -969,45 +924,93 @@ async def upload_dataset(request: DatasetUploadRequest):
 
     manager = HFDatasetManager(client=client)
 
-    local_path = Path(request.local_path)
-    if not local_path.exists():
+    source_path = Path(request.local_path).expanduser()
+    if not source_path.exists():
         raise HTTPException(status_code=400, detail="Path does not exist")
 
     # Validate path containment
     from bashgym.config import get_bashgym_dir, get_settings
 
-    resolved = local_path.resolve()
+    resolved = source_path.resolve()
     allowed_bases = [
         Path(get_settings().data.data_dir).resolve(),
         get_bashgym_dir().resolve(),
+        Path.cwd().resolve(),
     ]
-    if not any(str(resolved).startswith(str(base)) for base in allowed_bases):
-        raise HTTPException(status_code=400, detail="Path must be within the data directory")
+    if not any(resolved == base or resolved.is_relative_to(base) for base in allowed_bases):
+        raise HTTPException(
+            status_code=400,
+            detail="Path must be within the workspace, data directory, or BashGym home",
+        )
+
+    if resolved.is_file():
+        if resolved.suffix.lower() != ".jsonl":
+            raise HTTPException(status_code=400, detail="Dataset source must be a JSONL file")
+        local_path = resolved.parent
+        train_file = resolved
+        val_file = None
+    else:
+        local_path = resolved
+        train_file = next(
+            (
+                candidate
+                for candidate in (
+                    local_path / "train.jsonl",
+                    local_path / "train_queries.jsonl",
+                    local_path / "dd_raw_rows.jsonl",
+                )
+                if candidate.is_file()
+            ),
+            None,
+        )
+        val_file = next(
+            (
+                candidate
+                for candidate in (local_path / "val.jsonl", local_path / "validation.jsonl")
+                if candidate.is_file()
+            ),
+            None,
+        )
+        if train_file is None:
+            raise HTTPException(
+                status_code=400,
+                detail="No train.jsonl, train_queries.jsonl, or dd_raw_rows.jsonl found",
+            )
 
     try:
-        url = manager.upload_training_data(
+        metadata = {
+            **(request.metadata or {}),
+            "bashgym_source_file": train_file.name,
+        }
+        url = await asyncio.to_thread(
+            manager.upload_training_data,
             local_path=local_path,
             repo_name=request.repo_name,
             config=DatasetConfig(
                 repo_name=request.repo_name,
                 private=request.private,
             ),
-            metadata=request.metadata,
+            metadata=metadata,
+            train_file=train_file,
+            val_file=val_file,
         )
 
         # Count examples
-        train_count = 0
-        val_count = 0
-        train_file = local_path / "train.jsonl"
-        val_file = local_path / "val.jsonl"
-
-        if train_file.exists():
-            train_count = sum(1 for _ in train_file.open())
-        if val_file.exists():
-            val_count = sum(1 for _ in val_file.open())
+        with train_file.open(encoding="utf-8") as source:
+            train_count = sum(1 for _ in source)
+        if val_file is not None:
+            with val_file.open(encoding="utf-8") as source:
+                val_count = sum(1 for _ in source)
+        else:
+            val_count = 0
+        repo_id = (
+            f"{client.namespace}/{request.repo_name}"
+            if client.namespace
+            else request.repo_name
+        )
 
         return DatasetResponse(
-            repo_id=f"{client.namespace}/{request.repo_name}",
+            repo_id=repo_id,
             url=url,
             train_count=train_count,
             val_count=val_count,
@@ -1166,9 +1169,10 @@ async def push_model_to_hub(body: ModelPushRequest, request: Request):
     }
 
     try:
-        # Push merged model (preferred) or final adapter
+        # Push the requested artifact. Auto prefers merged for immediate
+        # deployment, then falls back to the lightweight adapter.
         model_dir = None
-        if profile.artifacts and getattr(profile.artifacts, "merged_path", None):
+        if body.artifact in {"auto", "merged"} and profile.artifacts:
             merged = (
                 profile.artifacts.merged_path
                 if isinstance(profile.artifacts, dict) is False
@@ -1176,7 +1180,7 @@ async def push_model_to_hub(body: ModelPushRequest, request: Request):
             )
             if merged:
                 model_dir = Path(merged) if isinstance(merged, str) else merged
-        if model_dir is None and profile.artifacts:
+        if model_dir is None and body.artifact in {"auto", "adapter"} and profile.artifacts:
             final = (
                 profile.artifacts.final_adapter_path
                 if isinstance(profile.artifacts, dict) is False
@@ -1189,7 +1193,10 @@ async def push_model_to_hub(body: ModelPushRequest, request: Request):
             url = manager.push_model(Path(model_dir), repo_name, private=body.private)
             result["url"] = url
         else:
-            raise HTTPException(status_code=400, detail="No merged or final model found to push")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Requested artifact '{body.artifact}' was not found for this model",
+            )
 
         # Push GGUF if requested
         if body.push_gguf and profile.artifacts:

@@ -24,8 +24,9 @@ export function JournalSessionRow({ snapshot, onOpenDetail }: JournalSessionRowP
   const when = snapshot.lastEventAt ?? snapshot.fileMtime
 
   return (
-    <div
-      className="flex items-center gap-2 px-1.5 py-1 rounded-brutal hover:bg-accent/[0.06] transition-colors min-w-0 cursor-pointer"
+    <button
+      type="button"
+      className="flex w-full min-w-0 items-center gap-2 overflow-hidden px-1.5 py-1 text-left rounded-brutal hover:bg-accent/[0.06] transition-colors cursor-pointer"
       onClick={onOpenDetail}
       title={snapshot.topic ?? snapshot.filePath}
     >
@@ -34,6 +35,6 @@ export function JournalSessionRow({ snapshot, onOpenDetail }: JournalSessionRowP
         {snapshot.topic ?? snapshot.title ?? snapshot.sessionId?.slice(0, 8) ?? '—'}
       </span>
       <span className="font-mono text-[10px] text-text-muted flex-shrink-0">{timeAgo(when)}</span>
-    </div>
+    </button>
   )
 }

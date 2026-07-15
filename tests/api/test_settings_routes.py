@@ -8,21 +8,20 @@ Tests cover:
   - ALLOWED_ENV_KEYS validation via the endpoint
 """
 
-import pytest
 from unittest.mock import patch
 
 from bashgym.api.settings_routes import (
-    _mask_value,
+    ALLOWED_ENV_KEYS,
     _is_placeholder,
+    _mask_value,
     _read_env_file,
     _write_env_values,
-    ALLOWED_ENV_KEYS,
 )
-
 
 # ---------------------------------------------------------------------------
 # 1. _mask_value()
 # ---------------------------------------------------------------------------
+
 
 class TestMaskValue:
     """Masking logic for API key display."""
@@ -60,6 +59,7 @@ class TestMaskValue:
 # ---------------------------------------------------------------------------
 # 2. _is_placeholder()
 # ---------------------------------------------------------------------------
+
 
 class TestIsPlaceholder:
     """Placeholder detection for API keys."""
@@ -107,6 +107,7 @@ class TestIsPlaceholder:
 # 3. _read_env_file() + _write_env_values()
 # ---------------------------------------------------------------------------
 
+
 class TestEnvFileRoundTrip:
     """Read/write .env file operations using tmp_path."""
 
@@ -151,8 +152,7 @@ class TestEnvFileRoundTrip:
         """Values wrapped in quotes should be stripped on read."""
         env_file = tmp_path / ".env"
         env_file.write_text(
-            'ANTHROPIC_API_KEY="sk-quoted"\n'
-            "HF_TOKEN='hf-single-quoted'\n",
+            'ANTHROPIC_API_KEY="sk-quoted"\n' "HF_TOKEN='hf-single-quoted'\n",
             encoding="utf-8",
         )
         with self._patch_env_path(tmp_path):
@@ -198,6 +198,7 @@ class TestEnvFileRoundTrip:
 # 4. ALLOWED_ENV_KEYS validation
 # ---------------------------------------------------------------------------
 
+
 class TestAllowedKeys:
     """Verify the allowlist contains expected keys and rejects others."""
 
@@ -219,6 +220,7 @@ class TestAllowedKeys:
     def test_update_endpoint_rejects_disallowed_key(self):
         """PUT /api/settings/env should reject keys not in the allowlist."""
         from fastapi.testclient import TestClient
+
         from bashgym.api.routes import app
 
         client = TestClient(app)
@@ -228,3 +230,33 @@ class TestAllowedKeys:
         )
         assert response.status_code == 400
         assert "not in the allowlist" in response.json()["detail"]
+
+    def test_hf_update_uses_secret_store_instead_of_env_file(self, tmp_path, monkeypatch):
+        """Both Electron token forms must use the durable credential path."""
+        from fastapi.testclient import TestClient
+
+        from bashgym.api.routes import app
+
+        configured = []
+
+        async def configure_token(request):
+            configured.append(request.token)
+            return {"success": True}
+
+        monkeypatch.delenv("HF_TOKEN", raising=False)
+        monkeypatch.setattr("bashgym.secrets.get_secret_with_source", lambda _: (None, ""))
+        monkeypatch.setattr("bashgym.api.hf_routes.configure_hf_token", configure_token)
+        env_file = tmp_path / ".env"
+
+        with patch(
+            "bashgym.api.settings_routes._get_project_env_path",
+            return_value=env_file,
+        ):
+            response = TestClient(app).put(
+                "/api/settings/env",
+                json={"values": {"HF_TOKEN": "hf_submitted_from_settings"}},
+            )
+
+        assert response.status_code == 200
+        assert configured == ["hf_submitted_from_settings"]
+        assert not env_file.exists()

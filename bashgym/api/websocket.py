@@ -10,8 +10,9 @@ Provides real-time updates for:
 
 import asyncio
 import json
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -132,7 +133,7 @@ class WSMessage:
 
     def __post_init__(self):
         if self.timestamp is None:
-            self.timestamp = datetime.utcnow().isoformat()
+            self.timestamp = datetime.now(UTC).isoformat()
 
     def to_json(self) -> str:
         return json.dumps(asdict(self))
@@ -274,7 +275,7 @@ class ConnectionManager:
                 "title": f"BashGym: {message.type}",
                 "color": color,
                 "fields": [],
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
             # Add relevant fields from the data
@@ -346,6 +347,7 @@ class TrainingProgressCallback:
         run_id: str,
         output_dir: str | None = None,
         static_payload: dict[str, Any] | None = None,
+        metric_sink: Callable[[dict[str, Any]], None] | None = None,
     ):
         self.run_id = run_id
         # When set, each progress point is persisted to <output_dir>/metrics.jsonl
@@ -359,6 +361,7 @@ class TrainingProgressCallback:
         self._main_loop = self._get_loop()
         self._last_recorded_step = -1
         self.static_payload = static_payload or {}
+        self.metric_sink = metric_sink
 
     def _get_loop(self):
         """Get the event loop, creating one if needed for sync context."""
@@ -397,6 +400,12 @@ class TrainingProgressCallback:
         await manager.broadcast(message)
 
     def _persist_point(self, metrics: dict[str, Any]) -> None:
+        if self.metric_sink is not None:
+            try:
+                self.metric_sink(metrics)
+            except Exception:
+                # Ledger availability must never interrupt the training process.
+                pass
         step = metrics.get("step")
         loss = metrics.get("loss")
         if (

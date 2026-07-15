@@ -18,6 +18,8 @@ env/
 
 # Environment files
 .env
+.env.local
+.env.*.local
 frontend.env.local
 
 # Internal config
@@ -31,6 +33,8 @@ docs/*
 !docs/TRAINING_SETUP.md
 !docs/hermes-agent-endpoints.md
 !docs/training-config-guide.md
+!docs/GEMMA4_12B_NVFP4.md
+!docs/TRAINING_ARTIFACT_STORAGE.md
 !docs/training/
 docs/training/*
 !docs/training/overview.md
@@ -46,6 +50,10 @@ docs/training/*
 !docs/training/metrics-runbook.md
 !docs/training/glossary.md
 !docs/training/agent-cli.md
+!docs/training/autoresearch-campaign.md
+!docs/training/bashgym-autoresearch-nvidia-brief.md
+!docs/training/experiment-ledger.md
+!docs/training/nemo-rl-bashgym-integration.md
 
 # IDE
 .vscode/
@@ -97,3 +105,12 @@ ds-bundle/
 # Personal planning notes + local agent config (not for the public repo)
 tasks/
 .claude/
+
+# Local BashGym state (never source-controlled)
+.bashgym/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal

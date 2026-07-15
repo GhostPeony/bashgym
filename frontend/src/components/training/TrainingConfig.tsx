@@ -178,6 +178,8 @@ export function TrainingConfig({ onClose, onStart, onOpenGuides }: TrainingConfi
     gradientAccumulationSteps: 8,
     maxSeqLength: 2048,
     saveSteps: 100,
+    checkpointLimit: 1,
+    artifactRetention: 'adapter_only',
     // LoRA defaults
     loraRank: 16,
     loraAlpha: 32,
@@ -217,6 +219,9 @@ export function TrainingConfig({ onClose, onStart, onOpenGuides }: TrainingConfi
     sessionDistillationMaskPolicy: 'target_span_only',
     sessionDistillationContextMode: 'hint_injected',
     sessionDistillationReader: 'heuristic',
+    autoExportGGUF: false,
+    ggufQuantization: 'q4_k_m',
+    hfUploadArtifact: 'auto',
     // Security dataset defaults
     securityDatasetType: '',
     securityDatasetPath: '',
@@ -774,7 +779,12 @@ export function TrainingConfig({ onClose, onStart, onOpenGuides }: TrainingConfi
                 type="button"
                 onClick={() => {
                   setTrainingBackend('local')
-                  setConfig({ ...config, useNemoGym: false, useRemoteSSH: false })
+                  setConfig({
+                    ...config,
+                    useNemoCustomizer: false,
+                    useNemoGym: false,
+                    useRemoteSSH: false,
+                  })
                 }}
                 className={clsx(
                   'card p-3 text-center transition-press',
@@ -791,7 +801,13 @@ export function TrainingConfig({ onClose, onStart, onOpenGuides }: TrainingConfi
                 type="button"
                 onClick={() => {
                   setTrainingBackend('remote_ssh')
-                  setConfig({ ...config, useNemoGym: false, useRemoteSSH: true, deviceId: defaultDeviceId || undefined })
+                  setConfig({
+                    ...config,
+                    useNemoCustomizer: false,
+                    useNemoGym: false,
+                    useRemoteSSH: true,
+                    deviceId: defaultDeviceId || undefined,
+                  })
                 }}
                 className={clsx(
                   'card p-3 text-center transition-press',
@@ -808,7 +824,12 @@ export function TrainingConfig({ onClose, onStart, onOpenGuides }: TrainingConfi
                 type="button"
                 onClick={() => {
                   setTrainingBackend('nemo')
-                  setConfig({ ...config, useNemoGym: true, useRemoteSSH: false })
+                  setConfig({
+                    ...config,
+                    useNemoCustomizer: true,
+                    useNemoGym: false,
+                    useRemoteSSH: false,
+                  })
                 }}
                 className={clsx(
                   'card p-3 text-center transition-press',
@@ -818,14 +839,21 @@ export function TrainingConfig({ onClose, onStart, onOpenGuides }: TrainingConfi
                 )}
               >
                 <Cloud className="w-5 h-5 mx-auto mb-1" />
-                <span className="block font-mono text-xs font-bold uppercase">NeMo Cloud</span>
+                <span className="block font-mono text-xs font-bold uppercase">
+                  NeMo Customizer
+                </span>
                 <span className="block font-mono text-xs mt-1 text-text-muted">NVIDIA Microservices</span>
               </button>
               <button
                 type="button"
                 onClick={() => {
                   setTrainingBackend('managed')
-                  setConfig({ ...config, useNemoGym: false, useRemoteSSH: false })
+                  setConfig({
+                    ...config,
+                    useNemoCustomizer: false,
+                    useNemoGym: false,
+                    useRemoteSSH: false,
+                  })
                 }}
                 className={clsx(
                   'card p-3 text-center transition-press',
@@ -889,7 +917,7 @@ export function TrainingConfig({ onClose, onStart, onOpenGuides }: TrainingConfi
                     ? 'Select or add a private compute target for larger training jobs.'
                     : trainingBackend === 'managed'
                       ? 'Submit a hosted fine-tune job to Together or OpenAI — no local GPU.'
-                      : 'Train using NVIDIA NeMo Microservices for scalable cloud training.'}
+                      : 'Use hosted NVIDIA NeMo Customizer through NeMo Microservices. NeMo RL is a separate private-compute campaign backend.'}
               </p>
             </div>
           </div>
@@ -1943,13 +1971,82 @@ export function TrainingConfig({ onClose, onStart, onOpenGuides }: TrainingConfi
             </div>
           )}
 
+          {/* Artifact storage policy */}
+          <div className="mt-4 p-3 card border-l-4 border-l-accent space-y-3">
+            <div>
+              <label className="block font-mono text-xs uppercase tracking-widest text-text-muted mb-2">
+                Artifact storage after a successful run
+              </label>
+              <select
+                value={config.artifactRetention ?? 'adapter_only'}
+                onChange={(e) => setConfig({
+                  ...config,
+                  artifactRetention: e.target.value as NonNullable<TrainingConfigType['artifactRetention']>,
+                })}
+                className="input w-full"
+              >
+                <option value="adapter_only">Adapter only — smallest, recommended for experiments</option>
+                <option value="adapter_checkpoint">Adapter + resumable checkpoints</option>
+                <option value="deployable">Deployable — adapter + merged model</option>
+                <option value="full_run">Full run — adapter + merged model + checkpoint history</option>
+              </select>
+              <p className="font-mono text-xs text-text-muted mt-1">
+                The base model cache is shared. Merged weights and GGUF exports create another model-sized copy per run.
+              </p>
+            </div>
+
+            {(config.artifactRetention === 'adapter_checkpoint' || config.artifactRetention === 'full_run') && (
+              <div>
+                <label className="block font-mono text-xs text-text-muted mb-2">Checkpoint limit</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={config.checkpointLimit ?? 1}
+                  onChange={(e) => setConfig({ ...config, checkpointLimit: parseInt(e.target.value) })}
+                  className="input w-full"
+                />
+              </div>
+            )}
+
+            {(config.artifactRetention === 'deployable' || config.artifactRetention === 'full_run') && (
+              <div className="space-y-2">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={config.autoExportGGUF ?? false}
+                    onChange={(e) => setConfig({ ...config, autoExportGGUF: e.target.checked })}
+                    className="accent-primary"
+                  />
+                  <span className="text-sm text-text-secondary">Also export a GGUF deployment copy</span>
+                </label>
+                {config.autoExportGGUF && (
+                  <select
+                    value={config.ggufQuantization ?? 'q4_k_m'}
+                    onChange={(e) => setConfig({ ...config, ggufQuantization: e.target.value })}
+                    className="input w-full"
+                  >
+                    <option value="q4_k_m">Q4_K_M</option>
+                    <option value="q5_k_m">Q5_K_M</option>
+                    <option value="q8_0">Q8_0</option>
+                    <option value="f16">F16</option>
+                  </select>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Auto-deploy to Ollama */}
           <div className="mt-4 p-3 card border-l-4 border-l-accent">
             <div className="flex items-center gap-2">
               <input
                 type="checkbox"
                 checked={config.autoDeployOllama ?? false}
-                onChange={(e) => setConfig({ ...config, autoDeployOllama: e.target.checked })}
+                onChange={(e) => setConfig({
+                  ...config,
+                  autoDeployOllama: e.target.checked,
+                  ...(e.target.checked ? { artifactRetention: 'deployable', autoExportGGUF: true } : {}),
+                })}
                 className="accent-primary"
               />
               <span className="text-sm text-text-secondary">Auto-deploy to Ollama after training</span>
@@ -1996,6 +2093,23 @@ export function TrainingConfig({ onClose, onStart, onOpenGuides }: TrainingConfi
                   />
                   <span className="text-xs text-text-muted">Private repository</span>
                 </div>
+                <select
+                  value={config.hfUploadArtifact ?? 'auto'}
+                  onChange={(e) => setConfig({
+                    ...config,
+                    hfUploadArtifact: e.target.value as NonNullable<TrainingConfigType['hfUploadArtifact']>,
+                  })}
+                  className="input w-full"
+                >
+                  <option value="auto">Upload deployable model when present, otherwise adapter</option>
+                  <option value="adapter">Upload adapter only</option>
+                  <option value="merged">Require merged deployable model</option>
+                </select>
+                {config.hfPrivate === false && (
+                  <p className="font-mono text-xs text-status-warning">
+                    Public upload: verify the base-model license, dataset provenance, and generated model card first.
+                  </p>
+                )}
               </div>
             )}
           </div>

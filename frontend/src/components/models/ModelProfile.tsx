@@ -55,6 +55,7 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
   const [showPushDialog, setShowPushDialog] = useState(false)
   const [pushRepoName, setPushRepoName] = useState('')
   const [pushPrivate, setPushPrivate] = useState(true)
+  const [pushArtifact, setPushArtifact] = useState<'auto' | 'adapter' | 'merged'>('auto')
   const [pushGguf, setPushGguf] = useState(true)
   const [isPushing, setIsPushing] = useState(false)
 
@@ -104,6 +105,7 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
         model_id: profile.model_id,
         repo_name: pushRepoName || undefined,
         private: pushPrivate,
+        artifact: pushArtifact,
         push_gguf: pushGguf,
         generate_card: true,
       })
@@ -739,10 +741,27 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
                 <input type="checkbox" checked={pushPrivate} onChange={(e) => setPushPrivate(e.target.checked)} className="accent-primary" />
                 <span className="text-sm text-text-secondary">Private repository</span>
               </div>
+              <div>
+                <label className="font-mono text-xs uppercase tracking-widest text-text-muted block mb-1">Artifact</label>
+                <select
+                  value={pushArtifact}
+                  onChange={(e) => setPushArtifact(e.target.value as 'auto' | 'adapter' | 'merged')}
+                  className="input w-full"
+                >
+                  <option value="auto">Merged model when present, otherwise adapter</option>
+                  <option value="adapter">Adapter only</option>
+                  <option value="merged">Merged deployable model</option>
+                </select>
+              </div>
               <div className="flex items-center gap-2">
                 <input type="checkbox" checked={pushGguf} onChange={(e) => setPushGguf(e.target.checked)} className="accent-primary" />
                 <span className="text-sm text-text-secondary">Include GGUF exports</span>
               </div>
+              {!pushPrivate && (
+                <p className="font-mono text-xs text-status-warning">
+                  Public release: verify the base-model license, dataset provenance, and model card before publishing.
+                </p>
+              )}
             </div>
             <div className="flex justify-end gap-2 mt-4">
               <button onClick={() => setShowPushDialog(false)} className="btn-secondary">Cancel</button>

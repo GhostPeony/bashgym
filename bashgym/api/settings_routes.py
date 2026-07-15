@@ -79,7 +79,8 @@ class EnvKeyStatus(BaseModel):
     is_set: bool = Field(description="Whether a non-placeholder value is present")
     masked_value: str = Field(default="", description="Last 4 chars of value, or empty")
     source: str = Field(
-        default="", description="Where the value comes from: 'env_file', 'environment', or ''"
+        default="",
+        description="Where the value comes from: 'env_file', 'environment', 'stored', or ''",
     )
 
 
@@ -217,6 +218,22 @@ async def get_env_keys():
     for env_key in ALLOWED_ENV_KEYS:
         meta = PROVIDER_META[env_key]
 
+        if env_key == "HF_TOKEN":
+            from bashgym.secrets import get_secret_with_source
+
+            effective, secret_source = get_secret_with_source(env_key)
+            source = "environment" if secret_source == "env" else "stored" if effective else ""
+            statuses.append(
+                EnvKeyStatus(
+                    key=env_key,
+                    display_name=meta["display_name"],
+                    is_set=bool(effective),
+                    masked_value=_mask_value(effective or ""),
+                    source=source,
+                )
+            )
+            continue
+
         # Check .env file first, then os.environ
         file_val = env_file_values.get(env_key, "")
         env_val = os.environ.get(env_key, "")
@@ -259,14 +276,41 @@ async def update_env_keys(request: EnvUpdateRequest):
                 detail=f"Key '{key}' is not in the allowlist. Allowed: {ALLOWED_ENV_KEYS}",
             )
 
-    # Write to .env file (preserves comments/ordering)
+    env_updates = {key: value for key, value in request.values.items() if key != "HF_TOKEN"}
+
+    # Hugging Face uses the same durable store as its dedicated Electron form.
+    if "HF_TOKEN" in request.values:
+        from bashgym.secrets import get_secret_with_source
+
+        hf_token = request.values["HF_TOKEN"].strip()
+        _, active_source = get_secret_with_source("HF_TOKEN")
+        if active_source == "env":
+            raise HTTPException(
+                status_code=409,
+                detail="HF_TOKEN is managed by environment configuration and cannot be replaced here.",
+            )
+        if hf_token:
+            from bashgym.api.hf_routes import HFConfigureRequest, configure_hf_token
+
+            await configure_hf_token(HFConfigureRequest(token=hf_token))
+        else:
+            from bashgym.config import reload_settings
+            from bashgym.integrations.huggingface import reset_hf_client
+            from bashgym.secrets import delete_secret
+
+            delete_secret("HF_TOKEN")
+            reload_settings()
+            reset_hf_client()
+
+    # Non-HF providers retain the existing .env behavior for compatibility.
     try:
-        _write_env_values(request.values)
+        if env_updates:
+            _write_env_values(env_updates)
     except OSError as e:
         raise HTTPException(status_code=500, detail=f"Failed to write .env file: {e}")
 
-    # Also update os.environ for the running process
-    for key, val in request.values.items():
+    # Also update os.environ for non-HF providers in the running process.
+    for key, val in env_updates.items():
         if val:
             os.environ[key] = val
         else:
@@ -292,11 +336,16 @@ async def test_env_key(request: EnvTestRequest):
     # Determine the value to test
     value = request.value
     if not value:
-        value = os.environ.get(request.key, "")
+        if request.key == "HF_TOKEN":
+            from bashgym.secrets import get_secret
+
+            value = get_secret("HF_TOKEN") or ""
+        else:
+            value = os.environ.get(request.key, "")
         if not value or _is_placeholder(value):
             # Also check .env file
             env_file_values = _read_env_file()
-            value = env_file_values.get(request.key, "")
+            value = value or env_file_values.get(request.key, "")
 
     if not value or _is_placeholder(value):
         return EnvTestResponse(

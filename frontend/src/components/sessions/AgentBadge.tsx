@@ -32,7 +32,7 @@ interface AgentBadgeProps {
 /** Recognizable provider mark in a tinted chip, tooltip carries the name */
 export function AgentBadge({ kind, size = 'sm', className }: AgentBadgeProps) {
   const iconClass = size === 'md' ? 'w-3.5 h-3.5' : 'w-3 h-3'
-  const label = kind === 'claude' ? 'Claude Code' : kind === 'codex' ? 'OpenAI Codex' : 'Shell'
+  const label = kind === 'claude' ? 'Claude Code' : kind === 'codex' ? 'OpenAI Codex' : 'Bash shell'
   return (
     <span
       className={clsx(

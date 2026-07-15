@@ -3,7 +3,7 @@
  * Handles communication with the Python backend
  */
 
-export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8002/api'
+export const API_BASE = import.meta.env?.VITE_API_URL || 'http://localhost:8002/api'
 
 function backendStartCommand(apiBase: string): string {
   try {
@@ -72,6 +72,8 @@ export interface TrainingRequest {
   gradient_accumulation_steps?: number
   max_seq_length?: number
   save_steps?: number
+  checkpoint_limit?: number
+  artifact_retention?: 'adapter_only' | 'adapter_checkpoint' | 'deployable' | 'full_run'
   // LoRA
   use_lora?: boolean
   lora_rank?: number
@@ -131,7 +133,10 @@ export interface TrainingRequest {
   auto_push_hf?: boolean
   hf_repo_name?: string
   hf_private?: boolean
+  hf_upload_artifact?: 'auto' | 'adapter' | 'merged'
   // Backend
+  use_nemo_customizer?: boolean
+  /** @deprecated Compatibility alias for hosted NeMo Customizer. */
   use_nemo_gym?: boolean
   use_remote_ssh?: boolean
   device_id?: string
@@ -192,6 +197,9 @@ export interface WorkspaceTerminalSnapshot {
 export interface WorkspaceCanvasSnapshot {
   schema_version?: string
   updated_at?: string
+  /** Which named canvas workspace this snapshot describes */
+  workspace_id?: string
+  workspace_name?: string
   panels: WorkspacePanelSnapshot[]
   edges: WorkspaceEdgeSnapshot[]
   terminals: WorkspaceTerminalSnapshot[]
@@ -201,6 +209,8 @@ export interface WorkspaceCanvasSnapshot {
 
 export interface WorkspaceEvent {
   type: string
+  /** Address the intent to a specific workspace canvas */
+  workspace_id?: string
   source?: {
     kind?: string
     terminal_id?: string
@@ -468,10 +478,12 @@ export interface PreflightResult {
   device?: Device
 }
 
-interface ApiResponse<T> {
+export interface ApiResponse<T> {
   ok: boolean
   data?: T
   error?: string
+  code?: string
+  details?: unknown
 }
 
 async function request<T>(
@@ -504,13 +516,156 @@ async function request<T>(
     const text = await response.text()
     try {
       const data = JSON.parse(text)
-      return { ok: response.ok, data, error: response.ok ? undefined : data?.detail || text }
+      const detail = data?.detail
+      const detailMessage = typeof detail === 'string' ? detail : detail?.message
+      return {
+        ok: response.ok,
+        data,
+        error: response.ok ? undefined : detailMessage || text,
+        code: response.ok ? undefined : detail?.code,
+        details: response.ok ? undefined : detail,
+      }
     } catch {
+      if (response.ok) return { ok: true, data: text as T }
       return { ok: false, error: text || `HTTP ${response.status}` }
     }
   } catch (error) {
     return { ok: false, error: normalizeApiError(error) }
   }
+}
+
+type CampaignBridgeRequest = (
+  method: 'GET' | 'POST',
+  route: string,
+  body?: Record<string, unknown>,
+  query?: Record<string, string | number | boolean>,
+) => Promise<ApiResponse<unknown>>
+
+async function campaignRequest<T>(
+  method: 'GET' | 'POST',
+  route: string,
+  body?: Record<string, unknown>,
+  query?: Record<string, string | number | boolean>,
+): Promise<ApiResponse<T>> {
+  const bridge = (window.bashgym as typeof window.bashgym & {
+    campaignRequest?: CampaignBridgeRequest
+  })?.campaignRequest
+  if (!bridge) {
+    return {
+      ok: false,
+      code: 'campaign_desktop_bridge_required',
+      error: 'Campaign controls require the authenticated BashGym desktop bridge.',
+    }
+  }
+  try {
+    return await bridge(method, route, body, query) as ApiResponse<T>
+  } catch (error) {
+    return { ok: false, error: normalizeApiError(error) }
+  }
+}
+
+export const campaignApi = {
+  list: (workspaceId: string) => campaignRequest<{
+    campaigns: import('../stores/campaignStore').CampaignRecord[]
+    controller: import('../stores/campaignStore').CampaignControllerStatus
+  }>('GET', '/api/campaigns', undefined, { workspace_id: workspaceId }),
+  get: (workspaceId: string, campaignId: string) =>
+    campaignRequest<import('../stores/campaignStore').CampaignRecord>(
+      'GET', `/api/campaigns/${encodeURIComponent(campaignId)}`, undefined,
+      { workspace_id: workspaceId },
+    ),
+  attempts: (workspaceId: string, campaignId: string) => campaignRequest<{
+    attempts: import('../stores/campaignStore').CampaignAttempt[]
+  }>('GET', `/api/campaigns/${encodeURIComponent(campaignId)}/attempts`, undefined, {
+    workspace_id: workspaceId,
+  }),
+  studies: (workspaceId: string, campaignId: string) => campaignRequest<{
+    studies: import('../stores/campaignStore').CampaignStudy[]
+  }>('GET', `/api/campaigns/${encodeURIComponent(campaignId)}/studies`, undefined, {
+    workspace_id: workspaceId,
+  }),
+  proposals: (workspaceId: string, campaignId: string) => campaignRequest<{
+    proposals: import('../stores/campaignStore').CampaignProposalRecord[]
+  }>('GET', `/api/campaigns/${encodeURIComponent(campaignId)}/proposals`, undefined, {
+    workspace_id: workspaceId,
+  }),
+  evidence: (workspaceId: string, campaignId: string) =>
+    campaignRequest<import('../stores/campaignStore').CampaignEvidence>(
+      'GET', `/api/campaigns/${encodeURIComponent(campaignId)}/evidence`, undefined,
+      { workspace_id: workspaceId },
+    ),
+  artifacts: (workspaceId: string, campaignId: string) => campaignRequest<{
+    artifacts: import('../stores/campaignStore').CampaignArtifact[]
+  }>('GET', `/api/campaigns/${encodeURIComponent(campaignId)}/artifacts`, undefined, {
+    workspace_id: workspaceId,
+  }),
+  comparisons: (workspaceId: string, campaignId: string) => campaignRequest<{
+    comparisons: import('../stores/campaignStore').CampaignComparison[]
+  }>('GET', `/api/campaigns/${encodeURIComponent(campaignId)}/comparisons`, undefined, {
+    workspace_id: workspaceId,
+  }),
+  ledger: (workspaceId: string, campaignId: string) =>
+    campaignRequest<import('../stores/campaignStore').CampaignLedgerProjection>(
+      'GET', `/api/campaigns/${encodeURIComponent(campaignId)}/ledger`, undefined,
+      { workspace_id: workspaceId },
+    ),
+  events: (
+    workspaceId: string,
+    campaignId: string,
+    afterCursor = 0,
+    limit = 200,
+  ) => campaignRequest<{
+    items: import('../stores/campaignStore').CampaignEventItem[]
+    next_cursor: number
+  }>('GET', `/api/campaigns/${encodeURIComponent(campaignId)}/events`, undefined, {
+    workspace_id: workspaceId,
+    after_cursor: afterCursor,
+    limit,
+  }),
+  metrics: (
+    workspaceId: string,
+    campaignId: string,
+    attemptId: string,
+    source: string,
+    metricName: string,
+    afterStep = -1,
+    limit = 2000,
+  ) => campaignRequest<{
+    metric_name: string
+    source: string
+    values: import('../stores/campaignStore').CampaignMetricValue[]
+    next_after_step: number
+  }>(
+    'GET',
+    `/api/campaigns/${encodeURIComponent(campaignId)}/attempts/${encodeURIComponent(attemptId)}/metrics`,
+    undefined,
+    {
+      workspace_id: workspaceId,
+      source,
+      metric_name: metricName,
+      after_step: afterStep,
+      limit,
+    },
+  ),
+  transition: (
+    workspaceId: string,
+    campaignId: string,
+    action: 'start' | 'pause' | 'resume' | 'cancel',
+    expectedVersion: number,
+    reason?: string,
+  ) => campaignRequest<{
+    campaign: import('../stores/campaignStore').CampaignRecord
+    event: Record<string, unknown>
+    replayed: boolean
+  }>(
+    'POST',
+    `/api/campaigns/${encodeURIComponent(campaignId)}/${action}`,
+    {
+      workspace_id: workspaceId,
+      expected_version: expectedVersion,
+      ...(reason ? { stop_reason: reason } : {}),
+    },
+  ),
 }
 
 // System API
@@ -770,7 +925,7 @@ export const trainingApi = {
     request<Array<{
       id: string
       run_id: string
-      kind: 'final' | 'merged' | 'intermediate'
+      kind: 'final' | 'merged' | 'intermediate' | 'gguf'
       path: string
       size_mb: number
       created_at: string
@@ -821,6 +976,8 @@ export interface DesignerCreateRequest {
   export_nemo?: boolean
   keep_only_passing?: boolean
   train_val_split?: number
+  origin?: { kind?: string; terminal_id?: string; panel_id?: string; agent?: string }
+  correlation_id?: string
 }
 
 export interface DesignerModel {
@@ -838,7 +995,15 @@ export interface DesignerJobStatus {
   status: string
   pipeline: string
   num_records: number
-  progress?: { current: number; total: number }
+  progress?: { current: number; total: number; phase?: string }
+  job_name?: string | null
+  dataset?: string | null
+  model?: string | null
+  provider?: string | null
+  execution?: 'local' | 'private' | 'cloud' | 'unknown' | null
+  started_at?: string | null
+  origin?: { kind?: string; terminal_id?: string; panel_id?: string; agent?: string } | null
+  correlation_id?: string | null
   output_dir?: string
   export_result?: Record<string, unknown>
   error?: string
@@ -1059,8 +1224,10 @@ export const workspaceApi = {
       body: JSON.stringify(snapshot),
     }),
 
-  getContext: (format: 'json' | 'markdown' = 'json') =>
-    request<Record<string, any> | string>(`/workspace/context?format=${format}`),
+  getContext: (format: 'json' | 'markdown' = 'json', workspaceId?: string) =>
+    request<Record<string, any> | string>(
+      `/workspace/context?format=${format}${workspaceId ? `&workspace_id=${encodeURIComponent(workspaceId)}` : ''}`
+    ),
 
   emitEvent: (event: WorkspaceEvent) =>
     request<{ ok: boolean; event: WorkspaceEvent & { event_id?: string; received_at?: string } }>(
@@ -1070,6 +1237,42 @@ export const workspaceApi = {
         body: JSON.stringify(event),
       }
     ),
+}
+
+export interface RuntimeArtifact {
+  name: string
+  path: string
+  size: number
+  modified_at: string
+}
+
+export interface RuntimeJob {
+  job_id: string
+  kind: 'training' | 'designer'
+  status: 'running' | 'completed'
+  pid: number
+  title: string
+  script: string
+  cwd: string
+  started_at: string
+  completed_at?: string | null
+  pipeline?: string | null
+  job_name?: string | null
+  dataset?: string | null
+  model?: string | null
+  provider?: string | null
+  execution?: 'local' | 'private' | 'cloud' | 'unknown'
+  log_path?: string | null
+  strategy?: string | null
+  output_dir?: string | null
+  progress?: { current: number; total?: number | null; unit: string } | null
+  artifacts: RuntimeArtifact[]
+  options: Record<string, string>
+  source: 'process_observer'
+}
+
+export const runtimeApi = {
+  listJobs: () => request<{ jobs: RuntimeJob[]; polled_at: string }>('/runtime/jobs'),
 }
 
 export interface SourcePrepareResponse {
@@ -2440,6 +2643,10 @@ export interface DiscoveredModel {
   pipeline_tag?: string | null
   params_billions: number | null
   hf_url: string
+  artifact_role?: 'trainable_base' | 'inference_quant'
+  trainable?: boolean
+  quantization?: string | null
+  runtime?: string
   fit?: DiscoveredModelFit | null
 }
 
@@ -3410,6 +3617,7 @@ export interface HFModelPushRequest {
   model_id: string
   repo_name?: string
   private?: boolean
+  artifact?: 'auto' | 'adapter' | 'merged'
   push_gguf?: boolean
   generate_card?: boolean
 }
@@ -3463,7 +3671,11 @@ export interface HFInventoryDataset {
   url: string
   private?: boolean | null
   downloads?: number
+  likes?: number
   last_modified?: string
+  created_at?: string
+  used_storage?: number | null
+  tags?: string[]
 }
 
 export interface HFInventoryBucket {
@@ -3497,6 +3709,92 @@ export interface HFInventoryOptions {
   refresh?: boolean
 }
 
+export type HFContextEvidenceKind = 'model' | 'dataset' | 'evaluation'
+export type HFContextComparability = 'comparable' | 'partial' | 'orientation_only' | 'unknown'
+
+export interface HFContextEvidence {
+  evidence_id: string
+  kind: HFContextEvidenceKind
+  resource_id: string
+  revision?: string | null
+  canonical_url: string
+  summary: string
+  facts: Record<string, unknown>
+  excerpt?: string | null
+  visibility: 'public' | 'workspace_private'
+  assessment: {
+    task_relevance: number
+    compatibility: number
+    constraint_passes: number
+    constraint_violations: string[]
+    comparability: HFContextComparability
+    confidence: number
+    rationale?: string | null
+    rule_version: string
+  }
+  cautions: string[]
+}
+
+export interface HFContextSourceStatus {
+  source: string
+  status: 'pending' | 'complete' | 'partial' | 'failed'
+  result_count: number
+  error_code?: string | null
+  safe_message?: string | null
+}
+
+export interface HFContextBundle {
+  schema_version: string
+  bundle_id: string
+  version: number
+  workspace_id: string
+  lifecycle: 'collecting' | 'ready'
+  freshness: 'fresh' | 'stale'
+  completion_outcome?: 'complete' | 'partial' | 'cancelled' | null
+  intent: string
+  task?: string | null
+  target: Record<string, unknown>
+  evidence: HFContextEvidence[]
+  selected_evidence_ids: string[]
+  warnings: string[]
+  source_status: HFContextSourceStatus[]
+  content_hash: string
+  created_at: string
+  ready_at?: string | null
+}
+
+export interface HFContextHistoryResponse {
+  bundles: HFContextBundle[]
+  active?: {
+    bundle_id: string
+    version: number
+    intent: string
+    freshness: 'fresh' | 'stale'
+    lifecycle: 'collecting' | 'ready'
+    evidence_counts: Record<HFContextEvidenceKind, number>
+    warning_count: number
+  } | null
+}
+
+export interface HFContextProjection {
+  bundle_id: string
+  version: number
+  renderer_version: string
+  markdown: string
+  projection_hash: string
+  estimated_tokens: number
+  truncated: boolean
+}
+
+export interface HFContextEvalPreview {
+  bundle_id: string
+  version: number
+  execute: false
+  model_id?: string | null
+  tasks: string[]
+  unknowns: string[]
+}
+
 function hfInventoryQuery(options?: HFInventoryOptions): string {
   const params = new URLSearchParams()
   if (options?.prefix !== undefined) params.set('prefix', options.prefix)
@@ -3515,6 +3813,74 @@ export const hfApi = {
 
   inventory: (options?: HFInventoryOptions) =>
     request<HFInventoryResponse>(`/hf/inventory${hfInventoryQuery(options)}`),
+
+  contextHistory: (workspaceId: string, limit = 20) =>
+    request<HFContextHistoryResponse>(
+      `/hf/context/bundles?workspace_id=${encodeURIComponent(workspaceId)}&limit=${limit}`
+    ),
+
+  discoverContext: (body: {
+    workspace_id: string
+    intent: string
+    task?: string
+    target?: Record<string, unknown>
+    origin?: Record<string, string>
+  }) => request<HFContextBundle>('/hf/context/discover', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  }),
+
+  contextVersion: (workspaceId: string, bundleId: string, version: number) =>
+    request<HFContextBundle>(
+      `/hf/context/bundles/${encodeURIComponent(bundleId)}/versions/${version}?workspace_id=${encodeURIComponent(workspaceId)}`
+    ),
+
+  pinContext: (
+    bundleId: string,
+    version: number,
+    body: { workspace_id: string; expected_version: number; selected_evidence_ids: string[] }
+  ) => request<HFContextBundle>(
+    `/hf/context/bundles/${encodeURIComponent(bundleId)}/versions/${version}/pin`,
+    { method: 'POST', body: JSON.stringify(body) }
+  ),
+
+  refreshContext: (workspaceId: string, bundleId: string, version: number) =>
+    request<HFContextBundle>(
+      `/hf/context/bundles/${encodeURIComponent(bundleId)}/versions/${version}/refresh`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ workspace_id: workspaceId, expected_version: version }),
+      }
+    ),
+
+  cancelContext: (workspaceId: string, bundleId: string, version: number) =>
+    request<HFContextBundle>(
+      `/hf/context/bundles/${encodeURIComponent(bundleId)}/versions/${version}/cancel`,
+      { method: 'POST', body: JSON.stringify({ workspace_id: workspaceId }) }
+    ),
+
+  activateContext: (workspaceId: string, bundleId: string, version: number) =>
+    request<HFContextBundle>(
+      `/hf/context/bundles/${encodeURIComponent(bundleId)}/versions/${version}/activate`,
+      { method: 'POST', body: JSON.stringify({ workspace_id: workspaceId }) }
+    ),
+
+  deactivateContext: (workspaceId: string) =>
+    request<{ status: string; workspace_id: string }>('/hf/context/active', {
+      method: 'DELETE',
+      body: JSON.stringify({ workspace_id: workspaceId }),
+    }),
+
+  contextMarkdown: (workspaceId: string, bundleId: string, version: number) =>
+    request<HFContextProjection>(
+      `/hf/context/bundles/${encodeURIComponent(bundleId)}/versions/${version}/markdown?workspace_id=${encodeURIComponent(workspaceId)}`
+    ),
+
+  prepareContextEval: (workspaceId: string, bundleId: string, version: number) =>
+    request<HFContextEvalPreview>(
+      `/hf/context/bundles/${encodeURIComponent(bundleId)}/versions/${version}/actions/eval`,
+      { method: 'POST', body: JSON.stringify({ workspace_id: workspaceId }) }
+    ),
 
   // Token Configuration
   configureToken: (token: string) =>
@@ -4218,10 +4584,19 @@ export interface ToolkitSkillResourceCounts {
 }
 
 export interface ToolkitSkill {
+  skill_id?: string
   name: string
   description: string
   source: string
+  available_sources?: string[]
   path?: string | null
+  revision?: string
+  allowed_tools?: string[]
+  shadowed_paths?: string[]
+  catalog_status?: 'active' | 'alternate' | 'deprecated' | 'invalid'
+  canonical_skill_id?: string | null
+  quality_issues?: string[]
+  remote_endpoint_id?: string
   resource_counts: ToolkitSkillResourceCounts
   tool_count: number
 }
@@ -4403,6 +4778,293 @@ export const toolkitApi = {
     const query = params.toString()
     return request<ToolkitInventoryResponse>(`/agent/toolkit${query ? `?${query}` : ''}`)
   }
+}
+
+export type SkillLabRunStatus = 'queued' | 'running' | 'completed' | 'failed'
+export type SkillLabArm = 'baseline' | 'available' | 'forced'
+
+export interface SkillLabCase {
+  case_id: string
+  name: string
+  prompt: string
+  should_invoke: boolean
+  expected_patterns: string[]
+  forbidden_patterns: string[]
+}
+
+export interface SkillLabThresholds {
+  min_uplift: number
+  min_forced_pass_rate: number
+  min_routing_precision: number
+  min_routing_recall: number
+  max_false_activation_rate: number
+}
+
+export interface SkillLabContract {
+  workspace_id: string
+  skill_id: string
+  endpoint_id?: string | null
+  cases: SkillLabCase[]
+  thresholds: SkillLabThresholds
+  updated_at?: string | null
+}
+
+export interface SkillLabAttempt {
+  case_id: string
+  case_name: string
+  arm: SkillLabArm
+  should_invoke: boolean
+  invoked: boolean
+  passed: boolean
+  output?: string
+  error?: string | null
+  duration_ms?: number
+  criterion_results?: Record<string, boolean>
+}
+
+export interface SkillLabKpis {
+  baseline_pass_rate: number
+  available_pass_rate: number
+  forced_pass_rate: number
+  success_uplift: number
+  routing_precision: number
+  routing_recall: number
+  routing_f1: number
+  false_activation_rate: number
+  evaluated_cases: number
+  target_cases: number
+  negative_cases: number
+  verdict: 'effective' | 'watch' | 'fail' | 'untested'
+  reasons?: string[]
+  confidence?: Record<string, { low: number; high: number }>
+  average_duration_ms?: number
+  total_duration_ms?: number
+  token_usage_available?: boolean
+}
+
+export interface SkillLabRun {
+  run_id: string
+  workspace_id: string
+  skill_id: string
+  skill_name: string
+  skill_revision?: string
+  endpoint_id: string
+  model?: string | null
+  status: SkillLabRunStatus
+  created_at: string
+  started_at?: string | null
+  completed_at?: string | null
+  progress?: { completed: number; total: number }
+  kpis?: SkillLabKpis | null
+  attempts?: SkillLabAttempt[]
+  error?: string | null
+}
+
+export interface SkillLabRunRequest {
+  workspace_id: string
+  skill_id: string
+  endpoint_id: string
+  cases: SkillLabCase[]
+  thresholds: SkillLabThresholds
+}
+
+export interface SkillLabPlanRequest {
+  workspace_id: string
+  skill_id: string
+  endpoint_id: string
+  goal?: string
+  depth: 'quick' | 'thorough'
+}
+
+export interface SkillLabPlan extends SkillLabContract {
+  summary: string
+  evaluation_calls: number
+  generation_model?: string
+}
+
+export const skillLabApi = {
+  plan: (payload: SkillLabPlanRequest) =>
+    request<SkillLabPlan>('/skill-lab/plans', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+  contract: (workspaceId: string, skillId: string) => {
+    const params = new URLSearchParams({ workspace_id: workspaceId })
+    return request<SkillLabContract>(`/skill-lab/contracts/${encodeURIComponent(skillId)}?${params}`)
+  },
+  saveContract: (contract: SkillLabContract) => {
+    const params = new URLSearchParams({ workspace_id: contract.workspace_id })
+    return request<SkillLabContract>(`/skill-lab/contracts/${encodeURIComponent(contract.skill_id)}?${params}`, {
+      method: 'PUT',
+      body: JSON.stringify(contract)
+    })
+  },
+  launch: (payload: SkillLabRunRequest) =>
+    request<SkillLabRun>('/skill-lab/runs', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+  listRuns: (workspaceId: string, limit = 20) => {
+    const params = new URLSearchParams({ workspace_id: workspaceId, limit: String(limit) })
+    return request<SkillLabRun[]>(`/skill-lab/runs?${params}`)
+  },
+  run: (runId: string) =>
+    request<SkillLabRun>(`/skill-lab/runs/${encodeURIComponent(runId)}`)
+}
+
+/** Build the workspace-aware adapter consumed by MCP Server canvas nodes. */
+export function createMcpWorkbenchApi(getWorkspaceId: () => string) {
+  const workspace = () => getWorkspaceId() || 'default'
+  const query = (extra?: Record<string, string | number>) => {
+    const params = new URLSearchParams({ workspace_id: workspace() })
+    for (const [key, value] of Object.entries(extra ?? {})) params.set(key, String(value))
+    return params.toString()
+  }
+  return {
+    listProfiles: () => request<import('../components/terminal/nodes/mcpWorkbenchModel').McpProfile[]>(
+      `/mcp/profiles?${query()}`
+    ),
+    createProfile: (input: import('../components/terminal/nodes/mcpWorkbenchModel').McpProfileInput) =>
+      request<import('../components/terminal/nodes/mcpWorkbenchModel').McpProfile>('/mcp/profiles', {
+        method: 'POST',
+        body: JSON.stringify({ ...input, workspace_id: workspace() })
+      }),
+    updateProfile: (
+      profileId: string,
+      input: import('../components/terminal/nodes/mcpWorkbenchModel').McpProfileInput,
+      expectedRevision: number
+    ) => request<import('../components/terminal/nodes/mcpWorkbenchModel').McpProfile>(`/mcp/profiles/${encodeURIComponent(profileId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ ...input, workspace_id: workspace(), expected_revision: expectedRevision })
+    }),
+    previewStdio: (profileId: string, profileRevision: number) =>
+      request<import('../components/terminal/nodes/mcpWorkbenchModel').McpStdioLaunchPreview>(
+        `/mcp/profiles/${encodeURIComponent(profileId)}/stdio/preview?${query({ profile_revision: profileRevision })}`
+      ),
+    approveStdio: (
+      profileId: string,
+      profileRevision: number,
+      executableSha256: string,
+      launchFingerprint: string
+    ) => request<Record<string, unknown>>(`/mcp/profiles/${encodeURIComponent(profileId)}/stdio/approve`, {
+      method: 'POST',
+      body: JSON.stringify({
+        workspace_id: workspace(),
+        profile_revision: profileRevision,
+        executable_sha256: executableSha256,
+        launch_fingerprint: launchFingerprint
+      })
+    }),
+    connect: (profileId: string, profileRevision: number) => request<import('../components/terminal/nodes/mcpWorkbenchModel').McpOperationAccepted>(
+      `/mcp/profiles/${encodeURIComponent(profileId)}/connect`,
+      { method: 'POST', body: JSON.stringify({ workspace_id: workspace(), profile_revision: profileRevision }) }
+    ),
+    refresh: (profileId: string) => request<import('../components/terminal/nodes/mcpWorkbenchModel').McpOperationAccepted>(
+      `/mcp/profiles/${encodeURIComponent(profileId)}/refresh`,
+      { method: 'POST', body: JSON.stringify({ workspace_id: workspace() }) }
+    ),
+    quickTest: (profileId: string) => request<import('../components/terminal/nodes/mcpWorkbenchModel').McpOperationAccepted>(
+      `/mcp/profiles/${encodeURIComponent(profileId)}/quick-test`,
+      { method: 'POST', body: JSON.stringify({ workspace_id: workspace() }) }
+    ),
+    selfTest: () => request<import('../components/terminal/nodes/mcpWorkbenchModel').McpOperationAccepted>(
+      '/mcp/self-test',
+      { method: 'POST', body: JSON.stringify({ workspace_id: workspace() }) }
+    ),
+    previewClaudeConfig: (
+      config: Record<string, unknown>,
+      sourceScope: 'local' | 'project' | 'user'
+    ) => request<import('../components/terminal/nodes/mcpWorkbenchModel').McpClaudeImportCandidate[]>(
+      '/mcp/imports/claude/preview',
+      {
+        method: 'POST',
+        body: JSON.stringify({ workspace_id: workspace(), config, source_scope: sourceScope })
+      }
+    ),
+    oauthStatus: (profileId: string) => request<import('../components/terminal/nodes/mcpWorkbenchModel').McpOAuthStatus>(
+      `/mcp/profiles/${encodeURIComponent(profileId)}/oauth/status?${query()}`
+    ),
+    logoutOAuth: (profileId: string) => request<Record<string, unknown>>(
+      `/mcp/profiles/${encodeURIComponent(profileId)}/oauth/logout`,
+      { method: 'POST', body: JSON.stringify({ workspace_id: workspace() }) }
+    ),
+    snapshot: (profileId: string) => request<import('../components/terminal/nodes/mcpWorkbenchModel').McpCapabilitySnapshot>(
+      `/mcp/profiles/${encodeURIComponent(profileId)}/snapshot?${query()}`
+    ),
+    disconnect: (sessionId: string) => request<import('../components/terminal/nodes/mcpWorkbenchModel').McpOperationAccepted>(
+      `/mcp/sessions/${encodeURIComponent(sessionId)}/disconnect`,
+      { method: 'POST', body: JSON.stringify({ workspace_id: workspace() }) }
+    ),
+    callTool: (
+      sessionId: string,
+      toolName: string,
+      argumentsValue: Record<string, unknown>,
+      options?: {
+        approved: boolean
+        typed_confirmation?: string
+        timeout_seconds?: number
+        max_result_bytes?: number
+      }
+    ) => request<import('../components/terminal/nodes/mcpWorkbenchModel').McpOperationAccepted>(
+      `/mcp/sessions/${encodeURIComponent(sessionId)}/tools/${encodeURIComponent(toolName)}/call`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ workspace_id: workspace(), arguments: argumentsValue, ...options })
+      }
+    ),
+    getOperation: (operationId: string) => request<import('../components/terminal/nodes/mcpWorkbenchModel').McpOperation>(
+      `/mcp/operations/${encodeURIComponent(operationId)}?${query()}`
+    ),
+    cancelOperation: (operationId: string) => request<import('../components/terminal/nodes/mcpWorkbenchModel').McpOperation>(
+      `/mcp/operations/${encodeURIComponent(operationId)}/cancel`,
+      { method: 'POST', body: JSON.stringify({ workspace_id: workspace() }) }
+    )
+  }
+}
+
+async function knowledgeRequest<T>(endpoint: string, options?: RequestInit): Promise<ApiResponse<T>> {
+  if (!window.bashgym?.api) return request<T>(endpoint, options)
+  try {
+    const ipv4Base = API_BASE.replace('://localhost:', '://127.0.0.1:')
+    const result = await window.bashgym.api.fetch(`${ipv4Base}${endpoint}`, options) as ApiResponse<T>
+    return !result.ok && result.error
+      ? { ...result, error: normalizeApiError(result.error) }
+      : result
+  } catch (error) {
+    return { ok: false, error: normalizeApiError(error) }
+  }
+}
+
+export const knowledgeApi = {
+  status: (workspaceId: string) => knowledgeRequest<import('../components/terminal/nodes/knowledgeBaseModel').KnowledgeStatus>(
+    `/knowledge/status?${new URLSearchParams({ workspace_id: workspaceId })}`
+  ),
+  inspect: (input: {
+    workspace_id: string
+    provider: import('../components/terminal/nodes/knowledgeBaseModel').KnowledgeProvider
+    root?: string
+    max_depth?: number
+    max_entries?: number
+  }) => knowledgeRequest<import('../components/terminal/nodes/knowledgeBaseModel').KnowledgeSnapshot>('/knowledge/inspect', {
+    method: 'POST', body: JSON.stringify(input)
+  }),
+  preview: (input: {
+    workspace_id: string
+    provider: import('../components/terminal/nodes/knowledgeBaseModel').KnowledgeProvider
+    root?: string
+    path: string
+  }) => knowledgeRequest<import('../components/terminal/nodes/knowledgeBaseModel').KnowledgePreview>('/knowledge/preview', {
+    method: 'POST', body: JSON.stringify(input)
+  }),
+  search: (input: {
+    workspace_id: string
+    provider: import('../components/terminal/nodes/knowledgeBaseModel').KnowledgeProvider
+    root?: string
+    query: string
+    limit?: number
+  }) => knowledgeRequest<import('../components/terminal/nodes/knowledgeBaseModel').KnowledgeSearchResponse>('/knowledge/search', {
+    method: 'POST', body: JSON.stringify(input)
+  })
 }
 
 // Orchestrator API

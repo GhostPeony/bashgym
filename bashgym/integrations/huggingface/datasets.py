@@ -157,8 +157,9 @@ This dataset is designed for supervised fine-tuning (SFT) of language models:
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments
 from trl import SFTTrainer
 
-model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-Coder-1.5B-Instruct")
-tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-Coder-1.5B-Instruct")
+model_id = "<operator-selected-trainable-model>"
+model = AutoModelForCausalLM.from_pretrained(model_id)
+tokenizer = AutoTokenizer.from_pretrained(model_id)
 
 trainer = SFTTrainer(
     model=model,
@@ -267,19 +268,23 @@ class HFDatasetManager:
         repo_name: str,
         config: DatasetConfig | None = None,
         metadata: dict[str, Any] | None = None,
+        train_file: Path | None = None,
+        val_file: Path | None = None,
     ) -> str:
         """
         Upload training data to HuggingFace Hub.
 
         Expects the local_path directory to contain:
-        - train.jsonl: Training examples (required)
-        - val.jsonl: Validation examples (optional)
+        - train.jsonl: Training examples (required unless train_file is provided)
+        - val.jsonl: Validation examples (optional unless val_file is provided)
 
         Args:
             local_path: Directory containing train.jsonl and optionally val.jsonl.
             repo_name: Name for the dataset repo (without namespace).
             config: Dataset configuration. If None, uses defaults.
             metadata: Additional metadata to include in metadata.json.
+            train_file: Generated JSONL file to publish as the train split.
+            val_file: Generated JSONL file to publish as the validation split.
 
         Returns:
             URL of the created dataset.
@@ -300,8 +305,8 @@ class HFDatasetManager:
 
         # Check for train.jsonl
         local_path = Path(local_path)
-        train_file = local_path / "train.jsonl"
-        val_file = local_path / "val.jsonl"
+        train_file = Path(train_file) if train_file else local_path / "train.jsonl"
+        val_file = Path(val_file) if val_file else local_path / "val.jsonl"
 
         if not train_file.exists():
             raise FileNotFoundError(f"train.jsonl not found in {local_path}")
@@ -309,6 +314,24 @@ class HFDatasetManager:
         # Count examples
         train_count = self._count_lines(train_file)
         val_count = self._count_lines(val_file) if val_file.exists() else 0
+        schema_fields: list[str] = []
+        try:
+            with train_file.open(encoding="utf-8") as source:
+                for line in source:
+                    if not line.strip():
+                        continue
+                    first_row = json.loads(line)
+                    if isinstance(first_row, dict):
+                        schema_fields = sorted(first_row)
+                    break
+        except (OSError, json.JSONDecodeError):
+            pass
+        metadata = {
+            **(metadata or {}),
+            "train_count": train_count,
+            "val_count": val_count,
+            "schema_fields": schema_fields,
+        }
 
         # Construct full repo ID
         repo_id = f"{self.username}/{repo_name}" if self.username else repo_name
@@ -365,15 +388,13 @@ class HFDatasetManager:
                     repo_type="dataset",
                 )
 
-                # Upload metadata.json if provided
-                if metadata:
-                    metadata_content = json.dumps(metadata, indent=2)
-                    api.upload_file(
-                        path_or_fileobj=metadata_content.encode("utf-8"),
-                        path_in_repo="metadata.json",
-                        repo_id=repo_id,
-                        repo_type="dataset",
-                    )
+                metadata_content = json.dumps(metadata, indent=2)
+                api.upload_file(
+                    path_or_fileobj=metadata_content.encode("utf-8"),
+                    path_in_repo="metadata.json",
+                    repo_id=repo_id,
+                    repo_type="dataset",
+                )
 
                 logger.info(f"Dataset uploaded successfully: {repo_id}")
                 return f"https://huggingface.co/datasets/{repo_id}"
@@ -452,6 +473,57 @@ class HFDatasetManager:
             # Simulation mode
             logger.info("Simulating dataset listing")
             return []
+
+    def list_dataset_details(
+        self,
+        prefix: str = "",
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """List owned datasets with the metadata needed by storage browsers."""
+        api = self._client.api
+        if api is None or not HF_HUB_AVAILABLE:
+            return []
+
+        try:
+            datasets = api.list_datasets(
+                author=self.username,
+                search=prefix or None,
+                limit=limit,
+                full=True,
+            )
+            rows: list[dict[str, Any]] = []
+            for dataset in datasets:
+                repo_id = str(getattr(dataset, "id", "") or "")
+                if not repo_id:
+                    continue
+
+                def iso_value(value: Any) -> str:
+                    if value is None:
+                        return ""
+                    if hasattr(value, "isoformat"):
+                        return str(value.isoformat())
+                    return str(value)
+
+                rows.append(
+                    {
+                        "id": repo_id,
+                        "url": f"https://huggingface.co/datasets/{repo_id}",
+                        "private": getattr(dataset, "private", None),
+                        "downloads": getattr(dataset, "downloads", 0) or 0,
+                        "likes": getattr(dataset, "likes", 0) or 0,
+                        "last_modified": iso_value(
+                            getattr(dataset, "last_modified", None)
+                            or getattr(dataset, "lastModified", None)
+                        ),
+                        "created_at": iso_value(getattr(dataset, "created_at", None)),
+                        "used_storage": getattr(dataset, "usedStorage", None),
+                        "tags": list(getattr(dataset, "tags", []) or [])[:16],
+                    }
+                )
+            return rows
+        except Exception as e:
+            logger.error(f"Failed to list dataset details: {e}")
+            raise HFError(f"Failed to list dataset details: {e}")
 
     def delete_dataset(self, repo_name: str) -> bool:
         """

@@ -1,31 +1,37 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
-import { Plus, Terminal, X, Globe, FileText, Layers, FolderTree, GripVertical, LayoutGrid, Maximize2 } from 'lucide-react'
-import { useTerminalStore } from '../../stores'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
+import { Plus, Terminal, X, Globe, FileText, Layers, FolderTree, GripVertical, LayoutGrid, Maximize2, MessageSquare } from 'lucide-react'
+import { useTerminalStore, useUIStore, useWorkspaceStore } from '../../stores'
 import { TerminalPane } from './TerminalPane'
 import { PreviewPane } from './PreviewPane'
 import { BrowserPane } from './BrowserPane'
 import { FileBrowser } from '../files/FileBrowser'
 import { CanvasViewWrapper } from './CanvasView'
 import { DATA_PANEL_DEFS, DATA_NODE_TYPES } from './nodes/dataPanels'
+import { CustomNodeSummary } from './nodes/CustomNodeSummary'
+import { isCustomNodeType } from './nodes/customNodeTypes'
+import { buildCanvasGraphIndex } from './canvasPerformance'
+import { getGridColumnSpan, getGridLayout, getGridTemplateRows } from './gridLayout'
 import { clsx } from 'clsx'
 import { GhostPeonyIcon, type GhostPeonyIconName } from '../common'
 
 export function TerminalGrid() {
-  const {
-    panels,
-    createTerminal,
-    activePanelId,
-    setActivePanel,
-    viewMode,
-    setViewMode,
-    cycleViewMode: _cycleViewMode,
-    removePanel,
-    renamePanel,
-    reorderPanels,
-    draggedPanelId,
-    setDraggedPanel,
-    addPanel
-  } = useTerminalStore()
+  const panels = useTerminalStore((state) => state.panels)
+  const createTerminal = useTerminalStore((state) => state.createTerminal)
+  const activePanelId = useTerminalStore((state) => state.activePanelId)
+  const setActivePanel = useTerminalStore((state) => state.setActivePanel)
+  const viewMode = useTerminalStore((state) => state.viewMode)
+  const setViewMode = useTerminalStore((state) => state.setViewMode)
+  const removePanel = useTerminalStore((state) => state.removePanel)
+  const renamePanel = useTerminalStore((state) => state.renamePanel)
+  const reorderPanels = useTerminalStore((state) => state.reorderPanels)
+  const draggedPanelId = useTerminalStore((state) => state.draggedPanelId)
+  const setDraggedPanel = useTerminalStore((state) => state.setDraggedPanel)
+  const addPanel = useTerminalStore((state) => state.addPanel)
+  const canvasEdges = useTerminalStore((state) => state.canvasEdges)
+  const canvasGraph = useMemo(
+    () => buildCanvasGraphIndex(panels, canvasEdges),
+    [canvasEdges, panels],
+  )
 
   // Drag state for visual feedback
   const [dragOverId, setDragOverId] = useState<string | null>(null)
@@ -38,31 +44,62 @@ export function TerminalGrid() {
   // Prevent React Strict Mode from creating multiple terminals
   const initializedRef = useRef(false)
 
-  // On first mount: re-adopt any live PTY sessions from the main process,
-  // then create a fresh terminal only if none were restored.
+  // On first mount: materialize the active workspace (restores its panels,
+  // re-adopts live PTYs, adopts orphans, opens a terminal on true first run)
   useEffect(() => {
-    if (panels.length === 0 && !initializedRef.current) {
+    if (!initializedRef.current) {
       initializedRef.current = true
-      useTerminalStore.getState().restoreSessions().then((restored) => {
-        useTerminalStore.getState().restoreSavedPanels()
-        const hasTerminal = useTerminalStore.getState().panels.some((p) => p.type === 'terminal')
-        if (restored === 0 && !hasTerminal) {
-          createTerminal()
-        }
-      })
+      void useTerminalStore.getState().bootActiveWorkspace()
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // State for canvas popup - must be before any early returns
   const [canvasPopupPanelId, setCanvasPopupPanelId] = useState<string | null>(null)
 
+  // Workspace switching: remount the canvas per workspace and drop any open popup
+  const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId)
+  const panelPresentationRequest = useUIStore((state) => state.panelPresentationRequest)
+  const clearPanelPresentationRequest = useUIStore((state) => state.clearPanelPresentationRequest)
+  const isAgentStreamOpen = useUIStore((state) => state.isAgentStreamOpen)
+  const setAgentStreamOpen = useUIStore((state) => state.setAgentStreamOpen)
+  useEffect(() => {
+    setCanvasPopupPanelId(null)
+  }, [activeWorkspaceId])
+
+  // Shared presentation requests let session/history surfaces focus a panel
+  // without reaching into this component's local popup implementation.
+  useEffect(() => {
+    if (!panelPresentationRequest) return
+    if (panelPresentationRequest.workspaceId !== activeWorkspaceId) {
+      useWorkspaceStore.getState().switchWorkspace(panelPresentationRequest.workspaceId)
+      return
+    }
+
+    const panel = useTerminalStore.getState().panels.find(
+      (candidate) => candidate.id === panelPresentationRequest.panelId
+    )
+    if (!panel) {
+      clearPanelPresentationRequest(panelPresentationRequest.requestedAt)
+      return
+    }
+    setActivePanel(panel.id)
+    if (viewMode === 'canvas' && !isCustomNodeType(panel.type)) {
+      setCanvasPopupPanelId(panel.id)
+    }
+    clearPanelPresentationRequest(panelPresentationRequest.requestedAt)
+  }, [
+    activeWorkspaceId,
+    clearPanelPresentationRequest,
+    panelPresentationRequest,
+    setActivePanel,
+    viewMode
+  ])
+
   // Handle focus panel from canvas view. Data/config nodes stay on-canvas and own their modal settings.
   const handleFocusPanel = useCallback((panelId: string) => {
     setActivePanel(panelId)
     const panel = useTerminalStore.getState().panels.find(p => p.id === panelId)
-    const inlineTypes = ['context', 'neon', 'vercel', ...DATA_NODE_TYPES]
-    if (panel && inlineTypes.includes(panel.type)) return
+    if (panel && isCustomNodeType(panel.type)) return
     setCanvasPopupPanelId(panelId)
   }, [setActivePanel])
 
@@ -81,14 +118,6 @@ export function TerminalGrid() {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [canvasPopupPanelId, closeCanvasPopup])
-
-  // Get span class for 3-panel layout
-  const getSpanClass = (index: number, total: number) => {
-    if (total === 3 && index === 2) {
-      return 'col-span-2'
-    }
-    return ''
-  }
 
   // Get icon for panel type
   const getPanelIcon = (type: string) => {
@@ -233,6 +262,17 @@ export function TerminalGrid() {
         />
       )
     }
+    if (isCustomNodeType(panel.type) && viewMode === 'grid') {
+      return (
+        <CustomNodeSummary
+          panel={panel}
+          graph={canvasGraph}
+          selected={isActive}
+          onFocus={setActivePanel}
+          onClose={removePanel}
+        />
+      )
+    }
     if (DATA_NODE_TYPES.includes(panel.type)) {
       return (
         <div className="h-full flex items-center justify-center bg-background-secondary">
@@ -245,25 +285,41 @@ export function TerminalGrid() {
     return null
   }
 
-  // Empty state
+  // Empty state — this workspace has no panels yet
   if (panels.length === 0) {
+    const wsName = useWorkspaceStore.getState().workspaces.find((w) => w.id === activeWorkspaceId)?.name
     return (
       <div className="h-full flex items-center justify-center bg-background-primary">
         <div className="text-center">
           <div className="w-16 h-16 mx-auto mb-4 border-brutal border-border rounded-brutal bg-background-secondary flex items-center justify-center shadow-brutal-sm">
             <Terminal className="w-8 h-8 text-text-muted" />
           </div>
-          <h3 className="text-lg font-brand font-semibold text-text-primary mb-2">No terminals open</h3>
+          <h3 className="text-lg font-brand font-semibold text-text-primary mb-2">
+            {wsName ? `${wsName} is empty` : 'No terminals open'}
+          </h3>
           <p className="text-sm text-text-muted mb-4 font-mono">
-            Create a terminal to start working
+            Launch a session to start working in this workspace
           </p>
-          <button
-            onClick={() => createTerminal()}
-            className="btn-primary inline-flex items-center gap-2"
-          >
-            <Plus className="w-4 h-4" />
-            New Terminal
-          </button>
+          <div className="flex items-center justify-center gap-2">
+            <button
+              onClick={() => createTerminal(undefined, 'Claude Code', 'claude')}
+              className="node-btn node-btn-wide node-btn-accent"
+            >
+              NEW CLAUDE
+            </button>
+            <button
+              onClick={() => createTerminal(undefined, 'Codex', 'codex')}
+              className="node-btn node-btn-wide"
+            >
+              NEW CODEX
+            </button>
+            <button
+              onClick={() => createTerminal()}
+              className="node-btn node-btn-wide"
+            >
+              <span className="flex items-center gap-1"><Plus className="w-2.5 h-2.5" /> SHELL</span>
+            </button>
+          </div>
         </div>
       </div>
     )
@@ -380,6 +436,23 @@ export function TerminalGrid() {
       {/* Spacer */}
       <div className="flex-1" />
 
+      <button
+        type="button"
+        onClick={() => setAgentStreamOpen(!isAgentStreamOpen)}
+        className={clsx(
+          'flex h-7 flex-shrink-0 items-center gap-1.5 rounded-brutal px-2 font-mono text-[10px] font-semibold uppercase tracking-[0.08em] transition-colors',
+          isAgentStreamOpen
+            ? 'bg-accent/[0.12] text-accent'
+            : 'text-text-muted hover:bg-background-tertiary hover:text-text-primary'
+        )}
+        title={isAgentStreamOpen ? 'Hide live agent feed' : 'Open live agent feed'}
+        aria-label={isAgentStreamOpen ? 'Hide live agent feed' : 'Open live agent feed'}
+        aria-pressed={isAgentStreamOpen}
+      >
+        <MessageSquare className="h-3.5 w-3.5" />
+        <span>Agent feed</span>
+      </button>
+
       {/* View mode buttons */}
       <div className="flex items-center gap-0.5 p-0.5 border-brutal border-border rounded-brutal bg-background-tertiary">
         <button
@@ -422,34 +495,7 @@ export function TerminalGrid() {
     </div>
   )
 
-  // Calculate grid position for a panel
-  const getGridStyle = (index: number, total: number): React.CSSProperties => {
-    const cols = total <= 2 ? total : total <= 4 ? 2 : 3
-    const row = Math.floor(index / cols)
-    const col = index % cols
-    const rows = Math.ceil(total / cols)
-
-    // Handle 3-panel layout where last panel spans 2 columns
-    if (total === 3 && index === 2) {
-      return {
-        position: 'absolute',
-        left: '0%',
-        top: `${(row / rows) * 100}%`,
-        width: '100%',
-        height: `${(1 / rows) * 100}%`,
-        padding: '2px'
-      }
-    }
-
-    return {
-      position: 'absolute',
-      left: `${(col / cols) * 100}%`,
-      top: `${(row / rows) * 100}%`,
-      width: `${(1 / cols) * 100}%`,
-      height: `${(1 / rows) * 100}%`,
-      padding: '2px'
-    }
-  }
+  const gridLayout = getGridLayout(panels.length)
 
   return (
     <div className="h-full flex flex-col bg-background-primary">
@@ -465,11 +511,25 @@ export function TerminalGrid() {
         In canvas mode with popup: the terminal stays in its container but the container
         is repositioned to appear as a popup (not re-rendered).
       */}
-      <div className="flex-1 overflow-hidden relative" style={{ minHeight: 0 }}>
+      <div
+        className={clsx(
+          'flex-1 min-h-0',
+          viewMode === 'grid'
+            ? 'grid gap-1 overflow-auto p-1'
+            : 'relative overflow-hidden',
+        )}
+        style={viewMode === 'grid'
+          ? {
+              gridTemplateColumns: `repeat(${gridLayout.tracks}, minmax(0, 1fr))`,
+              gridTemplateRows: getGridTemplateRows(panels.length),
+            }
+          : undefined
+        }
+      >
         {/* Canvas view background - rendered first so terminals appear on top when in popup */}
         {viewMode === 'canvas' && (
           <div className="absolute inset-0 z-10">
-            <CanvasViewWrapper onFocusPanel={handleFocusPanel} onClosePopup={closeCanvasPopup} />
+            <CanvasViewWrapper key={activeWorkspaceId} onFocusPanel={handleFocusPanel} onClosePopup={closeCanvasPopup} />
           </div>
         )}
 
@@ -485,19 +545,20 @@ export function TerminalGrid() {
         {panels.map((panel, index) => {
           const isActive = panel.id === activePanelId
           const isInPopup = viewMode === 'canvas' && panel.id === canvasPopupPanelId
-          const spanClass = getSpanClass(index, panels.length)
+          // Canvas panels remain mounted while hidden, but they must become
+          // inactive so reopening the popup creates a real false -> true
+          // transition and TerminalPane restores xterm keyboard focus.
+          const isPresented = viewMode === 'canvas' ? isInPopup : isActive
 
           // Determine container style based on view mode
           let containerStyle: React.CSSProperties = {}
           let containerClass = ''
 
           if (viewMode === 'grid') {
-            // Grid view - positioned in grid
-            const gridStyle = getGridStyle(index, panels.length)
-            containerStyle = gridStyle
+            const span = getGridColumnSpan(index, panels.length)
+            containerStyle = { gridColumn: `span ${span} / span ${span}` }
             containerClass = clsx(
-              'rounded-brutal overflow-hidden border-brutal transition-press',
-              spanClass,
+              'min-h-0 min-w-0 overflow-hidden rounded-brutal border-brutal transition-press',
               isActive
                 ? 'border-accent shadow-brutal-sm'
                 : 'border-border-subtle hover:border-border'
@@ -547,12 +608,15 @@ export function TerminalGrid() {
             >
               <div
                 className={needsPopupWrapper
-                  ? 'canvas-popup-panel pointer-events-auto'
+                  ? clsx(
+                      'canvas-popup-panel pointer-events-auto',
+                      panel.type === 'terminal' && 'canvas-popup-panel-terminal'
+                    )
                   : 'h-full w-full'
                 }
                 style={needsPopupWrapper ? { width: '90%', maxWidth: '1280px', height: '85%' } : undefined}
               >
-                {renderPanel(panel, isActive || isInPopup, isInPopup ? closeCanvasPopup : undefined)}
+                {renderPanel(panel, isPresented, isInPopup ? closeCanvasPopup : undefined)}
               </div>
             </div>
           )

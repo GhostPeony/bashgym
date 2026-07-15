@@ -7,7 +7,7 @@ import { useTrainingStore } from '../../stores'
 export interface CheckpointInfo {
   id: string
   run_id: string
-  kind: 'final' | 'merged' | 'intermediate'
+  kind: 'final' | 'merged' | 'intermediate' | 'gguf'
   path: string
   size_mb: number
   created_at: string
@@ -32,6 +32,7 @@ export function CheckpointBrowser() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
+  const [pruningRun, setPruningRun] = useState<string | null>(null)
   const setBaseModelOverride = useTrainingStore((s) => s.setBaseModelOverride)
 
   const fetchCheckpoints = useCallback(async () => {
@@ -76,13 +77,43 @@ export function CheckpointBrowser() {
     }
   }
 
+  const handleKeepAdapterOnly = async (runId: string) => {
+    const removable = checkpoints.filter((cp) => cp.run_id === runId && cp.kind !== 'final')
+    if (removable.length === 0) return
+    const removableMb = removable.reduce((sum, cp) => sum + cp.size_mb, 0)
+    const confirmed = window.confirm(
+      `Keep only the final adapter for ${runId}?\n\n` +
+      `This permanently deletes ${removable.length} merged/checkpoint/GGUF artifact(s) ` +
+      `and frees about ${formatSize(removableMb)}.`,
+    )
+    if (!confirmed) return
+    setPruningRun(runId)
+    setError(null)
+    try {
+      const deleted = new Set<string>()
+      for (const cp of removable) {
+        const res = await trainingApi.deleteCheckpoint(cp.id)
+        if (!res.ok) {
+          setError(res.error || `Failed to delete ${cp.id}`)
+          break
+        }
+        deleted.add(cp.id)
+      }
+      setCheckpoints((prev) => prev.filter((cp) => !deleted.has(cp.id)))
+    } finally {
+      setPruningRun(null)
+    }
+  }
+
+  const totalSizeMb = checkpoints.reduce((sum, cp) => sum + cp.size_mb, 0)
+
   return (
     <div className="card p-4">
       <div className="flex items-center justify-between mb-4">
         <div>
           <h2 className="font-brand text-xl text-text-primary">Checkpoints</h2>
           <p className="font-mono text-xs text-text-muted">
-            Saved models in ~/.bashgym/cascade and ~/.bashgym/models
+            {formatSize(totalSizeMb)} across local training artifacts
           </p>
         </div>
         <button
@@ -159,6 +190,17 @@ export function CheckpointBrowser() {
                         <ArrowRight className="w-3 h-3" />
                         Use as base
                       </button>
+                      {cp.kind === 'final' && checkpoints.some((candidate) => candidate.run_id === cp.run_id && candidate.kind !== 'final') && (
+                        <button
+                          onClick={() => handleKeepAdapterOnly(cp.run_id)}
+                          disabled={pruningRun === cp.run_id}
+                          className="btn-secondary flex items-center gap-1 py-1 px-2 text-[10px]"
+                          title="Delete merged weights, GGUF exports, and intermediate checkpoints for this run"
+                        >
+                          {pruningRun === cp.run_id ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Package className="w-3 h-3" />}
+                          Keep adapter only
+                        </button>
+                      )}
                       <button
                         onClick={() => handleDelete(cp)}
                         disabled={deleting === cp.id}

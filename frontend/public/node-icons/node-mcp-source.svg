@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">MCP workbench monogram</title>
+  <desc id="desc">A lilac botanical-brutalist tile with an outlined MCP monogram.</desc>
+  <g fill="none" stroke-linejoin="round">
+    <rect x="48" y="48" width="400" height="400" rx="58" fill="#fff" stroke="#7059a0" stroke-width="16"/>
+    <rect x="72" y="72" width="352" height="352" rx="42" fill="#f4f1eb" stroke="#c5b9df" stroke-width="6"/>
+    <g stroke="#7059a0" stroke-linecap="round">
+      <path d="M108 156c40-2 68-26 80-66 4 42-10 74-46 96" stroke-width="11"/>
+      <path d="M104 153c22 8 42 7 61-3" stroke-width="6"/>
+      <path d="M404 356c-40 2-68 26-80 66-4-42 10-74 46-96" stroke-width="11"/>
+      <path d="M408 359c-22-8-42-7-61 3" stroke-width="6"/>
+    </g>
+    <g fill="#c5b9df" stroke="#7059a0" stroke-width="5">
+      <circle cx="116" cy="118" r="21"/>
+      <circle cx="396" cy="394" r="21"/>
+    </g>
+    <g fill="#9987c1">
+      <circle cx="116" cy="118" r="7"/>
+      <circle cx="396" cy="394" r="7"/>
+    </g>
+    <!-- Vector-only display lettering: no runtime font dependency. -->
+    <g stroke="#202027" stroke-width="18" stroke-linecap="square" stroke-linejoin="miter">
+      <path d="M102 294V194l45 62 45-62v100"/>
+      <path d="M292 216c-10-18-27-28-48-28-34 0-58 24-58 57s24 57 58 57c21 0 38-10 48-28"/>
+      <path d="M328 294V194h44c28 0 45 14 45 38s-17 38-45 38h-44M328 270h44"/>
+    </g>
+    <path d="M142 334h228" stroke="#9987c1" stroke-width="10" stroke-linecap="round"/>
+  </g>
+</svg>

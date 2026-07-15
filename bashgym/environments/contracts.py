@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -94,6 +95,44 @@ class FixtureSpec:
 
 
 @dataclass
+class RewardComponentSpec:
+    """One named verifier reward used for multi-objective RL.
+
+    The weight is applied when producing the backward-compatible scalar total.
+    Trainers such as GDPO can also use the same weight after normalizing each
+    component independently.
+    """
+
+    name: str
+    weight: float = 1.0
+    description: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.name = str(self.name).strip()
+        self.weight = float(self.weight)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "weight": self.weight,
+            "description": self.description,
+            "metadata": self.metadata,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | str) -> RewardComponentSpec:
+        if isinstance(data, str):
+            return cls(name=data)
+        return cls(
+            name=str(data.get("name", "")),
+            weight=float(data.get("weight", 1.0)),
+            description=str(data.get("description", "")),
+            metadata=dict(data.get("metadata") or {}),
+        )
+
+
+@dataclass
 class VerifierSpec:
     """Programmatic reward/checker for an environment."""
 
@@ -103,11 +142,54 @@ class VerifierSpec:
     reward_type: str = "binary"
     success_threshold: float = 1.0
     timeout_sec: int = 120
+    reward_components: list[RewardComponentSpec] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def is_graded(self) -> bool:
         return self.reward_type not in {"binary", "pass_fail"} or self.success_threshold < 1.0
+
+    @property
+    def is_multi_reward(self) -> bool:
+        return len(self.reward_components) > 1
+
+    def reward_validation_errors(self) -> list[str]:
+        """Return issues that make named reward output unsafe for training."""
+
+        errors: list[str] = []
+        names = [component.name.strip() for component in self.reward_components]
+        if any(not name for name in names):
+            errors.append("verifier.reward_components names must be non-empty")
+        if len(names) != len(set(names)):
+            errors.append("verifier.reward_components names must be unique")
+        if any(not math.isfinite(component.weight) for component in self.reward_components):
+            errors.append("verifier.reward_components weights must be finite")
+        return errors
+
+    def combine_reward_components(self, values: dict[str, float]) -> float:
+        """Validate named rewards and return their configured weighted total."""
+
+        expected = {component.name for component in self.reward_components}
+        actual = set(values)
+        if actual != expected:
+            missing = sorted(expected - actual)
+            unexpected = sorted(actual - expected)
+            details = []
+            if missing:
+                details.append(f"missing={missing}")
+            if unexpected:
+                details.append(f"unexpected={unexpected}")
+            raise ValueError("reward component mismatch: " + ", ".join(details))
+
+        total = 0.0
+        for component in self.reward_components:
+            value = float(values[component.name])
+            if not math.isfinite(value):
+                raise ValueError(f"reward component {component.name!r} must be finite")
+            total += component.weight * value
+        if not math.isfinite(total):
+            raise ValueError("weighted reward total must be finite")
+        return total
 
     def to_dict(self) -> dict[str, Any]:
         return _clean_dict(
@@ -118,6 +200,11 @@ class VerifierSpec:
                 "reward_type": self.reward_type,
                 "success_threshold": self.success_threshold,
                 "timeout_sec": self.timeout_sec,
+                "reward_components": (
+                    [component.to_dict() for component in self.reward_components]
+                    if self.reward_components
+                    else None
+                ),
                 "metadata": self.metadata,
             }
         )
@@ -132,6 +219,12 @@ class VerifierSpec:
             reward_type=str(data.get("reward_type", "binary")),
             success_threshold=float(data.get("success_threshold", 1.0)),
             timeout_sec=int(data.get("timeout_sec", data.get("timeout", 120))),
+            reward_components=[
+                item
+                if isinstance(item, RewardComponentSpec)
+                else RewardComponentSpec.from_dict(item)
+                for item in (data.get("reward_components") or [])
+            ],
             metadata=dict(data.get("metadata") or {}),
         )
 
@@ -272,6 +365,7 @@ class EnvironmentSpec:
             errors.append("rollout.max_tool_calls must be positive")
         if self.verifier.timeout_sec <= 0:
             errors.append("verifier.timeout_sec must be positive")
+        errors.extend(self.verifier.reward_validation_errors())
         return errors
 
     def to_dict(self) -> dict[str, Any]:

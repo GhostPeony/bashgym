@@ -94,7 +94,9 @@ class TestTraceUploader:
         mock_ds.private = True
         mock_ds.downloads = 5
         mock_ds.lastModified = "2026-04-10"
-        MockApi.return_value.list_datasets.return_value = [mock_ds]
+        ordinary_ds = MagicMock()
+        ordinary_ds.id = "testuser/bashgym-training-data"
+        MockApi.return_value.list_datasets.return_value = [mock_ds, ordinary_ds]
 
         uploader = TraceUploader(token="fake")
         result = uploader.list_trace_datasets()

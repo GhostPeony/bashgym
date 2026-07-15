@@ -78,6 +78,13 @@ def parse_args(argv=None) -> argparse.Namespace:
 def main(argv=None) -> None:
     args = parse_args(argv)
 
+    from bashgym.models.artifact_capabilities import require_trainable_base
+
+    try:
+        require_trainable_base(args.base_model)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+
     import torch
 
     gc.collect()

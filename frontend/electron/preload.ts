@@ -1,4 +1,25 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import type {
+  CampaignBody,
+  CampaignMethod,
+  CampaignQuery,
+  CampaignResponse,
+} from './campaignBridge'
+
+export type CampaignRoute =
+  | '/api/campaign-auth/capabilities'
+  | '/api/campaigns'
+  | '/api/campaigns/from-template'
+  | `/api/campaigns/${string}`
+  | `/api/campaigns/${string}/events`
+  | `/api/campaigns/${string}/artifacts`
+  | `/api/campaigns/${string}/attempts`
+  | `/api/campaigns/${string}/comparisons`
+  | `/api/campaigns/${string}/attempts/${string}/metrics`
+  | `/api/campaigns/${string}/start`
+  | `/api/campaigns/${string}/pause`
+  | `/api/campaigns/${string}/resume`
+  | `/api/campaigns/${string}/cancel`
 
 // Type definitions for the exposed API
 export interface TerminalCreateResult {
@@ -55,6 +76,13 @@ export interface SystemAPI {
   }>
 }
 
+export type ApiStreamEvent =
+  | { type: 'headers'; ok: boolean; status: number }
+  | { type: 'chunk'; data: string }
+  | { type: 'done' }
+  | { type: 'aborted' }
+  | { type: 'error'; error: string }
+
 export interface ApiProxy {
   fetch: (url: string, options?: RequestInit) => Promise<{
     ok: boolean
@@ -62,6 +90,11 @@ export interface ApiProxy {
     data?: any
     error?: string
   }>
+  stream: (
+    url: string,
+    options: RequestInit | undefined,
+    callback: (event: ApiStreamEvent) => void
+  ) => () => void
 }
 
 export interface FileInfo {
@@ -176,6 +209,16 @@ export interface CredentialsAPI {
   delete: (key: string) => Promise<{ success: boolean; error?: string }>
 }
 
+export interface AgentBridgeAPI {
+  prepareLaunch: (request: {
+    kind: 'claude' | 'codex'
+    workspaceId: string
+    terminalId: string
+    panelId?: string
+    apiBase?: string
+  }) => Promise<{ success: boolean; command?: string; error?: string }>
+}
+
 export interface BashGymAPI {
   terminal: TerminalAPI
   theme: ThemeAPI
@@ -187,13 +230,23 @@ export interface BashGymAPI {
   browser: BrowserAPI
   clipboard: ClipboardAPI
   credentials: CredentialsAPI
+  agentBridge: AgentBridgeAPI
+  campaignRequest: (
+    method: CampaignMethod,
+    route: CampaignRoute,
+    body?: CampaignBody,
+    query?: CampaignQuery,
+  ) => Promise<CampaignResponse>
 }
 
 // Expose protected methods to renderer
 contextBridge.exposeInMainWorld('bashgym', {
   terminal: {
     create: (id: string, cwd?: string) => ipcRenderer.invoke('terminal:create', id, cwd),
-    write: (id: string, data: string) => ipcRenderer.invoke('terminal:write', id, data),
+    write: (id: string, data: string) => {
+      ipcRenderer.send('terminal:write', id, data)
+      return Promise.resolve(true)
+    },
     resize: (id: string, cols: number, rows: number) => ipcRenderer.invoke('terminal:resize', id, cols, rows),
     kill: (id: string) => ipcRenderer.invoke('terminal:kill', id),
     list: () => ipcRenderer.invoke('terminal:list'),
@@ -219,7 +272,31 @@ contextBridge.exposeInMainWorld('bashgym', {
     info: () => ipcRenderer.invoke('system:info')
   },
   api: {
-    fetch: (url: string, options?: RequestInit) => ipcRenderer.invoke('api:fetch', url, options)
+    fetch: (url: string, options?: RequestInit) => ipcRenderer.invoke('api:fetch', url, options),
+    stream: (
+      url: string,
+      options: RequestInit | undefined,
+      callback: (event: ApiStreamEvent) => void
+    ) => {
+      const requestId = crypto.randomUUID()
+      let closed = false
+      const listener = (_event: IpcRendererEvent, id: string, payload: ApiStreamEvent) => {
+        if (id !== requestId || closed) return
+        callback(payload)
+        if (payload.type === 'done' || payload.type === 'aborted' || payload.type === 'error') {
+          closed = true
+          ipcRenderer.removeListener('api:stream:event', listener)
+        }
+      }
+      ipcRenderer.on('api:stream:event', listener)
+      ipcRenderer.send('api:stream:start', requestId, url, options)
+      return () => {
+        if (closed) return
+        closed = true
+        ipcRenderer.removeListener('api:stream:event', listener)
+        ipcRenderer.send('api:stream:cancel', requestId)
+      }
+    }
   },
   files: {
     readDirectory: (path: string) => ipcRenderer.invoke('files:readDirectory', path),
@@ -249,6 +326,12 @@ contextBridge.exposeInMainWorld('bashgym', {
     read: (key: string) => ipcRenderer.invoke('credentials:read', key),
     delete: (key: string) => ipcRenderer.invoke('credentials:delete', key),
   },
+  agentBridge: {
+    prepareLaunch: (request) => ipcRenderer.invoke('agent-bridge:prepare-launch', request),
+  },
+  campaignRequest: (method, route, body, query) => (
+    ipcRenderer.invoke('campaign:request', method, route, body, query)
+  ),
   window: {
     minimize: () => ipcRenderer.invoke('window:minimize'),
     maximize: () => ipcRenderer.invoke('window:maximize'),

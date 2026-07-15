@@ -45,8 +45,24 @@ export interface IntegrationNodeData extends Record<string, unknown> {
 export interface DataNodeData extends Record<string, unknown> {
   panelId: string
   title: string
+  workspaceId?: string
   adapterConfig?: Record<string, unknown>
   hasConnections?: boolean
+  hasTerminalConnections?: boolean
+  linkedHuggingFace?: Array<{
+    panelId: string
+    title: string
+    adapterConfig?: Record<string, unknown>
+  }>
+  linkedKnowledgeBases?: Array<{
+    panelId: string
+    title: string
+    adapterConfig?: Record<string, unknown>
+  }>
+  linkedEvals?: Array<{
+    panelId: string
+    title: string
+  }>
   onFocus?: (panelId: string) => void
   onClose?: (panelId: string) => void
 }

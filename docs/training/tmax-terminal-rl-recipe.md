@@ -148,7 +148,7 @@ Run the local readiness bundle:
 bashgym training smoke-bundle \
   --replay data/dppo_replay/latest.jsonl \
   --output-dir data/backend-smokes/latest \
-  --base-model Qwen/Qwen2.5-Coder-1.5B-Instruct \
+  --base-model <operator-selected-trainable-model> \
   --backend auto \
   --rwml-embedding-model qwen3-embedding \
   --json

@@ -28,6 +28,8 @@ import { useAutoResearchStore } from '../stores/autoresearchStore'
 import { useActivityStore } from '../stores/activityStore'
 import { useCascadeStore } from '../stores/cascadeStore'
 import { useCanvasOrchestratorStore } from '../stores/canvasOrchestratorStore'
+import { useWorkspaceStore } from '../stores/workspaceStore'
+import { useHFContextStore } from '../stores/hfContextStore'
 
 type MessageHandler = (data: any) => void
 
@@ -461,9 +463,38 @@ class WebSocketService {
         // Heartbeat response, connection is alive
         break
 
-      case MessageTypes.WORKSPACE_CANVAS_INTENT:
+      case MessageTypes.WORKSPACE_CANVAS_INTENT: {
+        // Intents addressed to a specific workspace only materialize on that
+        // workspace's canvas
+        const intentWs = (payload as { workspace_id?: string }).workspace_id
+        if (intentWs && intentWs !== useWorkspaceStore.getState().activeWorkspaceId) {
+          console.info('[ws] workspace intent for inactive workspace skipped', intentWs)
+          break
+        }
         useCanvasOrchestratorStore.getState().handleWorkspaceIntent(payload as any)
+        const semanticType = String((payload as { type?: string }).type || '')
+        if (semanticType === 'skill_lab.prepared' || semanticType === 'skill_lab.inspected') {
+          useActivityStore.getState().addEvent('skill-eval:prepared', {
+            skill_name: (payload as any).entity?.skill_name,
+            skill_id: (payload as any).entity?.skill_id,
+          })
+        } else if (semanticType === 'skill_lab.skill.saved') {
+          useActivityStore.getState().addEvent('skill-eval:skill-saved', {
+            skill_name: (payload as any).entity?.skill_name,
+            skill_id: (payload as any).entity?.skill_id,
+          })
+        } else if (semanticType.startsWith('hf-context:')) {
+          useActivityStore.getState().addEvent(semanticType, {
+            ...(payload as any).entity,
+            ...(payload as any).payload,
+          })
+          if (semanticType !== 'hf-context:discovery-started') {
+            const workspaceId = intentWs || useWorkspaceStore.getState().activeWorkspaceId
+            if (workspaceId) void useHFContextStore.getState().load(workspaceId)
+          }
+        }
         break
+      }
 
       case MessageTypes.WORKSPACE_CONTEXT_UPDATED:
         // Lightweight notification only; Activity feed already records it.

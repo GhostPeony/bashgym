@@ -47,6 +47,7 @@ bashgym training docs --topic overview --json
 bashgym training docs --topic capabilities --json
 bashgym training docs --topic methods-reference --json
 bashgym training docs --topic session-distillation --json
+bashgym training docs --topic artifacts --json
 bashgym training docs --topic external-review --json
 bashgym training docs --topic strategy --json
 bashgym training docs --topic metrics --json
@@ -84,6 +85,12 @@ The plan returns:
 Use the plan as a starting point, not a release guarantee. Evaluation gates still
 decide whether a model is better.
 
+Direct launch plans for SFT, DPO, GRPO/RLVR, teacher distillation, and Session
+Distillation include the storage defaults `checkpoint_limit: 1`,
+`artifact_retention: adapter_only`, `auto_push_hf: false`, `hf_private: true`,
+and `hf_upload_artifact: auto`. The settings use the API field `num_epochs`, not
+the informal alias `epochs`.
+
 For reward-model, ORM, or PRM work, validate reward artifacts before trusting
 the plan:
 
@@ -103,6 +110,92 @@ such as `predicted_reward`, `predicted_score`, `model_score`, or
 `reward_model_score`. It emits heldout pair accuracy, calibration, reward
 margin, length bias, task-family breakdown, reward variance, and eval-only
 leakage checks.
+
+## Launch a tracked training run
+
+First read the canonical
+[compute-target activation contract](../../assistant/workspace/skills/training/references/compute-target-activation.md).
+It distinguishes executable same-device, private SSH, NeMo, Hugging Face Jobs,
+and managed-provider lanes. `bashgym compute launch --dry-run` only renders a
+SkyPilot/dstack plan; it does not start compute.
+
+The direct launch command supports `sft`, `dpo`, `grpo`, `rlvr`,
+`distillation`, and `session_distillation` (`session-distillation` is accepted as
+a CLI alias). Put additional validated `TrainingRequest` fields in a bounded JSON
+config file:
+
+```bash
+bashgym training start \
+  --strategy distillation \
+  --model <student-model-id> \
+  --dataset-path data/distillation/train.jsonl \
+  --compute-target ssh:<device-id> \
+  --config distillation-config.json \
+  --checkpoint-limit 1 \
+  --artifact-retention adapter_only \
+  --json
+```
+
+For an official experiment, also pass `--tracking-context tracking-context.json`.
+That file pins the workspace, project, experiment, model version, dataset version,
+environment, source revisions, and content/runtime digests. Runs without it are
+retained under an explicit unassigned project instead of being silently attached
+to whichever project an agent last discussed. See
+[Project-Isolated Experiment Ledger](experiment-ledger.md).
+
+## Inspect experiment history
+
+```bash
+bashgym ledger health --workspace-id <workspace> --credential-ref <credential> --json
+bashgym ledger projects --workspace-id <workspace> --credential-ref <credential> --json
+bashgym ledger context --workspace-id <workspace> --project <project> --credential-ref <credential> --json
+bashgym ledger runs --workspace-id <workspace> --project <project> --credential-ref <credential> --json
+bashgym ledger trend --workspace-id <workspace> --project <project> --run <run> --metric train.loss --credential-ref <credential> --json
+bashgym ledger compare --workspace-id <workspace> --project <project> --run <baseline> --run <candidate> --credential-ref <credential> --json
+bashgym ledger events --workspace-id <workspace> --project <project> --after-cursor 0 --credential-ref <credential> --json
+```
+
+The context response is an agent-ready, bounded synthesis of project health,
+lineage, run history, evaluations, decisions, and evidence references. The event
+response is the incremental curation boundary for GBrain or an optional cloud
+sink; it is not a request to copy raw logs, datasets, checkpoints, or secrets.
+
+Example `distillation-config.json`:
+
+```json
+{
+  "teacher_model": "<teacher-model-id>",
+  "teacher_temperature": 0.7,
+  "distillation_alpha": 0.5,
+  "num_epochs": 1,
+  "batch_size": 1,
+  "gradient_accumulation_steps": 8,
+  "max_seq_length": 4096,
+  "use_lora": true,
+  "load_in_4bit": false
+}
+```
+
+For approved off-device storage, add `--auto-push-hf --hf-repo-name <repo>
+--hf-private --hf-upload-artifact adapter`. `--hf-public` is available but must
+not be used without explicit public-release authority and license, provenance,
+and privacy review. Use `deployable` or `full_run` only when the extra merged
+model/checkpoint storage is intentional. See
+[Training artifact storage](../TRAINING_ARTIFACT_STORAGE.md).
+
+For a private device, `--compute-target ssh:<device_id>` now activates
+`use_remote_ssh` and selects the matching registered device.
+`cloud:nemo-customizer` activates hosted NeMo Customizer; it is not NeMo Gym or
+NeMo RL. Local NeMo RL belongs behind the registered private-compute campaign
+executor. Hugging Face Jobs is intentionally separate: verify
+`hf auth whoami`, validate a remotely loadable dataset/script, submit with
+`hf jobs uv run`, persist checkpoints/final artifacts to a private Hub repo, and
+record the returned HF job id plus Trackio/Hub evidence in the BashGym session.
+Do not pass `hf-jobs` to `bashgym training start`.
+
+DPPO, ECHO/RWML, reward-model, and cascade/MOPD workflows are not aliases for a
+direct training strategy. Use their replay, backend, reward, or cascade commands
+and preserve a method-specific RunCard.
 
 ## Prepare source artifacts
 
@@ -166,7 +259,7 @@ redacting common API tokens/secrets and summarizing long `stdout`, `stderr`,
 bashgym training smoke-bundle \
   --replay data/dppo_replay/latest.jsonl \
   --output-dir data/backend-smokes/run-001 \
-  --base-model Qwen/Qwen2.5-Coder-1.5B-Instruct \
+  --base-model <operator-selected-trainable-model> \
   --backend auto \
   --rwml-embedding-model qwen3-embedding \
   --json
@@ -230,17 +323,20 @@ The wrapper accepts `--host`, `--port`, `--reload`, `--workers`,
 3. `bashgym training docs --topic overview --json`
 4. `bashgym training docs --topic capabilities --json`
 5. `bashgym training plan --strategy sft --json`
-6. Set up or inspect the run in the UI/API.
-7. Evaluate with pass@k and heldout gates.
-8. If using terminal RL or DPPO, export replay and run
+6. Read the compute-target activation contract and verify the selected lane.
+7. Launch with `bashgym training start ... --json`, the matching API/agent tool,
+   or the documented provider-specific surface,
+   preserving the exact config and artifact policy.
+8. Evaluate with pass@k and heldout gates.
+9. If using terminal RL or DPPO, export replay and run
    `bashgym replay summarize <path> --json`.
-9. If using DPPO/ECHO/RWML, run
+10. If using DPPO/ECHO/RWML, run
    `bashgym training smoke-bundle --replay <path> --output-dir <dir> --json`.
-10. Run `bashgym training analyze --run-id <run> --json` or pass explicit
+11. Run `bashgym training analyze --run-id <run> --json` or pass explicit
    `--metrics`, `--replay`, `--smoke-bundle`, and `--release-evidence` paths.
-11. Read `tmax-terminal-rl-recipe.md` before a real terminal-RL run.
-12. Read `private-compute-eval-checklist.md` before moving artifacts to private/cloud compute.
-13. Read `metrics-runbook.md` when behavior does not improve.
+12. Read `tmax-terminal-rl-recipe.md` before a real terminal-RL run.
+13. Read `private-compute-eval-checklist.md` before moving artifacts to private/cloud compute.
+14. Read `metrics-runbook.md` when behavior does not improve.
 
 ## Exit-code expectations
 
@@ -255,6 +351,7 @@ The wrapper accepts `--host`, `--port`, `--reload`, `--workers`,
 - [training-methods-reference.md](training-methods-reference.md)
 - [external-review-packet.md](external-review-packet.md)
 - [strategy-guide.md](strategy-guide.md)
+- [Training artifact storage](../TRAINING_ARTIFACT_STORAGE.md)
 - [world-models.md](world-models.md)
 - [metrics-runbook.md](metrics-runbook.md)
 - [tmax-terminal-rl-recipe.md](tmax-terminal-rl-recipe.md)

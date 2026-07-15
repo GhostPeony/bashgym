@@ -15,6 +15,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
+from bashgym.models.artifact_capabilities import classify_model_artifact
 from bashgym.models.hardware_estimator import guess_params_billions_from_id
 
 # Orgs that publish open, trainable, code/reasoning models. Examples, not a
@@ -26,6 +27,7 @@ DEFAULT_TRAINING_AUTHORS = (
     "meta-llama",
     "microsoft",
     "mistralai",
+    "unsloth",
 )
 
 HF_MODEL_URL = "https://huggingface.co/{repo_id}"
@@ -55,6 +57,7 @@ def normalize_training_models(
     raw_models: Iterable[Any],
     *,
     limit: int | None = None,
+    trainable_only: bool = False,
 ) -> list[dict[str, Any]]:
     """Shape HuggingFace model listings into catalog dicts, sorted by downloads.
 
@@ -68,15 +71,20 @@ def normalize_training_models(
         repo_id = str(getattr(model, "id", "") or "")
         if not repo_id:
             continue
+        tags = list(getattr(model, "tags", []) or [])
+        capabilities = classify_model_artifact(repo_id, tags=tags)
+        if trainable_only and not capabilities.trainable:
+            continue
         entries.append(
             {
                 "id": repo_id,
                 "downloads": int(getattr(model, "downloads", 0) or 0),
                 "likes": int(getattr(model, "likes", 0) or 0),
-                "tags": list(getattr(model, "tags", []) or []),
+                "tags": tags,
                 "pipeline_tag": getattr(model, "pipeline_tag", None),
                 "params_billions": guess_params_billions_from_id(repo_id),
                 "hf_url": HF_MODEL_URL.format(repo_id=repo_id),
+                **capabilities.to_dict(),
             }
         )
 
@@ -119,7 +127,7 @@ def discover_training_models(
             )
         except Exception:  # noqa: BLE001 - one bad org must not break discovery
             continue
-    return normalize_training_models(discovered)
+    return normalize_training_models(discovered, trainable_only=True)
 
 
 def fetch_model_size(repo_id: str, *, api: Any | None = None) -> dict[str, Any]:

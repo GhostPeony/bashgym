@@ -189,6 +189,7 @@ gates by themselves.
 ## Read next
 
 - [capability-map.md](capability-map.md) - full training/eval capability map and stable vs backend-dependent status.
+- [bashgym-autoresearch-nvidia-brief.md](bashgym-autoresearch-nvidia-brief.md) - durable AutoResearch capability, NVIDIA NeMo alignment, and the next real-campaign milestones.
 - [platform-flywheels.md](platform-flywheels.md) - segmented product flywheels from coding traces to training, eval, rewards, source library, compute, and education.
 - [training-methods-reference.md](training-methods-reference.md) - method-by-method training reference for operators and AI/ML reviewers.
 - [external-review-packet.md](external-review-packet.md) - shareable reviewer packet with capabilities, limits, risks, and feedback questions.

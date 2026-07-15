@@ -13,12 +13,33 @@ export type {
   ToolHistoryItem,
   SessionMetrics
 } from './terminalStore'
+export { useWorkspaceStore } from './workspaceStore'
+export type { WorkspaceMeta } from './workspacePersistence'
+export { buildWorkspaceSessionIndex } from './workspaceSessionIndex'
+export type { WorkspaceSessionGroup, WorkspaceSessionRecord, SessionRuntimeState } from './workspaceSessionIndex'
 export { useCanvasControlStore } from './canvasControlStore'
 export type { CanvasControlState } from './canvasControlStore'
 export { useFileStore, initializeFileStore } from './fileStore'
 export type { FileNode } from './fileStore'
 export { useTrainingStore } from './trainingStore'
+export { useCampaignStore } from './campaignStore'
+export type {
+  CampaignStatus,
+  CampaignRecord,
+  CampaignAttempt,
+  CampaignStudy,
+  CampaignEvidence,
+  CampaignArtifact,
+  CampaignComparison,
+  CampaignEventItem,
+  CampaignMetricValue,
+  CampaignDetailState,
+} from './campaignStore'
 export { useCanvasOrchestratorStore } from './canvasOrchestratorStore'
+export { useRuntimeStore } from './runtimeStore'
+export type { ObservedRuntimeJob } from './runtimeStore'
+export { useSkillLabStore } from './skillLabStore'
+export { useHFContextStore } from './hfContextStore'
 export type {
   TrainingStrategy,
   TrainingProfile,
@@ -35,7 +56,7 @@ export type { RoutingStrategy, RoutingStats, RoutingDecision } from './routerSto
 export { useTracesStore } from './tracesStore'
 export type { TraceStatus, TraceQualityTier, TraceStep, QualityMetrics, Trace, RepoInfo } from './tracesStore'
 export { useUIStore } from './uiStore'
-export type { ViewMode } from './uiStore'
+export type { ViewMode, PanelPresentationRequest } from './uiStore'
 export { useTutorialStore } from './tutorialStore'
 export type { TutorialStep } from './tutorialStore'
 export { useAchievementStore } from './achievementStore'

@@ -12,9 +12,11 @@ import json
 import os
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +24,7 @@ from bashgym.compute import (
     get_compute_target,
     launch_plan,
     list_compute_targets,
+    normalize_training_target_payload,
     preflight_compute_target,
 )
 from bashgym.eval.dppo_replay import read_dppo_replay_jsonl, summarize_dppo_replay_records
@@ -113,6 +116,14 @@ DOCS = {
         "path": "docs/training/agent-cli.md",
         "summary": "Machine-readable CLI commands agents can use for setup and replay analysis.",
     },
+    "experiment-ledger": {
+        "path": "docs/training/experiment-ledger.md",
+        "summary": "Project-isolated run identities, metrics, evaluations, agent context, and GBrain/cloud boundaries.",
+    },
+    "artifacts": {
+        "path": "docs/TRAINING_ARTIFACT_STORAGE.md",
+        "summary": "Checkpoint retention, merged/GGUF storage, Hugging Face upload, and cleanup policy.",
+    },
     "terminal-rl-recipe": {
         "path": "docs/training/tmax-terminal-rl-recipe.md",
         "summary": "TMax-style terminal RL recipe from environment pool to release gate.",
@@ -140,6 +151,11 @@ SETTING_GUIDANCE: dict[str, dict[str, str]] = {
     },
     "epochs": {
         "means": "Full passes over the dataset.",
+        "start_here": "Use one short smoke epoch first; increase only after heldout behavior improves.",
+        "adjust_when": "Lower it when train loss improves but eval/heldout gets worse.",
+    },
+    "num_epochs": {
+        "means": "Full passes over the dataset; this is the exact TrainingRequest field name.",
         "start_here": "Use one short smoke epoch first; increase only after heldout behavior improves.",
         "adjust_when": "Lower it when train loss improves but eval/heldout gets worse.",
     },
@@ -172,6 +188,31 @@ SETTING_GUIDANCE: dict[str, dict[str, str]] = {
         "means": "Scale applied to LoRA updates.",
         "start_here": "Start near rank or 2x rank.",
         "adjust_when": "Lower with unstable updates; raise cautiously for underfit adapters.",
+    },
+    "checkpoint_limit": {
+        "means": "Maximum resumable checkpoints retained for this run.",
+        "start_here": "Keep one checkpoint unless the run must preserve multiple branch points.",
+        "adjust_when": "Raise it only when resume/branch value justifies the extra storage.",
+    },
+    "artifact_retention": {
+        "means": "Which local artifacts survive after the final adapter is saved successfully.",
+        "start_here": "Use adapter_only for routine experiments; choose deployable only for a serving candidate.",
+        "adjust_when": "Use adapter_checkpoint for post-run resume/branch work or full_run for audited releases.",
+    },
+    "auto_push_hf": {
+        "means": "Whether BashGym publishes the selected final artifact to Hugging Face after success.",
+        "start_here": "Leave disabled until a destination repository and publication authority are confirmed.",
+        "adjust_when": "Enable for durable off-device storage or an approved release workflow.",
+    },
+    "hf_upload_artifact": {
+        "means": "Selects adapter, merged weights, or automatic merged-then-adapter fallback for Hub upload.",
+        "start_here": "Use auto for general runs or adapter to guarantee a lightweight upload.",
+        "adjust_when": "Require merged only when a standalone deployment artifact is intentionally retained.",
+    },
+    "hf_private": {
+        "means": "Controls whether an automatically created Hugging Face model repository is private.",
+        "start_here": "Keep true by default.",
+        "adjust_when": "Set false only after explicit public-release approval and provenance/license review.",
     },
     "load_in_4bit": {
         "means": "QLoRA-style low-memory base-model loading.",
@@ -521,13 +562,20 @@ def _recipe(strategy: str, hardware: str, data: str) -> TrainingRecipe:
     hardware = hardware.lower().replace("-", "_")
     if hardware in {"dgx", "gx10", "remote", "remote_gpu"}:
         hardware = "private_compute"
+    artifact_defaults = {
+        "checkpoint_limit": 1,
+        "artifact_retention": "adapter_only",
+        "auto_push_hf": False,
+        "hf_private": True,
+        "hf_upload_artifact": "auto",
+    }
     base: dict[str, TrainingRecipe] = {
         "sft": TrainingRecipe(
             strategy="sft",
             when_to_use="First student model from gold traces or curated JSONL.",
             starting_settings={
                 "learning_rate": 2e-4 if hardware in {"local_12gb", "local_24gb"} else 2e-5,
-                "epochs": 1 if data == "small" else 3,
+                "num_epochs": 1 if data == "small" else 3,
                 "batch_size": 1,
                 "gradient_accumulation_steps": 8,
                 "max_seq_length": 4096 if hardware != "local_12gb" else 2048,
@@ -535,13 +583,14 @@ def _recipe(strategy: str, hardware: str, data: str) -> TrainingRecipe:
                 "lora_rank": 16,
                 "lora_alpha": 32,
                 "load_in_4bit": hardware != "private_compute",
+                **artifact_defaults,
             },
             watch=["train_loss", "eval_loss", "grad_norm", "truncation", "heldout_pass@k"],
             next_steps=[
                 "Inspect generated examples for truncation.",
                 "Run heldout trace eval and executable environment pass@k before routing.",
             ],
-            docs=["overview", "strategy", "metrics"],
+            docs=["overview", "strategy", "metrics", "artifacts"],
         ),
         "dpo": TrainingRecipe(
             strategy="dpo",
@@ -549,10 +598,11 @@ def _recipe(strategy: str, hardware: str, data: str) -> TrainingRecipe:
             starting_settings={
                 "dpo_beta": 0.1,
                 "learning_rate": 1e-5,
-                "epochs": 1,
+                "num_epochs": 1,
                 "max_seq_length": 4096 if hardware != "local_12gb" else 2048,
                 "use_lora": True,
                 "load_in_4bit": hardware != "private_compute",
+                **artifact_defaults,
             },
             watch=[
                 "rewards/chosen",
@@ -565,7 +615,7 @@ def _recipe(strategy: str, hardware: str, data: str) -> TrainingRecipe:
                 "Audit pairs for shared prompt identity.",
                 "Compare against the SFT checkpoint on heldout eval.",
             ],
-            docs=["strategy", "metrics", "glossary"],
+            docs=["strategy", "metrics", "glossary", "artifacts"],
         ),
         "grpo": TrainingRecipe(
             strategy="grpo",
@@ -580,6 +630,7 @@ def _recipe(strategy: str, hardware: str, data: str) -> TrainingRecipe:
                 "lm_head_fp32": True,
                 "prompts_per_rollout_batch": 8,
                 "max_tool_calls_per_episode": 64,
+                **artifact_defaults,
             },
             watch=[
                 "reward",
@@ -594,7 +645,7 @@ def _recipe(strategy: str, hardware: str, data: str) -> TrainingRecipe:
                 "Confirm reward groups have non-zero variance.",
                 "Export DPPO replay with behavior logprobs if using the DPPO path.",
             ],
-            docs=["strategy", "metrics", "world-models"],
+            docs=["strategy", "metrics", "world-models", "artifacts"],
         ),
         "world-model": TrainingRecipe(
             strategy="world-model",
@@ -662,6 +713,38 @@ def _recipe(strategy: str, hardware: str, data: str) -> TrainingRecipe:
             ],
             docs=["methods-reference", "metrics", "strategy", "rlhf-handbook-comparison"],
         ),
+        "distillation": TrainingRecipe(
+            strategy="distillation",
+            when_to_use=(
+                "Transfer behavior from a stronger teacher into a smaller student when "
+                "teacher outputs or logits are available and deployability matters."
+            ),
+            starting_settings={
+                "teacher_model": "<teacher-model-id>",
+                "teacher_temperature": 0.7,
+                "distillation_alpha": 0.5,
+                "learning_rate": 2e-5,
+                "num_epochs": 1,
+                "batch_size": 1,
+                "gradient_accumulation_steps": 8,
+                "max_seq_length": 4096 if hardware != "local_12gb" else 2048,
+                "use_lora": True,
+                "load_in_4bit": hardware != "private_compute",
+                **artifact_defaults,
+            },
+            watch=[
+                "train_loss",
+                "eval_loss",
+                "teacher_student_kl",
+                "heldout_pass@k",
+                "tool_call_validity",
+            ],
+            next_steps=[
+                "Verify teacher outputs and dataset provenance before training.",
+                "Compare the student against both its base checkpoint and the teacher on heldout behavior.",
+            ],
+            docs=["strategy", "methods-reference", "metrics", "artifacts"],
+        ),
         "session-distillation": TrainingRecipe(
             strategy="session-distillation",
             when_to_use=(
@@ -681,6 +764,7 @@ def _recipe(strategy: str, hardware: str, data: str) -> TrainingRecipe:
                 "gradient_accumulation_steps": 8,
                 "use_lora": True,
                 "load_in_4bit": hardware != "private_compute",
+                **artifact_defaults,
             },
             watch=[
                 "session_distillation_loss",
@@ -701,6 +785,7 @@ def _recipe(strategy: str, hardware: str, data: str) -> TrainingRecipe:
                 "strategy",
                 "metrics",
                 "methods-reference",
+                "artifacts",
             ],
         ),
     }
@@ -746,6 +831,24 @@ def _readiness_ladder(recipe: TrainingRecipe) -> list[dict[str, str]]:
                 "stage": "behavior_gate",
                 "evidence": "Heldout trace and environment gates compare against the SFT checkpoint.",
                 "promote_when": "Preference improvements do not regress task behavior.",
+            },
+        ]
+    if recipe.strategy == "distillation":
+        return [
+            {
+                "stage": "teacher_data_contract",
+                "evidence": "Teacher identity, outputs, dataset provenance, and student tokenization are pinned.",
+                "promote_when": "Teacher examples are valid, contamination-reviewed, and reproducible.",
+            },
+            {
+                "stage": "distillation_smoke",
+                "evidence": "A short run records student loss and teacher/student divergence without loader errors.",
+                "promote_when": "Loss is stable and the student preserves required output/tool format.",
+            },
+            {
+                "stage": "behavior_gate",
+                "evidence": "Heldout behavior compares the candidate with both the base student and teacher.",
+                "promote_when": "The candidate improves over base without unacceptable teacher-gap or safety regression.",
             },
         ]
     if recipe.strategy == "reward-model":
@@ -857,6 +960,17 @@ def _adjustment_rules(recipe: TrainingRecipe) -> list[dict[str, str]]:
             {
                 "signal": "preference accuracy is noisy",
                 "action": "Audit prompt identity and remove trivial or unrelated rejected examples.",
+            },
+        ]
+    if recipe.strategy == "distillation":
+        return rules + [
+            {
+                "signal": "student loss improves but the teacher gap or heldout behavior does not",
+                "action": "Audit teacher targets, lower distillation alpha, or add clean task labels before training longer.",
+            },
+            {
+                "signal": "tool format or safety regresses toward noisy teacher behavior",
+                "action": "Stop promotion, filter teacher outputs, and mix verified SFT examples into the next run.",
             },
         ]
     if recipe.strategy == "reward-model":
@@ -2034,6 +2148,43 @@ def cmd_manifest(args: argparse.Namespace) -> int:
             "manifest": "Show agent-readable command and docs map.",
             "workspace context": "Read the live sanitized workspace canvas context.",
             "workspace emit": "Emit a semantic canvas intent for dynamic node creation.",
+            "campaign list": "List capability-scoped experiment campaigns.",
+            "campaign templates": "List source-managed campaign templates.",
+            "campaign status": "Read one campaign aggregate and its next valid action.",
+            "campaign autoresearch": "Read durable AutoResearch state and decisions.",
+            "campaign manifest": "Read one immutable campaign manifest revision.",
+            "campaign evidence": "Read the bounded planner-safe evidence snapshot.",
+            "campaign artifacts": "List bounded campaign artifact metadata.",
+            "campaign study status": "Read one persisted study and its current stage status.",
+            "campaign attempts": "List persisted execution attempts for a campaign.",
+            "campaign comparisons": "List persisted development comparisons for a campaign.",
+            "campaign events": "Read a cursor-bounded campaign event stream.",
+            "campaign metrics": "Read one bounded, source-specific training metric series.",
+            "campaign create": "Create from an approved template or typed JSON manifest.",
+            "campaign revise": "Create an immutable manifest revision.",
+            "campaign propose": "Submit a falsifiable typed study proposal.",
+            "campaign start": "Start a ready campaign with optimistic concurrency.",
+            "campaign advance": "Request one deterministic controller advance.",
+            "campaign pause": "Pause campaign scheduling with a recorded reason.",
+            "campaign resume": "Resume a paused campaign with optimistic concurrency.",
+            "campaign cancel": "Cancel a campaign with a recorded reason.",
+            "campaign conclude": "Conclude a campaign without promotion.",
+            "campaign retry": "Request a policy-bounded action retry.",
+            "campaign protected-lease": "Request the protected evaluation lease.",
+            "campaign promote": "Compute and persist a champion decision.",
+            "campaign export": "Request reproducible campaign report artifacts.",
+            "ledger projects": "List isolated ML projects in the authorized workspace.",
+            "ledger context": "Read one project's structured status, health, and evidence context.",
+            "ledger runs": "List official run identities and lineage for one project.",
+            "ledger run": "Inspect one run with attempts, evaluations, and artifacts.",
+            "ledger trend": "Read a bounded metric series and deterministic trend summary.",
+            "ledger evaluations": "List comparable evaluation records for one project.",
+            "ledger compare": "Compare runs only across identical evaluation-suite contracts.",
+            "ledger events": "Read the cursor-based GBrain/cloud sync envelope.",
+            "ledger health": "Check local ledger integrity, migration, WAL, and record health.",
+            "training start": "Start a tracked training run through the BashGym API.",
+            "designer start": "Start a tracked Data Designer generation job.",
+            "designer status": "Read active or recent Data Designer jobs.",
             "training docs": "List or read training docs by topic.",
             "training capabilities": "Show structured training/eval/backend capability matrix.",
             "training plan": "Recommend starting settings and metrics for a strategy.",
@@ -2866,6 +3017,835 @@ def cmd_workspace_emit(args: argparse.Namespace) -> int:
     return _emit(response, as_json=True)
 
 
+def _campaign_api_base(args: argparse.Namespace) -> str:
+    return (
+        getattr(args, "api_base", None)
+        or os.environ.get("BASHGYM_API_BASE")
+        or "http://localhost:8003/api"
+    ).rstrip("/")
+
+
+def _campaign_client(args: argparse.Namespace):
+    from bashgym.campaigns.client import CampaignApiClient
+
+    return CampaignApiClient(
+        api_base=_campaign_api_base(args),
+        credential_ref=args.credential_ref,
+    )
+
+
+def _campaign_error(args: argparse.Namespace, exc: Exception) -> int:
+    from bashgym.campaigns.client import CampaignClientError
+
+    if isinstance(exc, CampaignClientError):
+        error = exc
+    else:
+        error = CampaignClientError(
+            "campaign_cli_invalid",
+            "Campaign command input is invalid.",
+            status_code=400,
+        )
+    payload = {
+        "title": "BashGym Campaign Error",
+        "ok": False,
+        "error": error.as_dict(),
+    }
+    print(f"{error.code}: {error.message}", file=sys.stderr)
+    _emit(payload, as_json=bool(args.json))
+    return error.exit_code
+
+
+def _campaign_request(
+    args: argparse.Namespace,
+    method: str,
+    path: str,
+    *,
+    query: dict[str, Any] | None = None,
+    payload: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+) -> tuple[Any | None, int | None]:
+    try:
+        return (
+            _campaign_client(args).request_json(
+                method,
+                path,
+                query=query,
+                payload=payload,
+                headers=headers,
+            ),
+            None,
+        )
+    except Exception as exc:
+        return None, _campaign_error(args, exc)
+
+
+def _emit_campaign_result(args: argparse.Namespace, response: Any, *, collection: str) -> int:
+    if isinstance(response, dict):
+        payload = response
+    elif isinstance(response, list):
+        payload = {"title": f"BashGym Campaign {collection.title()}", collection: response}
+    else:
+        payload = {"title": "BashGym Campaign", "result": response}
+    return _emit(payload, as_json=bool(args.json))
+
+
+def _quoted_identifier(value: str) -> str:
+    return urllib.parse.quote(value, safe="")
+
+
+def _read_campaign_json(path: str, *, label: str) -> dict[str, Any]:
+    """Read one bounded JSON object without treating its content as instructions."""
+
+    source = Path(path)
+    if source.is_symlink() or not source.is_file():
+        raise ValueError(f"{label} must be a regular file")
+    if source.stat().st_size > 8 * 1024 * 1024:
+        raise ValueError(f"{label} exceeds the 8 MiB CLI limit")
+    value = json.loads(source.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must contain one JSON object")
+    return value
+
+
+def _campaign_headers(args: argparse.Namespace) -> dict[str, str]:
+    headers = {"Idempotency-Key": args.idempotency_key}
+    if args.correlation_id:
+        headers["X-Correlation-ID"] = args.correlation_id
+    return headers
+
+
+def _campaign_post(
+    args: argparse.Namespace,
+    path: str,
+    payload: dict[str, Any],
+) -> int:
+    response, error = _campaign_request(
+        args,
+        "POST",
+        path,
+        payload=payload,
+        headers=_campaign_headers(args),
+    )
+    return (
+        error if error is not None else _emit_campaign_result(args, response, collection="mutation")
+    )
+
+
+def cmd_campaign_list(args: argparse.Namespace) -> int:
+    response, error = _campaign_request(
+        args,
+        "GET",
+        "/campaigns",
+        query={
+            "workspace_id": args.workspace_id,
+            "status": args.status,
+            "kind": args.kind,
+        },
+    )
+    return (
+        error
+        if error is not None
+        else _emit_campaign_result(args, response, collection="campaigns")
+    )
+
+
+def cmd_campaign_templates(args: argparse.Namespace) -> int:
+    response, error = _campaign_request(
+        args,
+        "GET",
+        "/campaigns/templates",
+        query={"workspace_id": args.workspace_id},
+    )
+    return (
+        error
+        if error is not None
+        else _emit_campaign_result(args, response, collection="templates")
+    )
+
+
+def cmd_campaign_doctor(args: argparse.Namespace) -> int:
+    response, error = _campaign_request(
+        args,
+        "GET",
+        f"/campaigns/templates/{_quoted_identifier(args.template_id)}/doctor",
+        query={"workspace_id": args.workspace_id},
+    )
+    return (
+        error
+        if error is not None
+        else _emit_campaign_result(args, response, collection="doctor")
+    )
+
+
+def cmd_campaign_setup_autoresearch(args: argparse.Namespace) -> int:
+    """Build and install one explicit quality-campaign definition locally."""
+
+    from bashgym.campaigns.installation import (
+        build_quality_autoresearch_definition,
+        install_autoresearch_definition,
+    )
+    from bashgym.config import get_bashgym_dir
+
+    deadline = None
+    if args.deadline:
+        try:
+            deadline = datetime.fromisoformat(args.deadline.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError("deadline must be an ISO-8601 datetime") from exc
+        if deadline.tzinfo is None:
+            raise ValueError("deadline must include a timezone")
+    definition = build_quality_autoresearch_definition(
+        template_id=args.template_id,
+        template_revision=args.template_revision,
+        objective=args.objective,
+        model_ref=args.model_ref,
+        target_contract_key=args.target_contract_key,
+        task=args.task,
+        dataset_version_id=args.dataset_version_id,
+        compute_profile_id=args.compute_profile_id,
+        ledger_project_id=args.ledger_project_id,
+        evaluation_suite_id=args.evaluation_suite_id,
+        primary_metric=args.primary_metric,
+        metric_direction=args.metric_direction,
+        budget_unit=args.budget_unit,
+        budget_limit=args.budget_limit,
+        max_attempts=args.max_attempts,
+        minimum_improvement=args.minimum_improvement,
+        target_metric=args.target_metric,
+        deadline=deadline,
+        retention_days_failed=args.retention_days_failed,
+    )
+    directory = (
+        Path(args.install_dir)
+        if args.install_dir
+        else get_bashgym_dir() / "campaigns" / "autoresearch-templates"
+    )
+    receipt = install_autoresearch_definition(
+        definition,
+        directory=directory,
+        replace=args.replace,
+    )
+    payload = {
+        "title": "BashGym AutoResearch Installation",
+        "ok": True,
+        **receipt.model_dump(mode="json"),
+        "next": [
+            {
+                "reason": "Register the exact ledger and private-compute bindings shown above.",
+                "command": "bashgym campaign doctor --template "
+                f"{definition.template_id} --workspace-id <workspace> "
+                "--credential-ref <refresh-secret-ref> --json",
+            }
+        ],
+    }
+    return _emit(payload, as_json=bool(args.json))
+
+
+def cmd_campaign_status(args: argparse.Namespace) -> int:
+    response, error = _campaign_request(
+        args,
+        "GET",
+        f"/campaigns/{_quoted_identifier(args.campaign_id)}",
+        query={"workspace_id": args.workspace_id},
+    )
+    return (
+        error if error is not None else _emit_campaign_result(args, response, collection="status")
+    )
+
+
+def cmd_campaign_autoresearch(args: argparse.Namespace) -> int:
+    return _campaign_read_collection(args, "autoresearch", "autoresearch")
+
+
+def _campaign_read_collection(args: argparse.Namespace, suffix: str, collection: str) -> int:
+    response, error = _campaign_request(
+        args,
+        "GET",
+        f"/campaigns/{_quoted_identifier(args.campaign_id)}/{suffix}",
+        query={"workspace_id": args.workspace_id},
+    )
+    return (
+        error if error is not None else _emit_campaign_result(args, response, collection=collection)
+    )
+
+
+def cmd_campaign_manifest(args: argparse.Namespace) -> int:
+    return _campaign_read_collection(
+        args,
+        f"manifest/{args.revision}",
+        "manifest",
+    )
+
+
+def cmd_campaign_evidence(args: argparse.Namespace) -> int:
+    return _campaign_read_collection(args, "evidence", "evidence")
+
+
+def cmd_campaign_ledger(args: argparse.Namespace) -> int:
+    return _campaign_read_collection(args, "ledger", "ledger")
+
+
+def cmd_campaign_artifacts(args: argparse.Namespace) -> int:
+    return _campaign_read_collection(args, "artifacts", "artifacts")
+
+
+def cmd_campaign_proposals(args: argparse.Namespace) -> int:
+    return _campaign_read_collection(args, "proposals", "proposals")
+
+
+def cmd_campaign_studies(args: argparse.Namespace) -> int:
+    return _campaign_read_collection(args, "studies", "studies")
+
+
+def cmd_campaign_study(args: argparse.Namespace) -> int:
+    return _campaign_read_collection(
+        args,
+        f"studies/{_quoted_identifier(args.study_id)}",
+        "study",
+    )
+
+
+def cmd_campaign_attempts(args: argparse.Namespace) -> int:
+    return _campaign_read_collection(args, "attempts", "attempts")
+
+
+def cmd_campaign_comparisons(args: argparse.Namespace) -> int:
+    return _campaign_read_collection(args, "comparisons", "comparisons")
+
+
+def cmd_campaign_events(args: argparse.Namespace) -> int:
+    response, error = _campaign_request(
+        args,
+        "GET",
+        f"/campaigns/{_quoted_identifier(args.campaign_id)}/events",
+        query={
+            "workspace_id": args.workspace_id,
+            "after_cursor": args.after_cursor,
+            "limit": args.limit,
+        },
+    )
+    return (
+        error if error is not None else _emit_campaign_result(args, response, collection="events")
+    )
+
+
+def cmd_campaign_metrics(args: argparse.Namespace) -> int:
+    response, error = _campaign_request(
+        args,
+        "GET",
+        (
+            f"/campaigns/{_quoted_identifier(args.campaign_id)}"
+            f"/attempts/{_quoted_identifier(args.attempt_id)}/metrics"
+        ),
+        query={
+            "workspace_id": args.workspace_id,
+            "source": args.source,
+            "metric_name": args.metric_name,
+            "after_step": args.after_step,
+            "limit": args.limit,
+        },
+    )
+    return (
+        error if error is not None else _emit_campaign_result(args, response, collection="metrics")
+    )
+
+
+def _ledger_get(
+    args: argparse.Namespace,
+    path: str,
+    *,
+    query: dict[str, Any],
+    collection: str,
+) -> int:
+    response, error = _campaign_request(args, "GET", path, query=query)
+    return (
+        error
+        if error is not None
+        else _emit_campaign_result(args, response, collection=collection)
+    )
+
+
+def cmd_ledger_projects(args: argparse.Namespace) -> int:
+    return _ledger_get(
+        args,
+        "/ledger/projects",
+        query={"workspace_id": args.workspace_id},
+        collection="projects",
+    )
+
+
+def cmd_ledger_context(args: argparse.Namespace) -> int:
+    return _ledger_get(
+        args,
+        f"/ledger/projects/{_quoted_identifier(args.project_id)}/context",
+        query={"workspace_id": args.workspace_id, "recent_limit": args.limit},
+        collection="context",
+    )
+
+
+def cmd_ledger_runs(args: argparse.Namespace) -> int:
+    return _ledger_get(
+        args,
+        f"/ledger/projects/{_quoted_identifier(args.project_id)}/runs",
+        query={"workspace_id": args.workspace_id, "status": args.status, "limit": args.limit},
+        collection="runs",
+    )
+
+
+def cmd_ledger_run(args: argparse.Namespace) -> int:
+    return _ledger_get(
+        args,
+        (
+            f"/ledger/projects/{_quoted_identifier(args.project_id)}"
+            f"/runs/{_quoted_identifier(args.run_id)}"
+        ),
+        query={"workspace_id": args.workspace_id},
+        collection="run",
+    )
+
+
+def cmd_ledger_trend(args: argparse.Namespace) -> int:
+    return _ledger_get(
+        args,
+        (
+            f"/ledger/projects/{_quoted_identifier(args.project_id)}"
+            f"/metrics/{_quoted_identifier(args.metric_name)}/trend"
+        ),
+        query={
+            "workspace_id": args.workspace_id,
+            "run_id": args.run_id,
+            "limit": args.limit,
+        },
+        collection="trend",
+    )
+
+
+def cmd_ledger_evaluations(args: argparse.Namespace) -> int:
+    return _ledger_get(
+        args,
+        f"/ledger/projects/{_quoted_identifier(args.project_id)}/evaluations",
+        query={
+            "workspace_id": args.workspace_id,
+            "run_id": args.run_id,
+            "limit": args.limit,
+        },
+        collection="evaluations",
+    )
+
+
+def cmd_ledger_compare(args: argparse.Namespace) -> int:
+    return _ledger_get(
+        args,
+        f"/ledger/projects/{_quoted_identifier(args.project_id)}/compare",
+        query={"workspace_id": args.workspace_id, "run_id": args.run_ids},
+        collection="comparison",
+    )
+
+
+def cmd_ledger_events(args: argparse.Namespace) -> int:
+    return _ledger_get(
+        args,
+        f"/ledger/projects/{_quoted_identifier(args.project_id)}/events",
+        query={
+            "workspace_id": args.workspace_id,
+            "after_cursor": args.after_cursor,
+            "limit": args.limit,
+        },
+        collection="events",
+    )
+
+
+def cmd_ledger_health(args: argparse.Namespace) -> int:
+    return _ledger_get(
+        args,
+        "/ledger/health",
+        query={"workspace_id": args.workspace_id},
+        collection="health",
+    )
+
+
+def _campaign_transition(args: argparse.Namespace, trigger: str) -> int:
+    payload: dict[str, Any] = {
+        "workspace_id": args.workspace_id,
+        "expected_version": args.expected_version,
+    }
+    reason = getattr(args, "reason", None)
+    if reason:
+        payload["stop_reason"] = reason
+    return _campaign_post(
+        args,
+        f"/campaigns/{_quoted_identifier(args.campaign_id)}/{trigger}",
+        payload,
+    )
+
+
+def cmd_campaign_start(args: argparse.Namespace) -> int:
+    return _campaign_transition(args, "start")
+
+
+def cmd_campaign_pause(args: argparse.Namespace) -> int:
+    return _campaign_transition(args, "pause")
+
+
+def cmd_campaign_resume(args: argparse.Namespace) -> int:
+    return _campaign_transition(args, "resume")
+
+
+def cmd_campaign_cancel(args: argparse.Namespace) -> int:
+    return _campaign_transition(args, "cancel")
+
+
+def cmd_campaign_create(args: argparse.Namespace) -> int:
+    if args.template_id:
+        if not args.campaign_id or not args.title:
+            raise ValueError("template creation requires --campaign and --title")
+        payload = {
+            "workspace_id": args.workspace_id,
+            "campaign_id": args.campaign_id,
+            "title": args.title,
+            "template_id": args.template_id,
+        }
+        path = "/campaigns/from-template"
+    else:
+        document = _read_campaign_json(args.manifest, label="campaign manifest")
+        allowed = {
+            "campaign_id",
+            "title",
+            "kind",
+            "objective",
+            "target_model",
+            "manifest",
+        }
+        if set(document).difference(allowed):
+            raise ValueError("campaign manifest envelope has unsupported fields")
+        payload = {"workspace_id": args.workspace_id, **document}
+        if args.campaign_id:
+            payload["campaign_id"] = args.campaign_id
+        if args.title:
+            payload["title"] = args.title
+        if allowed.difference(payload):
+            raise ValueError("campaign manifest envelope is incomplete")
+        path = "/campaigns"
+    return _campaign_post(args, path, payload)
+
+
+def cmd_campaign_revise(args: argparse.Namespace) -> int:
+    manifest = _read_campaign_json(args.manifest, label="campaign manifest")
+    return _campaign_post(
+        args,
+        f"/campaigns/{_quoted_identifier(args.campaign_id)}/manifest/revise",
+        {
+            "workspace_id": args.workspace_id,
+            "expected_version": args.expected_version,
+            "manifest": manifest,
+            "reason": args.reason,
+        },
+    )
+
+
+def cmd_campaign_propose(args: argparse.Namespace) -> int:
+    proposal = _read_campaign_json(args.proposal, label="study proposal")
+    prohibited = {
+        "workspace_id",
+        "campaign_id",
+        "planner_actor_id",
+        "creation_sequence",
+        "status",
+        "actor",
+        "profile",
+        "autonomy_profile",
+        "capabilities",
+        "authorization",
+    }
+    if set(proposal).intersection(prohibited):
+        raise ValueError("study proposal contains server-owned fields")
+    role = getattr(args, "autoresearch_role", None)
+    if role == "candidate" and not args.parent_proposal_id:
+        raise ValueError("AutoResearch candidate requires --parent-proposal")
+    if role != "candidate" and args.parent_proposal_id:
+        raise ValueError("--parent-proposal is only valid for an AutoResearch candidate")
+    campaign_path = f"/campaigns/{_quoted_identifier(args.campaign_id)}"
+    path = f"{campaign_path}/proposals"
+    if role == "baseline":
+        path = f"{campaign_path}/autoresearch/baseline"
+    elif role == "candidate":
+        path = f"{campaign_path}/autoresearch/candidates"
+    payload = {
+        "workspace_id": args.workspace_id,
+        "expected_version": args.expected_version,
+        **proposal,
+    }
+    if role == "candidate":
+        payload["parent_proposal_id"] = args.parent_proposal_id
+    return _campaign_post(
+        args,
+        path,
+        payload,
+    )
+
+
+def cmd_campaign_autoresearch_result(args: argparse.Namespace) -> int:
+    return _campaign_post(
+        args,
+        f"/campaigns/{_quoted_identifier(args.campaign_id)}/autoresearch/ingest-evaluation",
+        {
+            "workspace_id": args.workspace_id,
+            "project_id": args.project_id,
+            "evaluation_result_id": args.evaluation_result_id,
+        },
+    )
+
+
+def cmd_campaign_withdraw_proposal(args: argparse.Namespace) -> int:
+    return _campaign_post(
+        args,
+        (
+            f"/campaigns/{_quoted_identifier(args.campaign_id)}/proposals/"
+            f"{_quoted_identifier(args.proposal_id)}/withdraw"
+        ),
+        {"workspace_id": args.workspace_id, "expected_version": args.expected_version},
+    )
+
+
+def cmd_campaign_advance(args: argparse.Namespace) -> int:
+    return _campaign_transition(args, "advance")
+
+
+def cmd_campaign_conclude(args: argparse.Namespace) -> int:
+    return _campaign_transition(args, "conclude")
+
+
+def cmd_campaign_retry(args: argparse.Namespace) -> int:
+    return _campaign_post(
+        args,
+        (
+            f"/campaigns/{_quoted_identifier(args.campaign_id)}/actions/"
+            f"{_quoted_identifier(args.action_id)}/retry"
+        ),
+        {"workspace_id": args.workspace_id, "expected_version": args.expected_version},
+    )
+
+
+def cmd_campaign_abandon_study(args: argparse.Namespace) -> int:
+    return _campaign_post(
+        args,
+        (
+            f"/campaigns/{_quoted_identifier(args.campaign_id)}/studies/"
+            f"{_quoted_identifier(args.study_id)}/abandon"
+        ),
+        {
+            "workspace_id": args.workspace_id,
+            "expected_version": args.expected_version,
+            "reason": args.reason,
+        },
+    )
+
+
+def cmd_campaign_amend_budget(args: argparse.Namespace) -> int:
+    return _campaign_post(
+        args,
+        f"/campaigns/{_quoted_identifier(args.campaign_id)}/budget/amend",
+        {
+            "workspace_id": args.workspace_id,
+            "expected_version": args.expected_version,
+            "resource": args.resource,
+            "delta": args.delta,
+            "reason": args.reason,
+        },
+    )
+
+
+def cmd_campaign_approve_source(args: argparse.Namespace) -> int:
+    evidence = _read_campaign_json(args.evidence, label="source approval evidence")
+    return _campaign_post(
+        args,
+        (
+            f"/campaigns/{_quoted_identifier(args.campaign_id)}/sources/"
+            f"{_quoted_identifier(args.source_id)}/approve"
+        ),
+        {
+            "workspace_id": args.workspace_id,
+            "expected_version": args.expected_version,
+            "evidence": evidence,
+        },
+    )
+
+
+def cmd_campaign_force_stop(args: argparse.Namespace) -> int:
+    identity = _read_campaign_json(
+        args.expected_process,
+        label="persisted remote process identity",
+    )
+    return _campaign_post(
+        args,
+        (
+            f"/campaigns/{_quoted_identifier(args.campaign_id)}/actions/"
+            f"{_quoted_identifier(args.action_id)}/force-stop"
+        ),
+        {
+            "workspace_id": args.workspace_id,
+            "expected_version": args.expected_version,
+            "expected_remote_process_identity": identity,
+            "confirmed": True,
+            "reason": args.reason,
+        },
+    )
+
+
+def cmd_campaign_protected_lease(args: argparse.Namespace) -> int:
+    return _campaign_transition(args, "protected-lease")
+
+
+def cmd_campaign_protected_result(args: argparse.Namespace) -> int:
+    result = _read_campaign_json(args.result_file, label="protected evaluation result")
+    return _campaign_post(
+        args,
+        f"/campaigns/{_quoted_identifier(args.campaign_id)}/protected-result",
+        {
+            "workspace_id": args.workspace_id,
+            "expected_version": args.expected_version,
+            "result": result,
+        },
+    )
+
+
+def cmd_campaign_promote(args: argparse.Namespace) -> int:
+    payload: dict[str, Any] = {
+        "workspace_id": args.workspace_id,
+        "expected_version": args.expected_version,
+    }
+    if args.override_reason:
+        payload["override_reason"] = args.override_reason
+    return _campaign_post(
+        args,
+        f"/campaigns/{_quoted_identifier(args.campaign_id)}/promotion",
+        payload,
+    )
+
+
+def cmd_campaign_export(args: argparse.Namespace) -> int:
+    formats = [item.strip() for item in args.formats.split(",") if item.strip()]
+    supported = {"markdown", "json", "csv", "png", "docx", "pdf"}
+    if not formats or len(formats) != len(set(formats)) or set(formats).difference(supported):
+        raise ValueError("export formats must be a unique supported comma-separated list")
+    return _campaign_post(
+        args,
+        f"/campaigns/{_quoted_identifier(args.campaign_id)}/export",
+        {
+            "workspace_id": args.workspace_id,
+            "expected_version": args.expected_version,
+            "formats": formats,
+        },
+    )
+
+
+def _cli_agent_origin(args: argparse.Namespace) -> dict[str, str]:
+    terminal_id = os.environ.get("BASHGYM_TERMINAL_ID")
+    agent = getattr(args, "agent", None) or os.environ.get("BASHGYM_AGENT_KIND")
+    origin = {"kind": "terminal" if terminal_id else "cli"}
+    if terminal_id:
+        origin["terminal_id"] = terminal_id
+    if agent:
+        origin["agent"] = agent
+    return origin
+
+
+def cmd_training_start(args: argparse.Namespace) -> int:
+    from bashgym.api.schemas import TrainingRequest
+
+    training_config: dict[str, Any] = {}
+    if args.config:
+        training_config = _read_campaign_json(args.config, label="training config")
+        controlled_fields = {
+            "strategy",
+            "base_model",
+            "dataset_path",
+            "compute_target",
+            "correlation_id",
+            "origin",
+            "tracking",
+        }
+        blocked_fields = sorted(set(training_config).intersection(controlled_fields))
+        if blocked_fields:
+            raise ValueError(
+                "training config must not override CLI-controlled fields: "
+                + ", ".join(blocked_fields)
+            )
+        unknown_fields = sorted(set(training_config).difference(TrainingRequest.model_fields))
+        if unknown_fields:
+            raise ValueError(
+                "training config contains unsupported fields: " + ", ".join(unknown_fields)
+            )
+
+    payload: dict[str, Any] = {
+        **training_config,
+        "strategy": args.strategy.replace("-", "_"),
+        "base_model": args.model,
+        "origin": _cli_agent_origin(args),
+    }
+    if args.dataset_path:
+        payload["dataset_path"] = args.dataset_path
+    if args.compute_target:
+        payload["compute_target"] = args.compute_target
+    if args.correlation_id:
+        payload["correlation_id"] = args.correlation_id
+    if args.tracking_context:
+        payload["tracking"] = _read_campaign_json(
+            args.tracking_context, label="training tracking context"
+        )
+    for field in (
+        "checkpoint_limit",
+        "artifact_retention",
+        "auto_push_hf",
+        "hf_repo_name",
+        "hf_private",
+        "hf_upload_artifact",
+    ):
+        value = getattr(args, field)
+        if value is not None:
+            payload[field] = value
+    payload = normalize_training_target_payload(payload)
+    response = _workspace_http_json(args, "/training/start", method="POST", payload=payload)
+    return _emit(response, as_json=bool(args.json))
+
+
+def cmd_designer_start(args: argparse.Namespace) -> int:
+    payload: dict[str, Any] = {
+        "pipeline": args.pipeline,
+        "num_records": args.num_records,
+        "seed_type": args.seed_type,
+        "provider": args.provider,
+        "origin": _cli_agent_origin(args),
+    }
+    if args.seed_source:
+        payload["seed_source"] = args.seed_source
+    if args.model:
+        payload["text_model"] = args.model
+    if args.provider_endpoint:
+        payload["provider_endpoint"] = args.provider_endpoint
+    if args.correlation_id:
+        payload["correlation_id"] = args.correlation_id
+    response = _workspace_http_json(
+        args,
+        "/factory/designer/create",
+        method="POST",
+        payload=payload,
+    )
+    return _emit(response, as_json=bool(args.json))
+
+
+def cmd_designer_status(args: argparse.Namespace) -> int:
+    path = (
+        f"/factory/designer/jobs/{urllib.parse.quote(args.job_id)}"
+        if args.job_id
+        else f"/factory/designer/jobs?limit={args.limit}"
+    )
+    response = _workspace_http_json(args, path)
+    if isinstance(response, list):
+        response = {"title": "Data Designer Jobs", "jobs": response}
+    return _emit(response, as_json=bool(args.json))
+
+
 def build_parser() -> argparse.ArgumentParser:
     json_parent = argparse.ArgumentParser(add_help=False)
     json_parent.add_argument("--json", action="store_true", help="Emit a single JSON object")
@@ -2930,12 +3910,678 @@ def build_parser() -> argparse.ArgumentParser:
     )
     workspace_emit.set_defaults(func=cmd_workspace_emit)
 
+    campaign = subparsers.add_parser(
+        "campaign",
+        help="Operate durable experiment campaigns through the authenticated API",
+        parents=[json_parent],
+    )
+    campaign_sub = campaign.add_subparsers(dest="campaign_command", required=True)
+
+    campaign_setup = campaign_sub.add_parser(
+        "setup-autoresearch",
+        help="Build and install an explicit revision-pinned AutoResearch definition",
+        parents=[json_parent],
+    )
+    campaign_setup.add_argument("--template", dest="template_id", required=True)
+    campaign_setup.add_argument("--template-revision", default="v1")
+    campaign_setup.add_argument("--objective", required=True)
+    campaign_setup.add_argument(
+        "--model-ref",
+        required=True,
+        help="Trainable base URI plus immutable revision; no model is selected by default",
+    )
+    campaign_setup.add_argument("--target-contract", dest="target_contract_key", required=True)
+    campaign_setup.add_argument("--task", required=True)
+    campaign_setup.add_argument(
+        "--dataset-version", dest="dataset_version_id", required=True
+    )
+    campaign_setup.add_argument(
+        "--compute-profile", dest="compute_profile_id", required=True
+    )
+    campaign_setup.add_argument("--project", dest="ledger_project_id", required=True)
+    campaign_setup.add_argument(
+        "--evaluation-suite", dest="evaluation_suite_id", required=True
+    )
+    campaign_setup.add_argument("--primary-metric", required=True)
+    campaign_setup.add_argument(
+        "--metric-direction", choices=("maximize", "minimize"), required=True
+    )
+    campaign_setup.add_argument("--budget-unit", required=True)
+    campaign_setup.add_argument("--budget-limit", type=float, required=True)
+    campaign_setup.add_argument("--max-attempts", type=int, required=True)
+    campaign_setup.add_argument("--minimum-improvement", type=float, default=0.0)
+    campaign_setup.add_argument("--target-metric", type=float)
+    campaign_setup.add_argument("--deadline")
+    campaign_setup.add_argument("--retention-days-failed", type=int, default=90)
+    campaign_setup.add_argument(
+        "--install-dir",
+        help="Override the installation directory (default: BashGym user config)",
+    )
+    campaign_setup.add_argument(
+        "--replace",
+        action="store_true",
+        help="Replace a different installed definition with the same template ID",
+    )
+    campaign_setup.set_defaults(func=cmd_campaign_setup_autoresearch)
+
+    campaign_connection = argparse.ArgumentParser(add_help=False)
+    workspace_default = os.environ.get("BASHGYM_WORKSPACE_ID")
+    credential_default = os.environ.get("BASHGYM_CAMPAIGN_CREDENTIAL_REF")
+    campaign_connection.add_argument(
+        "--workspace-id",
+        default=workspace_default,
+        required=workspace_default is None,
+        help="Authorized campaign workspace (or BASHGYM_WORKSPACE_ID)",
+    )
+    campaign_connection.add_argument(
+        "--api-base",
+        help="Backend /api base URL (default: BASHGYM_API_BASE or http://localhost:8003/api)",
+    )
+    campaign_connection.add_argument(
+        "--credential-ref",
+        default=credential_default,
+        required=credential_default is None,
+        help="Secret-store key containing a refresh credential; never a raw token",
+    )
+
+    def add_campaign_mutation_arguments(
+        command_parser: argparse.ArgumentParser,
+        *,
+        campaign: bool = True,
+    ) -> None:
+        if campaign:
+            command_parser.add_argument("--campaign", dest="campaign_id", required=True)
+        command_parser.add_argument("--expected-version", type=int, required=True)
+        command_parser.add_argument("--idempotency-key", required=True)
+        command_parser.add_argument("--correlation-id")
+
+    campaign_list = campaign_sub.add_parser(
+        "list",
+        help="List campaigns visible to the authenticated actor",
+        parents=[json_parent, campaign_connection],
+    )
+    campaign_list.add_argument("--status")
+    campaign_list.add_argument("--kind")
+    campaign_list.set_defaults(func=cmd_campaign_list)
+
+    campaign_templates = campaign_sub.add_parser(
+        "templates",
+        help="List source-managed approved campaign templates",
+        parents=[json_parent, campaign_connection],
+    )
+    campaign_templates.set_defaults(func=cmd_campaign_templates)
+
+    campaign_doctor = campaign_sub.add_parser(
+        "doctor",
+        help="Check model, data, evaluator, private compute, and controller readiness",
+        parents=[json_parent, campaign_connection],
+    )
+    campaign_doctor.add_argument("--template", dest="template_id", required=True)
+    campaign_doctor.set_defaults(func=cmd_campaign_doctor)
+
+    campaign_status = campaign_sub.add_parser(
+        "status",
+        help="Read one campaign aggregate and next action",
+        parents=[json_parent, campaign_connection],
+    )
+    campaign_status.add_argument("--campaign", dest="campaign_id", required=True)
+    campaign_status.set_defaults(func=cmd_campaign_status)
+
+    campaign_autoresearch = campaign_sub.add_parser(
+        "autoresearch",
+        help="Read durable AutoResearch state, controls, and decisions",
+        parents=[json_parent, campaign_connection],
+    )
+    campaign_autoresearch.add_argument("--campaign", dest="campaign_id", required=True)
+    campaign_autoresearch.set_defaults(func=cmd_campaign_autoresearch)
+
+    campaign_manifest = campaign_sub.add_parser(
+        "manifest",
+        help="Read one immutable campaign manifest revision",
+        parents=[json_parent, campaign_connection],
+    )
+    campaign_manifest.add_argument("--campaign", dest="campaign_id", required=True)
+    campaign_manifest.add_argument("--revision", type=int, required=True)
+    campaign_manifest.set_defaults(func=cmd_campaign_manifest)
+
+    campaign_evidence = campaign_sub.add_parser(
+        "evidence",
+        help="Read the bounded planner-safe evidence snapshot",
+        parents=[json_parent, campaign_connection],
+    )
+    campaign_evidence.add_argument("--campaign", dest="campaign_id", required=True)
+    campaign_evidence.set_defaults(func=cmd_campaign_evidence)
+
+    campaign_ledger = campaign_sub.add_parser(
+        "ledger",
+        help="Read project-isolated runs, evaluations, artifacts, and decisions linked to a campaign",
+        parents=[json_parent, campaign_connection],
+    )
+    campaign_ledger.add_argument("--campaign", dest="campaign_id", required=True)
+    campaign_ledger.set_defaults(func=cmd_campaign_ledger)
+
+    campaign_artifacts = campaign_sub.add_parser(
+        "artifacts",
+        help="List bounded campaign artifact metadata",
+        parents=[json_parent, campaign_connection],
+    )
+    campaign_artifacts.add_argument("--campaign", dest="campaign_id", required=True)
+    campaign_artifacts.set_defaults(func=cmd_campaign_artifacts)
+
+    campaign_proposals = campaign_sub.add_parser(
+        "proposals",
+        help="List bounded campaign study proposals",
+        parents=[json_parent, campaign_connection],
+    )
+    campaign_proposals.add_argument("--campaign", dest="campaign_id", required=True)
+    campaign_proposals.set_defaults(func=cmd_campaign_proposals)
+
+    campaign_studies = campaign_sub.add_parser(
+        "studies",
+        help="List persisted campaign studies and stage cursors",
+        parents=[json_parent, campaign_connection],
+    )
+    campaign_studies.add_argument("--campaign", dest="campaign_id", required=True)
+    campaign_studies.set_defaults(func=cmd_campaign_studies)
+
+    campaign_attempts = campaign_sub.add_parser(
+        "attempts",
+        help="List persisted execution attempts for a campaign",
+        parents=[json_parent, campaign_connection],
+    )
+    campaign_attempts.add_argument("--campaign", dest="campaign_id", required=True)
+    campaign_attempts.set_defaults(func=cmd_campaign_attempts)
+
+    campaign_comparisons = campaign_sub.add_parser(
+        "comparisons",
+        help="List persisted development comparisons for a campaign",
+        parents=[json_parent, campaign_connection],
+    )
+    campaign_comparisons.add_argument("--campaign", dest="campaign_id", required=True)
+    campaign_comparisons.set_defaults(func=cmd_campaign_comparisons)
+
+    campaign_events = campaign_sub.add_parser(
+        "events",
+        help="Read campaign events after a durable cursor",
+        parents=[json_parent, campaign_connection],
+    )
+    campaign_events.add_argument("--campaign", dest="campaign_id", required=True)
+    campaign_events.add_argument("--after-cursor", type=int, default=0)
+    campaign_events.add_argument("--limit", type=int, default=200)
+    campaign_events.set_defaults(func=cmd_campaign_events)
+
+    campaign_metrics = campaign_sub.add_parser(
+        "metrics",
+        help="Read one bounded, source-specific metric series",
+        parents=[json_parent, campaign_connection],
+    )
+    campaign_metrics.add_argument("--campaign", dest="campaign_id", required=True)
+    campaign_metrics.add_argument("--attempt", dest="attempt_id", required=True)
+    campaign_metrics.add_argument("--source", required=True)
+    campaign_metrics.add_argument("--metric", dest="metric_name", required=True)
+    campaign_metrics.add_argument("--after-step", type=int, default=-1)
+    campaign_metrics.add_argument("--limit", type=int, default=2000)
+    campaign_metrics.set_defaults(func=cmd_campaign_metrics)
+
+    campaign_create = campaign_sub.add_parser(
+        "create",
+        help="Create a campaign from an approved template or a typed JSON envelope",
+        parents=[json_parent, campaign_connection],
+    )
+    create_source = campaign_create.add_mutually_exclusive_group(required=True)
+    create_source.add_argument("--template", dest="template_id")
+    create_source.add_argument("--manifest")
+    campaign_create.add_argument("--campaign", dest="campaign_id")
+    campaign_create.add_argument("--title")
+    campaign_create.add_argument("--idempotency-key", required=True)
+    campaign_create.add_argument("--correlation-id")
+    campaign_create.set_defaults(func=cmd_campaign_create)
+
+    campaign_revise = campaign_sub.add_parser(
+        "revise",
+        help="Create an immutable campaign manifest revision",
+        parents=[json_parent, campaign_connection],
+    )
+    add_campaign_mutation_arguments(campaign_revise)
+    campaign_revise.add_argument("--manifest", required=True)
+    campaign_revise.add_argument("--reason", required=True)
+    campaign_revise.set_defaults(func=cmd_campaign_revise)
+
+    campaign_propose = campaign_sub.add_parser(
+        "propose",
+        help="Submit a typed JSON study proposal for server-side validation",
+        parents=[json_parent, campaign_connection],
+    )
+    add_campaign_mutation_arguments(campaign_propose)
+    campaign_propose.add_argument("--proposal", required=True)
+    campaign_propose.add_argument(
+        "--autoresearch-role",
+        choices=("baseline", "candidate"),
+        help="Submit through the baseline-first AutoResearch policy boundary",
+    )
+    campaign_propose.add_argument(
+        "--parent-proposal",
+        dest="parent_proposal_id",
+        help="Current incumbent proposal ID for an AutoResearch candidate",
+    )
+    campaign_propose.set_defaults(func=cmd_campaign_propose)
+
+    campaign_autoresearch_result = campaign_sub.add_parser(
+        "autoresearch-result",
+        help="Ingest an authoritative ledger evaluation into AutoResearch",
+        parents=[json_parent, campaign_connection],
+    )
+    campaign_autoresearch_result.add_argument(
+        "--campaign", dest="campaign_id", required=True
+    )
+    campaign_autoresearch_result.add_argument("--project", dest="project_id", required=True)
+    campaign_autoresearch_result.add_argument(
+        "--evaluation-result", dest="evaluation_result_id", required=True
+    )
+    campaign_autoresearch_result.add_argument("--idempotency-key", required=True)
+    campaign_autoresearch_result.add_argument("--correlation-id")
+    campaign_autoresearch_result.set_defaults(func=cmd_campaign_autoresearch_result)
+
+    campaign_start = campaign_sub.add_parser(
+        "start",
+        help="Start a ready campaign",
+        parents=[json_parent, campaign_connection],
+    )
+    campaign_start.add_argument("--campaign", dest="campaign_id", required=True)
+    campaign_start.add_argument("--expected-version", type=int, required=True)
+    campaign_start.add_argument("--idempotency-key", required=True)
+    campaign_start.add_argument("--correlation-id")
+    campaign_start.set_defaults(func=cmd_campaign_start)
+
+    campaign_pause = campaign_sub.add_parser(
+        "pause",
+        help="Pause campaign scheduling",
+        parents=[json_parent, campaign_connection],
+    )
+    campaign_pause.add_argument("--campaign", dest="campaign_id", required=True)
+    campaign_pause.add_argument("--expected-version", type=int, required=True)
+    campaign_pause.add_argument("--idempotency-key", required=True)
+    campaign_pause.add_argument("--correlation-id")
+    campaign_pause.add_argument("--reason", required=True)
+    campaign_pause.set_defaults(func=cmd_campaign_pause)
+
+    campaign_resume = campaign_sub.add_parser(
+        "resume",
+        help="Resume a paused campaign",
+        parents=[json_parent, campaign_connection],
+    )
+    campaign_resume.add_argument("--campaign", dest="campaign_id", required=True)
+    campaign_resume.add_argument("--expected-version", type=int, required=True)
+    campaign_resume.add_argument("--idempotency-key", required=True)
+    campaign_resume.add_argument("--correlation-id")
+    campaign_resume.set_defaults(func=cmd_campaign_resume)
+
+    campaign_cancel = campaign_sub.add_parser(
+        "cancel",
+        help="Cancel a campaign and preserve its evidence",
+        parents=[json_parent, campaign_connection],
+    )
+    campaign_cancel.add_argument("--campaign", dest="campaign_id", required=True)
+    campaign_cancel.add_argument("--expected-version", type=int, required=True)
+    campaign_cancel.add_argument("--idempotency-key", required=True)
+    campaign_cancel.add_argument("--correlation-id")
+    campaign_cancel.add_argument("--reason", required=True)
+    campaign_cancel.set_defaults(func=cmd_campaign_cancel)
+
+    campaign_advance = campaign_sub.add_parser(
+        "advance",
+        help="Request one deterministic controller advance",
+        parents=[json_parent, campaign_connection],
+    )
+    add_campaign_mutation_arguments(campaign_advance)
+    campaign_advance.set_defaults(func=cmd_campaign_advance)
+
+    campaign_conclude = campaign_sub.add_parser(
+        "conclude",
+        help="Conclude a campaign without promotion after evidence checks",
+        parents=[json_parent, campaign_connection],
+    )
+    add_campaign_mutation_arguments(campaign_conclude)
+    campaign_conclude.add_argument("--reason", required=True)
+    campaign_conclude.set_defaults(func=cmd_campaign_conclude)
+
+    campaign_retry = campaign_sub.add_parser(
+        "retry",
+        help="Create one policy-bounded retry attempt for an action",
+        parents=[json_parent, campaign_connection],
+    )
+    add_campaign_mutation_arguments(campaign_retry)
+    campaign_retry.add_argument("--action", dest="action_id", required=True)
+    campaign_retry.set_defaults(func=cmd_campaign_retry)
+
+    campaign_protected = campaign_sub.add_parser(
+        "protected-lease",
+        help="Request the server-mediated one-time protected evaluation lease",
+        parents=[json_parent, campaign_connection],
+    )
+    add_campaign_mutation_arguments(campaign_protected)
+    campaign_protected.set_defaults(func=cmd_campaign_protected_lease)
+
+    campaign_protected_result = campaign_sub.add_parser(
+        "protected-result",
+        help="Record one candidate-locked protected evaluation result",
+        parents=[json_parent, campaign_connection],
+    )
+    add_campaign_mutation_arguments(campaign_protected_result)
+    campaign_protected_result.add_argument("--result-file", required=True)
+    campaign_protected_result.set_defaults(func=cmd_campaign_protected_result)
+
+    campaign_promote = campaign_sub.add_parser(
+        "promote",
+        help="Compute and record the server-authorized promotion decision",
+        parents=[json_parent, campaign_connection],
+    )
+    add_campaign_mutation_arguments(campaign_promote)
+    campaign_promote.add_argument("--override-reason")
+    campaign_promote.set_defaults(func=cmd_campaign_promote)
+
+    campaign_export = campaign_sub.add_parser(
+        "export",
+        help="Request reproducible campaign evidence exports",
+        parents=[json_parent, campaign_connection],
+    )
+    add_campaign_mutation_arguments(campaign_export)
+    campaign_export.add_argument("--formats", required=True)
+    campaign_export.set_defaults(func=cmd_campaign_export)
+
+    campaign_proposal = campaign_sub.add_parser("proposal", help="Manage study proposals")
+    campaign_proposal_sub = campaign_proposal.add_subparsers(
+        dest="campaign_proposal_command", required=True
+    )
+    campaign_withdraw = campaign_proposal_sub.add_parser(
+        "withdraw",
+        help="Withdraw a still-submitted proposal",
+        parents=[json_parent, campaign_connection],
+    )
+    add_campaign_mutation_arguments(campaign_withdraw)
+    campaign_withdraw.add_argument("--proposal", dest="proposal_id", required=True)
+    campaign_withdraw.set_defaults(func=cmd_campaign_withdraw_proposal)
+
+    campaign_study = campaign_sub.add_parser("study", help="Manage campaign studies")
+    campaign_study_sub = campaign_study.add_subparsers(dest="campaign_study_command", required=True)
+    campaign_study_status = campaign_study_sub.add_parser(
+        "status",
+        help="Read one persisted study and its current stage status",
+        parents=[json_parent, campaign_connection],
+    )
+    campaign_study_status.add_argument("--campaign", dest="campaign_id", required=True)
+    campaign_study_status.add_argument("--study", dest="study_id", required=True)
+    campaign_study_status.set_defaults(func=cmd_campaign_study)
+
+    campaign_abandon = campaign_study_sub.add_parser(
+        "abandon",
+        help="Abandon a nonterminal study with an auditable reason",
+        parents=[json_parent, campaign_connection],
+    )
+    add_campaign_mutation_arguments(campaign_abandon)
+    campaign_abandon.add_argument("--study", dest="study_id", required=True)
+    campaign_abandon.add_argument("--reason", required=True)
+    campaign_abandon.set_defaults(func=cmd_campaign_abandon_study)
+
+    campaign_budget = campaign_sub.add_parser("budget", help="Manage campaign budgets")
+    campaign_budget_sub = campaign_budget.add_subparsers(
+        dest="campaign_budget_command", required=True
+    )
+    campaign_amend = campaign_budget_sub.add_parser(
+        "amend",
+        help="Append an authorized campaign budget adjustment",
+        parents=[json_parent, campaign_connection],
+    )
+    add_campaign_mutation_arguments(campaign_amend)
+    campaign_amend.add_argument("--resource", required=True)
+    campaign_amend.add_argument("--delta", type=float, required=True)
+    campaign_amend.add_argument("--reason", required=True)
+    campaign_amend.set_defaults(func=cmd_campaign_amend_budget)
+
+    campaign_source = campaign_sub.add_parser("source", help="Manage campaign data sources")
+    campaign_source_sub = campaign_source.add_subparsers(
+        dest="campaign_source_command", required=True
+    )
+    campaign_approve = campaign_source_sub.add_parser(
+        "approve",
+        help="Record typed external-source approval evidence",
+        parents=[json_parent, campaign_connection],
+    )
+    add_campaign_mutation_arguments(campaign_approve)
+    campaign_approve.add_argument("--source", dest="source_id", required=True)
+    campaign_approve.add_argument("--evidence", required=True)
+    campaign_approve.set_defaults(func=cmd_campaign_approve_source)
+
+    campaign_action = campaign_sub.add_parser("action", help="Manage campaign actions")
+    campaign_action_sub = campaign_action.add_subparsers(
+        dest="campaign_action_command", required=True
+    )
+    campaign_force_stop = campaign_action_sub.add_parser(
+        "force-stop",
+        help="Force-stop only the exact persisted remote process identity",
+        parents=[json_parent, campaign_connection],
+    )
+    add_campaign_mutation_arguments(campaign_force_stop)
+    campaign_force_stop.add_argument("--action", dest="action_id", required=True)
+    campaign_force_stop.add_argument(
+        "--expected-process",
+        required=True,
+        help="JSON file containing the complete persisted remote process identity",
+    )
+    campaign_force_stop.add_argument("--reason", required=True)
+    campaign_force_stop.add_argument("--confirm", action="store_true", required=True)
+    campaign_force_stop.set_defaults(func=cmd_campaign_force_stop)
+
+    ledger = subparsers.add_parser(
+        "ledger",
+        help="Inspect project-isolated ML experiment history through the authenticated API",
+        parents=[json_parent],
+    )
+    ledger_sub = ledger.add_subparsers(dest="ledger_command", required=True)
+
+    ledger_projects = ledger_sub.add_parser(
+        "projects",
+        help="List projects in the authorized workspace",
+        parents=[json_parent, campaign_connection],
+    )
+    ledger_projects.set_defaults(func=cmd_ledger_projects)
+
+    ledger_context = ledger_sub.add_parser(
+        "context",
+        help="Read structured project status, health, history, and evidence references",
+        parents=[json_parent, campaign_connection],
+    )
+    ledger_context.add_argument("--project", dest="project_id", required=True)
+    ledger_context.add_argument("--limit", type=int, default=20)
+    ledger_context.set_defaults(func=cmd_ledger_context)
+
+    ledger_runs = ledger_sub.add_parser(
+        "runs",
+        help="List official training/evaluation runs for one project",
+        parents=[json_parent, campaign_connection],
+    )
+    ledger_runs.add_argument("--project", dest="project_id", required=True)
+    ledger_runs.add_argument("--status")
+    ledger_runs.add_argument("--limit", type=int, default=100)
+    ledger_runs.set_defaults(func=cmd_ledger_runs)
+
+    ledger_run = ledger_sub.add_parser(
+        "run",
+        help="Inspect one run and its attempts, evaluations, and artifacts",
+        parents=[json_parent, campaign_connection],
+    )
+    ledger_run.add_argument("--project", dest="project_id", required=True)
+    ledger_run.add_argument("--run", dest="run_id", required=True)
+    ledger_run.set_defaults(func=cmd_ledger_run)
+
+    ledger_trend = ledger_sub.add_parser(
+        "trend",
+        help="Read a metric series and deterministic trend summary",
+        parents=[json_parent, campaign_connection],
+    )
+    ledger_trend.add_argument("--project", dest="project_id", required=True)
+    ledger_trend.add_argument("--metric", dest="metric_name", required=True)
+    ledger_trend.add_argument("--run", dest="run_id")
+    ledger_trend.add_argument("--limit", type=int, default=5000)
+    ledger_trend.set_defaults(func=cmd_ledger_trend)
+
+    ledger_evaluations = ledger_sub.add_parser(
+        "evaluations",
+        help="List evaluation results for one project or run",
+        parents=[json_parent, campaign_connection],
+    )
+    ledger_evaluations.add_argument("--project", dest="project_id", required=True)
+    ledger_evaluations.add_argument("--run", dest="run_id")
+    ledger_evaluations.add_argument("--limit", type=int, default=200)
+    ledger_evaluations.set_defaults(func=cmd_ledger_evaluations)
+
+    ledger_compare = ledger_sub.add_parser(
+        "compare",
+        help="Compare runs only where evaluation-suite contracts are identical",
+        parents=[json_parent, campaign_connection],
+    )
+    ledger_compare.add_argument("--project", dest="project_id", required=True)
+    ledger_compare.add_argument("--run", dest="run_ids", action="append", required=True)
+    ledger_compare.set_defaults(func=cmd_ledger_compare)
+
+    ledger_events = ledger_sub.add_parser(
+        "events",
+        help="Read the cursor-based sync envelope for GBrain or an optional cloud sink",
+        parents=[json_parent, campaign_connection],
+    )
+    ledger_events.add_argument("--project", dest="project_id", required=True)
+    ledger_events.add_argument("--after-cursor", type=int, default=0)
+    ledger_events.add_argument("--limit", type=int, default=200)
+    ledger_events.set_defaults(func=cmd_ledger_events)
+
+    ledger_health = ledger_sub.add_parser(
+        "health",
+        help="Check database integrity, migration state, WAL, cursor, and record counts",
+        parents=[json_parent, campaign_connection],
+    )
+    ledger_health.set_defaults(func=cmd_ledger_health)
+
+    designer = subparsers.add_parser(
+        "designer",
+        help="Start and inspect tracked Data Designer jobs",
+        parents=[json_parent],
+    )
+    designer_sub = designer.add_subparsers(dest="designer_command", required=True)
+
+    designer_start = designer_sub.add_parser(
+        "start",
+        help="Start a Data Designer generation job",
+        parents=[json_parent],
+    )
+    designer_start.add_argument("--pipeline", default="coding_agent_sft")
+    designer_start.add_argument("--num-records", type=int, default=100)
+    designer_start.add_argument(
+        "--seed-type",
+        default="traces",
+        choices=["traces", "agent_rollouts", "huggingface", "file", "unstructured"],
+    )
+    designer_start.add_argument("--seed-source")
+    designer_start.add_argument("--model", help="Text model override")
+    designer_start.add_argument("--provider", default="nvidia")
+    designer_start.add_argument("--provider-endpoint")
+    designer_start.add_argument("--correlation-id")
+    designer_start.add_argument("--agent", default=os.environ.get("BASHGYM_AGENT_KIND", ""))
+    designer_start.add_argument(
+        "--api-base",
+        help="Backend /api base URL (default: BASHGYM_API_BASE or http://localhost:8003/api)",
+    )
+    designer_start.set_defaults(func=cmd_designer_start)
+
+    designer_status = designer_sub.add_parser(
+        "status",
+        help="Read one job or list recent jobs",
+        parents=[json_parent],
+    )
+    designer_status.add_argument("--job-id")
+    designer_status.add_argument("--limit", type=int, default=20)
+    designer_status.add_argument(
+        "--api-base",
+        help="Backend /api base URL (default: BASHGYM_API_BASE or http://localhost:8003/api)",
+    )
+    designer_status.set_defaults(func=cmd_designer_status)
+
     training = subparsers.add_parser(
         "training",
         help="Training docs and setup helpers",
         parents=[json_parent],
     )
     training_sub = training.add_subparsers(dest="training_command", required=True)
+
+    training_start = training_sub.add_parser(
+        "start",
+        help="Start a tracked training run",
+        parents=[json_parent],
+    )
+    training_start.add_argument(
+        "--strategy",
+        default="sft",
+        choices=[
+            "sft",
+            "dpo",
+            "grpo",
+            "rlvr",
+            "distillation",
+            "session_distillation",
+            "session-distillation",
+        ],
+    )
+    training_start.add_argument("--model", required=True, help="Base model identifier")
+    training_start.add_argument("--dataset-path")
+    training_start.add_argument("--compute-target")
+    training_start.add_argument("--correlation-id")
+    training_start.add_argument(
+        "--tracking-context",
+        help=(
+            "JSON file with exact project, experiment, model-version, dataset-version, "
+            "and environment IDs for an official ledger run"
+        ),
+    )
+    training_start.add_argument(
+        "--config",
+        help="JSON object with additional validated TrainingRequest fields",
+    )
+    training_start.add_argument("--checkpoint-limit", type=int, choices=range(1, 21))
+    training_start.add_argument(
+        "--artifact-retention",
+        choices=["adapter_only", "adapter_checkpoint", "deployable", "full_run"],
+    )
+    training_start.add_argument(
+        "--auto-push-hf",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Upload the selected final artifact to Hugging Face after success",
+    )
+    training_start.add_argument("--hf-repo-name")
+    hf_visibility = training_start.add_mutually_exclusive_group()
+    hf_visibility.add_argument(
+        "--hf-private",
+        dest="hf_private",
+        action="store_true",
+        default=None,
+        help="Create or use a private Hugging Face model repository",
+    )
+    hf_visibility.add_argument(
+        "--hf-public",
+        dest="hf_private",
+        action="store_false",
+        default=None,
+        help="Create or use a public Hugging Face model repository (requires approval)",
+    )
+    training_start.add_argument(
+        "--hf-upload-artifact",
+        choices=["auto", "adapter", "merged"],
+    )
+    training_start.add_argument("--agent", default=os.environ.get("BASHGYM_AGENT_KIND", ""))
+    training_start.add_argument(
+        "--api-base",
+        help="Backend /api base URL (default: BASHGYM_API_BASE or http://localhost:8003/api)",
+    )
+    training_start.set_defaults(func=cmd_training_start)
 
     docs = training_sub.add_parser(
         "docs",
@@ -2970,6 +4616,7 @@ def build_parser() -> argparse.ArgumentParser:
             "dpo",
             "grpo",
             "rlvr",
+            "distillation",
             "dppo",
             "reward-model",
             "reward_model",
@@ -3033,8 +4680,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     smoke_bundle.add_argument(
         "--base-model",
-        default="Qwen/Qwen2.5-Coder-1.5B-Instruct",
-        help="Base model id to pass to the backend smoke launcher",
+        required=True,
+        help="Explicit operator-selected trainable base to pass to the backend smoke launcher",
     )
     smoke_bundle.add_argument(
         "--backend",
@@ -3468,7 +5115,12 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        if getattr(args, "command", None) == "campaign":
+            return _campaign_error(args, exc)
+        raise
 
 
 if __name__ == "__main__":

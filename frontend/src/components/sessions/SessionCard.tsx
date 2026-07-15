@@ -1,20 +1,22 @@
 import { useState } from 'react'
 import { clsx } from 'clsx'
-import type { Panel, TerminalSession } from '../../stores'
-import type { AgentSessionSnapshot, SessionMatch } from '../../services/agentSessions/types'
-import { ContextMeter } from './ContextMeter'
+import type { TerminalSession } from '../../stores'
+import type { SessionRuntimeState } from '../../stores'
+import type { AgentSessionSnapshot } from '../../services/agentSessions/types'
 import { QuickPrompt } from './QuickPrompt'
 import { AgentBadge } from './AgentBadge'
+import { folderNameFromPath } from './format'
+import { MessageSquare } from 'lucide-react'
 
 interface SessionCardProps {
   session: TerminalSession
-  panel: Panel
   snapshot?: AgentSessionSnapshot
-  match?: SessionMatch
   onOpenDetail: (e: React.MouseEvent) => void
+  runtimeState?: SessionRuntimeState
 }
 
 function timeAgo(timestamp: number): string {
+  if (timestamp <= 0) return 'saved'
   const seconds = Math.floor((Date.now() - timestamp) / 1000)
   if (seconds < 60) return 'now'
   const minutes = Math.floor(seconds / 60)
@@ -36,50 +38,69 @@ const STATUS_DOT: Record<string, string> = {
  * a quiet context bar. Click opens the detail modal; right-click summons the
  * quick prompt in place. Nothing heavier happens from the row itself.
  */
-export function SessionCard({ session, panel: _panel, snapshot, match: _match, onOpenDetail }: SessionCardProps) {
+export function SessionCard({
+  session,
+  snapshot,
+  onOpenDetail,
+  runtimeState = 'unknown'
+}: SessionCardProps) {
   const [showPrompt, setShowPrompt] = useState(false)
 
   const kind = session.agentKind ?? snapshot?.kind
   const topic = snapshot?.topic ?? session.taskSummary ?? snapshot?.title ?? session.title
+  const projectName = folderNameFromPath(snapshot?.cwd ?? session.cwd, session.title)
+  const statusLabel = runtimeState === 'saved'
+    ? 'saved'
+    : session.isPaused
+      ? 'paused'
+      : session.status === 'tool_calling'
+        ? 'working'
+        : session.status.replace('_', ' ')
 
   return (
-    <div
-      className={clsx(
-        'card p-2 space-y-1.5 cursor-pointer',
-        !session.isPaused && session.status === 'running' && 'terminal-status-running',
-        !session.isPaused && session.status === 'tool_calling' && 'terminal-status-tool-calling',
-        !session.isPaused && session.status === 'waiting_input' && 'terminal-status-waiting-input'
-      )}
-      onClick={onOpenDetail}
-      onContextMenu={(e) => {
-        e.preventDefault()
-        setShowPrompt((v) => !v)
-      }}
-      title={`${session.title} — click for details · right-click to prompt`}
+    <article
+      className="w-full min-w-0 overflow-hidden rounded-brutal bg-background-secondary px-2.5 py-2 space-y-2 transition-colors hover:bg-accent/[0.06]"
     >
-      <div className="flex items-center gap-1.5 min-w-0">
-        <span className={clsx('status-dot flex-shrink-0', STATUS_DOT[session.status])} />
-        <span className="font-mono text-[11px] font-semibold text-text-primary truncate flex-1" title={topic}>
-          {topic}
-        </span>
+      <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-2 min-w-0">
         <AgentBadge kind={kind} />
-        <span className="font-mono text-[10px] text-text-muted flex-shrink-0">{timeAgo(session.lastActivity)}</span>
+        <div className="min-w-0 space-y-1">
+          <button
+            type="button"
+            onClick={onOpenDetail}
+            className="block w-full min-w-0 truncate text-left text-xs font-semibold text-text-primary hover:text-accent transition-colors"
+            title={`Open details for ${topic}`}
+          >
+            {topic}
+          </button>
+          <div className="flex min-w-0 items-center gap-1.5 font-mono text-[9px] text-text-muted">
+            <span className={clsx('status-dot flex-shrink-0', STATUS_DOT[session.status])} />
+            <span className="min-w-0 truncate text-text-secondary">{projectName}</span>
+            <span aria-hidden="true" className="flex-shrink-0 text-border">·</span>
+            <span className="flex-shrink-0">{statusLabel}</span>
+            <span aria-hidden="true" className="flex-shrink-0 text-border">·</span>
+            <span className="flex-shrink-0">{timeAgo(session.lastActivity)}</span>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowPrompt((visible) => !visible)}
+          className={clsx('node-btn flex-shrink-0', showPrompt ? 'node-btn-accent' : null)}
+          title={`Prompt ${session.title}`}
+          aria-label={`Prompt ${session.title}`}
+          aria-expanded={showPrompt}
+        >
+          <MessageSquare className="w-3 h-3" />
+        </button>
       </div>
 
-      <ContextMeter
-        contextTokens={snapshot?.contextTokens}
-        contextWindow={snapshot?.contextWindow}
-        approx={snapshot?.contextWindowApprox ?? true}
-      />
-
-      {showPrompt && (
+      {showPrompt ? (
         <QuickPrompt
           terminalId={session.id}
           status={session.status}
           autoFocus
           onClose={() => setShowPrompt(false)}
         />
-      )}
-    </div>
+      ) : null}
+    </article>
   )
 }

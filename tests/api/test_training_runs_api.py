@@ -14,6 +14,15 @@ def client():
 
 
 class TestTrainingRuns:
+    def test_direct_training_rejects_ambiguous_cloud_label(self, client):
+        resp = client.post(
+            "/api/training/start",
+            json={"strategy": "sft", "compute_target": "cloud"},
+        )
+
+        assert resp.status_code == 400
+        assert "ambiguous" in resp.json()["detail"]
+
     def test_list_runs_returns_runs_key(self, client):
         resp = client.get("/api/training/runs")
         assert resp.status_code == 200

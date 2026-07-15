@@ -28,7 +28,9 @@ import {
 } from '../../../services/api'
 import { useTerminalStore, type TerminalSession } from '../../../stores'
 import { DataNodeShell } from './DataNodeShell'
+import { findDynamicNodePosition } from '../canvasPlacement'
 import { hueFor } from './dataPanels'
+import { isCatalogSkillActive, skillIdFor } from './skillLabModel'
 import { ConfigRow, ConfigRows, ConfigSection, NodeConfigModal } from './NodeConfigModal'
 import type { DataNodeData } from './types'
 
@@ -49,7 +51,7 @@ interface LinkedInstance {
 const SKILL_SOURCES_BY_HARNESS: Record<HarnessKind, string[]> = {
   claude: ['agents', 'claude', 'workspace', 'peony'],
   codex: ['codex', 'codex-system', 'workspace', 'peony'],
-  hermes: ['workspace', 'peony'],
+  hermes: ['hermes', 'workspace', 'peony'],
   peony: ['workspace', 'peony'],
   terminal: ['workspace', 'peony']
 }
@@ -103,6 +105,7 @@ function endpointSkillItems(endpoint: ToolkitEndpointCapability): ToolkitSkill[]
     description: `${endpoint.label} endpoint skill`,
     source: endpoint.kind || 'agent',
     path: `agent:${endpoint.endpoint_id}`,
+    remote_endpoint_id: endpoint.endpoint_id,
     resource_counts: { scripts: 0, references: 0, assets: 0 },
     tool_count: 0
   }))
@@ -141,7 +144,7 @@ function skillMatchesLinkedScope(skill: ToolkitSkill, linkedInstances: LinkedIns
   for (const instance of linkedInstances) {
     for (const source of SKILL_SOURCES_BY_HARNESS[instance.kind]) allowed.add(source)
   }
-  return allowed.has(skill.source)
+  return [skill.source, ...(skill.available_sources || [])].some((source) => allowed.has(source))
 }
 
 function toolMatchesLinkedScope(tool: ToolkitTool, linkedInstances: LinkedInstance[]): boolean {
@@ -179,7 +182,7 @@ function buildToolkitContext(
   lines.push(
     '',
     '### Counts',
-    `- visible skills: ${visibleSkills.length} of ${(inventory.counts.skills || 0) + (inventory.counts.endpoint_skills || 0)}`,
+    `- visible skills: ${visibleSkills.length} of ${(inventory.counts.active_skills || inventory.counts.skills || 0) + (inventory.counts.endpoint_skills || 0)}`,
     `- visible tools: ${visibleTools.length} of ${inventory.counts.tools || 0}`,
     `- agent endpoints: ${inventory.counts.endpoints || 0}`,
     `- endpoint skills: ${inventory.counts.endpoint_skills || 0}`,
@@ -250,7 +253,7 @@ function buildToolkitContext(
   return lines.join('\n')
 }
 
-function SkillRow({ skill }: { skill: ToolkitSkill }) {
+function SkillRow({ skill, onSelect }: { skill: ToolkitSkill; onSelect: (skill: ToolkitSkill) => void }) {
   const resources = skill.resource_counts
   const resourceBits = [
     resources.scripts ? `${resources.scripts}s` : '',
@@ -259,10 +262,14 @@ function SkillRow({ skill }: { skill: ToolkitSkill }) {
     skill.tool_count ? `${skill.tool_count}t` : ''
   ].filter(Boolean).join(' ')
 
-  return (
-    <div className="min-w-0 text-[10px] font-mono">
+  const content = (
+    <>
       <div className="flex items-center gap-1.5 min-w-0">
-        <span className="w-1.5 h-1.5 rounded-full bg-accent flex-shrink-0" />
+        {skill.remote_endpoint_id ? (
+          <Network className="h-2.5 w-2.5 flex-shrink-0 text-accent" />
+        ) : (
+          <span className="w-1.5 h-1.5 rounded-full bg-accent flex-shrink-0" />
+        )}
         <span className="text-text-primary truncate">{skill.name}</span>
         <span className="text-text-muted flex-shrink-0">{skill.source}</span>
       </div>
@@ -270,7 +277,29 @@ function SkillRow({ skill }: { skill: ToolkitSkill }) {
         {skill.description || skill.path || 'No description'}
         {resourceBits ? ` | ${resourceBits}` : ''}
       </div>
-    </div>
+    </>
+  )
+
+  if (skill.remote_endpoint_id) {
+    return (
+      <div
+        className="block w-full min-w-0 rounded-brutal px-1 py-0.5 font-mono text-[10px]"
+        title={`Reported by ${skill.remote_endpoint_id}; local instructions are not available`}
+      >
+        {content}
+      </div>
+    )
+  }
+
+  return (
+    <button
+      type="button"
+      className="nodrag block w-full min-w-0 rounded-brutal px-1 py-0.5 text-left font-mono text-[10px] hover:bg-background-secondary"
+      onClick={() => onSelect(skill)}
+      title={`Open ${skill.name} in Skill Lab`}
+    >
+      {content}
+    </button>
   )
 }
 
@@ -417,7 +446,7 @@ export const ToolKitNode = memo(function ToolKitNode({
   )
 
   const scopedSkills = useMemo(() => {
-    const items = inventory?.skills ?? []
+    const items = (inventory?.skills ?? []).filter(isCatalogSkillActive)
     if (scopeMode === 'all') return [...items, ...endpointSkills]
     if (hasHermesLink) return endpointSkills
     return items.filter((skill) => skillMatchesLinkedScope(skill, linkedInstances))
@@ -473,6 +502,43 @@ export const ToolKitNode = memo(function ToolKitNode({
     ? linkedInstances.map((instance) => instance.label).join(' + ')
     : 'Workspace'
 
+  const openSkillLab = useCallback((skill: ToolkitSkill) => {
+    const state = useTerminalStore.getState()
+    const existing = state.panels.find((panel) => panel.type === 'skilllab')
+    const adapterConfig = {
+      ...(existing?.adapterConfig || {}),
+      selectedSkillId: skillIdFor(skill),
+      selectedSkillName: skill.name,
+      selectedSkillRevision: skill.revision,
+      selectedSkillSource: skill.source,
+      selectedSkillPath: skill.path,
+      openRequestedAt: Date.now(),
+    }
+    const panelId = existing?.id ?? state.addPanel({
+      type: 'skilllab',
+      title: 'Skill Lab',
+      adapterConfig,
+    })
+    if (existing) {
+      state.updatePanelConfig(panelId, adapterConfig)
+    } else {
+      const anchor = state.canvasNodes.get(data.panelId)?.position
+      const occupied = Array.from(state.canvasNodes.values()).map((node) => node.position)
+      state.updateCanvasNode(panelId, findDynamicNodePosition('skilllab', anchor, occupied))
+    }
+    const edgeExists = state.canvasEdges.some((edge) => (
+      (edge.source === data.panelId && edge.target === panelId)
+      || (edge.target === data.panelId && edge.source === panelId)
+    ))
+    if (!edgeExists) {
+      state.setCanvasEdges([
+        ...state.canvasEdges,
+        { id: `edge-${data.panelId}-${panelId}`, source: data.panelId, target: panelId },
+      ])
+    }
+    state.setActivePanel(panelId)
+  }, [data.panelId])
+
   return (
     <>
     <DataNodeShell
@@ -481,7 +547,7 @@ export const ToolKitNode = memo(function ToolKitNode({
       flowerVariant="toolkit"
       selected={selected}
       hasConnections={data.hasConnections}
-      buildContext={buildContext}
+      buildContext={data.hasTerminalConnections ? buildContext : undefined}
       statusBarClass={statusBarClass}
       hue={hueFor('toolkit')}
       onFocus={data.onFocus}
@@ -603,8 +669,8 @@ export const ToolKitNode = memo(function ToolKitNode({
 
         <div className="max-h-48 overflow-y-auto pr-1 space-y-1.5">
           {viewMode === 'skills' && (
-            filteredSkills.length ? filteredSkills.map((skill) => (
-              <SkillRow key={`${skill.source}-${skill.name}-${skill.path || ''}`} skill={skill} />
+              filteredSkills.length ? filteredSkills.map((skill) => (
+              <SkillRow key={`${skill.source}-${skill.name}-${skill.path || ''}`} skill={skill} onSelect={openSkillLab} />
             )) : (
               <div className="text-[10px] font-mono text-text-muted">No skills</div>
             )

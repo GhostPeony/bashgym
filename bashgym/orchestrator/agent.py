@@ -62,7 +62,7 @@ class OrchestrationAgent:
 
         # Local Ollama
         agent = OrchestrationAgent(
-            llm_config=LLMConfig(provider=LLMProvider.OLLAMA, model="qwen2.5-coder:32b")
+            llm_config=LLMConfig(provider=LLMProvider.OLLAMA, model="<installed-model>")
         )
 
         dag = await agent.submit_spec(spec)
@@ -91,7 +91,7 @@ class OrchestrationAgent:
         - anthropic: Claude models (Opus recommended)
         - openai: GPT-4o, o1, etc.
         - gemini: Gemini 2.5 Pro, etc.
-        - ollama: Any local model (qwen2.5-coder, llama3, etc.)
+        - ollama: An explicitly selected model installed in the configured runtime
 
         Args:
             llm_config: LLM provider config for spec decomposition.

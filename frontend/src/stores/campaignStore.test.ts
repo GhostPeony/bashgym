@@ -213,10 +213,21 @@ test('durable cursors append events once and loss queries use the exact source',
         items: [{
           cursor,
           event: {
+            schema_version: 'public_campaign_event.v1' as const,
             event_id: `event-${cursor}`,
+            workspace_id: 'workspace-a',
+            campaign_id: 'campaign-workspace-a',
+            sequence: cursor,
+            aggregate_version: cursor,
             event_type: 'campaign:training-metrics-appended',
-            payload: { attempt_id: 'attempt-workspace-a' },
-            idempotency_key: `idem-${cursor}`,
+            summary: {
+              schema_version: 'public_campaign_event_summary.v1' as const,
+              attempt_id: 'attempt-workspace-a',
+            },
+            actor_id: 'campaign-controller',
+            credential_kind: 'controller',
+            correlation_identity: 'a'.repeat(64),
+            idempotency_identity: 'b'.repeat(64),
             created_at: '2026-07-13T00:00:01Z',
           },
         }],
@@ -247,6 +258,55 @@ test('durable cursors append events once and loss queries use the exact source',
   assert.deepEqual(metricSources, ['training_metrics.jsonl', 'training_metrics.jsonl'])
   assert.deepEqual(detail.events.map((item) => item.cursor), [1, 2])
   assert.equal(useActivityStore.getState().events.length, 1)
+})
+
+test('campaign Activity ingests only the typed public event summary', async () => {
+  reset()
+  installReadMocks()
+  const eventFromTransport = {
+    schema_version: 'public_campaign_event.v1' as const,
+    event_id: 'event-1',
+    workspace_id: 'workspace-a',
+    campaign_id: 'campaign-workspace-a',
+    sequence: 1,
+    aggregate_version: 2,
+    event_type: 'campaign:action-blocked',
+    summary: {
+      schema_version: 'public_campaign_event_summary.v1' as const,
+      code: 'compute_capacity_unavailable',
+    },
+    actor_id: 'campaign-controller',
+    credential_kind: 'controller',
+    correlation_identity: 'a'.repeat(64),
+    idempotency_identity: 'b'.repeat(64),
+    created_at: '2026-07-16T00:00:00Z',
+    // An untrusted/older transport can still send extra JSON at runtime.
+    payload: {
+      location: 'C:/operator/restricted-result.json',
+      reference: 'protected-epoch-canary',
+      nested: { ordinary: 'candidate-map-canary' },
+    },
+  }
+  campaignApi.events = async () => ({
+    ok: true,
+    data: {
+      items: [{
+        cursor: 1,
+        event: eventFromTransport,
+      }],
+      next_cursor: 1,
+    },
+  })
+  campaignApi.metrics = async () => ({
+    ok: true,
+    data: { metric_name: 'loss', source: 'training_metrics.jsonl', values: [], next_after_step: -1 },
+  })
+
+  await useCampaignStore.getState().load('workspace-a')
+
+  const activity = useActivityStore.getState().events[0]
+  assert.match(activity.detail || '', /compute_capacity_unavailable/)
+  assert.doesNotMatch(activity.detail || '', /restricted-result|protected-epoch|candidate-map/)
 })
 
 test('transition refreshes authoritative campaign state after acknowledgement', async () => {

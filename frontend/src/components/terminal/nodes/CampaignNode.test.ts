@@ -267,10 +267,21 @@ function realisticDetail(): CampaignDetailState {
     events: [{
       cursor: 41,
       event: {
+        schema_version: 'public_campaign_event.v1',
         event_id: 'event-metrics-appended',
+        workspace_id: 'workspace-a',
+        campaign_id: 'campaign-1',
+        sequence: 41,
+        aggregate_version: 7,
         event_type: 'campaign:training-metrics-appended',
-        payload: { attempt_id: attempt.attempt_id },
-        idempotency_key: 'metrics-appended-once',
+        summary: {
+          schema_version: 'public_campaign_event_summary.v1',
+          attempt_id: attempt.attempt_id,
+        },
+        actor_id: 'campaign-controller',
+        credential_kind: 'controller',
+        correlation_identity: 'a'.repeat(64),
+        idempotency_identity: 'b'.repeat(64),
         created_at: '2026-07-13T21:14:34Z',
       },
     }],

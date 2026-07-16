@@ -51,7 +51,23 @@ class RecordingClient:
         if path.endswith("/events"):
             return {
                 "items": [
-                    {"cursor": index, "event": {"event_id": f"event-{index}"}}
+                    {
+                        "cursor": index,
+                        "event": {
+                            "schema_version": "public_campaign_event.v1",
+                            "event_id": f"event-{index}",
+                            "workspace_id": "workspace-a",
+                            "campaign_id": "campaign-1",
+                            "sequence": index,
+                            "aggregate_version": index,
+                            "event_type": "campaign:created",
+                            "actor_id": "codex-agent",
+                            "credential_kind": "access",
+                            "correlation_identity": "a" * 64,
+                            "idempotency_identity": "b" * 64,
+                            "created_at": "2026-07-16T00:00:00Z",
+                        },
+                    }
                     for index in range(1, 5)
                 ],
                 "next_cursor": 4,
@@ -91,6 +107,37 @@ class RecordingClient:
                 "replayed": False,
             }
         return {"campaign_id": "campaign-1", "workspace_id": "workspace-a"}
+
+
+class LeakyEventClient(RecordingClient):
+    def request_json(self, method: str, path: str, **kwargs) -> Any:
+        if path.endswith("/events"):
+            return {
+                "items": [{
+                    "cursor": 7,
+                    "event": {
+                        "schema_version": "campaign_event.v1",
+                        "event_id": "event-7",
+                        "workspace_id": "workspace-a",
+                        "campaign_id": "campaign-1",
+                        "sequence": 7,
+                        "aggregate_version": 3,
+                        "event_type": "campaign:protected-evaluation-completed",
+                        "payload": {
+                            "reference": "protected-epoch-canary",
+                            "result": "candidate-map-canary",
+                            "location": "C:/operator/restricted-result.json",
+                        },
+                        "actor_id": "campaign-controller",
+                        "credential_kind": "controller",
+                        "correlation_id": "protected-eval-correlation-canary",
+                        "idempotency_key": "protected-eval-idempotency-canary",
+                        "created_at": "2026-07-16T00:00:00Z",
+                    },
+                }],
+                "next_cursor": 7,
+            }
+        return super().request_json(method, path, **kwargs)
 
 
 async def call_tool(server, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -287,6 +334,33 @@ async def test_campaign_tools_bind_workspace_bound_arrays_and_mutation_headers()
         "expected_version": 3,
         "stop_reason": "Operator ended this bounded study.",
     }
+
+
+async def test_campaign_events_tool_reprojects_untrusted_event_responses():
+    server = build_server(
+        workspace_id="workspace-a",
+        credential_ref="BASHGYM_CAMPAIGN_REFRESH",
+        agent="codex",
+        client=LeakyEventClient(),
+    )
+
+    result = await call_tool(
+        server,
+        "campaign_events",
+        {"campaign_id": "campaign-1", "after_cursor": 0, "limit": 10},
+    )
+
+    assert result["ok"] is True
+    event = result["items"][0]["event"]
+    assert event["schema_version"] == "public_campaign_event.v1"
+    assert "summary" not in event
+    assert "payload" not in event
+    serialized = repr(result)
+    assert "protected-epoch-canary" not in serialized
+    assert "candidate-map-canary" not in serialized
+    assert "restricted-result.json" not in serialized
+    assert "protected-eval-correlation-canary" not in serialized
+    assert "protected-eval-idempotency-canary" not in serialized
 
 
 async def test_campaign_extended_tools_use_strict_paths_bodies_and_persisted_identity():

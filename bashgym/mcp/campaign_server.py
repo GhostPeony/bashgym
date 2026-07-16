@@ -16,6 +16,7 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from bashgym.campaigns.client import CampaignApiClient, CampaignClientError
+from bashgym.campaigns.visibility import project_public_campaign_event
 from bashgym.mcp.policy import validate_secret_ref_name
 
 
@@ -468,11 +469,27 @@ def build_server(
             payload, items, truncated = _bounded_collection(
                 result["data"], key="items", limit=limit
             )
-        except ValueError:
+            safe_items = []
+            for item in items:
+                if (
+                    not isinstance(item, dict)
+                    or not isinstance(item.get("cursor"), int)
+                    or not isinstance(item.get("event"), dict)
+                ):
+                    raise ValueError("invalid public event page item")
+                safe_items.append(
+                    {
+                        "cursor": item["cursor"],
+                        "event": project_public_campaign_event(item["event"]).model_dump(
+                            mode="json", exclude_none=True
+                        ),
+                    }
+                )
+        except (KeyError, TypeError, ValueError):
             return _invalid_response()
         return {
             "ok": True,
-            "items": items,
+            "items": safe_items,
             "next_cursor": payload.get("next_cursor", after_cursor),
             "truncated": truncated,
         }

@@ -1973,7 +1973,10 @@ def campaign_events(
         )
         return {
             "items": [
-                {"cursor": cursor, "event": event.model_dump(mode="json")}
+                {
+                    "cursor": cursor,
+                    "event": event.model_dump(mode="json", exclude_none=True),
+                }
                 for cursor, event in items
             ],
             "next_cursor": items[-1][0] if items else after_cursor,

@@ -1240,6 +1240,74 @@ def test_transitions_use_versions_idempotency_and_cursor_events(tmp_path):
     assert payload["next_cursor"] == payload["items"][-1]["cursor"]
 
 
+def test_events_endpoint_projects_fail_closed_public_events(tmp_path):
+    http, repository, refresh = campaign_client(
+        tmp_path, profile=AutonomyProfile.HERMES_BOUNDED
+    )
+    access = exchange(http, refresh.raw_token)
+    assert create_from_template(http, access).status_code == 200
+    canaries = {
+        "location": str(tmp_path / "operator" / "restricted-result.json"),
+        "reference": "protected-epoch-canary",
+        "result": "candidate-map-canary",
+        "note": "private-error-canary",
+        "nested": {"ordinary": ["nested-protected-canary"]},
+    }
+    with repository._connection(immediate=True) as connection:
+        connection.execute(
+            """
+            UPDATE campaign_events
+            SET event_type = ?, payload_json = ?, correlation_id = ?, idempotency_key = ?
+            WHERE workspace_id = ? AND campaign_id = ? AND sequence = 1
+            """,
+            (
+                "campaign:protected-evaluation-completed",
+                json.dumps(canaries),
+                "protected-eval-correlation-canary",
+                "protected-eval-idempotency-canary",
+                "workspace-a",
+                "campaign-1",
+            ),
+        )
+
+    response = http.get(
+        "/api/campaigns/campaign-1/events",
+        headers=bearer(access),
+        params={"workspace_id": "workspace-a", "after_cursor": 0, "limit": 10},
+    )
+
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert set(item) == {"cursor", "event"}
+    assert set(item["event"]) == {
+        "schema_version",
+        "event_id",
+        "workspace_id",
+        "campaign_id",
+        "sequence",
+        "aggregate_version",
+        "event_type",
+        "actor_id",
+        "credential_kind",
+        "correlation_identity",
+        "idempotency_identity",
+        "created_at",
+    }
+    assert item["event"]["schema_version"] == "public_campaign_event.v1"
+    assert "summary" not in item["event"]
+    serialized = json.dumps(response.json(), sort_keys=True)
+    for canary in (
+        "restricted-result.json",
+        "protected-epoch-canary",
+        "candidate-map-canary",
+        "private-error-canary",
+        "nested-protected-canary",
+    ):
+        assert canary not in serialized
+    assert "protected-eval-correlation-canary" not in serialized
+    assert "protected-eval-idempotency-canary" not in serialized
+
+
 def test_artifact_projection_redacts_absolute_uri(tmp_path):
     http, repository, refresh = campaign_client(tmp_path)
     access = exchange(http, refresh.raw_token)

@@ -1104,6 +1104,59 @@ class CampaignEvent(FrozenContractModel):
         return value
 
 
+class PublicCampaignEventSummaryV1(FrozenContractModel):
+    """Bounded workspace-safe fields classified for public campaign timelines."""
+
+    schema_version: Literal["public_campaign_event_summary.v1"] = (
+        "public_campaign_event_summary.v1"
+    )
+    action_id: Identifier | None = None
+    attempt_id: Identifier | None = None
+    study_id: Identifier | None = None
+    proposal_id: Identifier | None = None
+    source_id: Identifier | None = None
+    entry_id: Identifier | None = None
+    stage: Identifier | None = None
+    status: Identifier | None = None
+    code: Identifier | None = None
+    trigger: Identifier | None = None
+    outcome: Identifier | None = None
+    unit: Identifier | None = None
+    kind: Identifier | None = None
+    manifest_revision: int | None = Field(default=None, ge=1)
+    stage_index: int | None = Field(default=None, ge=0)
+    next_stage_index: int | None = Field(default=None, ge=0)
+    claim_generation: int | None = Field(default=None, ge=0)
+    cursor_end: int | None = Field(default=None, ge=0)
+    alert_count: int | None = Field(default=None, ge=0)
+    study_completed: bool | None = None
+    reserved: float | None = Field(default=None, ge=0)
+    actual: float | None = Field(default=None, ge=0)
+    effective_limit: float | None = Field(default=None, ge=0)
+    reason_codes: tuple[Identifier, ...] | None = Field(default=None, max_length=100)
+    metric_names: tuple[Identifier, ...] | None = Field(default=None, max_length=100)
+    evidence_ids: tuple[Identifier, ...] | None = Field(default=None, max_length=100)
+    artifact_ids: tuple[Identifier, ...] | None = Field(default=None, max_length=100)
+
+
+class PublicCampaignEventV1(FrozenContractModel):
+    """Fail-closed campaign event projection for readers and presentation surfaces."""
+
+    schema_version: Literal["public_campaign_event.v1"] = "public_campaign_event.v1"
+    event_id: Identifier
+    workspace_id: Identifier
+    campaign_id: Identifier
+    sequence: int = Field(ge=1)
+    aggregate_version: int = Field(ge=1)
+    event_type: Identifier
+    summary: PublicCampaignEventSummaryV1 | None = None
+    actor_id: Identifier
+    credential_kind: CredentialKind
+    correlation_identity: HexDigest
+    idempotency_identity: HexDigest
+    created_at: datetime
+
+
 class ActorPrincipal(FrozenContractModel):
     schema_version: Literal["campaign_actor_principal.v1"] = "campaign_actor_principal.v1"
     actor_id: Identifier
@@ -1300,6 +1353,8 @@ __all__ = [
     "CampaignSummaryV1",
     "CampaignEvidenceSnapshot",
     "CampaignEvent",
+    "PublicCampaignEventSummaryV1",
+    "PublicCampaignEventV1",
     "CampaignKind",
     "CampaignManifest",
     "CampaignStatus",

@@ -37,6 +37,7 @@ from bashgym.campaigns.runtime import (
     CampaignArtifactRecord,
     CampaignRuntimeRepository,
 )
+from bashgym.campaigns.visibility import project_public_campaign_event
 
 _TRIGGER_CAPABILITIES = {
     CampaignTrigger.START: Capability.CAMPAIGN_START,
@@ -141,8 +142,11 @@ class CampaignService:
         limit: int = 200,
     ):
         self.get(workspace_id, campaign_id, principal)
-        return self.repository.list_events(
-            workspace_id, campaign_id, after_cursor=after_cursor, limit=limit
+        return tuple(
+            (cursor, project_public_campaign_event(event))
+            for cursor, event in self.repository.list_events(
+                workspace_id, campaign_id, after_cursor=after_cursor, limit=limit
+            )
         )
 
     def artifacts(

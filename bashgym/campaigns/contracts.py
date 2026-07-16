@@ -561,6 +561,33 @@ class CampaignArtifactReference(FrozenContractModel):
     valid: bool
 
 
+class NemoGymEvidenceReference(FrozenContractModel):
+    """Bounded NeMo Gym identity exposed to planners without raw rollout content."""
+
+    schema_version: Literal["campaign_nemo_gym_evidence_reference.v1"] = (
+        "campaign_nemo_gym_evidence_reference.v1"
+    )
+    artifact_id: Identifier
+    artifact_sha256: HexDigest
+    bundle_digest: HexDigest
+    environment_id: Identifier
+    environment_digest: HexDigest
+    rollout_batch_digest: HexDigest
+    token_evidence_digest: HexDigest
+    refit_receipt_digest: HexDigest
+    rollout_count: int = Field(ge=1, le=4096)
+    mean_total_reward: float
+    training_step: int = Field(ge=0)
+    policy_revision: int = Field(ge=0)
+
+    @field_validator("mean_total_reward")
+    @classmethod
+    def finite_reward(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("NeMo Gym mean total reward must be finite")
+        return value
+
+
 class CompletedHypothesisSummary(FrozenContractModel):
     schema_version: Literal["campaign_completed_hypothesis_summary.v1"] = (
         "campaign_completed_hypothesis_summary.v1"
@@ -589,6 +616,9 @@ class CampaignEvidenceSnapshot(FrozenContractModel):
     proposal_counts: dict[ProposalStatus, int]
     completed_hypotheses: tuple[CompletedHypothesisSummary, ...] = Field(max_length=50)
     artifact_references: tuple[CampaignArtifactReference, ...] = Field(max_length=100)
+    nemo_gym_evidence_references: tuple[NemoGymEvidenceReference, ...] = Field(
+        default=(), max_length=100
+    )
     available_executors: tuple[Identifier, ...]
     active_study_id: Identifier | None = None
     active_action_id: Identifier | None = None
@@ -881,6 +911,7 @@ __all__ = [
     "HERMES_CAPABILITIES",
     "IssuedCredential",
     "ManifestRevision",
+    "NemoGymEvidenceReference",
     "CompletedHypothesisSummary",
     "ProposalRecord",
     "ProposalStatus",

@@ -22,6 +22,11 @@ from bashgym.campaigns.contracts import (
 )
 from bashgym.campaigns.evaluation import load_retrieval_evaluation_artifact
 from bashgym.campaigns.executors import FakeExecutionRequest, fake_digest
+from bashgym.campaigns.nemo_gym_evidence import (
+    NEMO_GYM_CAMPAIGN_EVIDENCE_FILENAME,
+    build_nemo_gym_campaign_evidence,
+    write_nemo_gym_campaign_evidence,
+)
 from bashgym.campaigns.remote import (
     ApprovedCodeLineageExecutionBinding,
     ApprovedRemoteExecutorProfile,
@@ -42,6 +47,11 @@ from bashgym.campaigns.worker import (
     CampaignWorker,
     SimulatedWorkerCrashError,
     _controller_selection_idempotency_key,
+)
+from bashgym.environments.nemo_gym import export_star_count_nemo_gym_bundle
+from bashgym.environments.star_count import (
+    generate_star_count_dataset,
+    star_count_environment_spec,
 )
 from tests.campaigns.test_persistence import campaign, create, transition
 
@@ -558,6 +568,114 @@ def test_remote_worker_launches_once_then_completes_on_a_later_tick(tmp_path):
         "actual": 0.25,
         "limit_delta": 0.0,
     }
+
+
+def test_nemo_gym_receipt_is_registered_with_bounded_metadata(tmp_path):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plan = seed_validated_study(repository)
+    worker = make_worker(repository, tmp_path, "worker-a")
+    schedule(repository, worker, plan)
+    claimed = repository.claim_next_action(
+        worker.leader,
+        ttl=timedelta(seconds=15),
+        now=START + timedelta(seconds=1),
+    )
+    assert claimed is not None
+
+    dataset = tmp_path / "star-count-dataset"
+    generate_star_count_dataset(
+        dataset,
+        train_size=1,
+        validation_size=1,
+        heldout_size=1,
+        seed=7,
+    )
+    bundle = export_star_count_nemo_gym_bundle(
+        dataset,
+        tmp_path / "nemo-gym-bundle",
+        nemo_gym_revision="a" * 40,
+        bashgym_revision="b" * 40,
+        dataset_license="MIT",
+    )
+    environment = star_count_environment_spec()
+    rollout = {
+        "session_id": "session-a",
+        "example_index": 0,
+        "environment_id": environment.id,
+        "environment_digest": canonical_hash(environment.to_dict()),
+        "response": {
+            "output": [
+                {
+                    "id": "message-a",
+                    "prompt_token_ids": [1, 2],
+                    "generation_token_ids": [3, 4],
+                    "generation_log_probs": [-0.1, -0.2],
+                }
+            ]
+        },
+        "reward_components": {"count_accuracy": 1.0, "format_accuracy": 1.0},
+        "total_reward": 1.0,
+        "refit": {
+            "refit_id": "refit-4",
+            "training_step": 4,
+            "source_checkpoint_sha256": "c" * 64,
+            "policy_revision": 4,
+            "generation_revision": 4,
+            "synchronized": True,
+        },
+    }
+    evidence = build_nemo_gym_campaign_evidence(
+        claimed,
+        bundle_manifest=bundle,
+        environment=environment,
+        rollout_payloads=[rollout],
+    )
+    temporary = tmp_path / "artifacts" / ".tmp" / "nemo-evidence"
+    temporary.mkdir(parents=True)
+    write_nemo_gym_campaign_evidence(
+        temporary / NEMO_GYM_CAMPAIGN_EVIDENCE_FILENAME,
+        evidence,
+    )
+    identity = RemoteRunIdentity(
+        compute_profile_id="private-compute-a",
+        run_id=claimed.attempt_id,
+        remote_run_directory=f"/private/{claimed.attempt_id}",
+        remote_pid=42,
+        process_group_id=42,
+        process_start_ticks=7,
+        boot_id="boot-a",
+        command_hash="d" * 64,
+        launch_manifest_sha256="e" * 64,
+        launched_at=START,
+    )
+    observation = RemoteObservation(
+        identity=identity,
+        state=RemoteRunState.COMPLETED,
+        observed_at=START + timedelta(seconds=2),
+        exit_code=0,
+        safe_reason="completed",
+    )
+    sealed, _manifest = worker.remote_output_sealer.seal_completed(
+        claimed,
+        identity,
+        observation,
+        temporary,
+    )
+    verified = worker._verify(claimed, sealed)
+    repository.complete_from_seal(
+        verified,
+        sealed,
+        worker_id=worker.worker_id,
+        now=START + timedelta(seconds=2),
+    )
+
+    artifact = repository.list_artifacts("workspace-a", "campaign-1")[0]
+    reference = artifact.metadata["nemo_gym"]
+    assert reference["artifact_id"] == artifact.artifact_id
+    assert reference["bundle_digest"] == bundle["bundle_digest"]
+    assert reference["token_evidence_digest"] == evidence.token_evidence_digest
+    assert reference["refit_receipt_digest"] == evidence.refit_receipt_digest
+    assert reference["rollout_count"] == 1
 
 
 def test_controller_resolves_server_profile_and_launches_without_actor_material(tmp_path):

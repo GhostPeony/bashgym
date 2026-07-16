@@ -84,6 +84,41 @@ IDs, generation IDs, and generation logprobs to pass through unchanged, unique
 session IDs for concurrent rollouts, exact component totals, and a synchronized
 policy-to-generation refit receipt.
 
+For campaign execution, convert the validated batch into the canonical
+`nemo_gym_campaign_evidence.json` receipt before returning remote outputs:
+
+```python
+from bashgym.campaigns.nemo_gym_evidence import (
+    build_nemo_gym_campaign_evidence,
+    write_nemo_gym_campaign_evidence,
+)
+
+evidence = build_nemo_gym_campaign_evidence(
+    attempt,
+    bundle_manifest=manifest,
+    environment=environment,
+    rollout_payloads=rollout_payloads,
+)
+write_nemo_gym_campaign_evidence(
+    output_directory / "nemo_gym_campaign_evidence.json",
+    evidence,
+)
+```
+
+The receipt binds the exact workspace, campaign, study, action, attempt,
+candidate, manifest revision, and claim generation to the bundle and environment
+digests. It also preserves the full message-level token arrays, named component
+rewards, weighted totals, ordered rollout identities, checkpoint digest, and
+policy/generation refit revision. The remote output sealer validates that binding
+before assigning the artifact schema. AutoResearch outcome evidence then includes
+the sealed artifact ID, while planner snapshots expose only bounded digests,
+counts, mean reward, training step, and policy revision—not raw rollouts or
+artifact paths.
+
+This proves the ingestion contract without claiming a live NeMo refit or model
+quality result. A live refit remains gated on the separate, compatible NeMo
+executor profile.
+
 This is an adapter and evidence boundary, not a claim that a live NeMo RL refit
 has run. The live proof remains gated on a dedicated NeMo executor and an
 already approved compatible campaign model. See NVIDIA's

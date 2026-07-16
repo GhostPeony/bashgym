@@ -46,6 +46,10 @@ from bashgym.campaigns.metrics import (
     detect_training_alerts,
     parse_metric_lines,
 )
+from bashgym.campaigns.nemo_gym_evidence import (
+    NEMO_GYM_CAMPAIGN_EVIDENCE_SCHEMA,
+    load_nemo_gym_campaign_evidence,
+)
 from bashgym.campaigns.persistence import (
     BudgetExceededError,
     CampaignPersistenceError,
@@ -2594,6 +2598,16 @@ class CampaignRuntimeRepository(CampaignRepository):
             reservation = json.loads(action_row["reservation_json"])
             for output in manifest.outputs:
                 artifact_id = f"artifact-{hashlib.sha256(f'{manifest.attempt_id}:{output.path}'.encode()).hexdigest()[:24]}"
+                metadata: dict[str, Any] = {"attempt_id": manifest.attempt_id}
+                if output.schema_name == NEMO_GYM_CAMPAIGN_EVIDENCE_SCHEMA:
+                    evidence = load_nemo_gym_campaign_evidence(
+                        sealed_directory / output.path,
+                        expected_attempt=attempt,
+                    )
+                    metadata["nemo_gym"] = evidence.bounded_reference(
+                        artifact_id=artifact_id,
+                        artifact_sha256=output.sha256,
+                    )
                 connection.execute(
                     """
                     INSERT OR IGNORE INTO campaign_artifacts(
@@ -2611,7 +2625,7 @@ class CampaignRuntimeRepository(CampaignRepository):
                         output.sha256,
                         output.size_bytes,
                         output.schema_name,
-                        _json({"attempt_id": manifest.attempt_id}),
+                        _json(metadata),
                         _iso(completed_at),
                     ),
                 )

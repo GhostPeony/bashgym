@@ -26,6 +26,7 @@ from bashgym.campaigns.contracts import (
     CompletedHypothesisSummary,
     CredentialKind,
     ManifestRevision,
+    NemoGymEvidenceReference,
     ProposalRecord,
     ProposalStatus,
     ProposalValidation,
@@ -37,6 +38,7 @@ from bashgym.campaigns.contracts import (
     canonical_hash,
     utc_now,
 )
+from bashgym.campaigns.nemo_gym_evidence import NEMO_GYM_CAMPAIGN_EVIDENCE_SCHEMA
 from bashgym.campaigns.transitions import transition_campaign
 
 
@@ -2410,7 +2412,7 @@ class CampaignRepository:
             )
             artifact_rows = connection.execute(
                 """
-                SELECT artifact_id, sha256, size_bytes, schema_name, valid
+                SELECT artifact_id, sha256, size_bytes, schema_name, valid, metadata_json
                 FROM campaign_artifacts
                 WHERE workspace_id = ? AND campaign_id = ? AND sealed = 1
                 ORDER BY created_at DESC, artifact_id DESC LIMIT 100
@@ -2427,6 +2429,26 @@ class CampaignRepository:
                 )
                 for row in artifact_rows
             )
+            nemo_gym_references = []
+            for row in artifact_rows:
+                metadata = json.loads(row["metadata_json"])
+                raw_reference = metadata.get("nemo_gym")
+                if raw_reference is None:
+                    continue
+                if row["schema_name"] != NEMO_GYM_CAMPAIGN_EVIDENCE_SCHEMA:
+                    raise CampaignPersistenceError(
+                        "campaign_nemo_gym_evidence_schema_mismatch"
+                    )
+                reference = NemoGymEvidenceReference.model_validate(raw_reference)
+                if (
+                    reference.artifact_id != row["artifact_id"]
+                    or reference.artifact_sha256 != row["sha256"]
+                    or not bool(row["valid"])
+                ):
+                    raise CampaignPersistenceError(
+                        "campaign_nemo_gym_evidence_reference_mismatch"
+                    )
+                nemo_gym_references.append(reference)
         return CampaignEvidenceSnapshot(
             workspace_id=workspace_id,
             campaign_id=campaign_id,
@@ -2444,6 +2466,7 @@ class CampaignRepository:
             proposal_counts=proposal_counts,
             completed_hypotheses=summaries,
             artifact_references=artifacts,
+            nemo_gym_evidence_references=tuple(nemo_gym_references),
             available_executors=("fake", "registered_remote"),
             active_study_id=campaign.active_study_id,
             active_action_id=campaign.active_action_id,

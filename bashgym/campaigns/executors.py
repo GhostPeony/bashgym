@@ -29,6 +29,11 @@ from bashgym.campaigns.evaluation import (
     compare_development_evaluations,
     load_retrieval_evaluation_artifact,
 )
+from bashgym.campaigns.nemo_gym_evidence import (
+    NEMO_GYM_CAMPAIGN_EVIDENCE_FILENAME,
+    NEMO_GYM_CAMPAIGN_EVIDENCE_SCHEMA,
+    load_nemo_gym_campaign_evidence,
+)
 from bashgym.campaigns.remote import RemoteObservation, RemoteRunIdentity
 
 
@@ -150,6 +155,9 @@ class RemoteOutputSealer:
     ) -> tuple[Path, SealedActionResult]:
         if observation.exit_code != 0 or observation.state.value != "completed":
             raise ValueError("remote completion must have a proven zero exit code")
+        evidence_path = temporary / NEMO_GYM_CAMPAIGN_EVIDENCE_FILENAME
+        if evidence_path.exists():
+            load_nemo_gym_campaign_evidence(evidence_path, expected_attempt=attempt)
         schemas = {
             path.relative_to(temporary).as_posix(): self._schema_for(path, temporary)
             for path in temporary.rglob("*")
@@ -322,6 +330,8 @@ class RemoteOutputSealer:
     @staticmethod
     def _schema_for(path: Path, root: Path) -> str:
         relative = path.relative_to(root).as_posix()
+        if relative == NEMO_GYM_CAMPAIGN_EVIDENCE_FILENAME:
+            return NEMO_GYM_CAMPAIGN_EVIDENCE_SCHEMA
         if relative == "training_metrics.jsonl":
             return "training_metrics_jsonl.v1"
         if relative == "training_manifest.json":

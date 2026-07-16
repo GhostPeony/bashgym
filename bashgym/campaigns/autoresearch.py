@@ -43,6 +43,7 @@ from bashgym.campaigns.contracts import (
     utc_now,
 )
 from bashgym.campaigns.lineage import code_mutation_kind_for_variable
+from bashgym.campaigns.nemo_gym_evidence import NEMO_GYM_CAMPAIGN_EVIDENCE_SCHEMA
 from bashgym.campaigns.persistence import (
     CampaignPersistenceError,
     MigrationChecksumError,
@@ -1623,6 +1624,11 @@ class AutoResearchCampaignCore:
             evidence_references.extend(
                 [ledger_artifact["artifact_id"], campaign_artifact.artifact_id]
             )
+        evidence_references.extend(
+            artifact.artifact_id
+            for artifact in campaign_artifacts
+            if artifact.schema_name == NEMO_GYM_CAMPAIGN_EVIDENCE_SCHEMA
+        )
 
         simulated = bool(run["is_simulation"]) or self._proposal_is_simulated(
             proposal.proposal

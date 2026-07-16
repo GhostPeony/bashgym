@@ -343,6 +343,25 @@ def test_authoritative_evaluation_derives_metric_cost_attempts_and_evidence(
                 NOW.isoformat(),
             ),
         )
+        connection.execute(
+            """
+            INSERT INTO campaign_artifacts(
+                workspace_id, campaign_id, artifact_id, producer_action_id,
+                uri, sha256, size_bytes, schema_name, sealed, valid,
+                metadata_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 24, ?, 1, 1, '{}', ?)
+            """,
+            (
+                "workspace-a",
+                "campaign-1",
+                "campaign-nemo-gym-evidence",
+                attempt.action_id,
+                "artifact://campaign/nemo-gym-evidence.json",
+                "9" * 64,
+                "nemo_gym_campaign_evidence.v1",
+                NOW.isoformat(),
+            ),
+        )
 
     ledger = core.ledger
     ledger.register_project(
@@ -519,6 +538,7 @@ def test_authoritative_evaluation_derives_metric_cost_attempts_and_evidence(
         "run-baseline-ledger",
         "ledger-eval-artifact",
         "campaign-eval-artifact",
+        "campaign-nemo-gym-evidence",
     }
     decisions = ledger.list_decisions("workspace-a", "project-a")
     assert len(decisions) == 1

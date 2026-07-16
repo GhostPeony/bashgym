@@ -3280,6 +3280,12 @@ def cmd_campaign_setup_nemo_rl(args: argparse.Namespace) -> int:
     if len(matches) != 1:
         raise ValueError("executor profile must resolve exactly once in the worker config")
     executor = matches[0]
+    if executor.nemo_rl is None and not args.allow_training_stage_replacement:
+        raise ValueError(
+            "initial NeMo RL setup replaces smoke/full training stages; "
+            "select a dedicated executor profile and pass "
+            "--allow-training-stage-replacement"
+        )
     image_digest = args.image_reference.rpartition("@sha256:")[2]
     dataset = Path(args.dataset).expanduser().resolve()
     provisional = ApprovedNemoRLProfile(
@@ -3358,7 +3364,12 @@ def cmd_campaign_setup_nemo_rl(args: argparse.Namespace) -> int:
     nemo_profile = ApprovedNemoRLProfile.model_validate(
         {**profile_payload, "runtime_receipt": runtime_receipt}
     )
-    revised = bind_nemo_rl_profile(executor, nemo_profile, replace=bool(args.replace))
+    revised = bind_nemo_rl_profile(
+        executor,
+        nemo_profile,
+        replace=bool(args.replace),
+        allow_training_stage_replacement=bool(args.allow_training_stage_replacement),
+    )
     remote_profiles = tuple(
         sorted(
             (
@@ -4193,6 +4204,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--replace",
         action="store_true",
         help="Replace an existing NeMo binding on this executor profile",
+    )
+    nemo_setup.add_argument(
+        "--allow-training-stage-replacement",
+        action="store_true",
+        help=(
+            "Acknowledge that initial setup replaces smoke/full stages; "
+            "use only with a dedicated NeMo executor profile"
+        ),
     )
     nemo_setup.set_defaults(func=cmd_campaign_setup_nemo_rl)
 

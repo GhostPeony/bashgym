@@ -44,11 +44,18 @@ def bind_nemo_rl_profile(
     nemo_profile: ApprovedNemoRLProfile,
     *,
     replace: bool,
+    allow_training_stage_replacement: bool = False,
 ) -> ApprovedRemoteExecutorProfile:
     """Return a revised executor whose training stages invoke the typed wrapper."""
 
     if executor.nemo_rl is not None and not replace:
         raise ValueError("NeMo RL is already configured; pass replace explicitly")
+    if executor.nemo_rl is None and not allow_training_stage_replacement:
+        raise ValueError(
+            "initial NeMo RL setup replaces smoke/full training stages; "
+            "use a dedicated executor profile and pass "
+            "allow_training_stage_replacement explicitly"
+        )
     if (
         nemo_profile.compute_profile_id != executor.compute_profile_id
         or nemo_profile.target_contract_key != executor.target_contract_key

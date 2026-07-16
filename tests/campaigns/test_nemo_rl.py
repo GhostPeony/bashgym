@@ -183,7 +183,12 @@ def test_docker_wrapper_uses_typed_bounded_argv(dataset: Path, tmp_path: Path):
 def test_binding_reuses_registered_executor_lifecycle(dataset: Path, tmp_path: Path):
     executor = _executor(tmp_path, dataset)
     nemo = _nemo_profile(dataset)
-    revised = bind_nemo_rl_profile(executor, nemo, replace=False)
+    revised = bind_nemo_rl_profile(
+        executor,
+        nemo,
+        replace=False,
+        allow_training_stage_replacement=True,
+    )
 
     assert revised.profile_revision == 2
     assert revised.nemo_rl == nemo
@@ -195,6 +200,16 @@ def test_binding_reuses_registered_executor_lifecycle(dataset: Path, tmp_path: P
         assert stage.code_lineage_binding.entrypoint_path == "bashgym/campaigns/nemo_rl_runner.py"
         parsed = NemoRLContainerContract.model_validate_json(stage.script_args[1])
         assert parsed.stage == stage.stage
+
+
+def test_initial_binding_refuses_to_replace_existing_training_stages(
+    dataset: Path,
+    tmp_path: Path,
+):
+    executor = _executor(tmp_path, dataset)
+
+    with pytest.raises(ValueError, match="dedicated executor profile"):
+        bind_nemo_rl_profile(executor, _nemo_profile(dataset), replace=False)
 
 
 @pytest.mark.asyncio

@@ -15,7 +15,10 @@ from bashgym.environments.nemo_gym import (
     NemoGymMessageTokenEvidence,
     assert_message_token_evidence_preserved,
     build_star_count_resources_server,
+    create_nemo_gym_bundle_archive,
     export_star_count_nemo_gym_bundle,
+    extract_nemo_gym_bundle_archive,
+    inspect_nemo_gym_bundle_archive,
     score_star_count_nemo_response,
     validate_nemo_gym_rollout_batch,
 )
@@ -120,9 +123,9 @@ def test_star_count_bundle_is_pinned_deterministic_and_path_independent(tmp_path
         assert len(records_a) == expected_size
         record = records_a[0]
         assert record["environment_id"] == "star-count-v1"
-        assert record["responses_create_params"]["input"][1]["content"][0][
-            "image_url"
-        ].startswith("data:image/png;base64,")
+        assert record["responses_create_params"]["input"][1]["content"][0]["image_url"].startswith(
+            "data:image/png;base64,"
+        )
         assert record["expected_counts"]
 
 
@@ -178,6 +181,48 @@ def test_bundle_refuses_mutable_revisions_and_nonempty_destination(tmp_path: Pat
             bashgym_revision=BASHGYM_REVISION,
             dataset_license="MIT",
         )
+
+
+def test_bundle_archive_is_deterministic_validated_and_safely_extracted(tmp_path: Path):
+    dataset = tmp_path / "dataset"
+    generate_star_count_dataset(
+        dataset,
+        train_size=2,
+        validation_size=1,
+        heldout_size=1,
+        seed=11,
+    )
+    bundle = tmp_path / "bundle"
+    manifest = export_star_count_nemo_gym_bundle(
+        dataset,
+        bundle,
+        nemo_gym_revision=NEMO_GYM_REVISION,
+        bashgym_revision=BASHGYM_REVISION,
+        dataset_license="MIT",
+    )
+    first = tmp_path / "first.zip"
+    second = tmp_path / "second.zip"
+
+    receipt_a = create_nemo_gym_bundle_archive(bundle, first)
+    receipt_b = create_nemo_gym_bundle_archive(bundle, second)
+
+    assert first.read_bytes() == second.read_bytes()
+    assert receipt_a == receipt_b
+    assert receipt_a["bundle_digest"] == manifest["bundle_digest"]
+    assert inspect_nemo_gym_bundle_archive(first) == manifest
+
+    extracted = tmp_path / "extracted"
+    assert extract_nemo_gym_bundle_archive(first, extracted) == manifest
+    assert (
+        extracted / "resources_servers/bashgym_star_count/configs/bashgym_star_count.yaml"
+    ).is_file()
+
+    damaged = bytearray(first.read_bytes())
+    damaged[-8] ^= 0xFF
+    corrupt = tmp_path / "corrupt.zip"
+    corrupt.write_bytes(damaged)
+    with pytest.raises(ValueError, match="archive is invalid|file digest mismatch"):
+        inspect_nemo_gym_bundle_archive(corrupt)
 
 
 def test_star_count_nemo_gym_reward_preserves_components():

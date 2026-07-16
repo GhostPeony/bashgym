@@ -58,6 +58,32 @@ Gold traces teach the model what good behavior looks like. Terminal
 environments prove whether the behavior survives interaction with a real shell,
 repo, and verifier.
 
+### AutoResearch across models and backends
+
+AutoResearch is BashGym's shared research control plane, not a feature of one
+model, environment, or trainer. Every registered open model uses the same agent
+intake, baseline-first hypotheses, budgets, attempts, leases, cancellation,
+restart recovery, artifact sealing, heldout evaluation, experiment ledger,
+keep/discard decision, promotion gates, and workspace canvas.
+
+| Layer | All registered BashGym models | Optional NeMo RL/Gym extension |
+|---|---|---|
+| Research controller and operator skills | Shared | Reused unchanged |
+| Local/private-SSH execution authority | Shared | Reused unchanged |
+| Evaluation, evidence, ledger, and promotion | Shared | Reused unchanged |
+| Model loader and training recipe | Selected per registered model/backend | NeMo RL recipe adapter |
+| Distributed rollout/generation topology | Backend-dependent | Ray plus async vLLM |
+| Multi-turn environment isolation | Backend-dependent | NeMo Gym servers/sessions |
+| Training-to-generation refit | Backend-dependent | NeMo RL refit contract |
+
+A model appearing in a local cache is not enough to activate training. Each new
+trainable base must resolve an immutable model revision, compatible installed
+trainer recipe, approved data/evaluator binding, and compute profile. Inference
+quants and served deployment artifacts cannot silently satisfy that contract.
+The productization goal is to discover and generate these bindings through a
+guided setup, while `campaign doctor` continues to fail closed on missing or
+incompatible material.
+
 ### Optional NeMo Gym environment export
 
 BashGym can export its deterministic star-count environment into the current
@@ -65,7 +91,10 @@ NeMo Gym resources-server, simple-agent, and Responses API dataset layout
 without installing NeMo Gym into BashGym's core Python environment:
 
 ```python
-from bashgym.environments import export_star_count_nemo_gym_bundle
+from bashgym.environments import (
+    create_nemo_gym_bundle_archive,
+    export_star_count_nemo_gym_bundle,
+)
 
 manifest = export_star_count_nemo_gym_bundle(
     "star-count-dataset",
@@ -74,7 +103,20 @@ manifest = export_star_count_nemo_gym_bundle(
     bashgym_revision="<40-character BashGym commit>",
     dataset_license="MIT",
 )
+archive = create_nemo_gym_bundle_archive(
+    "nemo-gym-bundle",
+    "nemo-gym-bundle.zip",
+)
 ```
+
+The exported directory can be turned into a deterministic, content-validated
+single-file transport artifact with `create_nemo_gym_bundle_archive`. A
+Gym-enabled executor binds that archive digest, requires NVIDIA's
+`examples/nemo_gym/run_grpo_nemo_gym.py` entrypoint, verifies the embedded Gym
+source revision, mounts only the approved resources server, includes
+`vllm_model_for_training.yaml`, and enables async vLLM HTTP generation.
+`no_update` smoke stages use Gym trajectory-collection mode instead of taking an
+optimizer step.
 
 The bundle embeds portable image data, BashGym's exact component verifier,
 immutable source revisions, and content hashes. Its resources server imports

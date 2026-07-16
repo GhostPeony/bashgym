@@ -12,6 +12,8 @@ import hashlib
 import json
 import math
 import re
+import stat
+import zipfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -34,6 +36,8 @@ _TOKEN_FIELDS = (
     "generation_log_probs",
 )
 _RESOURCE_ROOT = PurePosixPath("resources_servers/bashgym_star_count")
+_MAX_BUNDLE_FILES = 10_000
+_MAX_BUNDLE_BYTES = 512 * 1024 * 1024
 _APP_SOURCE = """\
 \"\"\"NeMo Gym entrypoint for the pinned BashGym star-count environment.\"\"\"
 
@@ -241,9 +245,7 @@ def export_star_count_nemo_gym_bundle(
     """Export one deterministic, path-independent NeMo Gym resources bundle."""
 
     nemo_revision = _immutable_revision(nemo_gym_revision, label="NeMo Gym revision")
-    bashgym_source_revision = _immutable_revision(
-        bashgym_revision, label="BashGym revision"
-    )
+    bashgym_source_revision = _immutable_revision(bashgym_revision, label="BashGym revision")
     license_id = _dataset_license(dataset_license)
     loaded = _load_verified_star_count_dataset(Path(dataset_directory))
     dataset_root: Path = loaded["root"]
@@ -324,6 +326,139 @@ def export_star_count_nemo_gym_bundle(
     return manifest
 
 
+def _validated_bundle_members(archive_path: Path) -> tuple[dict[str, bytes], dict[str, Any]]:
+    archive = archive_path.expanduser()
+    if archive.is_symlink() or not archive.is_file() or archive.suffix.casefold() != ".zip":
+        raise ValueError("NeMo Gym bundle archive must be a regular ZIP file")
+    members: dict[str, bytes] = {}
+    try:
+        with zipfile.ZipFile(archive.resolve()) as bundle:
+            entries = bundle.infolist()
+            if len(entries) > _MAX_BUNDLE_FILES:
+                raise ValueError("NeMo Gym bundle archive contains too many files")
+            if sum(entry.file_size for entry in entries) > _MAX_BUNDLE_BYTES:
+                raise ValueError("NeMo Gym bundle archive exceeds the extraction limit")
+            for entry in entries:
+                relative = PurePosixPath(entry.filename.replace("\\", "/"))
+                mode = entry.external_attr >> 16
+                if (
+                    entry.is_dir()
+                    or relative.is_absolute()
+                    or any(part in {"", ".", ".."} for part in relative.parts)
+                    or stat.S_ISLNK(mode)
+                    or relative.as_posix() in members
+                ):
+                    raise ValueError("NeMo Gym bundle archive contains an unsafe path")
+                members[relative.as_posix()] = bundle.read(entry)
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise ValueError("NeMo Gym bundle archive is invalid") from exc
+
+    try:
+        manifest = json.loads(members["bundle_manifest.json"].decode("utf-8"))
+    except (KeyError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("NeMo Gym bundle archive has no valid manifest") from exc
+    if (
+        not isinstance(manifest, Mapping)
+        or manifest.get("schema_version") != "bashgym_nemo_gym_bundle.v1"
+    ):
+        raise ValueError("unsupported NeMo Gym bundle manifest")
+    identity = {key: value for key, value in manifest.items() if key != "bundle_digest"}
+    if _canonical_hash(identity) != manifest.get("bundle_digest"):
+        raise ValueError("NeMo Gym bundle manifest digest mismatch")
+    records = manifest.get("files")
+    if not isinstance(records, list) or not records:
+        raise ValueError("NeMo Gym bundle manifest requires a file inventory")
+    expected_paths: list[str] = []
+    for record in records:
+        if not isinstance(record, Mapping):
+            raise ValueError("NeMo Gym bundle file records must be objects")
+        relative = PurePosixPath(str(record.get("path", "")))
+        path = relative.as_posix()
+        if (
+            relative.is_absolute()
+            or any(part in {"", ".", ".."} for part in relative.parts)
+            or path == "bundle_manifest.json"
+        ):
+            raise ValueError("NeMo Gym bundle manifest contains an unsafe file path")
+        payload = members.get(path)
+        if payload is None:
+            raise ValueError("NeMo Gym bundle archive is missing a manifest file")
+        if len(payload) != record.get("size_bytes"):
+            raise ValueError("NeMo Gym bundle file size mismatch")
+        if hashlib.sha256(payload).hexdigest() != record.get("sha256"):
+            raise ValueError("NeMo Gym bundle file digest mismatch")
+        expected_paths.append(path)
+    if expected_paths != sorted(set(expected_paths)):
+        raise ValueError("NeMo Gym bundle file inventory must be sorted and unique")
+    if set(members) != {"bundle_manifest.json", *expected_paths}:
+        raise ValueError("NeMo Gym bundle archive contains unbound files")
+    required = {
+        (_RESOURCE_ROOT / "app.py").as_posix(),
+        (_RESOURCE_ROOT / "configs/bashgym_star_count.yaml").as_posix(),
+        (_RESOURCE_ROOT / "data/train.jsonl").as_posix(),
+        (_RESOURCE_ROOT / "data/validation.jsonl").as_posix(),
+    }
+    if not required.issubset(members):
+        raise ValueError("NeMo Gym bundle archive is missing required runtime files")
+    return members, dict(manifest)
+
+
+def create_nemo_gym_bundle_archive(
+    bundle_directory: str | Path, output_path: str | Path
+) -> dict[str, Any]:
+    """Create one deterministic transport archive from an exported Gym bundle."""
+
+    root_candidate = Path(bundle_directory).expanduser()
+    if root_candidate.is_symlink() or not root_candidate.is_dir():
+        raise ValueError("NeMo Gym bundle must be a regular directory")
+    root = root_candidate.resolve()
+    destination = Path(output_path).expanduser().resolve()
+    if destination.exists() or destination.is_symlink():
+        raise FileExistsError("NeMo Gym bundle archive destination already exists")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    paths = sorted(path for path in root.rglob("*") if path.is_file() and not path.is_symlink())
+    with zipfile.ZipFile(
+        destination, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6
+    ) as archive:
+        for path in paths:
+            relative = path.relative_to(root).as_posix()
+            info = zipfile.ZipInfo(relative, date_time=(1980, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = 0o100600 << 16
+            archive.writestr(info, path.read_bytes(), compresslevel=6)
+    _members, manifest = _validated_bundle_members(destination)
+    return {
+        "schema_version": "bashgym_nemo_gym_bundle_archive.v1",
+        "archive_sha256": _sha256_file(destination),
+        "bundle_digest": manifest["bundle_digest"],
+        "size_bytes": destination.stat().st_size,
+    }
+
+
+def extract_nemo_gym_bundle_archive(
+    archive_path: str | Path, destination: str | Path
+) -> dict[str, Any]:
+    """Validate and safely extract one exact Gym bundle archive."""
+
+    members, manifest = _validated_bundle_members(Path(archive_path))
+    root = Path(destination).expanduser().resolve()
+    if root.exists() and (root.is_symlink() or not root.is_dir() or any(root.iterdir())):
+        raise FileExistsError("NeMo Gym bundle extraction destination is not empty")
+    root.mkdir(parents=True, exist_ok=True)
+    for relative, payload in members.items():
+        target = root.joinpath(*PurePosixPath(relative).parts)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(payload)
+    return manifest
+
+
+def inspect_nemo_gym_bundle_archive(archive_path: str | Path) -> dict[str, Any]:
+    """Return the validated, path-independent identity of a Gym bundle archive."""
+
+    _members, manifest = _validated_bundle_members(Path(archive_path))
+    return manifest
+
+
 def _response_output_text(response: Mapping[str, Any]) -> str:
     direct = response.get("output_text")
     if isinstance(direct, str):
@@ -392,9 +527,7 @@ class NemoGymMessageTokenEvidence:
         if not _IDENTIFIER.fullmatch(item_id):
             raise ValueError("token evidence requires a stable message item ID")
         prompt = _token_ids(message["prompt_token_ids"], label="prompt_token_ids")
-        generation = _token_ids(
-            message["generation_token_ids"], label="generation_token_ids"
-        )
+        generation = _token_ids(message["generation_token_ids"], label="generation_token_ids")
         log_probs = _log_probs(message["generation_log_probs"])
         if len(generation) != len(log_probs):
             raise ValueError("generation token IDs and logprobs must have the same length")
@@ -580,7 +713,10 @@ __all__ = [
     "NemoGymRolloutEvidence",
     "assert_message_token_evidence_preserved",
     "build_star_count_resources_server",
+    "create_nemo_gym_bundle_archive",
+    "extract_nemo_gym_bundle_archive",
     "export_star_count_nemo_gym_bundle",
+    "inspect_nemo_gym_bundle_archive",
     "run_star_count_resources_server",
     "score_star_count_nemo_response",
     "validate_nemo_gym_rollout_batch",

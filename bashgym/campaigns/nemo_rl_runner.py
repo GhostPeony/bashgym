@@ -18,10 +18,18 @@ from typing import IO, Any
 
 from bashgym.campaigns.contracts import canonical_hash
 from bashgym.campaigns.nemo_rl import NemoRLContainerContract, sha256_file
+from bashgym.environments.nemo_gym import (
+    extract_nemo_gym_bundle_archive,
+    inspect_nemo_gym_bundle_archive,
+)
 
 _METRIC = re.compile(
     r"(?P<name>reward|loss|kl|entropy|grad_norm)[\s/:=]+(?P<value>-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)",
     re.IGNORECASE,
+)
+_GYM_WORKSPACE = "/opt/nemo-rl/3rdparty/Gym-workspace/Gym"
+_VLLM_TRAINING_CONFIG = (
+    f"{_GYM_WORKSPACE}/responses_api_models/vllm_model/configs/vllm_model_for_training.yaml"
 )
 
 
@@ -54,11 +62,13 @@ def _run_checked(argv: Sequence[str], *, timeout: float = 30) -> str:
     return completed.stdout.strip()
 
 
-def validate_runtime_identity(
-    contract: NemoRLContainerContract, run_directory: Path
-) -> ModelMount:
+def validate_runtime_identity(contract: NemoRLContainerContract, run_directory: Path) -> ModelMount:
     dataset = run_directory / contract.dataset_file
-    if dataset.is_symlink() or not dataset.is_file() or sha256_file(dataset) != contract.dataset_sha256:
+    if (
+        dataset.is_symlink()
+        or not dataset.is_file()
+        or sha256_file(dataset) != contract.dataset_sha256
+    ):
         raise RuntimeError("nemo_rl_dataset_identity_mismatch")
 
     model = Path(contract.remote_model_path).expanduser().resolve()
@@ -105,6 +115,43 @@ def validate_runtime_identity(
     ).split(maxsplit=1)[0]
     if recipe != contract.recipe_sha256:
         raise RuntimeError("nemo_rl_recipe_identity_mismatch")
+    if contract.nemo_gym is not None:
+        gym = contract.nemo_gym
+        archive = run_directory / gym.bundle_archive_file
+        if (
+            archive.is_symlink()
+            or not archive.is_file()
+            or sha256_file(archive) != gym.bundle_archive_sha256
+        ):
+            raise RuntimeError("nemo_gym_bundle_archive_identity_mismatch")
+        manifest = inspect_nemo_gym_bundle_archive(archive)
+        expected = {
+            "bundle_digest": gym.bundle_digest,
+            "nemo_gym_source_revision": gym.nemo_gym_source_revision,
+            "environment_id": gym.environment_id,
+            "environment_digest": gym.environment_digest,
+            "resources_server_id": gym.resources_server_id,
+        }
+        if any(manifest.get(key) != value for key, value in expected.items()):
+            raise RuntimeError("nemo_gym_bundle_manifest_identity_mismatch")
+        gym_source = _run_checked(
+            (
+                "docker",
+                "run",
+                "--rm",
+                "--network=none",
+                "--entrypoint",
+                "git",
+                contract.image_reference,
+                "-C",
+                _GYM_WORKSPACE,
+                "rev-parse",
+                "HEAD",
+            ),
+            timeout=60,
+        )
+        if gym_source != gym.nemo_gym_source_revision:
+            raise RuntimeError("nemo_gym_source_identity_mismatch")
     if model.parent.name == "snapshots" and model.name == contract.model_revision:
         return ModelMount(
             host_directory=model.parent.parent,
@@ -122,7 +169,7 @@ def docker_argv(
 ) -> tuple[str, ...]:
     """Return a typed argv; callers never invoke a shell."""
 
-    controller_overrides = (
+    controller_overrides: tuple[str, ...] = (
         "checkpointing.checkpoint_dir=/bashgym/run/final",
         f"grpo.max_num_steps={contract.max_steps}",
         "logger.log_dir=/bashgym/run/logs",
@@ -130,6 +177,39 @@ def docker_argv(
         f"policy.optimizer.kwargs.lr={contract.learning_rate}",
         f"policy.tokenizer.name={model_mount.container_path}",
     )
+    mounts = [
+        "--mount",
+        f"type=bind,src={run_directory},dst=/bashgym/run",
+        "--mount",
+        f"type=bind,src={model_mount.host_directory},dst=/bashgym/model-repo,readonly",
+    ]
+    if contract.nemo_gym is not None:
+        gym = contract.nemo_gym
+        resource_source = (
+            run_directory / "nemo_gym_bundle" / "resources_servers" / gym.resources_server_id
+        )
+        resource_destination = f"{_GYM_WORKSPACE}/resources_servers/{gym.resources_server_id}"
+        mounts.extend(
+            (
+                "--mount",
+                f"type=bind,src={resource_source},dst={resource_destination},readonly",
+            )
+        )
+        resources_config = f"{_GYM_WORKSPACE}/{gym.resources_config_path}"
+        controller_overrides += (
+            "data.default.dataset_name=NemoGymDataset",
+            "data.default.env_name=nemo_gym",
+            f"data.train.data_path={resource_destination}/data/train.jsonl",
+            f"data.validation.data_path={resource_destination}/data/validation.jsonl",
+            "env.should_log_nemo_gym_responses=true",
+            "env.should_use_nemo_gym=true",
+            "env.nemo_gym.config_paths=" + f"[{_VLLM_TRAINING_CONFIG},{resources_config}]",
+            "env.nemo_gym.is_trajectory_collection="
+            + ("true" if contract.mode.value == "no_update" else "false"),
+            "policy.generation.backend=vllm",
+            "policy.generation.vllm_cfg.async_engine=true",
+            "policy.generation.vllm_cfg.expose_http_server=true",
+        )
     return (
         "docker",
         "run",
@@ -141,10 +221,7 @@ def docker_argv(
         f"device={','.join(str(index) for index in range(contract.gpu_count))}",
         "--shm-size",
         f"{contract.shared_memory_gib}g",
-        "--mount",
-        f"type=bind,src={run_directory},dst=/bashgym/run",
-        "--mount",
-        f"type=bind,src={model_mount.host_directory},dst=/bashgym/model-repo,readonly",
+        *mounts,
         "--workdir",
         "/opt/nemo-rl",
         contract.image_reference,
@@ -178,6 +255,11 @@ def run_contract(contract: NemoRLContainerContract, run_directory: Path) -> int:
     final_directory.mkdir(exist_ok=True)
     (run_directory / "logs").mkdir(exist_ok=True)
     model_mount = validate_runtime_identity(contract, run_directory)
+    if contract.nemo_gym is not None:
+        extract_nemo_gym_bundle_archive(
+            run_directory / contract.nemo_gym.bundle_archive_file,
+            run_directory / "nemo_gym_bundle",
+        )
     identity = canonical_hash(contract.model_dump(mode="json"))[:20]
     container_name = f"bashgym-nemo-{identity}-{os.getpid()}"
     argv = docker_argv(
@@ -209,9 +291,7 @@ def run_contract(contract: NemoRLContainerContract, run_directory: Path) -> int:
         if process is not None and process.poll() is None:
             process.terminate()
 
-    previous = {
-        sig: signal.signal(sig, stop_container) for sig in (signal.SIGINT, signal.SIGTERM)
-    }
+    previous = {sig: signal.signal(sig, stop_container) for sig in (signal.SIGINT, signal.SIGTERM)}
     exit_code = 125
     metrics_path = run_directory / "training_metrics.jsonl"
     try:
@@ -270,6 +350,17 @@ def run_contract(contract: NemoRLContainerContract, run_directory: Path) -> int:
             "dataset_sha256": contract.dataset_sha256,
             "verifier_id": contract.verifier_id,
             "verifier_digest": contract.verifier_digest,
+            "nemo_gym": (
+                {
+                    "bundle_digest": contract.nemo_gym.bundle_digest,
+                    "environment_id": contract.nemo_gym.environment_id,
+                    "environment_digest": contract.nemo_gym.environment_digest,
+                    "nemo_gym_source_revision": contract.nemo_gym.nemo_gym_source_revision,
+                    "trajectory_collection": contract.mode.value == "no_update",
+                }
+                if contract.nemo_gym is not None
+                else None
+            ),
             "mode": contract.mode,
             "max_steps": contract.max_steps,
             "learning_rate": contract.learning_rate,

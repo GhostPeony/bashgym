@@ -18,12 +18,8 @@ from bashgym.campaigns.worker_service import ControllerStatusProjection
 from bashgym.ledger.persistence import ExperimentLedgerRepository
 
 _IMMUTABLE_REVISION = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64}|sha256:[0-9a-f]{64})$")
-_DEFAULT_COMPUTE_STAGES = frozenset(
-    {StageKind.SMOKE_TRAINING, StageKind.FULL_TRAINING}
-)
-_REMOTE_COMPUTE_STAGES = frozenset(
-    {*_DEFAULT_COMPUTE_STAGES, StageKind.DEVELOPMENT_EVALUATION}
-)
+_DEFAULT_COMPUTE_STAGES = frozenset({StageKind.SMOKE_TRAINING, StageKind.FULL_TRAINING})
+_REMOTE_COMPUTE_STAGES = frozenset({*_DEFAULT_COMPUTE_STAGES, StageKind.DEVELOPMENT_EVALUATION})
 
 
 class AutoResearchDoctorCheck(FrozenContractModel):
@@ -224,11 +220,11 @@ def doctor_autoresearch_template(
         if profile is not None and profile.nemo_rl is not None:
             nemo = profile.nemo_rl
             receipt = nemo.runtime_receipt
-            model_location, _, model_revision = definition.target_model.base_model_ref.rpartition("@")
+            model_location, _, model_revision = definition.target_model.base_model_ref.rpartition(
+                "@"
+            )
             expected_model_id = (
-                model_location.removeprefix("hf://")
-                if model_location.startswith("hf://")
-                else ""
+                model_location.removeprefix("hf://") if model_location.startswith("hf://") else ""
             )
             checks.extend(
                 (
@@ -303,6 +299,7 @@ def doctor_autoresearch_template(
                             == (
                                 "effective_config.json",
                                 "final",
+                                "logs",
                                 "training_manifest.json",
                                 "training_metrics.jsonl",
                             )
@@ -321,6 +318,30 @@ def doctor_autoresearch_template(
                     ),
                 )
             )
+            if nemo.nemo_gym is not None:
+                gym = nemo.nemo_gym
+                checks.append(
+                    _check(
+                        "nemo_gym_execution_contract",
+                        bool(
+                            receipt is not None
+                            and receipt.nemo_gym_source_ready is True
+                            and receipt.nemo_gym_source_revision == gym.nemo_gym_source_revision
+                            and nemo.entrypoint_path == "examples/nemo_gym/run_grpo_nemo_gym.py"
+                            and all(
+                                gym.bundle_archive_path in stage.input_files
+                                and stage.input_sha256.get(gym.bundle_archive_path.name)
+                                == gym.bundle_archive_sha256
+                                and nemo.container_contract(stage.stage).nemo_gym is not None
+                                for stage in profile.stages
+                                if stage.stage in required_compute_stages
+                            )
+                        ),
+                        "nemo_gym_execution_contract_ready",
+                        "nemo_gym_execution_contract_unresolved",
+                        "Re-run setup-nemo-rl with the exact Gym bundle and embedded source revision on a dedicated profile.",
+                    )
+                )
         source_profile_id = evaluation_plan.get("source_repository_binding_id")
         source_profile = (
             source_profiles.get(source_profile_id)

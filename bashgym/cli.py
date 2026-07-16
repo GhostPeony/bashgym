@@ -3171,9 +3171,7 @@ def cmd_campaign_doctor(args: argparse.Namespace) -> int:
         query={"workspace_id": args.workspace_id},
     )
     return (
-        error
-        if error is not None
-        else _emit_campaign_result(args, response, collection="doctor")
+        error if error is not None else _emit_campaign_result(args, response, collection="doctor")
     )
 
 
@@ -3249,6 +3247,7 @@ def cmd_campaign_setup_nemo_rl(args: argparse.Namespace) -> int:
 
     from bashgym.campaigns.contracts import StageKind
     from bashgym.campaigns.nemo_rl import (
+        ApprovedNemoGymBinding,
         ApprovedNemoRLProfile,
         NemoRLExecutionMode,
         NemoRLInstallationReceipt,
@@ -3264,6 +3263,7 @@ def cmd_campaign_setup_nemo_rl(args: argparse.Namespace) -> int:
         write_worker_config,
     )
     from bashgym.config import get_bashgym_dir
+    from bashgym.environments.nemo_gym import inspect_nemo_gym_bundle_archive
     from bashgym.gym.remote_trainer import SSHConfig
 
     worker_config_path = (
@@ -3288,6 +3288,40 @@ def cmd_campaign_setup_nemo_rl(args: argparse.Namespace) -> int:
         )
     image_digest = args.image_reference.rpartition("@sha256:")[2]
     dataset = Path(args.dataset).expanduser().resolve()
+    nemo_gym = None
+    if args.nemo_gym_bundle:
+        bundle_archive = Path(args.nemo_gym_bundle).expanduser().resolve()
+        bundle_manifest = inspect_nemo_gym_bundle_archive(bundle_archive)
+        resources_config = args.nemo_gym_resources_config
+        if resources_config is None:
+            prefix = f"resources_servers/{bundle_manifest['resources_server_id']}/configs/"
+            candidates = tuple(
+                item["path"]
+                for item in bundle_manifest["files"]
+                if str(item["path"]).startswith(prefix)
+                and str(item["path"]).endswith((".yaml", ".yml"))
+            )
+            if len(candidates) != 1:
+                raise ValueError(
+                    "NeMo Gym bundle resources config must resolve exactly once; "
+                    "pass --nemo-gym-resources-config"
+                )
+            resources_config = candidates[0]
+        nemo_gym = ApprovedNemoGymBinding(
+            bundle_archive_path=bundle_archive,
+            bundle_archive_sha256=sha256_file(bundle_archive),
+            bundle_digest=bundle_manifest["bundle_digest"],
+            nemo_gym_source_revision=bundle_manifest["nemo_gym_source_revision"],
+            environment_id=bundle_manifest["environment_id"],
+            environment_digest=bundle_manifest["environment_digest"],
+            resources_server_id=bundle_manifest["resources_server_id"],
+            resources_config_path=resources_config,
+        )
+    elif args.nemo_gym_resources_config:
+        raise ValueError("--nemo-gym-resources-config requires --nemo-gym-bundle")
+    entrypoint = args.entrypoint or (
+        "examples/nemo_gym/run_grpo_nemo_gym.py" if nemo_gym is not None else "examples/run_grpo.py"
+    )
     provisional = ApprovedNemoRLProfile(
         profile_id=args.nemo_profile_id,
         profile_revision=args.profile_revision,
@@ -3303,7 +3337,7 @@ def cmd_campaign_setup_nemo_rl(args: argparse.Namespace) -> int:
         model_revision=args.model_revision,
         remote_model_path=args.remote_model_path,
         model_support_level=NemoRLModelSupportLevel(args.model_support_level),
-        entrypoint_path=args.entrypoint,
+        entrypoint_path=entrypoint,
         recipe_path=args.recipe,
         recipe_sha256=args.recipe_sha256,
         dataset_path=dataset,
@@ -3328,6 +3362,7 @@ def cmd_campaign_setup_nemo_rl(args: argparse.Namespace) -> int:
         shared_memory_gib=args.shared_memory_gib,
         minimum_available_disk_gib=args.minimum_available_disk_gib,
         overrides=tuple(sorted(args.override or ())),
+        nemo_gym=nemo_gym,
     )
     adapter = RemoteTrainingAdapter(
         SSHConfig(
@@ -3351,9 +3386,9 @@ def cmd_campaign_setup_nemo_rl(args: argparse.Namespace) -> int:
         and runtime_receipt.model_ready
         and runtime_receipt.platform == provisional.platform
         and runtime_receipt.gpu_count >= provisional.gpu_count
-        and runtime_receipt.available_disk_gib
-        >= provisional.minimum_available_disk_gib
+        and runtime_receipt.available_disk_gib >= provisional.minimum_available_disk_gib
         and runtime_receipt.shared_memory_gib >= provisional.shared_memory_gib
+        and (provisional.nemo_gym is None or runtime_receipt.nemo_gym_source_ready is True)
     )
     if not runtime_ready:
         raise RuntimeError("nemo_rl_runtime_not_ready")
@@ -3524,9 +3559,7 @@ def _ledger_get(
 ) -> int:
     response, error = _campaign_request(args, "GET", path, query=query)
     return (
-        error
-        if error is not None
-        else _emit_campaign_result(args, response, collection=collection)
+        error if error is not None else _emit_campaign_result(args, response, collection=collection)
     )
 
 
@@ -4109,12 +4142,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     campaign_setup.add_argument("--target-contract", dest="target_contract_key", required=True)
     campaign_setup.add_argument("--task", required=True)
-    campaign_setup.add_argument(
-        "--dataset-version", dest="dataset_version_id", required=True
-    )
-    campaign_setup.add_argument(
-        "--compute-profile", dest="compute_profile_id", required=True
-    )
+    campaign_setup.add_argument("--dataset-version", dest="dataset_version_id", required=True)
+    campaign_setup.add_argument("--compute-profile", dest="compute_profile_id", required=True)
     campaign_setup.add_argument(
         "--source-repository-profile",
         dest="source_repository_profile_id",
@@ -4122,9 +4151,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Logical installation-owned source repository binding for code hypotheses",
     )
     campaign_setup.add_argument("--project", dest="ledger_project_id", required=True)
-    campaign_setup.add_argument(
-        "--evaluation-suite", dest="evaluation_suite_id", required=True
-    )
+    campaign_setup.add_argument("--evaluation-suite", dest="evaluation_suite_id", required=True)
     campaign_setup.add_argument("--primary-metric", required=True)
     campaign_setup.add_argument(
         "--metric-direction", choices=("maximize", "minimize"), required=True
@@ -4163,9 +4190,7 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="Platform image pinned as registry/path@sha256:<digest>",
     )
-    nemo_setup.add_argument(
-        "--platform", choices=("linux/amd64", "linux/arm64"), required=True
-    )
+    nemo_setup.add_argument("--platform", choices=("linux/amd64", "linux/arm64"), required=True)
     nemo_setup.add_argument("--model-id", required=True)
     nemo_setup.add_argument("--model-revision", required=True)
     nemo_setup.add_argument(
@@ -4178,10 +4203,24 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("unsupported", "broad_api_compatible", "recipe_reproduced", "optimized"),
         required=True,
     )
-    nemo_setup.add_argument("--entrypoint", default="examples/run_grpo.py")
+    nemo_setup.add_argument(
+        "--entrypoint",
+        help=(
+            "Pinned NeMo RL entrypoint; defaults to generic GRPO or the exact "
+            "Gym GRPO entrypoint when --nemo-gym-bundle is supplied"
+        ),
+    )
     nemo_setup.add_argument("--recipe", required=True)
     nemo_setup.add_argument("--recipe-sha256", required=True)
     nemo_setup.add_argument("--dataset", required=True)
+    nemo_setup.add_argument(
+        "--nemo-gym-bundle",
+        help="Deterministic, content-validated NeMo Gym bundle ZIP for this dedicated profile",
+    )
+    nemo_setup.add_argument(
+        "--nemo-gym-resources-config",
+        help="Bundle-relative resources-server YAML; inferred when the bundle has exactly one",
+    )
     nemo_setup.add_argument("--verifier-id", required=True)
     nemo_setup.add_argument("--verifier-digest", required=True)
     nemo_setup.add_argument("--max-steps", type=int, default=10)
@@ -4422,9 +4461,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Ingest an authoritative ledger evaluation into AutoResearch",
         parents=[json_parent, campaign_connection],
     )
-    campaign_autoresearch_result.add_argument(
-        "--campaign", dest="campaign_id", required=True
-    )
+    campaign_autoresearch_result.add_argument("--campaign", dest="campaign_id", required=True)
     campaign_autoresearch_result.add_argument("--project", dest="project_id", required=True)
     campaign_autoresearch_result.add_argument(
         "--evaluation-result", dest="evaluation_result_id", required=True

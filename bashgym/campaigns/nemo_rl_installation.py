@@ -16,6 +16,7 @@ _RUNNER_PATH = Path(__file__).with_name("nemo_rl_runner.py").resolve()
 _OUTPUT_PATHS = (
     "effective_config.json",
     "final",
+    "logs",
     "training_manifest.json",
     "training_metrics.jsonl",
 )
@@ -72,15 +73,22 @@ def bind_nemo_rl_profile(
             stages.append(configured)
             continue
         contract = nemo_profile.container_contract(configured.stage)
+        input_files = [nemo_profile.dataset_path]
+        input_sha256 = {
+            nemo_profile.dataset_path.name: nemo_profile.dataset_sha256,
+        }
+        if nemo_profile.nemo_gym is not None:
+            input_files.append(nemo_profile.nemo_gym.bundle_archive_path)
+            input_sha256[nemo_profile.nemo_gym.bundle_archive_path.name] = (
+                nemo_profile.nemo_gym.bundle_archive_sha256
+            )
         stages.append(
             PinnedRemoteStageProfile(
                 stage=configured.stage,
                 script_path=_RUNNER_PATH,
                 script_sha256=sha256_file(_RUNNER_PATH),
-                input_files=(nemo_profile.dataset_path,),
-                input_sha256={
-                    nemo_profile.dataset_path.name: nemo_profile.dataset_sha256,
-                },
+                input_files=tuple(input_files),
+                input_sha256=input_sha256,
                 script_args=("--contract-json", contract.model_dump_json()),
                 output_paths=_OUTPUT_PATHS,
                 capacity_policy=configured.capacity_policy,

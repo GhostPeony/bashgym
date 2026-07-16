@@ -20,10 +20,9 @@ from bashgym.campaigns.contracts import (
     canonical_hash,
     utc_now,
 )
+from bashgym.environments.nemo_gym import inspect_nemo_gym_bundle_archive
 
-_IMAGE_REFERENCE = re.compile(
-    r"^[a-z0-9][a-z0-9._:/-]*@sha256:(?P<digest>[0-9a-f]{64})$"
-)
+_IMAGE_REFERENCE = re.compile(r"^[a-z0-9][a-z0-9._:/-]*@sha256:(?P<digest>[0-9a-f]{64})$")
 _OVERRIDE_KEY = re.compile(r"^\+?[A-Za-z][A-Za-z0-9_.]*$")
 _CONTROLLER_OWNED_OVERRIDES = frozenset(
     {
@@ -81,10 +80,7 @@ def _validate_overrides(value: tuple[str, ...]) -> tuple[str, ...]:
             raise ValueError("NeMo RL override is invalid")
         key, _raw = override.split("=", 1)
         normalized_key = key.removeprefix("+")
-        if (
-            _OVERRIDE_KEY.fullmatch(key) is None
-            or normalized_key in _CONTROLLER_OWNED_OVERRIDES
-        ):
+        if _OVERRIDE_KEY.fullmatch(key) is None or normalized_key in _CONTROLLER_OWNED_OVERRIDES:
             raise ValueError("NeMo RL override key is invalid or controller-owned")
         keys.append(normalized_key)
     if len(set(keys)) != len(keys) or tuple(sorted(value)) != value:
@@ -108,6 +104,113 @@ class NemoRLModelSupportLevel(str, Enum):
 class NemoRLExecutionMode(str, Enum):
     NO_UPDATE = "no_update"
     GRPO = "grpo"
+
+
+class NemoGymContainerBinding(FrozenContractModel):
+    """Path-independent NeMo Gym material transferred with one remote attempt."""
+
+    schema_version: Literal["nemo_gym_container_binding.v1"] = "nemo_gym_container_binding.v1"
+    bundle_archive_file: str = Field(min_length=1, max_length=240)
+    bundle_archive_sha256: HexDigest
+    bundle_digest: HexDigest
+    nemo_gym_source_revision: GitObjectId
+    environment_id: Identifier
+    environment_digest: HexDigest
+    resources_server_id: Identifier
+    resources_config_path: str = Field(min_length=1, max_length=1000)
+
+    @field_validator("bundle_archive_file")
+    @classmethod
+    def archive_basename(cls, value: str) -> str:
+        path = PurePosixPath(value)
+        if path.name != value or path.suffix.casefold() != ".zip":
+            raise ValueError("NeMo Gym bundle archive must be one ZIP basename")
+        return value
+
+    @field_validator("resources_config_path")
+    @classmethod
+    def safe_resources_config(cls, value: str) -> str:
+        path = PurePosixPath(value)
+        if (
+            path.is_absolute()
+            or path.suffix not in {".yaml", ".yml"}
+            or any(part in {"", ".", ".."} for part in path.parts)
+            or path.as_posix() != value
+        ):
+            raise ValueError("NeMo Gym resources config must be a safe relative YAML path")
+        return value
+
+    @model_validator(mode="after")
+    def config_belongs_to_server(self) -> NemoGymContainerBinding:
+        prefix = f"resources_servers/{self.resources_server_id}/configs/"
+        if not self.resources_config_path.startswith(prefix):
+            raise ValueError("NeMo Gym resources config does not belong to its server")
+        return self
+
+
+class ApprovedNemoGymBinding(FrozenContractModel):
+    """Installation-owned archive and identities for an optional Gym executor."""
+
+    schema_version: Literal["approved_nemo_gym_binding.v1"] = "approved_nemo_gym_binding.v1"
+    bundle_archive_path: Path
+    bundle_archive_sha256: HexDigest
+    bundle_digest: HexDigest
+    nemo_gym_source_revision: GitObjectId
+    environment_id: Identifier
+    environment_digest: HexDigest
+    resources_server_id: Identifier
+    resources_config_path: str = Field(min_length=1, max_length=1000)
+
+    @field_validator("bundle_archive_path")
+    @classmethod
+    def regular_archive(cls, value: Path) -> Path:
+        candidate = value.expanduser()
+        if (
+            candidate.is_symlink()
+            or not candidate.is_file()
+            or candidate.suffix.casefold() != ".zip"
+        ):
+            raise ValueError("NeMo Gym bundle archive must be a regular ZIP file")
+        return candidate.resolve()
+
+    @field_validator("resources_config_path")
+    @classmethod
+    def safe_resources_config(cls, value: str) -> str:
+        return NemoGymContainerBinding.safe_resources_config(value)
+
+    @model_validator(mode="after")
+    def exact_bundle_identity(self) -> ApprovedNemoGymBinding:
+        if sha256_file(self.bundle_archive_path) != self.bundle_archive_sha256:
+            raise ValueError("NeMo Gym bundle archive digest mismatch")
+        manifest = inspect_nemo_gym_bundle_archive(self.bundle_archive_path)
+        expected = {
+            "bundle_digest": self.bundle_digest,
+            "nemo_gym_source_revision": self.nemo_gym_source_revision,
+            "environment_id": self.environment_id,
+            "environment_digest": self.environment_digest,
+            "resources_server_id": self.resources_server_id,
+        }
+        if any(manifest.get(key) != value for key, value in expected.items()):
+            raise ValueError("NeMo Gym bundle manifest does not match its approved binding")
+        files = {str(item.get("path")) for item in manifest["files"]}
+        prefix = f"resources_servers/{self.resources_server_id}/configs/"
+        if not self.resources_config_path.startswith(prefix):
+            raise ValueError("NeMo Gym resources config does not belong to its server")
+        if self.resources_config_path not in files:
+            raise ValueError("NeMo Gym resources config is not bound by the bundle manifest")
+        return self
+
+    def container_binding(self) -> NemoGymContainerBinding:
+        return NemoGymContainerBinding(
+            bundle_archive_file=self.bundle_archive_path.name,
+            bundle_archive_sha256=self.bundle_archive_sha256,
+            bundle_digest=self.bundle_digest,
+            nemo_gym_source_revision=self.nemo_gym_source_revision,
+            environment_id=self.environment_id,
+            environment_digest=self.environment_digest,
+            resources_server_id=self.resources_server_id,
+            resources_config_path=self.resources_config_path,
+        )
 
 
 class NemoRLStageBinding(FrozenContractModel):
@@ -154,6 +257,8 @@ class NemoRLRuntimeReceipt(FrozenContractModel):
     recipe_ready: bool
     model_revision: GitObjectId
     model_ready: bool
+    nemo_gym_source_revision: GitObjectId | None = None
+    nemo_gym_source_ready: bool | None = None
     observed_at: datetime = Field(default_factory=utc_now)
     receipt_digest: HexDigest = ""
 
@@ -170,9 +275,7 @@ class NemoRLRuntimeReceipt(FrozenContractModel):
 class NemoRLContainerContract(FrozenContractModel):
     """Secret-free contract accepted by the remote host container wrapper."""
 
-    schema_version: Literal["nemo_rl_container_contract.v1"] = (
-        "nemo_rl_container_contract.v1"
-    )
+    schema_version: Literal["nemo_rl_container_contract.v1"] = "nemo_rl_container_contract.v1"
     release: Identifier
     source_revision: GitObjectId
     image_reference: str = Field(min_length=1, max_length=1000)
@@ -196,6 +299,7 @@ class NemoRLContainerContract(FrozenContractModel):
     gpu_count: int = Field(default=1, ge=1, le=8)
     shared_memory_gib: int = Field(default=16, ge=1, le=256)
     overrides: tuple[str, ...] = ()
+    nemo_gym: NemoGymContainerBinding | None = None
 
     @field_validator("image_reference")
     @classmethod
@@ -257,6 +361,10 @@ class NemoRLContainerContract(FrozenContractModel):
             max_steps=self.max_steps,
             learning_rate=self.learning_rate,
         )
+        if self.nemo_gym is not None and self.entrypoint_path != (
+            "examples/nemo_gym/run_grpo_nemo_gym.py"
+        ):
+            raise ValueError("NeMo Gym execution requires the exact Gym GRPO entrypoint")
         return self
 
 
@@ -292,6 +400,7 @@ class ApprovedNemoRLProfile(FrozenContractModel):
     minimum_available_disk_gib: float = Field(default=80.0, ge=1)
     overrides: tuple[str, ...] = ()
     runtime_receipt: NemoRLRuntimeReceipt | None = None
+    nemo_gym: ApprovedNemoGymBinding | None = None
 
     @field_validator("image_reference")
     @classmethod
@@ -367,6 +476,15 @@ class ApprovedNemoRLProfile(FrozenContractModel):
                 or receipt.model_revision != self.model_revision
             ):
                 raise ValueError("NeMo RL runtime receipt does not match the profile")
+            if self.nemo_gym is not None and (
+                receipt.nemo_gym_source_revision != self.nemo_gym.nemo_gym_source_revision
+                or receipt.nemo_gym_source_ready is not True
+            ):
+                raise ValueError("NeMo Gym runtime receipt does not match the profile")
+        if self.nemo_gym is not None and self.entrypoint_path != (
+            "examples/nemo_gym/run_grpo_nemo_gym.py"
+        ):
+            raise ValueError("NeMo Gym profile requires the exact Gym GRPO entrypoint")
         expected = canonical_hash(self.model_dump(mode="json", exclude={"profile_digest"}))
         if self.profile_digest and self.profile_digest != expected:
             raise ValueError("NeMo RL profile digest mismatch")
@@ -406,13 +524,12 @@ class ApprovedNemoRLProfile(FrozenContractModel):
             gpu_count=self.gpu_count,
             shared_memory_gib=self.shared_memory_gib,
             overrides=self.overrides,
+            nemo_gym=(self.nemo_gym.container_binding() if self.nemo_gym else None),
         )
 
 
 class NemoRLInstallationReceipt(FrozenContractModel):
-    schema_version: Literal["nemo_rl_installation_receipt.v1"] = (
-        "nemo_rl_installation_receipt.v1"
-    )
+    schema_version: Literal["nemo_rl_installation_receipt.v1"] = "nemo_rl_installation_receipt.v1"
     worker_config_path: str
     executor_profile_id: Identifier
     nemo_profile_id: Identifier
@@ -422,7 +539,9 @@ class NemoRLInstallationReceipt(FrozenContractModel):
 
 
 __all__ = [
+    "ApprovedNemoGymBinding",
     "ApprovedNemoRLProfile",
+    "NemoGymContainerBinding",
     "NemoRLContainerContract",
     "NemoRLExecutionMode",
     "NemoRLInstallationReceipt",

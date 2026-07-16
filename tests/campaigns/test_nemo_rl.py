@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from bashgym.campaigns.contracts import StageKind
 from bashgym.campaigns.nemo_rl import (
+    ApprovedNemoGymBinding,
     ApprovedNemoRLProfile,
     NemoRLContainerContract,
     NemoRLExecutionMode,
@@ -24,6 +25,11 @@ from bashgym.campaigns.remote import (
     RemoteCommandResult,
     RemoteTrainingAdapter,
 )
+from bashgym.environments.nemo_gym import (
+    create_nemo_gym_bundle_archive,
+    export_star_count_nemo_gym_bundle,
+)
+from bashgym.environments.star_count import generate_star_count_dataset
 from bashgym.gym.remote_trainer import SSHConfig
 
 SOURCE_REVISION = "a" * 40
@@ -34,7 +40,9 @@ VERIFIER_DIGEST = "e" * 64
 TARGET_DIGEST = "f" * 64
 
 
-def _nemo_profile(dataset: Path) -> ApprovedNemoRLProfile:
+def _nemo_profile(
+    dataset: Path, *, nemo_gym: ApprovedNemoGymBinding | None = None
+) -> ApprovedNemoRLProfile:
     return ApprovedNemoRLProfile(
         profile_id="nemo-test-v1",
         profile_revision=1,
@@ -50,7 +58,11 @@ def _nemo_profile(dataset: Path) -> ApprovedNemoRLProfile:
         model_revision=MODEL_REVISION,
         remote_model_path=f"~/models/snapshots/{MODEL_REVISION}",
         model_support_level=NemoRLModelSupportLevel.BROAD_API_COMPATIBLE,
-        entrypoint_path="examples/run_grpo.py",
+        entrypoint_path=(
+            "examples/nemo_gym/run_grpo_nemo_gym.py"
+            if nemo_gym is not None
+            else "examples/run_grpo.py"
+        ),
         recipe_path="/opt/nemo-rl/examples/configs/grpo.yaml",
         recipe_sha256=RECIPE_DIGEST,
         dataset_path=dataset,
@@ -72,6 +84,40 @@ def _nemo_profile(dataset: Path) -> ApprovedNemoRLProfile:
             ),
         ),
         overrides=("cluster.gpus_per_node=1",),
+        nemo_gym=nemo_gym,
+    )
+
+
+def _nemo_gym_binding(tmp_path: Path) -> ApprovedNemoGymBinding:
+    dataset = tmp_path / "star-count"
+    generate_star_count_dataset(
+        dataset,
+        train_size=2,
+        validation_size=1,
+        heldout_size=1,
+        seed=17,
+    )
+    bundle = tmp_path / "nemo-gym-bundle"
+    manifest = export_star_count_nemo_gym_bundle(
+        dataset,
+        bundle,
+        nemo_gym_revision="9" * 40,
+        bashgym_revision="8" * 40,
+        dataset_license="MIT",
+    )
+    archive = tmp_path / "nemo-gym-bundle.zip"
+    receipt = create_nemo_gym_bundle_archive(bundle, archive)
+    return ApprovedNemoGymBinding(
+        bundle_archive_path=archive,
+        bundle_archive_sha256=receipt["archive_sha256"],
+        bundle_digest=manifest["bundle_digest"],
+        nemo_gym_source_revision=manifest["nemo_gym_source_revision"],
+        environment_id=manifest["environment_id"],
+        environment_digest=manifest["environment_digest"],
+        resources_server_id=manifest["resources_server_id"],
+        resources_config_path=(
+            "resources_servers/bashgym_star_count/configs/bashgym_star_count.yaml"
+        ),
     )
 
 
@@ -139,22 +185,16 @@ def test_profile_can_record_a_proven_unsupported_model(dataset: Path):
 
 
 def test_contract_rejects_mutable_image_and_controller_override(dataset: Path):
-    payload = _nemo_profile(dataset).container_contract(
-        StageKind.FULL_TRAINING
-    ).model_dump()
+    payload = _nemo_profile(dataset).container_contract(StageKind.FULL_TRAINING).model_dump()
     payload["image_reference"] = "registry.example/nemo-rl:latest"
     with pytest.raises(ValidationError):
         NemoRLContainerContract.model_validate(payload)
 
-    payload = _nemo_profile(dataset).container_contract(
-        StageKind.FULL_TRAINING
-    ).model_dump()
+    payload = _nemo_profile(dataset).container_contract(StageKind.FULL_TRAINING).model_dump()
     payload["overrides"] = ("+data.train.data_path=/bashgym/run/data.jsonl",)
     assert NemoRLContainerContract.model_validate(payload).overrides == payload["overrides"]
 
-    payload = _nemo_profile(dataset).container_contract(
-        StageKind.FULL_TRAINING
-    ).model_dump()
+    payload = _nemo_profile(dataset).container_contract(StageKind.FULL_TRAINING).model_dump()
     payload["overrides"] = ("grpo.max_num_steps=100",)
     with pytest.raises(ValidationError):
         NemoRLContainerContract.model_validate(payload)
@@ -178,6 +218,54 @@ def test_docker_wrapper_uses_typed_bounded_argv(dataset: Path, tmp_path: Path):
     assert contract.image_reference in argv
     assert argv[argv.index("uv") : argv.index("uv") + 3] == ("uv", "run", "--no-sync")
     assert all(";" not in value for value in argv)
+
+
+def test_nemo_gym_profile_uses_exact_entrypoint_bundle_and_rollout_settings(
+    dataset: Path, tmp_path: Path
+):
+    gym = _nemo_gym_binding(tmp_path)
+    profile = _nemo_profile(dataset, nemo_gym=gym)
+    contract = profile.container_contract(StageKind.SMOKE_TRAINING)
+    argv = docker_argv(
+        contract,
+        run_directory=tmp_path,
+        model_mount=ModelMount(
+            host_directory=tmp_path / "model",
+            container_path="/bashgym/model-repo/snapshots/revision",
+        ),
+        container_name="bashgym-nemo-gym-test",
+    )
+
+    assert contract.entrypoint_path == "examples/nemo_gym/run_grpo_nemo_gym.py"
+    assert "env.should_use_nemo_gym=true" in argv
+    assert "env.nemo_gym.is_trajectory_collection=true" in argv
+    assert "policy.generation.vllm_cfg.async_engine=true" in argv
+    assert "policy.generation.vllm_cfg.expose_http_server=true" in argv
+    assert any("vllm_model_for_training.yaml" in item for item in argv)
+    assert any(
+        "resources_servers/bashgym_star_count" in item and item.endswith(",readonly")
+        for item in argv
+    )
+
+    revised = bind_nemo_rl_profile(
+        _executor(tmp_path, dataset),
+        profile,
+        replace=False,
+        allow_training_stage_replacement=True,
+    )
+    for stage in revised.stages:
+        assert gym.bundle_archive_path in stage.input_files
+        assert "logs" in stage.output_paths
+
+
+def test_nemo_gym_binding_rejects_generic_grpo_entrypoint(dataset: Path, tmp_path: Path):
+    payload = _nemo_profile(dataset, nemo_gym=_nemo_gym_binding(tmp_path)).model_dump(
+        exclude={"profile_digest"}
+    )
+    payload["entrypoint_path"] = "examples/run_grpo.py"
+
+    with pytest.raises(ValidationError, match="exact Gym GRPO entrypoint"):
+        ApprovedNemoRLProfile.model_validate(payload)
 
 
 def test_binding_reuses_registered_executor_lifecycle(dataset: Path, tmp_path: Path):
@@ -213,8 +301,8 @@ def test_initial_binding_refuses_to_replace_existing_training_stages(
 
 
 @pytest.mark.asyncio
-async def test_remote_preflight_returns_secret_free_runtime_receipt(dataset: Path):
-    profile = _nemo_profile(dataset)
+async def test_remote_preflight_returns_secret_free_runtime_receipt(dataset: Path, tmp_path: Path):
+    profile = _nemo_profile(dataset, nemo_gym=_nemo_gym_binding(tmp_path))
 
     class Session:
         async def run(self, command: str, *, timeout: float | None = None):
@@ -233,6 +321,8 @@ async def test_remote_preflight_returns_secret_free_runtime_receipt(dataset: Pat
                 output = str(32 * 1024 * 1024)
             elif "docker image inspect" in command:
                 output = profile.image_reference
+            elif "Gym-workspace/Gym" in command:
+                output = "9" * 40
             elif "rev-parse HEAD" in command:
                 output = SOURCE_REVISION
             elif "sha256sum" in command:
@@ -264,5 +354,7 @@ async def test_remote_preflight_returns_secret_free_runtime_receipt(dataset: Pat
     assert receipt.image_ready
     assert receipt.recipe_ready
     assert receipt.model_ready
+    assert receipt.nemo_gym_source_ready is True
+    assert receipt.nemo_gym_source_revision == "9" * 40
     assert receipt.gpu_count == 1
     assert "private.invalid" not in receipt.model_dump_json()

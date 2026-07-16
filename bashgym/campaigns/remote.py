@@ -737,9 +737,7 @@ class RemoteTrainingAdapter:
                 "docker info --format '{{json .Runtimes}}'",
                 "nemo_rl_docker_info_unavailable",
             )
-            architecture = (
-                await probe("uname -m", "nemo_rl_platform_unavailable")
-            ).casefold()
+            architecture = (await probe("uname -m", "nemo_rl_platform_unavailable")).casefold()
             platform = {
                 "amd64": "linux/amd64",
                 "x86_64": "linux/amd64",
@@ -778,6 +776,15 @@ class RemoteTrainingAdapter:
                 "nemo_rl_source_probe_failed",
                 timeout=60,
             )
+            nemo_gym_source_revision = None
+            if profile.nemo_gym is not None:
+                nemo_gym_source_revision = await probe(
+                    "docker run --rm --network=none --entrypoint git "
+                    f"{shlex.quote(profile.image_reference)} "
+                    "-C /opt/nemo-rl/3rdparty/Gym-workspace/Gym rev-parse HEAD",
+                    "nemo_gym_source_probe_failed",
+                    timeout=60,
+                )
             recipe_sha256 = (
                 await probe(
                     "docker run --rm --network=none "
@@ -797,8 +804,8 @@ class RemoteTrainingAdapter:
             quoted_revision = shlex.quote(profile.model_revision)
             model_check = await session.run(
                 f"test -f {quoted_model}/config.json && "
-                f"(test \"$(basename {quoted_model})\" = {quoted_revision} || "
-                f"test \"$(cat {quoted_model}/.bashgym-model-revision 2>/dev/null)\" = {quoted_revision})",
+                f'(test "$(basename {quoted_model})" = {quoted_revision} || '
+                f'test "$(cat {quoted_model}/.bashgym-model-revision 2>/dev/null)" = {quoted_revision})',
                 timeout=10,
             )
 
@@ -819,6 +826,12 @@ class RemoteTrainingAdapter:
             recipe_ready=recipe_sha256 == profile.recipe_sha256,
             model_revision=profile.model_revision,
             model_ready=model_check.exit_status == 0,
+            nemo_gym_source_revision=nemo_gym_source_revision,
+            nemo_gym_source_ready=(
+                nemo_gym_source_revision == profile.nemo_gym.nemo_gym_source_revision
+                if profile.nemo_gym is not None
+                else None
+            ),
         )
 
     @staticmethod

@@ -1510,6 +1510,8 @@ class CampaignRepository:
         """Create the aggregate, immutable manifest, event, and replay record atomically."""
 
         self._require_initialized()
+        if len(manifest_revision.manifest.budget_limits) > 64:
+            raise CampaignPersistenceError("campaign_budget_resource_limit_exceeded")
         if campaign.status != CampaignStatus.DRAFT or campaign.version != 1:
             raise ValueError("new campaigns must start at draft version 1")
         if (
@@ -2531,6 +2533,8 @@ class CampaignRepository:
         """Append an immutable manifest revision while no action is in flight."""
 
         self._require_initialized()
+        if len(manifest.budget_limits) > 64:
+            raise CampaignPersistenceError("campaign_budget_resource_limit_exceeded")
         mutation_kind = "campaign.manifest.revise"
         request_hash = canonical_hash(
             {

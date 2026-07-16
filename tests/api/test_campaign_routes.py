@@ -18,6 +18,11 @@ from bashgym.api.routes import create_app
 from bashgym.campaigns.auth import CampaignAuthService
 from bashgym.campaigns.autoresearch import (
     AUTORESEARCH_CONTROL_SMOKE_TEMPLATE_ID,
+    AutoResearchCampaignSpec,
+    AutoResearchRepository,
+    AutoResearchStopRules,
+    AutoResearchTemplateDefinition,
+    MetricDirection,
 )
 from bashgym.campaigns.contracts import (
     AutonomyProfile,
@@ -538,9 +543,21 @@ def _fixed_controller_observation(observed_at: datetime) -> ControllerStatusProj
     )
 
 
-def test_control_room_snapshot_requires_auth_and_sets_private_cache_headers(
-    tmp_path, monkeypatch
-):
+def _exact_control_room_definition(
+    template_id: str = "control-room-exact-v1",
+) -> AutoResearchTemplateDefinition:
+    value = campaign()
+    return AutoResearchTemplateDefinition(
+        template_id=template_id,
+        kind=value.kind,
+        objective=value.objective,
+        target_model=value.target_model,
+        manifest=manifest(),
+        policy=None,
+    )
+
+
+def test_control_room_snapshot_requires_auth_and_sets_private_cache_headers(tmp_path, monkeypatch):
     http, _repository, refresh = campaign_client(tmp_path)
     access = exchange(http, refresh.raw_token)
     assert create_from_template(http, access).status_code == 200
@@ -608,15 +625,133 @@ def test_control_room_snapshot_requires_auth_and_sets_private_cache_headers(
     assert payload["agents"] == []
     assert "durable_state" not in payload
     assert "controller_observation" not in payload
-    assert datetime.fromisoformat(
-        payload["controller"]["observed_at"].replace("Z", "+00:00")
-    ) == observed_at
+    assert (
+        datetime.fromisoformat(payload["controller"]["observed_at"].replace("Z", "+00:00"))
+        == observed_at
+    )
     assert payload["controller"]["heartbeat_age_seconds"] == 7.5
 
 
-def test_control_room_snapshot_etag_is_principal_specific_and_supports_304(
-    tmp_path, monkeypatch
-):
+def test_control_room_snapshot_get_never_initializes_the_experiment_ledger(tmp_path, monkeypatch):
+    http, _repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    assert create_from_template(http, access).status_code == 200
+    definition = _exact_control_room_definition()
+    http.app.state.campaign_autoresearch_templates = {definition.template_id: definition}
+
+    def fail_if_initialized(_self):
+        raise AssertionError("snapshot GET must not initialize or migrate the ledger")
+
+    monkeypatch.setattr(ExperimentLedgerRepository, "initialize", fail_if_initialized)
+    response = http.get(
+        "/api/campaigns/campaign-1/control-room-snapshot",
+        params={"workspace_id": "workspace-a"},
+        headers=bearer(access),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["readiness"]["blocking_codes"] == [
+        "campaign_readiness_ledger_unavailable"
+    ]
+
+
+def test_control_room_snapshot_readiness_changes_etag_but_checked_at_does_not(tmp_path):
+    http, _repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    assert create_from_template(http, access).status_code == 200
+    route = "/api/campaigns/campaign-1/control-room-snapshot"
+    params = {"workspace_id": "workspace-a"}
+
+    unavailable = http.get(route, params=params, headers=bearer(access))
+    definition = _exact_control_room_definition()
+    http.app.state.campaign_autoresearch_templates = {definition.template_id: definition}
+    changed = http.get(
+        route,
+        params=params,
+        headers={**bearer(access), "If-None-Match": unavailable.headers["etag"]},
+    )
+    stable = http.get(
+        route,
+        params=params,
+        headers={**bearer(access), "If-None-Match": changed.headers["etag"]},
+    )
+
+    assert unavailable.json()["readiness"]["blocking_codes"] == [
+        "campaign_readiness_definition_unavailable"
+    ]
+    assert changed.status_code == 200
+    assert changed.headers["etag"] != unavailable.headers["etag"]
+    assert changed.json()["readiness"]["blocking_codes"] == [
+        "campaign_readiness_ledger_unavailable"
+    ]
+    assert stable.status_code == 304
+
+
+def test_control_room_snapshot_requires_one_full_identity_definition(tmp_path):
+    http, _repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    assert create_from_template(http, access).status_code == 200
+    route = "/api/campaigns/campaign-1/control-room-snapshot"
+    params = {"workspace_id": "workspace-a"}
+
+    wrong_objective = _exact_control_room_definition().model_copy(
+        update={"objective": "A different campaign objective."}
+    )
+    http.app.state.campaign_autoresearch_templates = {wrong_objective.template_id: wrong_objective}
+    unavailable = http.get(route, params=params, headers=bearer(access))
+
+    first = _exact_control_room_definition("control-room-exact-one")
+    second = _exact_control_room_definition("control-room-exact-two")
+    http.app.state.campaign_autoresearch_templates = {
+        first.template_id: first,
+        second.template_id: second,
+    }
+    ambiguous = http.get(route, params=params, headers=bearer(access))
+
+    assert unavailable.json()["readiness"]["blocking_codes"] == [
+        "campaign_readiness_definition_unavailable"
+    ]
+    assert ambiguous.json()["readiness"]["blocking_codes"] == [
+        "campaign_readiness_definition_ambiguous"
+    ]
+
+
+def test_control_room_definition_must_align_with_persisted_autoresearch_spec(tmp_path):
+    http, repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    assert create_from_template(http, access).status_code == 200
+    autoresearch = AutoResearchRepository(repository.db_path)
+    autoresearch.initialize()
+    autoresearch.create_autoresearch_spec(
+        AutoResearchCampaignSpec(
+            workspace_id="workspace-a",
+            campaign_id="campaign-1",
+            primary_metric="mrr_at_10",
+            metric_direction=MetricDirection.MAXIMIZE,
+            stop_rules=AutoResearchStopRules(
+                max_attempts=1,
+                budget_unit="gpu_hours",
+                max_total_cost=1.0,
+            ),
+        )
+    )
+    definition = _exact_control_room_definition()
+    http.app.state.campaign_autoresearch_templates = {definition.template_id: definition}
+    http.app.state.campaign_experiment_ledger = ExperimentLedgerRepository(repository.db_path)
+
+    response = http.get(
+        "/api/campaigns/campaign-1/control-room-snapshot",
+        params={"workspace_id": "workspace-a"},
+        headers=bearer(access),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["readiness"]["blocking_codes"] == [
+        "campaign_readiness_definition_unavailable"
+    ]
+
+
+def test_control_room_snapshot_etag_is_principal_specific_and_supports_304(tmp_path, monkeypatch):
     http, _repository, refresh = campaign_client(tmp_path)
     first_access = exchange(http, refresh.raw_token)
     assert create_from_template(http, first_access).status_code == 200
@@ -756,9 +891,7 @@ def test_control_room_snapshot_keeps_durable_and_controller_observation_times_di
     assert "state_observed_at" not in payload
 
 
-def test_control_room_snapshot_returns_current_v1_for_an_older_etag(
-    tmp_path, monkeypatch
-):
+def test_control_room_snapshot_returns_current_v1_for_an_older_etag(tmp_path, monkeypatch):
     http, repository, refresh = campaign_client(tmp_path)
     access = exchange(http, refresh.raw_token)
     assert create_from_template(http, access).status_code == 200

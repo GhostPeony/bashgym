@@ -48,6 +48,26 @@ from bashgym.campaigns.transitions import allowed_triggers, evaluate_promotion_g
 
 
 @dataclass(frozen=True)
+class CandidateProvenance:
+    """Candidate-keyed IDs proven against campaign-owned rows."""
+
+    candidate_digest: str
+    source_attempt_ids: tuple[str, ...]
+    source_artifact_ids: tuple[str, ...]
+    latest_comparable_evaluation_id: str | None
+
+
+@dataclass(frozen=True)
+class ChampionProvenance:
+    """Persisted champion claim correlated to its candidate and gate decision."""
+
+    candidate_digest: str
+    decision_id: str
+    comparison_verdict: str | None
+    override: bool
+
+
+@dataclass(frozen=True)
 class ControlRoomDurableProjection:
     """Private one-transaction inputs for the public control-room projection."""
 
@@ -61,10 +81,11 @@ class ControlRoomDurableProjection:
     active_attempts: tuple[dict[str, Any], ...]
     remote_runs: tuple[dict[str, Any], ...]
     latest_gate: dict[str, Any] | None
-    latest_evaluation_id: str | None
     autoresearch_spec: dict[str, Any] | None
     baseline_outcome: dict[str, Any] | None
-    candidate_outcome: dict[str, Any] | None
+    candidate_provenance: CandidateProvenance | None
+    champion_provenance: ChampionProvenance | None
+    projection_invariant_codes: tuple[str, ...]
     protected_gate_passed: bool
     human_work: tuple[dict[str, Any], ...] = ()
     agents: tuple[dict[str, Any], ...] = ()
@@ -139,6 +160,9 @@ def read_control_room_projection(
             "created_at": manifest_row["created_at"],
         }
     )
+    projection_invariant_codes: list[str] = []
+    if len(manifest.manifest.budget_limits) > 64:
+        projection_invariant_codes.append("campaign_projection_budget_resources_exceeded")
     event_row = connection.execute(
         """
         SELECT COUNT(*) AS item_count, COALESCE(MAX(cursor), 0) AS latest_cursor
@@ -221,19 +245,67 @@ def read_control_room_projection(
         """,
         (workspace_id, campaign_id),
     ).fetchone()
-    evaluation_row = connection.execute(
-        """
-        SELECT evaluation_id FROM campaign_evaluations
-        WHERE workspace_id = ? AND campaign_id = ?
-        ORDER BY created_at DESC, evaluation_id DESC LIMIT 1
-        """,
-        (workspace_id, campaign_id),
-    ).fetchone()
     latest_gate = (
         {"decision_id": gate_row["decision_id"], **json.loads(gate_row["decision_json"])}
         if gate_row
         else None
     )
+    champion_provenance = None
+    if campaign.champion_ref and _table_exists(connection, "campaign_champions"):
+        parts = campaign.champion_ref.split(":")
+        if len(parts) != 4 or parts[0] != "champion" or not parts[2].isdigit():
+            projection_invariant_codes.append("campaign_projection_champion_ref_malformed")
+        else:
+            target_key, revision_text, referenced_candidate = parts[1:]
+            champion_row = connection.execute(
+                """
+                SELECT champion_json FROM campaign_champions
+                WHERE workspace_id = ? AND target_contract_key = ? AND revision = ?
+                """,
+                (workspace_id, target_key, int(revision_text)),
+            ).fetchone()
+            if champion_row is None or target_key != campaign.target_model.target_contract_key:
+                projection_invariant_codes.append("campaign_projection_champion_claim_missing")
+            else:
+                champion_payload = json.loads(champion_row["champion_json"])
+                decision_id = champion_payload.get("development_decision_id")
+                claimed_candidate = champion_payload.get("candidate_digest")
+                if (
+                    champion_payload.get("campaign_id") != campaign_id
+                    or not isinstance(claimed_candidate, str)
+                    or claimed_candidate != referenced_candidate
+                    or not isinstance(decision_id, str)
+                ):
+                    projection_invariant_codes.append("campaign_projection_champion_claim_mismatch")
+                else:
+                    champion_decision_row = connection.execute(
+                        """
+                        SELECT decision_json FROM campaign_gate_decisions
+                        WHERE workspace_id = ? AND campaign_id = ? AND decision_id = ?
+                        """,
+                        (workspace_id, campaign_id, decision_id),
+                    ).fetchone()
+                    comparison_verdict = None
+                    if champion_decision_row is not None:
+                        champion_decision = json.loads(champion_decision_row["decision_json"])
+                        if champion_decision.get("candidate_digest") == claimed_candidate:
+                            candidate_verdict = champion_decision.get("verdict")
+                            if candidate_verdict in {
+                                "passed",
+                                "failed",
+                                "insufficient_evidence",
+                            }:
+                                comparison_verdict = candidate_verdict
+                        else:
+                            projection_invariant_codes.append(
+                                "campaign_projection_champion_decision_mismatch"
+                            )
+                    champion_provenance = ChampionProvenance(
+                        candidate_digest=claimed_candidate,
+                        decision_id=decision_id,
+                        comparison_verdict=comparison_verdict,
+                        override=bool(champion_payload.get("override")),
+                    )
     protected_row = connection.execute(
         """
         SELECT lease_state, candidate_lock_digest, result_json
@@ -260,7 +332,8 @@ def read_control_room_projection(
             and protected_result.get("candidate_digest") == candidate_digest
             and protected_result.get("passed") is True
         )
-    autoresearch_spec = baseline_outcome = candidate_outcome = None
+    autoresearch_spec = baseline_outcome = None
+    candidate_provenance = None
     if _table_exists(connection, "autoresearch_campaign_specs"):
         spec_row = connection.execute(
             """
@@ -279,25 +352,120 @@ def read_control_room_projection(
             """,
             (workspace_id, campaign_id),
         ).fetchone()
-        candidate_row = connection.execute(
-            """
-            SELECT result_json, decision_json FROM autoresearch_results
-            WHERE workspace_id = ? AND campaign_id = ?
-              AND json_extract(decision_json, '$.decision') <> 'baseline'
-            ORDER BY created_at DESC, result_id DESC LIMIT 1
-            """,
-            (workspace_id, campaign_id),
-        ).fetchone()
         baseline_outcome = (
-            {"result": json.loads(baseline_row["result_json"]), "decision": json.loads(baseline_row["decision_json"])}
+            {
+                "result": json.loads(baseline_row["result_json"]),
+                "decision": json.loads(baseline_row["decision_json"]),
+            }
             if baseline_row
             else None
         )
-        candidate_outcome = (
-            {"result": json.loads(candidate_row["result_json"]), "decision": json.loads(candidate_row["decision_json"])}
-            if candidate_row
-            else None
+        gate_candidate = latest_gate.get("candidate_digest") if latest_gate else None
+        selected_candidate = (
+            champion_provenance.candidate_digest
+            if champion_provenance
+            else campaign.best_development_candidate_ref or gate_candidate
         )
+        if (
+            campaign.best_development_candidate_ref
+            and gate_candidate
+            and campaign.best_development_candidate_ref != gate_candidate
+        ):
+            projection_invariant_codes.append("campaign_projection_candidate_identity_mismatch")
+        if selected_candidate:
+            candidate_rows = connection.execute(
+                """
+                SELECT r.result_json, r.decision_json, s.study_id
+                FROM autoresearch_results r
+                JOIN campaign_studies s
+                  ON s.workspace_id = r.workspace_id
+                 AND s.campaign_id = r.campaign_id
+                 AND s.proposal_id = r.proposal_id
+                WHERE r.workspace_id = ? AND r.campaign_id = ?
+                  AND s.candidate_digest = ?
+                  AND json_valid(r.result_json)
+                  AND json_valid(r.decision_json)
+                ORDER BY r.created_at DESC, r.result_id DESC LIMIT 2
+                """,
+                (workspace_id, campaign_id, selected_candidate),
+            ).fetchall()
+            if len(candidate_rows) > 1:
+                projection_invariant_codes.append("campaign_projection_candidate_outcome_ambiguous")
+            if candidate_rows:
+                candidate_row = candidate_rows[0]
+                result_payload = json.loads(candidate_row["result_json"])
+                raw_attempts = result_payload.get("attempt_ids", [])
+                raw_artifacts = result_payload.get("evidence_references", [])
+                if not isinstance(raw_attempts, list) or not all(
+                    isinstance(item, str) for item in raw_attempts
+                ):
+                    raw_attempts = []
+                    projection_invariant_codes.append(
+                        "campaign_projection_candidate_attempts_malformed"
+                    )
+                if not isinstance(raw_artifacts, list) or not all(
+                    isinstance(item, str) for item in raw_artifacts
+                ):
+                    raw_artifacts = []
+                    projection_invariant_codes.append(
+                        "campaign_projection_candidate_artifacts_malformed"
+                    )
+                if len(raw_attempts) > 100 or len(raw_artifacts) > 100:
+                    projection_invariant_codes.append(
+                        "campaign_projection_candidate_references_exceeded"
+                    )
+                study_id = str(candidate_row["study_id"])
+                owned_attempt_rows = connection.execute(
+                    """
+                    SELECT t.attempt_id FROM campaign_attempts t
+                    JOIN campaign_actions a
+                      ON a.workspace_id = t.workspace_id AND a.action_id = t.action_id
+                    WHERE a.workspace_id = ? AND a.campaign_id = ? AND a.study_id = ?
+                    ORDER BY t.attempt_id LIMIT 101
+                    """,
+                    (workspace_id, campaign_id, study_id),
+                ).fetchall()
+                owned_artifact_rows = connection.execute(
+                    """
+                    SELECT ar.artifact_id FROM campaign_artifacts ar
+                    JOIN campaign_actions a
+                      ON a.workspace_id = ar.workspace_id
+                     AND a.action_id = ar.producer_action_id
+                    WHERE ar.workspace_id = ? AND ar.campaign_id = ? AND a.study_id = ?
+                    ORDER BY ar.artifact_id LIMIT 101
+                    """,
+                    (workspace_id, campaign_id, study_id),
+                ).fetchall()
+                if len(owned_attempt_rows) > 100 or len(owned_artifact_rows) > 100:
+                    projection_invariant_codes.append(
+                        "campaign_projection_candidate_owned_rows_exceeded"
+                    )
+                owned_attempts = {str(item["attempt_id"]) for item in owned_attempt_rows[:100]}
+                owned_artifacts = {str(item["artifact_id"]) for item in owned_artifact_rows[:100]}
+                candidate_evaluation_row = connection.execute(
+                    """
+                    SELECT evaluation_id FROM campaign_evaluations
+                    WHERE workspace_id = ? AND campaign_id = ?
+                      AND json_valid(evaluation_json)
+                      AND json_extract(evaluation_json, '$.candidate_digest') = ?
+                    ORDER BY created_at DESC, evaluation_id DESC LIMIT 1
+                    """,
+                    (workspace_id, campaign_id, selected_candidate),
+                ).fetchone()
+                candidate_provenance = CandidateProvenance(
+                    candidate_digest=selected_candidate,
+                    source_attempt_ids=tuple(
+                        item for item in raw_attempts[:100] if item in owned_attempts
+                    ),
+                    source_artifact_ids=tuple(
+                        item for item in raw_artifacts[:100] if item in owned_artifacts
+                    ),
+                    latest_comparable_evaluation_id=(
+                        str(candidate_evaluation_row["evaluation_id"])
+                        if candidate_evaluation_row
+                        else None
+                    ),
+                )
     return ControlRoomDurableProjection(
         campaign=campaign,
         manifest=manifest,
@@ -324,10 +492,11 @@ def read_control_room_projection(
         active_attempts=tuple(dict(item) for item in active_attempts),
         remote_runs=tuple(dict(item) for item in remote_runs),
         latest_gate=latest_gate,
-        latest_evaluation_id=str(evaluation_row["evaluation_id"]) if evaluation_row else None,
         autoresearch_spec=autoresearch_spec,
         baseline_outcome=baseline_outcome,
-        candidate_outcome=candidate_outcome,
+        candidate_provenance=candidate_provenance,
+        champion_provenance=champion_provenance,
+        projection_invariant_codes=tuple(dict.fromkeys(projection_invariant_codes)),
         protected_gate_passed=protected_gate_passed,
     )
 
@@ -357,8 +526,7 @@ def _status_summary(
         (workspace_id, campaign_id),
     ).fetchall()
     counts = tuple(
-        ControlRoomStatusCountV1(status=row["status"], count=int(row["item_count"]))
-        for row in rows
+        ControlRoomStatusCountV1(status=row["status"], count=int(row["item_count"])) for row in rows
     )
     return ControlRoomCollectionSummaryV1(
         total=sum(item.count for item in counts),
@@ -386,8 +554,7 @@ def _attempt_summary(
         (workspace_id, campaign_id),
     ).fetchall()
     counts = tuple(
-        ControlRoomStatusCountV1(status=row["status"], count=int(row["item_count"]))
-        for row in rows
+        ControlRoomStatusCountV1(status=row["status"], count=int(row["item_count"])) for row in rows
     )
     return ControlRoomCollectionSummaryV1(
         total=sum(item.count for item in counts),
@@ -499,6 +666,15 @@ def _binding(
 
 
 def _invariant_failed(durable: ControlRoomDurableProjection) -> bool:
+    if durable.projection_invariant_codes:
+        return True
+    if len(durable.manifest.manifest.budget_limits) > 64:
+        return True
+    if durable.candidate_provenance and (
+        len(durable.candidate_provenance.source_attempt_ids) > 100
+        or len(durable.candidate_provenance.source_artifact_ids) > 100
+    ):
+        return True
     if any(
         len(rows) > 1
         for rows in (durable.active_studies, durable.active_actions, durable.active_attempts)
@@ -561,9 +737,7 @@ def _decision_actions(
             not readiness.launch_ready or controller.state != "online"
         ):
             continue
-        if trigger == CampaignTrigger.PROMOTION_COMMITTED and (
-            not promotion_eligible or controller.state != "online"
-        ):
+        if trigger == CampaignTrigger.PROMOTION_COMMITTED and (not promotion_eligible):
             continue
         actions.append(
             DecisionActionV1(
@@ -625,6 +799,26 @@ def _blocker(
     )
 
 
+def _promotion_blocker(blocking_codes: tuple[str, ...]) -> DecisionBlockerV1 | None:
+    if not blocking_codes:
+        return None
+    summaries = {
+        "campaign_active_action_present": "Active campaign work must finish before promotion.",
+        "campaign_development_gate_not_passed": "The development comparison gate has not passed.",
+        "campaign_protected_gate_not_passed": "The protected evaluation gate has not passed.",
+        "campaign_human_work_incomplete": "Required human review is incomplete.",
+        "campaign_promotion_transition_unavailable": (
+            "Promotion is unavailable from the current campaign state."
+        ),
+    }
+    return DecisionBlockerV1(
+        code=blocking_codes[0],
+        summary=summaries[blocking_codes[0]],
+        evidence_ids=(),
+        secondary_codes=blocking_codes[1:],
+    )
+
+
 def _phase(
     phase_id: str,
     state: str,
@@ -660,7 +854,7 @@ def build_control_room_snapshot(
     manifest = durable.manifest.manifest
     invariant_failed = _invariant_failed(durable)
     budget_resources: list[BudgetResourceSummaryV1] = []
-    for unit, base_limit in sorted(manifest.budget_limits.items()):
+    for unit, base_limit in sorted(manifest.budget_limits.items())[:64]:
         reserved, settled, limit_delta = durable.budget_totals.get(unit, (0.0, 0.0, 0.0))
         limit = float(base_limit) + limit_delta
         remaining = limit - reserved - settled
@@ -680,16 +874,24 @@ def build_control_room_snapshot(
     promotion_gate = evaluate_promotion_gate(
         active_action_id=campaign.active_action_id,
         comparison_verdict=gate.get("verdict"),
-        candidate_digest=gate.get("candidate_digest")
-        or campaign.best_development_candidate_ref,
+        candidate_digest=gate.get("candidate_digest") or campaign.best_development_candidate_ref,
         protected_required=bool(manifest.protected_artifact_refs),
         protected_passed=durable.protected_gate_passed,
         human_work_complete=True,
     )
-    promotion_eligible = bool(
-        promotion_gate.eligible
-        and CampaignTrigger.PROMOTION_COMMITTED in allowed_triggers(campaign.status)
+    promotion_transition_allowed = (
+        CampaignTrigger.PROMOTION_COMMITTED in allowed_triggers(campaign.status)
     )
+    promotion_eligible = bool(
+        promotion_gate.eligible and promotion_transition_allowed
+    )
+    promotion_blocking_codes = promotion_gate.blocking_codes
+    if promotion_gate.eligible and not promotion_transition_allowed:
+        promotion_blocking_codes = (
+            *promotion_blocking_codes,
+            "campaign_promotion_transition_unavailable",
+        )
+    promotion_blocker = _promotion_blocker(promotion_blocking_codes)
     blocker = _blocker(
         durable,
         readiness,
@@ -705,14 +907,14 @@ def build_control_room_snapshot(
         invariant_failed=invariant_failed,
         promotion_eligible=promotion_eligible,
     )
-    execution_owner = "bashgym" if (
-        durable.active_actions or durable.active_attempts
-    ) else "none"
+    execution_owner = "bashgym" if (durable.active_actions or durable.active_attempts) else "none"
     attention_owner = "bashgym" if blocker is not None else "none"
     action_ids = tuple(action.action for action in actions)
 
-    setup_state = "ready" if readiness.launch_ready else (
-        "blocked" if readiness.blocking_codes else "not_started"
+    setup_state = (
+        "ready"
+        if readiness.launch_ready
+        else ("blocked" if readiness.blocking_codes else "not_started")
     )
     has_autoresearch = durable.autoresearch_spec is not None
     baseline_complete = bool(
@@ -761,6 +963,8 @@ def build_control_room_snapshot(
         if campaign.status == CampaignStatus.COMPLETED or campaign.champion_ref is not None
         else "failed"
         if campaign.status == CampaignStatus.FAILED
+        else "ready"
+        if promotion_eligible
         else "blocked"
         if durable.latest_gate is not None
         else "not_started"
@@ -792,7 +996,10 @@ def build_control_room_snapshot(
         _phase(
             "decision",
             decision_state,
+            attention_owner="bashgym" if decision_state == "blocked" else "none",
+            blocker=promotion_blocker if decision_state == "blocked" else None,
             evidence_count=durable.collection_counts["comparisons"],
+            actions=tuple(item for item in action_ids if item == "promote"),
         ),
     )
 
@@ -837,27 +1044,59 @@ def build_control_room_snapshot(
     )
     candidate = None
     if candidate_ref is not None:
-        outcome = durable.candidate_outcome["result"] if durable.candidate_outcome else {}
+        provenance = durable.candidate_provenance
+        if provenance is not None and provenance.candidate_digest != candidate_ref:
+            provenance = None
         verdict = gate.get("verdict")
         candidate = CandidateSummaryV1(
             candidate_ref=candidate_ref,
-            source_attempt_ids=tuple(outcome.get("attempt_ids", ())),
-            source_artifact_ids=tuple(outcome.get("evidence_references", ())),
-            latest_comparable_evaluation_id=durable.latest_evaluation_id,
-            comparison_verdict=verdict if verdict in {"passed", "failed", "insufficient_evidence"} else None,
+            source_attempt_ids=provenance.source_attempt_ids[:100] if provenance else (),
+            source_artifact_ids=provenance.source_artifact_ids[:100] if provenance else (),
+            latest_comparable_evaluation_id=(
+                provenance.latest_comparable_evaluation_id if provenance else None
+            ),
+            comparison_verdict=verdict
+            if verdict in {"passed", "failed", "insufficient_evidence"}
+            else None,
             gate_state=(
-                "passed" if verdict == "passed" else "failed" if verdict == "failed" else "blocked" if gate else "not_evaluated"
+                "passed"
+                if verdict == "passed"
+                else "failed"
+                if verdict == "failed"
+                else "blocked"
+                if gate
+                else "not_evaluated"
             ),
         )
     champion = None
     champion_ref = _safe_reference(campaign.champion_ref)
     if champion_ref is not None:
+        champion_claim = durable.champion_provenance
+        champion_candidate_provenance = durable.candidate_provenance
+        if (
+            champion_claim is None
+            or champion_candidate_provenance is None
+            or champion_candidate_provenance.candidate_digest != champion_claim.candidate_digest
+        ):
+            champion_candidate_provenance = None
         champion = CandidateSummaryV1(
             candidate_ref=champion_ref,
-            source_attempt_ids=(),
-            source_artifact_ids=(),
-            latest_comparable_evaluation_id=durable.latest_evaluation_id,
-            comparison_verdict="passed",
+            source_attempt_ids=(
+                champion_candidate_provenance.source_attempt_ids[:100]
+                if champion_candidate_provenance
+                else ()
+            ),
+            source_artifact_ids=(
+                champion_candidate_provenance.source_artifact_ids[:100]
+                if champion_candidate_provenance
+                else ()
+            ),
+            latest_comparable_evaluation_id=(
+                champion_candidate_provenance.latest_comparable_evaluation_id
+                if champion_candidate_provenance
+                else None
+            ),
+            comparison_verdict=(champion_claim.comparison_verdict if champion_claim else None),
             gate_state="promoted",
         )
 
@@ -978,6 +1217,8 @@ def build_control_room_snapshot(
 def principal_control_room_etag(
     snapshot: CampaignControlRoomSnapshotV1,
     principal: ActorPrincipal,
+    *,
+    readiness_revision: str | None = None,
 ) -> str:
     """Return a private validator that cannot be shared across principals."""
 
@@ -988,6 +1229,8 @@ def principal_control_room_etag(
             "aggregate_version": snapshot.aggregate_version,
             "latest_event_cursor": snapshot.latest_event_cursor,
             "controller_observation_version": snapshot.controller.controller_observation_version,
+            "readiness": snapshot.readiness.model_dump(mode="json", exclude={"checked_at"}),
+            "readiness_revision": readiness_revision,
             "principal": {
                 "actor_id": principal.actor_id,
                 "credential_id": principal.credential_id,
@@ -1015,6 +1258,8 @@ def if_none_match_matches(value: str | None, etag: str) -> bool:
 
 
 __all__ = [
+    "CandidateProvenance",
+    "ChampionProvenance",
     "ControlRoomDurableProjection",
     "build_control_room_snapshot",
     "if_none_match_matches",

@@ -900,6 +900,8 @@ class AutoResearchRepository(CampaignRuntimeRepository):
         *,
         ledger_context: AutoResearchLedgerCommitContext | None = None,
     ) -> AutoResearchOutcomeRecord:
+        if len(result.attempt_ids) > 100 or len(result.evidence_references) > 100:
+            raise AutoResearchInvariantError("autoresearch_result_reference_limit_exceeded")
         spec = self.get_autoresearch_spec(result.workspace_id, result.campaign_id)
         with self._connection(immediate=True) as connection:
             by_proposal = connection.execute(
@@ -1450,6 +1452,8 @@ class AutoResearchCampaignCore:
         *,
         ledger_context: AutoResearchLedgerCommitContext | None = None,
     ) -> AutoResearchOutcomeRecord:
+        if len(result.attempt_ids) > 100 or len(result.evidence_references) > 100:
+            raise AutoResearchInvariantError("autoresearch_result_reference_limit_exceeded")
         spec = self.repository.get_autoresearch_spec(result.workspace_id, result.campaign_id)
         if result.metric_name != spec.primary_metric:
             raise AutoResearchInvariantError("autoresearch_primary_metric_mismatch")

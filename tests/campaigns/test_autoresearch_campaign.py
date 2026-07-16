@@ -220,6 +220,33 @@ def result(proposal_id, study_id, attempt_id, metric, *, role, provenance="real"
     )
 
 
+def test_result_write_rejects_unbounded_candidate_references_before_lineage_lookup(
+    tmp_path,
+):
+    _path, _repository, core = fresh_core(tmp_path)
+    oversized = result(
+        "candidate-oversized",
+        "study-missing",
+        "attempt-000",
+        0.5,
+        role=ExperimentRole.CANDIDATE,
+        provenance="simulated",
+    ).model_copy(
+        update={
+            "attempt_ids": tuple(f"attempt-{index:03d}" for index in range(101)),
+            "evidence_references": tuple(
+                f"artifact-{index:03d}" for index in range(101)
+            ),
+        }
+    )
+
+    with pytest.raises(
+        AutoResearchInvariantError,
+        match="autoresearch_result_reference_limit_exceeded",
+    ):
+        core.record_result(oversized)
+
+
 def test_fresh_draft_campaign_has_controller_owned_preparation_and_source_template(tmp_path):
     _path, repository, core = fresh_core(tmp_path)
 

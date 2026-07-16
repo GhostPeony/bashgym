@@ -44,6 +44,7 @@ from bashgym.campaigns.contracts import (
     utc_now,
 )
 from bashgym.campaigns.control_room import (
+    ControlRoomDurableProjection,
     build_control_room_snapshot,
     if_none_match_matches,
     principal_control_room_etag,
@@ -78,6 +79,7 @@ from bashgym.campaigns.service import CampaignService
 from bashgym.campaigns.transitions import InvalidCampaignTransitionError
 from bashgym.campaigns.worker_service import (
     CONTROLLER_OFFLINE_GUIDANCE,
+    ControllerStatusProjection,
     DesktopWorkerStatusProjection,
     WorkerServiceError,
     load_approved_remote_profiles,
@@ -423,6 +425,7 @@ def _autoresearch_doctor_report(
 ) -> AutoResearchDoctorReport:
     ledger = ExperimentLedgerRepository(repository.db_path)
     ledger.initialize()
+    request.app.state.campaign_experiment_ledger = ledger
     return doctor_autoresearch_template(
         definition,
         workspace_id=workspace_id,
@@ -430,6 +433,136 @@ def _autoresearch_doctor_report(
         executor_profiles=_approved_executor_profiles(request),
         controller=project_controller_status(repository, get_bashgym_dir()),
         source_profiles=_approved_source_profiles(request),
+    )
+
+
+def _control_room_definition_matches(
+    definition: AutoResearchTemplateDefinition,
+    durable: ControlRoomDurableProjection,
+) -> bool:
+    campaign = durable.campaign
+    if (
+        definition.kind != campaign.kind
+        or definition.objective != campaign.objective
+        or definition.target_model != campaign.target_model
+        or canonical_hash(definition.manifest.model_dump(mode="json"))
+        != durable.manifest.manifest_hash
+    ):
+        return False
+    if durable.autoresearch_spec is None:
+        return True
+    materialized = definition.materialize_spec(
+        campaign.workspace_id, campaign.campaign_id
+    )
+    if materialized is None:
+        return False
+    persisted_spec = {
+        key: value
+        for key, value in durable.autoresearch_spec.items()
+        if key != "created_at"
+    }
+    return canonical_hash(
+        materialized.model_dump(mode="json", exclude={"created_at"})
+    ) == canonical_hash(persisted_spec)
+
+
+def _control_room_readiness(
+    request: Request,
+    durable: ControlRoomDurableProjection,
+    controller_status: ControllerStatusProjection,
+    *,
+    checked_at: datetime,
+) -> tuple[ReadinessSummaryV1, str]:
+    matches = tuple(
+        definition
+        for definition in _autoresearch_definitions(request).values()
+        if _control_room_definition_matches(definition, durable)
+    )
+    if not matches:
+        code = "campaign_readiness_definition_unavailable"
+        return (
+            ReadinessSummaryV1(
+                materializable=False,
+                launch_ready=False,
+                checked_at=checked_at,
+                activation_receipt_digest=None,
+                doctor_receipt_digest=None,
+                blocking_codes=(code,),
+            ),
+            canonical_hash({"status": code}),
+        )
+    if len(matches) != 1:
+        code = "campaign_readiness_definition_ambiguous"
+        return (
+            ReadinessSummaryV1(
+                materializable=False,
+                launch_ready=False,
+                checked_at=checked_at,
+                activation_receipt_digest=None,
+                doctor_receipt_digest=None,
+                blocking_codes=(code,),
+            ),
+            canonical_hash(
+                {
+                    "status": code,
+                    "definitions": sorted(
+                        item.definition_digest for item in matches
+                    ),
+                }
+            ),
+        )
+
+    definition = matches[0]
+    executor_profiles = _approved_executor_profiles(request)
+    source_profiles = _approved_source_profiles(request)
+    readiness_inputs = {
+        "definition": definition.definition_digest,
+        "executor_profiles": [
+            profile.model_dump(mode="json")
+            for _key, profile in sorted(executor_profiles.items())
+        ],
+        "source_profiles": [
+            profile.model_dump(mode="json")
+            for _key, profile in sorted(source_profiles.items())
+        ],
+    }
+    ledger = getattr(request.app.state, "campaign_experiment_ledger", None)
+    if not isinstance(ledger, ExperimentLedgerRepository):
+        code = "campaign_readiness_ledger_unavailable"
+        return (
+            ReadinessSummaryV1(
+                materializable=False,
+                launch_ready=False,
+                checked_at=checked_at,
+                activation_receipt_digest=None,
+                doctor_receipt_digest=None,
+                blocking_codes=(code,),
+            ),
+            canonical_hash({**readiness_inputs, "status": code}),
+        )
+    report = doctor_autoresearch_template(
+        definition,
+        workspace_id=durable.campaign.workspace_id,
+        ledger=ledger,
+        executor_profiles=executor_profiles,
+        controller=controller_status,
+        source_profiles=source_profiles,
+    )
+    readiness = ReadinessSummaryV1(
+        materializable=report.materializable,
+        launch_ready=report.launch_ready,
+        checked_at=checked_at,
+        activation_receipt_digest=None,
+        doctor_receipt_digest=None,
+        blocking_codes=report.blocking_codes,
+    )
+    return readiness, canonical_hash(
+        {
+            **readiness_inputs,
+            "readiness": readiness.model_dump(
+                mode="json", exclude={"checked_at"}
+            ),
+        }
     )
 
 
@@ -970,46 +1103,12 @@ def get_control_room_snapshot(
             controller_instance_id=controller_status.owner_id,
             safe_guidance=controller_status.guidance,
         )
-        checked_at = utc_now()
-        matching_definition = next(
-            (
-                definition
-                for definition in _autoresearch_definitions(request).values()
-                if definition.kind == durable.campaign.kind
-                and definition.target_model == durable.campaign.target_model
-                and canonical_hash(definition.manifest.model_dump(mode="json"))
-                == durable.manifest.manifest_hash
-            ),
-            None,
+        readiness, readiness_revision = _control_room_readiness(
+            request,
+            durable,
+            controller_status,
+            checked_at=utc_now(),
         )
-        if matching_definition is None:
-            readiness = ReadinessSummaryV1(
-                materializable=False,
-                launch_ready=False,
-                checked_at=checked_at,
-                activation_receipt_digest=None,
-                doctor_receipt_digest=None,
-                blocking_codes=("campaign_readiness_definition_unavailable",),
-            )
-        else:
-            ledger = ExperimentLedgerRepository(repository.db_path)
-            ledger.initialize()
-            report = doctor_autoresearch_template(
-                matching_definition,
-                workspace_id=workspace_id,
-                ledger=ledger,
-                executor_profiles=_approved_executor_profiles(request),
-                controller=controller_status,
-                source_profiles=_approved_source_profiles(request),
-            )
-            readiness = ReadinessSummaryV1(
-                materializable=report.materializable,
-                launch_ready=report.launch_ready,
-                checked_at=checked_at,
-                activation_receipt_digest=None,
-                doctor_receipt_digest=None,
-                blocking_codes=report.blocking_codes,
-            )
         snapshot = build_control_room_snapshot(
             durable,
             controller,
@@ -1017,7 +1116,11 @@ def get_control_room_snapshot(
             principal=principal,
             snapshot_at=utc_now(),
         )
-        etag = principal_control_room_etag(snapshot, principal)
+        etag = principal_control_room_etag(
+            snapshot,
+            principal,
+            readiness_revision=readiness_revision,
+        )
         headers["ETag"] = etag
         if if_none_match_matches(if_none_match, etag):
             return Response(status_code=304, headers=headers)

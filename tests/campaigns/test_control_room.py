@@ -8,7 +8,9 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from bashgym.campaigns import control_room as control_room_module
 from bashgym.campaigns import transitions as campaign_transitions
+from bashgym.campaigns.autoresearch import AutoResearchRepository
 from bashgym.campaigns.contracts import (
     ActorPrincipal,
     AutonomyProfile,
@@ -18,8 +20,17 @@ from bashgym.campaigns.contracts import (
     CredentialKind,
     ReadinessSummaryV1,
 )
-from bashgym.campaigns.control_room import build_control_room_snapshot
-from bashgym.campaigns.persistence import CampaignRepository, RecordNotFoundError
+from bashgym.campaigns.control_room import (
+    CandidateProvenance,
+    ChampionProvenance,
+    build_control_room_snapshot,
+)
+from bashgym.campaigns.persistence import (
+    CampaignPersistenceError,
+    CampaignRepository,
+    RecordNotFoundError,
+)
+from bashgym.campaigns.remote import RemoteRunIdentity
 from tests.campaigns.test_persistence import campaign, create, revision
 
 
@@ -307,12 +318,12 @@ def test_snapshot_promotion_eligibility_uses_the_shared_mutation_gate(repository
     )
     controller = ControllerObservationV1(
         controller_observation_version=1,
-        state="online",
+        state="offline",
         observed_at=now,
-        heartbeat_age_seconds=0,
-        lease_expires_at=now + timedelta(seconds=10),
-        controller_instance_id="resident-worker",
-        safe_guidance=None,
+        heartbeat_age_seconds=None,
+        lease_expires_at=None,
+        controller_instance_id=None,
+        safe_guidance="Start the resident controller.",
     )
     readiness = ReadinessSummaryV1(
         materializable=True,
@@ -341,9 +352,248 @@ def test_snapshot_promotion_eligibility_uses_the_shared_mutation_gate(repository
 
     assert mutation_gate.eligible is True
     assert snapshot.decision_surface.promotion_eligible is mutation_gate.eligible
-    assert "promote" in {
-        action.action for action in snapshot.decision_surface.next_actions
-    }
+    assert "promote" in {action.action for action in snapshot.decision_surface.next_actions}
+    decision = next(phase for phase in snapshot.journey if phase.phase_id == "decision")
+    assert decision.state == "ready"
+    assert decision.primary_blocker is None
+    assert decision.next_action_ids == ("promote",)
+
+
+def test_snapshot_decision_phase_exposes_shared_promotion_blockers(repository):
+    durable = repository.read_control_room_projection("workspace-a", "campaign-1")
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
+    durable = replace(
+        durable,
+        campaign=durable.campaign.model_copy(
+            update={
+                "status": "active",
+                "best_development_candidate_ref": "candidate-digest",
+            }
+        ),
+        latest_gate={
+            "decision_id": "comparison-1",
+            "verdict": "failed",
+            "candidate_digest": "candidate-digest",
+        },
+        protected_gate_passed=False,
+    )
+    principal = ActorPrincipal(
+        actor_id="codex-agent",
+        autonomy_profile=AutonomyProfile.CODEX_TRUSTED,
+        credential_id="credential-1",
+        credential_kind=CredentialKind.ACCESS,
+        workspace_ids=("workspace-a",),
+        capabilities=frozenset(Capability),
+        authorization_revision=1,
+        expires_at=now + timedelta(hours=1),
+    )
+    controller = ControllerObservationV1(
+        controller_observation_version=1,
+        state="online",
+        observed_at=now,
+        heartbeat_age_seconds=0,
+        lease_expires_at=now + timedelta(seconds=10),
+        controller_instance_id="resident-worker",
+        safe_guidance=None,
+    )
+    readiness = ReadinessSummaryV1(
+        materializable=True,
+        launch_ready=True,
+        checked_at=now,
+        activation_receipt_digest=None,
+        doctor_receipt_digest=None,
+        blocking_codes=(),
+    )
+
+    snapshot = build_control_room_snapshot(
+        durable,
+        controller,
+        readiness,
+        principal=principal,
+        snapshot_at=now,
+    )
+
+    decision = next(phase for phase in snapshot.journey if phase.phase_id == "decision")
+    assert snapshot.decision_surface.promotion_eligible is False
+    assert "promote" not in {action.action for action in snapshot.decision_surface.next_actions}
+    assert decision.state == "blocked"
+    assert decision.primary_blocker is not None
+    assert decision.primary_blocker.code == "campaign_development_gate_not_passed"
+    assert "campaign_protected_gate_not_passed" in decision.primary_blocker.secondary_codes
+
+    lifecycle_blocked = replace(
+        durable,
+        campaign=durable.campaign.model_copy(update={"status": "paused"}),
+        latest_gate={
+            "decision_id": "comparison-2",
+            "verdict": "passed",
+            "candidate_digest": "candidate-digest",
+        },
+        protected_gate_passed=True,
+    )
+    lifecycle_snapshot = build_control_room_snapshot(
+        lifecycle_blocked,
+        controller,
+        readiness,
+        principal=principal,
+        snapshot_at=now,
+    )
+    lifecycle_decision = next(
+        phase
+        for phase in lifecycle_snapshot.journey
+        if phase.phase_id == "decision"
+    )
+    assert lifecycle_decision.state == "blocked"
+    assert lifecycle_decision.primary_blocker is not None
+    assert (
+        lifecycle_decision.primary_blocker.code
+        == "campaign_promotion_transition_unavailable"
+    )
+
+
+def test_override_champion_reports_only_candidate_keyed_actual_evidence(repository):
+    durable = repository.read_control_room_projection("workspace-a", "campaign-1")
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
+    durable = replace(
+        durable,
+        campaign=durable.campaign.model_copy(
+            update={
+                "status": "completed",
+                "best_development_candidate_ref": "candidate-digest",
+                "champion_ref": "champion:target:1:candidate-digest",
+            }
+        ),
+        latest_gate={
+            "decision_id": "comparison-1",
+            "verdict": "failed",
+            "candidate_digest": "candidate-digest",
+        },
+        candidate_provenance=CandidateProvenance(
+            candidate_digest="candidate-digest",
+            source_attempt_ids=("attempt-owned",),
+            source_artifact_ids=("artifact-owned",),
+            latest_comparable_evaluation_id="evaluation-for-candidate",
+        ),
+        champion_provenance=ChampionProvenance(
+            candidate_digest="candidate-digest",
+            decision_id="comparison-1",
+            comparison_verdict="failed",
+            override=True,
+        ),
+    )
+    principal = ActorPrincipal(
+        actor_id="codex-agent",
+        autonomy_profile=AutonomyProfile.CODEX_TRUSTED,
+        credential_id="credential-1",
+        credential_kind=CredentialKind.ACCESS,
+        workspace_ids=("workspace-a",),
+        capabilities=frozenset(Capability),
+        authorization_revision=1,
+        expires_at=now + timedelta(hours=1),
+    )
+    controller = ControllerObservationV1(
+        controller_observation_version=1,
+        state="online",
+        observed_at=now,
+        heartbeat_age_seconds=0,
+        lease_expires_at=now + timedelta(seconds=10),
+        controller_instance_id="resident-worker",
+        safe_guidance=None,
+    )
+    readiness = ReadinessSummaryV1(
+        materializable=True,
+        launch_ready=True,
+        checked_at=now,
+        activation_receipt_digest=None,
+        doctor_receipt_digest=None,
+        blocking_codes=(),
+    )
+
+    snapshot = build_control_room_snapshot(
+        durable,
+        controller,
+        readiness,
+        principal=principal,
+        snapshot_at=now,
+    )
+
+    assert snapshot.champion is not None
+    assert snapshot.champion.comparison_verdict == "failed"
+    assert snapshot.champion.latest_comparable_evaluation_id == "evaluation-for-candidate"
+    assert snapshot.champion.source_attempt_ids == ("attempt-owned",)
+    assert snapshot.champion.source_artifact_ids == ("artifact-owned",)
+
+
+def test_durable_champion_claim_is_correlated_to_its_candidate_and_decision(repository):
+    candidate_digest = "c" * 64
+    target_key = campaign().target_model.target_contract_key
+    champion_ref = f"champion:{target_key}:1:{candidate_digest}"
+    now_text = "2026-07-16T12:00:00+00:00"
+    with sqlite3.connect(repository.db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO campaign_gate_decisions(
+                workspace_id, campaign_id, decision_id, decision_json, created_at
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                "workspace-a",
+                "campaign-1",
+                "comparison-override",
+                json.dumps(
+                    {"candidate_digest": candidate_digest, "verdict": "failed"}
+                ),
+                now_text,
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO campaign_champions(
+                workspace_id, target_contract_key, revision, champion_json, created_at
+            ) VALUES (?, ?, 1, ?, ?)
+            """,
+            (
+                "workspace-a",
+                target_key,
+                json.dumps(
+                    {
+                        "schema_version": "campaign_champion.v1",
+                        "campaign_id": "campaign-1",
+                        "candidate_digest": candidate_digest,
+                        "development_decision_id": "comparison-override",
+                        "protected_gate_passed": False,
+                        "override": True,
+                        "override_reason": "Approved exception",
+                        "actor_id": "operator",
+                        "created_at": now_text,
+                    }
+                ),
+                now_text,
+            ),
+        )
+        connection.execute(
+            """
+            UPDATE campaigns SET status = 'completed', champion_ref = ?,
+                best_development_candidate_ref = ?, updated_at = ?
+            WHERE workspace_id = ? AND campaign_id = ?
+            """,
+            (
+                champion_ref,
+                candidate_digest,
+                now_text,
+                "workspace-a",
+                "campaign-1",
+            ),
+        )
+
+    durable = repository.read_control_room_projection("workspace-a", "campaign-1")
+
+    assert durable.champion_provenance == ChampionProvenance(
+        candidate_digest=candidate_digest,
+        decision_id="comparison-override",
+        comparison_verdict="failed",
+        override=True,
+    )
 
 
 def test_valid_running_stage_plan_projects_active_work_without_invariant_failure(repository):
@@ -444,6 +694,610 @@ def test_valid_running_stage_plan_projects_active_work_without_invariant_failure
     assert snapshot.active_work.eta_seconds is None
 
 
+def test_candidate_projection_never_copies_unproven_outcome_references(repository):
+    durable = repository.read_control_room_projection("workspace-a", "campaign-1")
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
+    candidate_digest = "c" * 64
+    durable = replace(
+        durable,
+        campaign=durable.campaign.model_copy(
+            update={
+                "status": "active",
+                "best_development_candidate_ref": candidate_digest,
+            }
+        ),
+        latest_gate={
+            "decision_id": "comparison-selected",
+            "verdict": "failed",
+            "candidate_digest": candidate_digest,
+        },
+        candidate_provenance=CandidateProvenance(
+            candidate_digest="d" * 64,
+            source_attempt_ids=("attempt-from-unrelated-result",),
+            source_artifact_ids=("private_candidate_mapping",),
+            latest_comparable_evaluation_id="evaluation-for-unrelated-candidate",
+        ),
+    )
+    principal = ActorPrincipal(
+        actor_id="reader",
+        autonomy_profile=AutonomyProfile.HERMES_BOUNDED,
+        credential_id="reader-credential",
+        credential_kind=CredentialKind.ACCESS,
+        workspace_ids=("workspace-a",),
+        capabilities=frozenset({Capability.CAMPAIGN_READ}),
+        expires_at=now + timedelta(hours=1),
+    )
+
+    snapshot = build_control_room_snapshot(
+        durable,
+        ControllerObservationV1(
+            controller_observation_version=1,
+            state="online",
+            observed_at=now,
+            heartbeat_age_seconds=0,
+            lease_expires_at=now + timedelta(seconds=10),
+            controller_instance_id="resident-worker",
+            safe_guidance=None,
+        ),
+        ReadinessSummaryV1(
+            materializable=True,
+            launch_ready=True,
+            checked_at=now,
+            activation_receipt_digest=None,
+            doctor_receipt_digest=None,
+            blocking_codes=(),
+        ),
+        principal=principal,
+        snapshot_at=now,
+    )
+
+    assert snapshot.candidate is not None
+    assert snapshot.candidate.candidate_ref == candidate_digest
+    assert snapshot.candidate.source_attempt_ids == ()
+    assert snapshot.candidate.source_artifact_ids == ()
+    assert snapshot.candidate.latest_comparable_evaluation_id is None
+    rendered = snapshot.model_dump_json()
+    assert "attempt-from-unrelated-result" not in rendered
+    assert "private_candidate_mapping" not in rendered
+    assert "evaluation-for-unrelated-candidate" not in rendered
+
+
+def test_durable_read_correlates_candidate_provenance_to_owned_rows(repository):
+    AutoResearchRepository(repository.db_path).initialize()
+    selected_digest = "c" * 64
+    unrelated_digest = "d" * 64
+    stage_plan = json.dumps(
+        {
+            "schema_version": "campaign_stage_plan.v1",
+            "items": [
+                {
+                    "schema_version": "campaign_stage_plan_item.v1",
+                    "stage": "development_evaluation",
+                    "disposition": "required",
+                    "reason": "Candidate comparison",
+                    "input_contract": {},
+                    "output_contract": {},
+                }
+            ],
+        }
+    )
+    with sqlite3.connect(repository.db_path) as connection:
+        for suffix, digest, sequence in (
+            ("selected", selected_digest, 1),
+            ("unrelated", unrelated_digest, 2),
+        ):
+            connection.execute(
+                """
+                INSERT INTO campaign_proposals(
+                    workspace_id, campaign_id, proposal_id, status, priority,
+                    estimated_cost, creation_sequence, proposal_json, created_at
+                ) VALUES (?, ?, ?, 'accepted', 50, 0, ?, '{}', ?)
+                """,
+                (
+                    "workspace-a",
+                    "campaign-1",
+                    f"proposal-{suffix}",
+                    sequence,
+                    f"2026-07-16T00:00:0{sequence}+00:00",
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO campaign_studies(
+                    workspace_id, campaign_id, study_id, proposal_id, status,
+                    current_stage_index, stage_plan_json, candidate_digest,
+                    version, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, 'completed', 0, ?, ?, 1, ?, ?)
+                """,
+                (
+                    "workspace-a",
+                    "campaign-1",
+                    f"study-{suffix}",
+                    f"proposal-{suffix}",
+                    stage_plan,
+                    digest,
+                    f"2026-07-16T00:00:0{sequence}+00:00",
+                    f"2026-07-16T00:00:0{sequence}+00:00",
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO campaign_actions(
+                    workspace_id, campaign_id, study_id, action_id, stage_index,
+                    stage_kind, input_digest, status, candidate_digest,
+                    manifest_revision, version, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, 0, 'development_evaluation', ?, 'completed', ?, 1, 1, ?, ?)
+                """,
+                (
+                    "workspace-a",
+                    "campaign-1",
+                    f"study-{suffix}",
+                    f"action-{suffix}",
+                    "a" * 64,
+                    digest,
+                    f"2026-07-16T00:00:0{sequence}+00:00",
+                    f"2026-07-16T00:00:0{sequence}+00:00",
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO campaign_attempts(
+                    workspace_id, action_id, attempt_id, attempt_number,
+                    claim_generation, status, executor_json, created_at, updated_at
+                ) VALUES (?, ?, ?, 1, 1, 'completed', '{}', ?, ?)
+                """,
+                (
+                    "workspace-a",
+                    f"action-{suffix}",
+                    f"attempt-{suffix}",
+                    f"2026-07-16T00:00:0{sequence}+00:00",
+                    f"2026-07-16T00:00:0{sequence}+00:00",
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO campaign_artifacts(
+                    workspace_id, campaign_id, artifact_id, producer_action_id,
+                    uri, sha256, size_bytes, schema_name, sealed, valid,
+                    metadata_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 1, 'evaluation.v1', 1, 1, '{}', ?)
+                """,
+                (
+                    "workspace-a",
+                    "campaign-1",
+                    f"artifact-{suffix}",
+                    f"action-{suffix}",
+                    f"file:///private/{suffix}",
+                    ("e" if suffix == "selected" else "f") * 64,
+                    f"2026-07-16T00:00:0{sequence}+00:00",
+                ),
+            )
+        selected_result = {
+            "study_id": "study-selected",
+            "attempt_ids": [
+                "attempt-selected",
+                "attempt-unrelated",
+                "attempt-unknown",
+            ],
+            "evidence_references": [
+                "artifact-selected",
+                "artifact-unrelated",
+                "private_candidate_mapping",
+            ],
+        }
+        connection.execute(
+            """
+            INSERT INTO autoresearch_results(
+                workspace_id, campaign_id, result_id, proposal_id, result_json,
+                result_digest, decision_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "workspace-a",
+                "campaign-1",
+                "result-selected",
+                "proposal-selected",
+                json.dumps(selected_result),
+                "1" * 64,
+                json.dumps({"eligible_for_best": True, "decision": "keep"}),
+                "2026-07-16T00:00:03+00:00",
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO autoresearch_results(
+                workspace_id, campaign_id, result_id, proposal_id, result_json,
+                result_digest, decision_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "workspace-a",
+                "campaign-1",
+                "result-unrelated-later",
+                "proposal-unrelated",
+                json.dumps(
+                    {
+                        "study_id": "study-unrelated",
+                        "attempt_ids": ["attempt-unrelated"],
+                        "evidence_references": ["artifact-unrelated"],
+                    }
+                ),
+                "2" * 64,
+                json.dumps({"eligible_for_best": False, "decision": "discard"}),
+                "2026-07-16T00:00:04+00:00",
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO campaign_gate_decisions(
+                workspace_id, campaign_id, decision_id, decision_json, created_at
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                "workspace-a",
+                "campaign-1",
+                "comparison-selected",
+                json.dumps({"candidate_digest": selected_digest, "verdict": "failed"}),
+                "2026-07-16T00:00:05+00:00",
+            ),
+        )
+        for evaluation_id, digest, created_at in (
+            ("evaluation-selected", selected_digest, "2026-07-16T00:00:05+00:00"),
+            ("evaluation-unrelated-later", unrelated_digest, "2026-07-16T00:00:06+00:00"),
+        ):
+            connection.execute(
+                """
+                INSERT INTO campaign_evaluations(
+                    workspace_id, campaign_id, evaluation_id, evaluation_json, created_at
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    "workspace-a",
+                    "campaign-1",
+                    evaluation_id,
+                    json.dumps({"candidate_digest": digest}),
+                    created_at,
+                ),
+            )
+        connection.execute(
+            """
+            UPDATE campaigns SET status = 'active', best_development_candidate_ref = ?
+            WHERE workspace_id = ? AND campaign_id = ?
+            """,
+            (selected_digest, "workspace-a", "campaign-1"),
+        )
+
+    projection = repository.read_control_room_projection("workspace-a", "campaign-1")
+
+    assert projection.candidate_provenance is not None
+    assert projection.candidate_provenance.candidate_digest == selected_digest
+    assert projection.candidate_provenance.source_attempt_ids == ("attempt-selected",)
+    assert projection.candidate_provenance.source_artifact_ids == ("artifact-selected",)
+    assert projection.candidate_provenance.latest_comparable_evaluation_id == "evaluation-selected"
+
+
+def test_oversized_legacy_projection_is_bounded_and_fails_closed(repository):
+    durable = repository.read_control_room_projection("workspace-a", "campaign-1")
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
+    candidate_digest = "c" * 64
+    oversized_manifest = durable.manifest.manifest.model_copy(
+        update={"budget_limits": {f"unit_{index:03d}": 1.0 for index in range(65)}}
+    )
+    durable = replace(
+        durable,
+        campaign=durable.campaign.model_copy(
+            update={
+                "status": "active",
+                "best_development_candidate_ref": candidate_digest,
+            }
+        ),
+        manifest=durable.manifest.model_copy(update={"manifest": oversized_manifest}),
+        latest_gate={
+            "decision_id": "comparison-1",
+            "verdict": "passed",
+            "candidate_digest": candidate_digest,
+        },
+        candidate_provenance=CandidateProvenance(
+            candidate_digest=candidate_digest,
+            source_attempt_ids=tuple(f"attempt-{index:03d}" for index in range(101)),
+            source_artifact_ids=tuple(f"artifact-{index:03d}" for index in range(101)),
+            latest_comparable_evaluation_id="evaluation-1",
+        ),
+        projection_invariant_codes=(
+            "campaign_projection_budget_resources_exceeded",
+            "campaign_projection_candidate_references_exceeded",
+        ),
+    )
+    principal = ActorPrincipal(
+        actor_id="reader",
+        autonomy_profile=AutonomyProfile.HERMES_BOUNDED,
+        credential_id="reader-credential",
+        credential_kind=CredentialKind.ACCESS,
+        workspace_ids=("workspace-a",),
+        capabilities=frozenset({Capability.CAMPAIGN_READ}),
+        expires_at=now + timedelta(hours=1),
+    )
+
+    snapshot = build_control_room_snapshot(
+        durable,
+        ControllerObservationV1(
+            controller_observation_version=1,
+            state="online",
+            observed_at=now,
+            heartbeat_age_seconds=0,
+            lease_expires_at=now + timedelta(seconds=10),
+            controller_instance_id="resident-worker",
+            safe_guidance=None,
+        ),
+        ReadinessSummaryV1(
+            materializable=True,
+            launch_ready=True,
+            checked_at=now,
+            activation_receipt_digest=None,
+            doctor_receipt_digest=None,
+            blocking_codes=(),
+        ),
+        principal=principal,
+        snapshot_at=now,
+    )
+
+    assert len(snapshot.budget.resources) == 64
+    assert snapshot.candidate is not None
+    assert len(snapshot.candidate.source_attempt_ids) == 100
+    assert len(snapshot.candidate.source_artifact_ids) == 100
+    assert snapshot.decision_surface.blocker.code == "campaign_projection_invariant_failed"
+    assert snapshot.decision_surface.next_actions == ()
+    assert set(snapshot.decision_surface.recovery_actions) <= {
+        "inspect",
+        "reconcile_controller",
+        "reconcile_attempt",
+    }
+
+
+def test_new_campaign_rejects_more_budget_resources_than_public_contract(repository):
+    value = campaign(workspace_id="workspace-a", campaign_id="campaign-oversized")
+    oversized_manifest = revision(value).manifest.model_copy(
+        update={"budget_limits": {f"unit_{index:03d}": 1.0 for index in range(65)}}
+    )
+
+    with pytest.raises(
+        CampaignPersistenceError,
+        match="campaign_budget_resource_limit_exceeded",
+    ):
+        repository.create_campaign(
+            value,
+            revision(value).model_copy(update={"manifest": oversized_manifest}),
+            actor_id="codex-agent",
+            credential_kind=CredentialKind.ACCESS,
+            correlation_id="oversized-budget",
+            idempotency_key="oversized-budget",
+        )
+
+
 def test_snapshot_workspace_scope_fails_closed(repository):
     with pytest.raises(RecordNotFoundError):
-        repository.read_control_room_snapshot("workspace-b", "campaign-1")
+        repository.read_control_room_projection("workspace-b", "campaign-1")
+
+
+def test_projection_keeps_one_sqlite_snapshot_when_writer_commits_mid_read(repository, monkeypatch):
+    original_table_exists = control_room_module._table_exists
+    writer_committed = False
+
+    def commit_writer_after_initial_projection_reads(connection, table):
+        nonlocal writer_committed
+        if not writer_committed:
+            with sqlite3.connect(repository.db_path) as writer:
+                writer.execute(
+                    """
+                    UPDATE campaigns SET version = 2, updated_at = ?
+                    WHERE workspace_id = ? AND campaign_id = ?
+                    """,
+                    ("2026-07-16T12:00:00+00:00", "workspace-a", "campaign-1"),
+                )
+                writer.execute(
+                    """
+                    INSERT INTO campaign_events(
+                        event_id, workspace_id, campaign_id, sequence,
+                        aggregate_version, event_type, payload_json, actor_id,
+                        credential_kind, correlation_id, idempotency_key, created_at
+                    ) VALUES (?, ?, ?, 2, 2, ?, '{}', ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "event-concurrent-writer",
+                        "workspace-a",
+                        "campaign-1",
+                        "campaign:concurrent-test",
+                        "writer",
+                        "controller",
+                        "concurrent-writer",
+                        "concurrent-writer",
+                        "2026-07-16T12:00:00+00:00",
+                    ),
+                )
+            writer_committed = True
+        return original_table_exists(connection, table)
+
+    monkeypatch.setattr(
+        control_room_module,
+        "_table_exists",
+        commit_writer_after_initial_projection_reads,
+    )
+
+    projection = repository.read_control_room_projection("workspace-a", "campaign-1")
+
+    assert writer_committed is True
+    assert projection.campaign.version == 1
+    assert projection.latest_event_cursor == 1
+    assert projection.collection_counts["events"] == 1
+    assert repository.get_campaign("workspace-a", "campaign-1").version == 2
+
+
+def test_unknown_remote_identity_is_opaque_and_requires_reconciliation(repository):
+    now_text = "2026-07-16T12:00:00+00:00"
+    stage_plan = json.dumps(
+        {
+            "schema_version": "campaign_stage_plan.v1",
+            "items": [
+                {
+                    "schema_version": "campaign_stage_plan_item.v1",
+                    "stage": "smoke_training",
+                    "disposition": "required",
+                    "reason": "Bounded smoke check",
+                    "input_contract": {},
+                    "output_contract": {},
+                }
+            ],
+        }
+    )
+    identity = RemoteRunIdentity(
+        compute_profile_id="ssh-gpu-lab",
+        run_id="remote-run-1",
+        remote_run_directory="/private/remote/run-1",
+        remote_pid=4242,
+        process_group_id=4242,
+        process_start_ticks=9001,
+        boot_id="private-boot-id",
+        command_hash="a" * 64,
+        launch_manifest_sha256="d" * 64,
+        launched_at=datetime(2026, 7, 16, 12, 0, tzinfo=UTC),
+    )
+    with sqlite3.connect(repository.db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO campaign_proposals(
+                workspace_id, campaign_id, proposal_id, status, priority,
+                estimated_cost, creation_sequence, proposal_json, created_at
+            ) VALUES (?, ?, ?, 'accepted', 50, 0, 1, '{}', ?)
+            """,
+            ("workspace-a", "campaign-1", "proposal-remote", now_text),
+        )
+        connection.execute(
+            """
+            INSERT INTO campaign_studies(
+                workspace_id, campaign_id, study_id, proposal_id, status,
+                current_stage_index, stage_plan_json, candidate_digest,
+                version, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, 'smoke_training', 0, ?, ?, 1, ?, ?)
+            """,
+            (
+                "workspace-a",
+                "campaign-1",
+                "study-remote",
+                "proposal-remote",
+                stage_plan,
+                "b" * 64,
+                now_text,
+                now_text,
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO campaign_actions(
+                workspace_id, campaign_id, study_id, action_id, stage_index,
+                stage_kind, input_digest, status, candidate_digest,
+                manifest_revision, version, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, 0, 'smoke_training', ?, 'running', ?, 1, 1, ?, ?)
+            """,
+            (
+                "workspace-a",
+                "campaign-1",
+                "study-remote",
+                "action-remote",
+                "c" * 64,
+                "b" * 64,
+                now_text,
+                now_text,
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO campaign_attempts(
+                workspace_id, action_id, attempt_id, attempt_number,
+                claim_generation, status, executor_json, created_at, updated_at
+            ) VALUES (?, ?, ?, 1, 1, 'unknown', ?, ?, ?)
+            """,
+            (
+                "workspace-a",
+                "action-remote",
+                "attempt-remote",
+                json.dumps({"executor_kind": "ssh_remote"}),
+                now_text,
+                now_text,
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO campaign_remote_runs(
+                workspace_id, attempt_id, claim_generation, identity_json, state,
+                metric_cursor_json, log_cursor_json, created_at, updated_at
+            ) VALUES (?, ?, 1, ?, 'unknown', '{}', '{}', ?, ?)
+            """,
+            (
+                "workspace-a",
+                "attempt-remote",
+                identity.model_dump_json(),
+                now_text,
+                now_text,
+            ),
+        )
+        connection.execute(
+            """
+            UPDATE campaigns SET status = 'active', active_study_id = ?,
+                active_action_id = ?, updated_at = ?
+            WHERE workspace_id = ? AND campaign_id = ?
+            """,
+            (
+                "study-remote",
+                "action-remote",
+                now_text,
+                "workspace-a",
+                "campaign-1",
+            ),
+        )
+
+    durable = repository.read_control_room_projection("workspace-a", "campaign-1")
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
+    snapshot = build_control_room_snapshot(
+        durable,
+        ControllerObservationV1(
+            controller_observation_version=1,
+            state="online",
+            observed_at=now,
+            heartbeat_age_seconds=0,
+            lease_expires_at=now + timedelta(seconds=10),
+            controller_instance_id="resident-worker",
+            safe_guidance=None,
+        ),
+        ReadinessSummaryV1(
+            materializable=True,
+            launch_ready=True,
+            checked_at=now,
+            activation_receipt_digest=None,
+            doctor_receipt_digest=None,
+            blocking_codes=(),
+        ),
+        principal=ActorPrincipal(
+            actor_id="reader",
+            autonomy_profile=AutonomyProfile.HERMES_BOUNDED,
+            credential_id="reader-credential",
+            credential_kind=CredentialKind.ACCESS,
+            workspace_ids=("workspace-a",),
+            capabilities=frozenset({Capability.CAMPAIGN_READ}),
+            expires_at=now + timedelta(hours=1),
+        ),
+        snapshot_at=now,
+    )
+
+    assert snapshot.active_work is not None
+    assert snapshot.active_work.executor_type == "ssh_remote"
+    assert snapshot.active_work.process_identity is not None
+    assert snapshot.active_work.process_identity.run_id == "remote-run-1"
+    assert snapshot.active_work.process_identity.compute_profile_id == "ssh-gpu-lab"
+    assert snapshot.active_work.process_identity.state == "unknown"
+    assert snapshot.decision_surface.blocker is not None
+    assert snapshot.decision_surface.blocker.code == "campaign_process_identity_unknown"
+    assert "reconcile_attempt" in snapshot.decision_surface.recovery_actions
+    rendered = snapshot.model_dump_json()
+    assert "private-boot-id" not in rendered
+    assert "/private/remote/run-1" not in rendered
+    assert "4242" not in rendered

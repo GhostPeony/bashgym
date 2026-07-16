@@ -718,6 +718,7 @@ class ControlRoomControllerObservationV1(FrozenContractModel):
         "control_room_controller_observation.v1"
     )
     online: bool
+    controller_observation_version: int = Field(default=0, ge=0)
     state: Literal["online", "stale", "offline"]
     code: Identifier
     observed_at: datetime
@@ -733,6 +734,7 @@ class CampaignControlRoomSnapshotV1(FrozenContractModel):
     """Authenticated control-room response with explicit observation boundaries."""
 
     schema_version: Literal["control_room_snapshot.v1"] = "control_room_snapshot.v1"
+    authorization_revision: int = Field(ge=1)
     durable_state: CampaignControlRoomStateV1
     controller_observation: ControlRoomControllerObservationV1
 
@@ -821,6 +823,7 @@ class ActorPrincipal(FrozenContractModel):
     credential_kind: CredentialKind
     workspace_ids: tuple[Identifier, ...]
     capabilities: frozenset[Capability]
+    authorization_revision: int = Field(default=1, ge=1)
     expires_at: datetime
 
     def require(self, workspace_id: str, capability: Capability) -> None:

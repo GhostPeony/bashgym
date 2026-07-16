@@ -58,6 +58,9 @@ def test_current_owner_renews_without_changing_fencing_generation(tmp_path):
     acquired = repository.acquire_lease(
         "action:action-1", "worker-a", ttl=timedelta(seconds=15), now=start
     )
+    assert acquired.controller_observation_version == 1
+    assert repository.get_lease(acquired.lease_key).controller_observation_version == 1
+    assert repository.get_lease(acquired.lease_key).controller_observation_version == 1
     renewed = repository.heartbeat_lease(
         acquired.lease_key,
         acquired.owner_id,
@@ -67,6 +70,8 @@ def test_current_owner_renews_without_changing_fencing_generation(tmp_path):
     )
 
     assert renewed.generation == acquired.generation
+    assert renewed.controller_observation_version == 2
+    assert repository.get_lease(acquired.lease_key).controller_observation_version == 2
     assert renewed.expires_at == start + timedelta(seconds=20)
     repository.release_lease(
         renewed.lease_key,
@@ -81,3 +86,4 @@ def test_current_owner_renews_without_changing_fencing_generation(tmp_path):
         now=start + timedelta(seconds=6),
     )
     assert replacement.generation == 2
+    assert replacement.controller_observation_version == 4

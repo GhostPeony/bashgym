@@ -609,6 +609,85 @@ def test_control_room_snapshot_etag_is_principal_specific_and_supports_304(
     assert first.headers["etag"] != second.headers["etag"]
 
 
+def test_control_room_snapshot_etag_invalidates_on_durable_authorization_revision(
+    tmp_path, monkeypatch
+):
+    http, _repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    assert create_from_template(http, access).status_code == 200
+    observed_at = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr(
+        campaign_routes,
+        "project_controller_status",
+        lambda *_args, **_kwargs: _fixed_controller_observation(observed_at),
+    )
+    route = "/api/campaigns/campaign-1/control-room-snapshot"
+    params = {"workspace_id": "workspace-a"}
+    first = http.get(route, params=params, headers=bearer(access))
+
+    revision = http.app.state.campaign_auth_service.revise_credential_authorization(
+        refresh.credential_id,
+        autonomy_profile=AutonomyProfile.CODEX_TRUSTED,
+        workspace_ids=("workspace-a", "workspace-b"),
+    )
+    current = http.get(
+        route,
+        params=params,
+        headers={**bearer(access), "If-None-Match": first.headers["etag"]},
+    )
+
+    assert first.json()["authorization_revision"] == 1
+    assert revision == 2
+    assert current.status_code == 200
+    assert current.headers["etag"] != first.headers["etag"]
+    assert current.json()["authorization_revision"] == 2
+
+
+def test_control_room_snapshot_etag_invalidates_on_persisted_controller_observation(
+    tmp_path, monkeypatch
+):
+    data_directory = tmp_path / "bashgym-data"
+    monkeypatch.setattr(campaign_routes, "get_bashgym_dir", lambda: data_directory)
+    http, repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    assert create_from_template(http, access).status_code == 200
+    route = "/api/campaigns/campaign-1/control-room-snapshot"
+    params = {"workspace_id": "workspace-a"}
+    now = datetime.now(UTC)
+    lease = repository.acquire_lease(
+        scheduler_lease_key(data_directory),
+        "resident-worker",
+        ttl=timedelta(seconds=60),
+        now=now - timedelta(seconds=1),
+    )
+
+    first = http.get(route, params=params, headers=bearer(access))
+    stable = http.get(
+        route,
+        params=params,
+        headers={**bearer(access), "If-None-Match": first.headers["etag"]},
+    )
+    renewed = repository.heartbeat_lease(
+        lease.lease_key,
+        lease.owner_id,
+        lease.generation,
+        ttl=timedelta(seconds=60),
+        now=now,
+    )
+    current = http.get(
+        route,
+        params=params,
+        headers={**bearer(access), "If-None-Match": first.headers["etag"]},
+    )
+
+    assert first.json()["controller_observation"]["controller_observation_version"] == 1
+    assert stable.status_code == 304
+    assert renewed.controller_observation_version == 2
+    assert current.status_code == 200
+    assert current.headers["etag"] != first.headers["etag"]
+    assert current.json()["controller_observation"]["controller_observation_version"] == 2
+
+
 def test_control_room_snapshot_keeps_durable_and_controller_observation_times_distinct(
     tmp_path, monkeypatch
 ):

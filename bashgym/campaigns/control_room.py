@@ -165,10 +165,13 @@ def read_control_room_state(
 def build_control_room_snapshot(
     durable_state: CampaignControlRoomStateV1,
     controller_observation: ControlRoomControllerObservationV1,
+    *,
+    authorization_revision: int,
 ) -> CampaignControlRoomSnapshotV1:
     """Compose transaction state with a separately timestamped observation."""
 
     return CampaignControlRoomSnapshotV1(
+        authorization_revision=authorization_revision,
         durable_state=durable_state,
         controller_observation=controller_observation,
     )
@@ -194,6 +197,7 @@ def principal_control_room_etag(
                 "actor_id": principal.actor_id,
                 "credential_id": principal.credential_id,
                 "autonomy_profile": principal.autonomy_profile.value,
+                "authorization_revision": principal.authorization_revision,
             },
         }
     )

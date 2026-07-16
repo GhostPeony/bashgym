@@ -964,6 +964,7 @@ def get_control_room_snapshot(
             ControlRoomControllerObservationV1.model_validate(
                 controller_status.model_dump(mode="json", exclude={"schema_version"})
             ),
+            authorization_revision=principal.authorization_revision,
         )
         etag = principal_control_room_etag(snapshot, principal)
         headers["ETag"] = etag

@@ -239,6 +239,7 @@ class ControllerStatusProjection(BaseModel):
 
     schema_version: str = "campaign_controller_status.v1"
     online: bool
+    controller_observation_version: int = Field(default=0, ge=0)
     state: Literal["online", "stale", "offline"]
     code: str
     observed_at: datetime
@@ -418,6 +419,7 @@ def project_controller_status(
     if lease is None:
         return ControllerStatusProjection(
             online=False,
+            controller_observation_version=0,
             state="offline",
             code="controller_offline",
             observed_at=observed_at,
@@ -427,6 +429,7 @@ def project_controller_status(
     if lease.expires_at <= observed_at or heartbeat_age_seconds > stale_after.total_seconds():
         return ControllerStatusProjection(
             online=False,
+            controller_observation_version=lease.controller_observation_version,
             state="stale",
             code="controller_stale",
             observed_at=observed_at,
@@ -439,6 +442,7 @@ def project_controller_status(
         )
     return ControllerStatusProjection(
         online=True,
+        controller_observation_version=lease.controller_observation_version,
         state="online",
         code="controller_online",
         observed_at=observed_at,

@@ -28,6 +28,7 @@ def test_refresh_exchange_resolves_stored_hermes_identity_and_capabilities(auth)
 
     assert principal.actor_id == "hermes-agent"
     assert principal.autonomy_profile == AutonomyProfile.HERMES_BOUNDED
+    assert principal.authorization_revision == 1
     assert principal.workspace_ids == ("workspace-a", "workspace-b")
     assert Capability.COMPUTE_TRAIN_WITHIN_BUDGET in principal.capabilities
     assert Capability.PROMOTION_DECIDE not in principal.capabilities
@@ -67,6 +68,33 @@ def test_parent_revocation_invalidates_all_descendants_on_next_request(auth):
             service.authenticate_access(raw_token)
     with pytest.raises(CampaignAuthenticationError):
         service.exchange_refresh(refresh.raw_token)
+    revoked = _repository.get_actor_credential(refresh.credential_id)
+    assert revoked is not None and revoked.authorization_revision == 2
+
+
+def test_profile_or_scope_revision_is_durable_and_resolved_on_existing_access(auth):
+    repository, service = auth
+    refresh = service.issue_refresh_credential(
+        actor_id="codex-agent",
+        autonomy_profile=AutonomyProfile.CODEX_TRUSTED,
+        workspace_ids=("workspace-a",),
+    )
+    access = service.exchange_refresh(refresh.raw_token)
+    before = service.authenticate_access(access.raw_token)
+
+    revision = service.revise_credential_authorization(
+        refresh.credential_id,
+        autonomy_profile=AutonomyProfile.CODEX_TRUSTED,
+        workspace_ids=("workspace-b", "workspace-a"),
+    )
+    after = service.authenticate_access(access.raw_token)
+
+    assert before.authorization_revision == 1
+    assert revision == 2
+    assert after.authorization_revision == 2
+    assert after.workspace_ids == ("workspace-a", "workspace-b")
+    stored = repository.get_actor_credential(refresh.credential_id)
+    assert stored is not None and stored.authorization_revision == 2
 
 
 def test_missing_malformed_and_expired_access_tokens_are_indistinguishable(auth):

@@ -137,6 +137,7 @@ class StoredCredential:
     autonomy_profile: str
     credential_kind: str
     workspace_ids: tuple[str, ...]
+    authorization_revision: int
     token_salt: str
     token_hash: str
     issued_at: datetime
@@ -161,6 +162,7 @@ class LeaseRecord:
     lease_key: str
     owner_id: str
     generation: int
+    controller_observation_version: int
     expires_at: datetime
     heartbeat_at: datetime
 
@@ -965,6 +967,14 @@ MIGRATIONS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             )
             """,
             "CREATE INDEX idx_campaign_code_lineages_campaign ON campaign_code_lineages(workspace_id, campaign_id, state, created_at)",
+        ),
+    ),
+    (
+        10,
+        "control_room_cache_revisions",
+        (
+            "ALTER TABLE campaign_actor_credentials ADD COLUMN authorization_revision INTEGER NOT NULL DEFAULT 1 CHECK(authorization_revision >= 1)",
+            "ALTER TABLE campaign_scheduler_leases ADD COLUMN controller_observation_version INTEGER NOT NULL DEFAULT 1 CHECK(controller_observation_version >= 1)",
         ),
     ),
 )
@@ -3911,13 +3921,22 @@ class CampaignRepository:
             ).fetchone()
             if row is None:
                 generation = 1
+                observation_version = 1
                 connection.execute(
                     """
                     INSERT INTO campaign_scheduler_leases(
-                        lease_key, owner_id, generation, expires_at, heartbeat_at
-                    ) VALUES (?, ?, ?, ?, ?)
+                        lease_key, owner_id, generation, controller_observation_version,
+                        expires_at, heartbeat_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
                     """,
-                    (lease_key, owner_id, generation, _iso(expires_at), _iso(heartbeat)),
+                    (
+                        lease_key,
+                        owner_id,
+                        generation,
+                        observation_version,
+                        _iso(expires_at),
+                        _iso(heartbeat),
+                    ),
                 )
             else:
                 current_expiry = _dt(row["expires_at"])
@@ -3929,15 +3948,31 @@ class CampaignRepository:
                     raise LeaseBusyError(
                         f"{LeaseBusyError.code}: held by another owner until {current_expiry.isoformat()}"
                     )
+                observation_version = int(row["controller_observation_version"]) + 1
                 connection.execute(
                     """
                     UPDATE campaign_scheduler_leases
-                    SET owner_id = ?, generation = ?, expires_at = ?, heartbeat_at = ?
+                    SET owner_id = ?, generation = ?, controller_observation_version = ?,
+                        expires_at = ?, heartbeat_at = ?
                     WHERE lease_key = ?
                     """,
-                    (owner_id, generation, _iso(expires_at), _iso(heartbeat), lease_key),
+                    (
+                        owner_id,
+                        generation,
+                        observation_version,
+                        _iso(expires_at),
+                        _iso(heartbeat),
+                        lease_key,
+                    ),
                 )
-        return LeaseRecord(lease_key, owner_id, generation, expires_at, heartbeat)
+        return LeaseRecord(
+            lease_key,
+            owner_id,
+            generation,
+            observation_version,
+            expires_at,
+            heartbeat,
+        )
 
     def heartbeat_lease(
         self,
@@ -3956,11 +3991,13 @@ class CampaignRepository:
         heartbeat = now or utc_now()
         expires_at = heartbeat + ttl
         with self._connection(immediate=True) as connection:
-            cursor = connection.execute(
+            row = connection.execute(
                 """
                 UPDATE campaign_scheduler_leases
-                SET expires_at = ?, heartbeat_at = ?
+                SET expires_at = ?, heartbeat_at = ?,
+                    controller_observation_version = controller_observation_version + 1
                 WHERE lease_key = ? AND owner_id = ? AND generation = ? AND expires_at > ?
+                RETURNING controller_observation_version
                 """,
                 (
                     _iso(expires_at),
@@ -3970,10 +4007,18 @@ class CampaignRepository:
                     generation,
                     _iso(heartbeat),
                 ),
-            )
-            if cursor.rowcount != 1:
+            ).fetchone()
+            if row is None:
                 raise LeaseLostError(LeaseLostError.code)
-        return LeaseRecord(lease_key, owner_id, generation, expires_at, heartbeat)
+            observation_version = int(row["controller_observation_version"])
+        return LeaseRecord(
+            lease_key,
+            owner_id,
+            generation,
+            observation_version,
+            expires_at,
+            heartbeat,
+        )
 
     def get_lease(self, lease_key: str) -> LeaseRecord | None:
         """Read one scheduler lease for controller health projection."""
@@ -3994,6 +4039,7 @@ class CampaignRepository:
             lease_key=row["lease_key"],
             owner_id=row["owner_id"],
             generation=int(row["generation"]),
+            controller_observation_version=int(row["controller_observation_version"]),
             expires_at=expires_at,
             heartbeat_at=heartbeat_at,
         )
@@ -4014,7 +4060,8 @@ class CampaignRepository:
             cursor = connection.execute(
                 """
                 UPDATE campaign_scheduler_leases
-                SET expires_at = ?, heartbeat_at = ?
+                SET expires_at = ?, heartbeat_at = ?,
+                    controller_observation_version = controller_observation_version + 1
                 WHERE lease_key = ? AND owner_id = ? AND generation = ?
                 """,
                 (_iso(released_at), _iso(released_at), lease_key, owner_id, generation),
@@ -4030,9 +4077,9 @@ class CampaignRepository:
                 """
                 INSERT INTO campaign_actor_credentials(
                     credential_id, actor_id, autonomy_profile, credential_kind,
-                    workspace_ids_json,
+                    workspace_ids_json, authorization_revision,
                     token_salt, token_hash, issued_at, expires_at, token_not_before, revoked_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     value.credential_id,
@@ -4040,6 +4087,7 @@ class CampaignRepository:
                     value.autonomy_profile,
                     value.credential_kind,
                     _json(value.workspace_ids),
+                    value.authorization_revision,
                     value.token_salt,
                     value.token_hash,
                     _iso(value.issued_at),
@@ -4064,6 +4112,7 @@ class CampaignRepository:
             autonomy_profile=row["autonomy_profile"],
             credential_kind=row["credential_kind"],
             workspace_ids=tuple(json.loads(row["workspace_ids_json"])),
+            authorization_revision=int(row["authorization_revision"]),
             token_salt=row["token_salt"],
             token_hash=row["token_hash"],
             issued_at=_dt(row["issued_at"]),
@@ -4119,7 +4168,7 @@ class CampaignRepository:
                     a.token_hash AS access_hash, a.issued_at AS access_issued_at,
                     a.expires_at AS access_expires_at, a.revoked_at AS access_revoked_at,
                     c.actor_id, c.autonomy_profile, c.workspace_ids_json,
-                    c.credential_kind,
+                    c.credential_kind, c.authorization_revision,
                     c.token_salt AS credential_salt, c.token_hash AS credential_hash,
                     c.issued_at AS credential_issued_at, c.expires_at AS credential_expires_at,
                     c.token_not_before, c.revoked_at AS credential_revoked_at
@@ -4146,6 +4195,7 @@ class CampaignRepository:
             autonomy_profile=row["autonomy_profile"],
             credential_kind=row["credential_kind"],
             workspace_ids=tuple(json.loads(row["workspace_ids_json"])),
+            authorization_revision=int(row["authorization_revision"]),
             token_salt=row["credential_salt"],
             token_hash=row["credential_hash"],
             issued_at=_dt(row["credential_issued_at"]),
@@ -4154,6 +4204,70 @@ class CampaignRepository:
             revoked_at=_dt(row["credential_revoked_at"]),
         )
         return access, parent
+
+    def revise_actor_authorization(
+        self,
+        credential_id: str,
+        *,
+        autonomy_profile: str,
+        workspace_ids: tuple[str, ...],
+        audit_event_id: str,
+    ) -> int:
+        """Atomically revise durable authority and advance its cache revision."""
+
+        self._require_initialized()
+        now = utc_now()
+        with self._connection(immediate=True) as connection:
+            parent = connection.execute(
+                """
+                SELECT actor_id, autonomy_profile, workspace_ids_json,
+                       authorization_revision, revoked_at
+                FROM campaign_actor_credentials WHERE credential_id = ?
+                """,
+                (credential_id,),
+            ).fetchone()
+            if parent is None:
+                raise RecordNotFoundError("campaign credential not found")
+            if parent["revoked_at"] is not None:
+                raise CampaignPersistenceError("campaign_refresh_credential_invalid")
+            encoded_workspaces = _json(workspace_ids)
+            current_revision = int(parent["authorization_revision"])
+            if (
+                parent["autonomy_profile"] == autonomy_profile
+                and parent["workspace_ids_json"] == encoded_workspaces
+            ):
+                return current_revision
+            next_revision = current_revision + 1
+            connection.execute(
+                """
+                UPDATE campaign_actor_credentials
+                SET autonomy_profile = ?, workspace_ids_json = ?, authorization_revision = ?
+                WHERE credential_id = ?
+                """,
+                (autonomy_profile, encoded_workspaces, next_revision, credential_id),
+            )
+            connection.execute(
+                """
+                INSERT INTO campaign_auth_audit_events(
+                    event_id, credential_id, event_type, actor_id, safe_payload_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    audit_event_id,
+                    credential_id,
+                    "campaign-auth:authorization-revised",
+                    parent["actor_id"],
+                    _json(
+                        {
+                            "autonomy_profile": autonomy_profile,
+                            "workspace_count": len(workspace_ids),
+                            "authorization_revision": next_revision,
+                        }
+                    ),
+                    _iso(now),
+                ),
+            )
+        return next_revision
 
     def revoke_actor_credential(
         self, credential_id: str, *, audit_event_id: str, reason: str
@@ -4164,7 +4278,10 @@ class CampaignRepository:
         now = utc_now()
         with self._connection(immediate=True) as connection:
             parent = connection.execute(
-                "SELECT actor_id, revoked_at FROM campaign_actor_credentials WHERE credential_id = ?",
+                """
+                SELECT actor_id, authorization_revision, revoked_at
+                FROM campaign_actor_credentials WHERE credential_id = ?
+                """,
                 (credential_id,),
             ).fetchone()
             if parent is None:
@@ -4172,8 +4289,12 @@ class CampaignRepository:
             if parent["revoked_at"] is not None:
                 return 0
             connection.execute(
-                "UPDATE campaign_actor_credentials SET revoked_at = ? WHERE credential_id = ?",
-                (_iso(now), credential_id),
+                """
+                UPDATE campaign_actor_credentials
+                SET revoked_at = ?, authorization_revision = ?
+                WHERE credential_id = ?
+                """,
+                (_iso(now), int(parent["authorization_revision"]) + 1, credential_id),
             )
             children = connection.execute(
                 """
@@ -4193,7 +4314,13 @@ class CampaignRepository:
                     credential_id,
                     "campaign-auth:credential-revoked",
                     parent["actor_id"],
-                    _json({"reason": reason, "descendants_revoked": children.rowcount}),
+                    _json(
+                        {
+                            "reason": reason,
+                            "descendants_revoked": children.rowcount,
+                            "authorization_revision": int(parent["authorization_revision"]) + 1,
+                        }
+                    ),
                     _iso(now),
                 ),
             )

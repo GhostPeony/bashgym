@@ -1,5 +1,6 @@
 """Campaign migrations, workspace ownership, CAS, event, and replay tests."""
 
+import hashlib
 import sqlite3
 
 import pytest
@@ -15,6 +16,7 @@ from bashgym.campaigns.contracts import (
     TargetModelContract,
 )
 from bashgym.campaigns.persistence import (
+    MIGRATIONS,
     CampaignRepository,
     IdempotencyConflictError,
     RecordNotFoundError,
@@ -99,7 +101,7 @@ def transition(repository, trigger, version, *, key, payload=None):
 
 
 def test_initialize_applies_checksum_migration_and_all_owned_tables(repository):
-    assert repository.schema_versions() == [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    assert repository.schema_versions() == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     assert repository.journal_mode() == "wal"
     assert repository.foreign_keys_enabled() is True
 
@@ -132,6 +134,77 @@ def test_initialize_applies_checksum_migration_and_all_owned_tables(repository):
         "campaign_exports",
         "campaign_code_lineages",
     } <= tables
+
+
+def test_v9_database_migrates_existing_auth_and_controller_rows_to_revision_one(tmp_path):
+    path = tmp_path / "campaigns-v9.sqlite3"
+    applied_at = "2026-07-16T00:00:00+00:00"
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE campaign_schema_migrations (
+                version INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                checksum TEXT NOT NULL,
+                applied_at TEXT NOT NULL
+            )
+            """
+        )
+        for version, name, statements in MIGRATIONS[:-1]:
+            for statement in statements:
+                connection.execute(statement)
+            checksum = hashlib.sha256("\n".join(statements).encode("utf-8")).hexdigest()
+            connection.execute(
+                """
+                INSERT INTO campaign_schema_migrations(version, name, checksum, applied_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (version, name, checksum, applied_at),
+            )
+        connection.execute(
+            """
+            INSERT INTO campaign_actor_credentials(
+                credential_id, actor_id, autonomy_profile, credential_kind,
+                workspace_ids_json, token_salt, token_hash, issued_at,
+                expires_at, token_not_before, revoked_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+            """,
+            (
+                "cred-legacy",
+                "codex-agent",
+                "codex_trusted",
+                "refresh",
+                '["workspace-a"]',
+                "salt",
+                "hash",
+                applied_at,
+                "2026-08-16T00:00:00+00:00",
+                applied_at,
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO campaign_scheduler_leases(
+                lease_key, owner_id, generation, expires_at, heartbeat_at
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                "scheduler:legacy",
+                "worker-a",
+                1,
+                "2026-07-16T00:00:15+00:00",
+                applied_at,
+            ),
+        )
+
+    migrated = CampaignRepository(path)
+    migrated.initialize()
+
+    credential = migrated.get_actor_credential("cred-legacy")
+    lease = migrated.get_lease("scheduler:legacy")
+    assert migrated.schema_versions()[-1] == 10
+    assert credential is not None and credential.authorization_revision == 1
+    assert lease is not None and lease.controller_observation_version == 1
 
 
 def test_create_is_atomic_manifest_is_immutable_and_replay_is_exact(repository):

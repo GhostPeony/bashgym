@@ -318,6 +318,12 @@ class RemoteSession(Protocol):
 
 
 SessionFactory = Callable[[], Any]
+_SOURCE_ENTRYPOINT_BOOTSTRAP = (
+    "import runpy,sys;"
+    "source=sys.argv.pop(1);entrypoint=sys.argv.pop(1);"
+    "sys.path.insert(0,source);"
+    "runpy.run_path(entrypoint,run_name='__main__')"
+)
 
 
 def _sha256_file(path: Path) -> str:
@@ -819,8 +825,15 @@ class RemoteTrainingAdapter:
     def _argv(request: RemoteLaunchRequest, remote_directory: str) -> tuple[str, ...]:
         if request.source_snapshot is not None:
             entrypoint = f"{remote_directory}/source/{request.source_snapshot.entrypoint_path}"
-        else:
-            entrypoint = f"{remote_directory}/{request.script_path.name}"
+            return (
+                request.python_executable,
+                "-c",
+                _SOURCE_ENTRYPOINT_BOOTSTRAP,
+                f"{remote_directory}/source",
+                entrypoint,
+                *request.script_args,
+            )
+        entrypoint = f"{remote_directory}/{request.script_path.name}"
         return (
             request.python_executable,
             entrypoint,

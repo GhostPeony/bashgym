@@ -169,7 +169,10 @@ async def test_launch_executes_verified_captured_source_snapshot(tmp_path):
         "working_directory": f"{remote_directory}/source",
         "python_path": f"{remote_directory}/source",
     }
-    assert manifest["argv"][1] == f"{remote_directory}/source/bashgym/gym/trainer.py"
+    assert manifest["argv"][1] == "-c"
+    assert "sys.path.insert(0,source)" in manifest["argv"][2]
+    assert manifest["argv"][3] == f"{remote_directory}/source"
+    assert manifest["argv"][4] == f"{remote_directory}/source/bashgym/gym/trainer.py"
     assert [local for local, _remote in session.uploads] == [
         request.source_snapshot.archive_path,
         request.input_files[0],

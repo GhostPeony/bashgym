@@ -273,12 +273,19 @@ sealing, metrics, ineligible decision, and restart recovery without a GPU or API
 key. A real definition can be bound to a different machine without storing its
 host, key, or paths in source.
 
-A clean clone cannot yet run a real campaign with one command. It must still
-provide credentials, an approved dataset/evaluator, an executor profile, worker
-configuration/service install, and exact installation-local paths. The setup
-command now creates the portable definition and exact binding receipt; the doctor
-proves the remaining bindings and explains unavailability, but the guided path
-does not yet create the ledger records, worker profile, or service.
+A clean clone can now plan or apply the missing installation records with
+`bashgym campaign activate-autoresearch`. The command resolves an operator-
+registered SSH device, preflights it, hashes exact dataset/evaluator/training
+material, verifies private Git scopes and entrypoints, creates or replays ledger
+records, atomically merges protected source/executor profiles, optionally
+installs the per-user resident worker, and returns the direct doctor result.
+It never selects a model or backend and it refuses identity conflicts.
+
+The remaining proof is hardware-gated: run that installed path with an existing
+operator-approved trainable model through a bounded real baseline and
+authoritative evaluation. Local hardware currently uses the same protected SSH
+executor (including localhost SSH); BashGym does not claim a native same-process
+campaign executor yet.
 
 The product goal should be:
 

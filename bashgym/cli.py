@@ -3227,6 +3227,228 @@ def cmd_campaign_control_smoke(args: argparse.Namespace) -> int:
     )
 
 
+def cmd_campaign_activate_autoresearch(args: argparse.Namespace) -> int:
+    """Bind an installed definition to one registered private/local SSH device."""
+
+    import asyncio
+    import hashlib
+
+    from bashgym.campaigns.activation import (
+        AutoResearchActivationRequest,
+        activate_autoresearch,
+    )
+    from bashgym.campaigns.autoresearch import load_autoresearch_template_definitions
+    from bashgym.campaigns.contracts import CodeMutationKind, StageKind
+    from bashgym.campaigns.installation import autoresearch_binding_plan
+    from bashgym.campaigns.lineage import ApprovedSourceRepositoryProfile
+    from bashgym.campaigns.remote import (
+        ApprovedCodeLineageExecutionBinding,
+        ApprovedRemoteExecutorProfile,
+        PinnedRemoteStageProfile,
+        RemoteCapacityPolicy,
+    )
+    from bashgym.config import get_bashgym_dir
+    from bashgym.device_registry import DeviceRegistry
+    from bashgym.gym.remote_trainer import RemoteTrainer, SSHConfig
+    from bashgym.ledger.contracts import (
+        DatasetSpec,
+        DatasetVersionSpec,
+        EvaluationSuiteSpec,
+        ProjectSpec,
+    )
+
+    def sha256_file(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            while block := handle.read(1024 * 1024):
+                digest.update(block)
+        return digest.hexdigest()
+
+    root = Path(args.data_dir).expanduser().resolve() if args.data_dir else get_bashgym_dir()
+    install_dir = (
+        Path(args.install_dir).expanduser().resolve()
+        if args.install_dir
+        else root / "campaigns" / "autoresearch-templates"
+    )
+    definitions = {
+        definition.template_id: definition
+        for definition in load_autoresearch_template_definitions(install_dir)
+    }
+    definition = definitions.get(args.template_id)
+    if definition is None:
+        raise ValueError("installed AutoResearch template was not found")
+    binding = autoresearch_binding_plan(definition)
+
+    registry = DeviceRegistry(Path(args.device_registry) if args.device_registry else None)
+
+    async def resolve_and_preflight():
+        device = await registry.get_device(args.device_id)
+        if device is None:
+            raise ValueError("registered compute device was not found")
+        result = await RemoteTrainer(
+            SSHConfig(
+                host=device.host,
+                port=device.port,
+                username=device.username,
+                key_path=device.key_path,
+                remote_work_dir=device.work_dir,
+            )
+        ).preflight_check(require_unsloth=False)
+        if not result.ok:
+            raise ValueError("registered compute device failed SSH preflight")
+        if args.apply:
+            await registry.update_capabilities(device.id, result.capabilities())
+        return device, result
+
+    device, preflight = asyncio.run(resolve_and_preflight())
+    dataset_file = Path(args.dataset_file).expanduser().resolve()
+    evaluator_file = Path(args.evaluator_file).expanduser().resolve()
+    training_script = Path(args.training_script).expanduser().resolve()
+    training_inputs = tuple(
+        sorted(
+            {
+                dataset_file,
+                *(Path(value).expanduser().resolve() for value in args.training_input),
+            },
+            key=lambda path: path.name,
+        )
+    )
+    source_repository = Path(args.source_repository).expanduser().resolve()
+    mutation_paths: dict[CodeMutationKind, list[str]] = {}
+    for raw in args.mutation_path:
+        kind_raw, separator, relative_path = raw.partition("=")
+        if not separator:
+            raise ValueError("--mutation-path must use KIND=repository/relative/path")
+        kind = CodeMutationKind(kind_raw)
+        mutation_paths.setdefault(kind, []).append(relative_path)
+    source_profile = ApprovedSourceRepositoryProfile(
+        profile_id=binding.source_repository_profile_id,
+        repository_path=source_repository,
+        allowed_mutation_paths={
+            kind: tuple(sorted(set(paths))) for kind, paths in mutation_paths.items()
+        },
+    )
+    input_hashes = {path.name: sha256_file(path) for path in training_inputs}
+    capacity = RemoteCapacityPolicy(
+        minimum_available_memory_gib=args.minimum_available_memory_gib,
+        minimum_available_disk_gib=args.minimum_available_disk_gib,
+        maximum_external_gpu_processes=args.maximum_external_gpu_processes,
+    )
+    reservations = {
+        StageKind.FULL_TRAINING: args.full_budget_reservation,
+        StageKind.SMOKE_TRAINING: args.smoke_budget_reservation,
+    }
+    stages = tuple(
+        PinnedRemoteStageProfile(
+            stage=stage,
+            script_path=training_script,
+            script_sha256=sha256_file(training_script),
+            input_files=training_inputs,
+            input_sha256=input_hashes,
+            script_args=tuple(args.training_arg),
+            capacity_policy=capacity,
+            budget_unit=definition.policy.stop_rules.budget_unit,  # type: ignore[union-attr]
+            budget_reservation=reservations[stage],
+            python_executable=args.python_executable,
+            code_lineage_binding=ApprovedCodeLineageExecutionBinding(
+                binding_id=f"{args.executor_profile_id}-{stage.value}-source-v1",
+                binding_revision=1,
+                source_repository_profile_id=source_profile.profile_id,
+                entrypoint_path=args.source_entrypoint,
+            ),
+        )
+        for stage in (StageKind.FULL_TRAINING, StageKind.SMOKE_TRAINING)
+    )
+    executor = ApprovedRemoteExecutorProfile(
+        profile_id=args.executor_profile_id,
+        profile_revision=args.executor_profile_revision,
+        compute_profile_id=binding.compute_profile_id,
+        target_contract_key=binding.target_contract_key,
+        target_model_digest=binding.target_model_digest,
+        host=device.host,
+        username=device.username,
+        port=device.port,
+        key_path=device.key_path,
+        remote_work_dir=device.work_dir,
+        stages=stages,
+    )
+    task_type = definition.target_model.task
+    request = AutoResearchActivationRequest(
+        workspace_id=args.workspace_id,
+        project=ProjectSpec(
+            workspace_id=args.workspace_id,
+            project_id=binding.ledger_project_id,
+            display_name=args.project_name,
+            description=args.project_description,
+            owner_actor_id=args.owner_actor_id,
+            tags=tuple(sorted(set(args.project_tag))),
+        ),
+        dataset=DatasetSpec(
+            workspace_id=args.workspace_id,
+            project_id=binding.ledger_project_id,
+            dataset_id=args.dataset_id,
+            display_name=args.dataset_name,
+            task_type=task_type,
+        ),
+        dataset_version=DatasetVersionSpec(
+            workspace_id=args.workspace_id,
+            project_id=binding.ledger_project_id,
+            dataset_id=args.dataset_id,
+            dataset_version_id=binding.dataset_version_id,
+            source_uri=args.dataset_source_uri,
+            content_digest=sha256_file(dataset_file),
+        ),
+        evaluation_suite=EvaluationSuiteSpec(
+            workspace_id=args.workspace_id,
+            project_id=binding.ledger_project_id,
+            evaluation_suite_id=binding.evaluation_suite_id,
+            name=args.evaluation_name,
+            task_type=task_type,
+            dataset_version_id=binding.dataset_version_id,
+            metric_contract={
+                "primary_metric": binding.primary_metric,
+                "metric_direction": binding.metric_direction.value,
+            },
+            code_digest=sha256_file(evaluator_file),
+        ),
+        source_profile=source_profile,
+        executor_profile=executor,
+    )
+    receipt = activate_autoresearch(
+        definition,
+        request,
+        data_directory=root,
+        apply=bool(args.apply),
+        install_service=bool(args.install_worker),
+    )
+    return _emit(
+        {
+            "title": "BashGym AutoResearch Activation",
+            "ok": bool(receipt.doctor.materializable) if receipt.doctor else True,
+            "activation": receipt.model_dump(mode="json"),
+            "compute_preflight": {
+                "device_id": device.id,
+                "ok": preflight.ok,
+                "effective_vram_gb": preflight.effective_vram_gb,
+                "unified_memory": preflight.unified_memory,
+                "disk_free_gb": preflight.disk_free_gb,
+                "gpu_count": len(preflight.gpus or []),
+                "warnings": preflight.warnings,
+            },
+            "next": (
+                "Re-run with --apply after reviewing this plan."
+                if not args.apply
+                else (
+                    "The resident worker is online and the template is launch-ready."
+                    if receipt.doctor and receipt.doctor.launch_ready
+                    else "Install/start the resident worker, then run campaign doctor."
+                )
+            ),
+        },
+        as_json=bool(args.json),
+    )
+
+
 def cmd_campaign_setup_autoresearch(args: argparse.Namespace) -> int:
     """Build and install one explicit quality-campaign definition locally."""
 
@@ -4288,6 +4510,65 @@ def build_parser() -> argparse.ArgumentParser:
         help="Retain the isolated smoke database and artifacts in this directory",
     )
     campaign_control_smoke.set_defaults(func=cmd_campaign_control_smoke)
+
+    campaign_activate = campaign_sub.add_parser(
+        "activate-autoresearch",
+        help=(
+            "Plan or apply ledger, source, and registered SSH-compute bindings "
+            "for an installed AutoResearch definition"
+        ),
+        parents=[json_parent],
+    )
+    campaign_activate.add_argument("--template", dest="template_id", required=True)
+    campaign_activate.add_argument("--workspace-id", required=True)
+    campaign_activate.add_argument("--device-id", required=True)
+    campaign_activate.add_argument("--device-registry", help=argparse.SUPPRESS)
+    campaign_activate.add_argument("--project-name", required=True)
+    campaign_activate.add_argument("--project-description", default="")
+    campaign_activate.add_argument("--owner-actor-id", required=True)
+    campaign_activate.add_argument("--project-tag", action="append", default=[])
+    campaign_activate.add_argument("--dataset-id", required=True)
+    campaign_activate.add_argument("--dataset-name", required=True)
+    campaign_activate.add_argument("--dataset-file", required=True)
+    campaign_activate.add_argument(
+        "--dataset-source-uri",
+        required=True,
+        help="Stable logical/artifact URI stored in the ledger; local rows are never copied",
+    )
+    campaign_activate.add_argument("--evaluator-file", required=True)
+    campaign_activate.add_argument("--evaluation-name", required=True)
+    campaign_activate.add_argument("--source-repository", required=True)
+    campaign_activate.add_argument("--source-entrypoint", required=True)
+    campaign_activate.add_argument(
+        "--mutation-path",
+        action="append",
+        required=True,
+        help="Approved source scope as trainer|gym|reward|evaluator=relative/path",
+    )
+    campaign_activate.add_argument("--training-script", required=True)
+    campaign_activate.add_argument("--training-input", action="append", default=[])
+    campaign_activate.add_argument("--training-arg", action="append", default=[])
+    campaign_activate.add_argument("--python-executable", default="python3")
+    campaign_activate.add_argument("--executor-profile", dest="executor_profile_id", required=True)
+    campaign_activate.add_argument("--executor-profile-revision", type=int, default=1)
+    campaign_activate.add_argument("--smoke-budget-reservation", type=float, required=True)
+    campaign_activate.add_argument("--full-budget-reservation", type=float, required=True)
+    campaign_activate.add_argument("--minimum-available-memory-gib", type=float, default=0.0)
+    campaign_activate.add_argument("--minimum-available-disk-gib", type=float, default=50.0)
+    campaign_activate.add_argument("--maximum-external-gpu-processes", type=int, default=0)
+    campaign_activate.add_argument("--data-dir")
+    campaign_activate.add_argument("--install-dir")
+    campaign_activate.add_argument(
+        "--apply",
+        action="store_true",
+        help="Write replay-safe ledger records and atomically merge the worker config",
+    )
+    campaign_activate.add_argument(
+        "--install-worker",
+        action="store_true",
+        help="With --apply, install/start the per-user resident worker service",
+    )
+    campaign_activate.set_defaults(func=cmd_campaign_activate_autoresearch)
 
     nemo_setup = campaign_sub.add_parser(
         "setup-nemo-rl",

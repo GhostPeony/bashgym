@@ -178,6 +178,55 @@ explicit. Its receipt contains the exact target-model digest and secret-free
 ledger/evaluator/compute identities needed by the worker profile. It does not
 store a host, user, key, remote path, or credential.
 
+Activate those identities against an already registered SSH device without
+hand-authoring worker or ledger JSON. This is the same path for a private host
+and for hardware on the BashGym machine reached through localhost SSH; a native
+same-process campaign executor is not claimed yet.
+
+Run the command once without `--apply`. It performs SSH preflight, validates the
+Git source scopes and entrypoint, hashes the dataset/evaluator/training material,
+checks every existing identity for conflicts, and prints a non-applying plan.
+It does not create activation records, worker configuration, or a service (an
+existing installation database may still apply a pending schema migration when
+opened).
+
+```bash
+bashgym campaign activate-autoresearch \
+  --template <installation-template-id> \
+  --workspace-id <workspace-id> \
+  --device-id <registered-ssh-device-id> \
+  --project-name "<project display name>" \
+  --owner-actor-id <operator-actor-id> \
+  --dataset-id <dataset-id> \
+  --dataset-name "<dataset display name>" \
+  --dataset-file <exact-local-dataset-file> \
+  --dataset-source-uri 'artifact://<stable-dataset-identity>' \
+  --evaluator-file <exact-evaluator-source-file> \
+  --evaluation-name "<evaluation display name>" \
+  --source-repository <absolute-private-git-root> \
+  --source-entrypoint <repository-relative-python-entrypoint> \
+  --mutation-path trainer=<approved-repository-relative-path> \
+  --training-script <exact-local-launch-script> \
+  --training-input <exact-local-recipe-or-config> \
+  --executor-profile <installation-executor-profile-id> \
+  --smoke-budget-reservation <bounded-gpu-hours> \
+  --full-budget-reservation <bounded-gpu-hours> \
+  --json
+```
+
+After reviewing the plan, repeat it with `--apply`. Add `--install-worker` only
+when the command should also install and start the per-user worker service. The
+apply path is rerunnable: identical ledger and worker records replay, while a
+reused ID with different data, evaluator, source, model, script, or compute
+authority fails closed. It preserves unrelated profiles and stores neither raw
+dataset rows nor secret values in the activation receipt.
+
+An applied activation is `materializable` when every non-controller doctor
+check passes. It becomes `launch_ready` only after the resident worker owns a
+live controller lease. NeMo RL or NeMo Gym can then be attached as an optional
+backend to the same dedicated executor profile; neither is required for the
+regular registered-training path.
+
 `campaign doctor` reports `materializable` only when the model, data, evaluator,
 and registered compute profile all match. It reports `launch_ready` only when
 those bindings match and the resident controller is online. A quality-claiming
@@ -277,21 +326,16 @@ activation, Hugging Face publication authority, and GBrain curation.
 The standard registered-training path has completed one bounded real baseline
 and controlled candidate on a fixed held-out suite. The remaining work is:
 
-1. Extend the guided setup command beyond its completed definition installer so
-   it can create/verify ledger records, a protected executor profile, and the
-   resident-worker service without asking users to hand-author JSON.
-2. Complete model onboarding so a newly approved local open model can produce
-   model/trainer/data/evaluator/compute bindings without hand-authored JSON.
-3. Run the first live NeMo Gym trajectory/refit smoke and bounded GRPO candidate
+1. Run the hardware-gated clean-install activation against an operator-approved
+   registered SSH device and existing trainable model, then retain the bounded
+   baseline/evaluator evidence.
+2. Run the first live NeMo Gym trajectory/refit smoke and bounded GRPO candidate
    only when an already-installed, operator-approved model passes the pinned
    NeMo runtime's compatibility doctor.
-4. Convert actual Gym output into the exact token/refit campaign evidence receipt;
-   process success alone is not proof that policy and generation weights matched.
-5. Feed named reward components into a real GDPO trainer and compare the consumed
-   advantages against BashGym's provider-neutral reference math.
-6. Complete the fresh-clone/productization path: installer, secret setup,
-   installation bindings, sample project, worker-service bootstrap, readiness
-   validation, and first-run doctor.
+3. Add a separately registered native-local executor if same-process campaign
+   execution is needed; until then local hardware uses the protected SSH path.
+4. Finish profiling the remaining active source suite independently of the
+   deferred legacy Orchestrator tests.
 
 NeMo Gym bundle, launch, token, refit, and campaign-evidence contracts now exist,
 but no live refit is claimed until a compatible approved model executes them.

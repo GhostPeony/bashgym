@@ -970,6 +970,12 @@ class ExperimentLedgerRepository(CampaignRuntimeRepository):
             ("metadata_json",), "ledger model version not found"
         )
 
+    def get_dataset(self, workspace_id: str, project_id: str, dataset_id: str) -> dict[str, Any]:
+        return self._get_project_one(
+            "ledger_datasets", "dataset_id", workspace_id, project_id, dataset_id,
+            ("metadata_json",), "ledger dataset not found"
+        )
+
     def get_dataset_version(self, workspace_id: str, project_id: str, dataset_version_id: str) -> dict[str, Any]:
         return self._get_project_one(
             "ledger_dataset_versions", "dataset_version_id", workspace_id, project_id, dataset_version_id,

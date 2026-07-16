@@ -99,6 +99,26 @@ model identity, task, and training readiness before the installation definition
 is written. `campaign doctor` remains authoritative for installed runtime,
 data, evaluator, credential-material, and compute readiness.
 
+For a new installation, graduate the no-GPU control smoke through one canonical
+activation sequence:
+
+1. Inspect the operator-selected snapshot with
+   `campaign inspect-model-artifact`.
+2. Create the portable definition with `campaign setup-autoresearch`.
+3. Run `campaign activate-autoresearch` without `--apply` to preflight the
+   registered SSH device, source scope, dataset, evaluator, launch material, and
+   identity conflicts.
+4. Review the plan and repeat with `--apply`.
+5. Require `campaign doctor` to become `materializable`, bring the resident
+   controller online through `--install-worker` or an existing service, re-run
+   doctor, and require `launch_ready` before a bounded real baseline. Only then
+   launch a one-variable candidate.
+
+Registered SSH is the protected execution boundary for both private hardware
+and hardware on the BashGym machine via localhost SSH. See
+[autoresearch-campaign.md](autoresearch-campaign.md) for the exact flags,
+receipts, and evidence requirements.
+
 Named multi-reward environments can bind their declared component order and
 weights through `NamedRewardGDPOAdapter`. The adapter emits NeMo's stable
 `reward1`, `reward2`, ... and `total_reward` columns, selects the GDPO advantage
@@ -230,8 +250,9 @@ RL improves outcomes only after the model can produce attempts worth comparing.
 
 4. Train the first student with SFT.
 
-   Use QLoRA on small/local hardware. Use a private compute target or cloud path for
-   larger models, longer sequences, or full fine-tunes.
+   Use LoRA/QLoRA on constrained local hardware only when the selected
+   model/backend supports it. Use a registered private compute target for larger
+   models, longer sequences, or full fine-tunes; hosted compute is optional.
 
 5. Evaluate before routing.
 
@@ -329,7 +350,7 @@ gates by themselves.
 - [strategy-guide.md](strategy-guide.md) - concrete starting settings and when to use each strategy.
 - [session-distillation.md](session-distillation.md) - targeted self-distillation from failed trace spans.
 - [tmax-terminal-rl-recipe.md](tmax-terminal-rl-recipe.md) - environment-to-replay-to-backend recipe for terminal RL.
-- [private-compute-eval-checklist.md](private-compute-eval-checklist.md) - private/cloud compute backend-smoke and eval checklist.
+- [private-compute-eval-checklist.md](private-compute-eval-checklist.md) - local/private compute backend-smoke and eval checklist.
 - [world-models.md](world-models.md) - ECHO/RWML contracts, defaults, replay telemetry, and boundaries.
 - [metrics-runbook.md](metrics-runbook.md) - how to diagnose flat pass@k, zero reward variance, timeouts, verifier errors, and tamper attempts.
 - [glossary.md](glossary.md) - compact definitions for the training vocabulary.

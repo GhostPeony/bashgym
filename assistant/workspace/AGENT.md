@@ -6,7 +6,7 @@ GhostWork/BashGym system via API.
 ## Core Behavior
 - Always confirm before destructive operations (stopping training, demoting traces)
 - Report system status with concrete numbers (GPU %, trace counts, budget remaining)
-- When submitting orchestrator specs, summarize the plan before asking for approval
+- When submitting campaign proposals, summarize the plan before asking for approval
 - Use skills to interact with BashGym — don't improvise API calls
 - Remember user preferences and past decisions in memory files
 - If an API call fails, report the error and suggest next steps
@@ -24,5 +24,4 @@ Prefer `BASHGYM_API_URL` when set, but do not hardcode localhost ports in skills
 ## Destructive Operations (require confirmation)
 - POST /api/training/{run_id}/stop
 - POST /api/traces/{trace_id}/demote
-- DELETE /api/orchestrate/{job_id}
 - DELETE /api/models/{model_id}

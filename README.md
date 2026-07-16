@@ -20,7 +20,7 @@ Every AI coding session is a chain-of-thought reasoning trace — step-by-step p
 - **[docs/PRODUCTIZATION.md](docs/PRODUCTIZATION.md)** — tested fresh-clone contract, measured time to first success, portability boundary, and remaining gaps.
 - **[docs/training/capability-map.md](docs/training/capability-map.md)** — full training/eval spread, including ready, backend-dependent, and diagnostic surfaces.
 - **[docs/training/tmax-terminal-rl-recipe.md](docs/training/tmax-terminal-rl-recipe.md)** — TMax-style terminal RL recipe from environment pool to backend smoke and release gates.
-- **[docs/training/private-compute-eval-checklist.md](docs/training/private-compute-eval-checklist.md)** — private/cloud compute backend-smoke and eval checklist for DPPO/ECHO/RWML runs.
+- **[docs/training/private-compute-eval-checklist.md](docs/training/private-compute-eval-checklist.md)** — local/private compute backend-smoke and eval checklist for DPPO/ECHO/RWML runs.
 - **[docs/TRAINING_DATA_GUIDE.md](docs/TRAINING_DATA_GUIDE.md)** — trace format, quality tiers, and example generation.
 - **[docs/training/strategy-guide.md](docs/training/strategy-guide.md)** — concrete SFT, DPO, GRPO/RLVR, distillation, cascade, and DPPO starting recipes.
 - **[docs/API.md](docs/API.md)** — REST API reference.
@@ -331,19 +331,17 @@ Gamified progress tracking across trace collection, quality, training, and maste
 
 ### Base Models
 
-Any HuggingFace model compatible with Unsloth works. Set `BASE_MODEL` in the dashboard or `.env` to any model ID. Ollama models are auto-discovered for inference — train on HuggingFace weights, deploy via Ollama.
+BashGym has no repository-owned default or suggested base model. Select an
+operator-approved trainable artifact and immutable revision, then use an
+installed backend's model doctor to prove that the model task, architecture,
+quantization, tokenizer, runtime, and hardware are compatible. A cache hit,
+Ollama/GGUF artifact, or LoRA adapter is not a trainable-base substitute.
 
-**Examples (mid-2026 — not requirements; see the [Unsloth model catalog](https://unsloth.ai/docs/get-started/unsloth-model-catalog) for the live list):**
-
-| Model family | Notes |
-|--------------|-------|
-| Gemma 4 (E2B / E4B / 12B / 26B-A4B / 31B) | E2B trains in ~8 GB locally; dense and MoE variants for more capacity. |
-| Qwen3.5 / Qwen3.6 (dense 0.8B–27B; MoE 30B-A3B / 35B-A3B / 235B-A22B) | Apache-2.0. Strong coding/reasoning; small dense models fit consumer GPUs, MoE variants need larger local, private, or cloud GPU capacity. |
-| DeepSeek V4 | Large MoE, long context, MIT; use larger private or cloud GPUs. |
-| Llama 4 (Scout / Maverick) | Very long context. |
-| Mistral Small 4 / Devstral · Phi-4 | Apache-2.0 efficient general, coding, and instruct options. |
-
-These are suggestions, not restrictions. Any `AutoModelForCausalLM`-compatible model from HuggingFace will work. All training uses QLoRA (4-bit quantization) by default, so VRAM requirements are roughly `model_params / 2` GB.
+Backend catalogs describe candidates, not BashGym guarantees. For example, the
+[Unsloth model catalog](https://unsloth.ai/docs/get-started/unsloth-model-catalog)
+lists models supported by current Unsloth releases; optional NeMo recipes have
+their own pinned compatibility contract. QLoRA is available when the selected
+backend and model support it, but is not silently forced for every run.
 
 ### Output Formats
 
@@ -375,6 +373,26 @@ with `bashgym campaign control-smoke --json`, then follow the
 [durable campaign guide](docs/training/autoresearch-campaign.md) for a real
 baseline and one-variable candidate.
 
+The canonical graduation path is:
+
+1. `campaign inspect-model-artifact` — validate the operator-selected snapshot
+   and immutable revision without scanning caches or downloading a substitute.
+2. `campaign setup-autoresearch` — write the portable campaign definition with
+   exact model, data, evaluator, metric, compute, budget, and stop-rule IDs.
+3. `campaign activate-autoresearch` without `--apply` — preflight the registered
+   SSH device, source scopes, dataset, evaluator, launch material, and identity
+   conflicts.
+4. Repeat activation with `--apply`; add `--install-worker` only when BashGym
+   should install and start the per-user resident worker.
+5. Run `campaign doctor` and require `materializable`, bring the resident
+   controller online through `--install-worker` or an existing service, then
+   re-run doctor and require `launch_ready` before a bounded real baseline.
+   Only then launch a one-variable candidate.
+
+Registered SSH covers private hardware and hardware on the BashGym machine via
+localhost SSH. Hosted compute and NeMo RL/Gym are explicit optional adapters,
+not fallbacks for this path.
+
 The dashboard also retains three earlier prototype search loops for interactive
 hyperparameter, trace-curation, and schema exploration:
 
@@ -390,9 +408,11 @@ All three modes share the same evolutionary engine (`SearchSpace` ABC → `AutoR
 
 **Embedding-based dedup** runs across all modes via NIM API: computes semantic similarity between training examples and removes near-duplicates (configurable threshold, default 0.95). Diversity scores are tracked in the quality dashboard.
 
-### Cloud Training
+### Optional Hosted Training
 
-No local GPU? Use HuggingFace Cloud Training (Unsloth Jobs). Multiple GPU tiers available from T4 to H100. Requires HuggingFace Pro subscription.
+Hosted training can be selected explicitly when an installation supports it.
+It is not required for BashGym and never replaces an already registered
+local/private target during campaign resolution.
 
 ---
 
@@ -427,6 +447,8 @@ bashgym/
 ├── bashgym/                  # Python package
 │   ├── api/                  # REST API + WebSocket
 │   ├── arena/                # Execution (runner, sandbox)
+│   ├── campaigns/            # Durable AutoResearch state, workers, bindings, evidence
+│   ├── compute/              # Registered execution and capacity contracts
 │   ├── events/               # Typed EventBus (bus, event types, WebSocket bridge)
 │   ├── factory/              # Data synthesis (trace processor, example generator, decision extractor)
 │   ├── gym/                  # Training (trainer, autoresearch, cascade, training goals)
@@ -437,6 +459,7 @@ bashgym/
 │   │   ├── trace_researcher.py # Data curation optimization
 │   │   └── remote_trainer.py # SSH-based remote training
 │   ├── judge/                # Verification (evaluator, semantic judge, guardrails, benchmarks)
+│   ├── ledger/               # Project-isolated experiments and evaluation lineage
 │   ├── models/               # Model registry and lifecycle
 │   ├── pipeline/             # Automated watcher, quality gate, semantic evaluation
 │   ├── providers/            # Inference providers (Anthropic, NIM, Ollama)
@@ -467,7 +490,7 @@ bashgym/
 ├── tests/                    # Test suite
 ├── run_backend.py            # Backend entry point (uvicorn)
 ├── dev.ps1 / dev.sh          # Dev environment launchers
-└── docker-compose.yml        # Full stack deployment
+└── docker-compose.yml        # Backend API plus opt-in assistant profiles
 ```
 
 ---
@@ -489,7 +512,9 @@ See [TODOS.md](TODOS.md) for the full roadmap with details.
 ## FAQ
 
 **Do I need a GPU?**
-No. Trace capture, curation, and the dashboard work without one. Training requires a CUDA GPU (8GB+ VRAM) or you can use HuggingFace Cloud Training.
+No. Trace capture, curation, the dashboard, and the campaign control smoke work
+without one. Real training uses an explicitly registered compatible target:
+local hardware, private hardware over SSH, or an optional hosted backend.
 
 **How many traces before I can train?**
 20–30 gold traces for a basic SFT run. 100+ traces produce noticeably better results. More repos and task diversity = more generalizable model.
@@ -501,7 +526,11 @@ Only to the LLM providers you already use (Anthropic, etc.). Traces, training da
 A trace is a complete coding session from any supported tool (many tool calls, potentially 30+ minutes). A training example is a single task-response pair extracted from that trace. One trace typically produces 1–5 examples.
 
 **Can I use other base models?**
-Yes — any HuggingFace model that works with Unsloth/transformers. Qwen3.5/3.6, Llama 4, Gemma 4, Mistral, DeepSeek, Phi, and more. Set `BASE_MODEL` in the dashboard or `.env`. Larger models need more VRAM (or use cloud training). After training, export to GGUF and run via Ollama, llama.cpp, LM Studio, or any GGUF-compatible runtime.
+Yes, when the operator-selected trainable artifact passes the installed
+backend's compatibility and hardware checks. BashGym does not choose, download,
+or substitute a model. Pin the exact revision for durable campaigns; treat GGUF,
+served models, and adapters as inference or derived artifacts rather than base
+weights for training.
 
 **What about synthetic data?**
 The data factory supports NVIDIA NeMo Data Designer for structured synthetic generation, plus LLM-based augmentation using Anthropic or NVIDIA NIM models. Useful for filling gaps in your trace coverage.

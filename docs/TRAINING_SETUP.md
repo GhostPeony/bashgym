@@ -2,7 +2,7 @@
 
 This document describes the training stack in technical detail: the hardware
 tiers, the model families, the training strategies, the data-generation
-factory, the provider/serving layer, and the private/cloud compute flow. For the exact
+factory, the provider/serving layer, and the local/private compute flow. For the exact
 hyperparameter values and quick-start recipes see
 [training-config-guide.md](training-config-guide.md); for the beginner/operator
 curriculum see [training/overview.md](training/overview.md); for the stable,
@@ -45,22 +45,17 @@ local/private campaign.
 
 ## 2. Base models
 
-BashGym does not mandate a base model. The trainer fine-tunes **any open-weight
-HuggingFace causal language model**, accelerated with Unsloth, so you choose the
-target that fits your hardware and goal. Unsloth's supported set is wide and grows
-continuously; as of mid-2026 it spans, among others:
+BashGym does not mandate or suggest a repository-owned base model. Training
+starts from an operator-selected trainable artifact whose immutable revision,
+task, architecture, tokenizer, quantization, runtime, and hardware fit are
+accepted by the installed backend. A Hugging Face cache entry, served model,
+GGUF/inference quant, or adapter cannot silently satisfy that contract.
 
-- **Gemma 4** — E2B (trains in ~8 GB locally), E4B, 12B, 26B-A4B MoE, 31B
-- **Qwen3** — incl. Qwen3.6 / 3.7, the Qwen3-Coder MoE variants, and small 4B–14B dense models
-- **DeepSeek** — V3.x / V4-class and R1 distillations
-- **Llama 4** — Scout / Maverick (very long context); Llama 3.x
-- **Mistral** (Small, Devstral) and **Phi-4**
-
-Smaller models (a few billion parameters) fine-tune on the consumer GPU; larger
-and mixture-of-experts targets need larger local, private, or cloud GPUs. These
-are examples, not requirements — set `BASE_MODEL` to whatever you choose. For the
-current supported list see the
-[Unsloth model catalog](https://unsloth.ai/docs/get-started/unsloth-model-catalog).
+Backend catalogs are useful for discovery but are not BashGym compatibility
+guarantees. For example, consult the
+[Unsloth model catalog](https://unsloth.ai/docs/get-started/unsloth-model-catalog)
+when Unsloth is the selected backend, then run BashGym's artifact inspection and
+doctor checks against the exact local snapshot before launching training.
 
 ---
 
@@ -80,10 +75,11 @@ script.
 | **Session Distillation** | Hint-injected self-distillation over failed trace spans with masked KL/CE on the same target tokens. | Repair local mistakes, retry loops, and recovery pivots without replacing the trajectory. |
 | **Cascade RL** | Sequential domain-specialist training with multi-objective policy distillation (see §5). | Build a generalist by composing specialists. |
 
-Fine-tuning uses **LoRA / QLoRA** adapters (4-bit quantization where the hardware
-requires it) so runs fit on the consumer GPU; the adapter is merged into the base
-weights at export. Exact ranks, learning rates, warmup, gradient accumulation,
-and sequence lengths are in [training-config-guide.md](training-config-guide.md).
+Fine-tuning can use **LoRA / QLoRA** adapters when the selected model/backend
+supports them. The retention policy decides whether to keep an adapter, merged
+weights, or other deployable artifacts. Exact ranks, learning rates, warmup,
+gradient accumulation, and sequence lengths are in
+[training-config-guide.md](training-config-guide.md).
 
 ---
 
@@ -233,6 +229,12 @@ guardrail block.
 
 ## 8. Hyperparameter search (AutoResearch)
 
+This earlier in-process search loop is distinct from the authoritative durable
+campaign controller. The durable path applies the same baseline-first campaign,
+budget, lineage, evidence, and promotion contracts across registered models and
+trainers; this module remains an interactive search implementation beneath that
+broader product surface.
+
 `bashgym/gym/autoresearch.py` runs a population-based evolutionary search over
 training hyperparameters (learning rate, LoRA rank/alpha, dropout, warmup ratio,
 gradient accumulation, batch size, max sequence length, 4-bit on/off):
@@ -287,10 +289,11 @@ next training set.
 - [training/strategy-guide.md](training/strategy-guide.md) — concrete starting settings and strategy selection.
 - [training/agent-cli.md](training/agent-cli.md) — machine-readable CLI commands for agents setting up runs and analyzing replay artifacts.
 - [training/tmax-terminal-rl-recipe.md](training/tmax-terminal-rl-recipe.md) — TMax-style terminal RL path from environments to backend smoke and release gates.
-- [training/private-compute-eval-checklist.md](training/private-compute-eval-checklist.md) — private/cloud compute backend-smoke and eval checklist.
+- [training/private-compute-eval-checklist.md](training/private-compute-eval-checklist.md) — local/private compute backend-smoke and eval checklist.
+- [training/autoresearch-campaign.md](training/autoresearch-campaign.md) — durable plan-first activation, doctor, baseline, and candidate path.
 - [training/world-models.md](training/world-models.md) — ECHO/RWML contracts, replay payloads, backend integration, and telemetry boundaries.
 - [training/metrics-runbook.md](training/metrics-runbook.md) — diagnose flat pass@k, zero reward variance, timeouts, and verifier failures.
 - [training-config-guide.md](training-config-guide.md) — exact hyperparameters, LoRA/QLoRA settings, and quick-start recipes.
 - [TRAINING_DATA_GUIDE.md](TRAINING_DATA_GUIDE.md) — trace format, quality tiers, and the example-generation pipeline.
-- [PLATFORM_OVERVIEW.md](PLATFORM_OVERVIEW.md) — the platform architecture and design rationale.
+- [Project structure](../README.md#project-structure) — the current public package map.
 - [GETTING_STARTED.md](GETTING_STARTED.md) — install to first trained model, step by step.

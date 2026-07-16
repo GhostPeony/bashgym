@@ -111,7 +111,7 @@ Training examples use multi-turn `messages[]` with `tool_calls` and `tool` roles
     "total_steps": 3,
     "per_step_success": [true, true, true],
     "repo_name": "ghostwork",
-    "repo_path": "C:/Users/Cade/projects/ghostwork",
+    "repo_path": "/home/operator/projects/example-repo",
     "model": "claude-opus-4-5-20251101",
     "generated_at": "2026-02-25T12:00:00Z"
   }

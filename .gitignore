@@ -94,6 +94,7 @@ data/designer_output/
 # Assistant secrets
 assistant/config/config.json
 assistant/.env
+assistant/workspace/USER.md
 .gstack/
 
 # design-sync build output
@@ -101,9 +102,11 @@ ds-bundle/
 .ds-sync/
 .design-sync/.cache/
 
-# Personal planning notes + local agent config (not for the public repo)
+# Personal planning notes, internal handoffs, and local agent config
+# (not for the public repo)
 tasks/
 .claude/
+WORKSTREAMS.md
 
 # Installation-specific private operator materials
 assistant/workspace/skills/bashgym-operator/references/ponyo-memexai.md

@@ -48,6 +48,25 @@ bashgym --help
 bashgym campaign control-smoke --json
 ```
 
+The control smoke proves the durable controller without claiming model quality.
+To graduate it to a real local/private AutoResearch campaign, keep the full
+values in the canonical guide and use this order:
+
+```bash
+bashgym campaign inspect-model-artifact --help
+bashgym campaign setup-autoresearch --help
+bashgym campaign activate-autoresearch --help
+bashgym campaign doctor --help
+```
+
+Inspect an operator-selected trainable snapshot, create the portable definition,
+run activation once as a non-applying plan, repeat with `--apply`, and then run
+`campaign doctor`. Require `materializable`, bring the resident controller
+online through `--install-worker` or an existing service, then re-run doctor and
+require `launch_ready`. A bounded real baseline comes before any candidate. See
+[Durable AutoResearch Campaigns](training/autoresearch-campaign.md) for the exact
+flags and evidence contract.
+
 ---
 
 ## Step 2: Install Trace Capture Hooks (2 minutes)
@@ -139,13 +158,14 @@ Open the **Training** dashboard:
 
 Training a small model with LoRA typically takes 30-90 minutes depending on your GPU and trace count. The model auto-exports to GGUF when complete.
 
-### Cloud Training Alternative
+### Optional Hosted Training
 
-No local GPU? Use HuggingFace Cloud Training:
+If you explicitly choose a supported hosted backend instead of registered
+local/private hardware:
 
-1. Add `HF_TOKEN` to your `.env` file (requires a [HuggingFace Pro subscription](https://huggingface.co/subscribe/pro))
+1. Configure the credential and account entitlement required by the selected provider
 2. Open the **HuggingFace** dashboard from the sidebar
-3. Submit a cloud training job — supports T4, A10G, A100, and H100 hardware starting at $0.60/hr
+3. Review the current hardware and price at submission, then submit the job
 
 ---
 
@@ -177,8 +197,8 @@ Every week, retrain with your accumulated traces. Each cycle produces a better s
 ## Next Steps
 
 - **[Durable AutoResearch](training/autoresearch-campaign.md)** — Run the no-GPU control smoke, bind local/private compute, and execute a real baseline/candidate campaign
-- **[Peony Assistant](../README.md#peony-assistant)** — Control Bash Gym via Discord or Telegram
-- **[HuggingFace Integration](../README.md#huggingface-integration)** — Cloud training and model sharing
+- **[Peony Assistant](../README.md#agent-peony)** — Control Bash Gym via Discord or Telegram
+- **[Optional hosted training](../README.md#optional-hosted-training)** — Explicit hosted training and model sharing
 - **[API Reference](API.md)** — Full REST and WebSocket endpoint documentation
 
 ---
@@ -188,11 +208,15 @@ Every week, retrain with your accumulated traces. Each cycle produces a better s
 **Port 8003 is already in use:**
 ```bash
 # Windows (PowerShell)
-Get-Process -Name "python" | Where-Object { $_.CommandLine -like "*uvicorn*" } | Stop-Process
+$listener = Get-NetTCPConnection -LocalPort 8003 -State Listen
+Get-Process -Id $listener.OwningProcess
+# After verifying that PID belongs to BashGym:
+Stop-Process -Id <verified-PID>
 
 # macOS/Linux
-lsof -i :8003 | grep LISTEN
-kill -9 <PID>
+lsof -nP -iTCP:8003 -sTCP:LISTEN
+# After verifying that PID belongs to BashGym:
+kill <verified-PID>
 ```
 
 **Frontend can't connect to the API:**
@@ -215,7 +239,7 @@ The frontend uses `node-pty` which requires native compilation. Ensure you have:
 - On Windows: Visual Studio Build Tools with "Desktop development with C++"
 
 **Training fails with "CUDA out of memory":**
-1. Use QLoRA (4-bit quantization) — enabled by default
+1. Enable QLoRA/4-bit quantization when the selected model/backend supports it
 2. Reduce batch size to 1-2
-3. Use the smaller 1.5B model instead of 7B
+3. Select a smaller compatible operator-approved trainable base
 4. Close other GPU-consuming applications

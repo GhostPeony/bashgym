@@ -186,7 +186,7 @@ venv/bin/python -m pytest tests/research/ -v
 ## Known limitations
 
 - **Datasets with only a raw `content` column** (e.g. `GunA-SD/bash_code`, `1stvamp/py_ast`) cannot be auto-formatted — they need a user-written column mapping. The scanner will still score and rank them on the other dimensions but `bashgym_format` will be `None`.
-- **Gated datasets are always rejected**, even if the current user has access. The briefing from WORKSTREAMS.md treats gating as a compliance concern, not an auth concern.
+- **Gated datasets are always rejected**, even if the current user has access. The scanner treats gating as a compliance concern, not an authentication shortcut.
 - **Unknown license = rejection.** If both `card.license` and the `license:xxx` tag fallback are missing, the dataset is hard-rejected. This is deliberate — we don't want to accidentally ingest unlicensed data.
 - **Non-English datasets are not deprioritized.** The task_match dimension doesn't check language. If that matters, add a language filter to `SEARCH_QUERIES` or a language penalty to `_score_task_match`.
 - **The `popularity` signal saturates at 10k downloads.** Superstar datasets (HumanEval, MBPP) don't dominate the ranking just by being popular.
@@ -227,8 +227,11 @@ venv/bin/python -m bashgym.research.dataset_research_runner --top-n 5 --mode sim
 venv/bin/python -m bashgym.research.dataset_research_runner \
     --top-n 10 --mode real \
     --train-steps 100 --num-records 500 \
-    --base-model unsloth/gemma-4-E4B-it
+    --base-model "$BASE_MODEL"
 ```
+
+Set `BASE_MODEL` to the operator-approved trainable artifact selected for the
+run. The research tool does not choose or download a model.
 
 **How it works:**
 
@@ -246,7 +249,7 @@ venv/bin/python -m bashgym.research.dataset_research_runner \
 
 **How it integrates with autoresearch:**
 
-The runner injects a custom `DatasetSearchSpace` (a concrete impl of the existing `SearchSpace` ABC from `bashgym/gym/autoresearch.py`) into `AutoResearcher`. Instead of mutating hyperparameters against a fixed dataset, it holds hyperparameters fixed and iterates through the candidate list. The orchestrator's status tracking, pause/resume, and experiment history all work unchanged. If you want an API endpoint, the existing autoresearch routes already know how to expose the orchestrator.
+The runner injects a custom `DatasetSearchSpace` (a concrete impl of the existing `SearchSpace` ABC from `bashgym/gym/autoresearch.py`) into `AutoResearcher`. Instead of mutating hyperparameters against a fixed dataset, it holds hyperparameters fixed and iterates through the candidate list. AutoResearch status tracking, pause/resume, and experiment history all work unchanged. If you want an API endpoint, the existing AutoResearch routes already expose that run state.
 
 **Scope:** SFT-format datasets only. DPO and GRPO candidates are filtered out because their training loops have different eval metrics. Adding those means: extend the filter in `_load_candidates`, pick the right `strategy` on TrainerConfig, and read the right metric from `run.metrics`.
 

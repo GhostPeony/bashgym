@@ -309,7 +309,7 @@ Primary external sources:
 BashGym implementation references:
 
 - [Durable AutoResearch campaign](autoresearch-campaign.md)
-- [Project-isolated experiment ledger](experiment-ledger.md)
+- [Project-isolated experiment ledger CLI](agent-cli.md)
 - `bashgym/campaigns/autoresearch.py`
 - `bashgym/campaigns/worker_service.py`
 - `bashgym/api/campaign_routes.py`

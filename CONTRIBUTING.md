@@ -90,9 +90,6 @@ The UI follows **Botanical Brutalism** — structural honesty from brutalism (ha
 # All tests
 pytest tests/ -v
 
-# Retained February 2026 multi-agent Orchestrator dashboard only
-pytest tests/orchestrator/ --run-legacy-orchestrator -v
-
 # With coverage
 pytest tests/ --cov=bashgym --cov-report=html
 
@@ -111,7 +108,22 @@ pytest tests/test_data_factory.py -v
    - A clear title describing the change
    - Description of what and why
    - Screenshots for UI changes
+   - Documentation updates for public behavior, commands, configuration, or
+     compatibility changes
 5. Wait for review
+
+### Documentation Changes
+
+- Update the root `README.md` when a public capability or primary workflow
+  changes, and update the canonical guide that owns the full procedure.
+- Keep short discovery paths in entry-point docs; do not duplicate long command
+  references across multiple pages.
+- Use generic model, hardware, repository, and filesystem examples. Never commit
+  operator names, private hostnames, personal paths, credentials, or a silent
+  default model.
+- Keep internal implementation plans and agent handoffs in ignored local
+  planning files, not under the public `docs/` tree.
+- Before opening a PR, run `git diff --check` and verify changed Markdown links.
 
 ### Commit Messages
 
@@ -123,7 +135,8 @@ pytest tests/test_data_factory.py -v
 
 ## Project Architecture
 
-See the [Architecture Overview](README.md#architecture-overview) in the README for the full system diagram and layer descriptions. Key directories:
+See the [Project Structure](README.md#project-structure) in the README for the
+current package map. Key directories:
 
 | Directory | Language | Purpose |
 |-----------|----------|---------|
@@ -131,7 +144,7 @@ See the [Architecture Overview](README.md#architecture-overview) in the README f
 | `frontend/src/` | TypeScript | React + Electron UI |
 | `assistant/` | Go | Peony chat assistant (Discord/Telegram) |
 | `tests/` | Python | Test suite |
-| `docs/` | Markdown | Documentation |
+| `docs/` | Markdown | Durable public documentation |
 
 ---
 

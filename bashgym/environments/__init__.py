@@ -37,6 +37,15 @@ from bashgym.environments.metrics import (
     balance_score,
     summarize_environment_mix,
 )
+from bashgym.environments.nemo_gym import (
+    NemoGymMessageTokenEvidence,
+    NemoGymRefitReceipt,
+    NemoGymRolloutEvidence,
+    assert_message_token_evidence_preserved,
+    export_star_count_nemo_gym_bundle,
+    score_star_count_nemo_response,
+    validate_nemo_gym_rollout_batch,
+)
 from bashgym.environments.rollout import (
     CommandObservation,
     EnvironmentRolloutResult,
@@ -78,6 +87,9 @@ __all__ = [
     "LocalPersistentShell",
     "ModelCompleter",
     "ModelRolloutPlan",
+    "NemoGymMessageTokenEvidence",
+    "NemoGymRefitReceipt",
+    "NemoGymRolloutEvidence",
     "RewardHackingCanary",
     "RewardComponentSpec",
     "RolloutAttempt",
@@ -90,6 +102,7 @@ __all__ = [
     "TMaxImporter",
     "VerifierSpec",
     "axis_distribution",
+    "assert_message_token_evidence_preserved",
     "balance_score",
     "build_environment_rollout_messages",
     "canonical_star_count_answer",
@@ -97,6 +110,7 @@ __all__ = [
     "environment_from_record",
     "environment_text",
     "extract_verifier_rewards",
+    "export_star_count_nemo_gym_bundle",
     "filter_contaminated_environments",
     "generate_star_count_dataset",
     "load_environment",
@@ -112,7 +126,9 @@ __all__ = [
     "run_reward_hacking_canaries",
     "save_environment",
     "score_star_count_prediction",
+    "score_star_count_nemo_response",
     "star_count_environment_spec",
     "summarize_environment_mix",
     "summarize_reward_hacking_canaries",
+    "validate_nemo_gym_rollout_batch",
 ]

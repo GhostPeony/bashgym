@@ -58,6 +58,39 @@ Gold traces teach the model what good behavior looks like. Terminal
 environments prove whether the behavior survives interaction with a real shell,
 repo, and verifier.
 
+### Optional NeMo Gym environment export
+
+BashGym can export its deterministic star-count environment into the current
+NeMo Gym resources-server, simple-agent, and Responses API dataset layout
+without installing NeMo Gym into BashGym's core Python environment:
+
+```python
+from bashgym.environments import export_star_count_nemo_gym_bundle
+
+manifest = export_star_count_nemo_gym_bundle(
+    "star-count-dataset",
+    "nemo-gym-bundle",
+    nemo_gym_revision="<40-character NeMo Gym commit>",
+    bashgym_revision="<40-character BashGym commit>",
+    dataset_license="MIT",
+)
+```
+
+The bundle embeds portable image data, BashGym's exact component verifier,
+immutable source revisions, and content hashes. Its resources server imports
+BashGym only when launched inside the operator's separately pinned NeMo Gym
+runtime. Rollout evidence validation requires model-server message-level prompt
+IDs, generation IDs, and generation logprobs to pass through unchanged, unique
+session IDs for concurrent rollouts, exact component totals, and a synchronized
+policy-to-generation refit receipt.
+
+This is an adapter and evidence boundary, not a claim that a live NeMo RL refit
+has run. The live proof remains gated on a dedicated NeMo executor and an
+already approved compatible campaign model. See NVIDIA's
+[environment model](https://docs.nvidia.com/nemo/gym/main/about/concepts/environments/),
+[on-policy token contract](https://docs.nvidia.com/nemo/gym/main/contribute/rl-framework-integration/openai-compatible-http-server-on-policy-correction),
+and [NeMo RL integration flow](https://docs.nvidia.com/nemo/rl/nightly/design-docs/nemo-gym-integration.html).
+
 ---
 
 ## What the training strategies teach

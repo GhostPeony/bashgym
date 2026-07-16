@@ -31,7 +31,10 @@ from bashgym.campaigns.contracts import (
 from bashgym.campaigns.runtime import CampaignRuntimeRepository
 from bashgym.campaigns.service import CampaignService
 from bashgym.campaigns.worker import scheduler_lease_key
-from bashgym.campaigns.worker_service import DesktopWorkerStatusProjection
+from bashgym.campaigns.worker_service import (
+    ControllerStatusProjection,
+    DesktopWorkerStatusProjection,
+)
 from bashgym.ledger.contracts import (
     ArtifactSpec,
     DecisionSpec,
@@ -119,6 +122,7 @@ def test_create_app_registers_campaign_auth_and_campaign_routes():
         "/api/campaigns/from-template",
         "/api/campaigns/templates",
         "/api/campaigns/templates/{template_id}/doctor",
+        "/api/campaigns/{campaign_id}/control-room-snapshot",
         "/api/campaigns/{campaign_id}",
         "/api/campaigns/{campaign_id}/autoresearch",
         "/api/campaigns/{campaign_id}/autoresearch/baseline",
@@ -518,6 +522,156 @@ def test_campaign_list_projects_workspace_controller_health(tmp_path, monkeypatc
     assert online.json()["controller"]["state"] == "online"
     assert online.json()["controller"]["online"] is True
     assert online.json()["controller"]["owner_id"] == "resident-worker"
+
+
+def _fixed_controller_observation(observed_at: datetime) -> ControllerStatusProjection:
+    return ControllerStatusProjection(
+        online=True,
+        state="online",
+        code="controller_online",
+        observed_at=observed_at,
+        heartbeat_age_seconds=7.5,
+        owner_id="resident-worker",
+        generation=3,
+        heartbeat_at=observed_at - timedelta(seconds=7.5),
+        expires_at=observed_at + timedelta(seconds=7.5),
+    )
+
+
+def test_control_room_snapshot_requires_auth_and_sets_private_cache_headers(
+    tmp_path, monkeypatch
+):
+    http, _repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    assert create_from_template(http, access).status_code == 200
+    observed_at = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr(
+        campaign_routes,
+        "project_controller_status",
+        lambda *_args, **_kwargs: _fixed_controller_observation(observed_at),
+    )
+    route = "/api/campaigns/campaign-1/control-room-snapshot"
+
+    denied = http.get(route, params={"workspace_id": "workspace-a"})
+    response = http.get(
+        route,
+        params={"workspace_id": "workspace-a"},
+        headers=bearer(access),
+    )
+
+    assert denied.status_code == 401
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "private, no-store"
+    assert response.headers["vary"] == "Authorization"
+    assert response.headers["etag"].startswith('"')
+    assert response.json()["schema_version"] == "control_room_snapshot.v1"
+    assert response.json()["durable_state"]["campaign"]["version"] == 1
+    assert datetime.fromisoformat(
+        response.json()["controller_observation"]["observed_at"].replace("Z", "+00:00")
+    ) == observed_at
+    assert response.json()["controller_observation"]["heartbeat_age_seconds"] == 7.5
+
+
+def test_control_room_snapshot_etag_is_principal_specific_and_supports_304(
+    tmp_path, monkeypatch
+):
+    http, _repository, refresh = campaign_client(tmp_path)
+    first_access = exchange(http, refresh.raw_token)
+    assert create_from_template(http, first_access).status_code == 200
+    observed_at = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr(
+        campaign_routes,
+        "project_controller_status",
+        lambda *_args, **_kwargs: _fixed_controller_observation(observed_at),
+    )
+    auth = http.app.state.campaign_auth_service
+    second_refresh = auth.issue_refresh_credential(
+        actor_id="second-codex-agent",
+        autonomy_profile=AutonomyProfile.CODEX_TRUSTED,
+        workspace_ids=("workspace-a",),
+    )
+    second_access = exchange(http, second_refresh.raw_token)
+    route = "/api/campaigns/campaign-1/control-room-snapshot"
+    params = {"workspace_id": "workspace-a"}
+
+    first = http.get(route, params=params, headers=bearer(first_access))
+    not_modified = http.get(
+        route,
+        params=params,
+        headers={**bearer(first_access), "If-None-Match": first.headers["etag"]},
+    )
+    second = http.get(route, params=params, headers=bearer(second_access))
+
+    assert not_modified.status_code == 304
+    assert not not_modified.content
+    assert not_modified.headers["cache-control"] == "private, no-store"
+    assert not_modified.headers["vary"] == "Authorization"
+    assert first.headers["etag"] != second.headers["etag"]
+
+
+def test_control_room_snapshot_keeps_durable_and_controller_observation_times_distinct(
+    tmp_path, monkeypatch
+):
+    http, _repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    assert create_from_template(http, access).status_code == 200
+    controller_observed_at = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr(
+        campaign_routes,
+        "project_controller_status",
+        lambda *_args, **_kwargs: _fixed_controller_observation(controller_observed_at),
+    )
+
+    response = http.get(
+        "/api/campaigns/campaign-1/control-room-snapshot",
+        params={"workspace_id": "workspace-a"},
+        headers=bearer(access),
+    )
+    payload = response.json()
+
+    assert payload["durable_state"]["state_observed_at"] != payload["controller_observation"][
+        "observed_at"
+    ]
+    assert "transactionally_observed_at" not in payload
+    assert "snapshot_observed_at" not in payload
+
+
+def test_control_room_snapshot_returns_current_v1_for_an_older_etag(
+    tmp_path, monkeypatch
+):
+    http, repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    assert create_from_template(http, access).status_code == 200
+    observed_at = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr(
+        campaign_routes,
+        "project_controller_status",
+        lambda *_args, **_kwargs: _fixed_controller_observation(observed_at),
+    )
+    route = "/api/campaigns/campaign-1/control-room-snapshot"
+    params = {"workspace_id": "workspace-a"}
+    first = http.get(route, params=params, headers=bearer(access))
+
+    repository.transition_campaign(
+        "workspace-a",
+        "campaign-1",
+        CampaignTrigger.VALIDATE,
+        expected_version=1,
+        actor_id="campaign-controller",
+        credential_kind=CredentialKind.CONTROLLER,
+        correlation_id="compatibility-transition",
+        idempotency_key="compatibility-transition",
+    )
+    current = http.get(
+        route,
+        params=params,
+        headers={**bearer(access), "If-None-Match": first.headers["etag"]},
+    )
+
+    assert current.status_code == 200
+    assert current.headers["etag"] != first.headers["etag"]
+    assert current.json()["schema_version"] == "control_room_snapshot.v1"
+    assert current.json()["durable_state"]["campaign"]["version"] == 2
 
 
 def test_campaign_ledger_projection_keeps_project_evals_artifacts_and_decisions_linked(

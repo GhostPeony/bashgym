@@ -636,6 +636,107 @@ class CampaignEvidenceSnapshot(FrozenContractModel):
         return self
 
 
+class ControlRoomCampaignV1(FrozenContractModel):
+    """Safe campaign identity and lifecycle fields for the control room."""
+
+    schema_version: Literal["control_room_campaign.v1"] = "control_room_campaign.v1"
+    workspace_id: Identifier
+    campaign_id: Identifier
+    title: str = Field(min_length=1, max_length=240)
+    kind: CampaignKind
+    objective: str = Field(min_length=1, max_length=4000)
+    manifest_revision: int = Field(ge=1)
+    status: CampaignStatus
+    active_study_id: Identifier | None = None
+    active_action_id: Identifier | None = None
+    stop_reason: str | None = Field(default=None, max_length=2000)
+    version: int = Field(ge=1)
+    created_at: datetime
+    updated_at: datetime
+
+
+class ControlRoomStatusCountV1(FrozenContractModel):
+    schema_version: Literal["control_room_status_count.v1"] = "control_room_status_count.v1"
+    status: Identifier
+    count: int = Field(ge=1)
+
+
+class ControlRoomCollectionSummaryV1(FrozenContractModel):
+    """Bounded status histogram; never embeds collection rows."""
+
+    schema_version: Literal["control_room_collection_summary.v1"] = (
+        "control_room_collection_summary.v1"
+    )
+    total: int = Field(ge=0)
+    by_status: tuple[ControlRoomStatusCountV1, ...] = Field(default=(), max_length=64)
+
+    @model_validator(mode="after")
+    def validate_counts(self) -> ControlRoomCollectionSummaryV1:
+        statuses = tuple(item.status for item in self.by_status)
+        if statuses != tuple(sorted(set(statuses))):
+            raise ValueError("control-room status counts must be sorted and unique")
+        if sum(item.count for item in self.by_status) != self.total:
+            raise ValueError("control-room status counts must equal the collection total")
+        return self
+
+
+class ControlRoomArtifactSummaryV1(FrozenContractModel):
+    """Artifact counts without URI, metadata, or restricted evaluation content."""
+
+    schema_version: Literal["control_room_artifact_summary.v1"] = (
+        "control_room_artifact_summary.v1"
+    )
+    total: int = Field(ge=0)
+    sealed: int = Field(ge=0)
+    valid: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def validate_subtotals(self) -> ControlRoomArtifactSummaryV1:
+        if self.sealed > self.total or self.valid > self.total:
+            raise ValueError("artifact subtotals cannot exceed the total")
+        return self
+
+
+class CampaignControlRoomStateV1(FrozenContractModel):
+    """One-transaction durable state used to compose a control-room snapshot."""
+
+    schema_version: Literal["control_room_state.v1"] = "control_room_state.v1"
+    campaign: ControlRoomCampaignV1
+    latest_event_cursor: int = Field(ge=0)
+    proposals: ControlRoomCollectionSummaryV1
+    studies: ControlRoomCollectionSummaryV1
+    actions: ControlRoomCollectionSummaryV1
+    attempts: ControlRoomCollectionSummaryV1
+    artifacts: ControlRoomArtifactSummaryV1
+    state_observed_at: datetime
+
+
+class ControlRoomControllerObservationV1(FrozenContractModel):
+    """Separately timestamped controller observation outside the SQLite snapshot."""
+
+    schema_version: Literal["control_room_controller_observation.v1"] = (
+        "control_room_controller_observation.v1"
+    )
+    online: bool
+    state: Literal["online", "stale", "offline"]
+    code: Identifier
+    observed_at: datetime
+    heartbeat_age_seconds: float | None = Field(default=None, ge=0)
+    guidance: str | None = Field(default=None, max_length=2000)
+    owner_id: Identifier | None = None
+    generation: int | None = Field(default=None, ge=1)
+    heartbeat_at: datetime | None = None
+    expires_at: datetime | None = None
+
+
+class CampaignControlRoomSnapshotV1(FrozenContractModel):
+    """Authenticated control-room response with explicit observation boundaries."""
+
+    schema_version: Literal["control_room_snapshot.v1"] = "control_room_snapshot.v1"
+    durable_state: CampaignControlRoomStateV1
+    controller_observation: ControlRoomControllerObservationV1
+
+
 class Study(ContractModel):
     """Accepted proposal with one immutable stage plan and execution cursor."""
 
@@ -897,6 +998,8 @@ __all__ = [
     "DESKTOP_LOCAL_SCOPE",
     "Campaign",
     "CampaignArtifactReference",
+    "CampaignControlRoomSnapshotV1",
+    "CampaignControlRoomStateV1",
     "CampaignEvidenceSnapshot",
     "CampaignEvent",
     "CampaignKind",
@@ -913,6 +1016,11 @@ __all__ = [
     "ManifestRevision",
     "NemoGymEvidenceReference",
     "CompletedHypothesisSummary",
+    "ControlRoomArtifactSummaryV1",
+    "ControlRoomCampaignV1",
+    "ControlRoomCollectionSummaryV1",
+    "ControlRoomControllerObservationV1",
+    "ControlRoomStatusCountV1",
     "ProposalRecord",
     "ProposalStatus",
     "ProposalValidation",

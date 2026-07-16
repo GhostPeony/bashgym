@@ -38,6 +38,12 @@ test('campaign bridge allowlists exact REST routes and rejects renderer escape h
   validateCampaignRequest('GET', '/api/campaigns/campaign-1/ledger', undefined, {
     workspace_id: 'workspace-a',
   })
+  validateCampaignRequest(
+    'GET',
+    '/api/campaigns/campaign-1/control-room-snapshot',
+    undefined,
+    { workspace_id: 'workspace-a' },
+  )
   validateCampaignRequest('POST', '/api/campaigns/campaign-1/budget/amend', {
     workspace_id: 'workspace-a',
     expected_version: 4,
@@ -101,6 +107,15 @@ test('campaign bridge allowlists exact REST routes and rejects renderer escape h
   assert.throws(
     () => validateCampaignRequest('GET', '/api/campaigns/../settings'),
     /Invalid campaign route/,
+  )
+  assert.throws(
+    () => validateCampaignRequest(
+      'GET',
+      '/api/campaigns/campaign-1/control-room-snapshot/private',
+      undefined,
+      { workspace_id: 'workspace-a' },
+    ),
+    /not allowlisted/,
   )
   assert.throws(
     () => validateCampaignRequest('GET', '/api/campaigns', undefined, {

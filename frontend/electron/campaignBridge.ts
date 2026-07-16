@@ -21,6 +21,7 @@ const GET_ROUTES = [
   /^\/api\/campaigns\/templates$/,
   new RegExp(`^/api/campaigns/${IDENTIFIER}$`),
   new RegExp(`^/api/campaigns/${IDENTIFIER}/autoresearch$`),
+  new RegExp(`^/api/campaigns/${IDENTIFIER}/control-room-snapshot$`),
   new RegExp(`^/api/campaigns/${IDENTIFIER}/(?:events|artifacts|attempts|comparisons|proposals|studies|evidence|ledger)$`),
   new RegExp(`^/api/campaigns/${IDENTIFIER}/manifest/[1-9][0-9]*$`),
   new RegExp(`^/api/campaigns/${IDENTIFIER}/studies/${IDENTIFIER}$`),

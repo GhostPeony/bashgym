@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, Never
 
-from fastapi import APIRouter, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from bashgym.campaigns.auth import CampaignAuthenticationError, CampaignAuthService
@@ -28,16 +28,23 @@ from bashgym.campaigns.autoresearch import (
 from bashgym.campaigns.contracts import (
     ActorPrincipal,
     Campaign,
+    CampaignControlRoomSnapshotV1,
     CampaignKind,
     CampaignManifest,
     CampaignStatus,
     CampaignTrigger,
     Capability,
+    ControlRoomControllerObservationV1,
     ProtectedEvaluationResult,
     StagePlan,
     StudyProposalSubmission,
     TargetModelContract,
     canonical_hash,
+)
+from bashgym.campaigns.control_room import (
+    build_control_room_snapshot,
+    if_none_match_matches,
+    principal_control_room_etag,
 )
 from bashgym.campaigns.lineage import (
     ApprovedSourceRepositoryProfile,
@@ -927,6 +934,46 @@ def get_campaign(campaign_id: str, request: Request, workspace_id: str = Query(.
     try:
         _repository, _auth, service = _services(request)
         return service.get(workspace_id, campaign_id, _principal(request)).model_dump(mode="json")
+    except Exception as exc:
+        _raise_api(exc)
+
+
+@campaign_router.get(
+    "/{campaign_id}/control-room-snapshot",
+    response_model=CampaignControlRoomSnapshotV1,
+    responses={304: {"description": "Control-room state has not materially changed."}},
+)
+def get_control_room_snapshot(
+    campaign_id: str,
+    request: Request,
+    workspace_id: str = Query(..., min_length=1, max_length=160),
+    if_none_match: str | None = Header(default=None, alias="If-None-Match"),
+):
+    headers = {
+        "Cache-Control": "private, no-store",
+        "Vary": "Authorization",
+    }
+    try:
+        repository, _auth, _service = _services(request)
+        principal = _principal(request)
+        principal.require(workspace_id, Capability.CAMPAIGN_READ)
+        durable_state = repository.read_control_room_snapshot(workspace_id, campaign_id)
+        controller_status = project_controller_status(repository, get_bashgym_dir())
+        snapshot = build_control_room_snapshot(
+            durable_state,
+            ControlRoomControllerObservationV1.model_validate(
+                controller_status.model_dump(mode="json", exclude={"schema_version"})
+            ),
+        )
+        etag = principal_control_room_etag(snapshot, principal)
+        headers["ETag"] = etag
+        if if_none_match_matches(if_none_match, etag):
+            return Response(status_code=304, headers=headers)
+        return Response(
+            content=snapshot.model_dump_json(),
+            media_type="application/json",
+            headers=headers,
+        )
     except Exception as exc:
         _raise_api(exc)
 

@@ -16,6 +16,7 @@ from bashgym.campaigns.contracts import (
     BudgetLedgerEntry,
     Campaign,
     CampaignArtifactReference,
+    CampaignControlRoomStateV1,
     CampaignEvent,
     CampaignEvidenceSnapshot,
     CampaignManifest,
@@ -1612,6 +1613,18 @@ class CampaignRepository:
         if row is None:
             raise RecordNotFoundError("campaign not found")
         return self._campaign_from_row(row)
+
+    def read_control_room_snapshot(
+        self, workspace_id: str, campaign_id: str
+    ) -> CampaignControlRoomStateV1:
+        """Read the bounded durable control-room state in one SQLite transaction."""
+
+        self._require_initialized()
+        from bashgym.campaigns.control_room import read_control_room_state
+
+        with self._connection() as connection:
+            connection.execute("BEGIN")
+            return read_control_room_state(connection, workspace_id, campaign_id)
 
     def list_campaigns(self, workspace_id: str) -> list[Campaign]:
         self._require_initialized()

@@ -14,20 +14,20 @@ training data see [TRAINING_DATA_GUIDE.md](TRAINING_DATA_GUIDE.md).
 
 ## 1. Hardware tiers
 
-Training runs across local, private, and cloud compute targets from the same
+Training runs across local and private compute targets from the same
 workflow. The trainer abstracts the backend; the operator picks where a run
-executes.
+executes. Hosted backends are optional and never a fallback for a registered
+local/private campaign.
 
 ### Local — consumer GPU
-- **NVIDIA GeForce RTX 3080 Ti, 12 GB VRAM.**
-- Practical ceiling: small models in the low billions of parameters (for
-  example, Gemma 4 E2B trains in ~8 GB with Unsloth). The binding constraint is
-  the float32 fused cross-entropy step over a large vocabulary, which dominates
-  VRAM at the loss layer regardless of LoRA's parameter savings.
-- Used for fast iteration, smoke tests, and 1.5 B specialist fine-tunes.
+- Register the actual GPU inventory and available memory instead of selecting a
+  repository-owned device profile.
+- Use small LoRA/QLoRA runs, bounded smoke tests, and short contexts when memory
+  is constrained. The model doctor and trainer preflight decide fit from the
+  selected artifact, runtime, and hardware.
 
-### Private or cloud compute target
-- Larger GPU memory or managed accelerators for dense models, MoE variants,
+### Private compute target
+- Larger GPU memory or unified-memory systems for dense models, MoE variants,
   longer-context runs, and installed-backend smokes.
 - The target can train, export GGUF, and optionally serve the student locally if
   the operator has an inference runtime such as Ollama available there.
@@ -35,9 +35,9 @@ executes.
   to justify the run.
 
 ### Runtime requirements
-- Training requires **Python 3.12 with CUDA-enabled PyTorch** (Python 3.14 lacks
-  CUDA wheels at time of writing). The trainer auto-detects a Python 3.12
-  interpreter for the training subprocess.
+- Training requires a Python, CUDA, PyTorch, and trainer combination supported
+  by the explicitly selected backend. Keep this runtime isolated from the
+  lightweight BashGym control-plane environment.
 - Acceleration via **Unsloth** (2–5× faster, lower memory) on top of PyTorch +
   Hugging Face Transformers + PEFT + TRL.
 
@@ -199,9 +199,9 @@ Training artifacts land under `~/.bashgym/models/{run_id}/`: intermediate
   directory, load the dataset by bare filename, and write artifacts to
   `./final` and `./merged` — the locations the artifact download expects.
 
-For the GX10/DGX Spark target specifically — environment inventory, launch
-steps, smoke-test procedure, and current dependency issues — see the
-[GX10 environment runbook](training/gx10-environment-runbook.md).
+Each operator keeps machine-specific environment inventories and launch notes
+outside the repository. Public contracts use only logical local/private compute
+profile IDs and doctor output.
 
 ---
 
@@ -288,7 +288,6 @@ next training set.
 - [training/agent-cli.md](training/agent-cli.md) — machine-readable CLI commands for agents setting up runs and analyzing replay artifacts.
 - [training/tmax-terminal-rl-recipe.md](training/tmax-terminal-rl-recipe.md) — TMax-style terminal RL path from environments to backend smoke and release gates.
 - [training/private-compute-eval-checklist.md](training/private-compute-eval-checklist.md) — private/cloud compute backend-smoke and eval checklist.
-- [training/gx10-environment-runbook.md](training/gx10-environment-runbook.md) — GX10/DGX Spark services, venv inventory, launch steps, and open dependency issues.
 - [training/world-models.md](training/world-models.md) — ECHO/RWML contracts, replay payloads, backend integration, and telemetry boundaries.
 - [training/metrics-runbook.md](training/metrics-runbook.md) — diagnose flat pass@k, zero reward variance, timeouts, and verifier failures.
 - [training-config-guide.md](training-config-guide.md) — exact hyperparameters, LoRA/QLoRA settings, and quick-start recipes.

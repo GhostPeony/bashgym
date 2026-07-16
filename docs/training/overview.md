@@ -334,13 +334,12 @@ gates by themselves.
 - [metrics-runbook.md](metrics-runbook.md) - how to diagnose flat pass@k, zero reward variance, timeouts, verifier errors, and tamper attempts.
 - [glossary.md](glossary.md) - compact definitions for the training vocabulary.
 - [agent-cli.md](agent-cli.md) - machine-readable CLI commands agents can call for setup and replay analysis.
+- [autoresearch-campaign.md](autoresearch-campaign.md) - durable AutoResearch setup, control smoke, bindings, and real-evidence path.
 - [../TRAINING_DATA_GUIDE.md](../TRAINING_DATA_GUIDE.md) - trace format and data pipeline reference.
 - [../training-config-guide.md](../training-config-guide.md) - existing Training Config panel reference.
 
 ## Source references
 
-- [../../tasks/jepa-bashgym-action-plan-2026-06-23.md](../../tasks/jepa-bashgym-action-plan-2026-06-23.md)
-- [../../tasks/jepa-worldmodel-hardware-handoff-2026-06-23.md](../../tasks/jepa-worldmodel-hardware-handoff-2026-06-23.md)
 - [../../bashgym/gym/trainer.py](../../bashgym/gym/trainer.py)
 - [../../bashgym/gym/terminal_rl.py](../../bashgym/gym/terminal_rl.py)
 - [../../bashgym/eval/dppo_replay.py](../../bashgym/eval/dppo_replay.py)

@@ -1506,7 +1506,7 @@ def create_app() -> FastAPI:
                     )
                 config = TrainerConfig(
                     base_model=resolved_base_model,
-                    model_type=request.model_type or "qwen",
+                    model_type=request.model_type or "auto",
                     strategy=TS(request.strategy.value),
                     num_epochs=request.num_epochs,
                     batch_size=request.batch_size,

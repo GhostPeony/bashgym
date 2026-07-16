@@ -31,6 +31,7 @@ docs/
 !docs/
 docs/*
 !docs/TRAINING_SETUP.md
+!docs/PRODUCTIZATION.md
 !docs/hermes-agent-endpoints.md
 !docs/training-config-guide.md
 !docs/training/
@@ -48,6 +49,8 @@ docs/training/*
 !docs/training/metrics-runbook.md
 !docs/training/glossary.md
 !docs/training/agent-cli.md
+!docs/training/autoresearch-campaign.md
+!docs/training/bashgym-autoresearch-nvidia-brief.md
 
 # IDE
 .vscode/

@@ -19,16 +19,25 @@ Thanks for your interest in contributing! This guide will help you get set up.
 git clone https://github.com/GhostPeony/bashgym.git
 cd bashgym
 
-# Python dependencies
-pip install -r requirements.txt
-pip install -r requirements-training.txt  # optional, for ML work
+# Isolated Python environment
+python -m venv .venv
+# Windows: .\.venv\Scripts\Activate.ps1
+# macOS/Linux: source .venv/bin/activate
+
+# Package, CLI, and development dependencies
+python -m pip install -e ".[dev]"
+python -m pip install -e ".[training,dev]"  # optional, for ML work
 
 # Frontend dependencies
-cd frontend && npm install && cd ..
+cd frontend && npm ci && cd ..
 
 # Environment
 cp .env.example .env
-# Add your ANTHROPIC_API_KEY to .env
+# Add only provider credentials needed by the feature you are testing
+
+# Verify the package and no-GPU AutoResearch control path
+bashgym --help
+bashgym campaign control-smoke --json
 ```
 
 ### Running Locally

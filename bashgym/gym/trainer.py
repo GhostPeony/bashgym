@@ -379,7 +379,7 @@ class TrainerConfig:
     base_model: str = (
         ""  # No default — an explicit base model is required (see _require_base_model)
     )
-    model_type: str = "qwen"  # llama, mistral, qwen, phi
+    model_type: str = "auto"  # resolved from the explicitly selected base model
 
     # Training settings
     strategy: TrainingStrategy = TrainingStrategy.SFT

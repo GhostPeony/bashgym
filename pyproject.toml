@@ -27,9 +27,13 @@ classifiers = [
 
 dependencies = [
     "anthropic>=0.20.0",
+    "asyncssh>=2.14.0",
+    "fastapi>=0.109.0",
     "httpx>=0.26.0",
     "docker>=7.0.0",
     "python-dotenv>=1.0.0",
+    "python-multipart>=0.0.7",
+    "pydantic>=2.5.0",
     "psutil>=5.9.0",
     "keyring>=25.0.0",
     "mcp>=1.27,<2",
@@ -37,6 +41,10 @@ dependencies = [
     "Pillow>=10.0.0",
     "python-docx>=1.1.0",
     "reportlab>=4.0.0",
+    "PyYAML>=6.0.0",
+    "typing-extensions>=4.10.0",
+    "uvicorn>=0.27.0",
+    "watchdog>=4.0.0",
 ]
 
 [project.optional-dependencies]
@@ -52,6 +60,7 @@ dev = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.1.0",
+    "pytest-timeout>=2.0.0",
     "black>=23.0.0",
     "ruff>=0.1.0",
 ]
@@ -62,7 +71,12 @@ data-designer = [
     "data-designer>=0.6.1",
     "pandas>=2.0.0",
 ]
-all = ["bashgym[training,dev]"]
+training-optimized = [
+    "liger-kernel>=0.5.0",
+]
+nemo-customizer = [
+    "nemo-microservices>=0.1.0",
+]
 
 [project.scripts]
 bashgym = "bashgym.cli:main"
@@ -74,16 +88,43 @@ bashgym = "bashgym.cli:main"
 bashgym-gold-trace = "bashgym.factory.dd_plugin.plugin:gold_trace_plugin"
 
 [project.urls]
-Homepage = "https://github.com/your-org/project-bashgym"
-Documentation = "https://github.com/your-org/project-bashgym#readme"
-Repository = "https://github.com/your-org/project-bashgym.git"
-Issues = "https://github.com/your-org/project-bashgym/issues"
+Homepage = "https://github.com/GhostPeony/bashgym"
+Documentation = "https://github.com/GhostPeony/bashgym#readme"
+Repository = "https://github.com/GhostPeony/bashgym.git"
+Issues = "https://github.com/GhostPeony/bashgym/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
+include = ["bashgym*"]
+exclude = ["bashgym.tests*"]
+
+[tool.setuptools]
+include-package-data = false
 
 [tool.setuptools.package-data]
 "bashgym.campaigns.templates" = ["*.json"]
+"bashgym.agent.skills" = ["**/*.json"]
+"bashgym.judge" = ["verify.sh"]
+
+[tool.setuptools.data-files]
+"share/bashgym/docs/training" = [
+    "docs/training/overview.md",
+    "docs/training/capability-map.md",
+    "docs/training/training-methods-reference.md",
+    "docs/training/external-review-packet.md",
+    "docs/training/rlhf-handbook-comparison.md",
+    "docs/training/strategy-guide.md",
+    "docs/training/world-models.md",
+    "docs/training/metrics-runbook.md",
+    "docs/training/glossary.md",
+    "docs/training/agent-cli.md",
+    "docs/training/tmax-terminal-rl-recipe.md",
+    "docs/training/session-distillation.md",
+    "docs/training/private-compute-eval-checklist.md",
+    "docs/training/platform-flywheels.md",
+    "docs/training/autoresearch-campaign.md",
+    "docs/training/bashgym-autoresearch-nvidia-brief.md",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

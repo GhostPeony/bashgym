@@ -44,10 +44,10 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: requirements.txt
+          cache-dependency-path: pyproject.toml
 
       - name: Install dependencies
-        run: pip install -r requirements.txt pytest-timeout
+        run: pip install -e ".[dev]"
 
       - name: Run tests
         env:
@@ -56,6 +56,45 @@ jobs:
           OLLAMA_ENABLED: "false"
         timeout-minutes: 12
         run: pytest tests/ -m "not network and not integration and not slow" -x -v --tb=short --timeout=30
+
+  python-package:
+    name: Python Wheel Smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Build wheel
+        run: |
+          pip install build
+          python -m build --wheel
+
+      - name: Test installed wheel outside checkout
+        run: |
+          python -m venv /tmp/bashgym-wheel
+          /tmp/bashgym-wheel/bin/pip install dist/*.whl
+          cd /tmp
+          /tmp/bashgym-wheel/bin/bashgym manifest --json > manifest.json
+          /tmp/bashgym-wheel/bin/bashgym training docs --topic overview --json > docs.json
+          /tmp/bashgym-wheel/bin/bashgym campaign control-smoke --json > smoke.json
+          /tmp/bashgym-wheel/bin/python - <<'PY'
+          import json
+          from pathlib import Path
+          from bashgym.agent.skills.registry import SkillRegistry
+          from bashgym.api.routes import create_app
+
+          assert json.loads(Path("manifest.json").read_text())["ok"] is True
+          docs = json.loads(Path("docs.json").read_text())
+          assert docs["ok"] is True and docs["content"]
+          assert json.loads(Path("smoke.json").read_text())["ok"] is True
+          assert SkillRegistry().list_all()
+          assert create_app().title
+          PY
 
   # ──────────────────────────────────────────────
   # Frontend

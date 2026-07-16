@@ -6,6 +6,7 @@ network isolation, resource limits, and secure workspace management.
 """
 
 import shutil
+import tempfile
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -64,7 +65,9 @@ class SandboxConfig:
     cap_add: list[str] = field(default_factory=lambda: ["CHOWN", "SETUID", "SETGID"])
 
     # Workspace settings
-    workspace_base: str = "/tmp/bashgym_workspaces"
+    workspace_base: str = field(
+        default_factory=lambda: str(Path(tempfile.gettempdir()) / "bashgym_workspaces")
+    )
     mount_hooks: bool = True
 
     # Resource paths

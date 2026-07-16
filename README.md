@@ -16,6 +16,8 @@ Every AI coding session is a chain-of-thought reasoning trace — step-by-step p
 
 - **[docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)** — install to first trained model, step by step.
 - **[docs/training/overview.md](docs/training/overview.md)** — training gym curriculum: how strategies, rewards, world models, and gates fit together.
+- **[docs/training/autoresearch-campaign.md](docs/training/autoresearch-campaign.md)** — durable AutoResearch control smoke, installation bindings, doctor, and real-evidence path.
+- **[docs/PRODUCTIZATION.md](docs/PRODUCTIZATION.md)** — tested fresh-clone contract, measured time to first success, portability boundary, and remaining gaps.
 - **[docs/training/capability-map.md](docs/training/capability-map.md)** — full training/eval spread, including ready, backend-dependent, and diagnostic surfaces.
 - **[docs/training/tmax-terminal-rl-recipe.md](docs/training/tmax-terminal-rl-recipe.md)** — TMax-style terminal RL recipe from environment pool to backend smoke and release gates.
 - **[docs/training/private-compute-eval-checklist.md](docs/training/private-compute-eval-checklist.md)** — private/cloud compute backend-smoke and eval checklist for DPPO/ECHO/RWML runs.
@@ -99,14 +101,16 @@ The workspace is an infinite canvas where terminals, browsers, and integration n
 
 | Requirement | Version | Notes |
 |-------------|---------|-------|
-| **Python** | 3.10+ | Backend API and training scripts |
+| **Python** | 3.10+ | Backend API and control plane; use a backend-supported Python/CUDA combination for training |
 | **Node.js** | 18+ LTS | Frontend dashboard |
-| **Anthropic API key** | — | Get one at [console.anthropic.com](https://console.anthropic.com/) |
+| **Provider API key** | Optional | Add Anthropic, NVIDIA, OpenAI, or Hugging Face credentials only for features that use them |
 | **CUDA GPU** | 8GB+ VRAM | Only needed for local training. Not required for trace capture or the dashboard. |
 
 On Windows, `npm install` requires Visual Studio Build Tools with "Desktop development with C++" (for `node-pty` native compilation).
 
-No GPU? Use [HuggingFace Cloud Training](#cloud-training) instead.
+No GPU is required for installation, trace capture, campaign control, or the
+AutoResearch control smoke. Real training can run on local hardware, private
+hardware over SSH, or an explicitly selected hosted backend.
 
 ### 1. Install
 
@@ -114,14 +118,19 @@ No GPU? Use [HuggingFace Cloud Training](#cloud-training) instead.
 git clone https://github.com/GhostPeony/bashgym.git
 cd bashgym
 
-# Python dependencies
-pip install -r requirements.txt
+# Isolated Python environment
+python -m venv .venv
+# Windows: .\.venv\Scripts\Activate.ps1
+# macOS/Linux: source .venv/bin/activate
 
-# Training dependencies (optional — skip if no local GPU)
-pip install -r requirements-training.txt
+# Install BashGym and register the `bashgym` command
+python -m pip install -e .
+
+# Optional local/private model training stack
+python -m pip install -e ".[training]"
 
 # Frontend dependencies
-cd frontend && npm install && cd ..
+cd frontend && npm ci && cd ..
 ```
 
 ### 2. Configure
@@ -130,13 +139,16 @@ cd frontend && npm install && cd ..
 cp .env.example .env
 ```
 
-Open `.env` and add your API key:
+The default file contains no credential or model selection. Add only the
+providers you intend to use. Real training requires an explicit compatible
+trainable base; BashGym does not select or download an example model for you.
 
-```
-ANTHROPIC_API_KEY=sk-ant-...
-```
+Verify the install and durable campaign control plane before launching the app:
 
-That's the only required key. Everything else has working defaults. See [Configuration](#configuration) for optional keys.
+```bash
+bashgym --help
+bashgym campaign control-smoke --json
+```
 
 ### 3. Install Trace Capture Hooks
 
@@ -168,11 +180,13 @@ Verify: launch the app and check **Settings > Agents** — each configured tool 
 ./dev.sh                   # Backend + frontend
 ./dev.sh --electron        # Backend + desktop app
 
-# Docker (any platform)
-docker compose up
+# Docker API only (any platform)
+docker compose up bashgym-api
 ```
 
 Backend starts on `localhost:8003`, frontend on `localhost:5173`.
+The Compose file does not currently package the frontend; run it with `npm run
+dev` or use the desktop launchers above.
 
 ### 5. Use Your AI Coding Tools
 
@@ -234,26 +248,9 @@ Two feedback loops that improve agent behavior at different speeds:
 | **Fast loop** | Prompt evolution — analyze failure patterns, mutate worker prompts, evaluate, deploy best variant | Minutes | Immediate behavioral change |
 | **Slow loop** | Weight training — accumulate traces, generate examples, fine-tune model | Hours | Deep, permanent learning |
 
-The fast loop extracts recurring failure patterns from decision logs (wrong tool choices, missing context, anti-patterns) and uses an LLM to generate targeted prompt patches. Variants are scored against held-out traces and kept only if they improve quality. The best variant feeds into the orchestrator's worker prompts automatically.
+The fast loop extracts recurring failure patterns from decision logs (wrong tool choices, missing context, anti-patterns) and uses an LLM to generate targeted prompt patches. Variants are scored against held-out traces and retained only when they improve quality.
 
 The slow loop continues as before: gold traces become training examples, the model gets fine-tuned. But now gold traces are generated by workers using evolved prompts, so training data quality improves from both loops.
-
-### Orchestrator
-
-Multi-agent task decomposition across LLM providers with git worktree isolation.
-
-| Provider | Default planner model |
-|----------|---------------|
-| **Anthropic** | `claude-opus-4-6` |
-| **OpenAI** | `gpt-4o` |
-| **Gemini** | `gemini-2.5-pro` |
-| **Ollama** | Any local model |
-
-Defaults are configurable per provider; the Ollama brain uses any model you've pulled. Four phases: PLAN → DISPATCH → MONITOR → SYNTHESIZE. Workers always use Claude Code CLI regardless of the planning provider.
-
-**Three-layer prompt composition** structures worker context into Identity (static role/standards), Narrative (dynamic sibling progress, shared discoveries, file ownership), and Focus (task-specific requirements). Transition markers update running workers when siblings complete.
-
-**Shared memory** provides per-key locked state that parallel workers can read and write. Workers share discoveries (e.g., "the API uses Bearer auth") via a file-based IPC protocol. The orchestrator polls worktree state files and merges entries into a central store with conflict detection.
 
 ### Event System
 
@@ -372,7 +369,14 @@ Plug-and-play SSH device registry for remote training targets. No manual `.env` 
 
 ### AutoResearch
 
-Three evolutionary search loops that continuously improve your training pipeline. Each runs independently, keeps improvements, and converges on optimal configurations.
+The authoritative AutoResearch path is a durable, baseline-first campaign over
+registered model, data, evaluator, and local/private-compute bindings. Start
+with `bashgym campaign control-smoke --json`, then follow the
+[durable campaign guide](docs/training/autoresearch-campaign.md) for a real
+baseline and one-variable candidate.
+
+The dashboard also retains three earlier prototype search loops for interactive
+hyperparameter, trace-curation, and schema exploration:
 
 | Mode | What It Evolves | What It Searches | How It Evaluates |
 |------|----------------|-----------------|-----------------|
@@ -398,10 +402,10 @@ Copy `.env.example` to `.env`:
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `ANTHROPIC_API_KEY` | Yes | — | Claude API key |
-| `OPENAI_API_KEY` | No | — | OpenAI API key (for Codex trace capture and orchestrator routing) |
-| `GOOGLE_API_KEY` | No | — | Google/Gemini API key (for Gemini CLI trace capture and orchestrator routing) |
-| `BASE_MODEL` | No | (set per run) | Any HuggingFace model ID for fine-tuning (Unsloth-accelerated) |
+| `ANTHROPIC_API_KEY` | No | — | Claude teacher/provider features only |
+| `OPENAI_API_KEY` | No | — | OpenAI provider features only |
+| `GOOGLE_API_KEY` | No | — | Google/Gemini provider features only |
+| `BASE_MODEL` | No | — | Explicit compatible trainable-base ID; durable campaigns also pin an immutable revision |
 | `HF_TOKEN` | No | — | HuggingFace token (for cloud training and model push) |
 | `NVIDIA_API_KEY` | No | — | NVIDIA NIM API key (for synthetic data augmentation) |
 | `ROUTING_STRATEGY` | No | `confidence_based` | Model routing strategy |
@@ -434,7 +438,6 @@ bashgym/
 │   │   └── remote_trainer.py # SSH-based remote training
 │   ├── judge/                # Verification (evaluator, semantic judge, guardrails, benchmarks)
 │   ├── models/               # Model registry and lifecycle
-│   ├── orchestrator/         # Multi-agent decomposition (agent, DAG, shared state, context builder)
 │   ├── pipeline/             # Automated watcher, quality gate, semantic evaluation
 │   ├── providers/            # Inference providers (Anthropic, NIM, Ollama)
 │   ├── device_registry.py    # JSON-backed SSH device storage

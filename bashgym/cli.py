@@ -63,6 +63,7 @@ from bashgym.trace_capture.status_protocol import scrub_trace_replay_file
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TRAINING_DOCS_DIR = REPO_ROOT / "docs" / "training"
+INSTALLED_TRAINING_DOCS_DIR = Path(sys.prefix) / "share" / "bashgym" / "docs" / "training"
 
 
 @dataclass(frozen=True)
@@ -1648,15 +1649,6 @@ def _capability_matrix() -> dict[str, Any]:
                 "best_fit": ["coding agents", "terminal RL", "long-context traces"],
             },
             {
-                "id": "qwen2.5",
-                "display_name": "Qwen2.5 family",
-                "status": "profiled",
-                "tool_call_format": "qwen_xml",
-                "training_notes": ["stable coder/instruct fallback family"],
-                "checkpoint_guidance": "Use as a stable fallback when the latest Qwen3/Qwen3.6 checkpoint is unavailable or too large.",
-                "best_fit": ["coding traces", "small-to-mid open model baselines"],
-            },
-            {
                 "id": "llama3",
                 "status": "profiled",
                 "tool_call_format": "openai_json",
@@ -2128,7 +2120,7 @@ def _emit(payload: dict[str, Any], *, as_json: bool) -> int:
 def _doc_entries() -> list[dict[str, Any]]:
     entries = []
     for topic, meta in DOCS.items():
-        path = REPO_ROOT / meta["path"]
+        path = _training_doc_path(meta)
         entries.append(
             {
                 "topic": topic,
@@ -2138,6 +2130,15 @@ def _doc_entries() -> list[dict[str, Any]]:
             }
         )
     return entries
+
+
+def _training_doc_path(meta: dict[str, str]) -> Path:
+    """Resolve docs from a checkout first, then wheel-installed shared data."""
+
+    checkout_path = REPO_ROOT / meta["path"]
+    if checkout_path.exists():
+        return checkout_path
+    return INSTALLED_TRAINING_DOCS_DIR / Path(meta["path"]).name
 
 
 def cmd_manifest(args: argparse.Namespace) -> int:
@@ -2152,6 +2153,9 @@ def cmd_manifest(args: argparse.Namespace) -> int:
             "campaign templates": "List source-managed campaign templates.",
             "campaign inspect-model-artifact": (
                 "Inspect one operator-selected local model snapshot for training readiness."
+            ),
+            "campaign control-smoke": (
+                "Run the durable AutoResearch control path without a GPU or API key."
             ),
             "campaign status": "Read one campaign aggregate and its next valid action.",
             "campaign autoresearch": "Read durable AutoResearch state and decisions.",
@@ -2260,7 +2264,7 @@ def cmd_training_docs(args: argparse.Namespace) -> int:
             choices = sorted([*DOCS, *DOC_ALIASES])
             raise SystemExit(f"unknown topic {args.topic!r}; choose {', '.join(choices)}")
         meta = DOCS[topic]
-        path = REPO_ROOT / meta["path"]
+        path = _training_doc_path(meta)
         text = path.read_text(encoding="utf-8") if path.exists() else ""
         payload = {
             "title": f"BashGym Training Docs: {topic}",
@@ -3194,6 +3198,31 @@ def cmd_campaign_inspect_model_artifact(args: argparse.Namespace) -> int:
             "ok": plan.ready_for_binding,
             "model_onboarding_plan": plan.model_dump(mode="json"),
         },
+        as_json=bool(args.json),
+    )
+
+
+def cmd_campaign_control_smoke(args: argparse.Namespace) -> int:
+    """Run the durable AutoResearch path without a GPU, model, or API key."""
+
+    from tempfile import TemporaryDirectory
+
+    from bashgym.campaigns.control_smoke import run_autoresearch_control_smoke
+
+    try:
+        if args.output_dir:
+            output_directory = Path(args.output_dir)
+            report = run_autoresearch_control_smoke(output_directory)
+            report["output_directory"] = str(output_directory.expanduser().resolve())
+            report["retained"] = True
+        else:
+            with TemporaryDirectory(prefix="bashgym-autoresearch-smoke-") as temporary:
+                report = run_autoresearch_control_smoke(Path(temporary))
+            report["retained"] = False
+    except RuntimeError as exc:
+        raise ValueError(str(exc)) from exc
+    return _emit(
+        {"title": "BashGym AutoResearch Control Smoke", **report},
         as_json=bool(args.json),
     )
 
@@ -4248,6 +4277,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Immutable 40- or 64-character content revision",
     )
     campaign_inspect_model.set_defaults(func=cmd_campaign_inspect_model_artifact)
+
+    campaign_control_smoke = campaign_sub.add_parser(
+        "control-smoke",
+        help="Run the durable AutoResearch control path without a GPU or API key",
+        parents=[json_parent],
+    )
+    campaign_control_smoke.add_argument(
+        "--output-dir",
+        help="Retain the isolated smoke database and artifacts in this directory",
+    )
+    campaign_control_smoke.set_defaults(func=cmd_campaign_control_smoke)
 
     nemo_setup = campaign_sub.add_parser(
         "setup-nemo-rl",

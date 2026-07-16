@@ -2459,7 +2459,8 @@ def test_training_capabilities_matrix_maps_full_training_and_eval_spread(capsys)
         "backend_smoke_bundle",
         "release_evidence_json",
     } <= artifact_ids
-    assert {"gemma4", "qwen3", "qwen2.5", "llama3", "generic_hf_causal_lm"} <= family_ids
+    assert {"gemma4", "qwen3", "llama3", "generic_hf_causal_lm"} <= family_ids
+    assert "qwen2.5" not in family_ids
     assert {"local_12gb", "local_24gb", "private_compute_target", "cloud_backend"} <= hardware_ids
     assert {
         "data_scope",

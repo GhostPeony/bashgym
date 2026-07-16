@@ -13,5 +13,8 @@ frontend/dist-electron
 frontend/release
 tasks/
 *.egg-info
+build/
+dist/
+unsloth_compiled_cache/
 .pytest_cache
 .mypy_cache

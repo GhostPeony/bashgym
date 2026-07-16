@@ -9,8 +9,8 @@ This guide walks you from a fresh install to your first trained model.
 - **Python 3.10+** — Backend and training
 - **Node.js 18+** (LTS) — Frontend
 - **Git** — Version control
-- **CUDA-capable GPU** (optional) — Only needed for local training. 8GB+ VRAM for 1.5B models, 16GB+ for 7B. Alternatively, use [HuggingFace Cloud Training](#cloud-training-alternative) with no local GPU.
-- **Anthropic API key** — The only required key. Get one at [console.anthropic.com](https://console.anthropic.com/)
+- **CUDA-capable GPU** (optional) — Needed only for real local training. Private hardware over SSH and explicitly selected hosted backends are alternatives.
+- **Provider API keys** (optional) — Add credentials only for teacher, augmentation, hosted training, or publication features you use.
 
 ---
 
@@ -21,26 +21,32 @@ This guide walks you from a fresh install to your first trained model.
 git clone https://github.com/GhostPeony/bashgym.git
 cd bashgym
 
-# Install Python dependencies
-pip install -r requirements.txt
+# Create and activate an isolated environment
+python -m venv .venv
+# Windows: .\.venv\Scripts\Activate.ps1
+# macOS/Linux: source .venv/bin/activate
 
-# For training capabilities (optional, needs CUDA)
-pip install -r requirements-training.txt
+# Install BashGym and register its CLI
+python -m pip install -e .
+
+# Optional real local/private training dependencies
+python -m pip install -e ".[training]"
 
 # Install frontend dependencies
-cd frontend && npm install && cd ..
+cd frontend && npm ci && cd ..
 
 # Create your environment file
 cp .env.example .env
 ```
 
-Open `.env` and add your Anthropic API key:
+The copied file contains no credential or model default. Add only the provider
+credentials you intend to use. Verify the package and durable AutoResearch
+control plane without a GPU or API key:
 
+```bash
+bashgym --help
+bashgym campaign control-smoke --json
 ```
-ANTHROPIC_API_KEY=sk-ant-...
-```
-
-That's the only required key. NVIDIA and HuggingFace keys are optional.
 
 ---
 
@@ -73,11 +79,13 @@ Or use the dashboard **Settings > Agents** tab for one-click installation. Verif
 .\dev.ps1 -Electron    # Windows
 ./dev.sh --electron     # macOS/Linux
 
-# Docker (any platform)
-docker compose up
+# Docker backend API only (any platform)
+docker compose up bashgym-api
 ```
 
 Open `http://localhost:5173` in your browser (or the Electron window opens automatically).
+Docker Compose does not currently package the frontend, so run the Vite or
+Electron command separately when using the containerized API.
 
 ---
 
@@ -124,7 +132,7 @@ The factory segments multi-task sessions into individual training examples, scru
 Open the **Training** dashboard:
 
 1. Select **SFT** (Supervised Fine-Tuning) as the strategy
-2. Choose a base model — any HuggingFace model works (training is accelerated with Unsloth). Smaller models train fast on a consumer GPU; larger ones use private or cloud GPU targets. See the [Unsloth model catalog](https://unsloth.ai/docs/get-started/unsloth-model-catalog) for current options
+2. Choose a compatible, registered trainable base supported by an installed backend. Pin its immutable revision for a durable campaign; adapters and inference quants are not substitutes. Smaller models train on consumer GPUs, while larger ones use private or explicitly selected hosted targets.
 3. Select which repos to train on (or use all gold traces)
 4. Click **Start Training**
 5. Watch the live loss curve and training logs
@@ -168,7 +176,7 @@ Every week, retrain with your accumulated traces. Each cycle produces a better s
 
 ## Next Steps
 
-- **[Orchestrator](../README.md#orchestrator)** — Decompose complex specs into parallel tasks
+- **[Durable AutoResearch](training/autoresearch-campaign.md)** — Run the no-GPU control smoke, bind local/private compute, and execute a real baseline/candidate campaign
 - **[Peony Assistant](../README.md#peony-assistant)** — Control Bash Gym via Discord or Telegram
 - **[HuggingFace Integration](../README.md#huggingface-integration)** — Cloud training and model sharing
 - **[API Reference](API.md)** — Full REST and WebSocket endpoint documentation

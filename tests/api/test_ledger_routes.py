@@ -355,6 +355,32 @@ def test_completed_campaign_evaluation_triggers_authoritative_autoresearch_inges
         }
     ]
 
+    checkpoint = result.model_copy(
+        update={
+            "evaluation_result_id": "eval-result-checkpoint-1",
+            "slice_metrics": {
+                "autoresearch_role": "checkpoint",
+                "checkpoint_step": 80,
+            },
+        }
+    )
+    checkpoint_response = http.post(
+        "/api/ledger/projects/project-a/evaluation-results",
+        params={"workspace_id": "workspace-a"},
+        headers=bearer(token),
+        json=checkpoint.model_dump(mode="json"),
+    )
+
+    assert checkpoint_response.status_code == 200
+    assert checkpoint_response.json()["autoresearch_ingestion"] == {
+        "schema_version": "autoresearch_evaluation_ingestion.v1",
+        "status": "not_applicable",
+        "code": "autoresearch_checkpoint_evaluation",
+        "campaign_id": "campaign-1",
+        "outcome": None,
+    }
+    assert len(calls) == 1
+
     class DeferredCore:
         def ingest_evaluation_result(self, **_kwargs):
             raise AutoResearchInvariantError("autoresearch_study_budget_not_settled")

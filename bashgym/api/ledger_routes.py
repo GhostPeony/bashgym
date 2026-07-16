@@ -120,6 +120,9 @@ def _automatic_autoresearch_ingestion(
     if run.get("source_system") != "bashgym" or not campaign_id:
         projection["code"] = "autoresearch_campaign_lineage_not_present"
         return projection
+    if (evaluation.get("slice_metrics") or {}).get("autoresearch_role") == "checkpoint":
+        projection["code"] = "autoresearch_checkpoint_evaluation"
+        return projection
     campaign_repository = getattr(request.app.state, "campaign_repository", repository)
     try:
         outcome = _autoresearch_core(campaign_repository).ingest_evaluation_result(

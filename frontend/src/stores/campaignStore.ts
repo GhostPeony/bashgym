@@ -229,6 +229,7 @@ export interface CampaignAutoResearchState {
     | 'stop'
     | 'blocked'
   reason_code: string
+  ready_for_next_proposal: boolean
   baseline_verified: boolean
   pending_proposal_id?: string | null
   best_proposal_id?: string | null
@@ -283,6 +284,52 @@ export interface CampaignCodeLineage {
   captured_at?: string | null
 }
 
+export interface CampaignAutoResearchDiagnostics {
+  schema_version: 'autoresearch_diagnostics.v1'
+  workspace_id: string
+  campaign_id: string
+  primary_metric: string
+  metric_direction: 'maximize' | 'minimize'
+  low_signal: boolean
+  signals: Array<{
+    code: string
+    severity: 'info' | 'warning' | 'critical'
+    summary: string
+    evidence_references: string[]
+  }>
+  checkpoint_comparisons: Array<{
+    evaluation_result_id: string
+    run_id: string
+    role: 'checkpoint' | 'final'
+    step?: number | null
+    metric_name: string
+    metric_value: number
+    improvement_from_previous?: number | null
+    improvement_from_baseline?: number | null
+  }>
+  error_slices: Array<{
+    slice_path: string
+    direction: 'maximize' | 'minimize' | 'unknown'
+    candidate_value: number
+    baseline_value?: number | null
+    improvement?: number | null
+    status: 'observed' | 'improved' | 'regressed' | 'unchanged'
+    evidence_references: string[]
+  }>
+  ranked_hypotheses: Array<{
+    hypothesis_id: string
+    rank: number
+    action_kind: 'diagnostic' | 'evaluation' | 'candidate'
+    changed_variable: string
+    hypothesis: string
+    rationale: string
+    expected_outcome: string
+    falsification_criterion: string
+    evidence_references: string[]
+    eligible_for_submission: boolean
+  }>
+}
+
 export interface CampaignAutoResearchProjection {
   spec: {
     primary_metric: string
@@ -293,6 +340,7 @@ export interface CampaignAutoResearchProjection {
   proposals: Array<Record<string, unknown>>
   outcomes: CampaignAutoResearchOutcome[]
   code_lineages?: CampaignCodeLineage[]
+  diagnostics?: CampaignAutoResearchDiagnostics
 }
 
 export interface CampaignLedgerProjection {

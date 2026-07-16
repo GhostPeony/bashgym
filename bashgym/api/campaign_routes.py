@@ -729,6 +729,9 @@ def _campaign_ledger_projection(
         projection["autoresearch"] = {
             "spec": spec.model_dump(mode="json"),
             "state": core.state(workspace_id, campaign_id).model_dump(mode="json"),
+            "diagnostics": core.diagnostics(workspace_id, campaign_id).model_dump(
+                mode="json"
+            ),
             "proposals": [
                 item.model_dump(mode="json")
                 for item in core.repository.list_autoresearch_proposals(
@@ -943,6 +946,9 @@ def get_autoresearch_campaign(
                 workspace_id, campaign_id
             ).model_dump(mode="json"),
             "state": core.state(workspace_id, campaign_id).model_dump(mode="json"),
+            "diagnostics": core.diagnostics(workspace_id, campaign_id).model_dump(
+                mode="json"
+            ),
             "proposals": [
                 item.model_dump(mode="json")
                 for item in core.repository.list_autoresearch_proposals(

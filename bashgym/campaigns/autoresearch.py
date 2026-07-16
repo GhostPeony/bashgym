@@ -49,6 +49,10 @@ from bashgym.campaigns.persistence import (
     ProposalMutation,
     RecordNotFoundError,
 )
+from bashgym.campaigns.research_diagnostics import (
+    AutoResearchDiagnostics,
+    build_autoresearch_diagnostics,
+)
 from bashgym.campaigns.runtime import CampaignRuntimeRepository
 from bashgym.campaigns.service import CampaignService
 from bashgym.ledger.contracts import (
@@ -1225,6 +1229,48 @@ class AutoResearchCampaignCore:
             latest_decision=latest,
         )
 
+    def diagnostics(
+        self,
+        workspace_id: str,
+        campaign_id: str,
+    ) -> AutoResearchDiagnostics:
+        """Derive advisory diagnostics from immutable campaign and ledger evidence."""
+
+        spec = self.repository.get_autoresearch_spec(workspace_id, campaign_id)
+        outcomes = self.repository.list_autoresearch_outcomes(workspace_id, campaign_id)
+        evaluations: list[dict[str, Any]] = []
+        runs: list[dict[str, Any]] = []
+        if spec.ledger_project_id is not None:
+            try:
+                evaluations = self.ledger.list_evaluation_results(
+                    workspace_id,
+                    spec.ledger_project_id,
+                    limit=1000,
+                )
+                runs = [
+                    run
+                    for run in self.ledger.list_runs(
+                        workspace_id,
+                        spec.ledger_project_id,
+                        limit=1000,
+                    )
+                    if run.get("campaign_id") == campaign_id
+                ]
+            except RecordNotFoundError:
+                # A registered campaign can precede materialization of its logical
+                # ledger binding; diagnostics remain an empty advisory projection.
+                pass
+        return build_autoresearch_diagnostics(
+            workspace_id=workspace_id,
+            campaign_id=campaign_id,
+            primary_metric=spec.primary_metric,
+            metric_direction=spec.metric_direction.value,
+            evaluation_suite_id=spec.evaluation_suite_id,
+            outcomes=[item.model_dump(mode="json") for item in outcomes],
+            evaluations=evaluations,
+            runs=runs,
+        )
+
     def _submit(
         self,
         submission: StudyProposalSubmission,
@@ -1655,6 +1701,7 @@ __all__ = [
     "AutoResearchCampaignSpec",
     "AutoResearchConflictError",
     "AutoResearchDecision",
+    "AutoResearchDiagnostics",
     "AutoResearchError",
     "AutoResearchInvariantError",
     "AutoResearchNextAction",

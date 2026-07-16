@@ -111,6 +111,40 @@ such as `predicted_reward`, `predicted_score`, `model_score`, or
 margin, length bias, task-family breakdown, reward variance, and eval-only
 leakage checks.
 
+## Inspect an AutoResearch campaign
+
+```bash
+bashgym campaign autoresearch \
+  --workspace-id <workspace> \
+  --campaign <campaign-id> \
+  --credential-ref <credential> \
+  --json
+```
+
+The response joins the registered campaign specification, controller state,
+proposals, immutable outcomes, code lineage, and a deterministic `diagnostics`
+projection. Diagnostics identify low-signal or collapsed runs, compare every
+registered checkpoint on the pinned evaluation suite, expose numeric error
+slices, and rank bounded next hypotheses with evidence references and explicit
+falsification criteria. Ranked hypotheses are advisory: the projection never
+submits a candidate, spends campaign budget, or promotes a model.
+
+To register an intermediate checkpoint without consuming an AutoResearch
+proposal result, write its completed ledger evaluation with these slice fields:
+
+```json
+{
+  "autoresearch_role": "checkpoint",
+  "checkpoint_step": 80
+}
+```
+
+Use the same evaluation suite and run lineage as the terminal evaluation. The
+ledger retains the checkpoint result while the campaign controller excludes it
+from attempt accounting; the diagnostics projection then orders checkpoint
+metrics by step and reports signed improvement against both the previous
+checkpoint and the verified baseline.
+
 ## Launch a tracked training run
 
 First read the canonical

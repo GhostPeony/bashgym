@@ -209,6 +209,18 @@ def test_builtin_autoresearch_template_prepares_to_authorized_start_gate(tmp_pat
     assert state.status_code == 200
     assert state.json()["spec"]["primary_metric"] == "control_path_score"
     assert state.json()["state"]["next_action"] == "start_campaign"
+    assert state.json()["diagnostics"] == {
+        "schema_version": "autoresearch_diagnostics.v1",
+        "workspace_id": "workspace-a",
+        "campaign_id": "autoresearch-smoke-1",
+        "primary_metric": "control_path_score",
+        "metric_direction": "maximize",
+        "low_signal": False,
+        "signals": [],
+        "checkpoint_comparisons": [],
+        "error_slices": [],
+        "ranked_hypotheses": [],
+    }
     event_types = [
         event.event_type
         for _cursor, event in repository.list_events("workspace-a", "autoresearch-smoke-1")

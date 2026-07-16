@@ -197,6 +197,72 @@ function realisticDetail(): CampaignDetailState {
           decision_ids: ['decision-retain-champion'],
         },
       }],
+      autoresearch: {
+        spec: {
+          primary_metric: 'exact_mrr',
+          metric_direction: 'maximize',
+          stop_rules: { max_attempts: 3 },
+        },
+        state: {
+          campaign_status: 'active',
+          next_action: 'propose_candidate',
+          reason_code: 'ready_for_controlled_hypothesis',
+          ready_for_next_proposal: true,
+          baseline_verified: true,
+          best_metric: 0.271,
+          attempts_used: 2,
+          proposals_used: 2,
+          budget_used: 1.5,
+          budget_remaining: 10.32,
+        },
+        proposals: [],
+        outcomes: [],
+        diagnostics: {
+          schema_version: 'autoresearch_diagnostics.v1',
+          workspace_id: campaign.workspace_id,
+          campaign_id: campaign.campaign_id,
+          primary_metric: 'exact_mrr',
+          metric_direction: 'maximize',
+          low_signal: true,
+          signals: [{
+            code: 'checkpoint_evidence_missing',
+            severity: 'warning',
+            summary: 'Only the terminal candidate is evaluated; retained checkpoints cannot yet be compared.',
+            evidence_references: ['eval-positive-aware-dev'],
+          }],
+          checkpoint_comparisons: [{
+            evaluation_result_id: 'eval-positive-aware-dev',
+            run_id: attempt.attempt_id,
+            role: 'final',
+            step: null,
+            metric_name: 'exact_mrr',
+            metric_value: 0.308144,
+            improvement_from_previous: null,
+            improvement_from_baseline: 0.037144,
+          }],
+          error_slices: [{
+            slice_path: 'source.youtube.exact_mrr',
+            direction: 'maximize',
+            candidate_value: 0.308144,
+            baseline_value: 0.315,
+            improvement: -0.006856,
+            status: 'regressed',
+            evidence_references: ['eval-positive-aware-dev', 'eval-base-model-dev'],
+          }],
+          ranked_hypotheses: [{
+            hypothesis_id: 'hypothesis-checkpoint-selection',
+            rank: 1,
+            action_kind: 'evaluation',
+            changed_variable: 'evaluation.checkpoint_selection',
+            hypothesis: 'An earlier retained checkpoint may outperform the terminal checkpoint on the same fixed suite.',
+            rationale: 'The terminal checkpoint is the only measured checkpoint.',
+            expected_outcome: 'Identify the best observed checkpoint.',
+            falsification_criterion: 'All retained checkpoints underperform the terminal checkpoint.',
+            evidence_references: ['eval-positive-aware-dev'],
+            eligible_for_submission: false,
+          }],
+        },
+      },
     },
     events: [{
       cursor: 41,
@@ -281,6 +347,14 @@ test('campaign evidence panel renders the durable API/store projection and contr
   assert.match(markup, /eval-positive-aware-dev/)
   assert.match(markup, /Decisions/)
   assert.match(markup, /Retain the current champion/)
+  assert.match(markup, /AutoResearch Diagnostics/)
+  assert.match(markup, /aria-label="AutoResearch diagnostics"/)
+  assert.match(markup, /low signal detected/)
+  assert.match(markup, /checkpoint evidence missing/)
+  assert.match(markup, /Checkpoint trajectory/)
+  assert.match(markup, /source\.youtube\.exact mrr/)
+  assert.match(markup, /Ranked next hypotheses · advisory only/)
+  assert.match(markup, /An earlier retained checkpoint may outperform/)
 
   assert.match(markup, /aria-label="Campaign policy evidence"/)
   assert.match(markup, /ssh-gpu-lab/)

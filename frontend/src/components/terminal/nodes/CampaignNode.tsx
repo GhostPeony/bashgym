@@ -163,6 +163,7 @@ export function CampaignEvidencePanel({
   onRefresh,
 }: CampaignEvidencePanelProps) {
   const research = detail ? projectCampaignResearch(detail) : undefined
+  const diagnostics = detail?.ledger?.autoresearch?.diagnostics
   return (
     <>
       <ConfigSection title="Campaign">
@@ -232,6 +233,99 @@ export function CampaignEvidencePanel({
       ) : null}
 
       {research ? <CampaignResearchBrief research={research} /> : null}
+
+      {diagnostics ? (
+        <ConfigSection title="AutoResearch Diagnostics">
+          <div className="space-y-3" role="group" aria-label="AutoResearch diagnostics">
+            <div className="flex flex-wrap gap-1.5">
+              <ConfigPill tone={diagnostics.low_signal ? 'warning' : 'success'}>
+                {diagnostics.low_signal ? 'low signal detected' : 'signal healthy'}
+              </ConfigPill>
+              <ConfigPill tone="neutral">
+                {diagnostics.checkpoint_comparisons.length} checkpoint comparisons
+              </ConfigPill>
+              <ConfigPill tone="neutral">{diagnostics.error_slices.length} error slices</ConfigPill>
+            </div>
+
+            {diagnostics.signals.length ? (
+              <div className="space-y-1" aria-label="Diagnostic signals">
+                {diagnostics.signals.slice(0, 8).map((signal) => (
+                  <div key={signal.code} className="rounded-brutal border-brutal border-border-subtle px-2 py-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="font-mono text-[9px] font-bold text-text-primary">{readable(signal.code)}</div>
+                      <ConfigPill tone={signal.severity === 'critical' ? 'error' : signal.severity === 'warning' ? 'warning' : 'neutral'}>
+                        {signal.severity}
+                      </ConfigPill>
+                    </div>
+                    <div className="mt-0.5 text-[9px] leading-4 text-text-muted">{signal.summary}</div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            {diagnostics.checkpoint_comparisons.length ? (
+              <div>
+                <div className="mb-1 font-mono text-[8px] font-bold uppercase tracking-wide text-text-muted">Checkpoint trajectory</div>
+                <div className="space-y-1">
+                  {diagnostics.checkpoint_comparisons.slice(0, 8).map((checkpoint) => (
+                    <div key={checkpoint.evaluation_result_id} className="grid grid-cols-[1fr_auto_auto] gap-2 rounded-brutal border-brutal border-border-subtle px-2 py-1 font-mono text-[8px] text-text-muted">
+                      <span className="truncate">{checkpoint.step != null ? `step ${checkpoint.step}` : checkpoint.role}</span>
+                      <span>{compactNumber(checkpoint.metric_value)}</span>
+                      <span className={clsx(
+                        checkpoint.improvement_from_baseline != null && checkpoint.improvement_from_baseline > 0 && 'text-status-success',
+                        checkpoint.improvement_from_baseline != null && checkpoint.improvement_from_baseline < 0 && 'text-status-error',
+                      )}>
+                        {checkpoint.improvement_from_baseline == null
+                          ? 'no baseline delta'
+                          : `${checkpoint.improvement_from_baseline >= 0 ? '+' : ''}${compactNumber(checkpoint.improvement_from_baseline)}`}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {diagnostics.error_slices.length ? (
+              <div>
+                <div className="mb-1 font-mono text-[8px] font-bold uppercase tracking-wide text-text-muted">Error slices</div>
+                <div className="space-y-1">
+                  {diagnostics.error_slices.slice(0, 8).map((slice) => (
+                    <div key={slice.slice_path} className="flex items-center justify-between gap-2 rounded-brutal border-brutal border-border-subtle px-2 py-1 font-mono text-[8px]">
+                      <span className="truncate text-text-muted">{readable(slice.slice_path)}</span>
+                      <span className={clsx(
+                        slice.status === 'improved' && 'text-status-success',
+                        slice.status === 'regressed' && 'text-status-error',
+                        !['improved', 'regressed'].includes(slice.status) && 'text-text-muted',
+                      )}>
+                        {compactNumber(slice.candidate_value)} · {slice.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {diagnostics.ranked_hypotheses.length ? (
+              <div aria-label="Ranked next hypotheses">
+                <div className="mb-1 font-mono text-[8px] font-bold uppercase tracking-wide text-text-muted">Ranked next hypotheses · advisory only</div>
+                <div className="space-y-1">
+                  {diagnostics.ranked_hypotheses.map((hypothesis) => (
+                    <div key={hypothesis.hypothesis_id} className="rounded-brutal border-brutal border-border-subtle px-2 py-1.5">
+                      <div className="flex items-center gap-1.5 font-mono text-[8px] text-text-muted">
+                        <span className="font-bold text-text-primary">#{hypothesis.rank}</span>
+                        <ConfigPill tone={hypothesis.action_kind === 'candidate' ? 'accent' : 'neutral'}>{hypothesis.action_kind}</ConfigPill>
+                        <span className="truncate">{hypothesis.changed_variable}</span>
+                      </div>
+                      <div className="mt-1 text-[9px] leading-4 text-text-primary">{hypothesis.hypothesis}</div>
+                      <div className="mt-0.5 text-[8px] leading-3 text-text-muted">Falsify: {hypothesis.falsification_criterion}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </ConfigSection>
+      ) : null}
 
       {detail && chartData.length > 1 ? (
         <ConfigSection title={`Loss · ${latestAttempt?.attempt_id || 'latest attempt'}`}>

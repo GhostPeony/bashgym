@@ -3242,6 +3242,159 @@ def cmd_campaign_setup_autoresearch(args: argparse.Namespace) -> int:
     return _emit(payload, as_json=bool(args.json))
 
 
+def cmd_campaign_setup_nemo_rl(args: argparse.Namespace) -> int:
+    """Install one exact NeMo RL backend into a registered compute profile."""
+
+    import asyncio
+
+    from bashgym.campaigns.contracts import StageKind
+    from bashgym.campaigns.nemo_rl import (
+        ApprovedNemoRLProfile,
+        NemoRLExecutionMode,
+        NemoRLInstallationReceipt,
+        NemoRLModelSupportLevel,
+        NemoRLStageBinding,
+        sha256_file,
+    )
+    from bashgym.campaigns.nemo_rl_installation import bind_nemo_rl_profile
+    from bashgym.campaigns.remote import RemoteTrainingAdapter
+    from bashgym.campaigns.worker_service import (
+        WorkerRunConfig,
+        read_worker_config,
+        write_worker_config,
+    )
+    from bashgym.config import get_bashgym_dir
+    from bashgym.gym.remote_trainer import SSHConfig
+
+    worker_config_path = (
+        Path(args.worker_config).expanduser().resolve()
+        if args.worker_config
+        else get_bashgym_dir() / "campaigns" / "worker-config.v1.json"
+    )
+    config = read_worker_config(worker_config_path)
+    matches = [
+        profile
+        for profile in config.approved_remote_profiles
+        if profile.profile_id == args.executor_profile_id
+    ]
+    if len(matches) != 1:
+        raise ValueError("executor profile must resolve exactly once in the worker config")
+    executor = matches[0]
+    image_digest = args.image_reference.rpartition("@sha256:")[2]
+    dataset = Path(args.dataset).expanduser().resolve()
+    provisional = ApprovedNemoRLProfile(
+        profile_id=args.nemo_profile_id,
+        profile_revision=args.profile_revision,
+        compute_profile_id=executor.compute_profile_id,
+        target_contract_key=executor.target_contract_key,
+        target_model_digest=executor.target_model_digest,
+        release=args.release,
+        source_revision=args.source_revision,
+        image_reference=args.image_reference,
+        image_digest=image_digest,
+        platform=args.platform,
+        model_id=args.model_id,
+        model_revision=args.model_revision,
+        remote_model_path=args.remote_model_path,
+        model_support_level=NemoRLModelSupportLevel(args.model_support_level),
+        entrypoint_path=args.entrypoint,
+        recipe_path=args.recipe,
+        recipe_sha256=args.recipe_sha256,
+        dataset_path=dataset,
+        dataset_sha256=sha256_file(dataset),
+        verifier_id=args.verifier_id,
+        verifier_digest=args.verifier_digest,
+        stage_bindings=(
+            NemoRLStageBinding(
+                stage=StageKind.FULL_TRAINING,
+                mode=NemoRLExecutionMode.GRPO,
+                max_steps=args.max_steps,
+                learning_rate=args.learning_rate,
+            ),
+            NemoRLStageBinding(
+                stage=StageKind.SMOKE_TRAINING,
+                mode=NemoRLExecutionMode.NO_UPDATE,
+                max_steps=1,
+                learning_rate=0,
+            ),
+        ),
+        gpu_count=args.gpu_count,
+        shared_memory_gib=args.shared_memory_gib,
+        minimum_available_disk_gib=args.minimum_available_disk_gib,
+        overrides=tuple(sorted(args.override or ())),
+    )
+    adapter = RemoteTrainingAdapter(
+        SSHConfig(
+            host=executor.host,
+            username=executor.username,
+            port=executor.port,
+            key_path=executor.key_path,
+            remote_work_dir=executor.remote_work_dir,
+        ),
+        compute_profile_id=executor.compute_profile_id,
+    )
+    runtime_receipt = asyncio.run(
+        adapter.nemo_rl_preflight(provisional, pull_image=bool(args.pull_image))
+    )
+    runtime_ready = bool(
+        runtime_receipt.docker_ready
+        and runtime_receipt.nvidia_runtime_ready
+        and runtime_receipt.image_ready
+        and runtime_receipt.source_ready
+        and runtime_receipt.recipe_ready
+        and runtime_receipt.model_ready
+        and runtime_receipt.platform == provisional.platform
+        and runtime_receipt.gpu_count >= provisional.gpu_count
+        and runtime_receipt.available_disk_gib
+        >= provisional.minimum_available_disk_gib
+        and runtime_receipt.shared_memory_gib >= provisional.shared_memory_gib
+    )
+    if not runtime_ready:
+        raise RuntimeError("nemo_rl_runtime_not_ready")
+    profile_payload = provisional.model_dump(
+        mode="python",
+        exclude={"profile_digest", "runtime_receipt"},
+    )
+    nemo_profile = ApprovedNemoRLProfile.model_validate(
+        {**profile_payload, "runtime_receipt": runtime_receipt}
+    )
+    revised = bind_nemo_rl_profile(executor, nemo_profile, replace=bool(args.replace))
+    remote_profiles = tuple(
+        sorted(
+            (
+                revised if profile.profile_id == executor.profile_id else profile
+                for profile in config.approved_remote_profiles
+            ),
+            key=lambda profile: (
+                profile.compute_profile_id,
+                profile.target_contract_key,
+                profile.profile_id,
+                profile.profile_revision,
+            ),
+        )
+    )
+    config_payload = config.model_dump(mode="python")
+    config_payload["approved_remote_profiles"] = remote_profiles
+    write_worker_config(worker_config_path, WorkerRunConfig.model_validate(config_payload))
+    receipt = NemoRLInstallationReceipt(
+        worker_config_path=str(worker_config_path),
+        executor_profile_id=executor.profile_id,
+        nemo_profile_id=nemo_profile.profile_id,
+        nemo_profile_digest=nemo_profile.profile_digest,
+        runtime_receipt=runtime_receipt,
+        replaced=executor.nemo_rl is not None,
+    )
+    return _emit(
+        {
+            "title": "BashGym NeMo RL Installation",
+            "ok": True,
+            **receipt.model_dump(mode="json"),
+            "restart_required": True,
+        },
+        as_json=bool(args.json),
+    )
+
+
 def cmd_campaign_status(args: argparse.Namespace) -> int:
     response, error = _campaign_request(
         args,
@@ -3982,6 +4135,66 @@ def build_parser() -> argparse.ArgumentParser:
         help="Replace a different installed definition with the same template ID",
     )
     campaign_setup.set_defaults(func=cmd_campaign_setup_autoresearch)
+
+    nemo_setup = campaign_sub.add_parser(
+        "setup-nemo-rl",
+        help="Install an optional digest-pinned NeMo RL backend on registered private compute",
+        parents=[json_parent],
+    )
+    nemo_setup.add_argument("--worker-config")
+    nemo_setup.add_argument("--executor-profile", dest="executor_profile_id", required=True)
+    nemo_setup.add_argument("--nemo-profile", dest="nemo_profile_id", required=True)
+    nemo_setup.add_argument("--profile-revision", type=int, default=1)
+    nemo_setup.add_argument("--release", required=True)
+    nemo_setup.add_argument("--source-revision", required=True)
+    nemo_setup.add_argument(
+        "--image-reference",
+        required=True,
+        help="Platform image pinned as registry/path@sha256:<digest>",
+    )
+    nemo_setup.add_argument(
+        "--platform", choices=("linux/amd64", "linux/arm64"), required=True
+    )
+    nemo_setup.add_argument("--model-id", required=True)
+    nemo_setup.add_argument("--model-revision", required=True)
+    nemo_setup.add_argument(
+        "--remote-model-path",
+        required=True,
+        help="Existing immutable model snapshot on registered compute; never downloads implicitly",
+    )
+    nemo_setup.add_argument(
+        "--model-support-level",
+        choices=("broad_api_compatible", "recipe_reproduced", "optimized"),
+        required=True,
+    )
+    nemo_setup.add_argument("--entrypoint", default="examples/run_grpo.py")
+    nemo_setup.add_argument("--recipe", required=True)
+    nemo_setup.add_argument("--recipe-sha256", required=True)
+    nemo_setup.add_argument("--dataset", required=True)
+    nemo_setup.add_argument("--verifier-id", required=True)
+    nemo_setup.add_argument("--verifier-digest", required=True)
+    nemo_setup.add_argument("--max-steps", type=int, default=10)
+    nemo_setup.add_argument("--learning-rate", type=float, required=True)
+    nemo_setup.add_argument("--gpu-count", type=int, default=1)
+    nemo_setup.add_argument("--shared-memory-gib", type=int, default=16)
+    nemo_setup.add_argument("--minimum-available-disk-gib", type=float, default=80.0)
+    nemo_setup.add_argument(
+        "--override",
+        action="append",
+        default=[],
+        help="Exact non-controller-owned NeMo config override; repeat as needed",
+    )
+    nemo_setup.add_argument(
+        "--pull-image",
+        action="store_true",
+        help="Explicitly pull the pinned image before probing; otherwise setup is read-only remotely",
+    )
+    nemo_setup.add_argument(
+        "--replace",
+        action="store_true",
+        help="Replace an existing NeMo binding on this executor profile",
+    )
+    nemo_setup.set_defaults(func=cmd_campaign_setup_nemo_rl)
 
     campaign_connection = argparse.ArgumentParser(add_help=False)
     workspace_default = os.environ.get("BASHGYM_WORKSPACE_ID")

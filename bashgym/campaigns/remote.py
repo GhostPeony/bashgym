@@ -27,6 +27,7 @@ from bashgym.campaigns.contracts import (
     canonical_hash,
     utc_now,
 )
+from bashgym.campaigns.nemo_rl import ApprovedNemoRLProfile, NemoRLRuntimeReceipt
 from bashgym.gym.remote_trainer import HAS_ASYNCSSH, SSHConfig
 
 
@@ -462,6 +463,7 @@ class ApprovedRemoteExecutorProfile(FrozenContractModel):
     key_path: str = Field(min_length=1, max_length=4096)
     remote_work_dir: str = Field(default="~/bashgym-training", min_length=1, max_length=4096)
     stages: tuple[PinnedRemoteStageProfile, ...]
+    nemo_rl: ApprovedNemoRLProfile | None = None
 
     @field_validator("host", "username")
     @classmethod
@@ -505,7 +507,25 @@ class ApprovedRemoteExecutorProfile(FrozenContractModel):
 
     @model_validator(mode="after")
     def verify_profile_digest(self) -> ApprovedRemoteExecutorProfile:
-        payload = self.model_dump(mode="json", exclude={"profile_digest"})
+        if self.nemo_rl is not None:
+            required_stages = {
+                StageKind.SMOKE_TRAINING,
+                StageKind.FULL_TRAINING,
+            }
+            configured_stages = {stage.stage for stage in self.stages}
+            if (
+                self.nemo_rl.compute_profile_id != self.compute_profile_id
+                or self.nemo_rl.target_contract_key != self.target_contract_key
+                or self.nemo_rl.target_model_digest != self.target_model_digest
+                or not required_stages.issubset(configured_stages)
+            ):
+                raise ValueError("NeMo RL profile does not match its remote executor")
+        excluded = {"profile_digest"}
+        if self.nemo_rl is None:
+            # Preserve the v2 digest of profiles written before the optional
+            # NeMo RL extension existed.
+            excluded.add("nemo_rl")
+        payload = self.model_dump(mode="json", exclude=excluded)
         expected = canonical_hash(payload)
         if self.profile_digest and self.profile_digest != expected:
             raise ValueError("approved remote executor profile digest mismatch")
@@ -556,6 +576,22 @@ def remote_executor_config(
         "budget_reservation": configured.budget_reservation,
         "recipe_digest": recipe_digest,
     }
+    if profile.nemo_rl is not None and stage in {
+        StageKind.SMOKE_TRAINING,
+        StageKind.FULL_TRAINING,
+    }:
+        result["nemo_rl"] = {
+            "profile_id": profile.nemo_rl.profile_id,
+            "profile_revision": profile.nemo_rl.profile_revision,
+            "profile_digest": profile.nemo_rl.profile_digest,
+            "release": profile.nemo_rl.release,
+            "source_revision": profile.nemo_rl.source_revision,
+            "image_digest": profile.nemo_rl.image_digest,
+            "model_support_level": profile.nemo_rl.model_support_level.value,
+            "recipe_sha256": profile.nemo_rl.recipe_sha256,
+            "dataset_sha256": profile.nemo_rl.dataset_sha256,
+            "verifier_digest": profile.nemo_rl.verifier_digest,
+        }
     if code_lineage is not None:
         if code_lineage.state != CodeLineageState.CAPTURED:
             raise ValueError("code lineage must be captured before remote execution")
@@ -660,6 +696,124 @@ class RemoteTrainingAdapter:
         if not root.startswith("/"):
             raise RuntimeError("campaign_remote_root_must_be_absolute")
         return root.rstrip("/")
+
+    async def nemo_rl_preflight(
+        self,
+        profile: ApprovedNemoRLProfile,
+        *,
+        pull_image: bool = False,
+    ) -> NemoRLRuntimeReceipt:
+        """Probe an approved optional NeMo RL runtime without exposing host identity."""
+
+        if profile.compute_profile_id != self.compute_profile_id:
+            raise ValueError("NeMo RL profile does not match remote adapter")
+
+        async with self._session() as session:
+            if pull_image:
+                pulled = await session.run(
+                    f"docker pull {shlex.quote(profile.image_reference)}",
+                    timeout=3600,
+                )
+                if pulled.exit_status != 0:
+                    raise RuntimeError("nemo_rl_image_pull_failed")
+
+            async def probe(command: str, code: str, *, timeout: float = 30) -> str:
+                result = await session.run(command, timeout=timeout)
+                if result.exit_status != 0:
+                    raise RuntimeError(code)
+                return result.stdout.strip()
+
+            docker_version = await probe(
+                "docker version --format '{{.Server.Version}}'",
+                "nemo_rl_docker_unavailable",
+            )
+            runtimes = await probe(
+                "docker info --format '{{json .Runtimes}}'",
+                "nemo_rl_docker_info_unavailable",
+            )
+            architecture = (
+                await probe("uname -m", "nemo_rl_platform_unavailable")
+            ).casefold()
+            platform = {
+                "amd64": "linux/amd64",
+                "x86_64": "linux/amd64",
+                "aarch64": "linux/arm64",
+                "arm64": "linux/arm64",
+            }.get(architecture)
+            if platform is None:
+                raise RuntimeError("nemo_rl_platform_unsupported")
+
+            gpu_lines = await probe(
+                "nvidia-smi -L",
+                "nemo_rl_gpu_unavailable",
+            )
+            disk_kib = float(
+                await probe(
+                    "df -Pk . | awk 'NR==2 {print $4}'",
+                    "nemo_rl_disk_probe_failed",
+                )
+            )
+            shared_memory_kib = float(
+                await probe(
+                    "df -Pk /dev/shm | awk 'NR==2 {print $4}'",
+                    "nemo_rl_shared_memory_probe_failed",
+                )
+            )
+            repo_digests = await probe(
+                "docker image inspect "
+                f"{shlex.quote(profile.image_reference)} "
+                "--format '{{join .RepoDigests \"\\n\"}}'",
+                "nemo_rl_image_not_ready",
+            )
+            source_revision = await probe(
+                "docker run --rm --network=none --entrypoint git "
+                f"{shlex.quote(profile.image_reference)} "
+                "-C /opt/nemo-rl rev-parse HEAD",
+                "nemo_rl_source_probe_failed",
+                timeout=60,
+            )
+            recipe_sha256 = (
+                await probe(
+                    "docker run --rm --network=none "
+                    "--entrypoint sha256sum "
+                    f"{shlex.quote(profile.image_reference)} "
+                    f"{shlex.quote(profile.recipe_path)}",
+                    "nemo_rl_recipe_probe_failed",
+                    timeout=60,
+                )
+            ).split(maxsplit=1)[0]
+
+            remote_model_path = profile.remote_model_path
+            if remote_model_path == "~" or remote_model_path.startswith("~/"):
+                home = await probe('printf %s "$HOME"', "nemo_rl_remote_home_unavailable")
+                remote_model_path = home + remote_model_path[1:]
+            quoted_model = shlex.quote(remote_model_path)
+            quoted_revision = shlex.quote(profile.model_revision)
+            model_check = await session.run(
+                f"test -f {quoted_model}/config.json && "
+                f"(test \"$(basename {quoted_model})\" = {quoted_revision} || "
+                f"test \"$(cat {quoted_model}/.bashgym-model-revision 2>/dev/null)\" = {quoted_revision})",
+                timeout=10,
+            )
+
+        return NemoRLRuntimeReceipt(
+            compute_profile_id=self.compute_profile_id,
+            platform=platform,
+            docker_version=docker_version,
+            docker_ready=True,
+            nvidia_runtime_ready="nvidia" in runtimes.casefold(),
+            gpu_count=sum(1 for line in gpu_lines.splitlines() if line.strip().startswith("GPU ")),
+            available_disk_gib=disk_kib / 1024 / 1024,
+            shared_memory_gib=shared_memory_kib / 1024 / 1024,
+            image_digest=profile.image_digest,
+            image_ready=profile.image_reference in repo_digests,
+            source_revision=profile.source_revision,
+            source_ready=source_revision == profile.source_revision,
+            recipe_sha256=profile.recipe_sha256,
+            recipe_ready=recipe_sha256 == profile.recipe_sha256,
+            model_revision=profile.model_revision,
+            model_ready=model_check.exit_status == 0,
+        )
 
     @staticmethod
     def _argv(request: RemoteLaunchRequest, remote_directory: str) -> tuple[str, ...]:

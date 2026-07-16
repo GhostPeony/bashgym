@@ -221,6 +221,106 @@ def doctor_autoresearch_template(
                 "Install an exact registered-training profile for this model contract and verify every pinned script, input, credential, and stage.",
             )
         )
+        if profile is not None and profile.nemo_rl is not None:
+            nemo = profile.nemo_rl
+            receipt = nemo.runtime_receipt
+            model_location, _, model_revision = definition.target_model.base_model_ref.rpartition("@")
+            expected_model_id = (
+                model_location.removeprefix("hf://")
+                if model_location.startswith("hf://")
+                else ""
+            )
+            checks.extend(
+                (
+                    _check(
+                        "nemo_source",
+                        bool(
+                            receipt is not None
+                            and receipt.source_ready
+                            and receipt.source_revision == nemo.source_revision
+                        ),
+                        "nemo_source_ready",
+                        "nemo_source_unresolved",
+                        "Re-run setup-nemo-rl against the exact source revision embedded in the pinned image.",
+                    ),
+                    _check(
+                        "nemo_image",
+                        bool(
+                            receipt is not None
+                            and receipt.docker_ready
+                            and receipt.nvidia_runtime_ready
+                            and receipt.image_ready
+                            and receipt.image_digest == nemo.image_digest
+                            and receipt.platform == nemo.platform
+                        ),
+                        "nemo_image_ready",
+                        "nemo_image_unresolved",
+                        "Explicitly pull and verify the platform-specific image digest on registered private compute.",
+                    ),
+                    _check(
+                        "nemo_model_support",
+                        bool(
+                            receipt is not None
+                            and receipt.model_ready
+                            and nemo.model_id == expected_model_id
+                            and nemo.model_revision == model_revision
+                            and nemo.model_support_level.value
+                            in {"broad_api_compatible", "recipe_reproduced", "optimized"}
+                        ),
+                        "nemo_model_support_ready",
+                        "nemo_model_support_unresolved",
+                        "Bind the selected immutable trainable model and record its verified NeMo support level.",
+                    ),
+                    _check(
+                        "nemo_recipe_data_verifier",
+                        bool(
+                            receipt is not None
+                            and receipt.recipe_ready
+                            and receipt.recipe_sha256 == nemo.recipe_sha256
+                            and nemo.dataset_path.is_file()
+                            and nemo.verifier_digest
+                        ),
+                        "nemo_recipe_data_verifier_ready",
+                        "nemo_recipe_data_verifier_unresolved",
+                        "Pin the exact recipe, dataset, deterministic verifier, and their content digests.",
+                    ),
+                    _check(
+                        "nemo_runtime_capacity",
+                        bool(
+                            receipt is not None
+                            and receipt.gpu_count >= nemo.gpu_count
+                            and receipt.available_disk_gib >= nemo.minimum_available_disk_gib
+                            and receipt.shared_memory_gib >= nemo.shared_memory_gib
+                        ),
+                        "nemo_runtime_capacity_ready",
+                        "nemo_runtime_capacity_insufficient",
+                        "Free the configured disk/shared memory capacity or select a smaller approved recipe.",
+                    ),
+                    _check(
+                        "nemo_execution_contract",
+                        all(
+                            stage.output_paths
+                            == (
+                                "effective_config.json",
+                                "final",
+                                "training_manifest.json",
+                                "training_metrics.jsonl",
+                            )
+                            and stage.budget_reservation > 0
+                            and stage.script_args
+                            == (
+                                "--contract-json",
+                                nemo.container_contract(stage.stage).model_dump_json(),
+                            )
+                            for stage in profile.stages
+                            if stage.stage in required_compute_stages
+                        ),
+                        "nemo_execution_contract_ready",
+                        "nemo_execution_contract_unresolved",
+                        "Re-run setup-nemo-rl so the bounded wrapper, outputs, stop rules, and budget are exact.",
+                    ),
+                )
+            )
         source_profile_id = evaluation_plan.get("source_repository_binding_id")
         source_profile = (
             source_profiles.get(source_profile_id)

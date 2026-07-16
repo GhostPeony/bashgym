@@ -34,6 +34,7 @@ from bashgym.campaigns.lineage import (
 from bashgym.campaigns.persistence import (
     CampaignPersistenceError,
     LeaseBusyError,
+    LeaseLostError,
     LeaseRecord,
     RecordNotFoundError,
 )
@@ -128,13 +129,22 @@ class CampaignWorker:
                 now=now,
             )
         else:
-            self._leader = self.repository.heartbeat_lease(
-                self._leader.lease_key,
-                self._leader.owner_id,
-                self._leader.generation,
-                ttl=self.leader_ttl,
-                now=now,
-            )
+            try:
+                self._leader = self.repository.heartbeat_lease(
+                    self._leader.lease_key,
+                    self._leader.owner_id,
+                    self._leader.generation,
+                    ttl=self.leader_ttl,
+                    now=now,
+                )
+            except LeaseLostError:
+                self._leader = None
+                self._leader = self.repository.acquire_lease(
+                    self.leader_key,
+                    self.worker_id,
+                    ttl=self.leader_ttl,
+                    now=now,
+                )
         return self._leader
 
     def sealed_path(self, attempt: ActionAttempt) -> Path:

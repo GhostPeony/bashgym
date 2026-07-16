@@ -1165,3 +1165,35 @@ def test_resident_loop_heartbeats_during_idle_backoff_and_releases_leader(tmp_pa
         now=current,
     )
     assert replacement.generation == 2
+
+
+def test_worker_reacquires_an_expired_cached_scheduler_lease(tmp_path):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    worker = make_worker(repository, tmp_path, "worker-a")
+
+    assert worker.run_once(now=START) == "idle"
+    assert worker.leader is not None
+    assert worker.leader.generation == 1
+
+    assert worker.run_once(now=START + timedelta(seconds=16)) == "idle"
+    assert worker.leader is not None
+    assert worker.leader.generation == 2
+    assert worker.leader.expires_at == START + timedelta(seconds=31)
+
+
+def test_worker_drops_an_expired_cached_lease_after_a_successor_takes_over(tmp_path):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    worker = make_worker(repository, tmp_path, "worker-a")
+
+    assert worker.run_once(now=START) == "idle"
+    successor = repository.acquire_lease(
+        worker.leader_key,
+        "worker-b",
+        ttl=timedelta(seconds=15),
+        now=START + timedelta(seconds=16),
+    )
+
+    assert successor.generation == 2
+    assert worker.run_once(now=START + timedelta(seconds=17)) == "not_leader"
+    assert worker.leader is None
+    assert repository.get_lease(worker.leader_key) == successor

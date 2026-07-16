@@ -163,6 +163,7 @@ def test_docker_wrapper_uses_typed_bounded_argv(dataset: Path, tmp_path: Path):
     assert f"grpo.max_num_steps={contract.max_steps}" in argv
     assert f"policy.optimizer.kwargs.lr={contract.learning_rate}" in argv
     assert contract.image_reference in argv
+    assert argv[argv.index("uv") : argv.index("uv") + 3] == ("uv", "run", "--no-sync")
     assert all(";" not in value for value in argv)
 
 

@@ -150,6 +150,7 @@ def docker_argv(
         contract.image_reference,
         "uv",
         "run",
+        "--no-sync",
         contract.entrypoint_path,
         "--config",
         contract.recipe_path,

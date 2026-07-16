@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from bashgym.campaigns.contracts import (
     BudgetLedgerEntry,
@@ -40,7 +40,10 @@ from bashgym.campaigns.contracts import (
     utc_now,
 )
 from bashgym.campaigns.nemo_gym_evidence import NEMO_GYM_CAMPAIGN_EVIDENCE_SCHEMA
-from bashgym.campaigns.transitions import transition_campaign
+from bashgym.campaigns.transitions import evaluate_promotion_gate, transition_campaign
+
+if TYPE_CHECKING:
+    from bashgym.campaigns.control_room import ControlRoomDurableProjection
 
 
 class CampaignPersistenceError(RuntimeError):
@@ -1635,6 +1638,23 @@ class CampaignRepository:
         with self._connection() as connection:
             connection.execute("BEGIN")
             return read_control_room_state(connection, workspace_id, campaign_id)
+
+    def read_control_room_projection(
+        self, workspace_id: str, campaign_id: str, *, preview_limit: int = 10
+    ) -> ControlRoomDurableProjection:
+        """Read every durable control-room input in one explicit read transaction."""
+
+        self._require_initialized()
+        from bashgym.campaigns.control_room import read_control_room_projection
+
+        with self._connection() as connection:
+            connection.execute("BEGIN")
+            return read_control_room_projection(
+                connection,
+                workspace_id,
+                campaign_id,
+                preview_limit=preview_limit,
+            )
 
     def list_campaigns(self, workspace_id: str) -> list[Campaign]:
         self._require_initialized()
@@ -3273,7 +3293,15 @@ class CampaignRepository:
                     )
             if not candidate_digest:
                 candidate_digest = current.best_development_candidate_ref
-            if not candidate_digest or (not override_reason and not (gate_passed and protected_passed)):
+            promotion_gate = evaluate_promotion_gate(
+                active_action_id=current.active_action_id,
+                comparison_verdict=decision.get("verdict"),
+                candidate_digest=candidate_digest,
+                protected_required=bool(manifest.protected_artifact_refs),
+                protected_passed=protected_passed,
+                human_work_complete=True,
+            )
+            if not candidate_digest or (not override_reason and not promotion_gate.eligible):
                 raise PromotionGateFailedError("campaign_gate_failed")
             promoted_at = utc_now()
             target_key = current.target_model.target_contract_key

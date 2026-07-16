@@ -34,12 +34,14 @@ from bashgym.campaigns.contracts import (
     CampaignStatus,
     CampaignTrigger,
     Capability,
-    ControlRoomControllerObservationV1,
+    ControllerObservationV1,
     ProtectedEvaluationResult,
+    ReadinessSummaryV1,
     StagePlan,
     StudyProposalSubmission,
     TargetModelContract,
     canonical_hash,
+    utc_now,
 )
 from bashgym.campaigns.control_room import (
     build_control_room_snapshot,
@@ -957,14 +959,63 @@ def get_control_room_snapshot(
         repository, _auth, _service = _services(request)
         principal = _principal(request)
         principal.require(workspace_id, Capability.CAMPAIGN_READ)
-        durable_state = repository.read_control_room_snapshot(workspace_id, campaign_id)
+        durable = repository.read_control_room_projection(workspace_id, campaign_id)
         controller_status = project_controller_status(repository, get_bashgym_dir())
-        snapshot = build_control_room_snapshot(
-            durable_state,
-            ControlRoomControllerObservationV1.model_validate(
-                controller_status.model_dump(mode="json", exclude={"schema_version"})
+        controller = ControllerObservationV1(
+            controller_observation_version=controller_status.controller_observation_version,
+            state=controller_status.state,
+            observed_at=controller_status.observed_at,
+            heartbeat_age_seconds=controller_status.heartbeat_age_seconds,
+            lease_expires_at=controller_status.expires_at,
+            controller_instance_id=controller_status.owner_id,
+            safe_guidance=controller_status.guidance,
+        )
+        checked_at = utc_now()
+        matching_definition = next(
+            (
+                definition
+                for definition in _autoresearch_definitions(request).values()
+                if definition.kind == durable.campaign.kind
+                and definition.target_model == durable.campaign.target_model
+                and canonical_hash(definition.manifest.model_dump(mode="json"))
+                == durable.manifest.manifest_hash
             ),
-            authorization_revision=principal.authorization_revision,
+            None,
+        )
+        if matching_definition is None:
+            readiness = ReadinessSummaryV1(
+                materializable=False,
+                launch_ready=False,
+                checked_at=checked_at,
+                activation_receipt_digest=None,
+                doctor_receipt_digest=None,
+                blocking_codes=("campaign_readiness_definition_unavailable",),
+            )
+        else:
+            ledger = ExperimentLedgerRepository(repository.db_path)
+            ledger.initialize()
+            report = doctor_autoresearch_template(
+                matching_definition,
+                workspace_id=workspace_id,
+                ledger=ledger,
+                executor_profiles=_approved_executor_profiles(request),
+                controller=controller_status,
+                source_profiles=_approved_source_profiles(request),
+            )
+            readiness = ReadinessSummaryV1(
+                materializable=report.materializable,
+                launch_ready=report.launch_ready,
+                checked_at=checked_at,
+                activation_receipt_digest=None,
+                doctor_receipt_digest=None,
+                blocking_codes=report.blocking_codes,
+            )
+        snapshot = build_control_room_snapshot(
+            durable,
+            controller,
+            readiness,
+            principal=principal,
+            snapshot_at=utc_now(),
         )
         etag = principal_control_room_etag(snapshot, principal)
         headers["ETag"] = etag

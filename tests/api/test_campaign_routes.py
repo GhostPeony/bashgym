@@ -564,12 +564,54 @@ def test_control_room_snapshot_requires_auth_and_sets_private_cache_headers(
     assert response.headers["cache-control"] == "private, no-store"
     assert response.headers["vary"] == "Authorization"
     assert response.headers["etag"].startswith('"')
-    assert response.json()["schema_version"] == "control_room_snapshot.v1"
-    assert response.json()["durable_state"]["campaign"]["version"] == 1
+    payload = response.json()
+    assert tuple(payload) == (
+        "schema_version",
+        "workspace_id",
+        "campaign_id",
+        "aggregate_version",
+        "manifest_revision",
+        "authorization_revision",
+        "snapshot_at",
+        "latest_event_cursor",
+        "campaign",
+        "controller",
+        "readiness",
+        "bindings",
+        "journey",
+        "active_work",
+        "champion",
+        "candidate",
+        "metrics",
+        "budget",
+        "human_work",
+        "agents",
+        "collections",
+        "decision_surface",
+    )
+    assert payload["schema_version"] == "control_room_snapshot.v1"
+    assert payload["workspace_id"] == "workspace-a"
+    assert payload["campaign"]["aggregate_version"] == 1
+    assert [phase["phase_id"] for phase in payload["journey"]] == [
+        "setup",
+        "baseline",
+        "experiments",
+        "human_review",
+        "decision",
+    ]
+    assert payload["human_work"] == {
+        "schema_version": "human_work_summary.v1",
+        "blocking_count": 0,
+        "open_count": 0,
+        "newest": [],
+    }
+    assert payload["agents"] == []
+    assert "durable_state" not in payload
+    assert "controller_observation" not in payload
     assert datetime.fromisoformat(
-        response.json()["controller_observation"]["observed_at"].replace("Z", "+00:00")
+        payload["controller"]["observed_at"].replace("Z", "+00:00")
     ) == observed_at
-    assert response.json()["controller_observation"]["heartbeat_age_seconds"] == 7.5
+    assert payload["controller"]["heartbeat_age_seconds"] == 7.5
 
 
 def test_control_room_snapshot_etag_is_principal_specific_and_supports_304(
@@ -680,12 +722,12 @@ def test_control_room_snapshot_etag_invalidates_on_persisted_controller_observat
         headers={**bearer(access), "If-None-Match": first.headers["etag"]},
     )
 
-    assert first.json()["controller_observation"]["controller_observation_version"] == 1
+    assert first.json()["controller"]["controller_observation_version"] == 1
     assert stable.status_code == 304
     assert renewed.controller_observation_version == 2
     assert current.status_code == 200
     assert current.headers["etag"] != first.headers["etag"]
-    assert current.json()["controller_observation"]["controller_observation_version"] == 2
+    assert current.json()["controller"]["controller_observation_version"] == 2
 
 
 def test_control_room_snapshot_keeps_durable_and_controller_observation_times_distinct(
@@ -708,11 +750,10 @@ def test_control_room_snapshot_keeps_durable_and_controller_observation_times_di
     )
     payload = response.json()
 
-    assert payload["durable_state"]["state_observed_at"] != payload["controller_observation"][
-        "observed_at"
-    ]
+    assert payload["snapshot_at"] != payload["controller"]["observed_at"]
     assert "transactionally_observed_at" not in payload
     assert "snapshot_observed_at" not in payload
+    assert "state_observed_at" not in payload
 
 
 def test_control_room_snapshot_returns_current_v1_for_an_older_etag(
@@ -750,7 +791,7 @@ def test_control_room_snapshot_returns_current_v1_for_an_older_etag(
     assert current.status_code == 200
     assert current.headers["etag"] != first.headers["etag"]
     assert current.json()["schema_version"] == "control_room_snapshot.v1"
-    assert current.json()["durable_state"]["campaign"]["version"] == 2
+    assert current.json()["campaign"]["aggregate_version"] == 2
 
 
 def test_campaign_ledger_projection_keeps_project_evals_artifacts_and_decisions_linked(

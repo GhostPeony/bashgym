@@ -730,13 +730,302 @@ class ControlRoomControllerObservationV1(FrozenContractModel):
     expires_at: datetime | None = None
 
 
+class CampaignSummaryV1(FrozenContractModel):
+    schema_version: Literal["campaign_summary.v1"] = "campaign_summary.v1"
+    campaign_id: Identifier
+    title: str
+    objective: str
+    kind: CampaignKind
+    status: CampaignStatus
+    aggregate_version: int = Field(ge=1)
+    manifest_revision: int = Field(ge=1)
+    active_study_id: Identifier | None
+    active_action_id: Identifier | None
+    champion_ref: str | None
+    stop_reason: str | None
+
+
+class ControllerObservationV1(FrozenContractModel):
+    schema_version: Literal["controller_observation.v1"] = "controller_observation.v1"
+    controller_observation_version: int = Field(ge=0)
+    state: Literal["online", "stale", "offline"]
+    observed_at: datetime
+    heartbeat_age_seconds: float | None = Field(ge=0)
+    lease_expires_at: datetime | None
+    controller_instance_id: Identifier | None
+    safe_guidance: str | None
+
+
+class ReadinessSummaryV1(FrozenContractModel):
+    schema_version: Literal["readiness_summary.v1"] = "readiness_summary.v1"
+    materializable: bool
+    launch_ready: bool
+    checked_at: datetime
+    activation_receipt_digest: HexDigest | None
+    doctor_receipt_digest: HexDigest | None
+    blocking_codes: tuple[Identifier, ...] = Field(max_length=64)
+
+    @field_validator("blocking_codes")
+    @classmethod
+    def validate_blocking_codes(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(value) != len(set(value)):
+            raise ValueError("readiness blocking codes must be unique")
+        return value
+
+
+class SafeBindingIdentityV1(FrozenContractModel):
+    schema_version: Literal["safe_binding_identity.v1"] = "safe_binding_identity.v1"
+    binding_id: Identifier
+    immutable_digest: HexDigest | None
+    display_label: str
+
+
+class BindingSummaryV1(FrozenContractModel):
+    schema_version: Literal["binding_summary.v1"] = "binding_summary.v1"
+    model: SafeBindingIdentityV1 | None
+    data: SafeBindingIdentityV1 | None
+    evaluator: SafeBindingIdentityV1 | None
+    source: SafeBindingIdentityV1 | None
+    compute: SafeBindingIdentityV1 | None
+
+
+class DecisionBlockerV1(FrozenContractModel):
+    schema_version: Literal["decision_blocker.v1"] = "decision_blocker.v1"
+    code: Identifier
+    summary: str
+    evidence_ids: tuple[Identifier, ...] = Field(max_length=64)
+    secondary_codes: tuple[Identifier, ...] = Field(max_length=64)
+
+    @model_validator(mode="after")
+    def validate_unique_codes_and_evidence(self) -> DecisionBlockerV1:
+        if self.code in self.secondary_codes or len(self.secondary_codes) != len(
+            set(self.secondary_codes)
+        ):
+            raise ValueError("decision blocker codes must be unique")
+        if len(self.evidence_ids) != len(set(self.evidence_ids)):
+            raise ValueError("decision blocker evidence IDs must be unique")
+        return self
+
+
+class JourneyPhaseSummaryV1(FrozenContractModel):
+    schema_version: Literal["journey_phase_summary.v1"] = "journey_phase_summary.v1"
+    phase_id: Literal["setup", "baseline", "experiments", "human_review", "decision"]
+    state: Literal[
+        "not_started", "ready", "active", "blocked", "complete", "failed", "skipped"
+    ]
+    execution_owner: Literal["bashgym", "human", "none"]
+    attention_owner: Literal["bashgym", "agent", "human", "none"]
+    primary_blocker: DecisionBlockerV1 | None
+    evidence_count: int = Field(ge=0)
+    next_action_ids: tuple[Identifier, ...] = Field(max_length=64)
+
+    @field_validator("next_action_ids")
+    @classmethod
+    def validate_next_action_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(value) != len(set(value)):
+            raise ValueError("journey action IDs must be unique")
+        return value
+
+
+class OpaqueProcessIdentityV1(FrozenContractModel):
+    schema_version: Literal["opaque_process_identity.v1"] = "opaque_process_identity.v1"
+    run_id: Identifier
+    compute_profile_id: Identifier
+    state: Literal["launching", "running", "completed", "failed", "cancelled", "unknown"]
+
+
+class ActiveWorkSummaryV1(FrozenContractModel):
+    schema_version: Literal["active_work_summary.v1"] = "active_work_summary.v1"
+    study_id: Identifier | None
+    proposal_id: Identifier | None
+    action_id: Identifier | None
+    attempt_id: Identifier | None
+    stage: StageKind | None
+    hypothesis_summary: str | None
+    primary_variable_summary: str | None
+    controlled_variable_summary: tuple[str, ...] = Field(max_length=64)
+    progress_fraction: float | None = Field(ge=0, le=1)
+    eta_seconds: float | None = Field(ge=0)
+    executor_type: Literal["fake", "ssh_remote", "development_evaluation"] | None
+    process_identity: OpaqueProcessIdentityV1 | None
+
+
+class CandidateSummaryV1(FrozenContractModel):
+    schema_version: Literal["candidate_summary.v1"] = "candidate_summary.v1"
+    candidate_ref: str
+    source_attempt_ids: tuple[Identifier, ...] = Field(max_length=100)
+    source_artifact_ids: tuple[Identifier, ...] = Field(max_length=100)
+    latest_comparable_evaluation_id: Identifier | None
+    comparison_verdict: Literal["passed", "failed", "insufficient_evidence"] | None
+    gate_state: Literal["not_evaluated", "blocked", "passed", "failed", "promoted"]
+
+
+class MetricDescriptorV1(FrozenContractModel):
+    schema_version: Literal["metric_descriptor.v1"] = "metric_descriptor.v1"
+    metric_id: Identifier
+    display_name: str
+    unit: str | None
+    direction: Literal["maximize", "minimize", "target"]
+    target: float | None
+    tolerance: float | None
+    evaluator_revision: str | None
+    sample_count: int | None = Field(ge=0)
+    uncertainty_method: str | None
+    comparability_key: HexDigest
+
+
+class BudgetResourceSummaryV1(FrozenContractModel):
+    schema_version: Literal["budget_resource_summary.v1"] = "budget_resource_summary.v1"
+    unit: Identifier
+    limit: float
+    reserved: float
+    settled: float
+    remaining: float
+    blocked: bool
+    blocker_code: Identifier | None
+
+
+class BudgetSummaryV1(FrozenContractModel):
+    schema_version: Literal["budget_summary.v1"] = "budget_summary.v1"
+    resources: tuple[BudgetResourceSummaryV1, ...] = Field(max_length=64)
+    blocked: bool
+
+
+class HumanWorkItemSummaryV1(FrozenContractModel):
+    schema_version: Literal["human_work_item_summary.v1"] = "human_work_item_summary.v1"
+    work_item_id: Identifier
+    kind: Literal["blinded_sample_evaluation", "promotion_decision"]
+    status: Literal[
+        "open",
+        "claimed",
+        "accepted",
+        "rejected",
+        "revision_requested",
+        "abstained",
+        "cancelled",
+        "expired",
+    ]
+    blocking_scope: Identifier
+    assigned_actor_id: Identifier | None
+    required_count: int = Field(ge=0)
+    completed_count: int = Field(ge=0)
+    due_at: datetime | None
+
+
+class HumanWorkSummaryV1(FrozenContractModel):
+    schema_version: Literal["human_work_summary.v1"] = "human_work_summary.v1"
+    blocking_count: int = Field(ge=0)
+    open_count: int = Field(ge=0)
+    newest: tuple[HumanWorkItemSummaryV1, ...] = Field(max_length=10)
+
+
+class AttachedAgentSummaryV1(FrozenContractModel):
+    schema_version: Literal["attached_agent_summary.v1"] = "attached_agent_summary.v1"
+    session_id: Identifier
+    actor_id: Identifier
+    origin_id: Identifier
+    bundle_id: Identifier
+    capability_revision: int = Field(ge=1)
+    expires_at: datetime
+    liveness: Literal["active", "disconnected", "expired", "revoked"]
+    last_cursor: int = Field(ge=0)
+    last_request_id: Identifier | None
+
+
+class CollectionCursorV1(FrozenContractModel):
+    schema_version: Literal["collection_cursor.v1"] = "collection_cursor.v1"
+    count: int = Field(ge=0)
+    next_cursor: str | None
+    has_more: bool
+
+    @model_validator(mode="after")
+    def validate_cursor(self) -> CollectionCursorV1:
+        if self.has_more != (self.next_cursor is not None):
+            raise ValueError("collection has_more must match next_cursor presence")
+        return self
+
+
+class CollectionSummaryV1(FrozenContractModel):
+    schema_version: Literal["collection_summary.v1"] = "collection_summary.v1"
+    events: CollectionCursorV1
+    proposals: CollectionCursorV1
+    studies: CollectionCursorV1
+    attempts: CollectionCursorV1
+    artifacts: CollectionCursorV1
+    comparisons: CollectionCursorV1
+    human_work: CollectionCursorV1
+
+
+class DecisionActionV1(FrozenContractModel):
+    schema_version: Literal["decision_action.v1"] = "decision_action.v1"
+    action: Identifier
+    capability: Capability
+    freshness_class: Literal["read", "lifecycle", "privileged"]
+    requires_human_work: bool
+
+
+class DecisionSurfaceV1(FrozenContractModel):
+    schema_version: Literal["decision_surface.v1"] = "decision_surface.v1"
+    execution_owner: Literal["bashgym", "human", "none"]
+    attention_owner: Literal["bashgym", "agent", "human", "none"]
+    blocker: DecisionBlockerV1 | None
+    next_actions: tuple[DecisionActionV1, ...] = Field(max_length=64)
+    recovery_actions: tuple[Identifier, ...] = Field(max_length=16)
+    promotion_eligible: bool
+
+    @model_validator(mode="after")
+    def validate_unique_actions(self) -> DecisionSurfaceV1:
+        actions = tuple(item.action for item in self.next_actions)
+        if len(actions) != len(set(actions)):
+            raise ValueError("decision actions must be unique")
+        if len(self.recovery_actions) != len(set(self.recovery_actions)):
+            raise ValueError("recovery actions must be unique")
+        return self
+
+
 class CampaignControlRoomSnapshotV1(FrozenContractModel):
-    """Authenticated control-room response with explicit observation boundaries."""
+    """Complete principal-filtered public campaign projection."""
 
     schema_version: Literal["control_room_snapshot.v1"] = "control_room_snapshot.v1"
+    workspace_id: Identifier
+    campaign_id: Identifier
+    aggregate_version: int = Field(ge=1)
+    manifest_revision: int = Field(ge=1)
     authorization_revision: int = Field(ge=1)
-    durable_state: CampaignControlRoomStateV1
-    controller_observation: ControlRoomControllerObservationV1
+    snapshot_at: datetime
+    latest_event_cursor: int = Field(ge=0)
+    campaign: CampaignSummaryV1
+    controller: ControllerObservationV1
+    readiness: ReadinessSummaryV1
+    bindings: BindingSummaryV1
+    journey: tuple[JourneyPhaseSummaryV1, ...] = Field(min_length=5, max_length=5)
+    active_work: ActiveWorkSummaryV1 | None
+    champion: CandidateSummaryV1 | None
+    candidate: CandidateSummaryV1 | None
+    metrics: tuple[MetricDescriptorV1, ...] = Field(max_length=64)
+    budget: BudgetSummaryV1
+    human_work: HumanWorkSummaryV1
+    agents: tuple[AttachedAgentSummaryV1, ...] = Field(max_length=32)
+    collections: CollectionSummaryV1
+    decision_surface: DecisionSurfaceV1
+
+    @model_validator(mode="after")
+    def validate_identity_and_journey(self) -> CampaignControlRoomSnapshotV1:
+        if self.campaign_id != self.campaign.campaign_id:
+            raise ValueError("snapshot and campaign IDs must match")
+        if self.aggregate_version != self.campaign.aggregate_version:
+            raise ValueError("snapshot and campaign aggregate versions must match")
+        if self.manifest_revision != self.campaign.manifest_revision:
+            raise ValueError("snapshot and campaign manifest revisions must match")
+        if tuple(phase.phase_id for phase in self.journey) != (
+            "setup",
+            "baseline",
+            "experiments",
+            "human_review",
+            "decision",
+        ):
+            raise ValueError("control-room journey must use the exact ordered phases")
+        return self
 
 
 class Study(ContractModel):
@@ -991,24 +1280,31 @@ class BudgetLedgerEntry(FrozenContractModel):
 __all__ = [
     "ActionStatus",
     "ActionAttempt",
+    "ActiveWorkSummaryV1",
     "ActorPrincipal",
+    "AttachedAgentSummaryV1",
     "ArtifactOutput",
     "AttemptStatus",
     "AutonomyProfile",
     "BudgetEntryKind",
     "BudgetLedgerEntry",
+    "BudgetResourceSummaryV1",
+    "BudgetSummaryV1",
+    "BindingSummaryV1",
     "CODEX_CAPABILITIES",
     "DESKTOP_LOCAL_SCOPE",
     "Campaign",
     "CampaignArtifactReference",
     "CampaignControlRoomSnapshotV1",
     "CampaignControlRoomStateV1",
+    "CampaignSummaryV1",
     "CampaignEvidenceSnapshot",
     "CampaignEvent",
     "CampaignKind",
     "CampaignManifest",
     "CampaignStatus",
     "CampaignTrigger",
+    "CandidateSummaryV1",
     "Capability",
     "CodeLineageRecord",
     "CodeLineageState",
@@ -1019,21 +1315,34 @@ __all__ = [
     "ManifestRevision",
     "NemoGymEvidenceReference",
     "CompletedHypothesisSummary",
+    "CollectionCursorV1",
+    "CollectionSummaryV1",
+    "ControllerObservationV1",
     "ControlRoomArtifactSummaryV1",
     "ControlRoomCampaignV1",
     "ControlRoomCollectionSummaryV1",
     "ControlRoomControllerObservationV1",
     "ControlRoomStatusCountV1",
+    "DecisionActionV1",
+    "DecisionBlockerV1",
+    "DecisionSurfaceV1",
+    "HumanWorkItemSummaryV1",
+    "HumanWorkSummaryV1",
+    "JourneyPhaseSummaryV1",
+    "MetricDescriptorV1",
+    "OpaqueProcessIdentityV1",
     "ProposalRecord",
     "ProposalStatus",
     "ProposalValidation",
     "ProtectedEvaluationResult",
+    "ReadinessSummaryV1",
     "ResourceUsage",
     "SealedActionResult",
     "StageDisposition",
     "StageKind",
     "StagePlan",
     "StagePlanItem",
+    "SafeBindingIdentityV1",
     "StudyStatus",
     "Study",
     "StudyProposal",

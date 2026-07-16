@@ -29,6 +29,35 @@ class TransitionResult:
     event_type: str
 
 
+@dataclass(frozen=True)
+class PromotionGateEvaluation:
+    eligible: bool
+    blocking_codes: tuple[str, ...]
+
+
+def evaluate_promotion_gate(
+    *,
+    active_action_id: str | None,
+    comparison_verdict: str | None,
+    candidate_digest: str | None,
+    protected_required: bool,
+    protected_passed: bool,
+    human_work_complete: bool,
+) -> PromotionGateEvaluation:
+    """Evaluate the promotion evidence gate shared by reads and mutations."""
+
+    blockers: list[str] = []
+    if active_action_id is not None:
+        blockers.append("campaign_active_action_present")
+    if comparison_verdict != "passed" or not candidate_digest:
+        blockers.append("campaign_development_gate_not_passed")
+    if protected_required and not protected_passed:
+        blockers.append("campaign_protected_gate_not_passed")
+    if not human_work_complete:
+        blockers.append("campaign_human_work_incomplete")
+    return PromotionGateEvaluation(eligible=not blockers, blocking_codes=tuple(blockers))
+
+
 _FIXED_TRANSITIONS: dict[CampaignTrigger, tuple[frozenset[CampaignStatus], CampaignStatus, str]] = {
     CampaignTrigger.VALIDATE: (
         frozenset({CampaignStatus.DRAFT}),
@@ -137,7 +166,9 @@ def transition_campaign(
 
 __all__ = [
     "InvalidCampaignTransitionError",
+    "PromotionGateEvaluation",
     "TransitionResult",
     "allowed_triggers",
+    "evaluate_promotion_gate",
     "transition_campaign",
 ]

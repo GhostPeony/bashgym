@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from bashgym.campaigns.contracts import canonical_hash, utc_now
-from bashgym.campaigns.persistence import RecordNotFoundError, _iso, _json
+from bashgym.campaigns.persistence import MIGRATIONS, RecordNotFoundError, _iso, _json
 from bashgym.campaigns.runtime import CampaignRuntimeRepository
 from bashgym.ledger.contracts import (
     ArtifactSpec,
@@ -89,6 +93,87 @@ def _decode_row(row: sqlite3.Row | None, *json_fields: str) -> dict[str, Any] | 
 
 class ExperimentLedgerRepository(CampaignRuntimeRepository):
     """Experiment ledger stored in the authoritative campaign SQLite database."""
+
+    _REQUIRED_LEDGER_TABLES = frozenset(
+        {
+            "ledger_projects",
+            "ledger_experiments",
+            "ledger_models",
+            "ledger_model_versions",
+            "ledger_datasets",
+            "ledger_dataset_versions",
+            "ledger_environments",
+            "ledger_runs",
+            "ledger_run_attempts",
+            "ledger_metric_points",
+            "ledger_artifacts",
+            "ledger_evaluation_suites",
+            "ledger_evaluation_results",
+            "ledger_decisions",
+            "ledger_events",
+        }
+    )
+
+    @classmethod
+    def open_existing(cls, db_path: str | Path) -> ExperimentLedgerRepository:
+        """Attach a read-only ledger only when its complete schema already exists."""
+
+        repository = cls(db_path)
+        uri = f"{repository.db_path.resolve().as_uri()}?mode=ro"
+        try:
+            with sqlite3.connect(uri, uri=True, timeout=10) as connection:
+                tables = {
+                    str(row[0])
+                    for row in connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'table'"
+                    )
+                }
+                migration_rows = {
+                    int(row[0]): (str(row[1]), str(row[2]))
+                    for row in connection.execute(
+                        """
+                        SELECT version, name, checksum
+                        FROM campaign_schema_migrations
+                        """
+                    )
+                }
+        except sqlite3.Error as exc:
+            raise LedgerPersistenceError("ledger_schema_unavailable") from exc
+        if not repository._REQUIRED_LEDGER_TABLES.issubset(tables):
+            raise LedgerPersistenceError("ledger_schema_unavailable")
+        expected_migrations = {
+            version: (
+                name,
+                hashlib.sha256("\n".join(statements).encode("utf-8")).hexdigest(),
+            )
+            for version, name, statements in MIGRATIONS
+        }
+        if any(
+            migration_rows.get(version) != identity
+            for version, identity in expected_migrations.items()
+        ):
+            raise LedgerPersistenceError("ledger_schema_unavailable")
+        repository._initialized = True
+        repository._read_only_attach = True
+        return repository
+
+    @contextmanager
+    def _connection(self, *, immediate: bool = False) -> Iterator[sqlite3.Connection]:
+        if not getattr(self, "_read_only_attach", False):
+            with super()._connection(immediate=immediate) as connection:
+                yield connection
+            return
+        if immediate:
+            raise LedgerPersistenceError("ledger_read_only")
+        uri = f"{self.db_path.resolve().as_uri()}?mode=ro"
+        connection = sqlite3.connect(uri, uri=True, timeout=10)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute("PRAGMA busy_timeout=10000")
+        try:
+            yield connection
+        finally:
+            connection.close()
 
     @staticmethod
     def _identity_digest(spec: Any, *, exclude: set[str] | None = None) -> str:

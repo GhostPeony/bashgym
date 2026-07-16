@@ -94,6 +94,13 @@ class BudgetInvariantError(CampaignPersistenceError):
     code = "campaign_budget_invariant"
 
 
+class CampaignBudgetResourceLimitError(CampaignPersistenceError):
+    code = "campaign_budget_resource_limit_exceeded"
+
+    def __init__(self) -> None:
+        super().__init__(self.code)
+
+
 class InvalidProposalTransitionError(CampaignPersistenceError):
     code = "campaign_invalid_transition"
 
@@ -1511,7 +1518,7 @@ class CampaignRepository:
 
         self._require_initialized()
         if len(manifest_revision.manifest.budget_limits) > 64:
-            raise CampaignPersistenceError("campaign_budget_resource_limit_exceeded")
+            raise CampaignBudgetResourceLimitError()
         if campaign.status != CampaignStatus.DRAFT or campaign.version != 1:
             raise ValueError("new campaigns must start at draft version 1")
         if (
@@ -2534,7 +2541,7 @@ class CampaignRepository:
 
         self._require_initialized()
         if len(manifest.budget_limits) > 64:
-            raise CampaignPersistenceError("campaign_budget_resource_limit_exceeded")
+            raise CampaignBudgetResourceLimitError()
         mutation_kind = "campaign.manifest.revise"
         request_hash = canonical_hash(
             {

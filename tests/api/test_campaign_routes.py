@@ -632,18 +632,40 @@ def test_control_room_snapshot_requires_auth_and_sets_private_cache_headers(tmp_
     assert payload["controller"]["heartbeat_age_seconds"] == 7.5
 
 
-def test_control_room_snapshot_get_never_initializes_the_experiment_ledger(tmp_path, monkeypatch):
-    http, _repository, refresh = campaign_client(tmp_path)
+def test_fresh_control_room_process_attaches_existing_ledger_without_writes(
+    tmp_path, monkeypatch
+):
+    http, repository, refresh = campaign_client(tmp_path)
     access = exchange(http, refresh.raw_token)
     assert create_from_template(http, access).status_code == 200
     definition = _exact_control_room_definition()
-    http.app.state.campaign_autoresearch_templates = {definition.template_id: definition}
+
+    fresh_repository = CampaignRuntimeRepository(repository.db_path)
+    fresh_repository.initialize()
+    fresh_app = FastAPI()
+    fresh_app.state.campaign_repository = fresh_repository
+    fresh_app.state.campaign_auth_service = CampaignAuthService(fresh_repository)
+    fresh_app.state.campaign_service = CampaignService(
+        fresh_repository,
+        approved_template_hashes={
+            "memexai-approved-v1": canonical_hash(manifest().model_dump(mode="json"))
+        },
+    )
+    fresh_app.state.campaign_templates = http.app.state.campaign_templates
+    fresh_app.state.campaign_autoresearch_templates = {
+        definition.template_id: definition
+    }
+    fresh_app.state.campaign_worker_config_path = tmp_path / "worker-config.v1.json"
+    fresh_app.include_router(campaign_auth_router)
+    fresh_app.include_router(campaign_router)
+    fresh_http = TestClient(fresh_app)
+    database_before = repository.db_path.read_bytes()
 
     def fail_if_initialized(_self):
         raise AssertionError("snapshot GET must not initialize or migrate the ledger")
 
     monkeypatch.setattr(ExperimentLedgerRepository, "initialize", fail_if_initialized)
-    response = http.get(
+    response = fresh_http.get(
         "/api/campaigns/campaign-1/control-room-snapshot",
         params={"workspace_id": "workspace-a"},
         headers=bearer(access),
@@ -651,8 +673,10 @@ def test_control_room_snapshot_get_never_initializes_the_experiment_ledger(tmp_p
 
     assert response.status_code == 200
     assert response.json()["readiness"]["blocking_codes"] == [
-        "campaign_readiness_ledger_unavailable"
+        "template_policy_missing",
+        "controller_offline",
     ]
+    assert repository.db_path.read_bytes() == database_before
 
 
 def test_control_room_snapshot_readiness_changes_etag_but_checked_at_does_not(tmp_path):
@@ -682,7 +706,8 @@ def test_control_room_snapshot_readiness_changes_etag_but_checked_at_does_not(tm
     assert changed.status_code == 200
     assert changed.headers["etag"] != unavailable.headers["etag"]
     assert changed.json()["readiness"]["blocking_codes"] == [
-        "campaign_readiness_ledger_unavailable"
+        "template_policy_missing",
+        "controller_offline",
     ]
     assert stable.status_code == 304
 
@@ -749,6 +774,76 @@ def test_control_room_definition_must_align_with_persisted_autoresearch_spec(tmp
     assert response.json()["readiness"]["blocking_codes"] == [
         "campaign_readiness_definition_unavailable"
     ]
+
+
+def test_campaign_create_rejects_oversized_budget_with_typed_422_and_no_mutation(
+    tmp_path,
+):
+    http, repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    error_http = TestClient(http.app, raise_server_exceptions=False)
+    oversized_manifest = manifest().model_dump(mode="json")
+    oversized_manifest["budget_limits"] = {
+        f"unit_{index:03d}": 1.0 for index in range(65)
+    }
+    value = campaign(campaign_id="campaign-oversized")
+
+    response = error_http.post(
+        "/api/campaigns",
+        headers={**bearer(access), "Idempotency-Key": "oversized-create"},
+        json={
+            "workspace_id": "workspace-a",
+            "campaign_id": value.campaign_id,
+            "title": value.title,
+            "kind": value.kind.value,
+            "objective": value.objective,
+            "target_model": value.target_model.model_dump(mode="json"),
+            "manifest": oversized_manifest,
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == {
+        "code": "campaign_budget_resource_limit_exceeded",
+        "message": "Campaign bounded-resource policy rejected the operation.",
+    }
+    assert repository.list_campaigns("workspace-a") == []
+
+
+def test_manifest_revise_rejects_oversized_budget_with_typed_422_and_no_mutation(
+    tmp_path,
+):
+    http, repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    assert create_from_template(http, access).status_code == 200
+    error_http = TestClient(http.app, raise_server_exceptions=False)
+    oversized_manifest = manifest().model_dump(mode="json")
+    oversized_manifest["budget_limits"] = {
+        f"unit_{index:03d}": 1.0 for index in range(65)
+    }
+    before = repository.get_campaign("workspace-a", "campaign-1")
+    before_events = repository.list_events("workspace-a", "campaign-1")
+
+    response = error_http.post(
+        "/api/campaigns/campaign-1/manifest/revise",
+        headers={**bearer(access), "Idempotency-Key": "oversized-revise"},
+        json={
+            "workspace_id": "workspace-a",
+            "expected_version": before.version,
+            "reason": "Oversized revision",
+            "manifest": oversized_manifest,
+        },
+    )
+
+    after = repository.get_campaign("workspace-a", "campaign-1")
+    assert response.status_code == 422
+    assert response.json()["detail"] == {
+        "code": "campaign_budget_resource_limit_exceeded",
+        "message": "Campaign bounded-resource policy rejected the operation.",
+    }
+    assert after.version == before.version
+    assert after.manifest_revision == before.manifest_revision
+    assert repository.list_events("workspace-a", "campaign-1") == before_events
 
 
 def test_control_room_snapshot_etag_is_principal_specific_and_supports_304(tmp_path, monkeypatch):

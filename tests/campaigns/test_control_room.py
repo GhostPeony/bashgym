@@ -68,6 +68,40 @@ def repository(tmp_path) -> TracedCampaignRepository:
     return value
 
 
+def ready_snapshot(durable):
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
+    return build_control_room_snapshot(
+        durable,
+        ControllerObservationV1(
+            controller_observation_version=1,
+            state="online",
+            observed_at=now,
+            heartbeat_age_seconds=0,
+            lease_expires_at=now + timedelta(seconds=10),
+            controller_instance_id="resident-worker",
+            safe_guidance=None,
+        ),
+        ReadinessSummaryV1(
+            materializable=True,
+            launch_ready=True,
+            checked_at=now,
+            activation_receipt_digest=None,
+            doctor_receipt_digest=None,
+            blocking_codes=(),
+        ),
+        principal=ActorPrincipal(
+            actor_id="reader",
+            autonomy_profile=AutonomyProfile.HERMES_BOUNDED,
+            credential_id="reader-credential",
+            credential_kind=CredentialKind.ACCESS,
+            workspace_ids=("workspace-a",),
+            capabilities=frozenset({Capability.CAMPAIGN_READ}),
+            expires_at=now + timedelta(hours=1),
+        ),
+        snapshot_at=now,
+    )
+
+
 def test_snapshot_reads_campaign_cursor_and_summaries_in_one_transaction(repository):
     with sqlite3.connect(repository.db_path) as connection:
         connection.execute(
@@ -420,6 +454,15 @@ def test_snapshot_decision_phase_exposes_shared_promotion_blockers(repository):
     assert decision.primary_blocker is not None
     assert decision.primary_blocker.code == "campaign_development_gate_not_passed"
     assert "campaign_protected_gate_not_passed" in decision.primary_blocker.secondary_codes
+    assert snapshot.decision_surface.attention_owner == "bashgym"
+    assert snapshot.decision_surface.blocker is not None
+    assert (
+        snapshot.decision_surface.blocker.code
+        == "campaign_development_gate_not_passed"
+    )
+    assert "campaign_protected_gate_not_passed" in (
+        snapshot.decision_surface.blocker.secondary_codes
+    )
 
     lifecycle_blocked = replace(
         durable,
@@ -526,7 +569,10 @@ def test_override_champion_reports_only_candidate_keyed_actual_evidence(reposito
 
 def test_durable_champion_claim_is_correlated_to_its_candidate_and_decision(repository):
     candidate_digest = "c" * 64
-    target_key = campaign().target_model.target_contract_key
+    target_model = campaign().target_model.model_copy(
+        update={"target_contract_key": "registry:provider:model-v1"}
+    )
+    target_key = target_model.target_contract_key
     champion_ref = f"champion:{target_key}:1:{candidate_digest}"
     now_text = "2026-07-16T12:00:00+00:00"
     with sqlite3.connect(repository.db_path) as connection:
@@ -573,11 +619,12 @@ def test_durable_champion_claim_is_correlated_to_its_candidate_and_decision(repo
         )
         connection.execute(
             """
-            UPDATE campaigns SET status = 'completed', champion_ref = ?,
-                best_development_candidate_ref = ?, updated_at = ?
+            UPDATE campaigns SET status = 'completed', target_model_json = ?,
+                champion_ref = ?, best_development_candidate_ref = ?, updated_at = ?
             WHERE workspace_id = ? AND campaign_id = ?
             """,
             (
+                target_model.model_dump_json(),
                 champion_ref,
                 candidate_digest,
                 now_text,
@@ -594,6 +641,100 @@ def test_durable_champion_claim_is_correlated_to_its_candidate_and_decision(repo
         comparison_verdict="failed",
         override=True,
     )
+    assert "campaign_projection_champion_ref_malformed" not in (
+        durable.projection_invariant_codes
+    )
+    snapshot = ready_snapshot(durable)
+    assert snapshot.champion is not None
+    assert snapshot.champion.comparison_verdict == "failed"
+
+
+@pytest.mark.parametrize(
+    ("decision_json", "expected_invariant"),
+    (
+        (None, "campaign_projection_champion_decision_missing"),
+        (
+            json.dumps({"candidate_digest": "d" * 64, "verdict": "passed"}),
+            "campaign_projection_champion_decision_mismatch",
+        ),
+        ("not-json", "campaign_projection_champion_decision_mismatch"),
+    ),
+)
+def test_broken_champion_decision_fails_closed_without_trusted_provenance(
+    repository, decision_json, expected_invariant
+):
+    candidate_digest = "c" * 64
+    target_key = campaign().target_model.target_contract_key
+    champion_ref = f"champion:{target_key}:1:{candidate_digest}"
+    now_text = "2026-07-16T12:00:00+00:00"
+    with sqlite3.connect(repository.db_path) as connection:
+        if decision_json is not None:
+            connection.execute(
+                """
+                INSERT INTO campaign_gate_decisions(
+                    workspace_id, campaign_id, decision_id,
+                    decision_json, created_at
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    "workspace-a",
+                    "campaign-1",
+                    "comparison-missing",
+                    decision_json,
+                    now_text,
+                ),
+            )
+        connection.execute(
+            """
+            INSERT INTO campaign_champions(
+                workspace_id, target_contract_key, revision, champion_json, created_at
+            ) VALUES (?, ?, 1, ?, ?)
+            """,
+            (
+                "workspace-a",
+                target_key,
+                json.dumps(
+                    {
+                        "schema_version": "campaign_champion.v1",
+                        "campaign_id": "campaign-1",
+                        "candidate_digest": candidate_digest,
+                        "development_decision_id": "comparison-missing",
+                        "protected_gate_passed": False,
+                        "override": True,
+                        "override_reason": "Approved exception",
+                        "actor_id": "operator",
+                        "created_at": now_text,
+                    }
+                ),
+                now_text,
+            ),
+        )
+        connection.execute(
+            """
+            UPDATE campaigns SET status = 'completed', champion_ref = ?,
+                best_development_candidate_ref = ?, updated_at = ?
+            WHERE workspace_id = ? AND campaign_id = ?
+            """,
+            (
+                champion_ref,
+                candidate_digest,
+                now_text,
+                "workspace-a",
+                "campaign-1",
+            ),
+        )
+
+    durable = repository.read_control_room_projection("workspace-a", "campaign-1")
+    snapshot = ready_snapshot(durable)
+
+    assert durable.champion_provenance is None
+    assert expected_invariant in durable.projection_invariant_codes
+    assert snapshot.champion is not None
+    assert snapshot.champion.comparison_verdict is None
+    assert snapshot.champion.source_attempt_ids == ()
+    assert snapshot.champion.source_artifact_ids == ()
+    assert snapshot.decision_surface.blocker is not None
+    assert expected_invariant in snapshot.decision_surface.blocker.secondary_codes
 
 
 def test_valid_running_stage_plan_projects_active_work_without_invariant_failure(repository):
@@ -760,6 +901,65 @@ def test_candidate_projection_never_copies_unproven_outcome_references(repositor
     assert "attempt-from-unrelated-result" not in rendered
     assert "private_candidate_mapping" not in rendered
     assert "evaluation-for-unrelated-candidate" not in rendered
+
+
+def test_candidate_gate_mismatch_never_displays_the_other_candidate_verdict(repository):
+    durable = repository.read_control_room_projection("workspace-a", "campaign-1")
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
+    candidate_digest = "c" * 64
+    durable = replace(
+        durable,
+        campaign=durable.campaign.model_copy(
+            update={
+                "status": "active",
+                "best_development_candidate_ref": candidate_digest,
+            }
+        ),
+        latest_gate={
+            "decision_id": "comparison-other",
+            "verdict": "passed",
+            "candidate_digest": "d" * 64,
+        },
+        projection_invariant_codes=(
+            "campaign_projection_candidate_identity_mismatch",
+        ),
+    )
+    snapshot = build_control_room_snapshot(
+        durable,
+        ControllerObservationV1(
+            controller_observation_version=1,
+            state="online",
+            observed_at=now,
+            heartbeat_age_seconds=0,
+            lease_expires_at=now + timedelta(seconds=10),
+            controller_instance_id="resident-worker",
+            safe_guidance=None,
+        ),
+        ReadinessSummaryV1(
+            materializable=True,
+            launch_ready=True,
+            checked_at=now,
+            activation_receipt_digest=None,
+            doctor_receipt_digest=None,
+            blocking_codes=(),
+        ),
+        principal=ActorPrincipal(
+            actor_id="reader",
+            autonomy_profile=AutonomyProfile.HERMES_BOUNDED,
+            credential_id="reader-credential",
+            credential_kind=CredentialKind.ACCESS,
+            workspace_ids=("workspace-a",),
+            capabilities=frozenset({Capability.CAMPAIGN_READ}),
+            expires_at=now + timedelta(hours=1),
+        ),
+        snapshot_at=now,
+    )
+
+    assert snapshot.candidate is not None
+    assert snapshot.candidate.candidate_ref == candidate_digest
+    assert snapshot.candidate.comparison_verdict is None
+    assert snapshot.candidate.gate_state == "blocked"
+    assert snapshot.decision_surface.promotion_eligible is False
 
 
 def test_durable_read_correlates_candidate_provenance_to_owned_rows(repository):
@@ -1046,12 +1246,105 @@ def test_oversized_legacy_projection_is_bounded_and_fails_closed(repository):
     assert len(snapshot.candidate.source_attempt_ids) == 100
     assert len(snapshot.candidate.source_artifact_ids) == 100
     assert snapshot.decision_surface.blocker.code == "campaign_projection_invariant_failed"
+    assert snapshot.decision_surface.blocker.secondary_codes[:2] == (
+        "campaign_projection_budget_resources_exceeded",
+        "campaign_projection_candidate_references_exceeded",
+    )
+    assert snapshot.decision_surface.attention_owner == "bashgym"
+    assert snapshot.decision_surface.promotion_eligible is False
     assert snapshot.decision_surface.next_actions == ()
+    decision = next(phase for phase in snapshot.journey if phase.phase_id == "decision")
+    assert decision.state == "blocked"
+    assert decision.attention_owner == "bashgym"
+    assert decision.primary_blocker == snapshot.decision_surface.blocker
     assert set(snapshot.decision_surface.recovery_actions) <= {
         "inspect",
         "reconcile_controller",
         "reconcile_attempt",
     }
+
+
+@pytest.mark.parametrize(
+    "invariant_code",
+    (
+        "campaign_projection_budget_resources_exceeded",
+        "campaign_projection_candidate_artifacts_malformed",
+        "campaign_projection_candidate_attempts_malformed",
+        "campaign_projection_candidate_identity_mismatch",
+        "campaign_projection_candidate_outcome_ambiguous",
+        "campaign_projection_candidate_owned_rows_exceeded",
+        "campaign_projection_candidate_references_exceeded",
+        "campaign_projection_gate_decision_malformed",
+        "campaign_projection_champion_claim_mismatch",
+        "campaign_projection_champion_claim_missing",
+        "campaign_projection_champion_decision_mismatch",
+        "campaign_projection_champion_decision_missing",
+        "campaign_projection_champion_ref_malformed",
+    ),
+)
+def test_each_projection_invariant_blocks_a_passed_promotion_gate(
+    repository, invariant_code
+):
+    durable = repository.read_control_room_projection("workspace-a", "campaign-1")
+    now = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
+    candidate_digest = "c" * 64
+    durable = replace(
+        durable,
+        campaign=durable.campaign.model_copy(
+            update={
+                "status": "active",
+                "best_development_candidate_ref": candidate_digest,
+            }
+        ),
+        latest_gate={
+            "decision_id": "comparison-1",
+            "verdict": "passed",
+            "candidate_digest": candidate_digest,
+        },
+        protected_gate_passed=True,
+        projection_invariant_codes=(invariant_code,),
+    )
+    snapshot = build_control_room_snapshot(
+        durable,
+        ControllerObservationV1(
+            controller_observation_version=1,
+            state="online",
+            observed_at=now,
+            heartbeat_age_seconds=0,
+            lease_expires_at=now + timedelta(seconds=10),
+            controller_instance_id="resident-worker",
+            safe_guidance=None,
+        ),
+        ReadinessSummaryV1(
+            materializable=True,
+            launch_ready=True,
+            checked_at=now,
+            activation_receipt_digest=None,
+            doctor_receipt_digest=None,
+            blocking_codes=(),
+        ),
+        principal=ActorPrincipal(
+            actor_id="reader",
+            autonomy_profile=AutonomyProfile.HERMES_BOUNDED,
+            credential_id="reader-credential",
+            credential_kind=CredentialKind.ACCESS,
+            workspace_ids=("workspace-a",),
+            capabilities=frozenset({Capability.CAMPAIGN_READ}),
+            expires_at=now + timedelta(hours=1),
+        ),
+        snapshot_at=now,
+    )
+
+    decision = next(phase for phase in snapshot.journey if phase.phase_id == "decision")
+    assert snapshot.decision_surface.promotion_eligible is False
+    assert snapshot.decision_surface.next_actions == ()
+    assert snapshot.decision_surface.attention_owner == "bashgym"
+    assert snapshot.decision_surface.blocker is not None
+    assert snapshot.decision_surface.blocker.code == "campaign_projection_invariant_failed"
+    assert invariant_code in snapshot.decision_surface.blocker.secondary_codes
+    assert decision.state == "blocked"
+    assert decision.attention_owner == "bashgym"
+    assert decision.primary_blocker == snapshot.decision_surface.blocker
 
 
 def test_new_campaign_rejects_more_budget_resources_than_public_contract(repository):

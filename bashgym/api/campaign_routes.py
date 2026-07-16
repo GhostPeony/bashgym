@@ -57,6 +57,7 @@ from bashgym.campaigns.lineage import (
 from bashgym.campaigns.persistence import (
     BudgetExceededError,
     BudgetInvariantError,
+    CampaignBudgetResourceLimitError,
     IdempotencyConflictError,
     InvalidProposalTransitionError,
     PromotionGateFailedError,
@@ -88,7 +89,7 @@ from bashgym.campaigns.worker_service import (
     read_worker_config,
 )
 from bashgym.config import get_bashgym_dir, get_settings
-from bashgym.ledger.persistence import ExperimentLedgerRepository
+from bashgym.ledger.persistence import ExperimentLedgerRepository, LedgerPersistenceError
 
 campaign_router = APIRouter(prefix="/api/campaigns", tags=["campaigns"])
 campaign_auth_router = APIRouter(prefix="/api/campaign-auth", tags=["campaign-auth"])
@@ -528,18 +529,23 @@ def _control_room_readiness(
     }
     ledger = getattr(request.app.state, "campaign_experiment_ledger", None)
     if not isinstance(ledger, ExperimentLedgerRepository):
-        code = "campaign_readiness_ledger_unavailable"
-        return (
-            ReadinessSummaryV1(
-                materializable=False,
-                launch_ready=False,
-                checked_at=checked_at,
-                activation_receipt_digest=None,
-                doctor_receipt_digest=None,
-                blocking_codes=(code,),
-            ),
-            canonical_hash({**readiness_inputs, "status": code}),
-        )
+        repository = getattr(request.app.state, "campaign_repository", None)
+        try:
+            ledger = ExperimentLedgerRepository.open_existing(repository.db_path)
+        except (AttributeError, LedgerPersistenceError):
+            code = "campaign_readiness_ledger_unavailable"
+            return (
+                ReadinessSummaryV1(
+                    materializable=False,
+                    launch_ready=False,
+                    checked_at=checked_at,
+                    activation_receipt_digest=None,
+                    doctor_receipt_digest=None,
+                    blocking_codes=(code,),
+                ),
+                canonical_hash({**readiness_inputs, "status": code}),
+            )
+        request.app.state.campaign_experiment_ledger = ledger
     report = doctor_autoresearch_template(
         definition,
         workspace_id=durable.campaign.workspace_id,
@@ -731,6 +737,14 @@ def _raise_api(exc: Exception) -> Never:
         raise HTTPException(
             status_code=422,
             detail={"code": exc.code, "message": "Campaign policy gate rejected the operation."},
+        ) from exc
+    if isinstance(exc, CampaignBudgetResourceLimitError):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": exc.code,
+                "message": "Campaign bounded-resource policy rejected the operation.",
+            },
         ) from exc
     if isinstance(exc, ValueError):
         raise HTTPException(

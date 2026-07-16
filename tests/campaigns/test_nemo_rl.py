@@ -142,6 +142,12 @@ def test_contract_rejects_mutable_image_and_controller_override(dataset: Path):
     payload = _nemo_profile(dataset).container_contract(
         StageKind.FULL_TRAINING
     ).model_dump()
+    payload["overrides"] = ("+data.train.data_path=/bashgym/run/data.jsonl",)
+    assert NemoRLContainerContract.model_validate(payload).overrides == payload["overrides"]
+
+    payload = _nemo_profile(dataset).container_contract(
+        StageKind.FULL_TRAINING
+    ).model_dump()
     payload["overrides"] = ("grpo.max_num_steps=100",)
     with pytest.raises(ValidationError):
         NemoRLContainerContract.model_validate(payload)

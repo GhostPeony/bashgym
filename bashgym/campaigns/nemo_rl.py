@@ -24,7 +24,7 @@ from bashgym.campaigns.contracts import (
 _IMAGE_REFERENCE = re.compile(
     r"^[a-z0-9][a-z0-9._:/-]*@sha256:(?P<digest>[0-9a-f]{64})$"
 )
-_OVERRIDE_KEY = re.compile(r"^[A-Za-z][A-Za-z0-9_.]*$")
+_OVERRIDE_KEY = re.compile(r"^\+?[A-Za-z][A-Za-z0-9_.]*$")
 _CONTROLLER_OWNED_OVERRIDES = frozenset(
     {
         "checkpointing.checkpoint_dir",
@@ -80,9 +80,13 @@ def _validate_overrides(value: tuple[str, ...]) -> tuple[str, ...]:
         ):
             raise ValueError("NeMo RL override is invalid")
         key, _raw = override.split("=", 1)
-        if _OVERRIDE_KEY.fullmatch(key) is None or key in _CONTROLLER_OWNED_OVERRIDES:
+        normalized_key = key.removeprefix("+")
+        if (
+            _OVERRIDE_KEY.fullmatch(key) is None
+            or normalized_key in _CONTROLLER_OWNED_OVERRIDES
+        ):
             raise ValueError("NeMo RL override key is invalid or controller-owned")
-        keys.append(key)
+        keys.append(normalized_key)
     if len(set(keys)) != len(keys) or tuple(sorted(value)) != value:
         raise ValueError("NeMo RL overrides must be sorted and unique by key")
     return value

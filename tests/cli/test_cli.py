@@ -900,6 +900,181 @@ def test_campaign_setup_autoresearch_installs_explicit_binding_without_credentia
     assert (install_dir / "autoresearch-installed-v1.json").is_file()
 
 
+def test_campaign_inspect_model_artifact_reports_secret_free_training_plan(tmp_path, capsys):
+    artifact_dir = tmp_path / "operator-selected-snapshot"
+    artifact_dir.mkdir()
+    (artifact_dir / "config.json").write_text(
+        json.dumps(
+            {
+                "architectures": ["Gemma3ForCausalLM"],
+                "model_type": "gemma3",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (artifact_dir / "model.safetensors").write_bytes(b"local-test-weights")
+    revision = "c" * 40
+
+    assert (
+        main(
+            [
+                "campaign",
+                "inspect-model-artifact",
+                "--artifact-dir",
+                str(artifact_dir),
+                "--model-id",
+                "example/modern-open-model",
+                "--model-revision",
+                revision,
+                "--json",
+            ]
+        )
+        == 0
+    )
+
+    raw = capsys.readouterr().out
+    payload = json.loads(raw)
+    plan = payload["model_onboarding_plan"]
+    assert payload["ok"] is True
+    assert plan["model_ref"] == f"hf://example/modern-open-model@{revision}"
+    assert plan["task"] == "causal_lm"
+    assert plan["artifact_role"] == "trainable_base"
+    assert plan["ready_for_binding"] is True
+    assert str(artifact_dir) not in raw
+
+
+def test_campaign_setup_autoresearch_can_bind_inspected_trainable_artifact(tmp_path, capsys):
+    artifact_dir = tmp_path / "selected-model"
+    artifact_dir.mkdir()
+    (artifact_dir / "config.json").write_text(
+        json.dumps(
+            {
+                "architectures": ["Gemma3ForCausalLM"],
+                "model_type": "gemma3",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (artifact_dir / "model.safetensors").write_bytes(b"local-test-weights")
+    install_dir = tmp_path / "autoresearch-templates"
+    revision = "d" * 40
+
+    assert (
+        main(
+            [
+                "campaign",
+                "setup-autoresearch",
+                "--template",
+                "autoresearch-inspected-v1",
+                "--objective",
+                "Improve a fixed held-out metric with one controlled change.",
+                "--model-ref",
+                f"hf://example/modern-open-model@{revision}",
+                "--model-artifact-dir",
+                str(artifact_dir),
+                "--target-contract",
+                "modern-open-model-v1",
+                "--task",
+                "causal_lm",
+                "--dataset-version",
+                "dataset-version-1",
+                "--compute-profile",
+                "private-training-1",
+                "--source-repository-profile",
+                "bashgym-source-1",
+                "--project",
+                "project-1",
+                "--evaluation-suite",
+                "evaluation-suite-1",
+                "--primary-metric",
+                "heldout_pass_at_1",
+                "--metric-direction",
+                "maximize",
+                "--budget-unit",
+                "gpu_hours",
+                "--budget-limit",
+                "4",
+                "--max-attempts",
+                "4",
+                "--install-dir",
+                str(install_dir),
+                "--json",
+            ]
+        )
+        == 0
+    )
+
+    raw = capsys.readouterr().out
+    payload = json.loads(raw)
+    assert payload["model_onboarding_plan"]["ready_for_binding"] is True
+    assert payload["binding_plan"]["model_ref"] == f"hf://example/modern-open-model@{revision}"
+    assert str(artifact_dir) not in raw
+    assert (install_dir / "autoresearch-inspected-v1.json").is_file()
+
+
+def test_campaign_setup_autoresearch_rejects_inspected_task_mismatch(tmp_path, capsys):
+    artifact_dir = tmp_path / "selected-model"
+    artifact_dir.mkdir()
+    (artifact_dir / "config.json").write_text(
+        json.dumps(
+            {
+                "architectures": ["Gemma3ForCausalLM"],
+                "model_type": "gemma3",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (artifact_dir / "model.safetensors").write_bytes(b"local-test-weights")
+    install_dir = tmp_path / "autoresearch-templates"
+    revision = "e" * 40
+
+    exit_code = main(
+        [
+            "campaign",
+            "setup-autoresearch",
+            "--template",
+            "autoresearch-mismatch-v1",
+            "--objective",
+            "Improve a fixed metric.",
+            "--model-ref",
+            f"hf://example/modern-open-model@{revision}",
+            "--model-artifact-dir",
+            str(artifact_dir),
+            "--target-contract",
+            "modern-open-model-v1",
+            "--task",
+            "vision_language",
+            "--dataset-version",
+            "dataset-version-1",
+            "--compute-profile",
+            "private-training-1",
+            "--source-repository-profile",
+            "bashgym-source-1",
+            "--project",
+            "project-1",
+            "--evaluation-suite",
+            "evaluation-suite-1",
+            "--primary-metric",
+            "heldout_pass_at_1",
+            "--metric-direction",
+            "maximize",
+            "--budget-unit",
+            "gpu_hours",
+            "--budget-limit",
+            "4",
+            "--max-attempts",
+            "4",
+            "--install-dir",
+            str(install_dir),
+            "--json",
+        ]
+    )
+
+    assert exit_code != 0
+    assert json.loads(capsys.readouterr().out)["error"]["code"] == "campaign_cli_invalid"
+    assert not install_dir.exists()
+
+
 def test_campaign_code_lineage_cli_routes_prepare_and_capture(monkeypatch, capsys):
     class Client:
         def __init__(self):

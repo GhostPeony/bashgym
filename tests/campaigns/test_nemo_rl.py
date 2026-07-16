@@ -256,6 +256,8 @@ def test_nemo_gym_profile_uses_exact_entrypoint_bundle_and_rollout_settings(
     for stage in revised.stages:
         assert gym.bundle_archive_path in stage.input_files
         assert "logs" in stage.output_paths
+        assert "nemo_gym_bundle_manifest.json" in stage.output_paths
+        assert "nemo_gym_environment_contract.json" in stage.output_paths
 
 
 def test_nemo_gym_binding_rejects_generic_grpo_entrypoint(dataset: Path, tmp_path: Path):

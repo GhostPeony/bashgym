@@ -52,6 +52,13 @@ from bashgym.gym.environment import (
     Observation,
 )
 from bashgym.gym.environment_recipe_search_space import EnvironmentRecipeSearchSpace
+from bashgym.gym.gdpo_adapter import (
+    GDPOBindingReceipt,
+    GDPOComponent,
+    NamedRewardGDPOAdapter,
+    NemoGDPOBatch,
+    NemoGDPOConfig,
+)
 from bashgym.gym.policy_optimization import (
     ClippedPolicyObjective,
     GDPOAdvantageResult,
@@ -156,6 +163,12 @@ __all__ = [
     "BatchGymEnv",
     "DataRecipeSearchSpace",
     "EnvironmentRecipeSearchSpace",
+    # Named-reward GDPO adapter
+    "GDPOBindingReceipt",
+    "GDPOComponent",
+    "NamedRewardGDPOAdapter",
+    "NemoGDPOBatch",
+    "NemoGDPOConfig",
     # Provider-neutral policy optimization
     "ClippedPolicyObjective",
     "GDPOAdvantageResult",

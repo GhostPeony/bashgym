@@ -34,6 +34,13 @@ from bashgym.campaigns.nemo_gym_evidence import (
     NEMO_GYM_CAMPAIGN_EVIDENCE_SCHEMA,
     load_nemo_gym_campaign_evidence,
 )
+from bashgym.campaigns.nemo_gym_ingestion import (
+    NEMO_GYM_BUNDLE_MANIFEST_FILENAME,
+    NEMO_GYM_ENVIRONMENT_CONTRACT_FILENAME,
+    NEMO_GYM_REFIT_RECEIPT_FILENAME,
+    NEMO_GYM_TRAJECTORIES_FILENAME,
+    convert_nemo_gym_outputs,
+)
 from bashgym.campaigns.remote import RemoteObservation, RemoteRunIdentity
 
 
@@ -158,6 +165,31 @@ class RemoteOutputSealer:
         evidence_path = temporary / NEMO_GYM_CAMPAIGN_EVIDENCE_FILENAME
         if evidence_path.exists():
             load_nemo_gym_campaign_evidence(evidence_path, expected_attempt=attempt)
+        else:
+            companions = {
+                name: tuple(
+                    path
+                    for path in temporary.rglob(name)
+                    if path.is_file() and not path.is_symlink()
+                )
+                for name in (
+                    NEMO_GYM_BUNDLE_MANIFEST_FILENAME,
+                    NEMO_GYM_ENVIRONMENT_CONTRACT_FILENAME,
+                    NEMO_GYM_TRAJECTORIES_FILENAME,
+                    NEMO_GYM_REFIT_RECEIPT_FILENAME,
+                )
+            }
+            if any(companions.values()):
+                if any(len(paths) != 1 for paths in companions.values()):
+                    raise ValueError("NeMo Gym raw evidence companions are incomplete or ambiguous")
+                convert_nemo_gym_outputs(
+                    attempt,
+                    bundle_manifest=companions[NEMO_GYM_BUNDLE_MANIFEST_FILENAME][0],
+                    environment_contract=companions[NEMO_GYM_ENVIRONMENT_CONTRACT_FILENAME][0],
+                    trajectories=companions[NEMO_GYM_TRAJECTORIES_FILENAME][0],
+                    refit_receipt_path=companions[NEMO_GYM_REFIT_RECEIPT_FILENAME][0],
+                    output_directory=temporary,
+                )
         schemas = {
             path.relative_to(temporary).as_posix(): self._schema_for(path, temporary)
             for path in temporary.rglob("*")

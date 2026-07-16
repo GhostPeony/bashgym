@@ -2150,6 +2150,9 @@ def cmd_manifest(args: argparse.Namespace) -> int:
             "workspace emit": "Emit a semantic canvas intent for dynamic node creation.",
             "campaign list": "List capability-scoped experiment campaigns.",
             "campaign templates": "List source-managed campaign templates.",
+            "campaign inspect-model-artifact": (
+                "Inspect one operator-selected local model snapshot for training readiness."
+            ),
             "campaign status": "Read one campaign aggregate and its next valid action.",
             "campaign autoresearch": "Read durable AutoResearch state and decisions.",
             "campaign manifest": "Read one immutable campaign manifest revision.",
@@ -3175,6 +3178,26 @@ def cmd_campaign_doctor(args: argparse.Namespace) -> int:
     )
 
 
+def cmd_campaign_inspect_model_artifact(args: argparse.Namespace) -> int:
+    """Inspect one explicit local model snapshot without cache discovery or downloads."""
+
+    from bashgym.campaigns.model_onboarding import inspect_model_artifact
+
+    plan = inspect_model_artifact(
+        args.artifact_dir,
+        model_id=args.model_id,
+        model_revision=args.model_revision,
+    )
+    return _emit(
+        {
+            "title": "BashGym Model Artifact Inspection",
+            "ok": plan.ready_for_binding,
+            "model_onboarding_plan": plan.model_dump(mode="json"),
+        },
+        as_json=bool(args.json),
+    )
+
+
 def cmd_campaign_setup_autoresearch(args: argparse.Namespace) -> int:
     """Build and install one explicit quality-campaign definition locally."""
 
@@ -3192,6 +3215,27 @@ def cmd_campaign_setup_autoresearch(args: argparse.Namespace) -> int:
             raise ValueError("deadline must be an ISO-8601 datetime") from exc
         if deadline.tzinfo is None:
             raise ValueError("deadline must include a timezone")
+    model_onboarding_plan = None
+    if args.model_artifact_dir:
+        from bashgym.campaigns.model_onboarding import inspect_model_artifact
+
+        if not args.model_ref.startswith("hf://") or "@" not in args.model_ref:
+            raise ValueError(
+                "--model-artifact-dir requires --model-ref in hf://organization/repository@revision format"
+            )
+        model_id, model_revision = args.model_ref.removeprefix("hf://").rsplit("@", 1)
+        model_onboarding_plan = inspect_model_artifact(
+            args.model_artifact_dir,
+            model_id=model_id,
+            model_revision=model_revision,
+        )
+        if model_onboarding_plan.model_ref != args.model_ref:
+            raise ValueError("inspected artifact identity does not match --model-ref")
+        if model_onboarding_plan.task != args.task:
+            raise ValueError("inspected artifact task does not match --task")
+        if not model_onboarding_plan.ready_for_binding:
+            raise ValueError("inspected artifact is not a training-ready base model")
+
     definition = build_quality_autoresearch_definition(
         template_id=args.template_id,
         template_revision=args.template_revision,
@@ -3237,6 +3281,8 @@ def cmd_campaign_setup_autoresearch(args: argparse.Namespace) -> int:
             }
         ],
     }
+    if model_onboarding_plan is not None:
+        payload["model_onboarding_plan"] = model_onboarding_plan.model_dump(mode="json")
     return _emit(payload, as_json=bool(args.json))
 
 
@@ -4140,6 +4186,13 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="Trainable base URI plus immutable revision; no model is selected by default",
     )
+    campaign_setup.add_argument(
+        "--model-artifact-dir",
+        help=(
+            "Explicit local model snapshot to inspect before installation; "
+            "never scans caches or downloads models"
+        ),
+    )
     campaign_setup.add_argument("--target-contract", dest="target_contract_key", required=True)
     campaign_setup.add_argument("--task", required=True)
     campaign_setup.add_argument("--dataset-version", dest="dataset_version_id", required=True)
@@ -4173,6 +4226,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="Replace a different installed definition with the same template ID",
     )
     campaign_setup.set_defaults(func=cmd_campaign_setup_autoresearch)
+
+    campaign_inspect_model = campaign_sub.add_parser(
+        "inspect-model-artifact",
+        help="Inspect one explicit local model snapshot for training readiness",
+        parents=[json_parent],
+    )
+    campaign_inspect_model.add_argument(
+        "--artifact-dir",
+        required=True,
+        help="Operator-selected local model snapshot; no caches are searched",
+    )
+    campaign_inspect_model.add_argument(
+        "--model-id",
+        required=True,
+        help="Exact organization/repository identity expected for this snapshot",
+    )
+    campaign_inspect_model.add_argument(
+        "--model-revision",
+        required=True,
+        help="Immutable 40- or 64-character content revision",
+    )
+    campaign_inspect_model.set_defaults(func=cmd_campaign_inspect_model_artifact)
 
     nemo_setup = campaign_sub.add_parser(
         "setup-nemo-rl",

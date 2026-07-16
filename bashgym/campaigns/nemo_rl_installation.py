@@ -20,6 +20,15 @@ _OUTPUT_PATHS = (
     "training_manifest.json",
     "training_metrics.jsonl",
 )
+_GYM_OUTPUT_PATHS = tuple(
+    sorted(
+        (
+            *_OUTPUT_PATHS,
+            "nemo_gym_bundle_manifest.json",
+            "nemo_gym_environment_contract.json",
+        )
+    )
+)
 
 
 def _runner_binding(
@@ -90,7 +99,9 @@ def bind_nemo_rl_profile(
                 input_files=tuple(input_files),
                 input_sha256=input_sha256,
                 script_args=("--contract-json", contract.model_dump_json()),
-                output_paths=_OUTPUT_PATHS,
+                output_paths=(
+                    _GYM_OUTPUT_PATHS if nemo_profile.nemo_gym is not None else _OUTPUT_PATHS
+                ),
                 capacity_policy=configured.capacity_policy,
                 budget_unit=configured.budget_unit,
                 budget_reservation=configured.budget_reservation,

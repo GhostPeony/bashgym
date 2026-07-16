@@ -17,6 +17,10 @@ from pathlib import Path
 from typing import IO, Any
 
 from bashgym.campaigns.contracts import canonical_hash
+from bashgym.campaigns.nemo_gym_ingestion import (
+    NEMO_GYM_BUNDLE_MANIFEST_FILENAME,
+    NEMO_GYM_ENVIRONMENT_CONTRACT_FILENAME,
+)
 from bashgym.campaigns.nemo_rl import NemoRLContainerContract, sha256_file
 from bashgym.environments.nemo_gym import (
     extract_nemo_gym_bundle_archive,
@@ -256,10 +260,20 @@ def run_contract(contract: NemoRLContainerContract, run_directory: Path) -> int:
     (run_directory / "logs").mkdir(exist_ok=True)
     model_mount = validate_runtime_identity(contract, run_directory)
     if contract.nemo_gym is not None:
+        bundle_root = run_directory / "nemo_gym_bundle"
         extract_nemo_gym_bundle_archive(
             run_directory / contract.nemo_gym.bundle_archive_file,
-            run_directory / "nemo_gym_bundle",
+            bundle_root,
         )
+        for source_name, output_name in (
+            ("bundle_manifest.json", NEMO_GYM_BUNDLE_MANIFEST_FILENAME),
+            ("environment_contract.json", NEMO_GYM_ENVIRONMENT_CONTRACT_FILENAME),
+        ):
+            source = bundle_root / source_name
+            destination = run_directory / output_name
+            if destination.exists() or destination.is_symlink():
+                raise RuntimeError("nemo_gym_evidence_companion_already_exists")
+            destination.write_bytes(source.read_bytes())
     identity = canonical_hash(contract.model_dump(mode="json"))[:20]
     container_name = f"bashgym-nemo-{identity}-{os.getpid()}"
     argv = docker_argv(

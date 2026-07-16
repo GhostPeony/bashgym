@@ -18,6 +18,12 @@ from bashgym.campaigns.nemo_gym_evidence import (
     load_nemo_gym_campaign_evidence,
     write_nemo_gym_campaign_evidence,
 )
+from bashgym.campaigns.nemo_gym_ingestion import (
+    NEMO_GYM_BUNDLE_MANIFEST_FILENAME,
+    NEMO_GYM_ENVIRONMENT_CONTRACT_FILENAME,
+    NEMO_GYM_REFIT_RECEIPT_FILENAME,
+    NEMO_GYM_TRAJECTORIES_FILENAME,
+)
 from bashgym.campaigns.remote import RemoteObservation, RemoteRunIdentity, RemoteRunState
 from bashgym.environments.nemo_gym import export_star_count_nemo_gym_bundle
 from bashgym.environments.star_count import (
@@ -203,3 +209,53 @@ def test_remote_sealer_validates_contract_before_registering_schema(tmp_path: Pa
 
     assert sealed.is_dir()
     assert manifest.outputs[0].schema_name == NEMO_GYM_CAMPAIGN_EVIDENCE_SCHEMA
+
+
+def test_remote_sealer_converts_complete_raw_gym_outputs_before_sealing(tmp_path: Path):
+    attempt = _attempt()
+    bundle = _bundle(tmp_path)
+    artifact_root = tmp_path / "artifacts"
+    temporary = artifact_root / ".tmp" / "download"
+    logs = temporary / "logs"
+    logs.mkdir(parents=True)
+    (temporary / NEMO_GYM_BUNDLE_MANIFEST_FILENAME).write_text(json.dumps(bundle), encoding="utf-8")
+    (temporary / NEMO_GYM_ENVIRONMENT_CONTRACT_FILENAME).write_text(
+        json.dumps(star_count_environment_spec().to_dict()), encoding="utf-8"
+    )
+    rollout = _rollout("session-a", 0)
+    (logs / NEMO_GYM_TRAJECTORIES_FILENAME).write_text(
+        json.dumps({"trajectory": rollout}) + "\n", encoding="utf-8"
+    )
+    (logs / NEMO_GYM_REFIT_RECEIPT_FILENAME).write_text(
+        json.dumps(rollout["refit"]), encoding="utf-8"
+    )
+    identity = RemoteRunIdentity(
+        compute_profile_id="private-compute-a",
+        run_id="run-a",
+        remote_run_directory="/private/run-a",
+        remote_pid=100,
+        process_group_id=100,
+        process_start_ticks=10,
+        boot_id="boot-a",
+        command_hash="4" * 64,
+        launch_manifest_sha256="5" * 64,
+        launched_at=NOW,
+    )
+    observation = RemoteObservation(
+        identity=identity,
+        state=RemoteRunState.COMPLETED,
+        observed_at=NOW + timedelta(seconds=5),
+        exit_code=0,
+        safe_reason="completed",
+    )
+    sealer = RemoteOutputSealer(
+        artifact_root,
+        ArtifactSealer(b"s" * 32, key_version="nemo-gym-evidence-test-v1"),
+    )
+
+    sealed, manifest = sealer.seal_completed(attempt, identity, observation, temporary)
+
+    evidence_path = sealed / NEMO_GYM_CAMPAIGN_EVIDENCE_FILENAME
+    assert load_nemo_gym_campaign_evidence(evidence_path, expected_attempt=attempt)
+    schemas = {output.path: output.schema_name for output in manifest.outputs}
+    assert schemas[NEMO_GYM_CAMPAIGN_EVIDENCE_FILENAME] == NEMO_GYM_CAMPAIGN_EVIDENCE_SCHEMA

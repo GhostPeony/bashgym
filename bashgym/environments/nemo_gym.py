@@ -300,6 +300,10 @@ def export_star_count_nemo_gym_bundle(
     (config_root / "bashgym_star_count.yaml").write_text(
         _config_text(dataset_license=license_id), encoding="utf-8"
     )
+    (destination / "environment_contract.json").write_text(
+        _canonical_json(environment.to_dict()) + "\n",
+        encoding="utf-8",
+    )
 
     files = []
     for path in sorted(item for item in destination.rglob("*") if item.is_file()):
@@ -393,6 +397,7 @@ def _validated_bundle_members(archive_path: Path) -> tuple[dict[str, bytes], dic
     if set(members) != {"bundle_manifest.json", *expected_paths}:
         raise ValueError("NeMo Gym bundle archive contains unbound files")
     required = {
+        "environment_contract.json",
         (_RESOURCE_ROOT / "app.py").as_posix(),
         (_RESOURCE_ROOT / "configs/bashgym_star_count.yaml").as_posix(),
         (_RESOURCE_ROOT / "data/train.jsonl").as_posix(),
@@ -400,6 +405,17 @@ def _validated_bundle_members(archive_path: Path) -> tuple[dict[str, bytes], dic
     }
     if not required.issubset(members):
         raise ValueError("NeMo Gym bundle archive is missing required runtime files")
+    try:
+        environment_payload = json.loads(members["environment_contract.json"].decode("utf-8"))
+        environment = EnvironmentSpec.from_dict(environment_payload)
+    except (UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise ValueError("NeMo Gym bundle environment contract is invalid") from exc
+    if (
+        environment.id != manifest.get("environment_id")
+        or environment.validation_errors()
+        or _canonical_hash(environment_payload) != manifest.get("environment_digest")
+    ):
+        raise ValueError("NeMo Gym bundle environment contract identity mismatch")
     return members, dict(manifest)
 
 

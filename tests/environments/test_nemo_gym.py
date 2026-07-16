@@ -110,6 +110,9 @@ def test_star_count_bundle_is_pinned_deterministic_and_path_independent(tmp_path
     assert manifest_a["verified"] is False
     assert len(manifest_a["bundle_digest"]) == 64
     assert json.dumps(manifest_a, sort_keys=True).find(str(tmp_path)) == -1
+    assert json.loads((first / "environment_contract.json").read_text(encoding="utf-8")) == (
+        star_count_environment_spec().to_dict()
+    )
 
     relative = Path("resources_servers/bashgym_star_count")
     assert (first / relative / "app.py").read_bytes() == (second / relative / "app.py").read_bytes()
@@ -216,6 +219,7 @@ def test_bundle_archive_is_deterministic_validated_and_safely_extracted(tmp_path
     assert (
         extracted / "resources_servers/bashgym_star_count/configs/bashgym_star_count.yaml"
     ).is_file()
+    assert (extracted / "environment_contract.json").is_file()
 
     damaged = bytearray(first.read_bytes())
     damaged[-8] ^= 0xFF

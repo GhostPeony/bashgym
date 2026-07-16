@@ -80,9 +80,32 @@ A model appearing in a local cache is not enough to activate training. Each new
 trainable base must resolve an immutable model revision, compatible installed
 trainer recipe, approved data/evaluator binding, and compute profile. Inference
 quants and served deployment artifacts cannot silently satisfy that contract.
-The productization goal is to discover and generate these bindings through a
-guided setup, while `campaign doctor` continues to fail closed on missing or
-incompatible material.
+Inspect an operator-selected snapshot without scanning caches or downloading a
+substitute model:
+
+```bash
+bashgym campaign inspect-model-artifact \
+  --artifact-dir /path/to/selected/snapshot \
+  --model-id organization/model \
+  --model-revision <immutable-commit> \
+  --json
+```
+
+The secret-free plan distinguishes a trainable base from an adapter or
+inference quant, hashes the complete selected artifact, and identifies candidate
+standard, Unsloth, and optional NeMo backends. Pass the same directory as
+`--model-artifact-dir` to `campaign setup-autoresearch` to require the inspected
+model identity, task, and training readiness before the installation definition
+is written. `campaign doctor` remains authoritative for installed runtime,
+data, evaluator, credential-material, and compute readiness.
+
+Named multi-reward environments can bind their declared component order and
+weights through `NamedRewardGDPOAdapter`. The adapter emits NeMo's stable
+`reward1`, `reward2`, ... and `total_reward` columns, selects the GDPO advantage
+estimator with per-component normalization, and records deterministic batch,
+configuration, and advantage digests. Its consumed advantages are computed by
+the same dependency-free `gdpo_advantages` reference used in BashGym parity
+tests, so trainer-side component/order/weight drift fails before launch.
 
 ### Optional NeMo Gym environment export
 
@@ -126,26 +149,30 @@ IDs, generation IDs, and generation logprobs to pass through unchanged, unique
 session IDs for concurrent rollouts, exact component totals, and a synchronized
 policy-to-generation refit receipt.
 
-For campaign execution, convert the validated batch into the canonical
-`nemo_gym_campaign_evidence.json` receipt before returning remote outputs:
+For campaign execution, the registered runner returns the exact bundle manifest
+and environment contract alongside runtime logs. The Gym runtime integration
+must also emit `nemo_gym_trajectories.jsonl` and an independently observed
+`nemo_gym_refit_receipt.json`. When all four raw companions are downloaded, the
+remote sealer automatically converts them into the canonical
+`nemo_gym_campaign_evidence.json` receipt:
 
 ```python
-from bashgym.campaigns.nemo_gym_evidence import (
-    build_nemo_gym_campaign_evidence,
-    write_nemo_gym_campaign_evidence,
-)
+from bashgym.campaigns.nemo_gym_ingestion import convert_nemo_gym_outputs
 
-evidence = build_nemo_gym_campaign_evidence(
+convert_nemo_gym_outputs(
     attempt,
-    bundle_manifest=manifest,
-    environment=environment,
-    rollout_payloads=rollout_payloads,
-)
-write_nemo_gym_campaign_evidence(
-    output_directory / "nemo_gym_campaign_evidence.json",
-    evidence,
+    bundle_manifest="nemo_gym_bundle_manifest.json",
+    environment_contract="nemo_gym_environment_contract.json",
+    trajectories="logs/nemo_gym_trajectories.jsonl",
+    refit_receipt_path="logs/nemo_gym_refit_receipt.json",
+    output_directory=output_directory,
 )
 ```
+
+Each trajectory must carry the same full exact refit receipt as the separate
+receipt file. Missing, ambiguous, stale, unsynchronized, or cross-refit output
+is rejected; process completion and checkpoint presence are never interpreted
+as synchronization evidence.
 
 The receipt binds the exact workspace, campaign, study, action, attempt,
 candidate, manifest revision, and claim generation to the bundle and environment
@@ -156,10 +183,6 @@ before assigning the artifact schema. AutoResearch outcome evidence then include
 the sealed artifact ID, while planner snapshots expose only bounded digests,
 counts, mean reward, training step, and policy revision—not raw rollouts or
 artifact paths.
-
-This proves the ingestion contract without claiming a live NeMo refit or model
-quality result. A live refit remains gated on the separate, compatible NeMo
-executor profile.
 
 This is an adapter and evidence boundary, not a claim that a live NeMo RL refit
 has run. The live proof remains gated on a dedicated NeMo executor and an

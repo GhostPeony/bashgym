@@ -81,6 +81,9 @@ The UI follows **Botanical Brutalism** — structural honesty from brutalism (ha
 # All tests
 pytest tests/ -v
 
+# Retained February 2026 multi-agent Orchestrator dashboard only
+pytest tests/orchestrator/ --run-legacy-orchestrator -v
+
 # With coverage
 pytest tests/ --cov=bashgym --cov-report=html
 

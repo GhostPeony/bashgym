@@ -87,7 +87,7 @@ where = ["."]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["."]
+testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
 addopts = "-v --tb=short --timeout=120"
 markers = [

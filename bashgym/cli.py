@@ -4164,7 +4164,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     nemo_setup.add_argument(
         "--model-support-level",
-        choices=("broad_api_compatible", "recipe_reproduced", "optimized"),
+        choices=("unsupported", "broad_api_compatible", "recipe_reproduced", "optimized"),
         required=True,
     )
     nemo_setup.add_argument("--entrypoint", default="examples/run_grpo.py")

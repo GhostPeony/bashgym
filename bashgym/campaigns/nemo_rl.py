@@ -99,6 +99,7 @@ def _validate_model_id(value: str) -> str:
 
 
 class NemoRLModelSupportLevel(str, Enum):
+    UNSUPPORTED = "unsupported"
     BROAD_API_COMPATIBLE = "broad_api_compatible"
     RECIPE_REPRODUCED = "recipe_reproduced"
     OPTIMIZED = "optimized"

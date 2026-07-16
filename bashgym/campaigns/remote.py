@@ -1265,24 +1265,30 @@ class RemoteTrainingAdapter:
         if proven.identity != identity or proven.state != RemoteRunState.FAILED:
             raise RuntimeError("campaign_remote_terminal_evidence_not_ready")
         required = ("training.log", "exit_code", "launch_manifest.json")
-        optional = "training_metrics.jsonl"
+        optional = (
+            "effective_config.json",
+            "training_manifest.json",
+            "training_metrics.jsonl",
+        )
         predicates = []
         for relative in required:
             remote = f"{identity.remote_run_directory}/{relative}"
             quoted = shlex.quote(remote)
             predicates.append(f"test -f {quoted} && test ! -L {quoted}")
-        optional_remote = f"{identity.remote_run_directory}/{optional}"
-        optional_quoted = shlex.quote(optional_remote)
-        check_command = (
-            " && ".join(predicates)
-            + f" && if test -f {optional_quoted} -a ! -L {optional_quoted}; "
-            "then printf present; else printf absent; fi"
+        optional_checks = " ".join(
+            "if test -f {path} -a ! -L {path}; then printf '%s\\n' {name}; fi;".format(
+                path=shlex.quote(f"{identity.remote_run_directory}/{relative}"),
+                name=shlex.quote(relative),
+            )
+            for relative in optional
         )
+        check_command = " && ".join(predicates) + f" && {optional_checks}"
         async with self._session() as session:
             checked = await session.run(check_command, timeout=30)
-            if checked.exit_status != 0 or checked.stdout not in {"present", "absent"}:
+            present = tuple(line for line in checked.stdout.splitlines() if line)
+            if checked.exit_status != 0 or not set(present).issubset(optional):
                 raise RuntimeError("campaign_remote_terminal_evidence_invalid")
-            paths = (*required, optional) if checked.stdout == "present" else required
+            paths = (*required, *(relative for relative in optional if relative in present))
             downloaded: list[Path] = []
             for relative in paths:
                 local_path = local_directory / PurePosixPath(relative)

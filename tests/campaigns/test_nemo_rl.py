@@ -131,6 +131,13 @@ def test_contract_enforces_no_update_and_ten_step_ceiling(dataset: Path):
         NemoRLContainerContract.model_validate(payload)
 
 
+def test_profile_can_record_a_proven_unsupported_model(dataset: Path):
+    payload = _nemo_profile(dataset).model_dump(exclude={"profile_digest"})
+    payload["model_support_level"] = "unsupported"
+    profile = ApprovedNemoRLProfile.model_validate(payload)
+    assert profile.model_support_level is NemoRLModelSupportLevel.UNSUPPORTED
+
+
 def test_contract_rejects_mutable_image_and_controller_override(dataset: Path):
     payload = _nemo_profile(dataset).container_contract(
         StageKind.FULL_TRAINING

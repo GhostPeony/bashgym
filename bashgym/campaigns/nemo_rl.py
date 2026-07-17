@@ -35,6 +35,23 @@ _CONTROLLER_OWNED_OVERRIDES = frozenset(
     }
 )
 
+NEMO_RL_STAGE_OUTPUT_PATHS = (
+    "effective_config.json",
+    "final",
+    "logs",
+    "training_manifest.json",
+    "training_metrics.jsonl",
+)
+NEMO_GYM_STAGE_OUTPUT_PATHS = tuple(
+    sorted(
+        (
+            *NEMO_RL_STAGE_OUTPUT_PATHS,
+            "nemo_gym_bundle_manifest.json",
+            "nemo_gym_environment_contract.json",
+        )
+    )
+)
+
 
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()

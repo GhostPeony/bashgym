@@ -5,7 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from bashgym.campaigns.contracts import StageKind
-from bashgym.campaigns.nemo_rl import ApprovedNemoRLProfile, sha256_file
+from bashgym.campaigns.nemo_rl import (
+    NEMO_GYM_STAGE_OUTPUT_PATHS,
+    NEMO_RL_STAGE_OUTPUT_PATHS,
+    ApprovedNemoRLProfile,
+    sha256_file,
+)
 from bashgym.campaigns.remote import (
     ApprovedCodeLineageExecutionBinding,
     ApprovedRemoteExecutorProfile,
@@ -13,22 +18,6 @@ from bashgym.campaigns.remote import (
 )
 
 _RUNNER_PATH = Path(__file__).with_name("nemo_rl_runner.py").resolve()
-_OUTPUT_PATHS = (
-    "effective_config.json",
-    "final",
-    "logs",
-    "training_manifest.json",
-    "training_metrics.jsonl",
-)
-_GYM_OUTPUT_PATHS = tuple(
-    sorted(
-        (
-            *_OUTPUT_PATHS,
-            "nemo_gym_bundle_manifest.json",
-            "nemo_gym_environment_contract.json",
-        )
-    )
-)
 
 
 def _runner_binding(
@@ -100,7 +89,9 @@ def bind_nemo_rl_profile(
                 input_sha256=input_sha256,
                 script_args=("--contract-json", contract.model_dump_json()),
                 output_paths=(
-                    _GYM_OUTPUT_PATHS if nemo_profile.nemo_gym is not None else _OUTPUT_PATHS
+                    NEMO_GYM_STAGE_OUTPUT_PATHS
+                    if nemo_profile.nemo_gym is not None
+                    else NEMO_RL_STAGE_OUTPUT_PATHS
                 ),
                 capacity_policy=configured.capacity_policy,
                 budget_unit=configured.budget_unit,

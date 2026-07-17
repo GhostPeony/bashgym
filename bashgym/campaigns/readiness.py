@@ -16,6 +16,7 @@ from bashgym.campaigns.lineage import (
     GitHypothesisLineageManager,
     GitLineageError,
 )
+from bashgym.campaigns.nemo_rl import NEMO_GYM_STAGE_OUTPUT_PATHS, NEMO_RL_STAGE_OUTPUT_PATHS
 from bashgym.campaigns.persistence import RecordNotFoundError
 from bashgym.campaigns.remote import ApprovedRemoteExecutorProfile
 from bashgym.campaigns.worker_service import ControllerStatusProjection
@@ -301,11 +302,9 @@ def doctor_autoresearch_template(
                         all(
                             stage.output_paths
                             == (
-                                "effective_config.json",
-                                "final",
-                                "logs",
-                                "training_manifest.json",
-                                "training_metrics.jsonl",
+                                NEMO_GYM_STAGE_OUTPUT_PATHS
+                                if nemo.nemo_gym is not None
+                                else NEMO_RL_STAGE_OUTPUT_PATHS
                             )
                             and stage.budget_reservation > 0
                             and stage.script_args

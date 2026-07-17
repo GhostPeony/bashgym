@@ -266,14 +266,18 @@ async def _execute_command(
             progress.append({"progress": current, "total": total, "message": message})
 
         try:
-            async with asyncio.timeout(timeout_seconds):
-                result = await session.call_tool(
+            # asyncio.timeout requires Python 3.11; wait_for preserves the
+            # cancel-on-timeout semantics on the 3.10 floor this package claims.
+            result = await asyncio.wait_for(
+                session.call_tool(
                     command.parameters["tool_name"],
                     command.parameters.get("arguments"),
                     read_timeout_seconds=timedelta(seconds=timeout_seconds),
                     progress_callback=capture_progress,
-                )
-        except TimeoutError as exc:
+                ),
+                timeout=timeout_seconds,
+            )
+        except (TimeoutError, asyncio.TimeoutError) as exc:
             raise ToolCallTimeoutError(f"tool call exceeded {timeout_seconds:g} seconds") from exc
 
         normalized = _plain_json(result)

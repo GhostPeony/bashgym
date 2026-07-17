@@ -2148,6 +2148,12 @@ def cmd_manifest(args: argparse.Namespace) -> int:
             "manifest": "Show agent-readable command and docs map.",
             "workspace context": "Read the live sanitized workspace canvas context.",
             "workspace emit": "Emit a semantic canvas intent for dynamic node creation.",
+            "operator skills install": (
+                "Install the reviewed BashGym skill bundle into one supported agent host."
+            ),
+            "operator skills check": (
+                "Verify the active host copy and install receipt without changing it."
+            ),
             "campaign list": "List capability-scoped experiment campaigns.",
             "campaign templates": "List source-managed campaign templates.",
             "campaign inspect-model-artifact": (
@@ -2158,6 +2164,15 @@ def cmd_manifest(args: argparse.Namespace) -> int:
             ),
             "campaign provision-local-operator": (
                 "Provision one local human operator credential by opaque secret reference."
+            ),
+            "campaign setup-context": (
+                "Discover registered AutoResearch choices and resume a sealed setup session."
+            ),
+            "campaign setup-step": "Persist one ordered guided-setup choice.",
+            "campaign setup-doctor": "Run read-only readiness checks on a setup draft.",
+            "campaign setup-validate": "Seal an exact launch-ready setup draft.",
+            "campaign setup-create": (
+                "Atomically create a READY campaign without starting compute."
             ),
             "campaign status": "Read one campaign aggregate and its next valid action.",
             "campaign autoresearch": "Read durable AutoResearch state and decisions.",
@@ -3036,6 +3051,17 @@ def cmd_operator(args: argparse.Namespace) -> int:
     return _run_packaged_operator_script("operator_context.py", arguments)
 
 
+def cmd_operator_skills(args: argparse.Namespace) -> int:
+    from bashgym.operator_skills import check_skills, install_skills
+
+    if args.skills_command == "install":
+        result = install_skills(host=args.host)
+    else:
+        result = check_skills(host=args.host)
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if result["verified"] else 2
+
+
 def _nonblank_identifier(value: str) -> str:
     normalized = str(value).strip()
     if not normalized:
@@ -3308,6 +3334,92 @@ def cmd_campaign_doctor(args: argparse.Namespace) -> int:
     )
     return (
         error if error is not None else _emit_campaign_result(args, response, collection="doctor")
+    )
+
+
+def cmd_campaign_setup_context(args: argparse.Namespace) -> int:
+    response, error = _campaign_request(
+        args,
+        "GET",
+        "/campaigns/setup/context",
+        query={"workspace_id": args.workspace_id, "session_id": args.session_id},
+    )
+    return (
+        error if error is not None else _emit_campaign_result(args, response, collection="context")
+    )
+
+
+def cmd_campaign_setup_step(args: argparse.Namespace) -> int:
+    response, error = _campaign_request(
+        args,
+        "POST",
+        "/campaigns/setup/session",
+        payload={
+            "workspace_id": args.workspace_id,
+            "session_id": args.session_id,
+            "expected_version": args.expected_version,
+            "step": args.step,
+            "selection_id": args.selection_id,
+        },
+        headers={"Idempotency-Key": args.idempotency_key},
+    )
+    return (
+        error if error is not None else _emit_campaign_result(args, response, collection="session")
+    )
+
+
+def _guided_setup_draft(args: argparse.Namespace) -> dict[str, Any]:
+    draft = _read_campaign_json(args.draft, label="guided setup draft")
+    supplied_workspace = draft.pop("workspace_id", args.workspace_id)
+    if supplied_workspace != args.workspace_id:
+        raise ValueError("guided setup draft workspace does not match --workspace-id")
+    if set(draft) != {"template_id", "installation_id", "bindings"}:
+        raise ValueError("guided setup draft has unsupported fields")
+    return {"workspace_id": args.workspace_id, **draft}
+
+
+def cmd_campaign_setup_doctor(args: argparse.Namespace) -> int:
+    response, error = _campaign_request(
+        args,
+        "POST",
+        "/campaigns/setup/doctor",
+        payload=_guided_setup_draft(args),
+    )
+    return (
+        error if error is not None else _emit_campaign_result(args, response, collection="doctor")
+    )
+
+
+def cmd_campaign_setup_validate(args: argparse.Namespace) -> int:
+    response, error = _campaign_request(
+        args,
+        "POST",
+        "/campaigns/setup/validate",
+        payload=_guided_setup_draft(args),
+        headers={"Idempotency-Key": args.idempotency_key},
+    )
+    return (
+        error
+        if error is not None
+        else _emit_campaign_result(args, response, collection="validation")
+    )
+
+
+def cmd_campaign_setup_create(args: argparse.Namespace) -> int:
+    response, error = _campaign_request(
+        args,
+        "POST",
+        "/campaigns/setup/create",
+        payload={
+            "workspace_id": args.workspace_id,
+            "campaign_id": args.campaign_id,
+            "title": args.title,
+            "validation_receipt_id": args.validation_receipt_id,
+        },
+        headers=_campaign_headers(args),
+    )
+    return (
+        error if error is not None else _emit_campaign_result(args, response, collection="campaign")
     )
 
 
@@ -4671,6 +4783,20 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[json_parent],
     )
     operator_doctor.set_defaults(func=cmd_operator)
+    operator_skills = operator_sub.add_parser(
+        "skills",
+        help="Install or verify BashGym's public skills in an agent host",
+        parents=[json_parent],
+    )
+    operator_skills_sub = operator_skills.add_subparsers(dest="skills_command", required=True)
+    for skills_command in ("install", "check"):
+        skills_parser = operator_skills_sub.add_parser(skills_command, parents=[json_parent])
+        skills_parser.add_argument(
+            "--host",
+            choices=("codex", "claude", "hermes"),
+            help="Agent host (auto-detected only when unambiguous)",
+        )
+        skills_parser.set_defaults(func=cmd_operator_skills)
     operator_context = operator_sub.add_parser(
         "context",
         help="Read live runtime and project-isolated ledger context",
@@ -5147,6 +5273,61 @@ def build_parser() -> argparse.ArgumentParser:
     )
     campaign_doctor.add_argument("--template", dest="template_id", required=True)
     campaign_doctor.set_defaults(func=cmd_campaign_doctor)
+
+    campaign_setup_context = campaign_sub.add_parser(
+        "setup-context",
+        help="Discover registered AutoResearch setup choices and resume one sealed session",
+        parents=[json_parent, campaign_connection],
+    )
+    campaign_setup_context.add_argument("--session-id")
+    campaign_setup_context.set_defaults(func=cmd_campaign_setup_context)
+
+    campaign_setup_step = campaign_sub.add_parser(
+        "setup-step",
+        help="Record one ordered guided-setup choice",
+        parents=[json_parent, campaign_connection],
+    )
+    campaign_setup_step.add_argument("--session-id", required=True)
+    campaign_setup_step.add_argument("--expected-version", type=int, required=True)
+    campaign_setup_step.add_argument(
+        "--step",
+        choices=("template", "installation", "model", "data", "compute", "evaluation"),
+        required=True,
+    )
+    campaign_setup_step.add_argument("--selection-id", required=True)
+    campaign_setup_step.add_argument("--idempotency-key", required=True)
+    campaign_setup_step.set_defaults(func=cmd_campaign_setup_step)
+
+    campaign_setup_doctor = campaign_sub.add_parser(
+        "setup-doctor",
+        help="Run the read-only doctor for one guided-setup draft",
+        parents=[json_parent, campaign_connection],
+    )
+    campaign_setup_doctor.add_argument("--draft", required=True)
+    campaign_setup_doctor.set_defaults(func=cmd_campaign_setup_doctor)
+
+    campaign_setup_validate = campaign_sub.add_parser(
+        "setup-validate",
+        help="Seal a validated guided-setup draft without starting work",
+        parents=[json_parent, campaign_connection],
+    )
+    campaign_setup_validate.add_argument("--draft", required=True)
+    campaign_setup_validate.add_argument("--idempotency-key", required=True)
+    campaign_setup_validate.set_defaults(func=cmd_campaign_setup_validate)
+
+    campaign_setup_create = campaign_sub.add_parser(
+        "setup-create",
+        help="Atomically create a READY campaign from a sealed setup receipt",
+        parents=[json_parent, campaign_connection],
+    )
+    campaign_setup_create.add_argument("--campaign", dest="campaign_id", required=True)
+    campaign_setup_create.add_argument("--title", required=True)
+    campaign_setup_create.add_argument(
+        "--validation-receipt", dest="validation_receipt_id", required=True
+    )
+    campaign_setup_create.add_argument("--idempotency-key", required=True)
+    campaign_setup_create.add_argument("--correlation-id")
+    campaign_setup_create.set_defaults(func=cmd_campaign_setup_create)
 
     campaign_status = campaign_sub.add_parser(
         "status",

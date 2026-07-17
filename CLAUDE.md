@@ -11,6 +11,21 @@ Before planning or launching training, read
 Those files are the executable source for current strategy, artifact-retention,
 Hugging Face destination, and local/private/optional-hosted activation guidance.
 
+For durable AutoResearch, also read
+`assistant/workspace/skills/bashgym-operator/SKILL.md`. In a source clone, make
+the reviewed bundle available to Claude Code with:
+
+```bash
+bashgym operator skills install --host claude
+bashgym operator skills check --host claude
+```
+
+This installs operating instructions; it does not launch or register an agent.
+Begin with `campaign setup-context`, use only registered choices, and ask only
+for missing or ambiguous decisions. The initial request authorizes preparation
+only. Once the campaign is `READY`, present its exact contract and stop for a
+later explicit Start confirmation.
+
 ## Quick Reference
 
 ```bash

@@ -1,15 +1,15 @@
 ---
 name: bashgym-operator
-description: Operate BashGym training and evaluation work from Hermes on Discord or the BashGym canvas. Use for ML session planning, preflight, campaign goals and KPIs, model training or fine-tuning, runtime monitoring, evaluation and benchmark comparison, report generation, resumable iteration, and curated GBrain updates across embedding, SFT, DPO, GRPO/RLVR, LoRA/QLoRA, distillation, and full-model workflows.
+description: Operate BashGym training, evaluation, and durable AutoResearch from Codex, Claude Code, Hermes, or another compatible agent. Use for guided campaign preparation and resumption, ML session planning, preflight, goals and KPIs, model training or fine-tuning, runtime monitoring, evaluation and benchmark comparison, report generation, bounded iteration, and curated GBrain updates across embedding, SFT, DPO, GRPO/RLVR, LoRA/QLoRA, distillation, and full-model workflows.
 ---
 
 # BashGym Operator
 
-Act as the same local Hermes operator whether the request arrives through Discord or the BashGym canvas. Treat those as separate conversations over one identity; resume from BashGym's durable campaign evidence and GBrain, not from assumed transcript sharing.
+Act as the current operator inside an already-running Codex, Claude Code, Hermes, or another compatible agent session. The agent host is an interface over BashGym, not a launcher or a separate campaign system. Resume from BashGym's durable campaign evidence and GBrain rather than assumed transcript sharing between interfaces.
 
 ## Establish context
 
-1. Run `bashgym operator doctor` to verify the abilities available in the current Hermes environment. Do not infer API, CLI, or campaign access from documentation alone. If `critical_skill_integrity.verified` is false, stop before mutation or compute launch and report the mismatched source-managed files.
+1. Run `bashgym operator doctor` to verify the abilities available in the current agent environment. Do not infer API, CLI, or campaign access from documentation alone. If `critical_skill_integrity.verified` is false, stop before mutation or compute launch and report the mismatched source-managed files.
 2. Select the exact workspace and project before loading task-specific evidence. Run `bashgym operator context --workspace-id <workspace>` or `bashgym ledger projects --workspace-id <workspace> --json`; if more than one project is available, ask for the project ID instead of defaulting to the most familiar experiment. There is no implicit second workspace.
 3. Read BashGym live context for that identity:
    - In the canvas, use the injected `BashGym workspace context` block as the desktop workspace/campaign projection.
@@ -66,29 +66,53 @@ Use the campaign control plane for any new multi-iteration research loop. The
 legacy `/api/autoresearch/*` surface is prototype compatibility only and must not
 be used as the authoritative campaign record.
 
-1. Discover source-managed templates with `bashgym campaign templates ... --json`.
-   For real research, run `bashgym campaign setup-autoresearch --help`, supply
-   the explicitly approved immutable trainable-base revision and logical
-   model/data/evaluator/private-compute/source-repository IDs, then run `bashgym campaign doctor`
-   on the installed template. Never select a packaged example model or put
-   private transport/credential details in the definition.
-2. For a no-GPU orchestration proof, create from
-   `autoresearch-control-smoke-v1`. This template is explicitly ineligible for
-   quality claims. For real research, proceed only when the doctor reports both
+An initial natural-language request to start AutoResearch authorizes discovery and preparation only. It does not authorize compute launch. Do not require the user to fill a configuration form or repeat decisions already present in the registered BashGym context.
+
+1. Run `bashgym campaign setup-context --help`, then
+   `bashgym campaign setup-context --workspace-id <workspace> --json`. Use its
+   registered templates, installations, model/data/compute/evaluation bindings,
+   and resumable setup session as the bounded choice set. Never scan private
+   caches, invent binding IDs, select a packaged example model, or expose
+   transport and credential details.
+2. Resume the returned setup session when one exists. Otherwise create a setup
+   session through the same command surface. Process the ordered steps with
+   `bashgym campaign setup-step --help`: template, installation, model, data,
+   compute, then evaluation. If a step has exactly one eligible registered
+   choice, select it and continue. If there are zero registered choices, report
+   the missing registration or activation action. If there are multiple registered choices,
+   show their safe labels and ask for only that choice.
+   Re-read `setup-context` after each sealed step receipt; do not ask again for a
+   choice already durably recorded.
+3. Run `bashgym campaign setup-doctor --help` and the read-only doctor for the
+   completed draft. Resolve only reported missing, stale, ambiguous, or blocked
+   facts. For real research, continue only when doctor reports
    `materializable: true` and `launch_ready: true`; it must resolve the exact
    model-contract digest, ledger bindings, pinned smoke/full training materials,
    and resident controller.
-3. Inspect `bashgym campaign autoresearch --campaign <id> ... --json`. Creation
-   ends at `READY`; use the authenticated `campaign start` command as the
-   separate authority gate.
-4. Submit the first proposal with `campaign propose --autoresearch-role baseline`.
+4. Run `bashgym campaign setup-validate --help` to seal the exact prepared draft.
+   Then run `bashgym campaign setup-create --help` with the returned validation
+   receipt. Creation is atomic, consumes that receipt once, and ends at `READY`.
+   If the campaign already exists, inspect and resume it instead of creating a
+   replacement.
+5. When state is `READY`, present the exact campaign ID, model, data, evaluation, compute, budget, and stop rules,
+   plus unresolved warnings and evidence IDs.
+   Then **STOP and wait for a subsequent explicit Start confirmation**. Never run `bashgym campaign start` in the preparation turn.
+   Only a later user message
+   that clearly confirms Start authorizes the authenticated Start command for
+   that exact READY campaign; reconfirm if the manifest or readiness changed.
+6. For a no-GPU orchestration proof, create from
+   `autoresearch-control-smoke-v1`. This template is explicitly ineligible for
+   quality claims.
+7. After explicit Start, inspect
+   `bashgym campaign autoresearch --campaign <id> ... --json`. Submit the first
+   proposal with `campaign propose --autoresearch-role baseline`.
    After a real baseline is accepted, submit exactly one candidate at a time with
    `--autoresearch-role candidate --parent-proposal <incumbent-id>`. Do not use
    the generic proposal route for an AutoResearch campaign.
    If the candidate's primary variable starts with `trainer.`, `algorithm.`,
    `gym.`, `environment.`, `reward.`, `evaluator.`, or `verifier.`, Git lineage
-   is mandatory. Hermes does not receive `experiment.code_mutate`; hand the
-   proposal to a capability-authorized Codex operator. That operator must call
+   is mandatory. If the current agent lacks `experiment.code_mutate`, hand the
+   proposal to a capability-authorized operator. That operator must call
    `campaign proposal lineage-prepare`, edit only the returned private worktree,
    then call `campaign proposal lineage-capture`. Never edit the user's branch,
    bypass the approved path scope, or merge the hypothesis branch automatically.
@@ -98,7 +122,7 @@ be used as the authoritative campaign record.
    entrypoint; BashGym packages the exact captured commit and verifies its digest
    again before upload. Scalar recipe variables remain ledger-native and do not
    use this flow.
-5. Launch and evaluate through the training skill. The primary metric must come
+8. Launch and evaluate through the training skill. The primary metric must come
    from the pinned evaluation suite, not a training-loss proxy. Register exact
    run, attempt, artifact, and evaluation lineage. A completed campaign-linked
    evaluation write automatically attempts ingestion and reports its status;
@@ -106,9 +130,9 @@ be used as the authoritative campaign record.
    only for deferred reconciliation or exact replay. BashGym derives the metric,
    settled cost, provenance, campaign attempts, and evidence IDs; do not submit
    those facts as agent-authored JSON.
-6. Re-read AutoResearch state after every result. Simulated/fake results prove
+9. Re-read AutoResearch state after every result. Simulated/fake results prove
    orchestration only and cannot establish the baseline or become the incumbent.
-7. Stop only when the durable state reports a stop rule, or when the user invokes
+10. Stop only when the durable state reports a stop rule, or when the user invokes
    an authorized pause/cancel. Preserve the campaign, ledger, branches, and sealed
    evidence for restart and review.
 
@@ -150,5 +174,5 @@ or mounts the live index.
 - Do not claim quality findings from smoke runs.
 - Do not silently switch work from the selected compute target to paid external compute.
 - Do not create a public Hugging Face repository, retain a merged/full run, or purge resumable artifacts without the matching session authority.
-- Keep Discord updates concise: current phase, latest milestone/KPI, anomaly or decision, next action, and artifact/report reference.
+- Keep operator updates concise: current phase, latest milestone/KPI, anomaly or decision, next action, and artifact/report reference.
 - Treat `bashgym`, `bashgym-operator`, and `training` as source-managed critical skills. Never let a self-improvement review or Skill Lab call rewrite them; propose a reviewed repository change and redeploy the bundle instead.

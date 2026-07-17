@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   CheckCircle,
   XCircle,
-  Download,
   Trash2,
   Loader2,
   RefreshCw,
@@ -20,15 +19,6 @@ import { providersApi, ProviderStatus, OllamaModel } from '../../services/api'
 import { StudentModelPicker } from './StudentModelPicker'
 import { ModelSelect } from '../common/ModelSelect'
 import { clsx } from 'clsx'
-
-// Popular models for quick download
-const POPULAR_MODELS = [
-  { name: 'qwen2.5-coder:7b', description: 'Excellent code model, 7B params', size: '4.7GB' },
-  { name: 'qwen2.5-coder:1.5b', description: 'Fast, efficient coder', size: '1.0GB' },
-  { name: 'deepseek-coder-v2:16b', description: 'State-of-the-art coding', size: '8.9GB' },
-  { name: 'codellama:7b', description: 'Meta code model', size: '3.8GB' },
-  { name: 'llama3.2:3b', description: 'General purpose, small', size: '2.0GB' },
-]
 
 function ProviderCard({ provider }: { provider: ProviderStatus }) {
   const isLocal = provider.type === 'ollama' || provider.type === 'lm_studio'
@@ -120,7 +110,6 @@ export function ModelsSection() {
   const [isDeleting, setIsDeleting] = useState<string | null>(null)
   const [customModel, setCustomModel] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [showMoreModels, setShowMoreModels] = useState(false)
   // Connect cloud provider (OpenAI-compatible) form
   const [showConnect, setShowConnect] = useState(false)
   const [connectPlatform, setConnectPlatform] = useState('together')
@@ -281,6 +270,7 @@ export function ModelsSection() {
                   onChange={setConnectModel}
                   className="input w-full text-xs"
                   placeholder="Select a default model..."
+                  catalogOnly
                 />
               </div>
             </div>
@@ -360,7 +350,7 @@ export function ModelsSection() {
               </div>
             ) : (
               <p className="text-xs text-text-muted text-center py-3 font-mono">
-                No models installed. Download one below.
+                No models installed. Enter a model ID from your local catalog below.
               </p>
             )}
 
@@ -376,53 +366,13 @@ export function ModelsSection() {
               </>
             )}
 
-            {/* Quick Download */}
-            {(() => {
-              const availableModels = POPULAR_MODELS.filter(m =>
-                !ollamaModels.some(om => om.name === m.name || om.name.startsWith(m.name.split(':')[0]))
-              )
-              if (availableModels.length === 0) return null
-
-              return (
-                <div className="space-y-1.5">
-                  <button
-                    onClick={() => setShowMoreModels(!showMoreModels)}
-                    className="flex items-center gap-1 text-xs font-mono text-text-muted hover:text-text-secondary transition-press"
-                  >
-                    {showMoreModels ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-                    Download models ({availableModels.length} available)
-                  </button>
-                  {showMoreModels && (
-                    <div className="space-y-1 pl-1">
-                      {availableModels.map(model => (
-                        <button
-                          key={model.name}
-                          onClick={() => handlePullModel(model.name)}
-                          disabled={!!isPulling}
-                          className="w-full flex items-center gap-2 p-1.5 border-brutal border-border rounded-brutal bg-background-card hover:border-accent transition-press text-left disabled:opacity-50"
-                        >
-                          {isPulling === model.name ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin text-accent flex-shrink-0" />
-                          ) : (
-                            <Download className="w-3.5 h-3.5 text-text-muted flex-shrink-0" />
-                          )}
-                          <span className="text-xs font-mono text-text-primary flex-1">{model.name}</span>
-                          <span className="text-[10px] font-mono text-text-muted">{model.size}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )
-            })()}
-
             {/* Custom Model */}
             <div className="flex items-center gap-1.5 pt-1">
               <input
                 type="text"
                 value={customModel}
                 onChange={(e) => setCustomModel(e.target.value)}
-                placeholder="Custom model (e.g., mistral:7b)"
+                placeholder="Model ID from your Ollama catalog"
                 className="input flex-1 text-xs py-1.5 px-2 font-mono"
                 onKeyDown={(e) => e.key === 'Enter' && handlePullCustom()}
               />

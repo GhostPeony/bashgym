@@ -1742,6 +1742,7 @@ function ModelRolloutPanel({
             onChange={onEndpointModelChange}
             placeholder="Select endpoint model..."
             className="input w-full font-mono text-xs"
+            catalogOnly
           />
         </label>
         <label className="block">
@@ -2299,7 +2300,11 @@ function DppoSmokePanel({
             value={baseModel}
             onChange={onBaseModelChange}
             className="input w-full font-mono text-xs"
+            catalogOnly
           />
+          <p className="font-mono text-xs text-text-muted mt-1">
+            Select a catalog model or enter an explicit model ID.
+          </p>
         </label>
       </div>
 
@@ -2432,7 +2437,7 @@ export function EnvironmentLab() {
   const [dppoReplayThreshold, setDppoReplayThreshold] = useState('')
   const [dppoSmokeReplayPath, setDppoSmokeReplayPath] = useState('')
   const [dppoSmokeOutputDir, setDppoSmokeOutputDir] = useState('data/dppo_smoke/latest')
-  const [dppoSmokeBaseModel, setDppoSmokeBaseModel] = useState('Qwen/Qwen3.5-4B')
+  const [dppoSmokeBaseModel, setDppoSmokeBaseModel] = useState('')
   const [dppoSmokeBackend, setDppoSmokeBackend] =
     useState<'auto' | 'verl' | 'skyrl' | 'tmax_open_instruct' | 'grpo_fallback'>('auto')
   const [dppoSmokeMaxSteps, setDppoSmokeMaxSteps] = useState('1')

@@ -18,6 +18,7 @@ interface Props {
   onChange: (value: string) => void
   placeholder?: string
   className?: string
+  catalogOnly?: boolean
 }
 
 /**
@@ -25,10 +26,10 @@ interface Props {
  * Ollama) sourced from the live provider catalog, so it never goes stale, with
  * free-text fallback for any model id. Replaces raw text inputs.
  */
-export function ModelSelect({ value, onChange, placeholder, className }: Props) {
+export function ModelSelect({ value, onChange, placeholder, className, catalogOnly = false }: Props) {
   const [options, setOptions] = useState<{ value: string; label: string }[]>([])
   const mergedOptions = useMemo(() => {
-    const merged = [...FALLBACK_MODEL_OPTIONS]
+    const merged = catalogOnly ? [] : [...FALLBACK_MODEL_OPTIONS]
     for (const option of options) {
       if (!merged.some((existing) => existing.value === option.value)) {
         merged.push(option)

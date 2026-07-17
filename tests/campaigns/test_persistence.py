@@ -184,16 +184,14 @@ def test_v9_database_migrates_existing_auth_and_controller_rows_to_revision_one(
     path = tmp_path / "campaigns-v9.sqlite3"
     applied_at = "2026-07-16T00:00:00+00:00"
     with sqlite3.connect(path) as connection:
-        connection.execute(
-            """
+        connection.execute("""
             CREATE TABLE campaign_schema_migrations (
                 version INTEGER PRIMARY KEY,
                 name TEXT NOT NULL,
                 checksum TEXT NOT NULL,
                 applied_at TEXT NOT NULL
             )
-            """
-        )
+            """)
         for version, name, statements in MIGRATIONS[:-1]:
             for statement in statements:
                 connection.execute(statement)
@@ -286,6 +284,41 @@ def test_legacy_v1_manifest_revision_loads_without_rewriting_digest(repository):
         json.dumps(legacy_payload, sort_keys=True, separators=(",", ":")),
         legacy_digest,
     )
+
+
+def test_legacy_v1_manifest_digest_cannot_authorize_external_handoff(repository):
+    create(repository)
+    with sqlite3.connect(repository.db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT manifest_json FROM campaign_manifest_revisions
+            WHERE workspace_id = ? AND campaign_id = ? AND revision = 1
+            """,
+            ("workspace-a", "campaign-1"),
+        ).fetchone()
+        assert row is not None
+        payload = json.loads(row[0])
+        legacy_payload = {
+            field: value for field, value in payload.items() if field != "allow_external_handoff"
+        }
+        payload["allow_external_handoff"] = True
+        legacy_digest = canonical_hash(legacy_payload)
+        connection.execute(
+            """
+            UPDATE campaign_manifest_revisions
+            SET manifest_json = ?, manifest_hash = ?
+            WHERE workspace_id = ? AND campaign_id = ? AND revision = 1
+            """,
+            (
+                json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                legacy_digest,
+                "workspace-a",
+                "campaign-1",
+            ),
+        )
+
+    with pytest.raises(ValueError, match="manifest_hash does not match manifest"):
+        repository.get_manifest_revision("workspace-a", "campaign-1", 1)
 
 
 def test_current_manifest_revision_tampering_still_fails(repository):

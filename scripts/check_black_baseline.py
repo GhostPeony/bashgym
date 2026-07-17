@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import subprocess
 import sys
 from pathlib import Path
@@ -19,26 +18,33 @@ def _load_baseline() -> dict[str, str]:
         line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
-        digest, separator, relative = line.partition("  ")
-        if not separator or len(digest) != 64 or not relative:
+        blob, separator, relative = line.partition("  ")
+        if not separator or len(blob) != 40 or not relative:
             raise ValueError(f"invalid Black baseline entry on line {line_number}")
-        baseline[relative] = digest
+        baseline[relative] = blob
     return baseline
 
 
 def main() -> int:
     baseline = _load_baseline()
     failures: list[str] = []
-    for relative, expected_digest in baseline.items():
+    for relative, expected_blob in baseline.items():
         path = ROOT / relative
         if not path.is_file():
             failures.append(f"baseline file is missing: {relative}")
             continue
-        actual_digest = hashlib.sha256(path.read_bytes()).hexdigest()
-        if actual_digest != expected_digest:
+        result = subprocess.run(
+            ["git", "hash-object", "--path", relative, relative],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        actual_blob = result.stdout.strip() if result.returncode == 0 else ""
+        if actual_blob != expected_blob:
             failures.append(
                 f"baseline file changed: {relative}; format it and remove the entry, "
-                "or explicitly review and replace its hash"
+                "or explicitly review and replace its Git blob"
             )
 
     if failures:

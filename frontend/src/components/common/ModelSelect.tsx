@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { providersApi } from '../../services/api'
-import { FALLBACK_MODEL_OPTIONS } from './modelOptions'
+import { FALLBACK_MODEL_OPTIONS, type ModelOption } from './modelOptions'
 
 const PROVIDER_PREFIXES = ['anthropic/', 'openai/', 'nim/', 'hf/', 'ollama/', 'gemini/']
 
@@ -21,6 +21,19 @@ interface Props {
   catalogOnly?: boolean
 }
 
+export function mergeModelOptions(
+  catalogOptions: readonly ModelOption[],
+  catalogOnly: boolean
+): ModelOption[] {
+  const merged = catalogOnly ? [] : [...FALLBACK_MODEL_OPTIONS]
+  for (const option of catalogOptions) {
+    if (!merged.some((existing) => existing.value === option.value)) {
+      merged.push(option)
+    }
+  }
+  return merged
+}
+
 /**
  * Inference-model picker: a combobox of live models (Anthropic / NVIDIA NIM /
  * Ollama) sourced from the live provider catalog, so it never goes stale, with
@@ -28,15 +41,10 @@ interface Props {
  */
 export function ModelSelect({ value, onChange, placeholder, className, catalogOnly = false }: Props) {
   const [options, setOptions] = useState<{ value: string; label: string }[]>([])
-  const mergedOptions = useMemo(() => {
-    const merged = catalogOnly ? [] : [...FALLBACK_MODEL_OPTIONS]
-    for (const option of options) {
-      if (!merged.some((existing) => existing.value === option.value)) {
-        merged.push(option)
-      }
-    }
-    return merged
-  }, [options])
+  const mergedOptions = useMemo(
+    () => mergeModelOptions(options, catalogOnly),
+    [catalogOnly, options]
+  )
   const isKnown = mergedOptions.some((o) => o.value === value)
   const [custom, setCustom] = useState<boolean>(!!value && !isKnown)
 

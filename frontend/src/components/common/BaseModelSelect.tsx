@@ -9,6 +9,13 @@ interface Props {
   catalogOnly?: boolean
 }
 
+export function selectBaseModelGroups(
+  discovered: BaseModelGroup[],
+  catalogOnly: boolean
+): BaseModelGroup[] {
+  return catalogOnly ? discovered : [...BASE_MODEL_GROUPS, ...discovered]
+}
+
 /**
  * Base-model picker for fine-tuning: a grouped dropdown of current suggested
  * open models plus a "Custom model…" option that reveals a free-text field for
@@ -44,7 +51,7 @@ export function BaseModelSelect({ value, onChange, className, catalogOnly = fals
     }
   }, [])
 
-  const groups = catalogOnly ? discovered : [...BASE_MODEL_GROUPS, ...discovered]
+  const groups = selectBaseModelGroups(discovered, catalogOnly)
   const isKnown = groups.some((g) => g.models.some((m) => m.value === value))
   const [custom, setCustom] = useState<boolean>(!!value && !isKnown)
 

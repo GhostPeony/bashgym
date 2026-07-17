@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import socket
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -124,7 +125,8 @@ def test_inline_credentials_are_rejected_but_opaque_refs_work(monkeypatch):
 
 def test_stdio_launch_is_argv_only_and_fingerprint_is_enforced():
     launch = prepare_stdio_launch(sys.executable, ["-V"])
-    assert launch.command == launch.fingerprint.path
+    assert launch.command == str(Path(sys.executable).absolute())
+    assert launch.fingerprint.path == str(Path(sys.executable).resolve(strict=True))
     assert launch.args == ("-V",)
     assert len(launch.fingerprint.sha256) == 64
     assert (

@@ -1,13 +1,14 @@
 """Fail-closed campaign REST authentication, authority, and projection tests."""
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from bashgym._compat import UTC
 from bashgym.api import campaign_routes
 from bashgym.api.campaign_routes import (
     CampaignTemplate,

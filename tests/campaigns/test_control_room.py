@@ -4,10 +4,11 @@ import json
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 import pytest
 
+from bashgym._compat import UTC
 from bashgym.campaigns import control_room as control_room_module
 from bashgym.campaigns import transitions as campaign_transitions
 from bashgym.campaigns.autoresearch import AutoResearchRepository

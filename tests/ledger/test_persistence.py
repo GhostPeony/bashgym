@@ -1,10 +1,11 @@
 """Experiment-ledger identity, isolation, replay, and lineage tests."""
 
 import sqlite3
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 import pytest
 
+from bashgym._compat import UTC
 from bashgym.campaigns.contracts import canonical_hash
 from bashgym.campaigns.persistence import RecordNotFoundError
 from bashgym.ledger.contracts import (

@@ -3,11 +3,12 @@
 import asyncio
 import hashlib
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 
+from bashgym._compat import UTC
 from bashgym.campaigns.artifacts import ArtifactSealer
 from bashgym.campaigns.auth import CampaignAuthService
 from bashgym.campaigns.contracts import (

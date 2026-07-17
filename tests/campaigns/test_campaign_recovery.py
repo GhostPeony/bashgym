@@ -6,10 +6,11 @@ import hashlib
 import json
 import re
 import sqlite3
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 import pytest
 
+from bashgym._compat import UTC
 from bashgym.campaigns.artifacts import ArtifactSealer
 from bashgym.campaigns.campaign_recovery import (
     CampaignRecoveryConflictError,

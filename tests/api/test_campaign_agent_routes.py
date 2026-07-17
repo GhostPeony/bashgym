@@ -5,13 +5,14 @@ from __future__ import annotations
 import base64
 import json
 import sqlite3
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from bashgym._compat import UTC
 from bashgym.api.campaign_agent_routes import (
     campaign_agent_credential_router,
     campaign_agent_router,

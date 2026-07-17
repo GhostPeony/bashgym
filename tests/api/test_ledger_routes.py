@@ -1,10 +1,11 @@
 """Authenticated experiment-ledger REST projections."""
 
-from datetime import UTC, datetime
+from datetime import datetime
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from bashgym._compat import UTC
 from bashgym.api.campaign_routes import campaign_auth_router
 from bashgym.api.ledger_routes import router as ledger_router
 from bashgym.api.routes import create_app

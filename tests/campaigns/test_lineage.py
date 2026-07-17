@@ -5,11 +5,12 @@ from __future__ import annotations
 import hashlib
 import subprocess
 import tarfile
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 
+from bashgym._compat import UTC
 from bashgym.campaigns.artifacts import ArtifactSealer
 from bashgym.campaigns.contracts import (
     ActionAttempt,

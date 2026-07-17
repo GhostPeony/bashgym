@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 
+from bashgym._compat import UTC
 from bashgym.campaigns.autoresearch import (
     AutoResearchStopRules,
     AutoResearchTemplateDefinition,

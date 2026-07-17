@@ -7,12 +7,13 @@ import os
 import plistlib
 import threading
 import xml.etree.ElementTree as ET
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
+from bashgym._compat import UTC
 from bashgym.campaigns.contracts import StageKind
 from bashgym.campaigns.persistence import CampaignRepository
 from bashgym.campaigns.remote import (

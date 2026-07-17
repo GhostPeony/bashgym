@@ -1,9 +1,10 @@
 """Fenced scheduler/action lease tests."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 import pytest
 
+from bashgym._compat import UTC
 from bashgym.campaigns.persistence import (
     CampaignRepository,
     LeaseBusyError,

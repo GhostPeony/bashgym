@@ -1,7 +1,8 @@
 """Runnable no-GPU AutoResearch slice over the real campaign worker."""
 
-from datetime import UTC, datetime
+from datetime import datetime
 
+from bashgym._compat import UTC
 from bashgym.campaigns.artifacts import ArtifactSealer
 from bashgym.campaigns.autoresearch import (
     AutoResearchCampaignCore,

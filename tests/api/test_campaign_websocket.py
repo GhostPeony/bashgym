@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
 from fastapi import WebSocketDisconnect
 
+from bashgym._compat import UTC
 from bashgym.api.websocket import (
     CampaignHintV1,
     ConnectionManager,

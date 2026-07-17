@@ -1,7 +1,8 @@
 import hashlib
 import json
-from datetime import UTC, datetime
+from datetime import datetime
 
+from bashgym._compat import UTC
 from bashgym.campaigns.contracts import (
     CANONICAL_CAMPAIGN_EVENT_TYPES,
     CampaignEvent,

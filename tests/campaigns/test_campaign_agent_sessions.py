@@ -6,7 +6,7 @@ import base64
 import json
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 import pytest
 from cryptography.hazmat.primitives import hashes, serialization
@@ -15,6 +15,7 @@ from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from pydantic import ValidationError
 
+from bashgym._compat import UTC
 from bashgym.campaigns.artifacts import ArtifactSealer
 from bashgym.campaigns.campaign_agent_contracts import (
     CampaignAgentFamily,

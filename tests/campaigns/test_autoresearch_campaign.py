@@ -1,10 +1,11 @@
 """Baseline-first AutoResearch campaign control-loop tests."""
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime
 
 import pytest
 
+from bashgym._compat import UTC
 from bashgym.campaigns.autoresearch import (
     AUTORESEARCH_CONTROL_SMOKE_TEMPLATE_ID,
     AutoResearchCampaignCore,

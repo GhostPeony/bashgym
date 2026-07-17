@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 
 import pytest
 
+from bashgym._compat import UTC
 from bashgym.campaigns.contracts import (
     ActionAttempt,
     AttemptStatus,

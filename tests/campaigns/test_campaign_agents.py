@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 import pytest
 
+from bashgym._compat import UTC
 from bashgym.campaigns.artifacts import ArtifactSealer
 from bashgym.campaigns.campaign_agent_contracts import (
     CampaignAgentActionContext,

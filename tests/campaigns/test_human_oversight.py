@@ -3,10 +3,11 @@
 import json
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 import pytest
 
+from bashgym._compat import UTC
 from bashgym.campaigns.artifacts import ArtifactSealer
 from bashgym.campaigns.auth import CampaignAuthService
 from bashgym.campaigns.contracts import AutonomyProfile, CredentialKind, canonical_hash

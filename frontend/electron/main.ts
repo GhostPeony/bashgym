@@ -1050,7 +1050,23 @@ function registerPtySession(
 // Terminal management — create-or-attach: a live PTY for this id is re-attached
 // (with scrollback replay) instead of respawned, so renderer remounts never
 // orphan or kill the underlying process.
-ipcMain.handle('terminal:create', async (_, id: string, cwd?: string) => {
+// Creation is single-flight per terminal ID: the handler awaits between the
+// existence check and registry insertion, so concurrent invokes (double
+// restart clicks, remount races) would otherwise both spawn a PTY and orphan
+// one of them.
+const terminalCreateInFlight = new Map<string, Promise<unknown>>()
+
+ipcMain.handle('terminal:create', (_, id: string, cwd?: string) => {
+  const pending = terminalCreateInFlight.get(id)
+  if (pending) return pending
+  const create = createOrAttachTerminal(id, cwd).finally(() => {
+    terminalCreateInFlight.delete(id)
+  })
+  terminalCreateInFlight.set(id, create)
+  return create
+})
+
+async function createOrAttachTerminal(id: string, cwd?: string) {
   try {
     const existing = ptySessions.get(id)
     if (existing && !existing.exited) {
@@ -1112,7 +1128,7 @@ ipcMain.handle('terminal:create', async (_, id: string, cwd?: string) => {
     console.error('Failed to create terminal:', error)
     return { success: false, error: String(error) }
   }
-})
+}
 
 function writeTerminalInput(id: string, data: string): boolean {
   const session = ptySessions.get(id)

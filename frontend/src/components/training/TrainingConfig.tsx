@@ -10,6 +10,7 @@ import { useDeviceStore } from '../../stores/deviceStore'
 import { useCascadeStore } from '../../stores/cascadeStore'
 import { BaseModelSelect } from '../common/BaseModelSelect'
 import { ModelSelect } from '../common/ModelSelect'
+import { DEFAULT_TRAINING_BASE_MODEL, isExplicitBaseModel } from '../common/baseModels'
 
 type TrainingScope = 'all' | 'selected' | 'single'
 type TrainingBackend = 'local' | 'remote_ssh' | 'nemo' | 'managed'
@@ -169,7 +170,7 @@ export function TrainingConfig({ onClose, onStart, onOpenGuides }: TrainingConfi
 
   const [config, setConfig] = useState<TrainingConfigType>({
     strategy: 'sft',
-    baseModel: 'Qwen/Qwen2.5-Coder-1.5B-Instruct',
+    baseModel: DEFAULT_TRAINING_BASE_MODEL,
     datasetPath: '',  // Empty = auto-generate from gold traces
     epochs: 3,
     batchSize: 1,  // Reduced for 12GB VRAM (uses gradient accumulation)
@@ -269,13 +270,6 @@ export function TrainingConfig({ onClose, onStart, onOpenGuides }: TrainingConfi
     }
   }, [trainingBackend, config.deviceId])
 
-  // In Quick Start, adopt the top recommended model for the detected hardware.
-  useEffect(() => {
-    if (setupMode === 'quick' && recs?.recommended_models?.length) {
-      setConfig((prev) => ({ ...prev, baseModel: recs.recommended_models[0] }))
-    }
-  }, [setupMode, recs])
-
   // Poll a submitted managed (cloud) fine-tune for live status until it finishes.
   useEffect(() => {
     if (!managedJob) return
@@ -350,6 +344,7 @@ export function TrainingConfig({ onClose, onStart, onOpenGuides }: TrainingConfi
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!isExplicitBaseModel(config.baseModel)) return
 
     // Cascade RL uses its own API endpoint + store-driven error surfacing
     if (config.strategy === 'cascade') {
@@ -494,6 +489,9 @@ export function TrainingConfig({ onClose, onStart, onOpenGuides }: TrainingConfi
                   value={config.baseModel}
                   onChange={(v) => setConfig((prev) => ({ ...prev, baseModel: v }))}
                 />
+                {!isExplicitBaseModel(config.baseModel) ? (
+                  <p className="mt-2 font-mono text-xs text-status-warning">Choose the exact trainable base. BashGym never selects a model for you.</p>
+                ) : null}
                 {recs?.recommended_models?.length ? (
                   <p className="font-mono text-xs text-text-muted mt-2">Recommended for your hardware: {recs.recommended_models.slice(0, 3).join(', ')}</p>
                 ) : null}
@@ -1051,6 +1049,10 @@ export function TrainingConfig({ onClose, onStart, onOpenGuides }: TrainingConfi
               onChange={(baseModel) => setConfig({ ...config, baseModel })}
               className="input w-full"
             />
+
+            {!isExplicitBaseModel(config.baseModel) ? (
+              <p className="mt-2 font-mono text-xs text-status-warning">Choose the exact trainable base. BashGym never selects a model for you.</p>
+            ) : null}
 
             <p className="font-mono text-xs text-text-muted mt-2">
               Select a HuggingFace model to fine-tune, or enter a custom model ID.
@@ -2122,7 +2124,7 @@ export function TrainingConfig({ onClose, onStart, onOpenGuides }: TrainingConfi
           <button type="button" onClick={onClose} className="btn-secondary">
             Cancel
           </button>
-          <button onClick={handleSubmit} className="btn-primary">
+          <button onClick={handleSubmit} className="btn-primary" disabled={!isExplicitBaseModel(config.baseModel)}>
             Start Training
           </button>
         </div>

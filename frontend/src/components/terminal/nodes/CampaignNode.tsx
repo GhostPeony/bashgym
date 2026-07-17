@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useState } from 'react'
 import type { Node, NodeProps } from '@xyflow/react'
 import {
   AlertTriangle,
+  ExternalLink,
   Loader2,
   Pause,
   Play,
@@ -11,7 +12,10 @@ import {
 } from 'lucide-react'
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { clsx } from 'clsx'
-import { useCampaignStore } from '../../../stores/campaignStore'
+import {
+  retainCampaignSafetyReconcile,
+  useCampaignStore,
+} from '../../../stores/campaignStore'
 import { useTerminalStore } from '../../../stores/terminalStore'
 import { useWorkspaceStore } from '../../../stores/workspaceStore'
 import type {
@@ -26,12 +30,15 @@ import { DataNodeShell } from './DataNodeShell'
 import { projectCampaignResearch, type CampaignCanvasResearch } from './campaignCanvasModel'
 import { hueFor } from './dataPanels'
 import { ConfigPill, ConfigRow, ConfigRows, ConfigSection, NodeConfigModal } from './NodeConfigModal'
+import {
+  hasLiveCampaignAuthority,
+  openCampaignInAutoResearch,
+  shouldLoadCampaignDrillDown,
+  submitCampaignTransitionIfLive,
+} from './campaignNodeActions'
 import type { DataNodeData } from './types'
 
 export type CampaignNodeType = Node<DataNodeData, 'campaign'>
-
-const ACTIVE_POLL_MS = 3_000
-const IDLE_POLL_MS = 12_000
 
 const STATUS_BAR: Record<CampaignStatus, string> = {
   draft: 'bg-background-tertiary',
@@ -146,6 +153,7 @@ interface CampaignEvidencePanelProps {
   onSelect: (campaignId: string) => void
   onTransition: (action: 'start' | 'pause' | 'resume' | 'cancel') => void
   onRefresh: () => void
+  onOpenAutoResearch?: () => void
 }
 
 /** Pure modal body kept separate so the campaign evidence projection is DOM-testable. */
@@ -161,9 +169,11 @@ export function CampaignEvidencePanel({
   onSelect,
   onTransition,
   onRefresh,
+  onOpenAutoResearch,
 }: CampaignEvidencePanelProps) {
   const research = detail ? projectCampaignResearch(detail) : undefined
   const diagnostics = detail?.ledger?.autoresearch?.diagnostics
+  const hasLifecycleAuthority = hasLiveCampaignAuthority(detail)
   return (
     <>
       <ConfigSection title="Campaign">
@@ -196,19 +206,22 @@ export function CampaignEvidencePanel({
               <ConfigRow label="Stop reason" value={detail.campaign.stop_reason} />
             </ConfigRows>
             <div className="mt-3 flex flex-wrap gap-2 nodrag" role="group" aria-label="Campaign controls">
-              {detail.campaign.status === 'ready' ? (
+              {hasLifecycleAuthority && detail.campaign.status === 'ready' ? (
                 <button className="btn-primary !py-1.5 !text-[10px]" disabled={mutating} onClick={() => onTransition('start')}><Play className="h-3 w-3" />Start</button>
               ) : null}
-              {detail.campaign.status === 'active' ? (
+              {hasLifecycleAuthority && detail.campaign.status === 'active' ? (
                 <button className="btn-secondary !py-1.5 !text-[10px]" disabled={mutating} onClick={() => onTransition('pause')}><Pause className="h-3 w-3" />Pause</button>
               ) : null}
-              {detail.campaign.status === 'paused' ? (
+              {hasLifecycleAuthority && detail.campaign.status === 'paused' ? (
                 <button className="btn-primary !py-1.5 !text-[10px]" disabled={mutating} onClick={() => onTransition('resume')}><Play className="h-3 w-3" />Resume</button>
               ) : null}
-              {!['completed', 'exhausted', 'failed', 'cancelled', 'cancelling'].includes(detail.campaign.status) ? (
+              {hasLifecycleAuthority && !['completed', 'exhausted', 'failed', 'cancelled', 'cancelling'].includes(detail.campaign.status) ? (
                 <button className="btn-secondary !py-1.5 !text-[10px] !text-status-error" disabled={mutating} onClick={() => onTransition('cancel')}><Square className="h-3 w-3" />Cancel</button>
               ) : null}
               <button className="btn-ghost !py-1.5 !text-[10px]" disabled={detail.loading} onClick={onRefresh}><RefreshCw className={clsx('h-3 w-3', detail.loading && 'animate-spin')} />Refresh</button>
+              {onOpenAutoResearch ? (
+                <button className="btn-secondary !py-1.5 !text-[10px]" onClick={onOpenAutoResearch}><ExternalLink className="h-3 w-3" />Open in AutoResearch</button>
+              ) : null}
             </div>
           </>
         ) : null}
@@ -479,8 +492,8 @@ export const CampaignNode = memo(function CampaignNode({ data, selected }: NodeP
   const workspaceId = useWorkspaceStore((state) => state.activeWorkspaceId)
   const workspace = useCampaignStore((state) => state.workspaces[workspaceId])
   const load = useCampaignStore((state) => state.load)
+  const loadLegacyDetail = useCampaignStore((state) => state.loadLegacyDetail)
   const refresh = useCampaignStore((state) => state.refresh)
-  const refreshController = useCampaignStore((state) => state.refreshController)
   const selectCampaign = useCampaignStore((state) => state.select)
   const transition = useCampaignStore((state) => state.transition)
   const updatePanelConfig = useTerminalStore((state) => state.updatePanelConfig)
@@ -491,10 +504,16 @@ export const CampaignNode = memo(function CampaignNode({ data, selected }: NodeP
     : undefined
   const campaignId = configuredCampaignId || workspace?.selectedCampaignId || undefined
   const detail = campaignId ? workspace?.details[campaignId] : undefined
+  const snapshotVersion = detail?.snapshot?.aggregate_version ?? null
 
   useEffect(() => {
     void load(workspaceId, configuredCampaignId)
   }, [configuredCampaignId, load, workspaceId])
+
+  useEffect(() => {
+    if (!campaignId || !shouldLoadCampaignDrillDown(configOpen, snapshotVersion)) return
+    void loadLegacyDetail(workspaceId, campaignId)
+  }, [campaignId, configOpen, loadLegacyDetail, snapshotVersion, workspaceId])
 
   useEffect(() => {
     if (!campaignId || configuredCampaignId === campaignId) return
@@ -506,16 +525,8 @@ export const CampaignNode = memo(function CampaignNode({ data, selected }: NodeP
 
   useEffect(() => {
     if (!campaignId) return
-    const active = ['active', 'validating', 'cancelling'].includes(detail?.campaign.status || '')
-    const interval = active ? ACTIVE_POLL_MS : IDLE_POLL_MS
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        void refresh(workspaceId, campaignId)
-        void refreshController(workspaceId)
-      }
-    }, interval)
-    return () => window.clearInterval(timer)
-  }, [campaignId, detail?.campaign.status, refresh, refreshController, workspaceId])
+    return retainCampaignSafetyReconcile(workspaceId, campaignId)
+  }, [campaignId, workspaceId])
 
   const latestAttempt = detail?.attempts.at(-1)
   const loss = useMemo(
@@ -544,15 +555,10 @@ export const CampaignNode = memo(function CampaignNode({ data, selected }: NodeP
   }
 
   const runTransition = async (action: 'start' | 'pause' | 'resume' | 'cancel') => {
-    if (!detail || mutating) return
+    if (!hasLiveCampaignAuthority(detail) || !detail || mutating) return
     setMutating(true)
     try {
-      const reason = action === 'pause'
-        ? 'Paused from the BashGym campaign canvas.'
-        : action === 'cancel'
-          ? 'Cancelled from the BashGym campaign canvas.'
-          : undefined
-      await transition(workspaceId, detail.campaign.campaign_id, action, detail.campaign.version, reason)
+      await submitCampaignTransitionIfLive({ detail, mutating: false, action, workspaceId, transition })
     } finally {
       setMutating(false)
     }
@@ -718,9 +724,9 @@ export const CampaignNode = memo(function CampaignNode({ data, selected }: NodeP
 
             <div className="grid grid-cols-3 gap-px overflow-hidden rounded-brutal border-brutal border-border-subtle bg-border-subtle">
               {[
-                ['studies', detail.studies.length],
-                ['attempts', detail.attempts.length],
-                ['evidence', detail.artifacts.length],
+                ['studies', detail.snapshot?.collections.studies.count ?? detail.studies.length],
+                ['attempts', detail.snapshot?.collections.attempts.count ?? detail.attempts.length],
+                ['evidence', detail.snapshot?.collections.artifacts.count ?? detail.artifacts.length],
               ].map(([label, value]) => (
                 <div key={label} className="bg-background-card px-2 py-1 text-center">
                   <div className="font-mono text-[11px] font-bold text-text-primary">{value}</div>
@@ -760,7 +766,11 @@ export const CampaignNode = memo(function CampaignNode({ data, selected }: NodeP
               </div>
             ) : (
               <div className="rounded-brutal border-brutal border-border-subtle px-2 py-2 font-mono text-[9px] text-text-muted">
-                {latestAttempt ? `${readable(latestAttempt.stage)} · ${readable(latestAttempt.status)}` : 'Waiting for the first study attempt'}
+                {latestAttempt
+                  ? `${readable(latestAttempt.stage)} · ${readable(latestAttempt.status)}`
+                  : detail.snapshot?.active_work?.stage
+                    ? `${readable(detail.snapshot.active_work.stage)} · ${readable(detail.snapshot.active_work.process_identity?.state || 'observed')}`
+                    : 'Waiting for the first study attempt'}
               </div>
             )}
 
@@ -805,6 +815,10 @@ export const CampaignNode = memo(function CampaignNode({ data, selected }: NodeP
           onSelect={(nextId) => void handleSelect(nextId)}
           onTransition={(action) => void runTransition(action)}
           onRefresh={() => detail && void refresh(workspaceId, detail.campaign.campaign_id)}
+          onOpenAutoResearch={detail ? () => {
+            openCampaignInAutoResearch(workspaceId, detail.campaign.campaign_id)
+            setConfigOpen(false)
+          } : undefined}
         />
 
       </NodeConfigModal>

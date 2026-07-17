@@ -99,6 +99,14 @@ class ArtifactSealer:
         payload = manifest.model_dump(mode="json")
         return hmac.new(self._key, _canonical_bytes(payload), hashlib.sha256).hexdigest()
 
+    def sign_canonical_payload(self, value: Any, *, domain: str) -> str:
+        """Authenticate a bounded campaign payload under a domain-separated key."""
+
+        if not domain or len(domain) > 120:
+            raise ValueError("artifact seal signature domain is invalid")
+        message = domain.encode("utf-8") + b"\0" + _canonical_bytes(value)
+        return hmac.new(self._key, message, hashlib.sha256).hexdigest()
+
     def seal(
         self,
         temporary_directory: Path,

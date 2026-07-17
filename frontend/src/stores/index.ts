@@ -78,8 +78,6 @@ export { useAgentStore } from './agentStore'
 export type { ChatMessage as AgentChatMessage } from './agentStore'
 export { useAuthStore } from './authStore'
 export type { AuthUser } from './authStore'
-export { useAutoResearchStore } from './autoresearchStore'
-export type { ExperimentResult, TraceExperimentResult, AutoResearchStatus, AutoResearchStartConfig, AutoResearchMode } from './autoresearchStore'
 export { useCascadeStore } from './cascadeStore'
 export type { CascadeStatus, CascadeStage, StageStatus } from './cascadeStore'
 // agentSessionsStore is deliberately NOT re-exported here: it is Electron-only

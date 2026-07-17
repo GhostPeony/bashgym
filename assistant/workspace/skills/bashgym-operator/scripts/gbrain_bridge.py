@@ -216,7 +216,7 @@ def _publish(
     return base
 
 
-def main() -> int:
+def run(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", required=True, type=Path)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -226,7 +226,7 @@ def main() -> int:
     publish.add_argument("--relative", required=True)
     publish.add_argument("--execute", action="store_true")
     publish.add_argument("--sync", action="store_true")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     try:
         profile = _profile(args.profile)
         if args.command == "status":
@@ -244,6 +244,10 @@ def main() -> int:
         return 2
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
+
+
+def main() -> int:
+    return run()
 
 
 if __name__ == "__main__":

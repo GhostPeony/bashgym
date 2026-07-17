@@ -11,6 +11,8 @@ from typing import Any, Literal, Never
 from fastapi import APIRouter, Header, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from bashgym.api.websocket import manager as websocket_manager
+from bashgym.campaigns.artifacts import ArtifactSealer
 from bashgym.campaigns.auth import CampaignAuthenticationError, CampaignAuthService
 from bashgym.campaigns.autoresearch import (
     AutoResearchBudgetError,
@@ -48,6 +50,12 @@ from bashgym.campaigns.control_room import (
     build_control_room_snapshot,
     if_none_match_matches,
     principal_control_room_etag,
+)
+from bashgym.campaigns.human_oversight import (
+    HUMAN_WORK_MAX_ITEMS,
+    HumanOversightConflictError,
+    HumanOversightIntegrityError,
+    HumanOversightRepository,
 )
 from bashgym.campaigns.lineage import (
     ApprovedSourceRepositoryProfile,
@@ -90,6 +98,7 @@ from bashgym.campaigns.worker_service import (
 )
 from bashgym.config import get_bashgym_dir, get_settings
 from bashgym.ledger.persistence import ExperimentLedgerRepository, LedgerPersistenceError
+from bashgym.secrets import get_secret
 
 campaign_router = APIRouter(prefix="/api/campaigns", tags=["campaigns"])
 campaign_auth_router = APIRouter(prefix="/api/campaign-auth", tags=["campaign-auth"])
@@ -107,6 +116,14 @@ class CampaignCreateInput(ApiModel):
     objective: str = Field(min_length=1, max_length=4000)
     target_model: TargetModelContract
     manifest: CampaignManifest
+
+
+class CampaignLiveTicketInput(ApiModel):
+    workspace_id: str = Field(
+        min_length=1,
+        max_length=160,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$",
+    )
 
 
 class CampaignTemplate(ApiModel):
@@ -231,6 +248,46 @@ class CampaignExportInput(CampaignExpectedVersionInput):
         return value
 
 
+class HumanWorkClaimInput(ApiModel):
+    workspace_id: str = Field(
+        min_length=1,
+        max_length=160,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$",
+    )
+    expected_campaign_revision: int = Field(ge=1)
+    expected_version: int = Field(ge=1)
+    expected_state: Literal["pending", "expired"]
+
+
+class HumanWorkSubmitInput(ApiModel):
+    workspace_id: str = Field(
+        min_length=1,
+        max_length=160,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$",
+    )
+    expected_campaign_revision: int = Field(ge=1)
+    expected_version: int = Field(ge=1)
+    expected_rubric_version: int = Field(ge=1)
+    decision: Literal["prefer_left", "prefer_right", "no_material_difference"]
+    rationale: str = Field(min_length=1, max_length=2000)
+
+
+class HumanPromotionDecisionInput(ApiModel):
+    workspace_id: str = Field(
+        min_length=1,
+        max_length=160,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$",
+    )
+    receipt_id: str = Field(pattern=r"^hrc_[A-Za-z0-9_-]{16,120}$")
+    work_id: str = Field(pattern=r"^hw_[A-Za-z0-9_-]{16,120}$")
+    expected_campaign_revision: int = Field(ge=1)
+    expected_item_version: int = Field(ge=1)
+    expected_rubric_version: int = Field(ge=1)
+    expected_promotion_version: int = Field(ge=1)
+    expected_promotion_state: Literal["awaiting_human_decision"]
+    decision: Literal["promote", "hold"]
+
+
 def _services(
     request: Request,
 ) -> tuple[CampaignRuntimeRepository, CampaignAuthService, CampaignService]:
@@ -274,6 +331,51 @@ def _services(
             }
         )
     return repository, auth, service
+
+
+def _campaign_authority_sealer(request: Request) -> ArtifactSealer:
+    """Resolve the installation-held campaign authority without persisting its key."""
+
+    seal_key_ref = "BASHGYM_CAMPAIGN_SEAL_KEY"
+    seal_key_version = "campaign-seal-v1"
+    configured = getattr(request.app.state, "campaign_authority_seal_key", None)
+    if configured is None:
+        configured = getattr(request.app.state, "campaign_human_seal_key", None)
+    if configured is None:
+        configured = getattr(request.app.state, "campaign_recovery_seal_key", None)
+    config_path = getattr(request.app.state, "campaign_worker_config_path", None)
+    if configured is None and config_path is not None:
+        try:
+            worker_config = read_worker_config(Path(config_path))
+        except (OSError, WorkerServiceError) as exc:
+            raise HumanOversightIntegrityError(
+                "human receipt seal authority is unavailable"
+            ) from exc
+        seal_key_ref = worker_config.seal_key_ref
+        seal_key_version = worker_config.seal_key_version
+    if configured is None:
+        configured = get_secret(seal_key_ref)
+    key = configured if isinstance(configured, bytes) else str(configured or "").encode("utf-8")
+    version = getattr(request.app.state, "campaign_authority_seal_key_version", None)
+    if version is None:
+        version = getattr(request.app.state, "campaign_human_seal_key_version", None)
+    if version is None:
+        version = getattr(
+            request.app.state,
+            "campaign_recovery_seal_key_version",
+            seal_key_version,
+        )
+    return ArtifactSealer(key, key_version=str(version))
+
+
+def _human_oversight_repository(
+    request: Request,
+    repository: CampaignRuntimeRepository,
+) -> HumanOversightRepository:
+    return HumanOversightRepository(
+        repository,
+        sealer=_campaign_authority_sealer(request),
+    )
 
 
 def _autoresearch_definitions(request: Request) -> dict[str, AutoResearchTemplateDefinition]:
@@ -572,6 +674,123 @@ def _control_room_readiness(
     )
 
 
+_START_READINESS_GUIDANCE: dict[str, str] = {
+    "campaign_readiness_definition_unavailable": (
+        "Restore the exact installation-owned AutoResearch definition used to create "
+        "this campaign, then run doctor again."
+    ),
+    "campaign_readiness_definition_ambiguous": (
+        "Remove duplicate matching AutoResearch definitions, then run doctor again."
+    ),
+    "campaign_readiness_ledger_unavailable": (
+        "Restore the campaign experiment ledger, then run doctor again."
+    ),
+    "campaign_readiness_check_unavailable": (
+        "Restore the installation readiness service, then run doctor again."
+    ),
+    "controller_offline": CONTROLLER_OFFLINE_GUIDANCE,
+    "controller_stale": (
+        "Restart the resident campaign worker and wait for a fresh controller lease "
+        "before starting this campaign."
+    ),
+    "controller_identity_unverified": (
+        "Restart the resident campaign worker so it can publish a verified current "
+        "execution identity."
+    ),
+    "source_repository_binding_unresolved": (
+        "Restore the registered source repository binding and approved mutation paths, "
+        "then run doctor again."
+    ),
+    "code_lineage_execution_binding_unresolved": (
+        "Restore each required stage's registered source and entrypoint binding, then "
+        "run doctor again."
+    ),
+    "compute_binding_unresolved": (
+        "Restore the exact registered private-compute profile and its pinned stage "
+        "materials, then run doctor again."
+    ),
+    "data_binding_unresolved": (
+        "Restore the exact approved dataset version in the experiment ledger, then run "
+        "doctor again."
+    ),
+    "evaluator_binding_unresolved": (
+        "Restore the matching hash-pinned evaluation suite, then run doctor again."
+    ),
+    "model_binding_unresolved": (
+        "Register the operator-selected trainable base at an immutable revision, then "
+        "run doctor again."
+    ),
+}
+
+
+def _verified_controller_identity(controller: ControllerStatusProjection) -> bool:
+    """Require a live lease-backed controller identity at the Start boundary."""
+
+    return bool(
+        controller.online
+        and controller.state == "online"
+        and controller.owner_id
+        and controller.generation is not None
+        and controller.generation > 0
+        and controller.heartbeat_at is not None
+        and controller.expires_at is not None
+        and controller.expires_at > controller.observed_at
+    )
+
+
+def _launch_not_ready(blocking_codes: tuple[str, ...]) -> Never:
+    bounded_codes = tuple(blocking_codes[:32])
+    guidance = [
+        {
+            "code": code,
+            "message": _START_READINESS_GUIDANCE.get(
+                code,
+                "Restore this installation-owned readiness check, then run doctor again.",
+            )[:1000],
+        }
+        for code in bounded_codes
+    ]
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "code": "campaign_launch_not_ready",
+            "message": "AutoResearch launch readiness must be restored before Start.",
+            "blocking_codes": list(bounded_codes),
+            "guidance": guidance,
+        },
+    )
+
+
+def _require_autoresearch_launch_ready(
+    request: Request,
+    repository: CampaignRuntimeRepository,
+    durable: ControlRoomDurableProjection,
+) -> None:
+    """Recompute fail-closed launch authority without trusting renderer state."""
+
+    controller = project_controller_status(repository, get_bashgym_dir())
+    try:
+        readiness, _readiness_revision = _control_room_readiness(
+            request,
+            durable,
+            controller,
+            checked_at=utc_now(),
+        )
+    except Exception:
+        # Readiness inputs can include installation-owned files and a separate ledger.
+        # Their raw exceptions may contain private paths or profile material, so the
+        # mutation boundary exposes only a fixed remediation code.
+        _launch_not_ready(("campaign_readiness_check_unavailable",))
+
+    blocking_codes = list(readiness.blocking_codes)
+    if controller.online and not _verified_controller_identity(controller):
+        blocking_codes.append("controller_identity_unverified")
+    if not readiness.launch_ready and not blocking_codes:
+        blocking_codes.append("campaign_readiness_check_unavailable")
+    if not readiness.launch_ready or blocking_codes:
+        _launch_not_ready(tuple(blocking_codes))
+
+
 def _autoresearch_core(repository: CampaignRuntimeRepository) -> AutoResearchCampaignCore:
     if isinstance(repository, AutoResearchRepository):
         autoresearch_repository = repository
@@ -705,6 +924,22 @@ def _raise_api(exc: Exception) -> Never:
                 "message": "Idempotency key was reused with a different request.",
             },
         ) from exc
+    if isinstance(exc, HumanOversightConflictError):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": exc.code,
+                "message": "Human oversight state changed. Reconcile before retrying.",
+            },
+        ) from exc
+    if isinstance(exc, HumanOversightIntegrityError):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": exc.code,
+                "message": "Human oversight evidence could not be verified.",
+            },
+        ) from exc
     if isinstance(exc, (InvalidCampaignTransitionError, InvalidProposalTransitionError)):
         raise HTTPException(
             status_code=409,
@@ -778,16 +1013,41 @@ def _operation_mutation_payload(mutation) -> dict[str, Any]:
     return payload
 
 
+def _human_mutation_payload(mutation) -> dict[str, Any]:
+    return {
+        "queue": mutation.queue,
+        "event": mutation.event.model_dump(mode="json"),
+        "replayed": mutation.replayed,
+    }
+
+
 @campaign_auth_router.post("/exchange")
 def exchange_campaign_refresh(request: Request):
     try:
         _repository, auth, _service = _services(request)
         bearer = _bearer(request)
-        credential = (
-            auth.exchange_desktop_bootstrap(bearer)
-            if bearer.startswith("bgcb.")
-            else auth.exchange_refresh(bearer)
-        )
+        if bearer.startswith("bgcb."):
+            credential = auth.exchange_desktop_bootstrap(bearer)
+            from bashgym.api.campaign_agent_routes import (
+                CampaignAgentAuthorityUnavailableError,
+                activate_managed_desktop_campaign_agent_bindings,
+            )
+
+            try:
+                activate_managed_desktop_campaign_agent_bindings(
+                    request,
+                    authenticated_bootstrap=bearer,
+                )
+            except CampaignAgentAuthorityUnavailableError as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "code": "campaign_agent_authority_unavailable",
+                        "message": "The campaign-agent desktop authority is unavailable.",
+                    },
+                ) from exc
+        else:
+            credential = auth.exchange_refresh(bearer)
         return credential.model_dump(mode="json")
     except Exception as exc:
         _raise_api(exc)
@@ -908,6 +1168,40 @@ def _campaign_ledger_projection(
     except RecordNotFoundError:
         projection["autoresearch"] = None
     return projection
+
+
+@campaign_router.post("/live-ticket")
+def create_campaign_live_ticket(body: CampaignLiveTicketInput, request: Request):
+    try:
+        repository, _auth, _service = _services(request)
+        principal = _principal(request)
+        principal.require(body.workspace_id, Capability.CAMPAIGN_READ)
+        if not websocket_manager.allow_campaign_ticket_mint(
+            principal.credential_id, body.workspace_id
+        ):
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "code": "campaign_live_ticket_rate_limited",
+                    "message": "Campaign live-ticket mint rate exceeded.",
+                },
+            )
+        after_cursor = repository.latest_workspace_campaign_event_cursor(body.workspace_id)
+        ticket, binding = websocket_manager.issue_campaign_live_ticket(
+            repository,
+            principal,
+            body.workspace_id,
+            after_cursor=after_cursor,
+        )
+        return {
+            "schema_version": "campaign_live_ticket.v1",
+            "ticket": ticket,
+            "workspace_id": body.workspace_id,
+            "after_cursor": after_cursor,
+            "expires_at": binding.expires_at.isoformat(),
+        }
+    except Exception as exc:
+        _raise_api(exc)
 
 
 @campaign_router.post("")
@@ -1074,6 +1368,129 @@ def doctor_campaign_template(
         return _autoresearch_doctor_report(
             request, repository, definition, workspace_id
         ).model_dump(mode="json")
+    except Exception as exc:
+        _raise_api(exc)
+
+
+@campaign_router.get("/{campaign_id}/human-work")
+def get_human_work_queue(
+    campaign_id: str,
+    request: Request,
+    workspace_id: str = Query(
+        ...,
+        min_length=1,
+        max_length=160,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$",
+    ),
+    limit: int = Query(default=HUMAN_WORK_MAX_ITEMS, ge=1, le=HUMAN_WORK_MAX_ITEMS),
+):
+    try:
+        repository, _auth, _service = _services(request)
+        principal = _principal(request)
+        return _human_oversight_repository(request, repository).read_queue(
+            workspace_id,
+            campaign_id,
+            principal,
+            limit=limit,
+        )
+    except Exception as exc:
+        _raise_api(exc)
+
+
+@campaign_router.post("/{campaign_id}/human-work/{work_id}/claim")
+def claim_human_work(
+    campaign_id: str,
+    work_id: str,
+    body: HumanWorkClaimInput,
+    request: Request,
+    idempotency_key: str = Header(..., alias="Idempotency-Key", max_length=160),
+    correlation_id: str = Header(
+        default="human-work-claim", alias="X-Correlation-ID", max_length=160
+    ),
+):
+    try:
+        repository, _auth, _service = _services(request)
+        principal = _principal(request)
+        return _human_mutation_payload(
+            _human_oversight_repository(request, repository).claim(
+                workspace_id=body.workspace_id,
+                campaign_id=campaign_id,
+                work_id=work_id,
+                expected_campaign_revision=body.expected_campaign_revision,
+                expected_version=body.expected_version,
+                expected_state=body.expected_state,
+                principal=principal,
+                correlation_id=correlation_id,
+                idempotency_key=idempotency_key,
+            )
+        )
+    except Exception as exc:
+        _raise_api(exc)
+
+
+@campaign_router.post("/{campaign_id}/human-work/{work_id}/submit")
+def submit_human_work(
+    campaign_id: str,
+    work_id: str,
+    body: HumanWorkSubmitInput,
+    request: Request,
+    idempotency_key: str = Header(..., alias="Idempotency-Key", max_length=160),
+    correlation_id: str = Header(
+        default="human-work-submit", alias="X-Correlation-ID", max_length=160
+    ),
+):
+    try:
+        repository, _auth, _service = _services(request)
+        principal = _principal(request)
+        return _human_mutation_payload(
+            _human_oversight_repository(request, repository).submit(
+                workspace_id=body.workspace_id,
+                campaign_id=campaign_id,
+                work_id=work_id,
+                expected_campaign_revision=body.expected_campaign_revision,
+                expected_version=body.expected_version,
+                expected_rubric_version=body.expected_rubric_version,
+                decision=body.decision,
+                rationale=body.rationale,
+                principal=principal,
+                correlation_id=correlation_id,
+                idempotency_key=idempotency_key,
+            )
+        )
+    except Exception as exc:
+        _raise_api(exc)
+
+
+@campaign_router.post("/{campaign_id}/human-promotion")
+def decide_human_promotion(
+    campaign_id: str,
+    body: HumanPromotionDecisionInput,
+    request: Request,
+    idempotency_key: str = Header(..., alias="Idempotency-Key", max_length=160),
+    correlation_id: str = Header(
+        default="human-promotion-decision", alias="X-Correlation-ID", max_length=160
+    ),
+):
+    try:
+        repository, _auth, _service = _services(request)
+        principal = _principal(request)
+        return _human_mutation_payload(
+            _human_oversight_repository(request, repository).decide_promotion(
+                workspace_id=body.workspace_id,
+                campaign_id=campaign_id,
+                receipt_id=body.receipt_id,
+                work_id=body.work_id,
+                expected_campaign_revision=body.expected_campaign_revision,
+                expected_item_version=body.expected_item_version,
+                expected_rubric_version=body.expected_rubric_version,
+                expected_promotion_version=body.expected_promotion_version,
+                expected_promotion_state=body.expected_promotion_state,
+                decision=body.decision,
+                principal=principal,
+                correlation_id=correlation_id,
+                idempotency_key=idempotency_key,
+            )
+        )
     except Exception as exc:
         _raise_api(exc)
 
@@ -1864,14 +2281,35 @@ def start_campaign(
         default="campaign-rest-start", alias="X-Correlation-ID", max_length=160
     ),
 ):
-    return _transition_endpoint(
-        campaign_id,
-        CampaignTrigger.START,
-        body,
-        request,
-        idempotency_key,
-        correlation_id,
-    )
+    try:
+        repository, _auth, service = _services(request)
+        principal = _principal(request)
+        # Authorization precedes campaign projection and readiness evaluation. The
+        # transition boundary resolves replay/conflict/CAS before invoking this guard.
+        principal.require(body.workspace_id, Capability.CAMPAIGN_START)
+
+        def require_launch_ready(_current_campaign: Campaign) -> None:
+            durable = repository.read_control_room_projection(
+                body.workspace_id, campaign_id
+            )
+            if durable.autoresearch_spec is not None:
+                _require_autoresearch_launch_ready(request, repository, durable)
+
+        return _mutation_payload(
+            service.transition(
+                body.workspace_id,
+                campaign_id,
+                CampaignTrigger.START,
+                expected_version=body.expected_version,
+                principal=principal,
+                correlation_id=correlation_id,
+                idempotency_key=idempotency_key,
+                stop_reason=body.stop_reason,
+                precondition=require_launch_ready,
+            )
+        )
+    except Exception as exc:
+        _raise_api(exc)
 
 
 @campaign_router.post("/{campaign_id}/pause")
@@ -1986,14 +2424,29 @@ def campaign_events(
 
 
 @campaign_router.get("/{campaign_id}/artifacts")
-def campaign_artifacts(campaign_id: str, request: Request, workspace_id: str = Query(...)):
+def campaign_artifacts(
+    campaign_id: str,
+    request: Request,
+    workspace_id: str = Query(...),
+    after_cursor: str | None = Query(default=None, min_length=1, max_length=160),
+    limit: int = Query(default=50, ge=1, le=200),
+):
     try:
         _repository, _auth, service = _services(request)
+        artifacts, next_cursor, has_more = service.artifacts(
+            workspace_id,
+            campaign_id,
+            _principal(request),
+            after_cursor=after_cursor,
+            limit=limit,
+        )
         return {
             "artifacts": [
                 item.model_dump(mode="json")
-                for item in service.artifacts(workspace_id, campaign_id, _principal(request))
-            ]
+                for item in artifacts
+            ],
+            "next_cursor": next_cursor,
+            "has_more": has_more,
         }
     except Exception as exc:
         _raise_api(exc)

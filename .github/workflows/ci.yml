@@ -10,14 +10,16 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-jobs:
-  # ──────────────────────────────────────────────
-  # Python
-  # ──────────────────────────────────────────────
+permissions:
+  contents: read
 
-  python-lint:
-    name: Python Lint
+jobs:
+  # Keep the canonical quality gate small and deterministic. Compatibility and
+  # installed-wheel behavior are exercised separately below.
+  python-quality:
+    name: Python Quality (3.12)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -25,84 +27,86 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install linters
-        run: pip install ruff black
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Lockfile check
+        run: uv lock --check
+
+      - name: Install locked development tools
+        run: uv sync --frozen --extra dev
 
       - name: Ruff check
-        run: ruff check bashgym/
+        run: uv run ruff check bashgym/
 
       - name: Black check
-        run: black --check bashgym/
+        run: uv run black --check bashgym/
 
-  python-tests:
-    name: Python Tests
-    runs-on: ubuntu-latest
+  python-compatibility:
+    name: Python ${{ matrix.python }} / ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: Linux
+            python: "3.10"
+            full_suite: false
+          - os: ubuntu-latest
+            platform: Linux
+            python: "3.11"
+            full_suite: false
+          - os: ubuntu-latest
+            platform: Linux
+            python: "3.12"
+            full_suite: true
+          - os: windows-latest
+            platform: Windows
+            python: "3.12"
+            full_suite: false
+          - os: macos-latest
+            platform: macOS
+            python: "3.12"
+            full_suite: false
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: pyproject.toml
+          python-version: ${{ matrix.python }}
 
-      - name: Install dependencies
-        run: pip install -e ".[dev]"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
 
-      - name: Run tests
+      - name: Install locked test environment
+        run: uv sync --frozen --extra dev
+
+      # This runs first on every supported interpreter/OS. It builds the public
+      # wheel and proves its installed CLI/skills work outside the checkout.
+      - name: Packaging and installed-wheel tests
         env:
-          ANTHROPIC_API_KEY: test-key-for-ci
-          NVIDIA_API_KEY: test-key-for-ci
           OLLAMA_ENABLED: "false"
-        timeout-minutes: 12
-        run: pytest tests/ -m "not network and not integration and not slow" -x -v --tb=short --timeout=30
+        run: uv run --with pip --with setuptools --with wheel pytest tests/packaging -m "not network and not integration and not slow" -x -v --tb=short --timeout=300
 
-  python-package:
-    name: Python Wheel Smoke
+      - name: Remaining non-network tests
+        if: matrix.full_suite
+        env:
+          OLLAMA_ENABLED: "false"
+        # The retired February multi-agent Orchestrator is quarantined until its
+        # separately planned removal; it is not part of AutoResearch or the
+        # supported contributor loop.
+        run: uv run pytest tests/ --ignore=tests/packaging --ignore=tests/orchestrator -m "not network and not integration and not slow" -x -v --tb=short --timeout=30
+
+  frontend-quality:
+    name: Frontend Quality (Node 20)
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: pyproject.toml
-
-      - name: Build wheel
-        run: |
-          pip install build
-          python -m build --wheel
-
-      - name: Test installed wheel outside checkout
-        run: |
-          python -m venv /tmp/bashgym-wheel
-          /tmp/bashgym-wheel/bin/pip install dist/*.whl
-          cd /tmp
-          /tmp/bashgym-wheel/bin/bashgym manifest --json > manifest.json
-          /tmp/bashgym-wheel/bin/bashgym training docs --topic overview --json > docs.json
-          /tmp/bashgym-wheel/bin/bashgym campaign control-smoke --json > smoke.json
-          /tmp/bashgym-wheel/bin/python - <<'PY'
-          import json
-          from pathlib import Path
-          from bashgym.agent.skills.registry import SkillRegistry
-          from bashgym.api.routes import create_app
-
-          assert json.loads(Path("manifest.json").read_text())["ok"] is True
-          docs = json.loads(Path("docs.json").read_text())
-          assert docs["ok"] is True and docs["content"]
-          assert json.loads(Path("smoke.json").read_text())["ok"] is True
-          assert SkillRegistry().list_all()
-          assert create_app().title
-          PY
-
-  # ──────────────────────────────────────────────
-  # Frontend
-  # ──────────────────────────────────────────────
-
-  frontend-lint:
-    name: Frontend Lint
-    runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: frontend
@@ -115,39 +119,45 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Install dependencies
+      - name: Install dependencies without native lifecycle scripts
         run: npm ci --ignore-scripts
 
       - name: ESLint
         run: npm run lint
 
-  frontend-typecheck:
-    name: Frontend Type Check
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci --ignore-scripts
-
       - name: TypeScript check
         run: npm run typecheck
 
-  frontend-build:
-    name: Frontend Build
-    runs-on: ubuntu-latest
+      - name: Frontend tests
+        run: npm test
+
+      - name: Build web application
+        run: npm run web:build
+
+  electron-native-build:
+    name: Electron Unpacked / ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: Linux
+            artifact: electron-linux-unpacked
+          - os: windows-latest
+            platform: Windows
+            artifact: electron-windows-unpacked
+          - os: macos-latest
+            platform: macOS
+            artifact: electron-macos-unpacked
     defaults:
       run:
         working-directory: frontend
+    env:
+      # Produce unsigned CI artifacts; release signing belongs in a separate,
+      # secret-bearing release workflow.
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
       - uses: actions/checkout@v4
 
@@ -157,8 +167,38 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Install dependencies
-        run: npm ci --ignore-scripts
+      # Native lifecycle scripts are intentional in this target-native job so
+      # node-pty is installed/rebuilt for the host OS and architecture.
+      - name: Install target-native dependencies
+        timeout-minutes: 10
+        run: npm ci
 
-      - name: Build (web)
-        run: npm run web:build
+      - name: Rebuild native Electron dependencies
+        timeout-minutes: 5
+        run: npx electron-builder install-app-deps
+
+      - name: Build renderer and Electron processes
+        timeout-minutes: 10
+        run: npx vite build
+
+      - name: Build unsigned unpacked application
+        timeout-minutes: 10
+        run: npx electron-builder --dir --publish never
+
+      - name: Smoke unpacked application (Linux)
+        if: runner.os == 'Linux'
+        timeout-minutes: 2
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1280x800x24" npm run electron:smoke:packaged
+
+      - name: Smoke unpacked application (Windows and macOS)
+        if: runner.os != 'Linux'
+        timeout-minutes: 2
+        run: npm run electron:smoke:packaged
+
+      - name: Upload unpacked application
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: frontend/release/**
+          if-no-files-found: error
+          retention-days: 3

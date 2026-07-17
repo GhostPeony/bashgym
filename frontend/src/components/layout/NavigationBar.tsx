@@ -18,7 +18,7 @@ import { isElectron, isWeb } from '../../utils/platform'
 
 export function NavigationBar() {
   const { theme, toggleTheme } = useThemeStore()
-  const { toggleSidebar, overlayView, openOverlay, closeOverlay } = useUIStore()
+  const { toggleSidebar, overlayView, trainingSubview, openOverlay, closeOverlay } = useUIStore()
   const { createTerminal } = useTerminalStore()
   const { user, isAuthenticated, logout } = useAuthStore()
   const [isMaximized, setIsMaximized] = useState(false)
@@ -64,6 +64,7 @@ export function NavigationBar() {
   const getBreadcrumbText = () => {
     if (!overlayView) return 'Workspace'
     if (overlayView === 'home') return null
+    if (overlayView === 'training') return trainingSubview === 'autoresearch' ? 'AutoResearch' : 'Training'
     if (overlayView === 'factory') return 'Data Factory'
     if (overlayView === 'huggingface') return 'HuggingFace'
     return overlayView.charAt(0).toUpperCase() + overlayView.slice(1)
@@ -102,7 +103,7 @@ export function NavigationBar() {
           onClick={handleGoHome}
           className="flex items-center gap-3"
         >
-          <img src="/bashgym-peony.png" alt="BashGym" className="w-9 h-9 -my-1 object-contain" />
+          <img src="./bashgym-peony.png" alt="BashGym" className="w-9 h-9 -my-1 object-contain" />
           <span className="font-brand text-xl font-semibold leading-none">
             <span className="text-accent">/</span>
             <span className="text-text-primary">BashGym</span>

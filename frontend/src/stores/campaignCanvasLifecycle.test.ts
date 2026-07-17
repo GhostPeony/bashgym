@@ -1,15 +1,15 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { campaignsMissingPanels } from './campaignCanvasLifecycle'
+import { campaignsMissingPanels, materializeCampaignPanel } from './campaignCanvasLifecycle'
 import type { CampaignRecord } from './campaignStore'
 import type { Panel } from './terminalStore'
 
-function campaign(id: string): CampaignRecord {
+function campaign(id: string, workspaceId = 'workspace-a'): CampaignRecord {
   return {
     schema_version: 'campaign.v1',
     campaign_id: id,
-    workspace_id: 'workspace-a',
+    workspace_id: workspaceId,
     title: id,
     kind: 'embedding_finetune',
     objective: 'Improve retrieval',
@@ -36,4 +36,49 @@ test('campaign reload materializes every campaign exactly once', () => {
       .map((item) => item.campaign_id),
     ['campaign-2'],
   )
+})
+
+test('live campaign materialization rechecks current panels at insertion time', () => {
+  const panels: Panel[] = []
+  const state = {
+    panels,
+    activePanelId: null,
+    canvasNodes: new Map(),
+    addPanel(input: Omit<Panel, 'id'>) {
+      const id = `panel-${panels.length + 1}`
+      panels.push({ id, ...input } as Panel)
+      return id
+    },
+    updateCanvasNode() {},
+  }
+  const getState = () => state
+
+  assert.equal(materializeCampaignPanel(campaign('campaign-live'), getState), 'panel-1')
+  assert.equal(materializeCampaignPanel(campaign('campaign-live'), getState), null)
+  assert.equal(panels.length, 1)
+})
+
+test('same campaign ID materializes independently after a synchronous workspace canvas switch', () => {
+  const canvasState = () => {
+    const panels: Panel[] = []
+    return {
+      panels,
+      activePanelId: null,
+      canvasNodes: new Map(),
+      addPanel(input: Omit<Panel, 'id'>) {
+        const id = `panel-${panels.length + 1}`
+        panels.push({ id, ...input } as Panel)
+        return id
+      },
+      updateCanvasNode() {},
+    }
+  }
+  const workspaceA = canvasState()
+  const workspaceB = canvasState()
+
+  assert.equal(materializeCampaignPanel(campaign('campaign-1', 'workspace-a'), () => workspaceA), 'panel-1')
+  assert.equal(materializeCampaignPanel(campaign('campaign-1', 'workspace-b'), () => workspaceB), 'panel-1')
+  assert.equal(workspaceA.panels.length, 1)
+  assert.equal(workspaceB.panels.length, 1)
+  assert.notEqual(workspaceA.panels, workspaceB.panels)
 })

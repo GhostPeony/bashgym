@@ -10,8 +10,8 @@ Query BashGym system health and hardware information.
 ## Health Check
 
 Quick service health check:
-```
-scripts/api.sh GET /health
+```text
+bashgym api GET /api/health
 ```
 
 Returns: `{"status": "ok", "version": "..."}`
@@ -19,8 +19,8 @@ Returns: `{"status": "ok", "version": "..."}`
 ## System Information
 
 Full hardware report (CPU, GPU, memory, disk):
-```
-scripts/api.sh GET /system/info
+```text
+bashgym api GET /api/system/info
 ```
 
 Returns GPU utilization, CUDA availability, memory usage, disk space.
@@ -28,31 +28,31 @@ Returns GPU utilization, CUDA availability, memory usage, disk space.
 ## GPU Details
 
 Dedicated GPU endpoint:
-```
-scripts/api.sh GET /system/gpus
+```text
+bashgym api GET /api/system/gpus
 ```
 
 ## Aggregate Statistics
 
 Cross-subsystem stats (trace counts, model counts, training runs):
-```
-scripts/api.sh GET /stats
+```text
+bashgym api GET /api/stats
 ```
 
 ## Model Recommendations
 
 System-recommended models based on available hardware:
-```
-scripts/api.sh GET /system/recommendations
+```text
+bashgym api GET /api/system/recommendations
 ```
 
 ## Example Interactions
 
 User: "How's the system doing?"
-→ Call /health, then /system/info for GPU/memory. Summarize key numbers.
+→ Call `bashgym api GET /api/health`, then `bashgym api GET /api/system/info` for GPU/memory. Summarize key numbers.
 
 User: "Is my GPU being used?"
-→ Call /system/gpus. Report utilization %, memory used/total.
+→ Call `bashgym api GET /api/system/gpus`. Report utilization %, memory used/total.
 
 User: "Give me a status report"
-→ Call /stats for counts, /system/info for hardware. Present as a concise dashboard.
+→ Call `bashgym api GET /api/stats` for counts and `bashgym api GET /api/system/info` for hardware. Present as a concise dashboard.

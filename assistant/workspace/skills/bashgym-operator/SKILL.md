@@ -9,15 +9,15 @@ Act as the same local Hermes operator whether the request arrives through Discor
 
 ## Establish context
 
-1. Run `python3 scripts/operator_context.py doctor` to verify the abilities available in the current Hermes environment. Do not infer API, CLI, or campaign access from documentation alone. If `critical_skill_integrity.verified` is false, stop before mutation or compute launch and report the mismatched source-managed files.
-2. Select the exact project before loading task-specific evidence. Run `python3 scripts/operator_context.py context` or `bashgym ledger projects ... --json`; if more than one project is available, ask for the project ID instead of defaulting to the most familiar experiment.
+1. Run `bashgym operator doctor` to verify the abilities available in the current Hermes environment. Do not infer API, CLI, or campaign access from documentation alone. If `critical_skill_integrity.verified` is false, stop before mutation or compute launch and report the mismatched source-managed files.
+2. Select the exact workspace and project before loading task-specific evidence. Run `bashgym operator context --workspace-id <workspace>` or `bashgym ledger projects --workspace-id <workspace> --json`; if more than one project is available, ask for the project ID instead of defaulting to the most familiar experiment. There is no implicit second workspace.
 3. Read BashGym live context for that identity:
    - In the canvas, use the injected `BashGym workspace context` block as the desktop workspace/campaign projection.
-   - On the registered training host, run `python3 scripts/operator_context.py context --workspace-id <workspace> --project <project>` for live jobs, durable ledger state, and project-local evidence. Treat `task_profile` as supplemental evidence for that selected project only.
-   - When `BASHGYM_API_BASE_URL` is reachable, run `python3 scripts/operator_context.py workspace --workspace-id <id> --format markdown`.
+   - On the registered training host, run `bashgym operator context --workspace-id <workspace> --project <project>` for live jobs and project-isolated durable ledger state. The reusable helper never guesses or loads a task profile.
+   - When the BashGym API is reachable, run `bashgym operator workspace --workspace-id <id> --format markdown`. Set `BASHGYM_API_BASE` to the backend's `/api` URL when it is not `http://localhost:8003/api`.
    - Never assume Discord can reach the desktop API merely because the canvas can inject its projection.
 4. Query GBrain for the selected project's goal, prior decisions, accepted datasets/models, recent findings, and open follow-ups. Select `--source bashgym-activity` explicitly for curated BashGym activity; use `--source default` for broader project context. A GBrain page never proves what is currently running.
-5. Reconcile all sources using this precedence: live runtime > durable BashGym ledger > current workspace snapshot/project-local evidence > curated GBrain > conversation memory. Report source timestamps and conflicts; do not silently blend them.
+5. Reconcile all sources using this precedence: live runtime > durable BashGym ledger > current workspace snapshot > explicitly selected local-profile evidence > curated GBrain > conversation memory. Report source timestamps and conflicts; do not silently blend them.
    - Run `bashgym ledger projects ... --json` before choosing a project when the request is ambiguous.
    - Run `bashgym ledger context --project <id> ... --json` to load structured health, lineage, recent runs, eval coverage, decisions, and evidence IDs.
    - Use `bashgym ledger run`, `trend`, `evaluations`, and `compare` for evidence. A comparison is valid only when the evaluation-suite ID matches.
@@ -45,18 +45,18 @@ Before launch, identify or confirm:
 - checkpoint cadence/limit, artifact retention, remote download/cleanup responsibility, and report destinations;
 - Hugging Face repository, private/public visibility, adapter/merged upload choice, and publication/promotion authority.
 
-Use the existing campaign ledger as the durable training-session record. Use `general` for task-general LLM work and a named profile such as `embedding_retrieval` only when its task-specific executor and metrics apply. Never make embeddings the platform-wide default.
+Use the existing campaign ledger as the durable training-session record. Use `general` for task-general work and a named profile only when its separately installed executor and evaluation contract apply. Never make one task profile the platform-wide default.
 
 ## Run the cycle
 
 1. Inspect the workspace context, campaign evidence, recent cursor, attempts, runtime state, and reports.
 2. State the verified plan and unresolved gates. Do not relaunch work that already exists.
-3. Preview and persist the exact strategy/config, including `checkpoint_limit`, `artifact_retention`, and Hugging Face destination fields. Select a doctor-verified activation lane and perform the next allowed action through its executable surface. A generated SkyPilot/dstack plan is not a launch; an HF Jobs id is not a native BashGym run id. If the doctor reports `launch_general_training: false`, do not pretend the documented CLI is executable there: continue planning/inspection and request a reachable desktop API or an updated isolated checkout. If desktop campaign mutation is unavailable but a project-specific guarded training script exists, use that script and its manifest only for that named project profile; do not pretend a desktop campaign was advanced or create a parallel campaign ledger.
+3. Preview and persist the exact strategy/config, including `checkpoint_limit`, `artifact_retention`, and Hugging Face destination fields. Select a doctor-verified activation lane and perform the next allowed action through its executable surface. A generated SkyPilot/dstack plan is not a launch; an HF Jobs id is not a native BashGym run id. If the doctor reports `launch_general_training: false`, do not pretend the documented CLI is executable there: continue planning/inspection and request a reachable desktop API or an updated isolated checkout. Never imply that local project tooling advanced the desktop campaign ledger.
    - For direct runs, pass `--tracking-context <json>` or the agent tool's `tracking_context`. If lineage is incomplete, record an unassigned smoke/ad-hoc run and resolve it before using the result for a project decision.
 4. Monitor at a cadence appropriate to the run. Record milestones and anomalies, not every metric point.
 5. Evaluate with the declared suite, compare against the pinned baseline and gates, and distinguish smoke/runtime evidence from model-quality evidence.
 6. Export Markdown, charts, DOCX, and PDF only after the required full run and evaluation complete. Preserve report/export IDs and hashes.
-7. Curate the milestone into GBrain with `scripts/curate_activity.py`, then sync the `bashgym-activity` source.
+7. Curate the milestone into GBrain with `bashgym operator curate`, then sync the `bashgym-activity` source.
    - Prefer the incremental `bashgym ledger events --after-cursor <cursor>` envelope. Persist the returned cursor only after the curated write succeeds.
 8. Recommend and, within authority and budget, execute the next bounded iteration. Otherwise stop and ask for the specific missing authority.
 
@@ -120,26 +120,23 @@ planning documents as runtime authority.
 
 Use the deterministic helper instead of pasting raw logs:
 
-```bash
-GBRAIN_BIN="${GBRAIN_BIN:-gbrain}"
-BASHGYM_ACTIVITY_ROOT="${BASHGYM_ACTIVITY_ROOT:-$HOME/.local/share/bashgym/gbrain/bashgym-activity}"
-python scripts/curate_activity.py context workspace-context.json \
-  --output-root "$BASHGYM_ACTIVITY_ROOT"
-"$GBRAIN_BIN" sync --source bashgym-activity
+```text
+bashgym operator curate context workspace-context.json --output-root <activity-root>
+gbrain sync --source bashgym-activity
 ```
 
 For a decision or milestone not present in workspace context, create a `bashgym.activity.v1` JSON receipt and run:
 
-```bash
-python scripts/curate_activity.py receipt receipt.json \
-  --output-root "$BASHGYM_ACTIVITY_ROOT"
-"$GBRAIN_BIN" sync --source bashgym-activity
+```text
+bashgym operator curate receipt receipt.json --output-root <activity-root>
+gbrain sync --source bashgym-activity
 ```
 
-The helper is idempotent and strips secret-shaped fields, high-volume content, and local absolute paths. Curate goals, configuration decisions, lineage IDs/digests, milestones, anomalies, KPI snapshots, comparisons, conclusions, follow-ups, and report references. Keep raw datasets, checkpoints, transcripts, full logs, and metric series in BashGym.
+The helper is idempotent and strips secret-shaped fields, high-volume content, and local absolute paths even when a path is embedded in prose. Curate goals, configuration decisions, lineage IDs/digests, milestones, anomalies, KPI snapshots, comparisons, conclusions, follow-ups, and report references. Keep raw datasets, checkpoints, transcripts, full logs, and metric series in BashGym.
 
 For a desktop-to-remote handoff, render a `bashgym.session-handoff.v1` input with
-`curate_activity.py handoff`, then preview `scripts/gbrain_bridge.py publish`.
+`bashgym operator curate handoff`, then preview with
+`bashgym operator gbrain-bridge --profile <ignored-profile> publish --file <receipt> --relative <remote-relative-path>`.
 Only add `--execute --sync` after the rendered document and local bridge profile
 have been reviewed. The bridge writes one bounded Markdown receipt with an atomic
 rename and asks the authoritative remote GBrain to sync that source; it never copies
@@ -148,7 +145,7 @@ or mounts the live index.
 ## Boundaries
 
 - Do not introduce MCP or another daemon when local API/CLI/filesystem access works.
-- Do not merge BashGym and MemexAI repositories. Exchange versioned artifacts and contracts.
+- Keep project repositories separate from BashGym. Exchange versioned artifacts and contracts.
 - Do not open protected evaluation data, publish, promote, expand budget, or edit a product repository without the corresponding authority.
 - Do not claim quality findings from smoke runs.
 - Do not silently switch work from the selected compute target to paid external compute.

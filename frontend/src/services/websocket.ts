@@ -22,14 +22,18 @@
  */
 
 import { useEffect } from 'react'
-import { useTrainingStore, useRouterStore, useTracesStore } from '../stores'
+import { useTrainingStore } from '../stores/trainingStore'
+import { useRouterStore } from '../stores/routerStore'
+import { useTracesStore } from '../stores/tracesStore'
 import { useOrchestratorStore } from '../stores/orchestratorStore'
-import { useAutoResearchStore } from '../stores/autoresearchStore'
 import { useActivityStore } from '../stores/activityStore'
 import { useCascadeStore } from '../stores/cascadeStore'
 import { useCanvasOrchestratorStore } from '../stores/canvasOrchestratorStore'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useHFContextStore } from '../stores/hfContextStore'
+import { useCampaignStore } from '../stores/campaignStore'
+import { parseCampaignHint, type CampaignHintV1 } from '../stores/campaignFreshness'
+import { campaignApi } from './api'
 
 type MessageHandler = (data: any) => void
 
@@ -69,6 +73,9 @@ export const MessageTypes = {
   // Workspace canvas events
   WORKSPACE_CANVAS_INTENT: 'workspace:canvas:intent',
   WORKSPACE_CONTEXT_UPDATED: 'workspace:context:updated',
+  CAMPAIGN_HINT: 'campaign:hint',
+  CAMPAIGN_SUBSCRIBED: 'campaign:subscribed',
+  CAMPAIGN_SUBSCRIPTION_ERROR: 'campaign:subscription-error',
   // Connection events
   CONNECTED: 'connected',
   SUBSCRIBED: 'subscribed',
@@ -110,56 +117,225 @@ export const MessageTypes = {
   CASCADE_PROGRESS: 'cascade:progress',
 } as const
 
-class WebSocketService {
+type LiveTicketResult = { ok: boolean; data?: { ticket?: string } }
+
+interface WebSocketServiceOptions {
+  url?: string
+  socketFactory?: (url: string) => WebSocket
+  liveTicket?: (workspaceId: string) => Promise<LiveTicketResult>
+  scheduleReconnect?: (callback: () => void, delay: number) => ReturnType<typeof setTimeout>
+  clearScheduledReconnect?: (timer: ReturnType<typeof setTimeout>) => void
+  handleCampaignHint?: (hint: CampaignHintV1) => void | Promise<void>
+  handleConnection?: (connected: boolean, generation: number) => void | Promise<void>
+  handleSubscription?: (
+    workspaceId: string,
+    subscribed: boolean,
+    generation: number,
+  ) => void | Promise<void>
+  addActivity?: (type: string, payload: Record<string, any>) => void
+}
+
+const SOCKET_CONNECTING = 0
+const SOCKET_OPEN = 1
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
+}
+
+export class WebSocketService {
   private ws: WebSocket | null = null
   private url: string
   private handlers: Map<string, Set<MessageHandler>> = new Map()
   private reconnectAttempts = 0
-  private maxReconnectAttempts = 5
   private reconnectDelay = 1000
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private manuallyDisconnected = false
+  private connectionGeneration = 0
+  private campaignWorkspaceRefs = new Map<string, number>()
+  private pendingCampaignWorkspaces = new Set<string>()
+  private subscribedCampaignWorkspaces = new Set<string>()
+  private campaignSubscriptionRetryAttempts = new Map<string, number>()
+  private campaignSubscriptionRetryTimers = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >()
+  private socketFactory: (url: string) => WebSocket
+  private liveTicket: (workspaceId: string) => Promise<LiveTicketResult>
+  private scheduleReconnect: WebSocketServiceOptions['scheduleReconnect']
+  private clearScheduledReconnect: NonNullable<WebSocketServiceOptions['clearScheduledReconnect']>
+  private handleCampaignHint: NonNullable<WebSocketServiceOptions['handleCampaignHint']>
+  private handleConnection: NonNullable<WebSocketServiceOptions['handleConnection']>
+  private handleSubscription: NonNullable<WebSocketServiceOptions['handleSubscription']>
+  private addActivity: NonNullable<WebSocketServiceOptions['addActivity']>
 
-  constructor() {
-    const envUrl = import.meta.env.VITE_WS_URL
-    if (envUrl) {
-      this.url = envUrl
-    } else if (typeof window !== 'undefined' && import.meta.env.VITE_MODE === 'web') {
+  constructor(options: WebSocketServiceOptions = {}) {
+    const env = (import.meta as ImportMeta & {
+      env?: { VITE_WS_URL?: string; VITE_MODE?: string }
+    }).env ?? {}
+    if (options.url) {
+      this.url = options.url
+    } else if (typeof window !== 'undefined' && window.bashgym?.runtime?.webSocketUrl) {
+      this.url = window.bashgym.runtime.webSocketUrl
+    } else if (env.VITE_WS_URL) {
+      this.url = env.VITE_WS_URL
+    } else if (typeof window !== 'undefined' && env.VITE_MODE === 'web') {
       // Web mode: derive WebSocket URL from current host (same-origin)
       const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
       this.url = `${proto}//${window.location.host}/ws`
     } else {
-      this.url = 'ws://localhost:8003/ws'
+      this.url = 'ws://127.0.0.1:8003/ws'
+    }
+    this.socketFactory = options.socketFactory ?? ((url) => new WebSocket(url))
+    this.liveTicket = options.liveTicket ?? ((workspaceId) => campaignApi.liveTicket(workspaceId))
+    this.scheduleReconnect = options.scheduleReconnect ?? ((callback, delay) => setTimeout(callback, delay))
+    this.clearScheduledReconnect = options.clearScheduledReconnect ?? ((timer) => clearTimeout(timer))
+    this.handleCampaignHint = options.handleCampaignHint
+      ?? ((hint) => useCampaignStore.getState().handleHint(hint))
+    this.handleConnection = options.handleConnection
+      ?? ((connected, generation) => useCampaignStore.getState().handleConnection(connected, generation))
+    this.handleSubscription = options.handleSubscription
+      ?? ((workspaceId, subscribed, generation) => useCampaignStore.getState().handleSubscription(
+        workspaceId, subscribed, generation,
+      ))
+    this.addActivity = options.addActivity
+      ?? ((type, payload) => useActivityStore.getState().addEvent(type, payload))
+  }
+
+  retainCampaignWorkspace(workspaceId: string): () => void {
+    const normalized = workspaceId.trim()
+    if (!normalized) return () => {}
+    this.campaignWorkspaceRefs.set(normalized, (this.campaignWorkspaceRefs.get(normalized) ?? 0) + 1)
+    void this.syncCampaignSubscriptions()
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      const remaining = (this.campaignWorkspaceRefs.get(normalized) ?? 1) - 1
+      if (remaining > 0) {
+        this.campaignWorkspaceRefs.set(normalized, remaining)
+        return
+      }
+      this.campaignWorkspaceRefs.delete(normalized)
+      this.pendingCampaignWorkspaces.delete(normalized)
+      this.subscribedCampaignWorkspaces.delete(normalized)
+      this.clearCampaignSubscriptionRetry(normalized)
+      this.send('campaign:unsubscribe', { workspace_id: normalized })
     }
   }
 
+  private async syncCampaignSubscriptions(
+    socket = this.ws,
+    generation = this.connectionGeneration,
+  ) {
+    if (!socket || socket !== this.ws || socket.readyState !== SOCKET_OPEN) return
+    for (const workspaceId of this.campaignWorkspaceRefs.keys()) {
+      if (this.pendingCampaignWorkspaces.has(workspaceId)
+        || this.subscribedCampaignWorkspaces.has(workspaceId)) continue
+      this.pendingCampaignWorkspaces.add(workspaceId)
+      let sent = false
+      try {
+        const response = await this.liveTicket(workspaceId)
+        const ticket = response.ok ? response.data?.ticket : undefined
+        if (ticket && typeof ticket === 'string'
+          && socket === this.ws && generation === this.connectionGeneration
+          && socket.readyState === SOCKET_OPEN && this.campaignWorkspaceRefs.has(workspaceId)) {
+          socket.send(JSON.stringify({ type: 'campaign:subscribe', payload: { ticket } }))
+          sent = true
+        }
+      } catch {
+        sent = false
+      } finally {
+        // Keep the workspace pending until the server acknowledges. This avoids
+        // minting another single-use ticket when a second consumer mounts.
+        if (!sent) {
+          this.pendingCampaignWorkspaces.delete(workspaceId)
+          this.scheduleCampaignSubscriptionRetry(workspaceId, socket, generation)
+        }
+      }
+    }
+  }
+
+  private clearCampaignSubscriptionRetry(workspaceId: string) {
+    const timer = this.campaignSubscriptionRetryTimers.get(workspaceId)
+    if (timer) this.clearScheduledReconnect(timer)
+    this.campaignSubscriptionRetryTimers.delete(workspaceId)
+    this.campaignSubscriptionRetryAttempts.delete(workspaceId)
+  }
+
+  private clearAllCampaignSubscriptionRetries() {
+    for (const workspaceId of this.campaignSubscriptionRetryTimers.keys()) {
+      this.clearCampaignSubscriptionRetry(workspaceId)
+    }
+  }
+
+  private scheduleCampaignSubscriptionRetry(
+    workspaceId: string,
+    socket: WebSocket,
+    generation: number,
+  ) {
+    if (this.campaignSubscriptionRetryTimers.has(workspaceId)
+      || !this.campaignWorkspaceRefs.has(workspaceId)
+      || socket !== this.ws || generation !== this.connectionGeneration) return
+    const attempt = (this.campaignSubscriptionRetryAttempts.get(workspaceId) ?? 0) + 1
+    this.campaignSubscriptionRetryAttempts.set(workspaceId, attempt)
+    const delay = Math.min(250 * (2 ** Math.max(0, attempt - 1)), 8_000)
+    const timer = this.scheduleReconnect!(() => {
+      this.campaignSubscriptionRetryTimers.delete(workspaceId)
+      void this.syncCampaignSubscriptions(socket, generation)
+    }, delay)
+    this.campaignSubscriptionRetryTimers.set(workspaceId, timer)
+  }
+
   connect() {
-    if (this.ws?.readyState === WebSocket.OPEN) return
+    if (this.ws?.readyState === SOCKET_OPEN || this.ws?.readyState === SOCKET_CONNECTING) return
+    this.manuallyDisconnected = false
 
     console.log('WebSocket: Attempting connection to:', this.url)
     try {
-      this.ws = new WebSocket(this.url)
-      console.log('WebSocket: Created, readyState:', this.ws.readyState)
+      const socket = this.socketFactory(this.url)
+      const generation = ++this.connectionGeneration
+      this.ws = socket
+      console.log('WebSocket: Created, readyState:', socket.readyState)
 
-      this.ws.onopen = () => {
+      socket.onopen = () => {
+        if (this.ws !== socket || generation !== this.connectionGeneration) return
         console.log('WebSocket connected successfully to', this.url)
         this.reconnectAttempts = 0
         useTrainingStore.getState().setConnected(true)
+        this.pendingCampaignWorkspaces.clear()
+        this.subscribedCampaignWorkspaces.clear()
+        void this.handleConnection(true, generation)
+        void this.syncCampaignSubscriptions(socket, generation)
       }
 
-      this.ws.onclose = (event) => {
+      socket.onclose = (event) => {
+        if (this.ws !== socket || generation !== this.connectionGeneration) return
         console.log('WebSocket disconnected, code:', event.code, 'reason:', event.reason)
+        this.ws = null
         useTrainingStore.getState().setConnected(false)
-        this.attemptReconnect()
+        this.pendingCampaignWorkspaces.clear()
+        this.subscribedCampaignWorkspaces.clear()
+        this.clearAllCampaignSubscriptionRetries()
+        void this.handleConnection(false, generation)
+        if (!this.manuallyDisconnected) this.attemptReconnect()
       }
 
-      this.ws.onerror = (error) => {
+      socket.onerror = (error) => {
+        if (this.ws !== socket || generation !== this.connectionGeneration) return
         console.error('WebSocket error:', error)
         console.error('WebSocket URL was:', this.url)
-        console.error('WebSocket readyState:', this.ws?.readyState)
+        console.error('WebSocket readyState:', socket.readyState)
       }
 
-      this.ws.onmessage = (event) => {
+      socket.onmessage = (event) => {
+        if (this.ws !== socket || generation !== this.connectionGeneration) return
         try {
-          const message: WebSocketMessage = JSON.parse(event.data)
+          const parsed: unknown = JSON.parse(event.data)
+          if (!isPlainRecord(parsed) || typeof parsed.type !== 'string'
+            || !isPlainRecord(parsed.payload)) return
+          const message = parsed as unknown as WebSocketMessage
           this.handleMessage(message)
         } catch (error) {
           console.error('Failed to parse WebSocket message:', error)
@@ -172,33 +348,48 @@ class WebSocketService {
   }
 
   disconnect() {
-    if (this.ws) {
-      this.ws.close()
-      this.ws = null
-    }
+    this.manuallyDisconnected = true
+    if (this.reconnectTimer) this.clearScheduledReconnect(this.reconnectTimer)
+    this.reconnectTimer = null
+    const socket = this.ws
+    this.ws = null
+    this.connectionGeneration++
+    this.pendingCampaignWorkspaces.clear()
+    this.subscribedCampaignWorkspaces.clear()
+    this.clearAllCampaignSubscriptionRetries()
+    socket?.close()
+    useTrainingStore.getState().setConnected(false)
+    void this.handleConnection(false, this.connectionGeneration)
   }
 
   private attemptReconnect() {
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.log('Max reconnect attempts reached')
-      return
-    }
-
     this.reconnectAttempts++
-    const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1)
+    const delay = Math.min(30_000, this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1))
 
     console.log(`Attempting reconnect in ${delay}ms (attempt ${this.reconnectAttempts})`)
 
-    setTimeout(() => {
+    this.reconnectTimer = this.scheduleReconnect!(() => {
+      this.reconnectTimer = null
       this.connect()
     }, delay)
   }
 
   private handleMessage(message: WebSocketMessage) {
-    const { type, payload } = message
+    const { type } = message
+    let payload = message.payload
 
-    // Feed every tracked event into the unified activity feed
-    useActivityStore.getState().addEvent(type, payload ?? {})
+    if (type === MessageTypes.CAMPAIGN_HINT) {
+      const hint = parseCampaignHint(payload)
+      if (!hint) return
+      payload = hint
+      void this.handleCampaignHint(hint)
+    }
+
+    // Campaign frames are reconciliation transport, not user Activity.
+    const campaignControlFrame = type === MessageTypes.CAMPAIGN_HINT
+      || type === MessageTypes.CAMPAIGN_SUBSCRIBED
+      || type === MessageTypes.CAMPAIGN_SUBSCRIPTION_ERROR
+    if (!campaignControlFrame) this.addActivity(type, payload ?? {})
 
     // Handle built-in message types
     switch (type) {
@@ -369,59 +560,6 @@ class WebSocketService {
         useOrchestratorStore.getState().handleMergeResult(payload)
         break
 
-      // AutoResearch events
-      case MessageTypes.AUTORESEARCH_EXPERIMENT:
-        useAutoResearchStore.getState().addExperiment({
-          experimentId: payload.experiment_id,
-          totalExperiments: payload.total_experiments,
-          configSnapshot: payload.config_snapshot,
-          metricValue: payload.metric_value,
-          bestMetric: payload.best_metric,
-          improved: payload.improved,
-          durationSeconds: payload.duration_seconds,
-        })
-        break
-
-      case MessageTypes.AUTORESEARCH_STATUS:
-        useAutoResearchStore.getState().setStatus(payload.status)
-        break
-
-      case MessageTypes.AUTORESEARCH_TRACE_EXPERIMENT:
-        useAutoResearchStore.getState().addTraceExperiment({
-          experimentId: payload.experiment_id,
-          totalExperiments: payload.total_experiments,
-          configSnapshot: payload.config_snapshot,
-          examplesGenerated: payload.examples_generated,
-          uniqueRepos: payload.unique_repos,
-          avgExampleLength: payload.avg_example_length,
-          metricValue: payload.metric_value,
-          bestMetric: payload.best_metric,
-          improved: payload.improved,
-          durationSeconds: payload.duration_seconds,
-        })
-        break
-
-      case MessageTypes.AUTORESEARCH_TRACE_COMPLETE:
-        useAutoResearchStore.getState().setTraceStatus(payload.status)
-        break
-
-      // Schema research events
-      case MessageTypes.AUTORESEARCH_SCHEMA_EXPERIMENT:
-        useAutoResearchStore.getState().addSchemaExperiment({
-          experimentId: payload.experiment_id,
-          totalExperiments: payload.total_experiments,
-          configSnapshot: payload.config_snapshot,
-          metricValue: payload.metric_value,
-          bestMetric: payload.best_metric,
-          improved: payload.improved,
-          durationSeconds: payload.duration_seconds,
-        })
-        break
-
-      case MessageTypes.AUTORESEARCH_SCHEMA_STATUS:
-        useAutoResearchStore.getState().setSchemaStatus(payload.status)
-        break
-
       // Cascade RL events
       case MessageTypes.CASCADE_STAGE_STARTED:
         useCascadeStore.getState().handleStageStarted(payload)
@@ -499,6 +637,32 @@ class WebSocketService {
       case MessageTypes.WORKSPACE_CONTEXT_UPDATED:
         // Lightweight notification only; Activity feed already records it.
         break
+
+      case MessageTypes.CAMPAIGN_HINT:
+        // Parsed above; the store schedules authoritative snapshot reconciliation.
+        break
+
+      case MessageTypes.CAMPAIGN_SUBSCRIBED: {
+        const workspaceId = typeof payload.workspace_id === 'string' ? payload.workspace_id : ''
+        if (workspaceId && this.campaignWorkspaceRefs.has(workspaceId)) {
+          this.pendingCampaignWorkspaces.delete(workspaceId)
+          this.subscribedCampaignWorkspaces.add(workspaceId)
+          this.clearCampaignSubscriptionRetry(workspaceId)
+          void this.handleSubscription(workspaceId, true, this.connectionGeneration)
+        }
+        break
+      }
+
+      case MessageTypes.CAMPAIGN_SUBSCRIPTION_ERROR: {
+        // The denial is intentionally non-disclosing, so invalidate all pending
+        // attempts and replay every desired workspace on a fresh connection.
+        for (const workspaceId of this.campaignWorkspaceRefs.keys()) {
+          void this.handleSubscription(workspaceId, false, this.connectionGeneration)
+        }
+        const socket = this.ws
+        if (socket) socket.close()
+        break
+      }
     }
 
     // Notify custom handlers
@@ -527,7 +691,7 @@ class WebSocketService {
   }
 
   send(type: string, payload: Record<string, any>) {
-    if (this.ws?.readyState === WebSocket.OPEN) {
+    if (this.ws?.readyState === SOCKET_OPEN) {
       this.ws.send(JSON.stringify({ type, payload }))
     } else {
       console.warn('WebSocket not connected, cannot send message')
@@ -561,7 +725,7 @@ class WebSocketService {
    * Check if the WebSocket is connected.
    */
   isConnected(): boolean {
-    return this.ws?.readyState === WebSocket.OPEN
+    return this.ws?.readyState === SOCKET_OPEN
   }
 }
 

@@ -9,7 +9,7 @@ Manage training through BashGym, not ad-hoc shell scripts. A run that matters mu
 
 ## Default Rules
 
-- Use `scripts/api.sh` or `bashgym training ...` commands first.
+- Use installed `bashgym api ...` or `bashgym training ...` commands first. They work from any directory on Windows, macOS, and Linux.
 - Do not start raw Unsloth/HF scripts unless the user explicitly asks for manual debugging.
 - Classify every run by method from `run_state.json`/API config, not by model name.
 - A completed train loss curve is not a full eval. Require heldout, environment, release-evidence, or RunCard artifacts as appropriate.
@@ -26,13 +26,13 @@ For private remote-trainer details, use the operator's local runbook or saved co
 ## Preflight
 
 ```bash
-scripts/api.sh GET /api/health
-scripts/api.sh GET /api/system/info
-scripts/api.sh GET /api/system/recommendations
-scripts/api.sh GET /api/ssh/preflight
+bashgym api GET /api/health
+bashgym api GET /api/system/info
+bashgym api GET /api/system/recommendations
+bashgym api GET /api/ssh/preflight
 ```
 
-The helper discovers the active API base URL. Prefer setting `BASHGYM_API_URL`; if the local backend port changes, set `BASHGYM_API_PORT`, `BASHGYM_API_URLS`, or `BASHGYM_API_URL_FILE`, or write the live URL to `~/.bashgym/api_url`. Skills should keep using logical `/api/...` paths.
+The installed command defaults to `http://localhost:8003/api`. Set `BASHGYM_API_BASE` to the active backend's `/api` URL or pass `--api-base <url>`. Keep using logical `/api/...` paths; never put credentials in the URL or command arguments.
 
 On private unified-memory or remote GPU compute targets, prefer BashGym-managed runs with `use_remote_ssh: true` and `load_in_4bit: false` when the saved profile supports it. Use `sft_backend: "unsloth"` for known-good SFT smoke runs; fall back to `sft_backend: "plain"` if Unsloth import or hardware support fails. Only stop model services for memory after user approval.
 
@@ -48,11 +48,11 @@ direct `/api/training/start` run.
 Plan first when selecting a method. The plan output uses `TrainingRequest` field names and includes the default storage policy:
 
 ```bash
-bashgym training plan --strategy sft --hardware private_compute --data traces --json
-bashgym training plan --strategy dpo --hardware private_compute --data preference_pairs --json
+bashgym training plan --strategy sft --hardware private_compute --data gold_traces --json
+bashgym training plan --strategy dpo --hardware private_compute --data custom_jsonl --json
 bashgym training plan --strategy grpo --hardware private_compute --data terminal_envs --json
-bashgym training plan --strategy distillation --hardware private_compute --data traces --json
-bashgym training plan --strategy session-distillation --hardware private_compute --data traces --json
+bashgym training plan --strategy distillation --hardware private_compute --data gold_traces --json
+bashgym training plan --strategy session-distillation --hardware private_compute --data gold_traces --json
 ```
 
 Direct `/api/training/start` strategies are `sft`, `dpo`, `grpo`, `rlvr`, `distillation`, and `session_distillation`. DPPO replay, reward-model training, ECHO/RWML diagnostics, and cascade/MOPD use their own workflows; do not relabel one of them as a direct strategy.
@@ -122,10 +122,14 @@ The direct agent tool accepts the same strategies. Put validated `TrainingReques
 
 For exact SFT, DPO, GRPO/RLVR, teacher-distillation, and Session Distillation payloads, use `references/bashgym-launch-recipes.md`. Do not invent aliases such as `epochs`; the API field is `num_epochs`.
 
-API calls remain valid when the CLI is unavailable:
+The portable API operation accepts a UTF-8 JSON file, avoiding shell-specific quoting. Save the following object as `training-request.json`, then submit it from any directory:
 
 ```bash
-scripts/api.sh POST /api/training/start '{
+bashgym api POST /api/training/start --data-file training-request.json
+```
+
+```json
+{
   "strategy": "sft",
   "dataset_path": "/path/to/train.jsonl",
   "base_model": "<model-id>",
@@ -136,27 +140,27 @@ scripts/api.sh POST /api/training/start '{
   "hf_private": true,
   "hf_upload_artifact": "auto",
   "use_remote_ssh": true
-}'
+}
 ```
 
 ## Monitor And Control
 
 ```bash
-scripts/api.sh GET /api/training
-scripts/api.sh GET /api/training/runs
-scripts/api.sh GET /api/training/{run_id}
-scripts/api.sh GET "/api/training/{run_id}/log?tail=200"
-scripts/api.sh GET /api/training/runs/{run_id}/metrics
-scripts/api.sh GET /api/training/runs/{run_id}/analysis
-scripts/api.sh GET /api/system/info
+bashgym api GET /api/training
+bashgym api GET /api/training/runs
+bashgym api GET /api/training/{run_id}
+bashgym api GET /api/training/{run_id}/log --query tail=200
+bashgym api GET /api/training/runs/{run_id}/metrics
+bashgym api GET /api/training/runs/{run_id}/analysis
+bashgym api GET /api/system/info
 ```
 
 Pause/resume/stop work only for active in-memory runs:
 
 ```bash
-scripts/api.sh POST /api/training/{run_id}/pause '{}'
-scripts/api.sh POST /api/training/{run_id}/resume '{}'
-scripts/api.sh POST /api/training/{run_id}/stop '{}'
+bashgym api POST /api/training/{run_id}/pause
+bashgym api POST /api/training/{run_id}/resume
+bashgym api POST /api/training/{run_id}/stop
 ```
 
 ## Required Post-Run Eval
@@ -221,14 +225,14 @@ Minimum evidence:
 Useful eval endpoints:
 
 ```bash
-scripts/api.sh POST /api/eval/heldout '{...}'
-scripts/api.sh GET /api/eval/heldout/{job_id}
-scripts/api.sh POST /api/eval/environments/passk '{...}'
-scripts/api.sh POST /api/eval/environments/holdout-gate '{...}'
-scripts/api.sh POST /api/eval/environments/model-rollout-passk '{...}'
-scripts/api.sh POST /api/eval/environments/reward-hacking-canaries '{...}'
-scripts/api.sh POST /api/eval/environments/dppo-replay/enrich '{...}'
-scripts/api.sh POST /api/eval/environments/dppo-replay/smoke-plan '{...}'
+bashgym api POST /api/eval/heldout --data-file heldout-request.json
+bashgym api GET /api/eval/heldout/{job_id}
+bashgym api POST /api/eval/environments/passk --data-file passk-request.json
+bashgym api POST /api/eval/environments/holdout-gate --data-file holdout-gate-request.json
+bashgym api POST /api/eval/environments/model-rollout-passk --data-file rollout-request.json
+bashgym api POST /api/eval/environments/reward-hacking-canaries --data-file canary-request.json
+bashgym api POST /api/eval/environments/dppo-replay/enrich --data-file replay-request.json
+bashgym api POST /api/eval/environments/dppo-replay/smoke-plan --data-file smoke-plan-request.json
 ```
 
 ## RunCards
@@ -238,8 +242,8 @@ Create and validate a RunCard for any run that will be reused or promoted:
 ```bash
 bashgym training runcard create --run-id <run_id> --training-method <method> --base-model <model-id> --compute-target <target-id> --output data/models/<run_id>/run_card.json --metrics data/models/<run_id>/metrics.jsonl --promotion --json
 bashgym training runcard validate data/models/<run_id>/run_card.json --promotion
-scripts/api.sh GET /api/training/runcards
-scripts/api.sh GET "/api/training/runcards/validate?path=data/models/<run_id>/run_card.json&promotion=true"
+bashgym api GET /api/training/runcards
+bashgym api GET /api/training/runcards/validate --query path=data/models/<run_id>/run_card.json --query promotion=true
 ```
 
 ## Run Classification

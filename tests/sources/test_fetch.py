@@ -90,14 +90,14 @@ def test_fetch_source_records_allows_large_pull_with_recorded_approval(tmp_path)
         get_source("ultrafeedback_binarized"),
         output_dir=tmp_path,
         limit=1001,
-        approval_reason="GX10 prep smoke approved by Cade",
+        approval_reason="large pull integration test approved by release manager",
         loader=loader,
     )
 
     assert report["ok"] is True
     assert report["approval_required"] is True
     assert report["approval_granted"] is True
-    assert report["approval_reason"] == "GX10 prep smoke approved by Cade"
+    assert report["approval_reason"] == "large pull integration test approved by release manager"
     assert report["cache_hit"] is False
 
 

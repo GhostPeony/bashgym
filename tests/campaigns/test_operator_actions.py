@@ -4,12 +4,16 @@ import json
 
 import pytest
 
+from bashgym.campaigns.artifacts import ArtifactSealer
+from bashgym.campaigns.auth import CampaignAuthService
 from bashgym.campaigns.contracts import (
     ActionStatus,
     AttemptStatus,
+    AutonomyProfile,
     ProtectedEvaluationResult,
     StudyStatus,
 )
+from bashgym.campaigns.human_oversight import HumanOversightRepository
 from bashgym.campaigns.persistence import (
     PromotionGateFailedError,
     ProtectedLeaseDeniedError,
@@ -315,6 +319,95 @@ def test_protected_epoch_is_one_use_and_promotion_fails_closed_then_commits(tmp_
         idempotency_key="protected-result",
     )
     assert protected_result.details["passed"] is True
+
+    oversight = HumanOversightRepository(
+        repository,
+        sealer=ArtifactSealer(
+            b"operator-action-human-seal-key-v1",
+            key_version="operator-human-v1",
+        ),
+    )
+    queue = oversight.enqueue(
+        workspace_id="workspace-a",
+        campaign_id="campaign-1",
+        work_id="hw_promotiongate0001",
+        campaign_revision=1,
+        blocking=True,
+        rubric={
+            "rubric_id": "rub_gate0001",
+            "version": 1,
+            "instructions": "Choose the stronger response.",
+            "choices": [
+                {"choice_id": "left", "label": "Left"},
+                {"choice_id": "right", "label": "Right"},
+                {"choice_id": "tie", "label": "No material difference"},
+            ],
+        },
+        sample={
+            "prompt": "Review the bounded candidate evidence.",
+            "left": {"label": "A", "display": "Public candidate A"},
+            "right": {"label": "B", "display": "Public candidate B"},
+        },
+        protected_context={"candidate_mapping": "server-owned"},
+    )
+    with pytest.raises(PromotionGateFailedError):
+        service.promote(
+            "workspace-a",
+            "campaign-1",
+            expected_version=protected_result.campaign.version,
+            principal=actor,
+            correlation_id="promote-before-human-decision",
+            idempotency_key="promote-before-human-decision",
+        )
+
+    auth = CampaignAuthService(repository)
+    refresh = auth.issue_refresh_credential(
+        actor_id="desktop-reviewer",
+        autonomy_profile=AutonomyProfile.DESKTOP_USER,
+        workspace_ids=("workspace-a",),
+    )
+    reviewer = auth.authenticate_access(auth.exchange_refresh(refresh.raw_token).raw_token)
+    claimed = oversight.claim(
+        workspace_id="workspace-a",
+        campaign_id="campaign-1",
+        work_id="hw_promotiongate0001",
+        expected_campaign_revision=1,
+        expected_version=1,
+        expected_state="pending",
+        principal=reviewer,
+        correlation_id="claim-human-gate",
+        idempotency_key=queue["items"][0]["claim_idempotency_key"],
+    )
+    submitted = oversight.submit(
+        workspace_id="workspace-a",
+        campaign_id="campaign-1",
+        work_id="hw_promotiongate0001",
+        expected_campaign_revision=1,
+        expected_version=2,
+        expected_rubric_version=1,
+        decision="prefer_left",
+        rationale="Candidate A meets the rubric.",
+        principal=reviewer,
+        correlation_id="submit-human-gate",
+        idempotency_key=claimed.queue["items"][0]["submit_idempotency_key"],
+    )
+    receipt = submitted.queue["items"][0]["receipt"]
+    approved = oversight.decide_promotion(
+        workspace_id="workspace-a",
+        campaign_id="campaign-1",
+        receipt_id=receipt["receipt_id"],
+        work_id="hw_promotiongate0001",
+        expected_campaign_revision=1,
+        expected_item_version=3,
+        expected_rubric_version=1,
+        expected_promotion_version=2,
+        expected_promotion_state="awaiting_human_decision",
+        decision="promote",
+        principal=reviewer,
+        correlation_id="approve-human-gate",
+        idempotency_key=submitted.queue["promotion"]["idempotency_key"],
+    )
+    assert approved.queue["promotion"]["state"] == "promoted"
     promoted = service.promote(
         "workspace-a",
         "campaign-1",

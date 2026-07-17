@@ -11,7 +11,11 @@ from pydantic import Field
 
 from bashgym.campaigns.autoresearch import AutoResearchTemplateDefinition
 from bashgym.campaigns.contracts import FrozenContractModel, Identifier, StageKind, canonical_hash
-from bashgym.campaigns.lineage import ApprovedSourceRepositoryProfile
+from bashgym.campaigns.lineage import (
+    ApprovedSourceRepositoryProfile,
+    GitHypothesisLineageManager,
+    GitLineageError,
+)
 from bashgym.campaigns.persistence import RecordNotFoundError
 from bashgym.campaigns.remote import ApprovedRemoteExecutorProfile
 from bashgym.campaigns.worker_service import ControllerStatusProjection
@@ -348,12 +352,12 @@ def doctor_autoresearch_template(
             if isinstance(source_profile_id, str) and source_profiles is not None
             else None
         )
-        source_ready = bool(
-            source_profile is not None
-            and source_profile.repository_path.is_dir()
-            and not source_profile.repository_path.is_symlink()
-            and source_profile.allowed_mutation_paths
-        )
+        source_ready = source_profile is not None
+        if source_profile is not None:
+            try:
+                GitHypothesisLineageManager.verify_profile(source_profile)
+            except GitLineageError:
+                source_ready = False
         checks.append(
             _check(
                 "source_repository_binding",
@@ -364,7 +368,8 @@ def doctor_autoresearch_template(
             )
         )
         code_execution_ready = bool(
-            profile is not None
+            source_ready
+            and profile is not None
             and source_profile is not None
             and required_compute_stages
             and all(

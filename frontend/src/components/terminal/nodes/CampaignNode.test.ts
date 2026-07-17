@@ -2,8 +2,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { readFileSync } from 'node:fs'
 
 import type { CampaignDetailState } from '../../../stores/campaignStore'
+import { useUIStore } from '../../../stores/uiStore'
 
 const storage = new Map<string, string>()
 Object.defineProperty(globalThis, 'localStorage', {
@@ -56,6 +58,29 @@ function realisticDetail(): CampaignDetailState {
     updated_at: '2026-07-13T21:14:34Z',
   }
   return {
+    snapshot: null,
+    freshness: 'live',
+    lastVerifiedAt: null,
+    reconciliation: {
+      freshness: 'live', generation: 0, connectionGeneration: 1, subscribed: true,
+      appliedCursor: 0, appliedVersion: 8, targetCursor: 0, targetVersion: 8,
+      semanticKey: null, inFlightGeneration: null, retryCount: 0,
+      lastHintAt: null, lastVerifiedAt: null, errorCode: null,
+    },
+    pages: {
+      events: [],
+      artifacts: [],
+      eventCursor: 0,
+      artifactCursor: null,
+      eventsHasMore: true,
+      artifactsHasMore: true,
+      eventsLoading: false,
+      eventsLoaded: false,
+      eventsError: null,
+      artifactsLoading: false,
+      artifactsLoaded: false,
+      artifactsError: null,
+    },
     campaign,
     studies: [{
       study_id: 'study-cached-mnrl',
@@ -327,6 +352,7 @@ test('campaign evidence panel renders the durable API/store projection and contr
     onSelect: () => undefined,
     onTransition: () => undefined,
     onRefresh: () => undefined,
+    onOpenAutoResearch: () => undefined,
   }))
 
   assert.match(markup, /Memex embedding Candidate B/)
@@ -341,6 +367,7 @@ test('campaign evidence panel renders the durable API/store projection and contr
   assert.match(markup, /Pause<\/button>/)
   assert.match(markup, /Cancel<\/button>/)
   assert.match(markup, /Refresh<\/button>/)
+  assert.match(markup, /Open in AutoResearch<\/button>/)
   assert.match(markup, /Resident Controller/)
   assert.match(markup, /aria-label="Campaign controller stale"/)
   assert.match(markup, /heartbeat 20s ago/)
@@ -379,6 +406,36 @@ test('campaign evidence panel renders the durable API/store projection and contr
   assert.match(markup, /1\.5 MB/)
 })
 
+test('campaign control-room deep link uses exact workspace and campaign IDs', async () => {
+  const { openCampaignInAutoResearch } = await import('./campaignNodeActions')
+  const prior = useUIStore.getState().openTraining
+  const calls: unknown[][] = []
+  useUIStore.setState({
+    openTraining: (subview, selection) => { calls.push([subview, selection]) },
+  })
+  try {
+    openCampaignInAutoResearch('workspace-exact', 'campaign-exact')
+    assert.deepEqual(calls, [[
+      'autoresearch',
+      { workspaceId: 'workspace-exact', campaignId: 'campaign-exact' },
+    ]])
+  } finally {
+    useUIStore.setState({ openTraining: prior })
+  }
+})
+
+test('campaign node keeps legacy drill-down lazy until the evidence modal opens', async () => {
+  const { shouldLoadCampaignDrillDown } = await import('./campaignNodeActions')
+  assert.equal(shouldLoadCampaignDrillDown(false, 7), false)
+  assert.equal(shouldLoadCampaignDrillDown(true, null), false)
+  assert.equal(shouldLoadCampaignDrillDown(true, 7), true)
+
+  const source = readFileSync(new URL('./CampaignNode.tsx', import.meta.url), 'utf8')
+  assert.match(source, /const loadLegacyDetail = useCampaignStore/)
+  assert.match(source, /shouldLoadCampaignDrillDown\(configOpen, snapshotVersion\)/)
+  assert.match(source, /void loadLegacyDetail\(workspaceId, campaignId\)/)
+})
+
 test('campaign evidence panel exposes lifecycle controls for ready and paused states', async () => {
   const { CampaignEvidencePanel } = await import('./CampaignNode')
   const detail = realisticDetail()
@@ -400,4 +457,49 @@ test('campaign evidence panel exposes lifecycle controls for ready and paused st
 
   assert.match(renderStatus('ready'), /Start<\/button>/)
   assert.match(renderStatus('paused'), /Resume<\/button>/)
+})
+
+test('campaign evidence panel hides lifecycle mutations unless authority is exactly live', async () => {
+  const { CampaignEvidencePanel } = await import('./CampaignNode')
+  const base = realisticDetail()
+
+  for (const freshness of ['reconciling', 'stale', 'offline', 'error'] as const) {
+    const detail = { ...base, freshness }
+    const markup = renderToStaticMarkup(createElement(CampaignEvidencePanel, {
+      campaignId: detail.campaign.campaign_id,
+      campaigns: [detail.campaign],
+      detail,
+      controller: null,
+      chartData: [],
+      latestAttempt: undefined,
+      latestComparison: undefined,
+      mutating: false,
+      onSelect: () => undefined,
+      onTransition: () => { throw new Error(`transition rendered for ${freshness}`) },
+      onRefresh: () => undefined,
+      onOpenAutoResearch: () => undefined,
+    }))
+
+    assert.doesNotMatch(markup, />Start<|>Pause<|>Resume<|>Cancel</)
+    assert.match(markup, />Refresh</)
+    assert.match(markup, />Open in AutoResearch</)
+  }
+})
+
+test('campaign transition submission never calls the bridge without live authority', async () => {
+  const { submitCampaignTransitionIfLive } = await import('./campaignNodeActions')
+  const calls: unknown[][] = []
+  const transition = async (...args: unknown[]) => { calls.push(args) }
+
+  for (const freshness of ['reconciling', 'stale', 'offline', 'error'] as const) {
+    const submitted = await submitCampaignTransitionIfLive({
+      detail: { ...realisticDetail(), freshness },
+      mutating: false,
+      action: 'pause',
+      workspaceId: 'workspace-a',
+      transition,
+    })
+    assert.equal(submitted, false)
+  }
+  assert.deepEqual(calls, [])
 })

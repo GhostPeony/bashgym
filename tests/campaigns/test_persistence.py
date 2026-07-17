@@ -101,7 +101,7 @@ def transition(repository, trigger, version, *, key, payload=None):
 
 
 def test_initialize_applies_checksum_migration_and_all_owned_tables(repository):
-    assert repository.schema_versions() == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    assert repository.schema_versions() == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
     assert repository.journal_mode() == "wal"
     assert repository.foreign_keys_enabled() is True
 
@@ -133,6 +133,10 @@ def test_initialize_applies_checksum_migration_and_all_owned_tables(repository):
         "campaign_action_control_requests",
         "campaign_exports",
         "campaign_code_lineages",
+        "campaign_human_work",
+        "campaign_human_receipts",
+        "campaign_human_promotions",
+        "campaign_human_mutations",
     } <= tables
 
 
@@ -202,7 +206,7 @@ def test_v9_database_migrates_existing_auth_and_controller_rows_to_revision_one(
 
     credential = migrated.get_actor_credential("cred-legacy")
     lease = migrated.get_lease("scheduler:legacy")
-    assert migrated.schema_versions()[-1] == 10
+    assert migrated.schema_versions()[-1] == 15
     assert credential is not None and credential.authorization_revision == 1
     assert lease is not None and lease.controller_observation_version == 1
 

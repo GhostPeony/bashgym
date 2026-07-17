@@ -33,6 +33,7 @@ from bashgym.campaigns.contracts import (
     DecisionActionV1,
     DecisionBlockerV1,
     DecisionSurfaceV1,
+    HumanWorkItemSummaryV1,
     HumanWorkSummaryV1,
     JourneyPhaseSummaryV1,
     ManifestRevision,
@@ -44,7 +45,11 @@ from bashgym.campaigns.contracts import (
     utc_now,
 )
 from bashgym.campaigns.persistence import RecordNotFoundError
-from bashgym.campaigns.transitions import allowed_triggers, evaluate_promotion_gate
+from bashgym.campaigns.transitions import (
+    allowed_triggers,
+    evaluate_promotion_gate,
+    human_promotion_authorized,
+)
 
 
 @dataclass(frozen=True)
@@ -88,6 +93,10 @@ class ControlRoomDurableProjection:
     projection_invariant_codes: tuple[str, ...]
     protected_gate_passed: bool
     human_work: tuple[dict[str, Any], ...] = ()
+    human_work_open_count: int = 0
+    human_work_blocking_count: int = 0
+    human_promotion_state: str | None = None
+    has_current_blocking_human_work: bool = False
     agents: tuple[dict[str, Any], ...] = ()
 
 
@@ -491,6 +500,66 @@ def read_control_room_projection(
                         else None
                     ),
                 )
+    human_work_rows: tuple[dict[str, Any], ...] = ()
+    human_work_count = 0
+    human_work_open_count = 0
+    human_work_blocking_count = 0
+    human_promotion_state: str | None = None
+    has_current_blocking_human_work = False
+    if _table_exists(connection, "campaign_human_work"):
+        human_count_row = connection.execute(
+            """
+            SELECT COUNT(*) AS item_count,
+                   SUM(CASE WHEN campaign_revision != ? OR state NOT IN ('submitted', 'replaced') THEN 1 ELSE 0 END) AS open_count,
+                   SUM(CASE WHEN blocking = 1 AND (campaign_revision != ? OR state NOT IN ('submitted', 'replaced')) THEN 1 ELSE 0 END) AS blocking_count
+            FROM campaign_human_work
+            WHERE workspace_id = ? AND campaign_id = ?
+            """,
+            (
+                campaign.manifest_revision,
+                campaign.manifest_revision,
+                workspace_id,
+                campaign_id,
+            ),
+        ).fetchone()
+        human_work_count = int(human_count_row["item_count"])
+        human_work_open_count = int(human_count_row["open_count"] or 0)
+        human_work_blocking_count = int(human_count_row["blocking_count"] or 0)
+        human_rows = connection.execute(
+            """
+            SELECT work_id, campaign_revision, item_version, state, blocking,
+                   claimed_by_actor_id, lease_expires_at, updated_at
+            FROM campaign_human_work
+            WHERE workspace_id = ? AND campaign_id = ?
+            ORDER BY (campaign_revision = ?) DESC, updated_at DESC, work_id ASC
+            LIMIT 10
+            """,
+            (workspace_id, campaign_id, campaign.manifest_revision),
+        ).fetchall()
+        human_work_rows = tuple(dict(item) for item in human_rows)
+        current_blocking_row = connection.execute(
+            """
+            SELECT EXISTS(
+                SELECT 1 FROM campaign_human_work
+                WHERE workspace_id = ? AND campaign_id = ?
+                  AND campaign_revision = ? AND blocking = 1 AND state != 'replaced'
+            ) AS present
+            """,
+            (workspace_id, campaign_id, campaign.manifest_revision),
+        ).fetchone()
+        has_current_blocking_human_work = bool(current_blocking_row["present"])
+    if _table_exists(connection, "campaign_human_promotions"):
+        human_promotion_row = connection.execute(
+            """
+            SELECT state FROM campaign_human_promotions
+            WHERE workspace_id = ? AND campaign_id = ? AND campaign_revision = ?
+            """,
+            (workspace_id, campaign_id, campaign.manifest_revision),
+        ).fetchone()
+        human_promotion_state = (
+            str(human_promotion_row["state"]) if human_promotion_row is not None else None
+        )
+
     return ControlRoomDurableProjection(
         campaign=campaign,
         manifest=manifest,
@@ -502,7 +571,7 @@ def read_control_room_projection(
             "attempts": int(count_row["attempts"]),
             "artifacts": int(count_row["artifacts"]),
             "comparisons": int(count_row["comparisons"]),
-            "human_work": 0,
+            "human_work": human_work_count,
         },
         budget_totals={
             str(item["unit"]): (
@@ -523,6 +592,11 @@ def read_control_room_projection(
         champion_provenance=champion_provenance,
         projection_invariant_codes=tuple(dict.fromkeys(projection_invariant_codes)),
         protected_gate_passed=protected_gate_passed,
+        human_work=human_work_rows,
+        human_work_open_count=human_work_open_count,
+        human_work_blocking_count=human_work_blocking_count,
+        human_promotion_state=human_promotion_state,
+        has_current_blocking_human_work=has_current_blocking_human_work,
     )
 
 
@@ -875,6 +949,56 @@ def _phase(
     )
 
 
+def _human_work_summary(
+    durable: ControlRoomDurableProjection, snapshot_at: datetime
+) -> HumanWorkSummaryV1:
+    items: list[HumanWorkItemSummaryV1] = []
+    current_revision = durable.campaign.manifest_revision
+    for row in durable.human_work[:10]:
+        raw_state = str(row["state"])
+        due_at = (
+            datetime.fromisoformat(str(row["lease_expires_at"]))
+            if row.get("lease_expires_at")
+            else None
+        )
+        if int(row["campaign_revision"]) != current_revision:
+            status = "revision_requested"
+        elif raw_state == "pending":
+            status = "open"
+        elif raw_state == "claimed":
+            status = "expired" if due_at is not None and due_at <= snapshot_at else "claimed"
+        elif raw_state == "submitted":
+            status = "accepted"
+        elif raw_state == "expired":
+            status = "expired"
+        else:
+            status = "cancelled"
+        completed = status == "accepted"
+        items.append(
+            HumanWorkItemSummaryV1(
+                work_item_id=str(row["work_id"]),
+                kind="blinded_sample_evaluation",
+                status=status,
+                blocking_scope=(
+                    "comparison_and_promotion" if bool(row["blocking"]) else "advisory"
+                ),
+                assigned_actor_id=(
+                    str(row["claimed_by_actor_id"])
+                    if status == "claimed" and row.get("claimed_by_actor_id")
+                    else None
+                ),
+                required_count=1,
+                completed_count=1 if completed else 0,
+                due_at=due_at,
+            )
+        )
+    return HumanWorkSummaryV1(
+        blocking_count=durable.human_work_blocking_count,
+        open_count=durable.human_work_open_count,
+        newest=tuple(items),
+    )
+
+
 def build_control_room_snapshot(
     durable: ControlRoomDurableProjection,
     controller: ControllerObservationV1,
@@ -905,6 +1029,7 @@ def build_control_room_snapshot(
             )
         )
     budget_blocked = any(resource.blocked for resource in budget_resources)
+    human_work = _human_work_summary(durable, snapshot_at)
     gate = durable.latest_gate or {}
     promotion_gate = evaluate_promotion_gate(
         active_action_id=campaign.active_action_id,
@@ -912,7 +1037,10 @@ def build_control_room_snapshot(
         candidate_digest=gate.get("candidate_digest") or campaign.best_development_candidate_ref,
         protected_required=bool(manifest.protected_artifact_refs),
         protected_passed=durable.protected_gate_passed,
-        human_work_complete=True,
+        human_work_complete=human_promotion_authorized(
+            promotion_state=durable.human_promotion_state,
+            has_current_blocking_work=durable.has_current_blocking_human_work,
+        ),
     )
     promotion_transition_allowed = (
         CampaignTrigger.PROMOTION_COMMITTED in allowed_triggers(campaign.status)
@@ -1012,6 +1140,23 @@ def build_control_room_snapshot(
         if durable.latest_gate is not None
         else "not_started"
     )
+    human_statuses = {item.status for item in human_work.newest}
+    human_review_state = (
+        "not_started"
+        if not human_work.newest
+        else "complete"
+        if human_work.open_count == 0
+        else "active"
+        if "claimed" in human_statuses
+        else "blocked"
+        if human_statuses & {"expired", "revision_requested"}
+        else "ready"
+    )
+    human_blocker = (
+        _promotion_blocker(("campaign_human_work_incomplete",))
+        if human_work.blocking_count > 0
+        else None
+    )
     journey = (
         _phase(
             "setup",
@@ -1035,7 +1180,17 @@ def build_control_room_snapshot(
             evidence_count=durable.collection_counts["attempts"]
             + durable.collection_counts["comparisons"],
         ),
-        _phase("human_review", "not_started"),
+        _phase(
+            "human_review",
+            human_review_state,
+            attention_owner=(
+                "human" if human_review_state in {"ready", "active", "blocked"} else "none"
+            ),
+            blocker=human_blocker if human_review_state == "blocked" else None,
+            evidence_count=len(
+                [item for item in human_work.newest if item.status == "accepted"]
+            ),
+        ),
         _phase(
             "decision",
             decision_state,
@@ -1241,7 +1396,7 @@ def build_control_room_snapshot(
         candidate=candidate,
         metrics=metrics,
         budget=BudgetSummaryV1(resources=tuple(budget_resources), blocked=budget_blocked),
-        human_work=HumanWorkSummaryV1(blocking_count=0, open_count=0, newest=()),
+        human_work=human_work,
         agents=(),
         collections=CollectionSummaryV1(
             events=cursor("events"),
@@ -1254,8 +1409,10 @@ def build_control_room_snapshot(
         ),
         decision_surface=DecisionSurfaceV1(
             execution_owner=execution_owner,
-            attention_owner=attention_owner,
-            blocker=blocker,
+            attention_owner=(
+                "human" if human_work.blocking_count > 0 else attention_owner
+            ),
+            blocker=blocker or human_blocker,
             next_actions=actions,
             recovery_actions=tuple(dict.fromkeys(recovery)),
             promotion_eligible=promotion_eligible,

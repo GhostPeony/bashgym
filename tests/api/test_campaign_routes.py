@@ -15,6 +15,7 @@ from bashgym.api.campaign_routes import (
     campaign_router,
 )
 from bashgym.api.routes import create_app
+from bashgym.campaigns.artifacts import ArtifactSealer
 from bashgym.campaigns.auth import CampaignAuthService
 from bashgym.campaigns.autoresearch import (
     AUTORESEARCH_CONTROL_SMOKE_TEMPLATE_ID,
@@ -33,6 +34,7 @@ from bashgym.campaigns.contracts import (
     CredentialKind,
     canonical_hash,
 )
+from bashgym.campaigns.human_oversight import HumanOversightRepository
 from bashgym.campaigns.runtime import CampaignRuntimeRepository
 from bashgym.campaigns.service import CampaignService
 from bashgym.campaigns.worker import scheduler_lease_key
@@ -50,8 +52,14 @@ from bashgym.ledger.contracts import (
     RunSpec,
     RunStatus,
 )
-from bashgym.ledger.persistence import ExperimentLedgerRepository
-from tests.campaigns.test_autoresearch_readiness import definition as readiness_definition
+from bashgym.ledger.persistence import ExperimentLedgerRepository, LedgerPersistenceError
+from tests.campaigns.test_autoresearch_readiness import (
+    definition as readiness_definition,
+)
+from tests.campaigns.test_autoresearch_readiness import (
+    register_scientific_bindings,
+    registered_profile,
+)
 from tests.campaigns.test_lineage import initialized_repository, source_profile
 from tests.campaigns.test_persistence import campaign, manifest
 from tests.campaigns.test_proposals import proposal as study_proposal
@@ -86,6 +94,7 @@ def campaign_client(tmp_path, *, profile=AutonomyProfile.CODEX_TRUSTED):
     app.state.campaign_service = service
     app.state.campaign_templates = {"memexai-approved-v1": template}
     app.state.campaign_worker_config_path = tmp_path / "worker-config.v1.json"
+    app.state.campaign_human_seal_key = b"campaign-route-human-seal-key-v1"
     app.include_router(campaign_auth_router)
     app.include_router(campaign_router)
     return TestClient(app), repository, refresh
@@ -117,8 +126,54 @@ def create_from_template(http: TestClient, token: str, campaign_id="campaign-1")
     )
 
 
+def seed_human_work(repository, *, campaign_id="campaign-1"):
+    return HumanOversightRepository(
+        repository,
+        sealer=ArtifactSealer(
+            b"campaign-route-human-seal-key-v1",
+            key_version="campaign-seal-v1",
+        ),
+    ).enqueue(
+        workspace_id="workspace-a",
+        campaign_id=campaign_id,
+        work_id="hw_0123456789abcdef",
+        campaign_revision=1,
+        blocking=True,
+        rubric={
+            "rubric_id": "rub_01234567",
+            "version": 1,
+            "instructions": "Choose the stronger response.",
+            "choices": [
+                {"choice_id": "left", "label": "Left"},
+                {"choice_id": "right", "label": "Right"},
+            ],
+        },
+        sample={
+            "prompt": "Bounded prompt",
+            "left": {"label": "A", "display": "Candidate A"},
+            "right": {"label": "B", "display": "Candidate B"},
+        },
+        protected_context={
+            "mapping": "API-SECRET-MAPPING-CANARY",
+            "path": "C:/restricted/human.jsonl",
+        },
+        now=datetime(2026, 7, 16, 12, 0, tzinfo=UTC),
+    )
+
+
 def test_create_app_registers_campaign_auth_and_campaign_routes():
-    route_paths = {route.path for route in create_app().routes}
+    def collect_route_paths(routes) -> set[str]:
+        paths: set[str] = set()
+        for route in routes:
+            path = getattr(route, "path", None)
+            if isinstance(path, str):
+                paths.add(path)
+            included = getattr(route, "original_router", None)
+            if included is not None:
+                paths.update(collect_route_paths(included.routes))
+        return paths
+
+    route_paths = collect_route_paths(create_app().routes)
 
     assert {
         "/api/campaign-auth/exchange",
@@ -128,6 +183,10 @@ def test_create_app_registers_campaign_auth_and_campaign_routes():
         "/api/campaigns/templates",
         "/api/campaigns/templates/{template_id}/doctor",
         "/api/campaigns/{campaign_id}/control-room-snapshot",
+        "/api/campaigns/{campaign_id}/human-work",
+        "/api/campaigns/{campaign_id}/human-work/{work_id}/claim",
+        "/api/campaigns/{campaign_id}/human-work/{work_id}/submit",
+        "/api/campaigns/{campaign_id}/human-promotion",
         "/api/campaigns/{campaign_id}",
         "/api/campaigns/{campaign_id}/autoresearch",
         "/api/campaigns/{campaign_id}/autoresearch/baseline",
@@ -165,6 +224,234 @@ def test_create_app_registers_campaign_auth_and_campaign_routes():
         "/api/campaigns/{campaign_id}/ledger",
         "/api/campaigns/{campaign_id}/attempts/{attempt_id}/metrics",
     } <= route_paths
+
+
+def test_human_work_api_is_desktop_only_bounded_and_replayable(tmp_path):
+    http, repository, refresh = campaign_client(
+        tmp_path, profile=AutonomyProfile.DESKTOP_USER
+    )
+    access = exchange(http, refresh.raw_token)
+    assert create_from_template(http, access).status_code == 200
+    seeded = seed_human_work(repository)
+
+    read = http.get(
+        "/api/campaigns/campaign-1/human-work",
+        headers=bearer(access),
+        params={"workspace_id": "workspace-a", "limit": 50},
+    )
+    assert read.status_code == 200
+    assert read.json() == seeded
+    serialized = json.dumps(read.json())
+    assert "API-SECRET-MAPPING-CANARY" not in serialized
+    assert "restricted/human.jsonl" not in serialized
+
+    snapshot = http.get(
+        "/api/campaigns/campaign-1/control-room-snapshot",
+        headers=bearer(access),
+        params={"workspace_id": "workspace-a"},
+    )
+    assert snapshot.status_code == 200
+    snapshot_payload = snapshot.json()
+    assert snapshot_payload["human_work"] == {
+        "schema_version": "human_work_summary.v1",
+        "blocking_count": 1,
+        "open_count": 1,
+        "newest": [
+            {
+                "schema_version": "human_work_item_summary.v1",
+                "work_item_id": "hw_0123456789abcdef",
+                "kind": "blinded_sample_evaluation",
+                "status": "open",
+                "blocking_scope": "comparison_and_promotion",
+                "assigned_actor_id": None,
+                "required_count": 1,
+                "completed_count": 0,
+                "due_at": None,
+            }
+        ],
+    }
+    assert snapshot_payload["collections"]["human_work"]["count"] == 1
+    assert "API-SECRET-MAPPING-CANARY" not in json.dumps(snapshot_payload)
+    assert "Candidate A" not in json.dumps(snapshot_payload)
+
+    claim_headers = {
+        **bearer(access),
+        "Idempotency-Key": seeded["items"][0]["claim_idempotency_key"],
+        "X-Correlation-ID": "human-claim-correlation",
+    }
+    claim_body = {
+        "workspace_id": "workspace-a",
+        "expected_campaign_revision": 1,
+        "expected_version": 1,
+        "expected_state": "pending",
+    }
+    claimed = http.post(
+        "/api/campaigns/campaign-1/human-work/hw_0123456789abcdef/claim",
+        headers=claim_headers,
+        json=claim_body,
+    )
+    replayed_claim = http.post(
+        "/api/campaigns/campaign-1/human-work/hw_0123456789abcdef/claim",
+        headers=claim_headers,
+        json=claim_body,
+    )
+    assert claimed.status_code == replayed_claim.status_code == 200
+    assert claimed.json()["replayed"] is False
+    assert replayed_claim.json()["replayed"] is True
+    assert replayed_claim.json()["queue"] == claimed.json()["queue"]
+    assert claimed.json()["event"]["correlation_id"] == "human-claim-correlation"
+    assert claimed.json()["event"]["payload"] == {
+        "work_id": "hw_0123456789abcdef",
+        "campaign_revision": 1,
+        "item_version": 2,
+        "state": "claimed",
+    }
+
+    submit_key = claimed.json()["queue"]["items"][0]["submit_idempotency_key"]
+    submitted = http.post(
+        "/api/campaigns/campaign-1/human-work/hw_0123456789abcdef/submit",
+        headers={
+            **bearer(access),
+            "Idempotency-Key": submit_key,
+            "X-Correlation-ID": "human-submit-correlation",
+        },
+        json={
+            "workspace_id": "workspace-a",
+            "expected_campaign_revision": 1,
+            "expected_version": 2,
+            "expected_rubric_version": 1,
+            "decision": "prefer_left",
+            "rationale": "Candidate A follows the rubric.",
+        },
+    )
+    assert submitted.status_code == 200
+    queue = submitted.json()["queue"]
+    assert queue["items"][0]["state"] == "submitted"
+    assert queue["promotion"]["state"] == "awaiting_human_decision"
+    receipt = queue["items"][0]["receipt"]
+
+    promoted = http.post(
+        "/api/campaigns/campaign-1/human-promotion",
+        headers={
+            **bearer(access),
+            "Idempotency-Key": queue["promotion"]["idempotency_key"],
+            "X-Correlation-ID": "human-promote-correlation",
+        },
+        json={
+            "workspace_id": "workspace-a",
+            "receipt_id": receipt["receipt_id"],
+            "work_id": "hw_0123456789abcdef",
+            "expected_campaign_revision": 1,
+            "expected_item_version": 3,
+            "expected_rubric_version": 1,
+            "expected_promotion_version": 2,
+            "expected_promotion_state": "awaiting_human_decision",
+            "decision": "promote",
+        },
+    )
+    assert promoted.status_code == 200
+    assert promoted.json()["queue"]["promotion"]["state"] == "promoted"
+
+    public_events = http.get(
+        "/api/campaigns/campaign-1/events",
+        headers=bearer(access),
+        params={"workspace_id": "workspace-a"},
+    )
+    assert public_events.status_code == 200
+    public_events_json = json.dumps(public_events.json())
+    assert "API-SECRET-MAPPING-CANARY" not in public_events_json
+    assert "restricted/human.jsonl" not in public_events_json
+    assert "Candidate A follows the rubric" not in public_events_json
+    assert "hw_0123456789abcdef" not in public_events_json
+    assert receipt["receipt_id"] not in public_events_json
+
+
+def test_human_work_api_denies_agents_and_returns_safe_conflicts(tmp_path):
+    desktop_http, repository, desktop_refresh = campaign_client(
+        tmp_path, profile=AutonomyProfile.DESKTOP_USER
+    )
+    desktop_access = exchange(desktop_http, desktop_refresh.raw_token)
+    assert create_from_template(desktop_http, desktop_access).status_code == 200
+    seeded = seed_human_work(repository)
+
+    auth = CampaignAuthService(repository)
+    agent_refresh = auth.issue_refresh_credential(
+        actor_id="codex-agent",
+        autonomy_profile=AutonomyProfile.CODEX_TRUSTED,
+        workspace_ids=("workspace-a",),
+    )
+    agent_access = auth.exchange_refresh(agent_refresh.raw_token)
+    denied = desktop_http.get(
+        "/api/campaigns/campaign-1/human-work",
+        headers=bearer(agent_access.raw_token),
+        params={"workspace_id": "workspace-a"},
+    )
+    assert denied.status_code == 403
+    assert denied.json()["detail"] == {
+        "code": "campaign_capability_required",
+        "message": "Campaign operation is not permitted.",
+    }
+
+    conflict = desktop_http.post(
+        "/api/campaigns/campaign-1/human-work/hw_0123456789abcdef/claim",
+        headers={
+            **bearer(desktop_access),
+            "Idempotency-Key": seeded["items"][0]["claim_idempotency_key"],
+        },
+        json={
+            "workspace_id": "workspace-a",
+            "expected_campaign_revision": 1,
+            "expected_version": 9,
+            "expected_state": "pending",
+        },
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"] == {
+        "code": "human_work_conflict",
+        "message": "Human oversight state changed. Reconcile before retrying.",
+    }
+    assert "API-SECRET" not in json.dumps(conflict.json())
+
+
+def test_human_work_api_authenticates_before_lookup(tmp_path):
+    http, repository, refresh = campaign_client(
+        tmp_path, profile=AutonomyProfile.DESKTOP_USER
+    )
+    access = exchange(http, refresh.raw_token)
+    assert create_from_template(http, access).status_code == 200
+    seed_human_work(repository)
+
+    response = http.post(
+        "/api/campaigns/not-a-campaign/human-work/not-a-work/claim",
+        headers={"Idempotency-Key": "idem_0123456789abcdef"},
+        json={
+            "workspace_id": "workspace-a",
+            "expected_campaign_revision": 1,
+            "expected_version": 1,
+            "expected_state": "pending",
+        },
+    )
+    assert response.status_code == 401
+    assert response.json()["detail"]["code"] == "campaign_auth_required"
+
+    malformed = http.post(
+        "/api/campaigns/campaign-1/human-work/-invalid/claim",
+        headers={
+            **bearer(access),
+            "Idempotency-Key": "idem_0123456789abcdef",
+        },
+        json={
+            "workspace_id": "workspace-a",
+            "expected_campaign_revision": 1,
+            "expected_version": 1,
+            "expected_state": "pending",
+        },
+    )
+    assert malformed.status_code == 422
+    assert malformed.json()["detail"] == {
+        "code": "campaign_invalid",
+        "message": "invalid human work id",
+    }
 
 
 def test_builtin_autoresearch_template_prepares_to_authorized_start_gate(tmp_path):
@@ -237,6 +524,408 @@ def test_builtin_autoresearch_template_prepares_to_authorized_start_gate(tmp_pat
     assert event_types[-2:] == ["campaign:validation-started", "campaign:ready"]
 
 
+def test_autoresearch_start_recomputes_controller_readiness_and_does_not_consume_idempotency(
+    tmp_path, monkeypatch
+):
+    http, repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    created = http.post(
+        "/api/campaigns/from-template",
+        headers={**bearer(access), "Idempotency-Key": "create-start-gate"},
+        json={
+            "workspace_id": "workspace-a",
+            "campaign_id": "autoresearch-start-gate-1",
+            "title": "AutoResearch start gate",
+            "template_id": AUTORESEARCH_CONTROL_SMOKE_TEMPLATE_ID,
+        },
+    )
+    assert created.status_code == 200
+    before_events = repository.list_events("workspace-a", "autoresearch-start-gate-1")
+    headers = {
+        **bearer(access),
+        "Idempotency-Key": "start-after-controller-online",
+        "X-Correlation-ID": "operator-start-correlation",
+    }
+    body = {
+        "workspace_id": "workspace-a",
+        "expected_version": created.json()["campaign"]["version"],
+    }
+
+    offline = http.post(
+        "/api/campaigns/autoresearch-start-gate-1/start",
+        headers=headers,
+        json=body,
+    )
+
+    assert offline.status_code == 409
+    assert offline.json()["detail"] == {
+        "code": "campaign_launch_not_ready",
+        "message": "AutoResearch launch readiness must be restored before Start.",
+        "blocking_codes": ["controller_offline"],
+        "guidance": [
+            {
+                "code": "controller_offline",
+                "message": (
+                    "Install or restart the per-user campaign worker. Durable campaigns "
+                    "remain paused and remote training runs remain untouched."
+                ),
+            }
+        ],
+    }
+    assert repository.list_events("workspace-a", "autoresearch-start-gate-1") == before_events
+
+    observed_at = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr(
+        campaign_routes,
+        "project_controller_status",
+        lambda *_args, **_kwargs: _fixed_controller_observation(observed_at),
+    )
+    started = http.post(
+        "/api/campaigns/autoresearch-start-gate-1/start",
+        headers=headers,
+        json=body,
+    )
+    replayed = http.post(
+        "/api/campaigns/autoresearch-start-gate-1/start",
+        headers=headers,
+        json=body,
+    )
+
+    assert started.status_code == replayed.status_code == 200
+    assert replayed.json()["replayed"] is True
+    assert started.json()["event"]["idempotency_key"] == "start-after-controller-online"
+    assert started.json()["event"]["correlation_id"] == "operator-start-correlation"
+    assert started.json()["event"]["actor_id"] == "codex-agent"
+
+
+def test_autoresearch_start_resolves_replay_conflict_and_version_before_readiness(
+    tmp_path, monkeypatch
+):
+    http, _repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    created = http.post(
+        "/api/campaigns/from-template",
+        headers={**bearer(access), "Idempotency-Key": "create-start-ordering"},
+        json={
+            "workspace_id": "workspace-a",
+            "campaign_id": "autoresearch-start-ordering-1",
+            "title": "AutoResearch Start ordering",
+            "template_id": AUTORESEARCH_CONTROL_SMOKE_TEMPLATE_ID,
+        },
+    )
+    assert created.status_code == 200
+    expected_version = created.json()["campaign"]["version"]
+    headers = {
+        **bearer(access),
+        "Idempotency-Key": "start-ordering",
+        "X-Correlation-ID": "start-ordering-correlation",
+    }
+    body = {
+        "workspace_id": "workspace-a",
+        "expected_version": expected_version,
+    }
+    observed_at = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
+    with monkeypatch.context() as live_controller:
+        live_controller.setattr(
+            campaign_routes,
+            "project_controller_status",
+            lambda *_args, **_kwargs: _fixed_controller_observation(observed_at),
+        )
+        started = http.post(
+            "/api/campaigns/autoresearch-start-ordering-1/start",
+            headers=headers,
+            json=body,
+        )
+    assert started.status_code == 200
+
+    replayed = http.post(
+        "/api/campaigns/autoresearch-start-ordering-1/start",
+        headers=headers,
+        json=body,
+    )
+    conflicting_reuse = http.post(
+        "/api/campaigns/autoresearch-start-ordering-1/start",
+        headers=headers,
+        json={**body, "expected_version": expected_version + 1},
+    )
+    stale_version = http.post(
+        "/api/campaigns/autoresearch-start-ordering-1/start",
+        headers={**bearer(access), "Idempotency-Key": "start-ordering-stale"},
+        json=body,
+    )
+    invalid_transition = http.post(
+        "/api/campaigns/autoresearch-start-ordering-1/start",
+        headers={**bearer(access), "Idempotency-Key": "start-ordering-invalid"},
+        json={
+            **body,
+            "expected_version": started.json()["campaign"]["version"],
+        },
+    )
+
+    assert replayed.status_code == 200
+    assert replayed.json()["replayed"] is True
+    assert conflicting_reuse.status_code == 409
+    assert conflicting_reuse.json()["detail"]["code"] == "campaign_idempotency_conflict"
+    assert stale_version.status_code == 409
+    assert stale_version.json()["detail"]["code"] == "campaign_version_conflict"
+    assert invalid_transition.status_code == 409
+    assert invalid_transition.json()["detail"]["code"] == "campaign_invalid_transition"
+
+
+def test_autoresearch_start_fails_closed_for_unverified_controller_identity(
+    tmp_path, monkeypatch
+):
+    http, repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    created = http.post(
+        "/api/campaigns/from-template",
+        headers={**bearer(access), "Idempotency-Key": "create-unverified-controller"},
+        json={
+            "workspace_id": "workspace-a",
+            "campaign_id": "autoresearch-unverified-controller-1",
+            "title": "AutoResearch controller identity gate",
+            "template_id": AUTORESEARCH_CONTROL_SMOKE_TEMPLATE_ID,
+        },
+    )
+    assert created.status_code == 200
+    observed_at = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr(
+        campaign_routes,
+        "project_controller_status",
+        lambda *_args, **_kwargs: ControllerStatusProjection(
+            online=True,
+            state="online",
+            code="controller_online",
+            observed_at=observed_at,
+        ),
+    )
+    before_events = repository.list_events(
+        "workspace-a", "autoresearch-unverified-controller-1"
+    )
+
+    response = http.post(
+        "/api/campaigns/autoresearch-unverified-controller-1/start",
+        headers={**bearer(access), "Idempotency-Key": "start-unverified-controller"},
+        json={
+            "workspace_id": "workspace-a",
+            "expected_version": created.json()["campaign"]["version"],
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["blocking_codes"] == [
+        "controller_identity_unverified"
+    ]
+    assert repository.list_events(
+        "workspace-a", "autoresearch-unverified-controller-1"
+    ) == before_events
+
+
+def test_autoresearch_start_rechecks_current_bindings_and_never_leaks_private_values(
+    tmp_path, monkeypatch
+):
+    http, repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    definition = readiness_definition()
+    ledger = ExperimentLedgerRepository(repository.db_path)
+    ledger.initialize()
+    register_scientific_bindings(ledger)
+    profile, _script = registered_profile(tmp_path, definition)
+    source_root = tmp_path / "operator-private-source-canary"
+    source_root.mkdir()
+    source_repository, _base_commit = initialized_repository(source_root)
+    approved_source = source_profile(source_repository)
+    http.app.state.campaign_experiment_ledger = ledger
+    http.app.state.campaign_autoresearch_templates = {
+        definition.template_id: definition
+    }
+    http.app.state.campaign_executor_profiles = {
+        (profile.compute_profile_id, profile.target_contract_key): profile
+    }
+    http.app.state.campaign_source_profiles = {
+        approved_source.profile_id: approved_source
+    }
+    observed_at = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr(
+        campaign_routes,
+        "project_controller_status",
+        lambda *_args, **_kwargs: _fixed_controller_observation(observed_at),
+    )
+    created = http.post(
+        "/api/campaigns/from-template",
+        headers={**bearer(access), "Idempotency-Key": "create-binding-recheck"},
+        json={
+            "workspace_id": "workspace-a",
+            "campaign_id": "autoresearch-binding-recheck-1",
+            "title": "AutoResearch binding recheck",
+            "template_id": definition.template_id,
+        },
+    )
+    assert created.status_code == 200
+    before_events = repository.list_events("workspace-a", "autoresearch-binding-recheck-1")
+
+    http.app.state.campaign_autoresearch_templates = {}
+    missing_definition = http.post(
+        "/api/campaigns/autoresearch-binding-recheck-1/start",
+        headers={**bearer(access), "Idempotency-Key": "start-definition-missing"},
+        json={
+            "workspace_id": "workspace-a",
+            "expected_version": created.json()["campaign"]["version"],
+        },
+    )
+    assert missing_definition.status_code == 409
+    assert missing_definition.json()["detail"]["blocking_codes"] == [
+        "campaign_readiness_definition_unavailable"
+    ]
+
+    duplicate = definition.model_copy(
+        update={"template_id": "autoresearch-installed-duplicate-test-v1"}
+    )
+    http.app.state.campaign_autoresearch_templates = {
+        definition.template_id: definition,
+        duplicate.template_id: duplicate,
+    }
+    ambiguous_definition = http.post(
+        "/api/campaigns/autoresearch-binding-recheck-1/start",
+        headers={**bearer(access), "Idempotency-Key": "start-definition-ambiguous"},
+        json={
+            "workspace_id": "workspace-a",
+            "expected_version": created.json()["campaign"]["version"],
+        },
+    )
+    assert ambiguous_definition.status_code == 409
+    assert ambiguous_definition.json()["detail"]["blocking_codes"] == [
+        "campaign_readiness_definition_ambiguous"
+    ]
+
+    http.app.state.campaign_autoresearch_templates = {
+        definition.template_id: definition
+    }
+    http.app.state.campaign_experiment_ledger = None
+    with monkeypatch.context() as ledger_failure:
+        def unavailable_ledger(*_args, **_kwargs):
+            raise LedgerPersistenceError("operator-ledger-path-canary")
+
+        ledger_failure.setattr(
+            ExperimentLedgerRepository,
+            "open_existing",
+            unavailable_ledger,
+        )
+        missing_ledger = http.post(
+            "/api/campaigns/autoresearch-binding-recheck-1/start",
+            headers={**bearer(access), "Idempotency-Key": "start-ledger-missing"},
+            json={
+                "workspace_id": "workspace-a",
+                "expected_version": created.json()["campaign"]["version"],
+            },
+        )
+    assert missing_ledger.status_code == 409
+    assert missing_ledger.json()["detail"]["blocking_codes"] == [
+        "campaign_readiness_ledger_unavailable"
+    ]
+    assert "operator-ledger-path-canary" not in json.dumps(missing_ledger.json())
+
+    http.app.state.campaign_experiment_ledger = ledger
+    http.app.state.campaign_source_profiles = {}
+    headers = {**bearer(access), "Idempotency-Key": "start-after-binding-restored"}
+    body = {
+        "workspace_id": "workspace-a",
+        "expected_version": created.json()["campaign"]["version"],
+    }
+
+    blocked = http.post(
+        "/api/campaigns/autoresearch-binding-recheck-1/start",
+        headers=headers,
+        json=body,
+    )
+
+    assert blocked.status_code == 409
+    assert blocked.json()["detail"]["code"] == "campaign_launch_not_ready"
+    assert blocked.json()["detail"]["blocking_codes"] == [
+        "source_repository_binding_unresolved",
+        "code_lineage_execution_binding_unresolved",
+    ]
+    rendered = json.dumps(blocked.json())
+    assert "operator-private-source-canary" not in rendered
+    assert str(profile.key_path) not in rendered
+    assert repository.list_events("workspace-a", "autoresearch-binding-recheck-1") == before_events
+
+    http.app.state.campaign_source_profiles = {
+        approved_source.profile_id: approved_source
+    }
+    started = http.post(
+        "/api/campaigns/autoresearch-binding-recheck-1/start",
+        headers=headers,
+        json=body,
+    )
+    assert started.status_code == 200
+
+
+def test_autoresearch_start_rejects_source_profile_that_is_no_longer_git(
+    tmp_path, monkeypatch
+):
+    http, repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    definition = readiness_definition()
+    ledger = ExperimentLedgerRepository(repository.db_path)
+    ledger.initialize()
+    register_scientific_bindings(ledger)
+    profile, _script = registered_profile(tmp_path, definition)
+    source_root = tmp_path / "source-drift"
+    source_root.mkdir()
+    source_repository, _base_commit = initialized_repository(source_root)
+    approved_source = source_profile(source_repository)
+    http.app.state.campaign_experiment_ledger = ledger
+    http.app.state.campaign_autoresearch_templates = {
+        definition.template_id: definition
+    }
+    http.app.state.campaign_executor_profiles = {
+        (profile.compute_profile_id, profile.target_contract_key): profile
+    }
+    http.app.state.campaign_source_profiles = {
+        approved_source.profile_id: approved_source
+    }
+    observed_at = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr(
+        campaign_routes,
+        "project_controller_status",
+        lambda *_args, **_kwargs: _fixed_controller_observation(observed_at),
+    )
+    created = http.post(
+        "/api/campaigns/from-template",
+        headers={**bearer(access), "Idempotency-Key": "create-source-drift"},
+        json={
+            "workspace_id": "workspace-a",
+            "campaign_id": "autoresearch-source-drift-1",
+            "title": "AutoResearch source drift",
+            "template_id": definition.template_id,
+        },
+    )
+    assert created.status_code == 200
+    before_events = repository.list_events(
+        "workspace-a", "autoresearch-source-drift-1"
+    )
+    source_repository.joinpath(".git").rename(source_repository / ".git-disabled")
+
+    blocked = http.post(
+        "/api/campaigns/autoresearch-source-drift-1/start",
+        headers={**bearer(access), "Idempotency-Key": "start-source-drift"},
+        json={
+            "workspace_id": "workspace-a",
+            "expected_version": created.json()["campaign"]["version"],
+        },
+    )
+
+    assert blocked.status_code == 409
+    assert blocked.json()["detail"]["blocking_codes"] == [
+        "source_repository_binding_unresolved",
+        "code_lineage_execution_binding_unresolved",
+    ]
+    assert repository.list_events(
+        "workspace-a", "autoresearch-source-drift-1"
+    ) == before_events
+
+
 def test_installed_real_template_fails_closed_before_campaign_creation(tmp_path):
     http, repository, refresh = campaign_client(tmp_path)
     access = exchange(http, refresh.raw_token)
@@ -274,7 +963,9 @@ def test_installed_real_template_fails_closed_before_campaign_creation(tmp_path)
     assert repository.list_campaigns("workspace-a") == []
 
 
-def test_autoresearch_requires_explicit_role_and_accepts_bounded_baseline(tmp_path):
+def test_autoresearch_requires_explicit_role_and_accepts_bounded_baseline(
+    tmp_path, monkeypatch
+):
     http, _repository, refresh = campaign_client(tmp_path)
     access = exchange(http, refresh.raw_token)
     created = http.post(
@@ -288,6 +979,12 @@ def test_autoresearch_requires_explicit_role_and_accepts_bounded_baseline(tmp_pa
         },
     )
     assert created.status_code == 200
+    observed_at = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr(
+        campaign_routes,
+        "project_controller_status",
+        lambda *_args, **_kwargs: _fixed_controller_observation(observed_at),
+    )
     started = http.post(
         "/api/campaigns/autoresearch-baseline-1/start",
         headers={**bearer(access), "Idempotency-Key": "start-autoresearch-baseline"},
@@ -1362,6 +2059,130 @@ def test_artifact_projection_redacts_absolute_uri(tmp_path):
     assert "metadata" not in serialized
     assert "candidate-map-canary" not in serialized
     assert "protected-epoch-canary" not in serialized
+
+
+def test_artifact_projection_is_cursor_paginated_and_bounded(tmp_path):
+    http, repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    assert create_from_template(http, access).status_code == 200
+    with repository._connection(immediate=True) as connection:
+        for index in range(3):
+            connection.execute(
+                """
+                INSERT INTO campaign_artifacts(
+                    workspace_id, campaign_id, artifact_id, producer_action_id, uri,
+                    sha256, size_bytes, schema_name, sealed, valid, metadata_json, created_at
+                ) VALUES (?, ?, ?, NULL, ?, ?, 10, ?, 1, 1, '{}', ?)
+                """,
+                (
+                    "workspace-a",
+                    "campaign-1",
+                    f"artifact-{index + 1}",
+                    str(tmp_path / f"artifact-{index + 1}.bin"),
+                    str(index + 1) * 64,
+                    "huggingface_model_file.v1",
+                    campaign().created_at.isoformat(),
+                ),
+            )
+
+    first = http.get(
+        "/api/campaigns/campaign-1/artifacts",
+        headers=bearer(access),
+        params={"workspace_id": "workspace-a", "limit": 2},
+    )
+    assert first.status_code == 200
+    assert [item["artifact_id"] for item in first.json()["artifacts"]] == [
+        "artifact-1",
+        "artifact-2",
+    ]
+    assert isinstance(first.json()["next_cursor"], str)
+    assert first.json()["next_cursor"].startswith("a1.")
+    assert first.json()["next_cursor"] != "artifact-2"
+    assert len(first.json()["next_cursor"]) <= 160
+    assert first.json()["has_more"] is True
+
+    second = http.get(
+        "/api/campaigns/campaign-1/artifacts",
+        headers=bearer(access),
+        params={
+            "workspace_id": "workspace-a",
+            "after_cursor": first.json()["next_cursor"],
+            "limit": 2,
+        },
+    )
+    assert second.status_code == 200
+    assert [item["artifact_id"] for item in second.json()["artifacts"]] == ["artifact-3"]
+    assert second.json()["next_cursor"] is None
+    assert second.json()["has_more"] is False
+
+
+def test_artifact_cursor_does_not_skip_a_later_append_with_a_lower_id(tmp_path):
+    http, repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    assert create_from_template(http, access).status_code == 200
+    with repository._connection(immediate=True) as connection:
+        for artifact_id in ("artifact-b", "artifact-c"):
+            connection.execute(
+                """
+                INSERT INTO campaign_artifacts(
+                    workspace_id, campaign_id, artifact_id, producer_action_id, uri,
+                    sha256, size_bytes, schema_name, sealed, valid, metadata_json, created_at
+                ) VALUES (?, ?, ?, NULL, ?, ?, 10, ?, 1, 1, '{}', ?)
+                """,
+                (
+                    "workspace-a",
+                    "campaign-1",
+                    artifact_id,
+                    str(tmp_path / f"{artifact_id}.bin"),
+                    artifact_id[-1] * 64,
+                    "huggingface_model_file.v1",
+                    campaign().created_at.isoformat(),
+                ),
+            )
+
+    first = http.get(
+        "/api/campaigns/campaign-1/artifacts",
+        headers=bearer(access),
+        params={"workspace_id": "workspace-a", "limit": 1},
+    )
+    assert first.status_code == 200
+    assert [item["artifact_id"] for item in first.json()["artifacts"]] == ["artifact-b"]
+    assert first.json()["has_more"] is True
+
+    with repository._connection(immediate=True) as connection:
+        connection.execute(
+            """
+            INSERT INTO campaign_artifacts(
+                workspace_id, campaign_id, artifact_id, producer_action_id, uri,
+                sha256, size_bytes, schema_name, sealed, valid, metadata_json, created_at
+            ) VALUES (?, ?, ?, NULL, ?, ?, 10, ?, 1, 1, '{}', ?)
+            """,
+            (
+                "workspace-a",
+                "campaign-1",
+                "artifact-a",
+                str(tmp_path / "artifact-a.bin"),
+                "a" * 64,
+                "huggingface_model_file.v1",
+                campaign().created_at.isoformat(),
+            ),
+        )
+
+    second = http.get(
+        "/api/campaigns/campaign-1/artifacts",
+        headers=bearer(access),
+        params={
+            "workspace_id": "workspace-a",
+            "after_cursor": first.json()["next_cursor"],
+            "limit": 2,
+        },
+    )
+    assert second.status_code == 200
+    assert [item["artifact_id"] for item in second.json()["artifacts"]] == [
+        "artifact-c",
+        "artifact-a",
+    ]
+    assert second.json()["has_more"] is False
 
 
 def test_proposal_manifest_evidence_and_advance_rest_contract(tmp_path):

@@ -6,14 +6,14 @@
 |---|---|
 | Current canvas, desktop campaigns, reports, allowed actions | Injected canvas context or reachable `GET /api/workspace/context` |
 | Campaign goal, manifest, budget, attempts, durable cursor, evidence | BashGym campaign repository via REST/CLI |
-| Local training-host processes and run artifacts | `scripts/operator_context.py` over `~/.hermes/training_runs.py` plus BashGym manifests |
+| Local training-host processes and run artifacts | `bashgym operator context --workspace-id <workspace>` over the configured run observer plus BashGym manifests |
 | Personal/project history, decisions, preferences, follow-ups | GBrain |
 | Raw logs, metric series, datasets, checkpoints, report files | BashGym artifact storage |
 
 Never resolve a disagreement by copying live operational state into a new Hermes-only ledger.
 
 Use this precedence for current claims: live runtime > durable BashGym ledger >
-current workspace snapshot/project-local evidence > curated GBrain > conversation
+current workspace snapshot > explicitly selected local-profile evidence > curated GBrain > conversation
 memory. Include observation time and stable evidence IDs in the answer. If a lower
 source disagrees, name the conflict instead of merging both claims.
 
@@ -22,10 +22,10 @@ source disagrees, name the conflict instead of merging both claims.
 Verify the live environment first:
 
 ```bash
-python3 scripts/operator_context.py doctor
-python3 scripts/operator_context.py context
-python3 scripts/operator_context.py context --workspace-id "$WORKSPACE_ID" --project "$PROJECT_ID"
-python3 scripts/operator_context.py workspace --workspace-id "$WORKSPACE_ID" --format markdown
+bashgym operator doctor
+bashgym operator context --workspace-id <workspace-id>
+bashgym operator context --workspace-id <workspace-id> --project <project-id>
+bashgym operator workspace --workspace-id <workspace-id> --format markdown
 ```
 
 The doctor must report `critical_skill_integrity.verified: true` before any
@@ -33,7 +33,7 @@ mutation or compute launch. The `bashgym`, `bashgym-operator`, and `training`
 skills are source-managed; use a reviewed repository update and bundle deploy,
 never an in-session self-improvement patch.
 
-The `workspace` command requires a reachable `BASHGYM_API_BASE_URL`. In the canvas, prefer the prompt-injected workspace context. From a training-host agent, use local observer/manifests when the desktop API is unavailable.
+The `workspace` command requires a reachable `BASHGYM_API_BASE`. In the canvas, prefer the prompt-injected workspace context. From a training-host agent, use the local observer and durable ledger when the desktop API is unavailable.
 
 Use the campaign CLI only when `doctor` reports it available. Add `--json` for agent parsing and run the relevant subcommand with `--help` before the first mutation in an environment:
 
@@ -62,9 +62,10 @@ captured commit, patch digest, and uploaded archive digest.
 
 The CLI credential must be a bounded secret reference. Never print or pass a raw refresh/access credential in command arguments or GBrain content.
 
-The `context` command has no implicit project default. Its unscoped output is for
-project discovery only. Load a task-specific profile only after the selected ledger
-project requires it.
+The `context` command requires an explicit workspace, has no implicit project
+default, and never selects a task
+profile. Its unscoped output is for project discovery only. Load any task-specific
+profile separately and only after selecting the corresponding ledger project.
 
 ## Preflight outcome
 
@@ -100,28 +101,28 @@ Do not route `hf-jobs` or `managed:<provider>` through `/api/training/start`.
 
 Read the two relevant knowledge scopes explicitly:
 
-```bash
-GBRAIN_BIN="${GBRAIN_BIN:-gbrain}"
-BASHGYM_ACTIVITY_ROOT="${BASHGYM_ACTIVITY_ROOT:-$HOME/.local/share/bashgym/gbrain/bashgym-activity}"
-"$GBRAIN_BIN" search "<project question>" --source default --limit 10
-"$GBRAIN_BIN" search "<training question>" --source bashgym-activity --limit 10
+```text
+gbrain search "<project question>" --source default --limit 10
+gbrain search "<training question>" --source bashgym-activity --limit 10
 ```
 
 Register once:
 
-```bash
-mkdir -p "$BASHGYM_ACTIVITY_ROOT"
-"$GBRAIN_BIN" sources add bashgym-activity \
-  --path "$BASHGYM_ACTIVITY_ROOT"
+Create `<activity-root>` using the platform's normal directory command or file
+manager, then register it once:
+
+```text
+gbrain sources add bashgym-activity --path <activity-root>
 ```
 
 Sync after the curator writes a changed receipt:
 
-```bash
-"$GBRAIN_BIN" sync --source bashgym-activity
+```text
+gbrain sync --source bashgym-activity
 ```
 
-Desktop agents must use `scripts/gbrain_bridge.py` with a local, ignored profile
+Desktop agents must use `bashgym operator gbrain-bridge --profile <ignored-profile>`
+with a local, ignored profile
 to publish rendered receipts over SSH. Preview is the default. The bridge may
 atomically write a receipt and sync the configured source, but it must never copy,
 symlink, or network-mount the GBrain database/index itself.
@@ -132,14 +133,14 @@ Receipt input uses `bashgym.activity.v1`:
 {
   "schema_version": "bashgym.activity.v1",
   "kind": "evaluation",
-  "workspace_id": "memexai",
+  "workspace_id": "research-workspace",
   "entity_id": "eval-20260713-a",
   "status": "completed",
   "occurred_at": "2026-07-13T18:20:00Z",
-  "objective": "Measure retrieval quality against the frozen champion.",
+  "objective": "Measure the declared primary metric against the frozen baseline.",
   "summary": "Candidate missed the development gate.",
   "configuration": {"suite_id": "dev-v1", "candidate_digest": "..."},
-  "metrics": {"mrr_delta": -0.012},
+  "metrics": {"primary_metric_delta": -0.012},
   "artifact_references": [{"kind": "report", "id": "export-...", "digest": "..."}],
   "decision": "Retain the champion.",
   "limitations": ["Protected test remained unopened."],
@@ -148,7 +149,7 @@ Receipt input uses `bashgym.activity.v1`:
 }
 ```
 
-Use stable entity IDs so repeated curation updates the same page. Do not include local paths, raw log bodies, terminal transcripts, protected rows, secrets, or full metric arrays.
+Use stable entity IDs so repeated curation updates the same page. Do not include local paths, including paths embedded in prose, raw log bodies, terminal transcripts, protected rows, secrets, or full metric arrays.
 
 ## Resume behavior
 

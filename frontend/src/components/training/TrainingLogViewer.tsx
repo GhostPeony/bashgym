@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { RefreshCw, Download, Search } from 'lucide-react'
 import { clsx } from 'clsx'
-import { trainingApi } from '../../services/api'
+import { API_BASE, trainingApi } from '../../services/api'
 
 interface LogResponse {
   run_id: string
@@ -84,8 +84,7 @@ export function TrainingLogViewer() {
 
   const downloadHref = useMemo(() => {
     if (!selectedRun) return '#'
-    const base = import.meta.env.VITE_API_URL || '/api'
-    return `${base}/training/${encodeURIComponent(selectedRun)}/log?tail=0`
+    return `${API_BASE}/training/${encodeURIComponent(selectedRun)}/log?tail=0`
   }, [selectedRun])
 
   return (

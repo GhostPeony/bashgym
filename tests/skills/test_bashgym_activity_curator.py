@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 
 SCRIPT = (
@@ -115,3 +116,70 @@ def test_session_handoff_is_bounded_and_project_identified(tmp_path):
     content = (tmp_path / relative).read_text(encoding="utf-8")
     assert 'project_id: "general-llm"' in content
     assert "Live runtime outranks conversation memory" in content
+
+
+def test_context_ingestion_rejects_missing_or_blank_workspace_id(tmp_path):
+    for workspace_id in (None, "", "   "):
+        payload = {
+            "schema_version": "bashgym.workspace.context.v1",
+            "campaigns": [{"campaign_id": "campaign-a"}],
+            "training_runs": [{"id": "run-a", "status": "completed"}],
+        }
+        if workspace_id is not None:
+            payload["workspace_id"] = workspace_id
+        input_path = tmp_path / f"context-{workspace_id!r}.json"
+        input_path.write_text(json.dumps(payload), encoding="utf-8")
+
+        args = curator.argparse.Namespace(
+            command="context",
+            input=str(input_path),
+            output_root=str(tmp_path / "output"),
+            include_active_runs=False,
+        )
+        try:
+            curator._run(args)
+        except ValueError as exc:
+            assert "workspace_id" in str(exc)
+        else:
+            raise AssertionError("blank workspace_id must be rejected")
+
+    for builder, record in (
+        (curator._campaign_receipt, {"campaign_id": "campaign-a"}),
+        (curator._run_receipt, {"run_id": "run-a"}),
+    ):
+        try:
+            builder({}, record)
+        except ValueError as exc:
+            assert "workspace_id" in str(exc)
+        else:
+            raise AssertionError("receipt builders cannot create a default workspace bucket")
+
+
+def test_path_scrubber_covers_whole_and_embedded_absolute_paths_without_redacting_routes():
+    assert curator._safe("/var/lib/bashgym/model.bin") == "[local artifact: model.bin]"
+    assert curator._safe("/tmp/run/metrics.json") == "[local artifact: metrics.json]"
+    assert curator._safe(r"\\trainer\private\checkpoint.bin") == (
+        "[local artifact: checkpoint.bin]"
+    )
+    assert curator._safe("/api/training/start") == "/api/training/start"
+    assert curator._safe("Read /tmp/run/metrics.json after evaluation.") == (
+        "Read [local artifact: metrics.json] after evaluation."
+    )
+    assert curator._safe(r"Read C:\Users\operator\private\model.bin after evaluation.") == (
+        "Read [local artifact: model.bin] after evaluation."
+    )
+    assert curator._safe(r"Read \\trainer\private\checkpoint.bin after evaluation.") == (
+        "Read [local artifact: checkpoint.bin] after evaluation."
+    )
+    assert curator._safe("Artifact:/tmp/run/metrics.json") == (
+        "Artifact:[local artifact: metrics.json]"
+    )
+    assert curator._safe(r"Artifact:\\trainer\private\checkpoint.bin") == (
+        "Artifact:[local artifact: checkpoint.bin]"
+    )
+    assert curator._safe("Call /api/training/start after evaluation.") == (
+        "Call /api/training/start after evaluation."
+    )
+    assert curator._safe("Evaluation completed without a local artifact.") == (
+        "Evaluation completed without a local artifact."
+    )

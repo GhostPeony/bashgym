@@ -341,7 +341,7 @@ which heldout gate, replay export, or backend smoke should run next.
 ## Start the API server
 
 ```bash
-bashgym serve --host 127.0.0.1 --port 8000
+bashgym serve --host 127.0.0.1 --port 8003
 ```
 
 This delegates to the existing `python -m bashgym.main` server runner.

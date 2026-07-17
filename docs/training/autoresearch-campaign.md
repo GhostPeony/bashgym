@@ -9,6 +9,139 @@ This is BashGym's authoritative path for new AutoResearch work. The older
 `/api/autoresearch/*` endpoints remain prototype compatibility surfaces and are
 explicitly non-durable.
 
+## Choose this path when the experiment needs a durable record
+
+**Direct Training** is the normal way to start one selected training job and
+watch that run's logs and metrics. It is appropriate when the operator already
+knows the model, data, recipe, and execution target to use.
+
+**AutoResearch** is the durable control plane around a sequence of comparable
+training and evaluation studies. Before it can start, it records an immutable
+objective; an exact model, data, evaluator, and compute contract; budget and
+stop rules; and an authenticated authority boundary. It requires a real
+baseline, then permits a candidate only with one declared changed variable and
+an incumbent parent. Results, decisions, and restart recovery live in the
+campaign and experiment ledgers rather than in a terminal session or chat.
+
+The no-GPU control smoke proves that control-plane behavior. It does **not**
+prove model quality, a trainer integration, a local GPU setup, or the readiness
+of your hardware.
+
+## Fresh clone: what you need and what BashGym will not choose
+
+For a fresh fork or clone, install Python 3.10+, Node.js 18+ LTS, Git, and the
+native build prerequisites for the frontend. A GPU, provider key, model, and
+dataset are not required for the control smoke. They are required only for a
+real campaign on the backend you explicitly select.
+
+```bash
+git clone https://github.com/GhostPeony/bashgym.git
+cd bashgym
+python -m venv .venv
+# Windows: .\.venv\Scripts\Activate.ps1
+# macOS/Linux: source .venv/bin/activate
+python -m pip install -e .
+python -m pip install -e ".[training]"
+cd frontend && npm ci && cd ..
+cp .env.example .env
+```
+
+The training extra and frontend install are optional for the control-only CLI
+smoke, but are needed for their respective local features. The copied `.env`
+does not select a model or add credentials. Supply provider credentials only
+for integrations you choose.
+
+There is no repository-owned default or assumed model. For a real campaign,
+the operator selects an existing trainable base and pins an immutable
+40- or 64-character content revision (or SHA-256 digest), an approved dataset
+version, evaluator suite and primary metric, logical source profile, registered
+private-compute profile, budget, and stop rules. A cache hit, adapter, GGUF, or
+other inference quant is not a substitute for that trainable base. BashGym
+does not scan caches or download a substitute model during model inspection or
+setup.
+
+Start with commands that are safe on a new installation:
+
+```bash
+bashgym --help
+bashgym campaign control-smoke --json
+bashgym campaign inspect-model-artifact --help
+bashgym campaign setup-autoresearch --help
+bashgym campaign activate-autoresearch --help
+bashgym campaign doctor --help
+```
+
+After `activate-autoresearch --apply` registers the exact ledger and
+private-compute evidence, project those records into guided setup with a
+read-only plan:
+
+```bash
+bashgym campaign sync-autoresearch-registry \
+  --workspace-id <workspace-id> \
+  --template <installed-template-id> --json
+```
+
+The bounded plan contains only logical binding IDs and `reachable` or `unknown`
+state. It never searches model caches, infers trainability, downloads a model,
+or exposes host, user, path, key, or credential data. If no installation ID is
+supplied in plan mode, BashGym generates a reviewable `ins_<32-hex>` identity in
+the plan without writing it. Apply is explicit and idempotent, and requires that
+reviewed value rather than silently generating a different identity:
+
+```bash
+bashgym campaign sync-autoresearch-registry \
+  --workspace-id <workspace-id> \
+  --installation-id ins_<32-hex> \
+  --template <installed-template-id> \
+  --controller-owner-id <controller-id> \
+  --controller-lease-key-ref <secret-reference> \
+  --apply --json
+```
+
+A conflicting installation authority fails without partially changing bindings.
+
+`control-smoke` uses an isolated temporary database unless `--output-dir` is
+given. It does not need an API key, GPU, or model. Keep `--output-dir` only
+when you need to inspect the smoke database and sealed artifacts afterwards.
+
+### Register the local or private SSH target
+
+The current real-training executor uses the same registered SSH path for a
+private host and for hardware on the BashGym machine. For same-machine training,
+enable an SSH server and register a localhost or SSH-config alias; BashGym does
+not silently switch to a separate same-process executor.
+
+In the desktop app, open **Training**, choose **Start Training**, select
+**Private Target** under **Training Backend**, then either **Discover from SSH
+Config** or **Add Device**. Save the target and run **Test**. A passing card shows
+the logical **Device ID** required by `campaign activate-autoresearch`; host,
+username, key path, and work directory stay in the installation-owned device
+registry rather than the campaign definition.
+
+On a fresh desktop install the initial canvas workspace ID is `default`. A named
+canvas workspace uses its own persisted ID, which is also shown in the canonical
+AutoResearch URL as `workspace_id`. Use that same value for credential
+provisioning, activation, registry sync, doctor, and every later campaign call.
+Use one stable logical operator ID such as `local-operator` for the activation
+owner and local operator credential; it is an identity label, not an OS username.
+
+Provision that operator through an opaque secret reference before making
+authenticated campaign calls:
+
+```bash
+bashgym campaign provision-local-operator \
+  --workspace-id <workspace-id> \
+  --credential-ref BASHGYM_CAMPAIGN_OPERATOR \
+  --actor-id local-operator --json
+```
+
+The command creates one `desktop_user` refresh credential scoped to that exact
+workspace. Its raw value is returned only to BashGym's existing secret manager
+(the OS credential manager when available, otherwise the restricted local
+fallback); it is never accepted on the command line or printed. The reference
+must be unused, including in the environment. Use
+`BASHGYM_CAMPAIGN_OPERATOR` in place of `<refresh-secret-ref>` below.
+
 ## Contract
 
 ```mermaid
@@ -45,8 +178,8 @@ quality claim.
 
 ## One AutoResearch control plane, many models and trainers
 
-AutoResearch is not attached to the star-count experiment, Gemma, or NeMo. The
-controller operates on model, data, evaluator, compute, and trainer identities.
+AutoResearch is not attached to any example campaign, model family, or optional
+trainer. The controller operates on model, data, evaluator, compute, and trainer identities.
 Once those identities are registered, the same baseline-first research loop
 applies to language models, vision-language models, embedding models, and future
 open models using any approved BashGym trainer.
@@ -57,7 +190,7 @@ open models using any approved BashGym trainer.
 | Durable campaign, attempts, budgets, leases, cancellation, and recovery | Yes | Reused unchanged |
 | Local or private-SSH compute binding | Yes | Reused unchanged |
 | Artifact sealing, evaluation, experiment ledger, and keep/discard decision | Yes | Reused unchanged |
-| Workspace canvas, CLI, API, and Hermes/Codex projection | Yes | Reused unchanged |
+| Workspace canvas, CLI, API, and source-managed operator guidance | Yes | Reused unchanged |
 | Trainer recipe and model loader | Per registered backend/model | NeMo RL recipe adapter |
 | Ray placement, vLLM generation actors, and policy-to-generation refit | No | Optional NeMo RL |
 | Gym agent/resources servers and isolated multi-turn sessions | No | Optional NeMo Gym |
@@ -286,6 +419,187 @@ The canvas does not maintain a second AutoResearch state machine. It reads the
 same campaign/ledger projection used by CLI and API clients. Simulated outcomes
 remain visible but never render as the baseline.
 
+## Control Room and live updates
+
+The compact **Control Room** is the current read-oriented AutoResearch surface.
+After starting the backend and frontend with the documented development command
+for your platform (`.\dev.ps1` on Windows or `./dev.sh` on macOS/Linux), choose
+**AutoResearch** from the sidebar. **Training** opens direct runs; AutoResearch
+is a standalone sidebar item directly below it;
+both destinations share the training route internally. A selected campaign can
+also be addressed with the canonical
+URL:
+
+```text
+?view=training&tab=autoresearch&workspace_id=<workspace-id>&campaign_id=<campaign-id>
+```
+
+The Control Room loads a compact campaign snapshot first, then offers
+paginated events and artifacts for inspection. It presents campaign selection,
+journey, owner, freshness, blocker, next action, active work, evidence/metric
+summaries, budget, and recent activity. It is a view of server-owned durable
+state, not a second scheduler or result calculator.
+
+Live updates are intentionally only worker-safe hints. A subscribed client
+receives an identifier-only `campaign_hint.v1` containing the workspace and
+campaign IDs, event cursor, aggregate version, event type, correlation ID, and
+emission time. It must reconcile from the REST snapshot; a hint is never a
+result payload or authorization to mutate. The UI marks freshness as live,
+reconciling, stale, offline, or error so it does not imply that an old screen is
+authoritative.
+
+The Control Room keeps the ordered guided-setup path visible even before the
+first campaign exists and while the backend is offline. For a durable campaign
+in `READY`, its compact authority rail exposes **Start** only from a live,
+launch-ready projection. Clicking it still causes the backend to recompute the
+current definition, ledger bindings, source profile, controller lease, and
+execution identity; the renderer never promotes its cached projection into
+authority. A rejected mutation triggers a compact reconciliation before another
+attempt.
+
+The backend setup path discovers installation-registered logical model, data,
+evaluator, and compute bindings without projecting controller owners, lease
+keys, hosts, paths, or credentials. `GET /api/campaigns/setup/context` is an
+authenticated, read-only projection: it does not create setup schema, sessions,
+or receipts. Installation-owned services register bindings through the private
+recovery registry; there is no public route that lets a renderer assert that a
+model or compute target is reachable.
+
+`POST /api/campaigns/setup/session` advances one ordered selection at a time:
+template, installation, model, data, compute, then evaluation. Every accepted
+step must name an exact registered logical ID and emits a bounded,
+externally-sealed receipt chained to the previous step. The session is
+workspace- and actor-scoped, versioned, idempotent, restart-resumable, and
+reports explicit readiness reason codes. It becomes eligible for the existing
+doctor/validate/create authority only when all selected bindings are reachable
+and match the chosen template contract.
+
+The Control Room now drives that contract directly. Before the first campaign
+exists, it renders all six steps and a narrow authority summary. Offline or
+invalid responses leave the setup visible but read-only; they do not collapse
+the page into a backend error. A live session saves one registered choice at a
+time, resumes its workspace-scoped receipt chain, runs doctor, seals the exact
+validation result, and creates the campaign. Campaign creation is not Start:
+the new campaign opens for review, and the ordinary server-revalidated Start
+gate remains a separate human decision.
+
+The mounted `HumanOversightQueue` is authoritative: development evaluation can
+produce a blinded, one-reviewer work item; claim and rubric submission are
+revision-bound and idempotent; the receipt is sealed by installation-owned
+campaign authority; and pending human work blocks both comparison replacement
+and ordinary promotion. A worker crash after evaluation sealing is reconciled
+before the review is exposed. Recovery inspection uses separately sealed,
+scope-bound doctor, eligibility, and execution receipts. The fenced resident
+worker consumes accepted resume/repair requests, reclaims expired work after a
+restart, blocks ambiguous repairs for operator selection, and authenticates the
+mutable execution lifecycle. Mutation controls are enabled only from an exact
+live `execution_consumer` proof; the UI does not equate acceptance with
+execution.
+
+### Control Room projection baseline
+
+An absolute Windows/TestClient benchmark against a temporary SQLite WAL database
+used 1,000 campaign events, 256 budget entries (projected to the bounded maximum
+of 64 summaries), 50 human-review rows (10 previews), active work, remote runs,
+and sealed evidence. The authenticated Control Room projection performs 18
+`SELECT` statements inside one explicit read transaction. Across 250 direct
+end-to-end projection samples it measured 5.19 ms median and 6.11 ms p95, with a
+19.2 KB JSON response. Pure projection building measured 0.38 ms median.
+
+The matching FastAPI TestClient route measured about 239 ms median because
+credential authentication alone measured about 219 ms median; authentication,
+not projection construction, accounted for roughly 91% of route latency. A
+conditional `304` response currently saves payload bytes but still pays the
+authentication and projection cost. These are absolute local measurements, not
+a release regression baseline. Keep projection queries and payload bounds under
+test, and profile token verification separately before attributing route latency
+to the Control Room state model.
+
+The official product surface is the durable campaign path under
+`/api/campaigns/*` and the AutoResearch sidebar destination. The older
+`/api/autoresearch/*` hyperparameter/data/trace/schema research routes remain a
+temporary, explicitly non-campaign compatibility API; they are not rendered by
+the official Control Room, and the retired prototype renderer/store no longer
+ships as a competing state surface. Compatibility events can still appear in the
+ordinary Activity feed but are never treated as campaign authority. Legacy
+`?view=autoresearch` desktop links are redirect-only aliases to
+the canonical `?view=training&tab=autoresearch` destination.
+
+## Security and privacy boundaries
+
+- Desktop campaign requests are brokered through Electron's main-process
+  campaign bridge. The renderer uses its bounded bridge and route allowlist;
+  the bearer token is not exposed as a renderer configuration value.
+- A campaign live ticket is issued only to an actor with workspace read
+  capability, expires quickly, is bound to that credential and authorization
+  revision, and is consumed once when subscribing. It is not a reusable bearer
+  credential.
+- WebSocket hints contain no campaign payload. REST snapshot/cursor reads remain
+  the authority for state and are authenticated separately.
+- Public event and artifact projections are allowlisted. Raw event payloads,
+  protected evaluation identities/results, candidate mappings, private paths or
+  URIs, raw restricted rows, secrets, and unclassified metadata are excluded
+  rather than replaced with redacted placeholders.
+- Installation activation records secret-free binding identities and hashes;
+  private host, user, key, remote path, credentials, and raw dataset rows stay
+  in installation-owned configuration or the operator's private environment.
+- Campaign-agent origin verification and encrypted credential brokerage are
+  activated only when the backend is the managed desktop child and the current
+  Electron launch bootstrap has successfully authenticated. A renderer claim,
+  an unmanaged server, or an old bootstrap cannot enable that authority.
+- The main-only credential transport and isolated loopback MCP host expose
+  exactly two read-only actions: `campaign_observe` and `campaign_artifacts`.
+  They do not provide training launch/pause, artifact proposal, generic request
+  forwarding, filesystem access, or process execution, and their credential
+  routes are not available through the renderer's general campaign bridge.
+- The compact campaign-agent panel remains visible and disabled when its
+  authority is offline. Electron main now owns credential claim, heartbeat
+  activation, one scope-bound Codex PTY, MCP binding, and fail-closed teardown;
+  the renderer adopts only the already-running public PTY identity into the
+  matching Workspace. Hermes launch parity and mutation actions are not yet
+  supported. Do not describe an ordinary terminal or an empty/offline host as
+  executing a campaign, and retain a clean packaged-runtime activation/non-leak
+  proof before release.
+
+## Productization checklist and current limits
+
+The portable seam is deliberate: repository policy travels with the clone,
+while machine authority does not. Before calling a real campaign portable for a
+new installation, verify all of the following:
+
+The desktop starts model-neutral as well: detected hardware may produce an
+advisory list, but it never writes the first recommendation into Training or an
+AutoResearch campaign. The operator must select the exact trainable base.
+
+1. Inspect the operator-selected local model snapshot with
+   `campaign inspect-model-artifact`; do not substitute a downloaded or cached
+   model.
+2. Create the installation-owned definition with
+   `campaign setup-autoresearch`, including the immutable model reference,
+   data/evaluator/source/compute IDs, metric direction, budget, and stop rules.
+3. Register the private SSH device and run `campaign activate-autoresearch`
+   without `--apply` to preflight transport, source scope, dataset, evaluator,
+   launch materials, and identity conflicts. Repeat with `--apply` only after
+   reviewing the plan; add `--install-worker` only to install and start the
+   per-user resident worker.
+4. Run `campaign doctor` against the installation template. Require
+   `materializable`; then require `launch_ready`, which also requires a live
+   resident controller lease, before creating a quality-claiming campaign or
+   starting a real baseline.
+5. Preserve the real baseline, pinned evaluator result, sealed artifacts, and
+   budget evidence before proposing one controlled candidate. Reconcile any
+   deferred evaluation result by identifier; never submit caller-authored real
+   metric or cost JSON.
+
+The remaining bespoke seams are the device registry, private Git source root,
+SSH transport and remote runtime, registered trainer/recipe, dataset and
+evaluator files, ledger IDs, credential reference, and resident-worker service.
+Same-machine hardware still uses the registered localhost-SSH path; a native
+same-process campaign executor is not currently provided. Hosted compute and
+NeMo RL/Gym are explicit optional adapters, not fallback paths. A compatible
+model, live NeMo Gym rollout, or policy-to-generation refit must be proven on
+the operator's installed environment before it is represented as working.
+
 ## What we adopted from NVIDIA
 
 NVIDIA's workflow gets several operating principles right:
@@ -324,18 +638,26 @@ activation, Hugging Face publication authority, and GBrain curation.
 ## Remaining milestones
 
 The standard registered-training path has completed one bounded real baseline
-and controlled candidate on a fixed held-out suite. The remaining work is:
+and controlled candidate on a fixed held-out suite. Durable blinded human review
+is now integrated. The remaining work is:
 
-1. Run the hardware-gated clean-install activation against an operator-approved
+1. Retain a clean packaged-desktop proof of the implemented main-spawned Codex
+   lifecycle around `campaign_observe` and `campaign_artifacts`: credential
+   claim, heartbeat activation, scope-correct Workspace adoption, PTY/MCP
+   binding, non-disclosure, and fail-closed teardown. Add Hermes parity and
+   mutation tools only as separately bounded, verified milestones.
+2. Run the hardware-gated clean-install activation against an operator-approved
    registered SSH device and existing trainable model, then retain the bounded
    baseline/evaluator evidence.
-2. Run the first live NeMo Gym trajectory/refit smoke and bounded GRPO candidate
+3. Run the first live NeMo Gym trajectory/refit smoke and bounded GRPO candidate
    only when an already-installed, operator-approved model passes the pinned
    NeMo runtime's compatibility doctor.
-3. Add a separately registered native-local executor if same-process campaign
+4. Add a separately registered native-local executor if same-process campaign
    execution is needed; until then local hardware uses the protected SSH path.
-4. Finish profiling the remaining active source suite independently of the
+5. Finish profiling the remaining active source suite independently of the
    deferred legacy Orchestrator tests.
+6. Run the hardware-gated recovery flow against the packaged desktop and a live
+   resident worker, retaining the accepted, executing, and terminal receipts.
 
 NeMo Gym bundle, launch, token, refit, and campaign-evidence contracts now exist,
 but no live refit is claimed until a compatible approved model executes them.

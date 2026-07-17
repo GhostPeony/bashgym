@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -153,13 +154,25 @@ class CampaignService:
         )
 
     def artifacts(
-        self, workspace_id: str, campaign_id: str, principal: ActorPrincipal
-    ) -> tuple[PublicCampaignArtifactV1, ...]:
+        self,
+        workspace_id: str,
+        campaign_id: str,
+        principal: ActorPrincipal,
+        *,
+        after_cursor: str | None = None,
+        limit: int = 50,
+    ) -> tuple[tuple[PublicCampaignArtifactV1, ...], str | None, bool]:
         self.get(workspace_id, campaign_id, principal)
+        artifacts, next_cursor, has_more = self.repository.list_artifact_page(
+            workspace_id,
+            campaign_id,
+            after_cursor=after_cursor,
+            limit=limit,
+        )
         return tuple(
             project_public_campaign_artifact(artifact)
-            for artifact in self.repository.list_artifacts(workspace_id, campaign_id)
-        )
+            for artifact in artifacts
+        ), next_cursor, has_more
 
     def attempts(self, workspace_id: str, campaign_id: str, principal: ActorPrincipal):
         self.get(workspace_id, campaign_id, principal)
@@ -606,6 +619,7 @@ class CampaignService:
         idempotency_key: str,
         payload: dict[str, Any] | None = None,
         stop_reason: str | None = None,
+        precondition: Callable[[Campaign], None] | None = None,
     ) -> CampaignMutation:
         required = _TRIGGER_CAPABILITIES.get(trigger)
         if required is not None:
@@ -625,6 +639,7 @@ class CampaignService:
             idempotency_key=idempotency_key,
             payload=payload,
             stop_reason=stop_reason,
+            precondition=precondition,
         )
 
 

@@ -499,7 +499,7 @@ class TestSubagentCollector:
     def mock_claude_dir(self, tmp_path):
         """Create mock .claude with subagent files."""
         projects = tmp_path / "projects"
-        project = projects / "C--Users-Cade-projects-myapp"
+        project = projects / "C--Users-Developer-projects-myapp"
         session_dir = project / "abc12345-1234-5678-abcd-1234567890ab"
         subagents = session_dir / "subagents"
         subagents.mkdir(parents=True)
@@ -507,7 +507,7 @@ class TestSubagentCollector:
         subagent_file = subagents / "agent-a11b22c33d44e55f6.jsonl"
         lines = [
             json.dumps({"parentUuid": None, "isSidechain": True, "userType": "external",
-                "cwd": "C:\\Users\\Cade\\projects\\myapp",
+                "cwd": "C:\\Users\\Developer\\projects\\myapp",
                 "sessionId": "abc12345-1234-5678-abcd-1234567890ab",
                 "version": "2.1.51", "gitBranch": "main",
                 "agentId": "a11b22c33d44e55f6",
@@ -618,7 +618,7 @@ class TestSubagentCollector:
     def test_collect_handles_empty_subagent_file(self, tmp_path):
         """collect() handles an empty subagent JSONL gracefully."""
         projects = tmp_path / "projects"
-        project = projects / "C--Users-Cade-projects-emptyapp"
+        project = projects / "C--Users-Developer-projects-emptyapp"
         session_dir = project / "empty-session-id"
         subagents = session_dir / "subagents"
         subagents.mkdir(parents=True)
@@ -634,7 +634,7 @@ class TestSubagentCollector:
     def test_collect_handles_malformed_json_lines(self, tmp_path):
         """collect() skips malformed JSON lines without crashing."""
         projects = tmp_path / "projects"
-        project = projects / "C--Users-Cade-projects-badapp"
+        project = projects / "C--Users-Developer-projects-badapp"
         session_dir = project / "bad-session-id"
         subagents = session_dir / "subagents"
         subagents.mkdir(parents=True)
@@ -1012,8 +1012,8 @@ class TestPromptCollector:
         """Create mock .claude with history.jsonl and paste-cache/."""
         history = tmp_path / "history.jsonl"
         lines = [
-            json.dumps({"display": "Fix the auth bug", "pastedContents": {}, "timestamp": 1759817571796, "project": "C:\\Users\\Cade\\projects\\myapp"}),
-            json.dumps({"display": "Add dark mode", "pastedContents": {"abc123": True}, "timestamp": 1759817600000, "project": "C:\\Users\\Cade\\projects\\myapp"}),
+            json.dumps({"display": "Fix the auth bug", "pastedContents": {}, "timestamp": 1759817571796, "project": "C:\\Users\\Developer\\projects\\myapp"}),
+            json.dumps({"display": "Add dark mode", "pastedContents": {"abc123": True}, "timestamp": 1759817600000, "project": "C:\\Users\\Developer\\projects\\myapp"}),
         ]
         history.write_text("\n".join(lines), encoding="utf-8")
 
@@ -1122,7 +1122,7 @@ class TestPromptCollector:
             "display": long_prompt,
             "pastedContents": {long_paste_id: True},
             "timestamp": 1759817571796,
-            "project": "C:\\Users\\Cade\\projects\\bigapp",
+            "project": "C:\\Users\\Developer\\projects\\bigapp",
         })
         history.write_text(line, encoding="utf-8")
 

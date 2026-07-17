@@ -9,8 +9,10 @@ from pathlib import Path
 import pytest
 
 from bashgym.campaigns.artifacts import ArtifactSealer
+from bashgym.campaigns.auth import CampaignAuthService
 from bashgym.campaigns.contracts import (
     AttemptStatus,
+    AutonomyProfile,
     CampaignTrigger,
     CredentialKind,
     StageDisposition,
@@ -22,6 +24,7 @@ from bashgym.campaigns.contracts import (
 )
 from bashgym.campaigns.evaluation import load_retrieval_evaluation_artifact
 from bashgym.campaigns.executors import FakeExecutionRequest, fake_digest
+from bashgym.campaigns.human_oversight import HumanOversightRepository
 from bashgym.campaigns.nemo_gym_evidence import (
     NEMO_GYM_CAMPAIGN_EVIDENCE_FILENAME,
     build_nemo_gym_campaign_evidence,
@@ -1016,6 +1019,25 @@ def test_development_evaluation_stage_validates_seals_and_persists_rows(tmp_path
     champion_id = repository.store_retrieval_evaluation(
         "workspace-a", "campaign-1", champion, now=START
     )
+    with repository._connection(immediate=True) as connection:
+        manifest_row = connection.execute(
+            """
+            SELECT manifest_json FROM campaign_manifest_revisions
+            WHERE workspace_id = 'workspace-a' AND campaign_id = 'campaign-1' AND revision = 1
+            """
+        ).fetchone()
+        manifest_payload = json.loads(manifest_row["manifest_json"])
+        manifest_payload["promotion_gates"]["quality_claim_eligible"] = True
+        connection.execute(
+            """
+            UPDATE campaign_manifest_revisions SET manifest_json = ?, manifest_hash = ?
+            WHERE workspace_id = 'workspace-a' AND campaign_id = 'campaign-1' AND revision = 1
+            """,
+            (
+                json.dumps(manifest_payload, sort_keys=True, separators=(",", ":")),
+                canonical_hash(manifest_payload),
+            ),
+        )
     scheduled = repository.schedule_action_under_leader(
         ActionSpec(
             workspace_id="workspace-a",
@@ -1048,7 +1070,15 @@ def test_development_evaluation_stage_validates_seals_and_persists_rows(tmp_path
         now=START,
     )
 
-    assert worker.run_once(now=START + timedelta(seconds=1)) == "completed"
+    original_persist = worker._persist_development_evaluation_evidence
+    worker._persist_development_evaluation_evidence = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        SimulatedWorkerCrashError("crash after development seal")
+    )
+    with pytest.raises(SimulatedWorkerCrashError):
+        worker.run_once(now=START + timedelta(seconds=1))
+    worker._persist_development_evaluation_evidence = original_persist
+    successor = make_worker(repository, tmp_path, "worker-b")
+    assert successor.run_once(now=START + timedelta(seconds=17)) == "reconciled"
     completed = repository.get_attempt("workspace-a", scheduled.attempt_id)
     assert completed.status == AttemptStatus.COMPLETED
     assert (Path(completed.sealed_result_uri) / "evaluation.json").is_file()
@@ -1063,7 +1093,46 @@ def test_development_evaluation_stage_validates_seals_and_persists_rows(tmp_path
     evaluation = repository.get_retrieval_evaluation("workspace-a", row["evaluation_id"])
     assert len(evaluation.rows) == 18
     assert {item.eval_id for item in evaluation.rows} == {f"dev-{index}" for index in range(18)}
-    assert decision_count == 1
+    assert decision_count == 0
+
+    oversight = HumanOversightRepository(
+        repository,
+        sealer=ArtifactSealer(b"w" * 32, key_version="worker-test-v1"),
+    )
+    auth = CampaignAuthService(repository)
+    refresh = auth.issue_refresh_credential(
+        actor_id="desktop-reviewer",
+        autonomy_profile=AutonomyProfile.DESKTOP_USER,
+        workspace_ids=("workspace-a",),
+    )
+    reviewer = auth.authenticate_access(auth.exchange_refresh(refresh.raw_token).raw_token)
+    queue = oversight.read_queue(
+        "workspace-a", "campaign-1", reviewer, now=START + timedelta(seconds=18)
+    )
+    assert len(queue["items"]) == 1
+    assert champion.candidate_digest not in json.dumps(queue)
+    work = queue["items"][0]
+    claimed = oversight.claim(
+        workspace_id="workspace-a", campaign_id="campaign-1",
+        work_id=work["work_id"], expected_campaign_revision=1,
+        expected_version=1, expected_state="pending", principal=reviewer,
+        correlation_id="worker-review-claim",
+        idempotency_key=work["claim_idempotency_key"],
+        now=START + timedelta(seconds=18),
+    )
+    oversight.submit(
+        workspace_id="workspace-a", campaign_id="campaign-1",
+        work_id=work["work_id"], expected_campaign_revision=1,
+        expected_version=2, expected_rubric_version=1,
+        decision="no_material_difference", rationale="Equivalent under the blinded rubric.",
+        principal=reviewer, correlation_id="worker-review-submit",
+        idempotency_key=claimed.queue["items"][0]["submit_idempotency_key"],
+        now=START + timedelta(seconds=19),
+    )
+    with repository._connection() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM campaign_gate_decisions"
+        ).fetchone()[0] == 1
 
 
 def test_development_evaluation_invokes_hash_pinned_physical_dev_scorer(tmp_path):

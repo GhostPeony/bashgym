@@ -12,7 +12,7 @@ export function LoginPage() {
         {/* Header */}
         <div className="p-8 pb-4 text-center">
           <img
-            src="/bashgym-peony.png"
+            src="./bashgym-peony.png"
             alt="BashGym"
             className="w-20 h-20 mx-auto mb-4 object-contain"
           />

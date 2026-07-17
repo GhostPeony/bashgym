@@ -15,14 +15,12 @@ import {
   BarChart3,
   Cloud,
   ExternalLink,
-  Zap,
-  ChevronRight,
   Gauge,
   ScrollText,
   Package,
   BookOpen
 } from 'lucide-react'
-import { useTrainingStore, useUIStore } from '../../stores'
+import { useTrainingStore } from '../../stores'
 import { trainingApi, tracesApi, hfApi, RepoInfo, SystemInfo, ModelRecommendations } from '../../services/api'
 import { LossCurve } from './LossCurve'
 import { HealthBanner } from './HealthBanner'
@@ -48,7 +46,6 @@ type TrainingTab = 'dashboard' | 'logs' | 'checkpoints' | 'guides'
 export function TrainingDashboard() {
   const { currentRun, lossHistory, startTraining, pauseTraining, resumeTraining, stopTraining, updateMetrics } =
     useTrainingStore()
-  const { openOverlay } = useUIStore()
   const [activeTab, setActiveTab] = useState<TrainingTab>('dashboard')
   const [showConfig, setShowConfig] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
@@ -158,8 +155,8 @@ export function TrainingDashboard() {
   }, [exportResult])
 
   return (
-    <div className="h-full p-4 overflow-auto">
-      <div className="max-w-[1500px] mx-auto">
+    <div className="h-full overflow-auto p-4">
+      <div className="mx-auto max-w-[1500px]">
       {/* Header */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between mb-4">
         <div>
@@ -664,26 +661,9 @@ export function TrainingDashboard() {
             )}
           </div>
         )}
-        {/* AutoResearch Link */}
-        <div className="col-span-12">
-          <button
-            onClick={() => openOverlay('autoresearch')}
-            className="card w-full p-4 flex items-center justify-between hover:border-accent shadow-brutal-sm"
-          >
-            <div className="flex items-center gap-3">
-              <Zap className="w-5 h-5 text-accent" />
-              <div className="text-left">
-                <span className="font-mono text-sm font-semibold">AutoResearch</span>
-                <p className="text-xs text-text-muted">Automated hyperparameter search & trace optimization</p>
-              </div>
-            </div>
-            <ChevronRight className="w-4 h-4 text-text-muted" />
-          </button>
-        </div>
       </div>
       )}
 
-      </div>
       {/* Training Config Modal */}
       {showConfig && (
         <TrainingConfig
@@ -698,6 +678,7 @@ export function TrainingDashboard() {
           }}
         />
       )}
+      </div>
     </div>
   )
 }

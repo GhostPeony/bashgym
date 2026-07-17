@@ -1,4 +1,4 @@
-# Bash Gym
+# BashGym
 
 **Turn your AI coding sessions into fine-tuned models.**
 
@@ -8,7 +8,7 @@
 
 ---
 
-Every AI coding session is a chain-of-thought reasoning trace — step-by-step problem solving with verifiable outcomes. Every session from Claude Code, Gemini CLI, OpenCode, Codex, or Copilot CLI — tool calls, file edits, bash commands, multi-step reasoning — is a structured trace of expert coding behavior. Bash Gym captures these traces and uses them to train a reasoning language model with the same techniques behind frontier RLMs: GRPO for reinforcement learning, RLVR for verifiable reward signals from test results, and distillation to transfer reasoning from a large teacher into a small local model. The result is a personal RLM trained on how you actually think through code — your conventions, your repos, your patterns.
+Every AI coding session is a chain-of-thought reasoning trace — step-by-step problem solving with verifiable outcomes. Every session from Claude Code, Gemini CLI, OpenCode, Codex, or Copilot CLI — tool calls, file edits, bash commands, multi-step reasoning — is a structured trace of expert coding behavior. BashGym captures these traces and uses them to train a reasoning language model with the same techniques behind frontier RLMs: GRPO for reinforcement learning, RLVR for verifiable reward signals from test results, and distillation to transfer reasoning from a large teacher into a small local model. The result is a personal RLM trained on how you actually think through code — your conventions, your repos, your patterns.
 
 ---
 
@@ -16,7 +16,9 @@ Every AI coding session is a chain-of-thought reasoning trace — step-by-step p
 
 - **[docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)** — install to first trained model, step by step.
 - **[docs/training/overview.md](docs/training/overview.md)** — training gym curriculum: how strategies, rewards, world models, and gates fit together.
-- **[docs/training/autoresearch-campaign.md](docs/training/autoresearch-campaign.md)** — durable AutoResearch control smoke, installation bindings, doctor, and real-evidence path.
+- **[docs/training/autoresearch-campaign.md](docs/training/autoresearch-campaign.md)** — fresh-clone AutoResearch guide: durable campaigns versus direct runs, private SSH setup, doctor/readiness, Control Room, and privacy boundaries.
+- **[docs/training/bashgym-autoresearch-nvidia-brief.md](docs/training/bashgym-autoresearch-nvidia-brief.md)** — what BashGym adopted from NVIDIA's workflow, what remains platform-native, and the current capability gaps.
+- `bashgym campaign sync-autoresearch-registry` safely projects applied activation evidence into guided setup; planning is read-only and apply requires explicit installation authority.
 - **[docs/PRODUCTIZATION.md](docs/PRODUCTIZATION.md)** — tested fresh-clone contract, measured time to first success, portability boundary, and remaining gaps.
 - **[docs/training/capability-map.md](docs/training/capability-map.md)** — full training/eval spread, including ready, backend-dependent, and diagnostic surfaces.
 - **[docs/training/tmax-terminal-rl-recipe.md](docs/training/tmax-terminal-rl-recipe.md)** — TMax-style terminal RL recipe from environment pool to backend smoke and release gates.
@@ -150,6 +152,21 @@ bashgym --help
 bashgym campaign control-smoke --json
 ```
 
+For authenticated AutoResearch work, provision one local operator by opaque
+secret reference after choosing the workspace (the first desktop workspace is
+`default`):
+
+```bash
+bashgym campaign provision-local-operator \
+  --workspace-id default \
+  --credential-ref BASHGYM_CAMPAIGN_OPERATOR --json
+```
+
+The raw refresh credential is stored by BashGym's secret manager and is never
+printed or accepted as a CLI argument. See the
+[durable AutoResearch campaign guide](docs/training/autoresearch-campaign.md)
+for private-compute registration and the full guided path.
+
 ### 3. Install Trace Capture Hooks
 
 Auto-detect installed tools and configure adapters for all of them:
@@ -187,6 +204,19 @@ docker compose up bashgym-api
 Backend starts on `localhost:8003`, frontend on `localhost:5173`.
 The Compose file does not currently package the frontend; run it with `npm run
 dev` or use the desktop launchers above.
+
+The current Electron distribution is a thin desktop client, not a bundled
+Python appliance. In a source checkout it discovers that checkout; outside a
+checkout it starts the `bashgym` package installed in the interpreter selected
+by `BASHGYM_PYTHON` (or `python` on `PATH`). Run `bashgym operator doctor`
+before first launch. Set `BASHGYM_PROJECT_ROOT` only when intentionally using a
+specific source checkout; an invalid override fails closed instead of silently
+falling back. `BASHGYM_API_BASE` is the shared API endpoint contract and must be
+a credential-free loopback URL ending in `/api`; the desktop derives its
+WebSocket endpoint from it. `BASHGYM_DEV_SERVER_URL` changes only the local
+renderer origin. The legacy Electron-only `BASHGYM_API_URL` name is accepted as
+a normalized compatibility alias, while browser builds may still inject
+`VITE_API_URL` at build time.
 
 ### 5. Use Your AI Coding Tools
 
@@ -237,7 +267,7 @@ See [Training](#training) for details.
 - **Compute**: Local GPU, private compute target, or HuggingFace cloud
 - **Output**: LoRA adapter, merged weights (16-bit), GGUF (for Ollama/llama.cpp/LM Studio)
 - **Training goals**: Define weighted success criteria and hard/soft constraints instead of optimizing a single loss scalar. The outcome aggregator tracks progress and recommends when to stop, adjust, or continue.
-- **AutoResearch**: Three evolutionary search modes (hyperparameters, trace curation, schema evolution) — see [AutoResearch](#autoresearch) for the full breakdown
+- **AutoResearch**: Durable baseline-first campaigns with controlled hypotheses, budgets, authoritative evaluation, evidence lineage, human oversight, and restart-safe decisions — see [AutoResearch](#autoresearch)
 
 ### Dual-Loop Evolution
 
@@ -373,18 +403,28 @@ with `bashgym campaign control-smoke --json`, then follow the
 [durable campaign guide](docs/training/autoresearch-campaign.md) for a real
 baseline and one-variable candidate.
 
+Use direct **Training** for one selected run. Use **AutoResearch** when a
+baseline, controlled candidates, evidence, budget, and restart-safe decisions
+must share one durable campaign record.
+
 The canonical graduation path is:
 
-1. `campaign inspect-model-artifact` — validate the operator-selected snapshot
+1. Provision the exact workspace-scoped local operator with
+   `campaign provision-local-operator` using the opaque reference shown in
+   [Setup](#2-configure).
+2. `campaign inspect-model-artifact` — validate the operator-selected snapshot
    and immutable revision without scanning caches or downloading a substitute.
-2. `campaign setup-autoresearch` — write the portable campaign definition with
+3. `campaign setup-autoresearch` — write the portable campaign definition with
    exact model, data, evaluator, metric, compute, budget, and stop-rule IDs.
-3. `campaign activate-autoresearch` without `--apply` — preflight the registered
+4. `campaign activate-autoresearch` without `--apply` — preflight the registered
    SSH device, source scopes, dataset, evaluator, launch material, and identity
    conflicts.
-4. Repeat activation with `--apply`; add `--install-worker` only when BashGym
+5. Repeat activation with `--apply`; add `--install-worker` only when BashGym
    should install and start the per-user resident worker.
-5. Run `campaign doctor` and require `materializable`, bring the resident
+6. Run `campaign sync-autoresearch-registry` in plan mode, then apply the exact
+   reviewed installation ID and logical bindings with installation-owned
+   controller authority.
+7. Run `campaign doctor` and require `materializable`, bring the resident
    controller online through `--install-worker` or an existing service, then
    re-run doctor and require `launch_ready` before a bounded real baseline.
    Only then launch a one-variable candidate.
@@ -393,8 +433,57 @@ Registered SSH covers private hardware and hardware on the BashGym machine via
 localhost SSH. Hosted compute and NeMo RL/Gym are explicit optional adapters,
 not fallbacks for this path.
 
-The dashboard also retains three earlier prototype search loops for interactive
-hyperparameter, trace-curation, and schema exploration:
+In the desktop app, **AutoResearch** is a literal sidebar destination directly
+below **Training**. Its compact Control Room keeps the campaign journey and
+last verified evidence visible through backend outages, and places the
+server-revalidated Start gate in a narrow authority rail rather than replacing
+the page with an error screen.
+
+When no campaign exists, the Control Room renders the guided setup shell even
+if the backend is offline; it stays read-only until authority reconnects. The
+live six-step flow accepts only installation-registered logical IDs, in order:
+template, installation, model, data, compute, and evaluation. It then runs
+doctor, seals validation, and creates the campaign. Creation never starts work:
+**Start** remains a separate, server-revalidated decision in the campaign's
+authority rail. The read-only context request creates no setup state, and the
+renderer cannot claim hardware or model reachability.
+
+Campaign-agent authority also fails closed. The backend activates its trusted
+origin verifier and encrypted credential broker only when it is running as the
+managed desktop backend and the current Electron launch bootstrap has been
+successfully exchanged. The main-owned boundary includes fixed credential
+transports and an isolated loopback MCP host with exactly two read-only tools:
+`campaign_observe` and `campaign_artifacts`. Electron main can now launch one
+campaign-scoped Codex PTY directly, claim and activate its one-time credential,
+maintain heartbeat authority, bind the MCP host to that exact process
+generation, and revoke and erase authority on exit, replacement, reload,
+explicit revoke, stale heartbeat, or shutdown. The renderer receives only the
+public terminal identity and adopts the already-running PTY into the matching
+Workspace/canvas session; it never receives the credential or a shell command
+to replay. Those tools cannot launch or pause training, propose artifacts, or
+forward arbitrary requests, and the renderer's general campaign bridge cannot
+call their credential routes. Ordinary renderer-launched terminals remain
+intentionally ineligible. Hermes launch parity and mutation actions are not
+supported in this slice, and a clean packaged-desktop activation proof remains
+a release gate. The Control Room stays visible when the host or backend is
+unavailable.
+
+When a development comparison requires review, BashGym now creates a durable,
+blinded one-reviewer work item. Claim, rubric submission, hold, and promotion
+are revision-bound and idempotent; signed receipts survive worker restarts, and
+ordinary promotion cannot bypass pending human authority. Recovery evidence is
+also rendered without hiding the rest of the Control Room. Accepted resume and
+repair requests are consumed by the fenced resident worker, survive restart,
+and expose a separately sealed execution lifecycle. The desktop enables a
+mutation only when the authenticated projection proves that the registered
+consumer has a live controller lease; an acceptance receipt is never presented
+as an executed resume.
+
+Three earlier prototype loops remain behind the temporary
+`/api/autoresearch/*` compatibility API for hyperparameter, trace-curation, and
+schema exploration. They are not part of the official Control Room, have no
+renderer-owned state surface, and must not be presented as durable campaign
+evidence:
 
 | Mode | What It Evolves | What It Searches | How It Evaluates |
 |------|----------------|-----------------|-----------------|
@@ -404,7 +493,10 @@ hyperparameter, trace-curation, and schema exploration:
 
 **Schema evolution** is the newest mode — the AutoCurriculum Compiler. Instead of tuning hyperparameters or data curation rules, it evolves the entire data generation pipeline. A `SchemaSearchSpace` mutates Data Designer configs (which models generate code vs judge quality, what temperature, how many judge dimensions, whether to include code validation), evaluates each mutant by generating real training data and measuring downstream training loss, and keeps winners. The template library maps failure patterns from your traces to starting templates — if your model keeps picking the wrong tool, the schema evolves toward tool-use-focused training data.
 
-All three modes share the same evolutionary engine (`SearchSpace` ABC → `AutoResearcher` loop) and UI (start/stop/pause/resume, real-time experiment streaming via WebSocket, loss curves, generation cards with mutation diffs).
+The prototype hyperparameter loop uses the older `SearchSpace` ABC →
+`AutoResearcher` engine. Compatibility events may still enter the general
+Activity feed, but they never update durable campaign authority. New product
+work belongs under `/api/campaigns/*` and the AutoResearch sidebar destination.
 
 **Embedding-based dedup** runs across all modes via NIM API: computes semantic similarity between training examples and removes near-duplicates (configurable threshold, default 0.95). Diversity scores are tracked in the quality dashboard.
 
@@ -474,13 +566,14 @@ bashgym/
 │   ├── observability/        # Profiler, span tracing, backend integrations
 │   ├── api/                  # REST API + WebSocket
 │   │   ├── device_routes.py  # Device management endpoints
-│   │   ├── autoresearch_routes.py # AutoResearch + schema research endpoints
+│   │   ├── autoresearch_routes.py # Temporary prototype compatibility endpoints
 │   │   └── cascade_routes.py # Cascade RL + MOPD endpoints
 │   └── integrations/         # HuggingFace, NeMo, Ollama
 │
 ├── frontend/                 # Electron + React dashboard
 │   ├── src/components/       # 100+ React components
-│   │   └── training/         # DeviceManager, AutoResearchPanel, TrainingConfig, etc.
+│   │   ├── autoresearch/     # Official durable campaign Control Room
+│   │   └── training/         # DeviceManager, TrainingConfig, TrainingDashboard, etc.
 │   ├── src/stores/           # Zustand state management
 │   └── electron/             # Main process + secure storage
 │

@@ -12,9 +12,9 @@ GhostWork/BashGym system via API.
 - If an API call fails, report the error and suggest next steps
 
 ## API Access
-All BashGym interaction goes through HTTP calls discovered by the shared helper.
-Use the shared scripts/api.sh helper from the workspace.
-Prefer `BASHGYM_API_URL` when set, but do not hardcode localhost ports in skills.
+All BashGym interaction goes through the installed `bashgym` command.
+Use `bashgym api` for portable HTTP calls from any working directory.
+Prefer `BASHGYM_API_BASE` when set, but do not hardcode installation-specific ports in skills.
 
 ## Training Operations
 - Use the training skill for all BashGym training, monitoring, evaluation, and RunCard work.

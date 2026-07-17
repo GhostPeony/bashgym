@@ -28,6 +28,7 @@ classifiers = [
 dependencies = [
     "anthropic>=0.20.0",
     "asyncssh>=2.14.0",
+    "cryptography>=46.0.0",
     "fastapi>=0.109.0",
     "httpx>=0.26.0",
     "docker>=7.0.0",
@@ -95,7 +96,7 @@ Issues = "https://github.com/GhostPeony/bashgym/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["bashgym*"]
+include = ["bashgym*", "assistant.workspace.skills"]
 exclude = ["bashgym.tests*"]
 
 [tool.setuptools]
@@ -105,6 +106,25 @@ include-package-data = false
 "bashgym.campaigns.templates" = ["*.json"]
 "bashgym.agent.skills" = ["**/*.json"]
 "bashgym.judge" = ["verify.sh"]
+"assistant.workspace.skills" = [
+    "bashgym-operator/SKILL.md",
+    "bashgym-operator/bundle.lock.json",
+    "bashgym-operator/references/operator-contract.md",
+    "bashgym-operator/scripts/curate_activity.py",
+    "bashgym-operator/scripts/gbrain_bridge.py",
+    "bashgym-operator/scripts/operator_context.py",
+    "bashgym/SKILL.md",
+    "bashgym/references/architecture-overview.md",
+    "bashgym/references/eval-capabilities.md",
+    "factory/SKILL.md",
+    "models/SKILL.md",
+    "system/SKILL.md",
+    "traces/SKILL.md",
+    "training/SKILL.md",
+    "training/references/bashgym-launch-recipes.md",
+    "training/references/bashgym-methods-and-evals.md",
+    "training/references/compute-target-activation.md",
+]
 
 [tool.setuptools.data-files]
 "share/bashgym/docs/training" = [

@@ -1,4 +1,4 @@
-# Contributing to Bash Gym
+# Contributing to BashGym
 
 Thanks for your interest in contributing! This guide will help you get set up.
 
@@ -38,6 +38,16 @@ cp .env.example .env
 # Verify the package and no-GPU AutoResearch control path
 bashgym --help
 bashgym campaign control-smoke --json
+```
+
+When testing authenticated campaign routes, create a disposable workspace-scoped
+operator through the supported secret-reference path rather than placing raw
+campaign tokens in commands or fixtures:
+
+```bash
+bashgym campaign provision-local-operator \
+  --workspace-id <test-workspace> \
+  --credential-ref BASHGYM_CAMPAIGN_TEST_OPERATOR --json
 ```
 
 ### Running Locally
@@ -95,6 +105,20 @@ pytest tests/ --cov=bashgym --cov-report=html
 
 # Specific module
 pytest tests/test_data_factory.py -v
+
+# AutoResearch setup and managed-desktop authority contracts
+pytest tests/campaigns/test_guided_setup.py tests/api/test_campaign_setup_routes.py tests/api/test_campaign_agent_routes.py -q
+
+# Frontend suite
+cd frontend
+npm test
+
+# Focused frontend files (exact basename or path; unmatched filters fail)
+npm test -- GuidedAutoResearchSetup.test.ts campaignApi.test.ts campaignBridgeSecurity.test.ts
+
+# Frontend contracts
+npm run typecheck
+npm run lint
 ```
 
 ---
@@ -124,6 +148,26 @@ pytest tests/test_data_factory.py -v
 - Keep internal implementation plans and agent handoffs in ignored local
   planning files, not under the public `docs/` tree.
 - Before opening a PR, run `git diff --check` and verify changed Markdown links.
+
+### AutoResearch Boundaries
+
+- Keep the six setup choices ordered: template, installation, model, data,
+  compute, evaluation. The renderer may submit only registered logical IDs; it
+  must not discover private paths or assert model or hardware reachability.
+- Keep guided setup visible when the API is offline, but read-only. The write
+  path is doctor, sealed validation, then campaign creation. Start is a separate
+  server-revalidated human decision.
+- Treat local/private registered SSH compute as the primary real-training path.
+  Do not add a default model, implicit download, model substitution, hosted
+  fallback, or required NeMo dependency.
+- Campaign-agent authority may activate only after the current managed-desktop
+  bootstrap exchange. Do not add renderer-controlled trust flags or expose raw
+  session/delivery credentials through a generic renderer route.
+- Electron main owns campaign-agent liveness, ephemeral keys, registration,
+  claim, reconciliation, and revocation, and the Control Room keeps that state
+  visible-disabled. The implemented Codex path launches one dedicated,
+  scope-bound child with a fixed two-tool read-only proxy; ordinary terminals
+  remain ineligible. Hermes parity and mutation-capable tools are not claimed.
 
 ### Commit Messages
 

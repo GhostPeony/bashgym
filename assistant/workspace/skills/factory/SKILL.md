@@ -10,77 +10,82 @@ Synthetic data generation and training data management.
 ## Seeds
 
 List existing seeds:
-```
-scripts/api.sh GET /factory/seeds
+```text
+bashgym api GET /api/factory/seeds
 ```
 
 Create a new seed:
-```
-scripts/api.sh POST /factory/seeds '{"content": "...", "tags": ["python", "refactor"]}'
+Save `{"data":{"content":"..."},"source":"manual"}` as `seed-request.json`, then run:
+```text
+bashgym api POST /api/factory/seeds --data-file seed-request.json
 ```
 
 Create seeds from gold traces:
-```
-scripts/api.sh POST /factory/seeds/from-traces '{}'
+Save `{}` as `empty-request.json`, then run:
+```text
+bashgym api POST /api/factory/seeds/from-traces --data-file empty-request.json
 ```
 
 Delete a seed:
-```
-scripts/api.sh DELETE /factory/seeds/{seed_id}
+```text
+bashgym api DELETE /api/factory/seeds/{seed_id}
 ```
 
 ## Synthesis
 
 Preview what synthesis would produce:
-```
-scripts/api.sh POST /factory/preview '{"seed_ids": ["seed-1"], "count": 5}'
+Save `{"row_count":50}` as `preview-request.json`, then run:
+```text
+bashgym api POST /api/factory/preview --data-file preview-request.json
 ```
 
 Start synthesis job:
-```
-scripts/api.sh POST /factory/synthesize '{"seed_ids": ["seed-1"], "count": 10}'
+Save `{"row_count":10}` as `synthesis-request.json`, then run:
+```text
+bashgym api POST /api/factory/synthesize --data-file synthesis-request.json
 ```
 
 ## Synthetic Data Generation
 
 Generate synthetic training examples:
-```
-scripts/api.sh POST /factory/synthetic/generate '{
-  "preset": "code_completion",
-  "count": 50
-}'
+Save `{"preset":"custom","target_examples":50}` as
+`synthetic-request.json`, then run:
+```text
+bashgym api POST /api/factory/synthetic/generate --data-file synthetic-request.json
 ```
 
 List synthetic generation jobs:
-```
-scripts/api.sh GET /factory/synthetic/jobs
+```text
+bashgym api GET /api/factory/synthetic/jobs
 ```
 
 Check job status:
-```
-scripts/api.sh GET /factory/synthetic/jobs/{job_id}
+```text
+bashgym api GET /api/factory/synthetic/jobs/{job_id}
 ```
 
 Available presets:
-```
-scripts/api.sh GET /factory/synthetic/presets
+```text
+bashgym api GET /api/factory/synthetic/presets
 ```
 
 ## Factory Configuration
 
-```
-scripts/api.sh GET /factory/config
-scripts/api.sh PUT /factory/config '{"provider": "anthropic", "model": "claude-sonnet-4-5-20250929"}'
+Read the current full configuration, edit that schema into `factory-config.json`,
+then update it:
+```text
+bashgym api GET /api/factory/config
+bashgym api PUT /api/factory/config --data-file factory-config.json
 ```
 
 ## Example Interactions
 
 User: "Generate 50 synthetic training examples"
-→ Call GET /factory/synthetic/presets to show options. Ask which preset.
-   Call POST /factory/synthetic/generate. Report job_id.
+→ Call `bashgym api GET /api/factory/synthetic/presets` to show options. Ask which preset.
+   Call `bashgym api POST /api/factory/synthetic/generate --data-file synthetic-request.json`. Report job_id.
 
 User: "Create seeds from my gold traces"
-→ Call POST /factory/seeds/from-traces. Report how many seeds created.
+→ Call `bashgym api POST /api/factory/seeds/from-traces --data-file empty-request.json`. Report how many seeds created.
 
 User: "What seeds do I have?"
-→ Call GET /factory/seeds. List with tags and content previews.
+→ Call `bashgym api GET /api/factory/seeds`. List source and data previews.

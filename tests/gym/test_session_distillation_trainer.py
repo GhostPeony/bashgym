@@ -42,21 +42,21 @@ def test_session_distillation_script_uses_masked_hinted_kl_loss():
 
 def test_session_distillation_script_escapes_windows_local_model_path():
     config = TrainerConfig(
-        base_model=r"C:\Users\Cade\AppData\Local\Temp\tiny-model",
+        base_model=r"C:\Users\Developer\AppData\Local\Temp\tiny-model",
         strategy=TrainingStrategy.SESSION_DISTILLATION,
     )
     run = TrainingRun(
         run_id="session-distill-windows-path",
         strategy=TrainingStrategy.SESSION_DISTILLATION,
         base_model=config.base_model,
-        dataset_path=Path(r"C:\Users\Cade\AppData\Local\Temp\records.jsonl"),
-        output_path=Path(r"C:\Users\Cade\AppData\Local\Temp\out"),
+        dataset_path=Path(r"C:\Users\Developer\AppData\Local\Temp\records.jsonl"),
+        output_path=Path(r"C:\Users\Developer\AppData\Local\Temp\out"),
     )
 
     script = Trainer(config)._generate_session_distillation_script(run)
 
     ast.parse(script)
-    assert 'MODEL_NAME = "C:/Users/Cade/AppData/Local/Temp/tiny-model"' in script
+    assert 'MODEL_NAME = "C:/Users/Developer/AppData/Local/Temp/tiny-model"' in script
 
 
 def _sd_run(config, *, dataset="data/session_distillation_records.jsonl", out="/tmp/bashgym-sd"):
@@ -121,7 +121,7 @@ def test_session_distillation_script_uses_relative_paths_when_remote():
         base_model="tiny-local-model",
         strategy=TrainingStrategy.SESSION_DISTILLATION,
     )
-    run = _sd_run(config, dataset=r"C:\Users\Cade\records.jsonl", out=r"C:\Users\Cade\out")
+    run = _sd_run(config, dataset=r"C:\Users\Developer\records.jsonl", out=r"C:\Users\Developer\out")
     script = Trainer(config)._generate_session_distillation_script(run, remote=True)
     ast.parse(script)
     assert 'DATASET_PATH = "records.jsonl"' in script
@@ -129,7 +129,7 @@ def test_session_distillation_script_uses_relative_paths_when_remote():
 
 
 def test_remote_uploaded_basename_handles_windows_paths_on_any_host():
-    assert _remote_uploaded_basename(r"C:\Users\Cade\records.jsonl") == "records.jsonl"
+    assert _remote_uploaded_basename(r"C:\Users\Developer\records.jsonl") == "records.jsonl"
     assert _remote_uploaded_basename("/tmp/bashgym/records.jsonl") == "records.jsonl"
 
 
@@ -140,7 +140,7 @@ def test_remote_launch_spec_runs_session_distillation_script_without_unsloth():
     config = TrainerConfig(
         base_model="tiny-local-model", strategy=TrainingStrategy.SESSION_DISTILLATION
     )
-    run = _sd_run(config, dataset=r"C:\Users\Cade\records.jsonl", out=r"C:\Users\Cade\out")
+    run = _sd_run(config, dataset=r"C:\Users\Developer\records.jsonl", out=r"C:\Users\Developer\out")
     content, script_name, require_unsloth = Trainer(config)._remote_launch_spec(run)
     assert script_name == "train_session_distillation.py"
     assert require_unsloth is False

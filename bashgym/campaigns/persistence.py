@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -40,7 +40,11 @@ from bashgym.campaigns.contracts import (
     utc_now,
 )
 from bashgym.campaigns.nemo_gym_evidence import NEMO_GYM_CAMPAIGN_EVIDENCE_SCHEMA
-from bashgym.campaigns.transitions import evaluate_promotion_gate, transition_campaign
+from bashgym.campaigns.transitions import (
+    evaluate_promotion_gate,
+    human_promotion_authorized,
+    transition_campaign,
+)
 
 if TYPE_CHECKING:
     from bashgym.campaigns.control_room import ControlRoomDurableProjection
@@ -121,6 +125,18 @@ class CampaignMutation:
     campaign: Campaign
     event: CampaignEvent
     replayed: bool = False
+
+
+@dataclass(frozen=True)
+class CampaignHintSource:
+    """Payload-free durable event columns used only for live wake-up hints."""
+
+    cursor: int
+    workspace_id: str
+    campaign_id: str
+    aggregate_version: int
+    event_type: str
+    correlation_id: str
 
 
 @dataclass(frozen=True)
@@ -985,6 +1001,123 @@ MIGRATIONS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
         (
             "ALTER TABLE campaign_actor_credentials ADD COLUMN authorization_revision INTEGER NOT NULL DEFAULT 1 CHECK(authorization_revision >= 1)",
             "ALTER TABLE campaign_scheduler_leases ADD COLUMN controller_observation_version INTEGER NOT NULL DEFAULT 1 CHECK(controller_observation_version >= 1)",
+        ),
+    ),
+    (
+        11,
+        "workspace_campaign_hint_cursor",
+        (
+            "CREATE INDEX idx_campaign_events_workspace_cursor ON campaign_events(workspace_id, cursor)",
+        ),
+    ),
+    (
+        12,
+        "durable_human_oversight",
+        (
+            """
+            CREATE TABLE campaign_human_work (
+                workspace_id TEXT NOT NULL,
+                campaign_id TEXT NOT NULL,
+                work_id TEXT NOT NULL,
+                campaign_revision INTEGER NOT NULL CHECK(campaign_revision >= 1),
+                item_version INTEGER NOT NULL CHECK(item_version >= 1),
+                state TEXT NOT NULL CHECK(state IN ('pending', 'claimed', 'submitted', 'expired', 'replaced')),
+                blocking INTEGER NOT NULL CHECK(blocking IN (0, 1)),
+                rubric_json TEXT NOT NULL,
+                public_sample_json TEXT NOT NULL,
+                protected_context_json TEXT NOT NULL,
+                claimed_by_actor_id TEXT,
+                lease_expires_at TEXT,
+                claim_idempotency_key TEXT NOT NULL,
+                submit_idempotency_key TEXT NOT NULL,
+                receipt_id TEXT,
+                replacement_for_work_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(workspace_id, campaign_id, work_id),
+                UNIQUE(workspace_id, claim_idempotency_key),
+                UNIQUE(workspace_id, submit_idempotency_key),
+                FOREIGN KEY(workspace_id, campaign_id)
+                    REFERENCES campaigns(workspace_id, campaign_id) ON DELETE RESTRICT,
+                FOREIGN KEY(workspace_id, campaign_id, replacement_for_work_id)
+                    REFERENCES campaign_human_work(workspace_id, campaign_id, work_id) ON DELETE RESTRICT
+            )
+            """,
+            """
+            CREATE TABLE campaign_human_receipts (
+                workspace_id TEXT NOT NULL,
+                campaign_id TEXT NOT NULL,
+                receipt_id TEXT NOT NULL,
+                work_id TEXT NOT NULL,
+                campaign_revision INTEGER NOT NULL CHECK(campaign_revision >= 1),
+                item_version INTEGER NOT NULL CHECK(item_version >= 1),
+                rubric_version INTEGER NOT NULL CHECK(rubric_version >= 1),
+                decision TEXT NOT NULL CHECK(decision IN ('prefer_left', 'prefer_right', 'no_material_difference')),
+                rationale TEXT NOT NULL,
+                sealed_payload_json TEXT NOT NULL,
+                receipt_digest TEXT NOT NULL,
+                sealed_at TEXT NOT NULL,
+                PRIMARY KEY(workspace_id, campaign_id, receipt_id),
+                UNIQUE(workspace_id, campaign_id, work_id, campaign_revision, item_version),
+                FOREIGN KEY(workspace_id, campaign_id, work_id)
+                    REFERENCES campaign_human_work(workspace_id, campaign_id, work_id) ON DELETE RESTRICT
+            )
+            """,
+            """
+            CREATE TABLE campaign_human_promotions (
+                workspace_id TEXT NOT NULL,
+                campaign_id TEXT NOT NULL,
+                campaign_revision INTEGER NOT NULL CHECK(campaign_revision >= 1),
+                state TEXT NOT NULL CHECK(state IN ('blocked_by_review', 'awaiting_human_decision', 'promoted', 'not_required')),
+                version INTEGER NOT NULL CHECK(version >= 1),
+                eligible_receipt_id TEXT,
+                idempotency_key TEXT NOT NULL,
+                decided_by_actor_id TEXT,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(workspace_id, campaign_id, campaign_revision),
+                UNIQUE(workspace_id, idempotency_key),
+                FOREIGN KEY(workspace_id, campaign_id)
+                    REFERENCES campaigns(workspace_id, campaign_id) ON DELETE RESTRICT
+            )
+            """,
+            """
+            CREATE TABLE campaign_human_mutations (
+                workspace_id TEXT NOT NULL,
+                actor_id TEXT NOT NULL,
+                mutation_kind TEXT NOT NULL,
+                idempotency_key TEXT NOT NULL,
+                request_hash TEXT NOT NULL,
+                campaign_id TEXT NOT NULL,
+                event_id TEXT NOT NULL,
+                response_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY(workspace_id, actor_id, mutation_kind, idempotency_key),
+                FOREIGN KEY(event_id) REFERENCES campaign_events(event_id) ON DELETE RESTRICT
+            )
+            """,
+            "CREATE INDEX idx_campaign_human_queue ON campaign_human_work(workspace_id, campaign_id, campaign_revision DESC, created_at DESC)",
+            "CREATE INDEX idx_campaign_human_receipts_work ON campaign_human_receipts(workspace_id, campaign_id, work_id, sealed_at)",
+        ),
+    ),
+    (
+        13,
+        "human_oversight_replay_digest",
+        (
+            "ALTER TABLE campaign_human_mutations ADD COLUMN response_digest TEXT NOT NULL DEFAULT ''",
+        ),
+    ),
+    (
+        14,
+        "human_oversight_authenticated_receipts",
+        (
+            "ALTER TABLE campaign_human_receipts ADD COLUMN seal_key_version TEXT NOT NULL DEFAULT ''",
+        ),
+    ),
+    (
+        15,
+        "human_oversight_authenticated_replay",
+        (
+            "ALTER TABLE campaign_human_mutations ADD COLUMN response_seal_key_version TEXT NOT NULL DEFAULT ''",
         ),
     ),
 )
@@ -3304,15 +3437,50 @@ class CampaignRepository:
                     )
             if not candidate_digest:
                 candidate_digest = current.best_development_candidate_ref
+            human_authority_row = connection.execute(
+                """
+                SELECT
+                    (SELECT state FROM campaign_human_promotions
+                     WHERE workspace_id = ? AND campaign_id = ? AND campaign_revision = ?)
+                        AS promotion_state,
+                    EXISTS(
+                        SELECT 1 FROM campaign_human_work
+                        WHERE workspace_id = ? AND campaign_id = ?
+                          AND campaign_revision = ? AND blocking = 1 AND state != 'replaced'
+                    ) AS has_current_blocking_work
+                """,
+                (
+                    workspace_id,
+                    campaign_id,
+                    current.manifest_revision,
+                    workspace_id,
+                    campaign_id,
+                    current.manifest_revision,
+                ),
+            ).fetchone()
+            human_work_complete = human_promotion_authorized(
+                promotion_state=(
+                    str(human_authority_row["promotion_state"])
+                    if human_authority_row["promotion_state"] is not None
+                    else None
+                ),
+                has_current_blocking_work=bool(
+                    human_authority_row["has_current_blocking_work"]
+                ),
+            )
             promotion_gate = evaluate_promotion_gate(
                 active_action_id=current.active_action_id,
                 comparison_verdict=decision.get("verdict"),
                 candidate_digest=candidate_digest,
                 protected_required=bool(manifest.protected_artifact_refs),
                 protected_passed=protected_passed,
-                human_work_complete=True,
+                human_work_complete=human_work_complete,
             )
-            if not candidate_digest or (not override_reason and not promotion_gate.eligible):
+            if (
+                not candidate_digest
+                or not human_work_complete
+                or (not override_reason and not promotion_gate.eligible)
+            ):
                 raise PromotionGateFailedError("campaign_gate_failed")
             promoted_at = utc_now()
             target_key = current.target_model.target_contract_key
@@ -3536,6 +3704,7 @@ class CampaignRepository:
         idempotency_key: str,
         payload: dict[str, Any] | None = None,
         stop_reason: str | None = None,
+        precondition: Callable[[Campaign], None] | None = None,
     ) -> CampaignMutation:
         """Apply one explicit transition with CAS, event, and idempotent replay."""
 
@@ -3577,6 +3746,8 @@ class CampaignRepository:
                 trigger,
                 prior_scheduling_status=current.prior_scheduling_status,
             )
+            if precondition is not None:
+                precondition(current)
             now = utc_now()
             updated = current.model_copy(
                 update={
@@ -3661,6 +3832,52 @@ class CampaignRepository:
                 (workspace_id, campaign_id, after_cursor, limit),
             ).fetchall()
         return [(int(row["cursor"]), self._event_from_row(row)) for row in rows]
+
+    def list_workspace_campaign_hint_sources(
+        self, workspace_id: str, *, after_cursor: int, limit: int = 200
+    ) -> tuple[CampaignHintSource, ...]:
+        """Read only classified hint columns; payload_json is never selected."""
+
+        self._require_initialized()
+        bounded_limit = max(1, min(limit, 200))
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT cursor, workspace_id, campaign_id, aggregate_version,
+                       event_type, correlation_id
+                FROM campaign_events
+                WHERE workspace_id = ? AND cursor > ?
+                ORDER BY cursor
+                LIMIT ?
+                """,
+                (workspace_id, after_cursor, bounded_limit),
+            ).fetchall()
+        return tuple(
+            CampaignHintSource(
+                cursor=int(row["cursor"]),
+                workspace_id=str(row["workspace_id"]),
+                campaign_id=str(row["campaign_id"]),
+                aggregate_version=int(row["aggregate_version"]),
+                event_type=str(row["event_type"]),
+                correlation_id=str(row["correlation_id"]),
+            )
+            for row in rows
+        )
+
+    def latest_workspace_campaign_event_cursor(self, workspace_id: str) -> int:
+        """Return a workspace cursor watermark without loading event payloads."""
+
+        self._require_initialized()
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT COALESCE(MAX(cursor), 0) AS latest_cursor
+                FROM campaign_events
+                WHERE workspace_id = ?
+                """,
+                (workspace_id,),
+            ).fetchone()
+        return int(row["latest_cursor"])
 
     def list_recent_events(
         self, workspace_id: str, campaign_id: str, *, limit: int = 50

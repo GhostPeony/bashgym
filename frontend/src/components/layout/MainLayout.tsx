@@ -1,9 +1,10 @@
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { MessageSquare } from 'lucide-react'
 import { NavigationBar } from './NavigationBar'
 import { Sidebar } from './Sidebar'
 import { StatusBar } from './StatusBar'
 import { TrainingDashboard } from '../training/TrainingDashboard'
+import { AutoResearchControlRoom } from '../autoresearch/AutoResearchControlRoom'
 import { RouterDashboard } from '../router/RouterDashboard'
 import { TraceBrowser } from '../traces/TraceBrowser'
 import { FactoryDashboard } from '../factory/FactoryDashboard'
@@ -13,7 +14,6 @@ import { ProfilerDashboard } from '../profiler/ProfilerDashboard'
 import { ModelBrowser, ModelProfilePage, ModelComparison, ModelTrends } from '../models'
 import { HFDashboard } from '../huggingface'
 import { AchievementsView } from '../achievements/AchievementsView'
-import { AutoResearchDashboard } from '../autoresearch/AutoResearchDashboard'
 import { HomeScreen, TutorialChecklist, TutorialTooltip } from '../home'
 import { KeyboardShortcutsModal } from '../common/KeyboardShortcutsModal'
 import { ActivityFeed } from '../activity/ActivityFeed'
@@ -53,13 +53,20 @@ function LazyFallback() {
 }
 
 export function MainLayout() {
-  const { isSidebarOpen: _isSidebarOpen, overlayView, openOverlay, isAgentChatOpen, toggleAgentChat } = useUIStore()
+  const { isSidebarOpen: _isSidebarOpen, overlayView, trainingSubview, openOverlay, isAgentChatOpen, toggleAgentChat, hydrateNavigationFromUrl } = useUIStore()
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null)
   const [modelSubView, setModelSubView] = useState<ModelSubView>('browser')
   const [compareModelIds, setCompareModelIds] = useState<string[]>([])
 
   const showHome = overlayView === 'home'
   const showWorkspace = overlayView === null
+
+  useEffect(() => {
+    const hydrate = () => hydrateNavigationFromUrl()
+    hydrate()
+    window.addEventListener('popstate', hydrate)
+    return () => window.removeEventListener('popstate', hydrate)
+  }, [hydrateNavigationFromUrl])
 
   return (
     <div className="h-screen flex flex-col bg-background-primary">
@@ -99,13 +106,7 @@ export function MainLayout() {
           {/* Dashboard Overlays */}
           {overlayView === 'training' && (
             <div className="flex-1 overflow-auto">
-              <TrainingDashboard />
-            </div>
-          )}
-
-          {overlayView === 'autoresearch' && (
-            <div className="flex-1 overflow-auto">
-              <AutoResearchDashboard />
+              {trainingSubview === 'autoresearch' ? <AutoResearchControlRoom /> : <TrainingDashboard />}
             </div>
           )}
 

@@ -100,19 +100,56 @@ is written. `campaign doctor` remains authoritative for installed runtime,
 data, evaluator, credential-material, and compute readiness.
 
 For a new installation, graduate the no-GPU control smoke through one canonical
-activation sequence:
+activation and guided-setup sequence:
 
-1. Inspect the operator-selected snapshot with
+1. Provision one workspace-scoped local operator with
+   `campaign provision-local-operator`, using the opaque secret-reference path
+   documented in [autoresearch-campaign.md](autoresearch-campaign.md).
+2. Inspect the operator-selected snapshot with
    `campaign inspect-model-artifact`.
-2. Create the portable definition with `campaign setup-autoresearch`.
-3. Run `campaign activate-autoresearch` without `--apply` to preflight the
+3. Create the portable definition with `campaign setup-autoresearch`.
+4. Run `campaign activate-autoresearch` without `--apply` to preflight the
    registered SSH device, source scope, dataset, evaluator, launch material, and
    identity conflicts.
-4. Review the plan and repeat with `--apply`.
-5. Require `campaign doctor` to become `materializable`, bring the resident
+5. Review the plan and repeat with `--apply`.
+6. Run `campaign sync-autoresearch-registry` in its default read-only mode.
+   Review the logical model, data, evaluator, and compute evidence plus the
+   generated installation ID. Repeat with that exact ID, installation-owned
+   controller authority, and `--apply`; the command never discovers, downloads,
+   or substitutes a model.
+7. Require `campaign doctor` to become `materializable`, bring the resident
    controller online through `--install-worker` or an existing service, re-run
    doctor, and require `launch_ready` before a bounded real baseline. Only then
    launch a one-variable candidate.
+
+The guided-setup API projects at most 32 templates, 32 installations, and 32
+bindings of each kind per installation, with explicit truncation reason codes.
+Its resumable session records exactly six ordered selections and chains
+workspace- and actor-scoped receipts under external campaign sealing authority.
+No-session discovery is read-only and does not require that authority; resuming
+or mutating a session does. The desktop renderer exposes the same six ordered
+registered choices, persists only opaque session/idempotency identifiers, runs
+doctor and sealed validation, and creates without automatically starting the
+campaign. Its workflow remains visible but write-disabled while offline.
+
+Restart recovery uses the same portable/install-local split. The repository
+defines recovery policy and public evidence shape, while each installation owns
+its controller lease and binding authority. Recovery receipts and mutable
+accepted/executing/terminal request state are externally sealed. The resident
+worker consumes one request beneath its scheduler-leader fence, can reclaim a
+stale execution after restart, and repairs only one exact sealed local attempt.
+The UI must keep recovery controls disabled unless the live projection proves a
+ready consumer.
+
+Campaign-scoped Codex and Hermes attachment is a separate fail-closed boundary.
+The backend can issue human-approved grants, constrain capabilities, authorize
+each action, attest short-lived host sessions, and encrypt a one-time credential
+to an ephemeral host key without storing the raw token. The compact Control Room
+session panel and Electron main-process key, registration, reconciliation, and
+revocation lifecycle are wired and remain visible-disabled when no trusted
+session exists. A genuine main-spawned Codex/Hermes child and fixed-capability
+credential proxy are still pending, so the page correctly reports no eligible
+session rather than treating an arbitrary terminal as trusted execution.
 
 Registered SSH is the protected execution boundary for both private hardware
 and hardware on the BashGym machine via localhost SSH. See

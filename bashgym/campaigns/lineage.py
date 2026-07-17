@@ -182,21 +182,23 @@ class GitHypothesisLineageManager:
             raise GitLineageError("campaign_git_lineage_worktree_root_unsafe")
         return root, hooks
 
-    def _repository(self, profile: ApprovedSourceRepositoryProfile) -> Path:
+    @classmethod
+    def _repository(cls, profile: ApprovedSourceRepositoryProfile) -> Path:
         supplied = profile.repository_path.expanduser()
         if not supplied.is_dir() or supplied.is_symlink():
             raise GitLineageError("campaign_git_lineage_repository_unavailable")
         repository = supplied.resolve()
-        if self._text(repository, "rev-parse", "--is-inside-work-tree") != "true":
+        if cls._text(repository, "rev-parse", "--is-inside-work-tree") != "true":
             raise GitLineageError("campaign_git_lineage_repository_unavailable")
-        if self._text(repository, "rev-parse", "--show-prefix"):
+        if cls._text(repository, "rev-parse", "--show-prefix"):
             raise GitLineageError("campaign_git_lineage_repository_root_required")
         return repository
 
-    def verify_profile(self, profile: ApprovedSourceRepositoryProfile) -> None:
+    @classmethod
+    def verify_profile(cls, profile: ApprovedSourceRepositoryProfile) -> None:
         """Verify the private repository and every approved scope without exposing paths."""
 
-        repository = self._repository(profile)
+        repository = cls._repository(profile)
         for approved_paths in profile.allowed_mutation_paths.values():
             for relative_path in approved_paths:
                 target = repository.joinpath(*PurePosixPath(relative_path).parts)

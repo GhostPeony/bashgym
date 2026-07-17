@@ -90,6 +90,8 @@ class RecordingClient:
                     "valid": True,
                     "created_at": "2026-07-16T00:00:00Z",
                 } for index in range(5)],
+                "next_cursor": None,
+                "has_more": False,
             }
         if path.endswith("/proposals") and method == "GET":
             return {"proposals": [{"proposal_id": f"proposal-{index}"} for index in range(5)]}
@@ -174,8 +176,40 @@ class LeakyArtifactClient(RecordingClient):
                     },
                     "created_at": "2026-07-16T00:00:00Z",
                 }],
+                "next_cursor": None,
+                "has_more": False,
             }
         return super().request_json(method, path, **kwargs)
+
+
+class PaginatedArtifactClient(RecordingClient):
+    def request_json(self, method: str, path: str, **kwargs) -> Any:
+        self.calls.append({
+            "method": method,
+            "path": path,
+            "query": kwargs.get("query"),
+            "payload": kwargs.get("payload"),
+            "headers": kwargs.get("headers"),
+        })
+        if path.endswith("/artifacts"):
+            return {
+                "artifacts": [{
+                    "schema_version": "public_campaign_artifact.v1",
+                    "workspace_id": "workspace-a",
+                    "campaign_id": "campaign-1",
+                    "artifact_id": f"artifact-{index}",
+                    "producer_action_id": None,
+                    "sha256": f"{index:064x}",
+                    "size_bytes": index,
+                    "schema_name": "training_metrics_jsonl.v1",
+                    "sealed": True,
+                    "valid": True,
+                    "created_at": "2026-07-16T00:00:00Z",
+                } for index in (5, 6)],
+                "next_cursor": None,
+                "has_more": False,
+            }
+        raise AssertionError(f"unexpected request: {method} {path}")
 
 
 async def call_tool(server, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -424,6 +458,36 @@ async def test_campaign_artifacts_tool_reprojects_untrusted_artifact_responses()
     assert "restricted-result.json" not in serialized
     assert "candidate-map-canary" not in serialized
     assert "protected-epoch-canary" not in serialized
+
+
+async def test_campaign_artifacts_tool_preserves_bounded_server_pagination():
+    client = PaginatedArtifactClient()
+    server = build_server(
+        workspace_id="workspace-a",
+        credential_ref="BASHGYM_CAMPAIGN_REFRESH",
+        agent="codex",
+        client=client,
+    )
+
+    result = await call_tool(
+        server,
+        "campaign_artifacts",
+        {
+            "campaign_id": "campaign-1",
+            "after_cursor": "a1.AAAAAAAAAAQ",
+            "limit": 2,
+        },
+    )
+
+    call = client.calls[-1]
+    assert call["query"] == {
+        "workspace_id": "workspace-a",
+        "after_cursor": "a1.AAAAAAAAAAQ",
+        "limit": 2,
+    }
+    assert result["next_cursor"] is None
+    assert result["has_more"] is False
+    assert result["count"] == 2
 
 
 async def test_campaign_extended_tools_use_strict_paths_bodies_and_persisted_identity():

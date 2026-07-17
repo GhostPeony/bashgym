@@ -232,6 +232,11 @@ CANONICAL_CAMPAIGN_EVENT_TYPES = frozenset(
         "campaign:protected-evaluation-completed",
         "campaign:promotion-committed",
         "campaign:export-completed",
+        "campaign:human-work-claimed",
+        "campaign:human-work-enqueued",
+        "campaign:human-work-submitted",
+        "campaign:human-promotion-held",
+        "campaign:human-promotion-approved",
     }
 )
 
@@ -358,7 +363,10 @@ HERMES_CAPABILITIES = frozenset(
         Capability.EXPERIMENT_LEDGER_WRITE,
     }
 )
-CODEX_CAPABILITIES = frozenset(Capability)
+CODEX_CAPABILITIES = frozenset(
+    capability for capability in Capability
+    if capability is not Capability.PROMOTION_OVERRIDE
+)
 DESKTOP_LOCAL_SCOPE = "desktop-local"
 
 

@@ -4,9 +4,14 @@ Status: implementation brief for NVIDIA discussion, July 2026.
 
 ## Executive summary
 
-BashGym now has a durable, baseline-first AutoResearch control plane that Hermes,
-Codex, the CLI, REST clients, and the workspace canvas can operate without
-creating separate experiment histories. It is not yet a NeMo Gym or NeMo RL
+BashGym now has a durable, baseline-first AutoResearch control plane that the
+CLI, REST clients, workspace canvas, and source-managed Hermes/Codex skills can
+operate without creating separate experiment histories. The current
+main process includes fixed credential transports, an isolated loopback MCP host
+with exactly two read-only tools (`campaign_observe` and
+`campaign_artifacts`), and a direct scope-bound Codex PTY lifecycle. Ordinary
+terminals remain ineligible; Hermes launch parity and mutation actions are not
+supported by this slice. BashGym is not a NeMo Gym or NeMo RL
 replacement. The intended integration is complementary:
 
 - BashGym owns research intent, authority, budgets, durable state, evidence
@@ -14,8 +19,14 @@ replacement. The intended integration is complementary:
 - NeMo RL can become a recipe-driven training executor.
 - NeMo Gym can become the rollout, environment, tool, state-isolation, verifier,
   and reward substrate.
-- Hermes and Codex remain interchangeable research operators through the
-  source-managed BashGym skills.
+- Hermes and Codex share source-managed BashGym operating instructions. Direct
+  campaign-agent launch is implemented for Codex first; that runtime support is
+  not yet interchangeable with Hermes.
+
+This is an NVIDIA-informed, platform-native architecture. BashGym keeps its
+campaign controller, evidence and human-authority model, offline-visible Control
+Room, and primary local/private-compute lane independent of NeMo. NeMo RL and
+NeMo Gym plug in only where their training and environment machinery adds value.
 
 The control plane is now materially more robust than a prompt plus Git branch and
 TSV file. NVIDIA remains well ahead on the machinery that determines real RL
@@ -123,6 +134,56 @@ The canvas reads the same campaign and ledger projection as the CLI and API. It
 shows baseline status, incumbent metric, budget, attempts, evidence, decisions,
 and controller health; it does not implement a second state machine.
 
+### Compact Control Room and human visibility
+
+AutoResearch is now a first-class sidebar destination directly below Training,
+not a duplicate tab inside the direct-run monitor. Its compact Control Room uses
+one atomic, versioned campaign projection and arranges active work/evidence in a
+primary column with controller, launch authority, budget, and collection context
+in a narrow rail. The entire shell and last verified evidence remain visible
+while the API is reconciling or offline.
+
+WebSocket traffic is an identifier-only hint, never campaign state. Every hint
+causes an authenticated compact reconciliation; lifecycle controls are disabled
+outside the exact live workspace/campaign authority. Start is renderer-visible
+only for a live `READY` campaign, but the backend recomputes installation
+bindings and the controller execution identity before writing the transition.
+Success and rejection both reconcile rather than treating the response as final
+campaign state.
+
+The ordered setup backend is mounted and model-neutral. Its context projection
+bounds templates, installations, and each binding kind, reports explicit
+truncation, and exposes only public logical IDs and safe labels. Workspace- and
+actor-scoped sessions advance through six ordered selections and can resume from
+an externally sealed receipt chain after restart; inaccessible and stale choices
+fail closed. The matching guided renderer now keeps the six-step registered-
+resource path visible through service loss, resumes its sealed workspace
+session, and stops at campaign creation so Start remains a separate human
+authority decision.
+
+The full blinded human-work queue is durable and mounted: evaluation/restart
+reconciliation produces review work, claim and submission are revision-bound
+and idempotent, signed receipts gate promotion, and the rest of the Control Room
+remains visible during service loss. Recovery doctor/eligibility evidence feeds
+a fenced resident-worker consumer with externally sealed accepted, executing,
+and terminal lifecycle state; controls fail closed unless the projection proves
+the registered consumer has a live controller lease.
+
+The campaign-agent backend now provides sealed human grants, constrained
+campaign capabilities, per-action authorization, short-lived host-session
+attestations, and one-time X25519/HKDF/ChaCha20-Poly1305 credential envelopes.
+It stores ciphertext rather than raw bearer material. Electron main has fixed
+credential-bearing heartbeat/observe/artifact transports, and its isolated
+loopback MCP host exposes only `campaign_observe` and `campaign_artifacts` with
+bounded schemas. Electron main directly launches and attests one scope-bound
+Codex PTY, claims and activates its credential, maintains heartbeat authority,
+and closes MCP/backend authority on every terminal lifecycle boundary. The
+renderer receives only the public terminal identity for Workspace adoption; it
+cannot call credential routes, and the MCP host has no generic forwarder or
+mutation tools. A clean packaged-runtime activation/non-leak receipt remains a
+release proof. Hermes launch parity remains a later adapter, so ordinary
+terminals stay ineligible rather than weakening origin checks.
+
 ### Hermes and Codex operator skills
 
 The repository contains source-managed `bashgym`, `bashgym-operator`, and
@@ -172,7 +233,7 @@ scientifically sound.
 
 | Capability | BashGym now | NVIDIA workflow / NeMo | Assessment |
 |---|---|---|---|
-| Agent operating instructions | Source-managed Hermes/Codex router, operator, training, eval, and authority rules | Brev etiquette, session memory, AutoResearch skill | Comparable pattern; both correctly externalize institutional knowledge |
+| Agent operating instructions | Seven packaged generic workspace skills, including shared Hermes/Codex operator, training, eval, and authority guidance | Brev etiquette, session memory, AutoResearch skill | Comparable pattern; both correctly externalize institutional knowledge |
 | Campaign truth | Typed SQLite/WAL state, versioning, idempotency, leases, events, budgets, sealed evidence | Git branches, session diary, TSV/log ledger in the skill workflow | BashGym is stronger as a multi-operator product control plane |
 | Baseline and hypothesis policy | Enforced baseline first, incumbent parent, one declared variable | Prescribed baseline first and one branch/hypothesis | BashGym enforces more of the policy in code |
 | Result authority | Evaluation-result ID is resolved against run, attempt, suite, metric, budget, and artifact lineage; research/general-ledger decision is atomic | Agent reads the recipe/evaluator metric and logs it | BashGym has the stronger product boundary |
@@ -182,8 +243,8 @@ scientifically sound.
 | Rollout isolation | Unique session and async-order evidence is enforced; live concurrent Gym lifecycle remains unproven | Per-rollout Resources Server sessions isolate tools/state and return verifier rewards | NVIDIA remains ahead |
 | Multi-turn RL correctness | Exact message-level prompt/generation IDs and logprobs are required by the evidence contract; live multi-turn proof pending | Exact message-level token IDs, on-policy fixes, multi-turn orchestration | Contract exists; NVIDIA runtime proof remains ahead |
 | Train/generation coordination | Gym launch requires async vLLM and refit evidence, but no compatible-model live refit has run | Rollout scheduling, policy loss, and training/generation weight synchronization | Critical remaining live-proof gap |
-| Human interface | Workspace canvas reconstructs live campaign, evidence, and controller status | IDE/chat, logs, reports | BashGym is stronger as a product surface |
-| Fresh-clone setup | Control smoke, skills, atomic definition installer, and doctor ship; ledger/profile/service binding remains manual | Brev launchable plus setup skill supplies a demonstrated path | NVIDIA is easier for the demonstrated configuration |
+| Human interface | Compact offline-visible Control Room, workspace-canvas nodes, durable blinded review, and fenced recovery execution share one authority and stay visible offline | IDE/chat, logs, reports | BashGym has the stronger oversight shell; NVIDIA has the more proven sample-level research workflow |
+| Fresh-clone setup | Control smoke, seven generic workspace skills packaged through a 17-file allowlist, atomic definition installer, doctor, plan-first registry sync, and bounded resumable setup UI; real installation authority and private-hardware proof remain explicit | Brev launchable plus setup skill supplies a demonstrated path | BashGym's current installed control plane is portable across installations; NVIDIA is still easier for its demonstrated configuration, and BashGym's wider Git tree retains documented legacy cleanup work |
 
 ## The correct integration boundary
 
@@ -263,11 +324,14 @@ mutations. Recipe-only scalar changes remain ledger-native.
 ## Productization verdict
 
 The installed control plane and real-definition format are portable; real
-hardware activation is still more manual than it should be.
+hardware activation is still more manual than it should be. This verdict is
+specific to the current AutoResearch path. Legacy machine-specific utilities
+and environment aliases elsewhere in the repository remain productization debt.
 
 A clean clone can obtain the migrations, campaign contracts, control template,
-atomic installation-definition builder/loader, Hermes/Codex skills, CLI/API
-surfaces, doctor, packaged docs, and canvas code. `bashgym campaign
+atomic installation-definition builder/loader, seven generic workspace skills
+packaged through an explicit 17-file allowlist, CLI/API surfaces, doctor,
+packaged docs, and canvas code. `bashgym campaign
 control-smoke --json` now proves the durable scheduler, simulated execution,
 sealing, metrics, ineligible decision, and restart recovery without a GPU or API
 key. A real definition can be bound to a different machine without storing its
@@ -280,6 +344,27 @@ material, verifies private Git scopes and entrypoints, creates or replays ledger
 records, atomically merges protected source/executor profiles, optionally
 installs the per-user resident worker, and returns the direct doctor result.
 It never selects a model or backend and it refuses identity conflicts.
+
+After activation, `bashgym campaign sync-autoresearch-registry` creates a
+read-only, bounded, secret-free plan from exact installed executor, dataset, and
+evaluator evidence. Applying that reviewed plan requires an explicit
+installation ID plus installation-owned controller authority and writes the
+logical registry atomically and idempotently. The guided-setup context then
+publishes bounded discovery, while externally sealed six-step sessions preserve
+workspace/actor scope and restart continuity. This reduces manual copying; it
+does not move host names, key paths, source credentials, runtime paths, or lease
+secrets into the repository.
+
+The campaign-agent REST/persistence layer, fixed main-only action transports,
+isolated two-tool MCP host, and main-spawned Codex lifecycle now form the
+read-only product execution path. Credential claim, heartbeat, PTY/MCP binding,
+scope-correct Workspace adoption, and teardown remain main-owned without
+exposing the credential to the renderer or terminal. Clean packaged-runtime
+proof is still required; Hermes parity and mutation actions are not supported.
+
+The desktop is also model-neutral: live hardware discovery may recommend
+compatible candidates, but it cannot silently populate the Training or
+AutoResearch base-model field. An operator selection is required before launch.
 
 The remaining proof is hardware-gated: run that installed path with an existing
 operator-approved trainable model through a bounded real baseline and
@@ -311,8 +396,16 @@ BashGym implementation references:
 - [Durable AutoResearch campaign](autoresearch-campaign.md)
 - [Project-isolated experiment ledger CLI](agent-cli.md)
 - `bashgym/campaigns/autoresearch.py`
+- `bashgym/campaigns/guided_setup.py`
+- `bashgym/campaigns/registry_sync.py`
+- `bashgym/campaigns/campaign_recovery.py`
+- `bashgym/campaigns/campaign_agents.py`
+- `bashgym/campaigns/campaign_agent_sessions.py`
 - `bashgym/campaigns/worker_service.py`
 - `bashgym/api/campaign_routes.py`
+- `bashgym/api/campaign_agent_routes.py`
+- `frontend/electron/campaignBridge.ts`
+- `frontend/electron/campaignAgentMcpHost.ts`
 - `frontend/src/components/terminal/nodes/CampaignNode.tsx`
 - `assistant/workspace/skills/bashgym-operator/SKILL.md`
 - `assistant/workspace/skills/training/SKILL.md`
@@ -325,6 +418,24 @@ Verified in this milestone:
   provenance, and evidence and supports exact replay;
 - completed campaign-linked evaluation writes automatically request ingestion
   without rolling back durable evaluation evidence when prerequisites defer it;
-- campaign/API/CLI/controller test surface passes;
-- focused campaign canvas tests pass;
-- project-wide frontend TypeScript validation passes.
+- guided setup bounds discovery, persists ordered scope-bound session choices,
+  and verifies its external receipt chain on resume;
+- registry synchronization plans without writes or private data, then applies
+  only with reviewed installation authority in an atomic idempotent transaction;
+- recovery requests are externally sealed and consumed through resident-worker
+  accepted, executing, and terminal lifecycle states;
+- campaign-agent grants, attachments, action authorization, host-session
+  attestations, encrypted one-time delivery, fixed main-only action transports,
+  the isolated two-tool MCP host, and the scope-bound Codex PTY lifecycle fail
+  closed across activation and teardown;
+- the clean wheel packages seven generic workspace skills through an explicit
+  17-file allowlist and verifies both installed discovery and representative
+  documented commands from an arbitrary working directory;
+- the sequential campaign suite passes 379 tests with one intentional skip;
+- the campaign API route/WebSocket slice passes 97 tests, and the installed
+  CLI/operator/packaging/fixture slice passes 314 tests;
+- all 448 frontend tests, zero-warning lint, TypeScript validation, and web plus
+  renderer/main/preload production builds pass;
+- an existing Windows unpacked artifact passes the offline preload and real PTY
+  lifecycle smoke; the same probe is wired after native CI builds on Windows,
+  Linux, and macOS.

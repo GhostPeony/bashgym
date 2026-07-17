@@ -10,7 +10,6 @@ from bashgym.compute import (
 
 def test_private_gpu_preflight_reports_missing_host_env(monkeypatch):
     monkeypatch.delenv("BASHGYM_PRIVATE_GPU_HOST", raising=False)
-    monkeypatch.delenv("BASHGYM_GX10_HOST", raising=False)
     target = get_compute_target("private_gpu")
 
     report = preflight_compute_target(target)
@@ -20,10 +19,11 @@ def test_private_gpu_preflight_reports_missing_host_env(monkeypatch):
     assert any(check["code"] == "private_compute_target_configured" for check in report["checks"])
 
 
-def test_private_gpu_accepts_legacy_target_alias():
-    target = get_compute_target("gx10_ssh")
+def test_private_gpu_uses_only_machine_neutral_configuration_names():
+    target = get_compute_target("private_gpu")
 
-    assert target.id == "private_gpu"
+    assert target.env_vars == ("BASHGYM_PRIVATE_GPU_HOST", "BASHGYM_PRIVATE_GPU_WORKDIR")
+    assert set(target.metadata) == {"description", "host_env", "workdir_env"}
 
 
 def test_skypilot_launch_plan_generates_yaml_without_secrets():

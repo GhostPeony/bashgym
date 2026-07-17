@@ -221,6 +221,13 @@ PUBLIC_EVENT_TYPE_FIELDS = MappingProxyType(
         "campaign:protected-evaluation-completed": _fields(),
         "campaign:promotion-committed": _fields(),
         "campaign:export-completed": _fields(),
+        # Human-review events expose presence only. Work, receipt, rationale, sample,
+        # decision, and promotion bindings remain in the authenticated queue.
+        "campaign:human-work-claimed": _fields(),
+        "campaign:human-work-enqueued": _fields(),
+        "campaign:human-work-submitted": _fields(),
+        "campaign:human-promotion-held": _fields(),
+        "campaign:human-promotion-approved": _fields(),
     }
 )
 

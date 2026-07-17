@@ -22,6 +22,29 @@ function project(
 
 function detail(): CampaignDetailState {
   return {
+    snapshot: null,
+    freshness: 'live',
+    lastVerifiedAt: null,
+    reconciliation: {
+      freshness: 'live', generation: 0, connectionGeneration: 1, subscribed: true,
+      appliedCursor: 0, appliedVersion: 3, targetCursor: 0, targetVersion: 3,
+      semanticKey: null, inFlightGeneration: null, retryCount: 0,
+      lastHintAt: null, lastVerifiedAt: null, errorCode: null,
+    },
+    pages: {
+      events: [],
+      artifacts: [],
+      eventCursor: 0,
+      artifactCursor: null,
+      eventsHasMore: true,
+      artifactsHasMore: true,
+      eventsLoading: false,
+      eventsLoaded: false,
+      eventsError: null,
+      artifactsLoading: false,
+      artifactsLoaded: false,
+      artifactsError: null,
+    },
     campaign: {
       schema_version: 'campaign.v1',
       campaign_id: 'campaign-auto-1',

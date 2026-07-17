@@ -13,15 +13,13 @@ export interface BaseModelGroup {
   models: BaseModelOption[]
 }
 
+export const DEFAULT_TRAINING_BASE_MODEL = ''
+
+export function isExplicitBaseModel(value: string): boolean {
+  return value.trim().length > 0
+}
+
 export const BASE_MODEL_GROUPS: BaseModelGroup[] = [
-  {
-    label: 'Qwen2.5 Coder',
-    models: [
-      { value: 'Qwen/Qwen2.5-Coder-1.5B-Instruct', label: 'Qwen2.5 Coder 1.5B (fast default)' },
-      { value: 'Qwen/Qwen2.5-Coder-7B-Instruct', label: 'Qwen2.5 Coder 7B' },
-      { value: 'Qwen/Qwen2.5-Coder-32B-Instruct', label: 'Qwen2.5 Coder 32B (teacher-grade)' },
-    ],
-  },
   {
     label: 'Gemma 4',
     models: [

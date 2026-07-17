@@ -35,6 +35,24 @@ class PromotionGateEvaluation:
     blocking_codes: tuple[str, ...]
 
 
+def human_promotion_authorized(
+    *,
+    promotion_state: str | None,
+    has_current_blocking_work: bool,
+) -> bool:
+    """Resolve the durable human-promotion authority without optimistic inference.
+
+    A campaign without any current blocking human work needs no separate decision.
+    Once blocking work exists, only an explicit current-revision ``promoted`` row
+    authorizes the ordinary candidate-promotion path. Submitted reviews and a
+    ``hold`` remain blocking.
+    """
+
+    if not has_current_blocking_work:
+        return promotion_state in {None, "not_required", "promoted"}
+    return promotion_state == "promoted"
+
+
 def evaluate_promotion_gate(
     *,
     active_action_id: str | None,
@@ -170,5 +188,6 @@ __all__ = [
     "TransitionResult",
     "allowed_triggers",
     "evaluate_promotion_gate",
+    "human_promotion_authorized",
     "transition_campaign",
 ]

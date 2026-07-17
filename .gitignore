@@ -106,12 +106,8 @@ ds-bundle/
 # (not for the public repo)
 tasks/
 .claude/
+.superpowers/
 WORKSTREAMS.md
-
-# Installation-specific private operator materials
-assistant/workspace/skills/bashgym-operator/references/ponyo-memexai.md
-scripts/memexai/run_ponyo_campaign_smoke.py
-scripts/memexai/run_ponyo_positive_aware.sh
 
 # Local BashGym state (never source-controlled)
 .bashgym/

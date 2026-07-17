@@ -32,7 +32,13 @@ logger = logging.getLogger(__name__)
 from bashgym.api.achievements_routes import router as achievements_router  # noqa: E402
 from bashgym.api.agent_routes import router as agent_router  # noqa: E402
 from bashgym.api.autoresearch_routes import router as autoresearch_router  # noqa: E402
+from bashgym.api.campaign_agent_routes import (  # noqa: E402
+    campaign_agent_credential_router,
+    campaign_agent_router,
+)
+from bashgym.api.campaign_recovery_routes import campaign_recovery_router  # noqa: E402
 from bashgym.api.campaign_routes import campaign_auth_router, campaign_router  # noqa: E402
+from bashgym.api.campaign_setup_routes import campaign_setup_router  # noqa: E402
 from bashgym.api.cascade_routes import router as cascade_router  # noqa: E402
 from bashgym.api.dev_routes import router as dev_router  # noqa: E402
 from bashgym.api.device_routes import get_registry as get_device_registry  # noqa: E402
@@ -5834,6 +5840,10 @@ def create_app() -> FastAPI:
     # Campaign routes enforce their own bearer even when desktop middleware is permissive.
     app.include_router(campaign_auth_router)
     app.include_router(campaign_router)
+    app.include_router(campaign_recovery_router)
+    app.include_router(campaign_setup_router)
+    app.include_router(campaign_agent_router)
+    app.include_router(campaign_agent_credential_router)
     app.include_router(ledger_router)
 
     # Include Factory routes (synthetic data generation)
@@ -6204,4 +6214,4 @@ app = create_app()
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8003)

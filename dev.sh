@@ -57,7 +57,7 @@ fi
 if $FRONTEND; then
   if $ELECTRON; then
     echo "Starting Electron app..."
-    (cd frontend && BASHGYM_API_URL="http://127.0.0.1:$PORT" npm run electron:dev) &
+    (cd frontend && BASHGYM_API_BASE="http://127.0.0.1:$PORT/api" npm run electron:dev) &
   else
     echo "Starting frontend on port 5173..."
     (cd frontend && npm run dev) &

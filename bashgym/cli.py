@@ -8,18 +8,22 @@ replay artifacts, and starting the existing API server.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from bashgym.api_base import normalize_api_base as _normalize_api_base
+from bashgym.api_base import open_api_url as _open_api_url
 from bashgym.compute import (
     get_compute_target,
     launch_plan,
@@ -138,11 +142,6 @@ DOCS = {
         "summary": "Private compute-target backend-smoke and eval checklist for DPPO/ECHO/RWML handoff.",
     },
 }
-
-DOC_ALIASES = {
-    "gx10-checklist": "private-compute-checklist",
-}
-
 
 SETTING_GUIDANCE: dict[str, dict[str, str]] = {
     "learning_rate": {
@@ -561,7 +560,7 @@ def _recipe(strategy: str, hardware: str, data: str) -> TrainingRecipe:
     if strategy in {"session", "session-distill", "session-distillation"}:
         strategy = "session-distillation"
     hardware = hardware.lower().replace("-", "_")
-    if hardware in {"dgx", "gx10", "remote", "remote_gpu"}:
+    if hardware in {"remote", "remote_gpu"}:
         hardware = "private_compute"
     artifact_defaults = {
         "checkpoint_limit": 1,
@@ -1309,7 +1308,7 @@ def _capability_matrix() -> dict[str, Any]:
                     "bashgym replay summarize <path> --json",
                     "bashgym training smoke-bundle --replay <path> --output-dir <dir> --json",
                     "bashgym training analyze --metrics <path> --replay <path> --smoke-bundle <path> --release-evidence <path> --json",
-                    "bashgym serve --host 127.0.0.1 --port 8000",
+                    "bashgym serve --host 127.0.0.1 --port 8003",
                 ],
                 "best_for": [
                     "new-session handoff",
@@ -2157,6 +2156,9 @@ def cmd_manifest(args: argparse.Namespace) -> int:
             "campaign control-smoke": (
                 "Run the durable AutoResearch control path without a GPU or API key."
             ),
+            "campaign provision-local-operator": (
+                "Provision one local human operator credential by opaque secret reference."
+            ),
             "campaign status": "Read one campaign aggregate and its next valid action.",
             "campaign autoresearch": "Read durable AutoResearch state and decisions.",
             "campaign manifest": "Read one immutable campaign manifest revision.",
@@ -2259,9 +2261,9 @@ def cmd_training_capabilities(args: argparse.Namespace) -> int:
 
 def cmd_training_docs(args: argparse.Namespace) -> int:
     if args.topic:
-        topic = DOC_ALIASES.get(args.topic, args.topic)
+        topic = args.topic
         if topic not in DOCS:
-            choices = sorted([*DOCS, *DOC_ALIASES])
+            choices = sorted(DOCS)
             raise SystemExit(f"unknown topic {args.topic!r}; choose {', '.join(choices)}")
         meta = DOCS[topic]
         path = _training_doc_path(meta)
@@ -2936,7 +2938,7 @@ def _workspace_api_base(args: argparse.Namespace) -> str:
         or os.environ.get("BASHGYM_API_BASE")
         or "http://localhost:8003/api"
     )
-    return raw.rstrip("/")
+    return _normalize_api_base(raw)
 
 
 def _workspace_http_json(
@@ -2955,20 +2957,147 @@ def _workspace_http_json(
         headers["X-BashGym-Origin-Terminal"] = os.environ["BASHGYM_TERMINAL_ID"]
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
-    url = f"{_workspace_api_base(args)}{path}"
+    base_url = _workspace_api_base(args)
+    normalized_path = path
+    if base_url.endswith("/api") and (path == "/api" or path.startswith("/api/")):
+        normalized_path = path.removeprefix("/api") or "/"
+    url = f"{base_url}{normalized_path}"
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with _open_api_url(req, timeout=15) as resp:
             body = resp.read().decode("utf-8")
             content_type = resp.headers.get("Content-Type", "")
             if "json" in content_type:
                 return json.loads(body)
             return body
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"{method} {url} failed: HTTP {exc.code} {detail}") from exc
+        raise RuntimeError(f"{method} API request failed with HTTP {exc.code}") from exc
     except urllib.error.URLError as exc:
-        raise RuntimeError(f"{method} {url} failed: {exc.reason}") from exc
+        raise RuntimeError(f"{method} API request failed: connection unavailable") from exc
+
+
+def _run_packaged_operator_script(script_name: str, arguments: list[str]) -> int:
+    allowed_scripts = {"curate_activity.py", "gbrain_bridge.py", "operator_context.py"}
+    if script_name not in allowed_scripts:
+        raise RuntimeError("packaged BashGym operator script is not allowlisted")
+    skill_root = Path(__file__).resolve().parents[1] / "assistant" / "workspace" / "skills"
+    script_path = skill_root / "bashgym-operator" / "scripts" / script_name
+    if not script_path.is_file():
+        raise RuntimeError("packaged BashGym operator context is unavailable")
+    spec = importlib.util.spec_from_file_location("bashgym_packaged_operator_context", script_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("packaged BashGym operator context is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+        return int(module.run(arguments))
+    finally:
+        sys.modules.pop(spec.name, None)
+
+
+def cmd_operator(args: argparse.Namespace) -> int:
+    arguments = [args.operator_command]
+    if args.operator_command == "context":
+        arguments.extend(["--workspace-id", args.workspace_id])
+        if args.project:
+            arguments.extend(["--project", args.project])
+        arguments.extend(["--limit", str(args.limit)])
+    elif args.operator_command == "workspace":
+        arguments.extend(
+            [
+                "--workspace-id",
+                args.workspace_id,
+                "--format",
+                args.format,
+            ]
+        )
+        if args.api_base:
+            arguments.extend(["--api-base", args.api_base])
+    elif args.operator_command == "ledger":
+        arguments.extend(["--workspace-id", args.workspace_id])
+        if args.project_id:
+            arguments.extend(["--project-id", args.project_id])
+        arguments.extend(["--limit", str(args.limit)])
+    elif args.operator_command == "curate":
+        arguments = [args.curate_command, args.input, "--output-root", args.output_root]
+        if args.include_active_runs:
+            arguments.append("--include-active-runs")
+        return _run_packaged_operator_script("curate_activity.py", arguments)
+    elif args.operator_command == "gbrain-bridge":
+        arguments = ["--profile", args.profile, args.bridge_command]
+        if args.bridge_command == "publish":
+            arguments.extend(["--file", args.file, "--relative", args.relative])
+            if args.execute:
+                arguments.append("--execute")
+            if args.sync:
+                arguments.append("--sync")
+        return _run_packaged_operator_script("gbrain_bridge.py", arguments)
+    return _run_packaged_operator_script("operator_context.py", arguments)
+
+
+def _nonblank_identifier(value: str) -> str:
+    normalized = str(value).strip()
+    if not normalized:
+        raise argparse.ArgumentTypeError("identifier cannot be blank")
+    return normalized
+
+
+def _portable_api_path(raw_path: str, query_arguments: Sequence[str] = ()) -> str:
+    parsed = urllib.parse.urlsplit(raw_path)
+    if parsed.scheme or parsed.netloc or not parsed.path.startswith("/api/"):
+        raise ValueError("API path must be an absolute /api/... path, not a URL")
+    if any(part == ".." for part in parsed.path.split("/")):
+        raise ValueError("API path cannot contain parent traversal")
+    query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+    for argument in query_arguments:
+        key, separator, value = argument.partition("=")
+        if not separator or not key:
+            raise ValueError("--query must use KEY=VALUE")
+        query.append((key, value))
+    if any(
+        re.search(
+            r"(?:api[-_]?key|auth|bearer|credential|password|secret|token)",
+            key,
+            re.IGNORECASE,
+        )
+        for key, _value in query
+    ):
+        raise ValueError("credentials and secrets are not allowed in API query arguments")
+    encoded_query = urllib.parse.urlencode(query)
+    return urllib.parse.urlunsplit(("", "", parsed.path, encoded_query, ""))
+
+
+def _read_api_json_file(path: Any) -> Any:
+    with path.open("rb") as handle:
+        content = handle.read(1024 * 1024 + 1)
+    if len(content) > 1024 * 1024:
+        raise ValueError("API request data file exceeds 1 MiB")
+    try:
+        text = content.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise ValueError("API request data file must be valid UTF-8") from exc
+    return json.loads(text)
+
+
+def cmd_api(args: argparse.Namespace) -> int:
+    payload: Any | None = None
+    if args.data_file:
+        data_path = Path(args.data_file).expanduser()
+        payload = _read_api_json_file(data_path)
+    if args.method in {"GET", "DELETE"} and payload is not None:
+        raise ValueError(f"{args.method} requests cannot include --data-file")
+    response = _workspace_http_json(
+        args,
+        _portable_api_path(args.path, args.query),
+        method=args.method,
+        payload=payload,
+    )
+    if isinstance(response, str):
+        print(response)
+    else:
+        print(json.dumps(response, indent=2, sort_keys=True))
+    return 0
 
 
 def cmd_workspace_context(args: argparse.Namespace) -> int:
@@ -3444,6 +3573,165 @@ def cmd_campaign_activate_autoresearch(args: argparse.Namespace) -> int:
                     else "Install/start the resident worker, then run campaign doctor."
                 )
             ),
+        },
+        as_json=bool(args.json),
+    )
+
+
+def cmd_campaign_sync_autoresearch_registry(args: argparse.Namespace) -> int:
+    """Plan or atomically apply logical setup bindings from activation evidence."""
+
+    from bashgym.campaigns.autoresearch import load_autoresearch_template_definitions
+    from bashgym.campaigns.registry_sync import (
+        MAX_REGISTRY_SYNC_DEFINITIONS,
+        apply_autoresearch_registry_sync,
+        plan_autoresearch_registry_sync,
+        resolve_autoresearch_installation_id,
+    )
+    from bashgym.campaigns.worker_service import read_worker_config
+    from bashgym.config import get_bashgym_dir
+    from bashgym.ledger.persistence import ExperimentLedgerRepository
+
+    root = Path(args.data_dir).expanduser().resolve() if args.data_dir else get_bashgym_dir()
+    install_dir = (
+        Path(args.install_dir).expanduser().resolve()
+        if args.install_dir
+        else root / "campaigns" / "autoresearch-templates"
+    )
+    worker_config_path = (
+        Path(args.worker_config).expanduser().resolve()
+        if args.worker_config
+        else root / "campaigns" / "worker-config.v1.json"
+    )
+    database_path = root / "campaigns" / "campaigns.sqlite3"
+    if not worker_config_path.is_file():
+        raise ValueError("activation_worker_config_unavailable: run activate-autoresearch --apply")
+    if not database_path.is_file():
+        raise ValueError("activation_ledger_unavailable: run activate-autoresearch --apply")
+    definition_files = 0
+    directory_entries = 0
+    if install_dir.is_dir():
+        with os.scandir(install_dir) as entries:
+            for entry in entries:
+                directory_entries += 1
+                if directory_entries > MAX_REGISTRY_SYNC_DEFINITIONS * 4:
+                    raise ValueError("installed_definition_directory_limit_exceeded")
+                if entry.name.endswith(".json"):
+                    definition_files += 1
+                    if definition_files > MAX_REGISTRY_SYNC_DEFINITIONS:
+                        raise ValueError("installed_definitions_limit_exceeded")
+    definitions = load_autoresearch_template_definitions(install_dir)
+    if args.template_ids:
+        requested = set(args.template_ids)
+        definitions = tuple(item for item in definitions if item.template_id in requested)
+        if requested != {item.template_id for item in definitions}:
+            raise ValueError("installed_autoresearch_template_not_found")
+    installation_id = resolve_autoresearch_installation_id(
+        args.installation_id,
+        apply=bool(args.apply),
+    )
+    plan = plan_autoresearch_registry_sync(
+        definitions=definitions,
+        workspace_id=args.workspace_id,
+        installation_id=installation_id,
+        ledger=ExperimentLedgerRepository.open_existing(database_path),
+        worker_config=read_worker_config(worker_config_path),
+    )
+    payload: dict[str, Any] = {
+        "title": "BashGym AutoResearch Registry Sync",
+        "mode": "plan",
+        "plan": plan.model_dump(mode="json"),
+    }
+    if args.apply:
+        if not args.controller_owner_id or not args.controller_lease_key_ref:
+            raise ValueError("registry_apply_authority_incomplete")
+        from bashgym.secrets import get_secret
+
+        lease_key = get_secret(args.controller_lease_key_ref)
+        if not lease_key:
+            raise ValueError("registry_apply_lease_authority_unavailable")
+        receipt = apply_autoresearch_registry_sync(
+            plan,
+            database_path=database_path,
+            controller_owner_id=args.controller_owner_id,
+            controller_lease_key=lease_key,
+        )
+        payload["mode"] = "apply"
+        payload["receipt"] = receipt.model_dump(mode="json")
+    return _emit(payload, as_json=bool(args.json))
+
+
+_CAMPAIGN_LOCAL_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
+
+
+def cmd_campaign_provision_local_operator(args: argparse.Namespace) -> int:
+    """Provision one local human credential without exposing its raw token."""
+
+    from bashgym import secrets as secret_store
+    from bashgym.campaigns.auth import CampaignAuthService
+    from bashgym.campaigns.autoresearch import AutoResearchRepository
+    from bashgym.campaigns.contracts import AutonomyProfile
+    from bashgym.config import get_bashgym_dir
+    from bashgym.mcp.policy import validate_secret_ref_name
+
+    workspace_id = args.workspace_id
+    actor_id = args.actor_id
+    credential_ref = args.credential_ref
+    if not _CAMPAIGN_LOCAL_IDENTIFIER_RE.fullmatch(workspace_id):
+        raise ValueError("workspace ID must be a bounded campaign identifier")
+    if not _CAMPAIGN_LOCAL_IDENTIFIER_RE.fullmatch(actor_id):
+        raise ValueError("actor ID must be a bounded campaign identifier")
+    validate_secret_ref_name(credential_ref)
+    if not 1 <= args.ttl_days <= 90:
+        raise ValueError("operator credential TTL must be between 1 and 90 days")
+    if secret_store.get_secret(credential_ref) is not None:
+        raise ValueError("campaign credential reference is already configured")
+
+    root = Path(args.data_dir).expanduser().resolve() if args.data_dir else get_bashgym_dir()
+    repository = AutoResearchRepository(root / "campaigns" / "campaigns.sqlite3")
+    repository.initialize()
+    auth = CampaignAuthService(repository)
+    issued = auth.issue_refresh_credential(
+        actor_id=actor_id,
+        autonomy_profile=AutonomyProfile.DESKTOP_USER,
+        workspace_ids=(workspace_id,),
+        ttl=timedelta(days=args.ttl_days),
+    )
+    try:
+        secret_store.set_secret(credential_ref, issued.raw_token)
+    except Exception:
+        try:
+            auth.revoke_credential(
+                issued.credential_id,
+                reason="local_operator_secret_storage_failed",
+            )
+        except Exception:
+            raise ValueError(
+                "campaign credential storage failed and the issued credential could not be revoked"
+            ) from None
+        raise ValueError(
+            "campaign credential storage failed; issued credential was revoked"
+        ) from None
+
+    return _emit(
+        {
+            "title": "BashGym Local Campaign Operator Provisioned",
+            "ok": True,
+            "credential_id": issued.credential_id,
+            "credential_ref": credential_ref,
+            "actor_id": actor_id,
+            "autonomy_profile": AutonomyProfile.DESKTOP_USER.value,
+            "workspace_id": workspace_id,
+            "expires_at": issued.expires_at.isoformat(),
+            "next": [
+                {
+                    "reason": "Verify authenticated campaign access.",
+                    "command": (
+                        f"bashgym campaign list --workspace-id {workspace_id} "
+                        f"--credential-ref {credential_ref} --json"
+                    ),
+                }
+            ],
         },
         as_json=bool(args.json),
     )
@@ -4371,6 +4659,100 @@ def build_parser() -> argparse.ArgumentParser:
     )
     manifest.set_defaults(func=cmd_manifest)
 
+    operator = subparsers.add_parser(
+        "operator",
+        help="Run the installed BashGym operator preflight and context helpers",
+        parents=[json_parent],
+    )
+    operator_sub = operator.add_subparsers(dest="operator_command", required=True)
+    operator_doctor = operator_sub.add_parser(
+        "doctor",
+        help="Verify local operator abilities without mutation",
+        parents=[json_parent],
+    )
+    operator_doctor.set_defaults(func=cmd_operator)
+    operator_context = operator_sub.add_parser(
+        "context",
+        help="Read live runtime and project-isolated ledger context",
+        parents=[json_parent],
+    )
+    operator_context.add_argument("--workspace-id", required=True, type=_nonblank_identifier)
+    operator_context.add_argument("--project", type=_nonblank_identifier)
+    operator_context.add_argument("--limit", type=int, default=8)
+    operator_context.set_defaults(func=cmd_operator)
+    operator_workspace = operator_sub.add_parser(
+        "workspace",
+        help="Read one explicit workspace projection from the BashGym API",
+        parents=[json_parent],
+    )
+    operator_workspace.add_argument("--workspace-id", required=True, type=_nonblank_identifier)
+    operator_workspace.add_argument("--format", choices=("json", "markdown"), default="json")
+    operator_workspace.add_argument(
+        "--api-base",
+        help="Backend /api base URL (default: BASHGYM_API_BASE or http://localhost:8003/api)",
+    )
+    operator_workspace.set_defaults(func=cmd_operator)
+    operator_ledger = operator_sub.add_parser(
+        "ledger",
+        help="Read project-isolated local experiment context",
+        parents=[json_parent],
+    )
+    operator_ledger.add_argument("--workspace-id", required=True, type=_nonblank_identifier)
+    operator_ledger.add_argument("--project-id", type=_nonblank_identifier)
+    operator_ledger.add_argument("--limit", type=int, default=20)
+    operator_ledger.set_defaults(func=cmd_operator)
+    operator_curate = operator_sub.add_parser(
+        "curate",
+        help="Write sanitized, idempotent GBrain activity receipts",
+        parents=[json_parent],
+    )
+    curate_sub = operator_curate.add_subparsers(dest="curate_command", required=True)
+    for curate_name in ("receipt", "context", "handoff"):
+        curate_command = curate_sub.add_parser(curate_name, parents=[json_parent])
+        curate_command.add_argument("input", help="JSON file path or - for stdin")
+        curate_command.add_argument("--output-root", required=True)
+        if curate_name == "context":
+            curate_command.add_argument("--include-active-runs", action="store_true")
+        else:
+            curate_command.set_defaults(include_active_runs=False)
+        curate_command.set_defaults(func=cmd_operator)
+    operator_bridge = operator_sub.add_parser(
+        "gbrain-bridge",
+        help="Preview or publish a curated receipt through an ignored bridge profile",
+        parents=[json_parent],
+    )
+    operator_bridge.add_argument("--profile", required=True)
+    bridge_sub = operator_bridge.add_subparsers(dest="bridge_command", required=True)
+    bridge_status = bridge_sub.add_parser("status", parents=[json_parent])
+    bridge_status.set_defaults(func=cmd_operator)
+    bridge_publish = bridge_sub.add_parser("publish", parents=[json_parent])
+    bridge_publish.add_argument("--file", required=True)
+    bridge_publish.add_argument("--relative", required=True)
+    bridge_publish.add_argument("--execute", action="store_true")
+    bridge_publish.add_argument("--sync", action="store_true")
+    bridge_publish.set_defaults(func=cmd_operator)
+
+    api = subparsers.add_parser(
+        "api",
+        help="Call a BashGym API path without shell-specific curl helpers",
+        parents=[json_parent],
+    )
+    api.add_argument("method", choices=("GET", "POST", "PUT", "DELETE"))
+    api.add_argument("path", help="Absolute backend path beginning with /api/")
+    api.add_argument("--data-file", help="Portable UTF-8 JSON request body file (POST/PUT only)")
+    api.add_argument(
+        "--query",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Repeatable query argument encoded by BashGym (never use for credentials)",
+    )
+    api.add_argument(
+        "--api-base",
+        help="Backend /api base URL (default: BASHGYM_API_BASE or http://localhost:8003/api)",
+    )
+    api.set_defaults(func=cmd_api)
+
     workspace = subparsers.add_parser(
         "workspace",
         help="Canvas-aware workspace context and intent helpers",
@@ -4423,6 +4805,39 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[json_parent],
     )
     campaign_sub = campaign.add_subparsers(dest="campaign_command", required=True)
+
+    campaign_operator = campaign_sub.add_parser(
+        "provision-local-operator",
+        help="Provision a local human campaign operator credential into the secret store",
+        parents=[json_parent],
+    )
+    operator_credential_default = os.environ.get("BASHGYM_CAMPAIGN_CREDENTIAL_REF")
+    campaign_operator.add_argument(
+        "--workspace-id",
+        required=True,
+        help="Single campaign workspace authorized for this local operator",
+    )
+    campaign_operator.add_argument(
+        "--credential-ref",
+        default=operator_credential_default,
+        required=operator_credential_default is None,
+        help=(
+            "Opaque secret-store key to create (or BASHGYM_CAMPAIGN_CREDENTIAL_REF); "
+            "raw tokens are never accepted"
+        ),
+    )
+    campaign_operator.add_argument("--actor-id", default="local-operator")
+    campaign_operator.add_argument(
+        "--ttl-days",
+        type=int,
+        default=30,
+        help="Refresh credential lifetime from 1 through 90 days (default: 30)",
+    )
+    campaign_operator.add_argument(
+        "--data-dir",
+        help="BashGym data root containing campaigns/campaigns.sqlite3",
+    )
+    campaign_operator.set_defaults(func=cmd_campaign_provision_local_operator)
 
     campaign_setup = campaign_sub.add_parser(
         "setup-autoresearch",
@@ -4569,6 +4984,34 @@ def build_parser() -> argparse.ArgumentParser:
         help="With --apply, install/start the per-user resident worker service",
     )
     campaign_activate.set_defaults(func=cmd_campaign_activate_autoresearch)
+
+    campaign_registry_sync = campaign_sub.add_parser(
+        "sync-autoresearch-registry",
+        help="Plan or apply guided-setup bindings from existing activation records",
+        parents=[json_parent],
+    )
+    campaign_registry_sync.add_argument("--workspace-id", required=True)
+    campaign_registry_sync.add_argument(
+        "--installation-id",
+        help=(
+            "Reviewed ins_<32-hex> identity. Plan mode generates one when omitted; "
+            "apply requires the reviewed value explicitly."
+        ),
+    )
+    campaign_registry_sync.add_argument(
+        "--template", dest="template_ids", action="append", default=[]
+    )
+    campaign_registry_sync.add_argument("--data-dir")
+    campaign_registry_sync.add_argument("--install-dir")
+    campaign_registry_sync.add_argument("--worker-config")
+    campaign_registry_sync.add_argument("--controller-owner-id")
+    campaign_registry_sync.add_argument("--controller-lease-key-ref")
+    campaign_registry_sync.add_argument(
+        "--apply",
+        action="store_true",
+        help="Atomically write the explicit installation and logical binding registry",
+    )
+    campaign_registry_sync.set_defaults(func=cmd_campaign_sync_autoresearch_registry)
 
     nemo_setup = campaign_sub.add_parser(
         "setup-nemo-rl",
@@ -5291,7 +5734,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="List or read training docs",
         parents=[json_parent],
     )
-    docs.add_argument("--topic", choices=sorted([*DOCS, *DOC_ALIASES]), help="Doc topic to read")
+    docs.add_argument("--topic", choices=sorted(DOCS), help="Doc topic to read")
     docs.add_argument(
         "--include-content",
         action="store_true",
@@ -5343,8 +5786,6 @@ def build_parser() -> argparse.ArgumentParser:
             "private-compute",
             "remote",
             "remote_gpu",
-            "dgx",
-            "gx10",
             "cloud",
         ],
     )

@@ -3,6 +3,7 @@ import path from 'path'
 import fs from 'fs'
 import os from 'os'
 import { spawn, type ChildProcess } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import type { IPty } from 'node-pty'
 import { buildAgentBridgeLaunchCommand, type AgentBridgeLaunchRequest } from './agentBridge'
 import {
@@ -12,12 +13,30 @@ import {
   type CampaignBody,
   type CampaignMethod,
   type CampaignQuery,
+  type CampaignRequestAuthority,
   createDesktopBootstrapToken,
   resolveCampaignApiOrigin,
 } from './campaignBridge'
 import {
+  CampaignAgentHostController,
+  type MainOwnedCampaignAgentIdentity,
+} from './campaignAgentHost'
+import { buildCodexCampaignAgentLaunch } from './campaignAgentLaunch'
+import { CampaignAgentMcpHost } from './campaignAgentMcpHost'
+import {
+  createRetryableInitializer,
+  managedBackendStartAction,
+  resolveBackendRoot,
+} from './backendLifecycle'
+import {
+  DEFAULT_DESKTOP_RUNTIME_ENDPOINTS,
+  resolveDesktopRuntimeEndpoints,
+} from './runtimeEndpoints'
+import {
   buildPowerShellArgs,
   TerminalIpcBatcher,
+  TerminalOutputFlowController,
+  TerminalOutputFlowOwnership,
   TerminalScrollbackBuffer,
   TerminalSizeTracker,
 } from './terminalTransport'
@@ -44,16 +63,26 @@ interface PtySession {
   scrollback: TerminalScrollbackBuffer
   /** Short-frame output batching prevents redraw IPC floods. */
   outputBatcher: TerminalIpcBatcher
+  /** Parser acknowledgements keep xterm's redraw queue bounded. */
+  outputFlow: TerminalOutputFlowController
+  /** Ensures stale panes cannot acknowledge or release a replacement pane. */
+  outputFlowOwnership: TerminalOutputFlowOwnership
   /** Last applied ConPTY size, used to suppress duplicate full-screen TUI redraws. */
   size: TerminalSizeTracker
   cwd: string
   createdAt: number
   exited: boolean
   exitCode: number | null
+  /** Main-owned lifecycle generation; changes whenever a PTY id is replaced. */
+  generation: string
+  /** Set only by a main-owned Codex/Hermes launch path, never from attach IPC. */
+  campaignAgentIdentity?: MainOwnedCampaignAgentIdentity
 }
 
 const MAX_BUFFER_BYTES = 400_000 // ~400KB of scrollback per session
 const ptySessions: Map<string, PtySession> = new Map()
+const campaignAgentMcpHosts: Map<string, CampaignAgentMcpHost> = new Map()
+const campaignAgentLaunchScopes: Map<string, { workspaceId: string; campaignId: string }> = new Map()
 const agentBridgeArtifacts: Map<string, Set<string>> = new Map()
 
 function registerAgentBridgeArtifact(terminalId: string, artifactPath: string) {
@@ -71,46 +100,108 @@ function cleanupAgentBridgeArtifacts(terminalId: string) {
   agentBridgeArtifacts.delete(terminalId)
 }
 
+function revokeCampaignAgentTerminal(
+  terminalId: string,
+  reason: 'pty_exit' | 'pty_replacement' | 'renderer_reload' | 'app_shutdown' | 'explicit_revoke',
+): Promise<void> {
+  return campaignAgentHostController.teardownTerminal(terminalId, reason)
+    .finally(() => closeCampaignAgentMcpHost(terminalId))
+}
+
+function closeCampaignAgentMcpHost(terminalId: string): Promise<void> {
+  const host = campaignAgentMcpHosts.get(terminalId)
+  campaignAgentLaunchScopes.delete(terminalId)
+  if (!host) return Promise.resolve()
+  campaignAgentMcpHosts.delete(terminalId)
+  host.lock()
+  return host.close()
+}
+
+async function teardownAllCampaignAgents(
+  reason: 'renderer_reload' | 'app_shutdown',
+): Promise<void> {
+  try {
+    await campaignAgentHostController.teardownAll(reason)
+  } finally {
+    await Promise.allSettled([...campaignAgentMcpHosts.keys()].map(closeCampaignAgentMcpHost))
+  }
+}
+
 function killAllPtys() {
   ptySessions.forEach((s, id) => {
     s.outputBatcher.dispose()
+    s.outputFlow.dispose()
     try { s.pty.kill() } catch { /* already dead */ }
     cleanupAgentBridgeArtifacts(id)
   })
   ptySessions.clear()
+  campaignAgentMcpHosts.forEach((host) => {
+    host.lock()
+    void host.close()
+  })
+  campaignAgentMcpHosts.clear()
+  campaignAgentLaunchScopes.clear()
+  campaignAgentHostController.disposeLocal()
 }
 
 // Determine if we're in development
 const isDev = !app.isPackaged
-let campaignApiOrigin: string
+let runtimeEndpointConfigurationError: Error | null = null
+let desktopRuntimeEndpoints = DEFAULT_DESKTOP_RUNTIME_ENDPOINTS
 try {
-  campaignApiOrigin = resolveCampaignApiOrigin(process.env.BASHGYM_API_URL)
-} catch {
-  // Invalid/non-loopback configuration must not crash unrelated desktop features.
-  // Campaign auth remains bound to a managed loopback child.
-  campaignApiOrigin = resolveCampaignApiOrigin()
+  desktopRuntimeEndpoints = resolveDesktopRuntimeEndpoints(process.env)
+} catch (error) {
+  runtimeEndpointConfigurationError = asError(error)
 }
+const campaignApiOrigin = resolveCampaignApiOrigin(desktopRuntimeEndpoints.apiOrigin)
 const desktopBootstrapToken = createDesktopBootstrapToken()
 const campaignBridgeClient = new CampaignBridgeClient(
   campaignApiOrigin,
   desktopBootstrapToken,
 )
+const campaignAgentHostInstanceId = `desktop_${randomUUID().replaceAll('-', '')}`
+const campaignAgentHostController = new CampaignAgentHostController({
+  transport: {
+    register: (body) => campaignBridgeClient.registerCampaignAgentHostSession(body),
+    claim: (registrationId) => campaignBridgeClient.claimCampaignAgentDelivery(registrationId),
+    revoke: (registrationId) => campaignBridgeClient.revokeCampaignAgentHostSession(registrationId),
+    grant: (campaignId, body) => campaignBridgeClient.issueCampaignAgentGrant(campaignId, body),
+    attach: (campaignId, body) => campaignBridgeClient.attachCampaignAgent(campaignId, body),
+    revokeAttachment: (campaignId, attachmentId, body) => (
+      campaignBridgeClient.revokeCampaignAgentAttachment(campaignId, attachmentId, body)
+    ),
+    heartbeat: (credential, body) => campaignBridgeClient.heartbeatCampaignAgent(credential, body),
+    observe: (credential) => campaignBridgeClient.observeCampaignAsAgent(credential),
+    artifacts: (credential, query) => campaignBridgeClient.listCampaignArtifactsAsAgent(credential, query),
+  },
+  resolveIdentity: (terminalId) => {
+    const session = ptySessions.get(terminalId)
+    if (!session?.campaignAgentIdentity) return null
+    return {
+      ...session.campaignAgentIdentity,
+      live: !session.exited,
+    }
+  },
+  onLifecycle: (event) => {
+    if (event.kind === 'activated') return
+    const host = campaignAgentMcpHosts.get(event.terminalId)
+    if (event.kind === 'actions_locked') {
+      host?.lock()
+      void revokeCampaignAgentTerminal(event.terminalId, 'explicit_revoke').catch(() => undefined)
+      return
+    }
+    campaignAgentLaunchScopes.delete(event.terminalId)
+    if (!host) return
+    campaignAgentMcpHosts.delete(event.terminalId)
+    host.lock()
+    void host.close()
+  },
+})
 let backendProcess: ChildProcess | null = null
-let campaignBackendReady: Promise<void> | null = null
+let lastCampaignBackendError: Error | null = runtimeEndpointConfigurationError
 
-function resolveBackendRoot(): string {
-  const candidates = [
-    process.env.BASHGYM_PROJECT_ROOT,
-    path.resolve(process.cwd(), '..'),
-    process.cwd(),
-    path.resolve(__dirname, '../..'),
-    path.resolve(process.resourcesPath, '..'),
-  ].filter((candidate): candidate is string => Boolean(candidate))
-  const root = candidates.find((candidate) => (
-    fs.existsSync(path.join(candidate, 'bashgym', 'api', 'routes.py'))
-  ))
-  if (!root) throw new Error('BashGym backend root is unavailable')
-  return root
+function asError(value: unknown): Error {
+  return value instanceof Error ? value : new Error(String(value || 'Unknown backend error'))
 }
 
 async function backendIsReachable(): Promise<boolean> {
@@ -125,10 +216,19 @@ async function backendIsReachable(): Promise<boolean> {
 }
 
 async function startManagedBackend(): Promise<void> {
-  if (await backendIsReachable()) {
-    throw new Error('BashGym managed backend port is already in use')
-  }
-  const root = resolveBackendRoot()
+  const startAction = managedBackendStartAction(
+    await backendIsReachable(),
+    backendProcess !== null && backendProcess.exitCode === null,
+  )
+  if (startAction === 'reuse') return
+  const root = resolveBackendRoot({
+    configuredRoot: process.env.BASHGYM_PROJECT_ROOT,
+    cwd: process.cwd(),
+    appPath: app.getAppPath(),
+    resourcesPath: process.resourcesPath,
+    executablePath: process.execPath,
+    markerExists: fs.existsSync,
+  })
   const url = new URL(campaignApiOrigin)
   const pythonCommand = process.env.BASHGYM_PYTHON || 'python'
   let spawnFailed = false
@@ -146,7 +246,14 @@ async function startManagedBackend(): Promise<void> {
     ],
     {
       cwd: root,
-      env: buildBackendChildEnvironment(process.env, desktopBootstrapToken),
+      env: buildBackendChildEnvironment(
+        {
+          ...process.env,
+          BASHGYM_API_BASE: desktopRuntimeEndpoints.apiBase,
+          BASHGYM_API_URL: desktopRuntimeEndpoints.apiOrigin,
+        },
+        desktopBootstrapToken,
+      ),
       stdio: 'ignore',
       windowsHide: true,
     },
@@ -157,6 +264,8 @@ async function startManagedBackend(): Promise<void> {
   backendProcess.once('exit', () => {
     backendProcess = null
     campaignBridgeClient.dispose()
+    lastCampaignBackendError = new Error('BashGym managed backend exited')
+    campaignBackendReadiness.invalidate()
   })
   const deadline = Date.now() + MANAGED_BACKEND_STARTUP_TIMEOUT_MS
   while (Date.now() < deadline) {
@@ -171,18 +280,25 @@ async function startManagedBackend(): Promise<void> {
   throw new Error('BashGym managed backend did not become ready')
 }
 
-function initializeManagedCampaignBackend(): Promise<void> {
-  if (!campaignBackendReady) {
-    campaignBackendReady = (async () => {
-      await startManagedBackend()
-      await campaignBridgeClient.initialize()
-    })()
+const campaignBackendReadiness = createRetryableInitializer(async () => {
+  try {
+    if (runtimeEndpointConfigurationError) throw runtimeEndpointConfigurationError
+    await startManagedBackend()
+    await campaignBridgeClient.initialize()
+    lastCampaignBackendError = null
+  } catch (error) {
+    lastCampaignBackendError = asError(error)
+    throw error
   }
-  return campaignBackendReady
+})
+
+function initializeManagedCampaignBackend(): Promise<void> {
+  return campaignBackendReadiness.ensureReady()
 }
 
 function stopManagedBackend(): void {
   campaignBridgeClient.dispose()
+  campaignBackendReadiness.invalidate()
   if (!backendProcess) return
   try { backendProcess.kill() } catch { /* already stopped */ }
   backendProcess = null
@@ -240,6 +356,7 @@ function createWindow() {
   const appIconPath = resolveAppIconPath()
 
   mainWindow = new BrowserWindow({
+    show: false,
     width: 1400,
     height: 900,
     minWidth: 800,
@@ -251,11 +368,20 @@ function createWindow() {
     backgroundColor: '#0D0D0D',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
+      additionalArguments: [
+        `--bashgym-api-base=${desktopRuntimeEndpoints.apiBase}`,
+        `--bashgym-websocket-url=${desktopRuntimeEndpoints.webSocketUrl}`,
+      ],
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: false, // Required for node-pty
       webviewTag: true // Required for browser panel screenshots
     }
+  })
+
+  mainWindow.once('ready-to-show', () => {
+    mainWindow?.show()
+    mainWindow?.webContents.invalidate()
   })
 
   // Content Security Policy
@@ -281,10 +407,19 @@ function createWindow() {
     })
   })
 
+  let rendererHasLoaded = false
+  mainWindow.webContents.on('did-start-navigation', (_event, _url, _isInPlace, isMainFrame) => {
+    if (rendererHasLoaded && isMainFrame) {
+      void teardownAllCampaignAgents('renderer_reload').catch(() => undefined)
+    }
+  })
+  mainWindow.webContents.on('render-process-gone', () => {
+    void teardownAllCampaignAgents('renderer_reload').catch(() => undefined)
+  })
+
   // Load the app
   if (isDev) {
-    const devServerUrl = process.env.BASHGYM_DEV_SERVER_URL || 'http://localhost:5190'
-    mainWindow.loadURL(devServerUrl)
+    mainWindow.loadURL(desktopRuntimeEndpoints.devServerUrl)
     // DevTools adds substantial input-tail latency to xterm/ConPTY traffic.
     // Keep it available for targeted debugging without attaching it to every launch.
     if (process.env.BASHGYM_OPEN_DEVTOOLS === '1') {
@@ -296,6 +431,8 @@ function createWindow() {
 
   // Inject electron-window class for platform-specific styling (e.g. window border on Windows)
   mainWindow.webContents.on('did-finish-load', () => {
+    rendererHasLoaded = true
+    mainWindow?.webContents.invalidate()
     mainWindow?.webContents.executeJavaScript(
       `document.documentElement.classList.add('electron-window')`
     )
@@ -328,6 +465,7 @@ function createWindow() {
   })
 
   mainWindow.on('closed', () => {
+    void teardownAllCampaignAgents('renderer_reload').catch(() => undefined)
     mainWindow = null
     // PTY processes intentionally survive window close — they are cleaned up on app quit.
   })
@@ -335,6 +473,8 @@ function createWindow() {
 
 // Only initialize if we got the lock
 if (gotTheLock) {
+  let campaignAgentShutdownStarted = false
+  let campaignAgentShutdownReady = false
   // Handle second instance - focus existing window
   app.on('second-instance', () => {
     if (mainWindow) {
@@ -347,9 +487,9 @@ if (gotTheLock) {
   app.whenReady().then(() => {
     setupMenu()
     createWindow()
-    void initializeManagedCampaignBackend().catch(() => {
+    void initializeManagedCampaignBackend().catch((error) => {
       // The app remains usable for non-campaign work; campaign IPC fails closed.
-      console.error('BashGym managed campaign backend failed to initialize')
+      console.error('BashGym managed campaign backend failed to initialize:', asError(error).message)
     })
 
     app.on('activate', () => {
@@ -365,6 +505,19 @@ if (gotTheLock) {
     }
   })
 
+  app.on('before-quit', (event) => {
+    if (campaignAgentShutdownReady) return
+    event.preventDefault()
+    if (campaignAgentShutdownStarted) return
+    campaignAgentShutdownStarted = true
+    void teardownAllCampaignAgents('app_shutdown')
+      .catch(() => undefined)
+      .finally(() => {
+        campaignAgentShutdownReady = true
+        app.quit()
+      })
+  })
+
   app.on('will-quit', () => {
     stopManagedBackend()
     killAllPtys()
@@ -372,8 +525,8 @@ if (gotTheLock) {
 
   // Unclean-exit guards: ensure no orphaned PTY processes
   process.on('exit', () => { stopManagedBackend(); killAllPtys() })
-  process.on('SIGTERM', () => { stopManagedBackend(); killAllPtys(); app.quit() })
-  process.on('SIGINT', () => { stopManagedBackend(); killAllPtys(); app.quit() })
+  process.on('SIGTERM', () => { app.quit() })
+  process.on('SIGINT', () => { app.quit() })
 }
 
 // IPC Handlers
@@ -386,6 +539,7 @@ ipcMain.handle(
     route: string,
     body?: CampaignBody,
     query?: CampaignQuery,
+    authority?: CampaignRequestAuthority,
   ) => {
     if (!mainWindow || event.sender !== mainWindow.webContents) {
       return { ok: false, status: 403, error: 'Campaign request sender is not permitted' }
@@ -393,15 +547,317 @@ ipcMain.handle(
     try {
       await initializeManagedCampaignBackend()
     } catch {
-      return { ok: false, status: 503, error: 'Campaign backend is unavailable' }
+      const sourceRootInvalid = lastCampaignBackendError?.message === 'The configured BashGym backend root is invalid'
+      const configurationInvalid = sourceRootInvalid || runtimeEndpointConfigurationError !== null
+      return {
+        ok: false,
+        status: 503,
+        code: configurationInvalid
+          ? 'campaign_backend_configuration_invalid'
+          : 'campaign_backend_unavailable',
+        error: sourceRootInvalid
+          ? 'The configured BashGym source checkout is invalid. Remove BASHGYM_PROJECT_ROOT to use the package installed in BASHGYM_PYTHON, or point it at a valid checkout.'
+          : configurationInvalid
+            ? 'The configured BashGym API or development-server endpoint is invalid. Use a credential-free loopback URL and set BASHGYM_API_BASE to an /api URL.'
+          : 'The authenticated campaign service could not start or reconnect.',
+      }
     }
     try {
-      return await campaignBridgeClient.request(method, route, body, query)
+      return await campaignBridgeClient.request(method, route, body, query, authority)
     } catch {
       return { ok: false, status: 400, error: 'Campaign request was rejected' }
     }
   },
 )
+
+function campaignAgentHostSenderPermitted(event: Electron.IpcMainInvokeEvent): boolean {
+  return Boolean(mainWindow && event.sender === mainWindow.webContents)
+}
+
+function campaignAgentHostFailure(error = 'Campaign agent host request was rejected') {
+  return { success: false, error }
+}
+
+interface CampaignAgentLaunchRequest {
+  workspaceId: string
+  campaignId: string
+  cwd?: string
+}
+
+interface CampaignAgentScopeRequest {
+  workspaceId: string
+  campaignId: string
+}
+
+interface CampaignAgentTerminalScopeRequest extends CampaignAgentScopeRequest {
+  terminalId: string
+}
+
+function assertCampaignAgentScopeRequest(value: unknown): CampaignAgentScopeRequest {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Invalid campaign agent scope request')
+  }
+  const prototype = Object.getPrototypeOf(value)
+  const record = value as Record<string, unknown>
+  const keys = Object.keys(record)
+  if ((prototype !== Object.prototype && prototype !== null)
+    || keys.length !== 2
+    || !Object.hasOwn(record, 'workspaceId')
+    || !Object.hasOwn(record, 'campaignId')
+    || typeof record.workspaceId !== 'string'
+    || typeof record.campaignId !== 'string') {
+    throw new Error('Invalid campaign agent scope request')
+  }
+  return { workspaceId: record.workspaceId, campaignId: record.campaignId }
+}
+
+function assertCampaignAgentLaunchRequest(value: unknown): CampaignAgentLaunchRequest {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Invalid campaign agent launch request')
+  }
+  const prototype = Object.getPrototypeOf(value)
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new Error('Invalid campaign agent launch request')
+  }
+  const record = value as Record<string, unknown>
+  const keys = Object.keys(record)
+  if (!Object.hasOwn(record, 'workspaceId')
+    || !Object.hasOwn(record, 'campaignId')
+    || keys.some((key) => !['workspaceId', 'campaignId', 'cwd'].includes(key))) {
+    throw new Error('Invalid campaign agent launch request')
+  }
+  if (typeof record.workspaceId !== 'string'
+    || typeof record.campaignId !== 'string'
+    || (record.cwd !== undefined && typeof record.cwd !== 'string')) {
+    throw new Error('Invalid campaign agent launch request')
+  }
+  return {
+    workspaceId: record.workspaceId,
+    campaignId: record.campaignId,
+    ...(record.cwd !== undefined ? { cwd: record.cwd } : {}),
+  }
+}
+
+function assertCampaignAgentTerminalScopeRequest(value: unknown): CampaignAgentTerminalScopeRequest {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Invalid campaign agent terminal request')
+  }
+  const prototype = Object.getPrototypeOf(value)
+  const record = value as Record<string, unknown>
+  const keys = Object.keys(record)
+  if ((prototype !== Object.prototype && prototype !== null)
+    || keys.length !== 3
+    || !Object.hasOwn(record, 'terminalId')
+    || !Object.hasOwn(record, 'workspaceId')
+    || !Object.hasOwn(record, 'campaignId')
+    || typeof record.terminalId !== 'string'
+    || typeof record.workspaceId !== 'string'
+    || typeof record.campaignId !== 'string') {
+    throw new Error('Invalid campaign agent terminal request')
+  }
+  return {
+    terminalId: record.terminalId,
+    workspaceId: record.workspaceId,
+    campaignId: record.campaignId,
+  }
+}
+
+function assertActiveCampaignAgentTerminal(terminalId: string): void {
+  if (!campaignAgentMcpHosts.has(terminalId) || !campaignAgentLaunchScopes.has(terminalId)) {
+    throw new Error('Campaign agent MCP host is unavailable')
+  }
+}
+
+function assertActiveCampaignAgentRequest(value: unknown): void {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Invalid campaign agent request')
+  }
+  const record = value as Record<string, unknown>
+  if (typeof record.terminalId !== 'string'
+    || typeof record.workspaceId !== 'string'
+    || typeof record.campaignId !== 'string') {
+    throw new Error('Invalid campaign agent request')
+  }
+  assertActiveCampaignAgentTerminal(record.terminalId)
+  const scope = campaignAgentLaunchScopes.get(record.terminalId)
+  if (!scope
+    || scope.workspaceId !== record.workspaceId
+    || scope.campaignId !== record.campaignId) {
+    throw new Error('Campaign agent request scope changed')
+  }
+}
+
+function executableFile(candidate: string): boolean {
+  try {
+    return fs.statSync(candidate).isFile()
+  } catch {
+    return false
+  }
+}
+
+function resolveCodexExecutable(): string {
+  const executableName = process.platform === 'win32' ? 'codex.exe' : 'codex'
+  const configured = process.env.BASHGYM_CODEX_EXECUTABLE?.trim()
+  if (configured) {
+    if (!path.isAbsolute(configured)
+      || path.basename(configured).toLowerCase() !== executableName
+      || !executableFile(configured)) {
+      throw new Error('Configured Codex CLI executable is unavailable')
+    }
+    return configured
+  }
+  const pathValue = process.env.PATH ?? process.env.Path ?? ''
+  for (const entry of pathValue.split(path.delimiter)) {
+    const directory = entry.trim().replace(/^"|"$/g, '')
+    if (!directory) continue
+    const candidate = path.resolve(directory, executableName)
+    if (executableFile(candidate)) return candidate
+  }
+  throw new Error('Codex CLI executable was not found')
+}
+
+ipcMain.handle('campaign-agent-host:launch', async (event, request: unknown) => {
+  if (!campaignAgentHostSenderPermitted(event)) {
+    return campaignAgentHostFailure('Campaign agent host sender is not permitted')
+  }
+  let host: CampaignAgentMcpHost | null = null
+  let ptyProcess: IPty | null = null
+  let launchedTerminalId: string | null = null
+  try {
+    const intent = assertCampaignAgentLaunchRequest(request)
+    await initializeManagedCampaignBackend()
+    const terminalId = `campaign_codex_${randomUUID().replaceAll('-', '')}`
+    launchedTerminalId = terminalId
+    const generation = `ptygen_${randomUUID().replaceAll('-', '')}`
+    const resolvedCwd = resolveTerminalCwd(intent.cwd)
+    host = new CampaignAgentMcpHost({
+      terminalId,
+      generation,
+      scope: { workspaceId: intent.workspaceId, campaignId: intent.campaignId },
+      observe: () => campaignAgentHostController.observe(terminalId),
+      artifacts: (args) => campaignAgentHostController.artifacts(terminalId, args),
+    })
+    const mcpLaunch = await host.start()
+    const launch = buildCodexCampaignAgentLaunch({
+      intent: { ...intent, cwd: resolvedCwd },
+      terminalId,
+      generation,
+      hostInstanceId: campaignAgentHostInstanceId,
+      mcpLaunch,
+    }, {
+      resolveCodexExecutable,
+      pathExists: fs.existsSync,
+      defaultCwd: os.homedir(),
+      sourceEnv: process.env,
+    })
+    const pty = await import('node-pty')
+    ptyProcess = pty.spawn(launch.executable, [...launch.args], {
+      name: 'xterm-256color',
+      cols: 80,
+      rows: 24,
+      cwd: launch.cwd,
+      env: { ...launch.env },
+    })
+    campaignAgentMcpHosts.set(terminalId, host)
+    campaignAgentLaunchScopes.set(terminalId, {
+      workspaceId: intent.workspaceId,
+      campaignId: intent.campaignId,
+    })
+    registerPtySession(
+      terminalId,
+      ptyProcess,
+      launch.cwd,
+      generation,
+      launch.identity,
+    )
+    return { success: true, terminalId, cwd: launch.cwd }
+  } catch {
+    try { ptyProcess?.kill() } catch { /* launch did not produce a live PTY */ }
+    if (launchedTerminalId && campaignAgentMcpHosts.has(launchedTerminalId)) {
+      await closeCampaignAgentMcpHost(launchedTerminalId).catch(() => undefined)
+    } else {
+      host?.lock()
+      await host?.close().catch(() => undefined)
+    }
+    return campaignAgentHostFailure(
+      'Codex campaign agent could not start. Ensure the Codex CLI is installed and the workspace is accessible.',
+    )
+  }
+})
+
+ipcMain.handle('campaign-agent-host:eligible', (event, request: unknown) => {
+  if (!campaignAgentHostSenderPermitted(event)) return campaignAgentHostFailure('Campaign agent host sender is not permitted')
+  try {
+    const selectedScope = assertCampaignAgentScopeRequest(request)
+    const identities = [...ptySessions.values()]
+      .map((session) => session.campaignAgentIdentity
+        ? { ...session.campaignAgentIdentity, live: !session.exited }
+        : null)
+      .filter((identity): identity is MainOwnedCampaignAgentIdentity => identity !== null)
+      .filter((identity) => {
+        const scope = campaignAgentLaunchScopes.get(identity.terminalId)
+        return Boolean(scope
+          && scope.workspaceId === selectedScope.workspaceId
+          && scope.campaignId === selectedScope.campaignId)
+      })
+    return { success: true, sessions: campaignAgentHostController.eligibleSessions(identities) }
+  } catch {
+    return campaignAgentHostFailure()
+  }
+})
+
+ipcMain.handle('campaign-agent-host:attach', async (event, request: unknown) => {
+  if (!campaignAgentHostSenderPermitted(event)) return campaignAgentHostFailure('Campaign agent host sender is not permitted')
+  try {
+    assertActiveCampaignAgentRequest(request)
+    await initializeManagedCampaignBackend()
+    const status = await campaignAgentHostController.attach(request as never)
+    return { success: true, status }
+  } catch {
+    return campaignAgentHostFailure()
+  }
+})
+
+ipcMain.handle('campaign-agent-host:activate', async (event, request: unknown) => {
+  if (!campaignAgentHostSenderPermitted(event)) return campaignAgentHostFailure('Campaign agent host sender is not permitted')
+  try {
+    const { terminalId, workspaceId, campaignId } = assertCampaignAgentTerminalScopeRequest(request)
+    assertActiveCampaignAgentRequest({ terminalId, workspaceId, campaignId })
+    await initializeManagedCampaignBackend()
+    const current = campaignAgentHostController.status(terminalId)
+    if (current?.state !== 'credential_ready') {
+      await campaignAgentHostController.claim(terminalId)
+    }
+    const status = await campaignAgentHostController.activate(terminalId)
+    return { success: true, status }
+  } catch {
+    return campaignAgentHostFailure()
+  }
+})
+
+ipcMain.handle('campaign-agent-host:authorize', async (event, request: unknown) => {
+  if (!campaignAgentHostSenderPermitted(event)) return campaignAgentHostFailure('Campaign agent host sender is not permitted')
+  try {
+    assertActiveCampaignAgentRequest(request)
+    await initializeManagedCampaignBackend()
+    const status = await campaignAgentHostController.authorize(request as never)
+    return { success: true, status }
+  } catch {
+    return campaignAgentHostFailure()
+  }
+})
+
+ipcMain.handle('campaign-agent-host:revoke', async (event, request: unknown) => {
+  if (!campaignAgentHostSenderPermitted(event)) return campaignAgentHostFailure('Campaign agent host sender is not permitted')
+  try {
+    const { terminalId, workspaceId, campaignId } = assertCampaignAgentTerminalScopeRequest(request)
+    assertActiveCampaignAgentRequest({ terminalId, workspaceId, campaignId })
+    await revokeCampaignAgentTerminal(terminalId, 'explicit_revoke')
+    return { success: true }
+  } catch {
+    return campaignAgentHostFailure()
+  }
+})
 
 function safeBridgeArgument(value: string, label: string): string {
   if (!value || value.length > 512 || /[\r\n"&|<>^%]/.test(value)) {
@@ -428,7 +884,7 @@ function writeAgentBridgeWrapper(request: AgentBridgeLaunchRequest): string {
   if (request.panelId) {
     args.push('--origin-panel-id', safeBridgeArgument(request.panelId, 'panel id'))
   }
-  const apiBase = request.apiBase || process.env.BASHGYM_API_URL || 'http://127.0.0.1:8003'
+  const apiBase = request.apiBase || desktopRuntimeEndpoints.apiOrigin
   args.push('--api-base', safeBridgeArgument(apiBase, 'API URL'))
 
   const bridgeDir = path.join(os.homedir(), '.bashgym', 'agent_bridge')
@@ -467,8 +923,11 @@ function writeClaudeAgentBridgeConfig(
   return configPath
 }
 
-ipcMain.handle('agent-bridge:prepare-launch', (_, request: AgentBridgeLaunchRequest) => {
+ipcMain.handle('agent-bridge:prepare-launch', (event, request: AgentBridgeLaunchRequest) => {
   try {
+    if (!mainWindow || event.sender !== mainWindow.webContents) {
+      throw new Error('Agent bridge sender is not permitted')
+    }
     if (!request || !['claude', 'codex'].includes(request.kind)) {
       throw new Error('Unsupported agent bridge kind')
     }
@@ -476,21 +935,22 @@ ipcMain.handle('agent-bridge:prepare-launch', (_, request: AgentBridgeLaunchRequ
     const scopedRequest = {
       ...request,
       workspaceId: request.workspaceId?.trim() || 'default',
-      apiBase: request.apiBase || process.env.BASHGYM_API_URL || 'http://127.0.0.1:8003',
+      apiBase: request.apiBase || desktopRuntimeEndpoints.apiOrigin,
       pythonCommand: request.pythonCommand || process.env.BASHGYM_PYTHON || 'python',
     }
     const wrapperPath = writeAgentBridgeWrapper(scopedRequest)
     const claudeConfigPath = scopedRequest.kind === 'claude'
       ? writeClaudeAgentBridgeConfig(scopedRequest, wrapperPath)
       : undefined
+    const command = buildAgentBridgeLaunchCommand({
+      ...scopedRequest,
+      serverCommand: wrapperPath,
+      serverArgs: [],
+      claudeConfigPath,
+    })
     return {
       success: true,
-      command: buildAgentBridgeLaunchCommand({
-        ...scopedRequest,
-        serverCommand: wrapperPath,
-        serverArgs: [],
-        claudeConfigPath,
-      }),
+      command,
     }
   } catch (error) {
     return { success: false, error: String(error) }
@@ -535,6 +995,58 @@ function resolveTerminalCwd(cwd?: string): string {
   return requested
 }
 
+function registerPtySession(
+  id: string,
+  ptyProcess: IPty,
+  resolvedCwd: string,
+  generation: string,
+  campaignAgentIdentity?: MainOwnedCampaignAgentIdentity,
+): PtySession {
+  const outputFlow = new TerminalOutputFlowController(
+    (data, frameId) => mainWindow?.webContents.send(
+      `terminal:data:${id}`,
+      frameId === undefined ? data : { data, frameId },
+    ),
+    (paused) => {
+      try {
+        if (paused) ptyProcess.pause()
+        else ptyProcess.resume()
+      } catch {
+        // The PTY may exit while a renderer acknowledgement is in flight.
+      }
+    },
+  )
+  const session: PtySession = {
+    pty: ptyProcess,
+    scrollback: new TerminalScrollbackBuffer(MAX_BUFFER_BYTES),
+    outputBatcher: new TerminalIpcBatcher((data) => outputFlow.push(data)),
+    outputFlow,
+    outputFlowOwnership: new TerminalOutputFlowOwnership(outputFlow),
+    size: new TerminalSizeTracker(80, 24),
+    cwd: resolvedCwd,
+    createdAt: Date.now(),
+    exited: false,
+    exitCode: null,
+    generation,
+    ...(campaignAgentIdentity ? { campaignAgentIdentity } : {}),
+  }
+  ptySessions.set(id, session)
+
+  ptyProcess.onData((data: string) => {
+    session.scrollback.append(data)
+    session.outputBatcher.push(data)
+  })
+  ptyProcess.onExit(({ exitCode }) => {
+    session.outputBatcher.dispose(true)
+    session.exited = true
+    session.exitCode = exitCode
+    mainWindow?.webContents.send(`terminal:exit:${id}`, exitCode)
+    void revokeCampaignAgentTerminal(id, 'pty_exit').catch(() => undefined)
+    // Keep the entry and scrollback so a renderer can display the exit.
+  })
+  return session
+}
+
 // Terminal management — create-or-attach: a live PTY for this id is re-attached
 // (with scrollback replay) instead of respawned, so renderer remounts never
 // orphan or kill the underlying process.
@@ -553,7 +1065,9 @@ ipcMain.handle('terminal:create', async (_, id: string, cwd?: string) => {
     }
     // A dead session being recreated: drop the stale entry
     if (existing) {
+      await revokeCampaignAgentTerminal(id, 'pty_replacement').catch(() => undefined)
       existing.outputBatcher.dispose()
+      existing.outputFlow.dispose()
       ptySessions.delete(id)
       cleanupAgentBridgeArtifacts(id)
     }
@@ -586,34 +1100,12 @@ ipcMain.handle('terminal:create', async (_, id: string, cwd?: string) => {
       env
     })
 
-    const session: PtySession = {
-      pty: ptyProcess,
-      scrollback: new TerminalScrollbackBuffer(MAX_BUFFER_BYTES),
-      outputBatcher: new TerminalIpcBatcher((data) => {
-        mainWindow?.webContents.send(`terminal:data:${id}`, data)
-      }),
-      size: new TerminalSizeTracker(80, 24),
-      cwd: resolvedCwd,
-      createdAt: Date.now(),
-      exited: false,
-      exitCode: null
-    }
-    ptySessions.set(id, session)
-
-    // Forward output to renderer and retain it for re-attach replay
-    ptyProcess.onData((data: string) => {
-      session.scrollback.append(data)
-      session.outputBatcher.push(data)
-    })
-
-    ptyProcess.onExit(({ exitCode }) => {
-      session.outputBatcher.dispose(true)
-      session.exited = true
-      session.exitCode = exitCode
-      mainWindow?.webContents.send(`terminal:exit:${id}`, exitCode)
-      // Entry (with buffer) is kept so a reloaded renderer can see it exited;
-      // it is dropped on explicit kill or recreate.
-    })
+    registerPtySession(
+      id,
+      ptyProcess,
+      resolvedCwd,
+      `ptygen_${randomUUID().replaceAll('-', '')}`,
+    )
 
     return { success: true, id, attached: false, cwd: resolvedCwd }
   } catch (error) {
@@ -642,6 +1134,20 @@ ipcMain.handle('terminal:write', (_, id: string, data: string) => {
   return writeTerminalInput(id, data)
 })
 
+// Opt-in parser flow control keeps the existing terminal:data payload contract
+// compatible with renderer/preload hot reloads. Old renderers never enable it.
+ipcMain.on('terminal:output-flow', (_, id: string, owner: string, enabled: boolean) => {
+  const session = ptySessions.get(id)
+  if (!session) return
+  if (enabled) session.outputFlowOwnership.acquire(owner)
+  else session.outputFlowOwnership.release(owner)
+})
+
+ipcMain.on('terminal:output-ack', (_, id: string, owner: string, frameId: number) => {
+  const session = ptySessions.get(id)
+  session?.outputFlowOwnership.acknowledge(owner, frameId)
+})
+
 ipcMain.handle('terminal:resize', (_, id: string, cols: number, rows: number) => {
   const session = ptySessions.get(id)
   if (session && !session.exited) {
@@ -651,10 +1157,12 @@ ipcMain.handle('terminal:resize', (_, id: string, cols: number, rows: number) =>
   return false
 })
 
-ipcMain.handle('terminal:kill', (_, id: string) => {
+ipcMain.handle('terminal:kill', async (_, id: string) => {
   const session = ptySessions.get(id)
   if (session) {
+    await revokeCampaignAgentTerminal(id, 'pty_exit').catch(() => undefined)
     session.outputBatcher.dispose()
+    session.outputFlow.dispose()
     try { session.pty.kill() } catch { /* already dead */ }
     ptySessions.delete(id)
     cleanupAgentBridgeArtifacts(id)

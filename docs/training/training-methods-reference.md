@@ -11,7 +11,7 @@ Use it with:
 ```bash
 bashgym training capabilities --json
 bashgym training plan --strategy sft --json
-bashgym training plan --strategy grpo --data terminal_envs --hardware dgx --json
+bashgym training plan --strategy grpo --data terminal_envs --hardware private_compute --json
 bashgym training plan --strategy world-model --json
 ```
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
 import sqlite3
@@ -168,6 +170,30 @@ class CampaignArtifactRecord(FrozenContractModel):
     valid: bool
     metadata: dict[str, Any]
     created_at: datetime
+
+
+_ARTIFACT_CURSOR_PREFIX = "a1."
+
+
+def _encode_artifact_cursor(sequence: int) -> str:
+    payload = base64.urlsafe_b64encode(sequence.to_bytes(8, "big")).decode("ascii")
+    return f"{_ARTIFACT_CURSOR_PREFIX}{payload.rstrip('=')}"
+
+
+def _decode_artifact_cursor(cursor: str) -> int:
+    if not cursor.startswith(_ARTIFACT_CURSOR_PREFIX):
+        raise ValueError("invalid artifact continuation cursor")
+    payload = cursor.removeprefix(_ARTIFACT_CURSOR_PREFIX)
+    try:
+        raw = base64.b64decode(f"{payload}=", altchars=b"-_", validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("invalid artifact continuation cursor") from exc
+    if len(raw) != 8:
+        raise ValueError("invalid artifact continuation cursor")
+    sequence = int.from_bytes(raw, "big")
+    if sequence < 1:
+        raise ValueError("invalid artifact continuation cursor")
+    return sequence
 
 
 def _study_status_for_stage(stage: StageKind) -> StudyStatus:
@@ -1285,6 +1311,60 @@ class CampaignRuntimeRepository(CampaignRepository):
             for row in rows
         )
 
+    def list_artifact_page(
+        self,
+        workspace_id: str,
+        campaign_id: str,
+        *,
+        after_cursor: str | None = None,
+        limit: int = 50,
+    ) -> tuple[tuple[CampaignArtifactRecord, ...], str | None, bool]:
+        """Return an append-stable artifact page with an opaque continuation cursor."""
+
+        self._require_initialized()
+        limit = max(1, min(limit, 200))
+        after_sequence = _decode_artifact_cursor(after_cursor) if after_cursor else 0
+        with self._connection() as connection:
+            campaign = connection.execute(
+                "SELECT 1 FROM campaigns WHERE workspace_id = ? AND campaign_id = ?",
+                (workspace_id, campaign_id),
+            ).fetchone()
+            if campaign is None:
+                raise RecordNotFoundError("campaign not found")
+            rows = connection.execute(
+                """
+                SELECT rowid AS artifact_sequence, * FROM campaign_artifacts
+                WHERE workspace_id = ? AND campaign_id = ? AND rowid > ?
+                ORDER BY rowid LIMIT ?
+                """,
+                (workspace_id, campaign_id, after_sequence, limit + 1),
+            ).fetchall()
+        has_more = len(rows) > limit
+        page_rows = rows[:limit]
+        artifacts = tuple(
+            CampaignArtifactRecord(
+                workspace_id=row["workspace_id"],
+                campaign_id=row["campaign_id"],
+                artifact_id=row["artifact_id"],
+                producer_action_id=row["producer_action_id"],
+                uri=row["uri"],
+                sha256=row["sha256"],
+                size_bytes=row["size_bytes"],
+                schema_name=row["schema_name"],
+                sealed=bool(row["sealed"]),
+                valid=bool(row["valid"]),
+                metadata=json.loads(row["metadata_json"]),
+                created_at=row["created_at"],
+            )
+            for row in page_rows
+        )
+        next_cursor = (
+            _encode_artifact_cursor(int(page_rows[-1]["artifact_sequence"]))
+            if has_more and page_rows
+            else None
+        )
+        return artifacts, next_cursor, has_more
+
     def store_retrieval_evaluation(
         self,
         workspace_id: str,
@@ -1361,6 +1441,23 @@ class CampaignRuntimeRepository(CampaignRepository):
                 if existing["decision_json"] != payload:
                     raise CampaignPersistenceError("campaign_gate_identity_conflict")
                 return decision_id
+            blocking_human_work = connection.execute(
+                """
+                SELECT 1
+                FROM campaign_human_work AS work
+                JOIN campaigns AS campaign
+                  ON campaign.workspace_id = work.workspace_id
+                 AND campaign.campaign_id = work.campaign_id
+                WHERE work.workspace_id = ? AND work.campaign_id = ?
+                  AND work.campaign_revision = campaign.manifest_revision
+                  AND work.blocking = 1
+                  AND work.state NOT IN ('submitted', 'replaced')
+                LIMIT 1
+                """,
+                (workspace_id, campaign_id),
+            ).fetchone()
+            if blocking_human_work is not None:
+                raise CampaignPersistenceError("campaign_human_work_incomplete")
             connection.execute(
                 """
                 INSERT INTO campaign_gate_decisions(

@@ -125,3 +125,160 @@ export class TerminalIpcBatcher {
     else this.pending = ''
   }
 }
+
+export interface TerminalOutputFlowOptions {
+  highWatermarkChars?: number
+  lowWatermarkChars?: number
+}
+
+/**
+ * Keeps Electron and xterm from accumulating an unbounded redraw queue.
+ * Only one renderer frame is in flight. Later PTY bytes stay ordered in a
+ * bounded main-process buffer while xterm parses the current frame.
+ */
+export class TerminalOutputFlowController {
+  private enabled = false
+  private awaitingAcknowledgement = false
+  private currentFrameId: number | undefined
+  private nextFrameId = 1
+  private pending = ''
+  private paused = false
+  private readonly highWatermarkChars: number
+  private readonly lowWatermarkChars: number
+
+  constructor(
+    private readonly onDeliver: (data: string, frameId?: number) => void,
+    private readonly onPauseChange: (paused: boolean) => void,
+    options: TerminalOutputFlowOptions = {},
+  ) {
+    this.highWatermarkChars = Math.max(1, options.highWatermarkChars ?? 64 * 1024)
+    this.lowWatermarkChars = Math.min(
+      this.highWatermarkChars,
+      Math.max(0, options.lowWatermarkChars ?? 16 * 1024),
+    )
+  }
+
+  enable(): void {
+    if (this.enabled) return
+    this.enabled = true
+    this.awaitingAcknowledgement = false
+    this.currentFrameId = undefined
+    this.pending = ''
+    this.setPaused(false)
+  }
+
+  disable(): void {
+    if (!this.enabled && !this.paused) return
+    this.enabled = false
+    this.awaitingAcknowledgement = false
+    this.currentFrameId = undefined
+    // Output is still retained by TerminalScrollbackBuffer. A remounted pane
+    // replays it, so dropping renderer-only pending bytes here cannot lose PTY data.
+    this.pending = ''
+    this.setPaused(false)
+  }
+
+  push(data: string): void {
+    if (!data) return
+    if (!this.enabled) {
+      this.onDeliver(data)
+      return
+    }
+
+    if (!this.awaitingAcknowledgement) {
+      this.awaitingAcknowledgement = true
+      this.deliverNext(data)
+      return
+    }
+
+    this.pending += data
+    this.updateBackpressure()
+  }
+
+  acknowledge(frameId: number | undefined): void {
+    if (!this.enabled || !this.awaitingAcknowledgement || frameId !== this.currentFrameId) return
+    if (this.pending) {
+      const next = this.pending.slice(0, this.highWatermarkChars)
+      this.pending = this.pending.slice(next.length)
+      this.deliverControlled(next)
+      this.updateBackpressure()
+      return
+    }
+
+    this.awaitingAcknowledgement = false
+    this.currentFrameId = undefined
+    this.setPaused(false)
+  }
+
+  dispose(): void {
+    this.disable()
+  }
+
+  get inFlight(): boolean {
+    return this.awaitingAcknowledgement
+  }
+
+  get pendingChars(): number {
+    return this.pending.length
+  }
+
+  get frameId(): number | undefined {
+    return this.currentFrameId
+  }
+
+  private deliverNext(data: string): void {
+    const next = data.slice(0, this.highWatermarkChars)
+    this.pending = data.slice(next.length)
+    this.deliverControlled(next)
+    this.updateBackpressure()
+  }
+
+  private deliverControlled(data: string): void {
+    const frameId = this.nextFrameId
+    this.nextFrameId += 1
+    this.currentFrameId = frameId
+    this.onDeliver(data, frameId)
+  }
+
+  private updateBackpressure(): void {
+    if (this.pending.length >= this.highWatermarkChars) {
+      this.setPaused(true)
+    } else if (this.pending.length <= this.lowWatermarkChars) {
+      this.setPaused(false)
+    }
+  }
+
+  private setPaused(paused: boolean): void {
+    if (this.paused === paused) return
+    this.paused = paused
+    this.onPauseChange(paused)
+  }
+}
+
+/**
+ * Arbitrates which mounted xterm may control and acknowledge a PTY's output.
+ * A stale pane can neither release nor advance a replacement pane's frames.
+ */
+export class TerminalOutputFlowOwnership {
+  private owner: string | undefined
+
+  constructor(private readonly flow: TerminalOutputFlowController) {}
+
+  acquire(owner: string): void {
+    if (this.owner === owner) return
+    this.flow.disable()
+    this.owner = owner
+    this.flow.enable()
+  }
+
+  release(owner: string): void {
+    if (this.owner !== owner) return
+    this.flow.disable()
+    this.owner = undefined
+  }
+
+  acknowledge(owner: string, frameId: number): void {
+    if (this.owner === owner) this.flow.acknowledge(frameId)
+  }
+
+}

@@ -180,6 +180,12 @@ This installs operating instructions; it does not launch, register, or replace
 the agent. Re-run `check` after upgrading BashGym so a stale or modified bundle
 fails closed before campaign mutation or compute launch.
 
+The destination is deterministic: Codex uses `CODEX_HOME`, then `~/.codex`;
+Claude uses `CLAUDE_CONFIG_DIR`, then `CLAUDE_HOME`, then `~/.claude`; and
+Hermes uses `HERMES_HOME`, then `~/.hermes`. Each host receives the bundle in
+its selected `skills/` directory. Set the relevant variable for an isolated or
+CI installation.
+
 ### 3. Install Trace Capture Hooks
 
 Auto-detect installed tools and configure adapters for all of them:

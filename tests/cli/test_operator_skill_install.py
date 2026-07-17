@@ -109,6 +109,20 @@ def test_operator_skills_parser_exposes_install_and_check_commands():
     )
 
 
+@pytest.mark.parametrize("command", ["install", "check"])
+def test_operator_skills_action_help_discloses_host_home_precedence(
+    command: str,
+    capsys: pytest.CaptureFixture[str],
+):
+    with pytest.raises(SystemExit, match="0"):
+        main(["operator", "skills", command, "--help"])
+
+    help_text = " ".join(capsys.readouterr().out.split())
+    assert "CODEX_HOME, then ~/.codex" in help_text
+    assert "CLAUDE_CONFIG_DIR, then CLAUDE_HOME, then ~/.claude" in help_text
+    assert "HERMES_HOME, then ~/.hermes" in help_text
+
+
 @pytest.mark.parametrize("host", ["codex", "claude", "hermes"])
 def test_operator_skills_install_deploys_the_full_locked_bundle_without_removing_other_skills(
     host: str,

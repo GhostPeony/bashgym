@@ -113,6 +113,9 @@ def public_skill_wheel(tmp_path_factory: pytest.TempPathFactory) -> Path:
         f"stdout:\n{build.stdout}\n"
         f"stderr:\n{build.stderr}"
     )
+    build_output = build.stdout + build.stderr
+    assert "project.license as a TOML table is deprecated" not in build_output
+    assert "License classifiers are deprecated" not in build_output
     wheels = list(wheel_dir.glob("bashgym-*.whl"))
     assert len(wheels) == 1
     return wheels[0]

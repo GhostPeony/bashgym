@@ -4786,11 +4786,22 @@ def build_parser() -> argparse.ArgumentParser:
     operator_skills = operator_sub.add_parser(
         "skills",
         help="Install or verify BashGym's public skills in an agent host",
+        description=(
+            "Install or verify BashGym's public skills in an agent host. "
+            "Home precedence: Codex uses CODEX_HOME, then ~/.codex; Claude uses "
+            "CLAUDE_CONFIG_DIR, then CLAUDE_HOME, then ~/.claude; Hermes uses "
+            "HERMES_HOME, then ~/.hermes. Each host installs under its selected "
+            "home's skills directory."
+        ),
         parents=[json_parent],
     )
     operator_skills_sub = operator_skills.add_subparsers(dest="skills_command", required=True)
     for skills_command in ("install", "check"):
-        skills_parser = operator_skills_sub.add_parser(skills_command, parents=[json_parent])
+        skills_parser = operator_skills_sub.add_parser(
+            skills_command,
+            description=operator_skills.description,
+            parents=[json_parent],
+        )
         skills_parser.add_argument(
             "--host",
             choices=("codex", "claude", "hermes"),

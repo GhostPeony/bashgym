@@ -85,6 +85,11 @@ public skills to the selected host's discovery root while preserving unrelated
 skills; `check` verifies the installed inventory and receipt. Re-run it after a
 BashGym upgrade before authorizing campaign mutation or compute.
 
+The host-home order is explicit: Codex uses `CODEX_HOME`, then `~/.codex`;
+Claude uses `CLAUDE_CONFIG_DIR`, then `CLAUDE_HOME`, then `~/.claude`; Hermes
+uses `HERMES_HOME`, then `~/.hermes`. The selected home receives the bundle in
+`skills/`; set the relevant variable for an isolated or CI installation.
+
 The shared operator skill is the normal agent entry point. An initial request
 to start AutoResearch authorizes discovery and preparation, not training. The
 agent reads registered templates, installations, model/data/compute/evaluation

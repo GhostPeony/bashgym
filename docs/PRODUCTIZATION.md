@@ -77,6 +77,12 @@ agent launcher or campaign registration ceremony. Installed-wheel tests now
 cover each supported host root; the remaining release proof is the complete
 guided preparation flow from an installed bundle through `READY`.
 
+Host-home precedence is explicit: Codex uses `CODEX_HOME`, then `~/.codex`;
+Claude uses `CLAUDE_CONFIG_DIR`, then `CLAUDE_HOME`, then `~/.claude`; Hermes
+uses `HERMES_HOME`, then `~/.hermes`. The bundle is installed in the selected
+home's `skills/` directory, so release tests and CI should set the relevant
+variable to an isolated location.
+
 ## Desktop distribution contract
 
 The current Electron installer is intentionally a **thin desktop client**. It

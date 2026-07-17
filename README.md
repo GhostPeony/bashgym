@@ -104,7 +104,7 @@ The workspace is an infinite canvas where terminals, browsers, and integration n
 | Requirement | Version | Notes |
 |-------------|---------|-------|
 | **Python** | 3.10+ | Backend API and control plane; use a backend-supported Python/CUDA combination for training |
-| **Node.js** | 18+ LTS | Frontend dashboard |
+| **Node.js** | 22+ LTS | Frontend dashboard and native Electron packaging |
 | **Provider API key** | Optional | Add Anthropic, NVIDIA, OpenAI, or Hugging Face credentials only for features that use them |
 | **CUDA GPU** | 8GB+ VRAM | Only needed for local training. Not required for trace capture or the dashboard. |
 

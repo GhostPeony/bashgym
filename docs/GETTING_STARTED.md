@@ -7,7 +7,7 @@ This guide walks you from a fresh install to your first trained model.
 ## Prerequisites
 
 - **Python 3.10+** — Backend and training
-- **Node.js 18+** (LTS) — Frontend
+- **Node.js 22+** (LTS) — Frontend and native Electron packaging
 - **Git** — Version control
 - **CUDA-capable GPU** (optional) — Needed only for real local training. Private hardware over SSH and explicitly selected hosted backends are alternatives.
 - **Provider API keys** (optional) — Add credentials only for teacher, augmentation, hosted training, or publication features you use.
@@ -234,7 +234,7 @@ Or use **Settings > Agents** in the app to install hooks from the UI.
 
 **`npm install` fails:**
 The frontend uses `node-pty` which requires native compilation. Ensure you have:
-- Node.js 18+ (LTS recommended)
+- Node.js 22+ (LTS recommended)
 - Python 3.10+ (for node-gyp)
 - On Windows: Visual Studio Build Tools with "Desktop development with C++"
 

@@ -29,7 +29,7 @@ of your hardware.
 
 ## Fresh clone: what you need and what BashGym will not choose
 
-For a fresh fork or clone, install Python 3.10+, Node.js 18+ LTS, Git, and the
+For a fresh fork or clone, install Python 3.10+, Node.js 22+ LTS, Git, and the
 native build prerequisites for the frontend. A GPU, provider key, model, and
 dataset are not required for the control smoke. They are required only for a
 real campaign on the backend you explicitly select.

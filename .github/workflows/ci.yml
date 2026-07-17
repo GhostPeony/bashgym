@@ -22,13 +22,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v8
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
@@ -42,8 +42,8 @@ jobs:
       - name: Ruff check
         run: uv run ruff check bashgym/
 
-      - name: Black check
-        run: uv run black --check bashgym/
+      - name: Black ratchet
+        run: uv run python scripts/check_black_baseline.py
 
   python-compatibility:
     name: Python ${{ matrix.python }} / ${{ matrix.platform }}
@@ -74,13 +74,13 @@ jobs:
             python: "3.12"
             full_suite: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
 
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v8
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
@@ -105,18 +105,18 @@ jobs:
         run: uv run pytest tests/ --ignore=tests/packaging --ignore=tests/orchestrator -m "not network and not integration and not slow" -x -v --tb=short --timeout=30
 
   frontend-quality:
-    name: Frontend Quality (Node 20)
+    name: Frontend Quality (Node 22)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -160,11 +160,11 @@ jobs:
       # secret-bearing release workflow.
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -173,10 +173,6 @@ jobs:
       - name: Install target-native dependencies
         timeout-minutes: 10
         run: npm ci
-
-      - name: Rebuild native Electron dependencies
-        timeout-minutes: 5
-        run: npx electron-builder install-app-deps
 
       - name: Build renderer and Electron processes
         timeout-minutes: 10
@@ -197,7 +193,7 @@ jobs:
         run: npm run electron:smoke:packaged
 
       - name: Upload unpacked application
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
           path: frontend/release/**

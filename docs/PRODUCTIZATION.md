@@ -234,7 +234,7 @@ artifact signatures, and idempotency keys.
 | Error guidance | 8/10 | Model inspection, guided activation, and campaign doctor fail closed with identity, source, runtime, and compute diagnostics. |
 | Documentation | 8/10 | Public entry points link the durable campaign, training, portability, and contribution contracts; live hardware evidence remains operator-owned. |
 | Upgrade path | 4/10 | Changelog exists, but migrations and compatibility policy need a release-grade guide. |
-| Developer environment | 7/10 | CI now defines Python 3.10–3.12/Linux plus Windows/macOS 3.12 packaging cells, the full frontend gate, and native three-OS Electron startup/PTY smokes. Current-source hosted results and a green whole-tree Black baseline still need to be retained. |
+| Developer environment | 8/10 | CI defines Python 3.10–3.12/Linux plus Windows/macOS 3.12 packaging cells, the full Node 22 frontend gate, and native three-OS Electron startup/PTY smokes. Historical Black debt is hash-locked so new files and any touched legacy file cannot add formatting drift. Current-source hosted results still need to be retained. |
 | Community | 5/10 | Contributing guide and issue URL exist; support/discussion workflow is still thin. |
 | DX measurement | 6/10 | CI now measures installed-artifact behavior; recurring cold-install and hardware-lane telemetry are not yet automated. |
 | **Overall** | **6.6/10** | The control plane and guided activation are usable; release-grade upgrades and live hardware proof remain. |

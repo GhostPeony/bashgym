@@ -76,9 +76,7 @@ def scheduler_lease_key(data_directory: Path) -> str:
     return f"scheduler:{directory_digest}"
 
 
-def _controller_selection_idempotency_key(
-    workspace_id: str, campaign_id: str, version: int
-) -> str:
+def _controller_selection_idempotency_key(workspace_id: str, campaign_id: str, version: int) -> str:
     identity = canonical_hash([workspace_id, campaign_id, version])[:32]
     return f"controller-select-{identity}"
 
@@ -97,8 +95,9 @@ class CampaignWorker:
         leader_ttl: timedelta = timedelta(seconds=15),
         action_ttl: timedelta = timedelta(seconds=15),
         remote_adapters: dict[str, RemoteTrainingAdapter] | None = None,
-        remote_executor_profiles: Mapping[tuple[str, str], ApprovedRemoteExecutorProfile]
-        | None = None,
+        remote_executor_profiles: (
+            Mapping[tuple[str, str], ApprovedRemoteExecutorProfile] | None
+        ) = None,
         source_repository_profiles: Mapping[str, ApprovedSourceRepositoryProfile] | None = None,
         lineage_manager: GitHypothesisLineageManager | None = None,
     ):
@@ -215,9 +214,7 @@ class CampaignWorker:
                 (sealed_path / "evaluation.json").read_text(encoding="utf-8")
             )
         except (OSError, ValueError) as exc:
-            raise CampaignPersistenceError(
-                "campaign_development_evaluation_seal_invalid"
-            ) from exc
+            raise CampaignPersistenceError("campaign_development_evaluation_seal_invalid") from exc
         self.repository.store_retrieval_evaluation(
             attempt.workspace_id,
             attempt.campaign_id,
@@ -232,9 +229,7 @@ class CampaignWorker:
                 comparison_path.read_text(encoding="utf-8")
             )
         except (OSError, ValueError) as exc:
-            raise CampaignPersistenceError(
-                "campaign_development_comparison_seal_invalid"
-            ) from exc
+            raise CampaignPersistenceError("campaign_development_comparison_seal_invalid") from exc
         manifest = self.repository.get_manifest_revision(
             attempt.workspace_id,
             attempt.campaign_id,
@@ -283,12 +278,18 @@ class CampaignWorker:
                     or attempt.lease_expires_at is None
                     or attempt.lease_expires_at <= now
                 ):
-                    attempt = self.repository.adopt_remote_attempt(
-                        attempt,
-                        self._leader,
-                        ttl=self.action_ttl,
-                        now=now,
-                    )
+                    try:
+                        attempt = self.repository.adopt_remote_attempt(
+                            attempt,
+                            self._leader,
+                            ttl=self.action_ttl,
+                            now=now,
+                        )
+                    except LeaseBusyError:
+                        # Another live worker still holds this attempt's lease.
+                        # Leave it for the owner (or for adoption after expiry)
+                        # instead of failing the whole reconcile pass.
+                        continue
                 return asyncio.run(self._remote_tick(attempt, now=now))
             sealed_path = self.sealed_path(attempt)
             if sealed_path.is_dir():
@@ -342,9 +343,7 @@ class CampaignWorker:
         else:
             candidates = tuple(
                 value
-                for value in self.repository.list_attempts(
-                    claim.workspace_id, claim.campaign_id
-                )
+                for value in self.repository.list_attempts(claim.workspace_id, claim.campaign_id)
                 if value.status in {AttemptStatus.RUNNING, AttemptStatus.UNKNOWN}
                 and value.executor.get("kind") != "ssh_remote"
                 and self.sealed_path(value).is_dir()
@@ -359,9 +358,7 @@ class CampaignWorker:
 
         sealed_path = self.sealed_path(attempt)
         if not sealed_path.is_dir() or attempt.executor.get("kind") == "ssh_remote":
-            self.recovery.settle(
-                claim, status="blocked", outcome_code="needs_operator", now=now
-            )
+            self.recovery.settle(claim, status="blocked", outcome_code="needs_operator", now=now)
             return "recovery_blocked"
         try:
             manifest = self._verify(attempt, sealed_path)
@@ -376,13 +373,9 @@ class CampaignWorker:
                 now=now,
             )
         except (CampaignPersistenceError, OSError, ValueError):
-            self.recovery.settle(
-                claim, status="blocked", outcome_code="needs_operator", now=now
-            )
+            self.recovery.settle(claim, status="blocked", outcome_code="needs_operator", now=now)
             return "recovery_blocked"
-        self.recovery.settle(
-            claim, status="completed", outcome_code="attempt_reconciled", now=now
-        )
+        self.recovery.settle(claim, status="completed", outcome_code="attempt_reconciled", now=now)
         return "recovery_repaired"
 
     def _consume_recovery_once(self, leader: LeaseRecord, *, now: datetime) -> str | None:
@@ -401,9 +394,7 @@ class CampaignWorker:
         if claim.action == RecoveryAction.REPAIR:
             return self._repair_recovery(claim, now=now)
         if claim.action != RecoveryAction.RESUME:
-            self.recovery.settle(
-                claim, status="blocked", outcome_code="needs_operator", now=now
-            )
+            self.recovery.settle(claim, status="blocked", outcome_code="needs_operator", now=now)
             return "recovery_blocked"
         try:
             self.repository.transition_campaign(
@@ -418,13 +409,9 @@ class CampaignWorker:
                 payload={"recovery_request_id": claim.request_id},
             )
         except (InvalidCampaignTransitionError, RevisionConflictError):
-            self.recovery.settle(
-                claim, status="blocked", outcome_code="authority_changed", now=now
-            )
+            self.recovery.settle(claim, status="blocked", outcome_code="authority_changed", now=now)
             return "recovery_blocked"
-        self.recovery.settle(
-            claim, status="completed", outcome_code="campaign_resumed", now=now
-        )
+        self.recovery.settle(claim, status="completed", outcome_code="campaign_resumed", now=now)
         return "recovery_resumed"
 
     def controller_once(self, leader: LeaseRecord, *, now: datetime) -> str | None:

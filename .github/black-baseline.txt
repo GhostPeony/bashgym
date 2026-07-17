@@ -20,7 +20,6 @@ f310431a0d4f4397905e7eaf0940b0b07c570bef  bashgym/campaigns/persistence.py
 d1df3a0a085e405a2a5af2d11eef7baec5992362  bashgym/campaigns/research_diagnostics.py
 3e0c3072434e9b6bb63d0dfab8e99784d266b656  bashgym/campaigns/runtime.py
 27920cb7aba2b1bf3748500a9f698aa12d2ea11e  bashgym/campaigns/worker_service.py
-a5eeaf954e57c28b78a06c177f4e7c3be6558ac5  bashgym/campaigns/worker.py
 a9446e73ed4a2c6aee8d07c9b02bcfb451f3e4d1  bashgym/environments/contracts.py
 d0d825ae4277854192de3d77620534ea83c47feb  bashgym/environments/rollout.py
 416e883fb646de50d191073f5cb9dedb69e830d9  bashgym/environments/star_count.py

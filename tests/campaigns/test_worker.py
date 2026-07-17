@@ -772,9 +772,7 @@ def test_registered_compute_resolves_remote_development_evaluation(tmp_path):
         "workspace-a",
         "campaign-1",
         "study-1",
-        executor_profiles={
-            (profile.compute_profile_id, profile.target_contract_key): profile
-        },
+        executor_profiles={(profile.compute_profile_id, profile.target_contract_key): profile},
     )
 
     assert action.stage == StageKind.DEVELOPMENT_EVALUATION
@@ -1021,12 +1019,10 @@ def test_development_evaluation_stage_validates_seals_and_persists_rows(tmp_path
         "workspace-a", "campaign-1", champion, now=START
     )
     with repository._connection(immediate=True) as connection:
-        manifest_row = connection.execute(
-            """
+        manifest_row = connection.execute("""
             SELECT manifest_json FROM campaign_manifest_revisions
             WHERE workspace_id = 'workspace-a' AND campaign_id = 'campaign-1' AND revision = 1
-            """
-        ).fetchone()
+            """).fetchone()
         manifest_payload = json.loads(manifest_row["manifest_json"])
         manifest_payload["promotion_gates"]["quality_claim_eligible"] = True
         connection.execute(
@@ -1072,9 +1068,9 @@ def test_development_evaluation_stage_validates_seals_and_persists_rows(tmp_path
     )
 
     original_persist = worker._persist_development_evaluation_evidence
-    worker._persist_development_evaluation_evidence = lambda *_args, **_kwargs: (_ for _ in ()).throw(
-        SimulatedWorkerCrashError("crash after development seal")
-    )
+    worker._persist_development_evaluation_evidence = lambda *_args, **_kwargs: (
+        _ for _ in ()
+    ).throw(SimulatedWorkerCrashError("crash after development seal"))
     with pytest.raises(SimulatedWorkerCrashError):
         worker.run_once(now=START + timedelta(seconds=1))
     worker._persist_development_evaluation_evidence = original_persist
@@ -1114,26 +1110,33 @@ def test_development_evaluation_stage_validates_seals_and_persists_rows(tmp_path
     assert champion.candidate_digest not in json.dumps(queue)
     work = queue["items"][0]
     claimed = oversight.claim(
-        workspace_id="workspace-a", campaign_id="campaign-1",
-        work_id=work["work_id"], expected_campaign_revision=1,
-        expected_version=1, expected_state="pending", principal=reviewer,
+        workspace_id="workspace-a",
+        campaign_id="campaign-1",
+        work_id=work["work_id"],
+        expected_campaign_revision=1,
+        expected_version=1,
+        expected_state="pending",
+        principal=reviewer,
         correlation_id="worker-review-claim",
         idempotency_key=work["claim_idempotency_key"],
         now=START + timedelta(seconds=18),
     )
     oversight.submit(
-        workspace_id="workspace-a", campaign_id="campaign-1",
-        work_id=work["work_id"], expected_campaign_revision=1,
-        expected_version=2, expected_rubric_version=1,
-        decision="no_material_difference", rationale="Equivalent under the blinded rubric.",
-        principal=reviewer, correlation_id="worker-review-submit",
+        workspace_id="workspace-a",
+        campaign_id="campaign-1",
+        work_id=work["work_id"],
+        expected_campaign_revision=1,
+        expected_version=2,
+        expected_rubric_version=1,
+        decision="no_material_difference",
+        rationale="Equivalent under the blinded rubric.",
+        principal=reviewer,
+        correlation_id="worker-review-submit",
         idempotency_key=claimed.queue["items"][0]["submit_idempotency_key"],
         now=START + timedelta(seconds=19),
     )
     with repository._connection() as connection:
-        assert connection.execute(
-            "SELECT COUNT(*) FROM campaign_gate_decisions"
-        ).fetchone()[0] == 1
+        assert connection.execute("SELECT COUNT(*) FROM campaign_gate_decisions").fetchone()[0] == 1
 
 
 def test_development_evaluation_invokes_hash_pinned_physical_dev_scorer(tmp_path):
@@ -1186,8 +1189,7 @@ manifest = {
 (args.output_dir / 'query_format_ablation_manifest.json').write_text(
     json.dumps(manifest, sort_keys=True), encoding='utf-8'
 )
-""".strip()
-        + "\n",
+""".strip() + "\n",
         encoding="utf-8",
     )
     corpus = tmp_path / "corpus.jsonl"
@@ -1249,8 +1251,7 @@ manifest = {
     assert (sealed / "scoring" / "query_format_ablation_manifest.json").is_file()
     envelope = json.loads((sealed / SEAL_FILENAME).read_text(encoding="utf-8"))
     output_schemas = {
-        output["path"]: output["schema_name"]
-        for output in envelope["manifest"]["outputs"]
+        output["path"]: output["schema_name"] for output in envelope["manifest"]["outputs"]
     }
     assert (
         output_schemas["scoring/query_format_ablation_manifest.json"]
@@ -1394,3 +1395,27 @@ def test_worker_drops_an_expired_cached_lease_after_a_successor_takes_over(tmp_p
     assert worker.run_once(now=START + timedelta(seconds=17)) == "not_leader"
     assert worker.leader is None
     assert repository.get_lease(worker.leader_key) == successor
+
+
+def test_reconcile_skips_remote_attempt_leased_by_a_live_foreign_worker(tmp_path):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plan = seed_validated_study(repository)
+    predecessor = make_worker(repository, tmp_path, "worker-a")
+    schedule_remote(repository, predecessor, plan, tmp_path)
+    claimed = repository.claim_next_action(
+        predecessor.leader, ttl=timedelta(hours=1), now=START + timedelta(seconds=1)
+    )
+    assert claimed is not None
+    assert claimed.executor.get("kind") == "ssh_remote"
+
+    successor = make_worker(repository, tmp_path, "worker-b")
+    later = START + timedelta(minutes=2)
+    successor._ensure_leader(later)
+
+    assert successor.reconcile_once(now=later) is None
+
+    refreshed = {item.attempt_id: item for item in repository.list_unfinished_attempts()}[
+        claimed.attempt_id
+    ]
+    assert refreshed.lease_owner == claimed.lease_owner
+    assert refreshed.claim_generation == claimed.claim_generation

@@ -5,22 +5,17 @@ import test from 'node:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
-import * as baseModelSelectModule from '../common/BaseModelSelect'
+import { BaseModelSelect } from '../common/BaseModelSelect'
 import { BASE_MODEL_GROUPS } from '../common/baseModels'
-import * as modelSelectModule from '../common/ModelSelect'
-import { FALLBACK_MODEL_OPTIONS, type ModelOption } from '../common/modelOptions'
+import { ModelSelect } from '../common/ModelSelect'
+import { mergeModelOptions, selectBaseModelGroups } from '../common/modelSelectOptions'
+import { FALLBACK_MODEL_OPTIONS } from '../common/modelOptions'
 
 const source = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8')
 const exactPattern = (value: string) =>
   new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
 
 test('catalog-only inference options keep mocked catalog entries and suppress every static fallback', () => {
-  const mergeModelOptions = Reflect.get(modelSelectModule, 'mergeModelOptions') as
-    | ((catalog: ModelOption[], catalogOnly: boolean) => ModelOption[])
-    | undefined
-  assert.equal(typeof mergeModelOptions, 'function')
-  if (!mergeModelOptions) return
-
   const catalog = [{ value: 'registered/example', label: 'Registered example' }]
   assert.deepEqual(mergeModelOptions(catalog, true), catalog)
   assert.deepEqual(
@@ -30,12 +25,6 @@ test('catalog-only inference options keep mocked catalog entries and suppress ev
 })
 
 test('catalog-only base-model groups keep a mocked catalog and suppress every static group', () => {
-  const selectBaseModelGroups = Reflect.get(baseModelSelectModule, 'selectBaseModelGroups') as
-    | ((catalog: typeof BASE_MODEL_GROUPS, catalogOnly: boolean) => typeof BASE_MODEL_GROUPS)
-    | undefined
-  assert.equal(typeof selectBaseModelGroups, 'function')
-  if (!selectBaseModelGroups) return
-
   const catalog = [
     {
       label: 'Registered catalog',
@@ -49,11 +38,11 @@ test('catalog-only base-model groups keep a mocked catalog and suppress every st
 test('rendered model selectors toggle static fallbacks while retaining custom selection', () => {
   const renderInference = (catalogOnly: boolean) =>
     renderToStaticMarkup(
-      createElement(modelSelectModule.ModelSelect, { value: '', onChange() {}, catalogOnly })
+      createElement(ModelSelect, { value: '', onChange() {}, catalogOnly })
     )
   const renderBase = (catalogOnly: boolean) =>
     renderToStaticMarkup(
-      createElement(baseModelSelectModule.BaseModelSelect, { value: '', onChange() {}, catalogOnly })
+      createElement(BaseModelSelect, { value: '', onChange() {}, catalogOnly })
     )
 
   const inferenceWithFallbacks = renderInference(false)

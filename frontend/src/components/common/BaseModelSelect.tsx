@@ -1,19 +1,13 @@
 import { useEffect, useState } from 'react'
 import { systemInfoApi } from '../../services/api'
-import { BASE_MODEL_GROUPS, type BaseModelGroup } from './baseModels'
+import type { BaseModelGroup } from './baseModels'
+import { selectBaseModelGroups } from './modelSelectOptions'
 
 interface Props {
   value: string
   onChange: (value: string) => void
   className?: string
   catalogOnly?: boolean
-}
-
-export function selectBaseModelGroups(
-  discovered: BaseModelGroup[],
-  catalogOnly: boolean
-): BaseModelGroup[] {
-  return catalogOnly ? discovered : [...BASE_MODEL_GROUPS, ...discovered]
 }
 
 /**

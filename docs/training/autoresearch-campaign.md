@@ -71,6 +71,36 @@ bashgym campaign activate-autoresearch --help
 bashgym campaign doctor --help
 ```
 
+If AutoResearch will be operated from an agent, begin in an already-running
+Codex, Claude Code, or Hermes session and install the exact packaged BashGym
+skill bundle into that host:
+
+```bash
+bashgym operator skills install --host codex   # or: claude, hermes
+bashgym operator skills check --host codex
+```
+
+The installer does not launch or register an agent. It deploys the locked
+public skills to the selected host's discovery root while preserving unrelated
+skills; `check` verifies the installed inventory and receipt. Re-run it after a
+BashGym upgrade before authorizing campaign mutation or compute.
+
+The shared operator skill is the normal agent entry point. An initial request
+to start AutoResearch authorizes discovery and preparation, not training. The
+agent reads registered templates, installations, model/data/compute/evaluation
+bindings, and any resumable sealed setup session. It chooses a value only when
+there is exactly one eligible registered choice and asks only for choices that
+are missing or ambiguous. It runs doctor, validates the exact draft, creates a
+`READY` campaign, presents the model, data, evaluator, compute, budget, and stop
+rules, and then stops. Only a subsequent explicit Start confirmation authorizes
+starting that exact campaign.
+
+The guided setup backend, Control Room, and current-source CLI implement this
+contract. The direct wrappers are `campaign setup-context`, `setup-step`,
+`setup-doctor`, `setup-validate`, and `setup-create`; the packaged operator skill
+uses the same authenticated API underneath. Do not invent registered IDs or
+treat low-level activation commands as a substitute for human Start approval.
+
 After `activate-autoresearch --apply` registers the exact ledger and
 private-compute evidence, project those records into guided setup with a
 read-only plan:
@@ -474,7 +504,7 @@ reports explicit readiness reason codes. It becomes eligible for the existing
 doctor/validate/create authority only when all selected bindings are reachable
 and match the chosen template contract.
 
-The Control Room now drives that contract directly. Before the first campaign
+The Control Room drives that contract directly. Before the first campaign
 exists, it renders all six steps and a narrow authority summary. Offline or
 invalid responses leave the setup visible but read-only; they do not collapse
 the page into a backend error. A live session saves one registered choice at a
@@ -543,23 +573,21 @@ the canonical `?view=training&tab=autoresearch` destination.
 - Installation activation records secret-free binding identities and hashes;
   private host, user, key, remote path, credentials, and raw dataset rows stay
   in installation-owned configuration or the operator's private environment.
-- Campaign-agent origin verification and encrypted credential brokerage are
-  activated only when the backend is the managed desktop child and the current
-  Electron launch bootstrap has successfully authenticated. A renderer claim,
-  an unmanaged server, or an old bootstrap cannot enable that authority.
-- The main-only credential transport and isolated loopback MCP host expose
+- The optional campaign-agent origin verifier and encrypted credential broker
+  activate only for an authenticated managed-desktop bootstrap. A renderer
+  claim, unmanaged server, or stale bootstrap cannot enable that authority.
+- Its main-only credential transport and isolated loopback MCP host expose
   exactly two read-only actions: `campaign_observe` and `campaign_artifacts`.
   They do not provide training launch/pause, artifact proposal, generic request
   forwarding, filesystem access, or process execution, and their credential
   routes are not available through the renderer's general campaign bridge.
-- The compact campaign-agent panel remains visible and disabled when its
-  authority is offline. Electron main now owns credential claim, heartbeat
-  activation, one scope-bound Codex PTY, MCP binding, and fail-closed teardown;
-  the renderer adopts only the already-running public PTY identity into the
-  matching Workspace. Hermes launch parity and mutation actions are not yet
-  supported. Do not describe an ordinary terminal or an empty/offline host as
-  executing a campaign, and retain a clean packaged-runtime activation/non-leak
-  proof before release.
+- The low-level Electron adapter can bind that authority to one scope-bound
+  Codex PTY and tear it down fail-closed. It is retained as optional compatibility
+  plumbing, is not mounted in the primary Control Room, and is not required for
+  an already-running Codex, Claude Code, Hermes, or compatible skill host to
+  prepare a campaign. Do not describe the adapter as the AutoResearch launcher
+  or an empty/offline host as executing a campaign. Other host adapters and any
+  mutation actions require separate verification.
 
 ## Productization checklist and current limits
 
@@ -629,11 +657,13 @@ BashGym keeps git lineage where code changes require it, but its operational
 truth is a typed, authenticated, append-only campaign database with optimistic
 concurrency, idempotency, authority checks, budget reservations, sealed
 artifacts, cursor events, and workspace-scoped projections. This is safer for
-Hermes/Codex coordination and more suitable for a product UI.
+coordination across agent hosts and more suitable for a product UI.
 
-The BashGym operator and training skills also already encode project selection,
+The packaged BashGym operator and training skills encode project selection,
 tracking identity, protected-evaluation policy, artifact retention, compute
-activation, Hugging Face publication authority, and GBrain curation.
+activation, Hugging Face publication authority, and GBrain curation. They must
+be installed and checked in the active host before that host-discovery claim
+applies; packaging alone does not make Codex, Claude Code, or Hermes load them.
 
 ## Remaining milestones
 
@@ -641,11 +671,10 @@ The standard registered-training path has completed one bounded real baseline
 and controlled candidate on a fixed held-out suite. Durable blinded human review
 is now integrated. The remaining work is:
 
-1. Retain a clean packaged-desktop proof of the implemented main-spawned Codex
-   lifecycle around `campaign_observe` and `campaign_artifacts`: credential
-   claim, heartbeat activation, scope-correct Workspace adoption, PTY/MCP
-   binding, non-disclosure, and fail-closed teardown. Add Hermes parity and
-   mutation tools only as separately bounded, verified milestones.
+1. Retain an installed-bundle guided preparation proof that asks only for
+   missing choices, reaches `READY`, and stops for a separate explicit Start
+   approval. Installed-wheel install/check already passes for Codex, Claude
+   Code, and Hermes roots.
 2. Run the hardware-gated clean-install activation against an operator-approved
    registered SSH device and existing trainable model, then retain the bounded
    baseline/evaluator evidence.
@@ -658,6 +687,10 @@ is now integrated. The remaining work is:
    deferred legacy Orchestrator tests.
 6. Run the hardware-gated recovery flow against the packaged desktop and a live
    resident worker, retaining the accepted, executing, and terminal receipts.
+7. Retain the existing main-spawned Codex/two-tool MCP lifecycle as an optional
+   compatibility proof: credential non-disclosure, scope binding, heartbeat,
+   and teardown. Do not make it a Control Room or campaign-start prerequisite;
+   add other host adapters or mutation tools only as separately bounded work.
 
 NeMo Gym bundle, launch, token, refit, and campaign-evidence contracts now exist,
 but no live refit is claimed until a compatible approved model executes them.

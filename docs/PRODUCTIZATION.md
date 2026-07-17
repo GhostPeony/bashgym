@@ -67,6 +67,16 @@ seven skills from an arbitrary working directory. Ignored machine profiles, priv
 references, plans, `tasks/`, `.superpowers/`, and Python caches are not part of
 that allowlist.
 
+Packaging the skills is not the same as making an agent host discover them.
+Current source provides `bashgym operator skills install --host
+codex|claude|hermes` and the matching `skills check` command. The installer
+copies the exact locked public bundle into the selected host's skill root,
+preserves unrelated skills, and writes a verifiable receipt; `check` fails
+closed on inventory, receipt, or content drift. This is host setup, not an
+agent launcher or campaign registration ceremony. Installed-wheel tests now
+cover each supported host root; the remaining release proof is the complete
+guided preparation flow from an installed bundle through `READY`.
+
 ## Desktop distribution contract
 
 The current Electron installer is intentionally a **thin desktop client**. It
@@ -150,7 +160,19 @@ session, runs doctor and sealed validation, and creates the campaign without
 starting it. The same structure stays visible and read-only when authority is
 offline.
 
-## Restart recovery and campaign-agent boundary
+The intended agent path starts inside an already-running Codex, Claude Code,
+Hermes, or compatible skill host. After the packaged skills are installed and
+checked, the shared operator skill reads the same registered setup state,
+selects the only eligible choice when one exists, and asks only when a choice
+is missing or ambiguous. It prepares a `READY` campaign and must stop for a
+subsequent explicit Start approval after presenting the exact model, data,
+evaluation, compute, budget, and stop rules. The backend and Control Room
+contracts are implemented. Current source also exposes direct `campaign
+setup-context`, `setup-step`, `setup-doctor`, `setup-validate`, and
+`setup-create` wrappers with focused end-to-end CLI coverage. Installed-wheel
+host and guided-flow proof remains a release gate.
+
+## Restart recovery and optional campaign-agent boundary
 
 Recovery receipts and the mutable request lifecycle are sealed by external,
 versioned campaign authority; the sealing key is not stored in the campaign
@@ -160,8 +182,9 @@ single-attempt repair are restart-safe, stale claims can be reclaimed, and the
 public projection reports whether a current recovery consumer is actually
 ready before the UI enables a mutation.
 
-The campaign-agent boundary is present, but it is deliberately fail-closed.
-It supports human-issued, campaign-scoped Codex or Hermes grants, bounded
+The campaign-agent boundary is present as optional compatibility and security
+plumbing, and it is deliberately fail-closed. It supports human-issued,
+campaign-scoped Codex or Hermes grants, bounded
 capabilities, per-action authorization, externally sealed audit/attachment
 state, and one-time encrypted credential delivery. Host-session delivery uses
 an ephemeral X25519 key agreement with HKDF and ChaCha20-Poly1305; the backend
@@ -188,6 +211,13 @@ retain an end-to-end activation/non-leak receipt before release. Hermes launch
 parity and all agent mutation actions, including training launch/pause and
 artifact proposal, are not supported by this read-only slice.
 
+None of this boundary is mounted or required in the primary Control Room. The
+normal workflow does not ask Electron to launch, register, or activate an agent:
+the user starts in their chosen agent, loads the installed BashGym skill, and
+operates the same campaign authority through supported CLI/API surfaces. The
+Codex PTY adapter is retained for low-level compatibility work, not as the
+product's canonical entry point.
+
 ## Portable boundary
 
 The repository owns:
@@ -206,8 +236,8 @@ Each installation owns:
 - dataset version, evaluator suite, primary metric, ledger project, source
   repository, and compute profile;
 - resident-worker configuration and retained run artifacts.
-- desktop host-session liveness, ephemeral private keys, and the agent credential
-  activation lifecycle for one exact live process.
+- optional desktop host-session liveness, ephemeral private keys, and agent
+  credential activation state when that compatibility adapter is enabled.
 
 Those installation values must never be committed as repository defaults. A
 model cache hit, adapter, GGUF/inference quant, process exit code, or hosted
@@ -235,8 +265,8 @@ signatures, and idempotency keys.
 
 | Dimension | Score | Method and evidence |
 |---|---:|---|
-| Getting started | 7/10 | Tested clean source to control result in 48.71 s; real hardware authority and the desktop frontend remain installation steps. |
-| CLI/API ergonomics | 8/10 | Tested installed help, docs, API construction, one-argument control smoke, plan-first activation, registry synchronization, and bounded guided-setup APIs. Real campaigns retain explicit bindings by design. |
+| Getting started | 7/10 | Tested clean source to control result in 48.71 s; agent-host skill installation, real hardware authority, and the desktop frontend remain explicit installation steps. |
+| CLI/API ergonomics | 8/10 | Tested installed help, docs, API construction, one-argument control smoke, plan-first activation, registry synchronization, bounded guided-setup APIs, current-source guided CLI wrappers, and installed-wheel skill deployment for all three hosts. The installed-bundle flow through `READY` remains; real campaigns retain explicit bindings by design. |
 | Error guidance | 8/10 | Model inspection, guided activation, and campaign doctor fail closed with identity, source, runtime, and compute diagnostics. |
 | Documentation | 8/10 | Public entry points link the durable campaign, training, portability, and contribution contracts; live hardware evidence remains operator-owned. |
 | Upgrade path | 4/10 | Changelog exists, but migrations and compatibility policy need a release-grade guide. |
@@ -254,18 +284,21 @@ signatures, and idempotency keys.
 2. Add a hardware-gated local/private smoke that inspects an existing approved
    trainable model, runs a bounded real baseline, and ingests the authoritative
    evaluation without downloading or substituting a model.
-3. Retain a clean packaged-desktop end-to-end proof for the implemented
-   main-owned Codex/two-tool MCP lifecycle, including credential non-disclosure,
-   Workspace adoption, heartbeat, and teardown. Add Hermes parity only as a
-   separately verified launch adapter; add mutation tools only with their own
-   fixed backend action adapters and human-authority gates.
-4. Either package the frontend in Compose or keep Docker explicitly backend-only;
+3. Retain an installed-bundle guided-flow proof through `READY`, including the
+   mandatory stop and separate explicit Start approval. Installed-wheel
+   install/check already passes for Codex, Claude Code, and Hermes skill roots.
+4. Retain the optional packaged-desktop Codex/two-tool MCP lifecycle proof as a
+   bounded compatibility test, including credential non-disclosure, Workspace
+   adoption, heartbeat, and teardown. Do not make it a Control Room or launch
+   prerequisite; add other host adapters or mutation tools only with separate
+   fixed-action and human-authority verification.
+5. Either package the frontend in Compose or keep Docker explicitly backend-only;
    make assistant services opt-in profiles with generated configuration.
-5. Remove the obsolete multi-agent Orchestrator UI/backend/tests and its stale
+6. Remove the obsolete multi-agent Orchestrator UI/backend/tests and its stale
    onboarding references while preserving the current canvas/campaign runtime.
-6. Finish profiling the remaining active test suite so the default contributor
+7. Finish profiling the remaining active test suite so the default contributor
    command has a predictable completion time.
-7. Remove or generalize legacy machine-specific scripts and compute aliases
+8. Remove or generalize legacy machine-specific scripts and compute aliases
    outside the current AutoResearch path.
 
 For the exact real campaign sequence, see

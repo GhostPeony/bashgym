@@ -5,13 +5,13 @@ Status: implementation brief for NVIDIA discussion, July 2026.
 ## Executive summary
 
 BashGym now has a durable, baseline-first AutoResearch control plane that the
-CLI, REST clients, workspace canvas, and source-managed Hermes/Codex skills can
-operate without creating separate experiment histories. The current
-main process includes fixed credential transports, an isolated loopback MCP host
-with exactly two read-only tools (`campaign_observe` and
-`campaign_artifacts`), and a direct scope-bound Codex PTY lifecycle. Ordinary
-terminals remain ineligible; Hermes launch parity and mutation actions are not
-supported by this slice. BashGym is not a NeMo Gym or NeMo RL
+CLI, REST clients, workspace canvas, and packaged operator skills can operate
+without creating separate experiment histories. The normal agent workflow
+starts inside an already-running Codex, Claude Code, Hermes, or compatible
+agent. BashGym installs and checks the locked public skill bundle in that host;
+the shared operator skill discovers registered setup state, asks only for
+missing or ambiguous choices, prepares a `READY` campaign, and stops for a
+separate explicit Start approval. BashGym is not a NeMo Gym or NeMo RL
 replacement. The intended integration is complementary:
 
 - BashGym owns research intent, authority, budgets, durable state, evidence
@@ -19,9 +19,9 @@ replacement. The intended integration is complementary:
 - NeMo RL can become a recipe-driven training executor.
 - NeMo Gym can become the rollout, environment, tool, state-isolation, verifier,
   and reward substrate.
-- Hermes and Codex share source-managed BashGym operating instructions. Direct
-  campaign-agent launch is implemented for Codex first; that runtime support is
-  not yet interchangeable with Hermes.
+- Codex, Claude Code, Hermes, and compatible hosts use the same packaged BashGym
+  operating instructions. They are interfaces over the campaign control plane,
+  not launchers or separate sources of campaign truth.
 
 This is an NVIDIA-informed, platform-native architecture. BashGym keeps its
 campaign controller, evidence and human-authority model, offline-visible Control
@@ -41,6 +41,12 @@ The next proof is the optional NeMo Gym path: trajectory collection, an observed
 policy-to-generation refit, and a bounded GRPO candidate using an already
 approved compatible model. No model should be downloaded or substituted merely
 to complete that backend test.
+
+The backend also retains a sealed campaign-agent/MCP boundary with two fixed
+read-only actions and an optional scope-bound Codex PTY adapter. This is
+low-level compatibility and security plumbing. It is not mounted in the primary
+Control Room, is not the canonical agent entry point, and is not required to
+prepare or Start a campaign.
 
 ## What exists now
 
@@ -169,7 +175,7 @@ a fenced resident-worker consumer with externally sealed accepted, executing,
 and terminal lifecycle state; controls fail closed unless the projection proves
 the registered consumer has a live controller lease.
 
-The campaign-agent backend now provides sealed human grants, constrained
+The optional campaign-agent backend provides sealed human grants, constrained
 campaign capabilities, per-action authorization, short-lived host-session
 attestations, and one-time X25519/HKDF/ChaCha20-Poly1305 credential envelopes.
 It stores ciphertext rather than raw bearer material. Electron main has fixed
@@ -181,13 +187,20 @@ and closes MCP/backend authority on every terminal lifecycle boundary. The
 renderer receives only the public terminal identity for Workspace adoption; it
 cannot call credential routes, and the MCP host has no generic forwarder or
 mutation tools. A clean packaged-runtime activation/non-leak receipt remains a
-release proof. Hermes launch parity remains a later adapter, so ordinary
-terminals stay ineligible rather than weakening origin checks.
+compatibility proof. This adapter is not mounted in the primary Control Room and
+is not required by the agent-in-place workflow. Other host adapters and mutation
+actions remain separately bounded work; origin checks should not be weakened to
+claim parity.
 
-### Hermes and Codex operator skills
+### Agent-host operator skills
 
 The repository contains source-managed `bashgym`, `bashgym-operator`, and
-`training` skills. They encode the same behavior for Hermes and Codex:
+`training` skills within a seven-skill public bundle. Current source provides
+`bashgym operator skills install --host codex|claude|hermes` and `skills check`
+to deploy the exact locked bundle into the selected host's discovery root and
+verify its receipt without removing unrelated skills. This is skill
+installation, not agent registration or launch. The skills encode the same
+behavior across supported hosts:
 
 - inspect live runtime before conversational memory;
 - select an exact workspace/project and preserve lineage IDs;
@@ -199,8 +212,19 @@ The repository contains source-managed `bashgym`, `bashgym-operator`, and
   GBrain rather than treating chat history as the experiment record.
 
 These are BashGym's counterpart to NVIDIA's Brev etiquette, session-memory, and
-AutoResearch skills. They should invoke the identifier-only evaluation-ingestion
-path for real campaign outcomes.
+AutoResearch skills. For a new campaign, the operator skill treats an initial
+natural-language request as preparation authority only. It discovers the
+registered six-step setup state, selects only an unambiguous singleton, asks for
+only missing or ambiguous choices, runs doctor and validation, creates the
+campaign at `READY`, presents the exact campaign contract, and stops for a later
+explicit Start confirmation.
+
+The setup backend, Control Room, and current-source CLI implement that contract.
+The direct context, step, doctor, validation, and create wrappers have focused
+end-to-end CLI coverage. The skill uses those wrappers and the identifier-only
+evaluation-ingestion path for real outcomes. Installed-wheel install/check now
+passes for all three supported hosts; the installed-bundle guided flow through
+`READY` remains a release gate.
 
 ## What NVIDIA's workflow gets right
 
@@ -233,7 +257,7 @@ scientifically sound.
 
 | Capability | BashGym now | NVIDIA workflow / NeMo | Assessment |
 |---|---|---|---|
-| Agent operating instructions | Seven packaged generic workspace skills, including shared Hermes/Codex operator, training, eval, and authority guidance | Brev etiquette, session memory, AutoResearch skill | Comparable pattern; both correctly externalize institutional knowledge |
+| Agent operating instructions | Seven packaged generic workspace skills, installed-wheel install/check for Codex, Claude Code, and Hermes, and current-source guided CLI wrappers | Brev etiquette, session memory, AutoResearch skill | Comparable pattern; both correctly externalize institutional knowledge; BashGym still needs an installed-bundle guided preparation proof |
 | Campaign truth | Typed SQLite/WAL state, versioning, idempotency, leases, events, budgets, sealed evidence | Git branches, session diary, TSV/log ledger in the skill workflow | BashGym is stronger as a multi-operator product control plane |
 | Baseline and hypothesis policy | Enforced baseline first, incumbent parent, one declared variable | Prescribed baseline first and one branch/hypothesis | BashGym enforces more of the policy in code |
 | Result authority | Evaluation-result ID is resolved against run, attempt, suite, metric, budget, and artifact lineage; research/general-ledger decision is atomic | Agent reads the recipe/evaluator metric and logs it | BashGym has the stronger product boundary |
@@ -244,7 +268,7 @@ scientifically sound.
 | Multi-turn RL correctness | Exact message-level prompt/generation IDs and logprobs are required by the evidence contract; live multi-turn proof pending | Exact message-level token IDs, on-policy fixes, multi-turn orchestration | Contract exists; NVIDIA runtime proof remains ahead |
 | Train/generation coordination | Gym launch requires async vLLM and refit evidence, but no compatible-model live refit has run | Rollout scheduling, policy loss, and training/generation weight synchronization | Critical remaining live-proof gap |
 | Human interface | Compact offline-visible Control Room, workspace-canvas nodes, durable blinded review, and fenced recovery execution share one authority and stay visible offline | IDE/chat, logs, reports | BashGym has the stronger oversight shell; NVIDIA has the more proven sample-level research workflow |
-| Fresh-clone setup | Control smoke, seven generic workspace skills packaged through a 17-file allowlist, atomic definition installer, doctor, plan-first registry sync, and bounded resumable setup UI; real installation authority and private-hardware proof remain explicit | Brev launchable plus setup skill supplies a demonstrated path | BashGym's current installed control plane is portable across installations; NVIDIA is still easier for its demonstrated configuration, and BashGym's wider Git tree retains documented legacy cleanup work |
+| Fresh-clone setup | Control smoke, seven generic workspace skills packaged through a 17-file allowlist, installed-wheel host install/check, source-level guided CLI wrappers, atomic definition installer, doctor, plan-first registry sync, and bounded resumable setup UI; installed-bundle guided-flow proof remains | Brev launchable plus setup skill supplies a demonstrated path | BashGym's control plane is portable across installations; NVIDIA remains easier for its demonstrated configuration, and BashGym's wider Git tree retains documented legacy cleanup work |
 
 ## The correct integration boundary
 
@@ -253,7 +277,7 @@ loop. NeMo should not replace BashGym's campaign authority and product UI.
 
 ```mermaid
 flowchart TB
-  U["Researcher"] --> A["Hermes or Codex skill"]
+  U["Researcher"] --> A["Already-running agent + BashGym skill"]
   A --> P["BashGym campaign policy + authority"]
   P --> E["Registered executor adapter"]
   E --> RL["NeMo RL recipe / trainer"]
@@ -337,6 +361,13 @@ sealing, metrics, ineligible decision, and restart recovery without a GPU or API
 key. A real definition can be bound to a different machine without storing its
 host, key, or paths in source.
 
+Current source also installs and checks the locked skill bundle in explicit
+Codex, Claude Code, or Hermes discovery roots without removing unrelated skills.
+That host-install path is distinct from launching an agent. The direct guided
+CLI wrappers, guided backend, and Control Room implement the same ordered setup
+contract in current source. Installed-wheel install/check passes for all three
+roots; the full guided flow from the installed bundle remains release work.
+
 A clean clone can now plan or apply the missing installation records with
 `bashgym campaign activate-autoresearch`. The command resolves an operator-
 registered SSH device, preflights it, hashes exact dataset/evaluator/training
@@ -356,11 +387,14 @@ does not move host names, key paths, source credentials, runtime paths, or lease
 secrets into the repository.
 
 The campaign-agent REST/persistence layer, fixed main-only action transports,
-isolated two-tool MCP host, and main-spawned Codex lifecycle now form the
-read-only product execution path. Credential claim, heartbeat, PTY/MCP binding,
+isolated two-tool MCP host, and main-spawned Codex lifecycle remain optional
+read-only compatibility plumbing. Credential claim, heartbeat, PTY/MCP binding,
 scope-correct Workspace adoption, and teardown remain main-owned without
-exposing the credential to the renderer or terminal. Clean packaged-runtime
-proof is still required; Hermes parity and mutation actions are not supported.
+exposing the credential to the renderer or terminal. They are not mounted in
+the primary Control Room and are not required by the shared skill workflow.
+Clean packaged-runtime proof is still required before claiming that optional
+adapter as release-ready; other host adapters and mutation actions are separate
+work.
 
 The desktop is also model-neutral: live hardware discovery may recommend
 compatible candidates, but it cannot silently populate the Training or
@@ -375,7 +409,7 @@ campaign executor yet.
 The product goal should be:
 
 ```text
-clone -> install -> control smoke -> register local/private bindings -> campaign doctor -> real baseline
+clone -> install -> install/check agent skills -> control smoke -> register local/private bindings -> prepare READY -> explicit Start -> real baseline
 ```
 
 with no source edits, no personal device names, and no silent fallback from a
@@ -424,13 +458,16 @@ Verified in this milestone:
   only with reviewed installation authority in an atomic idempotent transaction;
 - recovery requests are externally sealed and consumed through resident-worker
   accepted, executing, and terminal lifecycle states;
-- campaign-agent grants, attachments, action authorization, host-session
+- optional campaign-agent grants, attachments, action authorization, host-session
   attestations, encrypted one-time delivery, fixed main-only action transports,
   the isolated two-tool MCP host, and the scope-bound Codex PTY lifecycle fail
   closed across activation and teardown;
 - the clean wheel packages seven generic workspace skills through an explicit
   17-file allowlist and verifies both installed discovery and representative
   documented commands from an arbitrary working directory;
+- source-level host installation/checking and direct guided-setup CLI wrappers
+  are implemented for Codex, Claude Code, and Hermes; installed-wheel host and
+  guided-flow proofs remain pending release verification;
 - the sequential campaign suite passes 379 tests with one intentional skip;
 - the campaign API route/WebSocket slice passes 97 tests, and the installed
   CLI/operator/packaging/fixture slice passes 314 tests;

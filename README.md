@@ -167,6 +167,19 @@ printed or accepted as a CLI argument. See the
 [durable AutoResearch campaign guide](docs/training/autoresearch-campaign.md)
 for private-compute registration and the full guided path.
 
+To operate AutoResearch from an already-running Codex, Claude Code, or Hermes
+session, install the packaged BashGym skill bundle into that host and verify
+the exact installed receipt:
+
+```bash
+bashgym operator skills install --host codex   # or: claude, hermes
+bashgym operator skills check --host codex
+```
+
+This installs operating instructions; it does not launch, register, or replace
+the agent. Re-run `check` after upgrading BashGym so a stale or modified bundle
+fails closed before campaign mutation or compute launch.
+
 ### 3. Install Trace Capture Hooks
 
 Auto-detect installed tools and configure adapters for all of them:
@@ -414,7 +427,22 @@ Use direct **Training** for one selected run. Use **AutoResearch** when a
 baseline, controlled candidates, evidence, budget, and restart-safe decisions
 must share one durable campaign record.
 
-The canonical graduation path is:
+The normal agent path begins inside an already-running Codex, Claude Code,
+Hermes, or compatible skill host. Install and check the packaged BashGym skills
+for that host, then ask the current agent to prepare AutoResearch. The shared
+operator skill reads registered setup state, resumes any sealed setup session,
+and asks only for missing or ambiguous choices. Preparation ends at a reviewable
+`READY` campaign. Starting compute is a separate approval: the agent must show
+the exact model, data, evaluator, compute, budget, and stop rules, then stop
+until the user explicitly confirms **Start** for that campaign.
+
+The guided backend, Control Room, and current-source CLI implement the ordered
+setup, doctor, validation, and create contracts. The direct wrappers are
+`campaign setup-context`, `setup-step`, `setup-doctor`, `setup-validate`, and
+`setup-create`; the packaged operator skill uses those registered surfaces
+rather than inventing IDs or bypassing setup state.
+
+The lower-level installation path behind that guided flow is:
 
 1. Provision the exact workspace-scoped local operator with
    `campaign provision-local-operator` using the opaque reference shown in
@@ -455,24 +483,17 @@ doctor, seals validation, and creates the campaign. Creation never starts work:
 authority rail. The read-only context request creates no setup state, and the
 renderer cannot claim hardware or model reachability.
 
-Campaign-agent authority also fails closed. The backend activates its trusted
-origin verifier and encrypted credential broker only when it is running as the
-managed desktop backend and the current Electron launch bootstrap has been
-successfully exchanged. The main-owned boundary includes fixed credential
-transports and an isolated loopback MCP host with exactly two read-only tools:
-`campaign_observe` and `campaign_artifacts`. Electron main can now launch one
-campaign-scoped Codex PTY directly, claim and activate its one-time credential,
-maintain heartbeat authority, bind the MCP host to that exact process
-generation, and revoke and erase authority on exit, replacement, reload,
-explicit revoke, stale heartbeat, or shutdown. The renderer receives only the
-public terminal identity and adopts the already-running PTY into the matching
-Workspace/canvas session; it never receives the credential or a shell command
-to replay. Those tools cannot launch or pause training, propose artifacts, or
-forward arbitrary requests, and the renderer's general campaign bridge cannot
-call their credential routes. Ordinary renderer-launched terminals remain
-intentionally ineligible. Hermes launch parity and mutation actions are not
-supported in this slice, and a clean packaged-desktop activation proof remains
-a release gate. The Control Room stays visible when the host or backend is
+An optional campaign-agent compatibility boundary also remains fail-closed in
+the backend. It provides sealed campaign grants, encrypted one-time credential
+delivery, fixed read-only `campaign_observe` and `campaign_artifacts` actions,
+and an isolated loopback MCP host. An Electron adapter can bind that authority
+to a scope-bound Codex PTY without exposing its credential to the renderer.
+This is low-level security and integration plumbing: it is not mounted as a
+required Control Room feature, does not make Codex the canonical launcher, and
+is not required for the shared-skill workflow above. It cannot launch or pause
+training, propose artifacts, or forward arbitrary requests. Agent-host parity
+and any future mutation actions require their own bounded verification. The
+Control Room remains visible when this optional host boundary or the backend is
 unavailable.
 
 When a development comparison requires review, BashGym now creates a durable,

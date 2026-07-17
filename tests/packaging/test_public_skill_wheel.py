@@ -68,6 +68,16 @@ LEGACY_RESIDUE_TOKEN = re.compile(
 )
 
 
+def test_build_system_requires_pep_639_capable_setuptools():
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    build_system = pyproject.split("[build-system]", 1)[1].split("[project]", 1)[0]
+    match = re.search(r'"setuptools>=(\d+(?:\.\d+)*)"', build_system)
+
+    assert match is not None
+    minimum = tuple(int(part) for part in match.group(1).split("."))
+    assert minimum >= (77, 0, 0)
+
+
 @pytest.fixture(scope="module")
 def public_skill_wheel(tmp_path_factory: pytest.TempPathFactory) -> Path:
     proof_dir = tmp_path_factory.mktemp("public-skill-wheel")

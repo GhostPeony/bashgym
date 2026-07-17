@@ -26,7 +26,6 @@ import {
 import { useUIStore } from '../../stores/uiStore'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
 import { Button } from '../common/Button'
-import { CampaignAgentControl } from './CampaignAgentControl'
 import { CampaignRecoveryPanel } from './CampaignRecoveryPanel'
 import { GuidedAutoResearchSetup, type GuidedSetupConnectionState } from './GuidedAutoResearchSetup'
 import { HumanOversightQueue, type HumanReviewResponse } from './HumanOversightQueue'
@@ -78,7 +77,6 @@ export interface ControlRoomContentProps {
   onLoadArtifacts: () => void
   onStart?: () => void
   startPending?: boolean
-  campaignAgent?: ReactNode
   humanOversight?: ReactNode
   campaignRecovery?: ReactNode
   guidedSetup?: ReactNode
@@ -706,7 +704,6 @@ export function ControlRoomContent(props: ControlRoomContentProps) {
       <div className="space-y-4">
         <ControlRoomHeader campaigns={campaigns} selectedCampaignId={props.selectedCampaignId} onSelect={props.onSelect} />
         <ControlRoomStateNotice model={displayModel} onRetry={props.onRetry} noCampaigns={campaigns.length === 0} />
-        {props.campaignAgent}
         {campaigns.length === 0 ? (
           props.guidedSetup ?? <GuidedAutoResearchSetup
             context={null}
@@ -742,7 +739,6 @@ export function ControlRoomContent(props: ControlRoomContentProps) {
       <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_20rem] xl:grid-cols-[minmax(0,1fr)_22rem]">
         <main className="min-w-0 space-y-4" aria-label="Campaign work and evidence">
           <ActiveWorkPanel model={model} />
-          {props.campaignAgent}
           {props.humanOversight}
           {props.campaignRecovery}
           <EvidencePanel model={model} artifacts={props.artifacts} pages={props.pages} onLoadArtifacts={props.onLoadArtifacts} />
@@ -1250,21 +1246,6 @@ export function AutoResearchControlRoom() {
   }
 
   const humanSummary = model.kind === 'snapshot' ? model.snapshot.human_work : null
-  const campaignAgentFreshness = model.kind === 'snapshot'
-    ? model.freshness
-    : model.kind === 'loading'
-      ? 'reconciling'
-      : model.kind === 'offline'
-        ? 'offline'
-        : model.kind === 'error'
-          ? 'error'
-          : 'stale'
-  const campaignAgent = selectedCampaignId ? (
-    <CampaignAgentControl
-      scope={{ workspaceId, campaignId: selectedCampaignId }}
-      freshness={campaignAgentFreshness}
-    />
-  ) : undefined
   const showHumanOversight = Boolean(
     humanSummary && (
       humanSummary.open_count > 0
@@ -1380,7 +1361,6 @@ export function AutoResearchControlRoom() {
           onLoadArtifacts={() => selectedCampaignId && void loadArtifactsPage(workspaceId, selectedCampaignId)}
           onStart={() => { void handleStart() }}
           startPending={startPending}
-          campaignAgent={campaignAgent}
           humanOversight={humanOversight}
           campaignRecovery={campaignRecovery}
           guidedSetup={guidedSetup}

@@ -12,7 +12,6 @@ import { resolveControlRoomCampaignSelection, shouldCanonicalizeControlRoomSelec
 import { createRecoveryLoadGate } from './recoveryLoadGate'
 
 const controlRoomSource = readFileSync(new URL('./AutoResearchControlRoom.tsx', import.meta.url), 'utf8')
-const campaignAgentControlSource = readFileSync(new URL('./CampaignAgentControl.tsx', import.meta.url), 'utf8')
 
 const fleet: CampaignRecord[] = [{
   schema_version: 'campaign.v1',
@@ -221,39 +220,12 @@ test('mounts durable human oversight in the primary work column before evidence'
   assert.ok(html.indexOf('Human queue projection') < html.indexOf('Evidence &amp; metrics'))
 })
 
-test('mounts the safe campaign-agent session surface in the primary work column and keeps it during service errors', () => {
-  const campaignAgent = createElement('section', { 'aria-label': 'Safe campaign agent session' }, 'Main-owned campaign agent host')
-  const liveHtml = renderToStaticMarkup(createElement(ControlRoomContent, {
-    model: buildControlRoomModel({ snapshot: controlRoomSnapshot(), freshness: 'live', error: null }),
-    campaigns: fleet, selectedCampaignId: 'campaign-1', events: [], artifacts: [], pages: unloadedPages,
-    onSelect: () => {}, onRetry: () => {}, onLoadEvents: () => {}, onLoadArtifacts: () => {},
-    campaignAgent,
-  }))
-  assert.match(liveHtml, /Main-owned campaign agent host/)
-  assert.ok(liveHtml.indexOf('Main-owned campaign agent host') < liveHtml.indexOf('Evidence &amp; metrics'))
-
-  const errorHtml = renderToStaticMarkup(createElement(ControlRoomContent, {
-    model: buildControlRoomModel({ snapshot: null, freshness: 'error', error: 'Campaign authority unavailable.' }),
-    campaigns: fleet, selectedCampaignId: 'campaign-1', events: [], artifacts: [], pages: unloadedPages,
-    onSelect: () => {}, onRetry: () => {}, onLoadEvents: () => {}, onLoadArtifacts: () => {},
-    campaignAgent,
-  }))
-  assert.match(errorHtml, /Main-owned campaign agent host/)
-  assert.match(errorHtml, /Campaign overview/)
-})
-
-test('official control room uses only the high-level campaign-agent host boundary', () => {
-  assert.match(controlRoomSource, /CampaignAgentControl/)
-  assert.match(campaignAgentControlSource, /campaignAgentHost/)
-  assert.match(campaignAgentControlSource, /invokeCampaignAgentHostAction/)
-  assert.match(campaignAgentControlSource, /launchCodexCampaignAgent/)
-  assert.match(campaignAgentControlSource, /host\.eligible\(\{\s*workspaceId: scope\.workspaceId,\s*campaignId: scope\.campaignId,?\s*\}\)/)
-  assert.match(campaignAgentControlSource, /if \(!result\.success\) \{\s*await reconcile\(false\)\s*setHostError\(result\.error\)\s*return\s*\}/)
-  assert.doesNotMatch(campaignAgentControlSource, /setInterval/)
-  assert.match(campaignAgentControlSource, /if \(activeReconciliations\.current > 0 \|\| launchLifecycleActive\.current\) \{\s*schedulePoll\(\)\s*return\s*\}/)
-  assert.match(campaignAgentControlSource, /setTimeout\(\(\) => \{[\s\S]*?void reconcile\(false\)\.finally\(schedulePoll\)[\s\S]*?\}, 3000\)/)
-  assert.doesNotMatch(`${controlRoomSource}\n${campaignAgentControlSource}`, /agentOrigin|agentPrincipalId|sessionId:\s*.*campaignAgent|bgag\./)
-  assert.doesNotMatch(campaignAgentControlSource, /\bclaim\b/i)
+test('keeps coding-agent launch and activation out of the primary control room journey', () => {
+  assert.doesNotMatch(controlRoomSource, /CampaignAgentControl|campaignAgent|Codex|Hermes/)
+  assert.match(controlRoomSource, /GuidedAutoResearchSetup/)
+  assert.match(controlRoomSource, /HumanOversightQueue/)
+  assert.match(controlRoomSource, /CampaignRecoveryPanel/)
+  assert.match(controlRoomSource, /handleStart/)
 })
 
 test('keeps recovery visibility in the primary work column without replacing campaign evidence', () => {

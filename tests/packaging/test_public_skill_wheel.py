@@ -53,12 +53,16 @@ def public_skill_wheel(tmp_path_factory: pytest.TempPathFactory) -> Path:
     proof_dir = tmp_path_factory.mktemp("public-skill-wheel")
     source_dir = proof_dir / "source"
     source_dir.mkdir()
-    publishable = subprocess.run(
-        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
-        check=True,
-        cwd=ROOT,
-        capture_output=True,
-    ).stdout.decode("utf-8").split("\0")
+    publishable = (
+        subprocess.run(
+            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+            check=True,
+            cwd=ROOT,
+            capture_output=True,
+        )
+        .stdout.decode("utf-8")
+        .split("\0")
+    )
     for relative in filter(None, publishable):
         source = ROOT / relative
         if source.is_file():
@@ -187,11 +191,16 @@ def test_installed_wheel_skill_loader_discovers_the_public_operator_skills(
                 "'warnings': warnings}))"
             ),
         ],
-        check=True,
+        check=False,
         cwd=tmp_path,
         env=environment,
         capture_output=True,
         text=True,
+    )
+    assert result.returncode == 0, (
+        "installed wheel could not load its public operator skills\n"
+        f"stdout:\n{result.stdout}\n"
+        f"stderr:\n{result.stderr}"
     )
     payload = json.loads(result.stdout)
 

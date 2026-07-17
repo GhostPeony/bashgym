@@ -15,11 +15,12 @@ import sqlite3
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 from uuid import uuid4
 
+from bashgym._compat import UTC
 from bashgym.campaigns.artifacts import ArtifactSealer
 from bashgym.campaigns.campaign_agent_contracts import (
     CampaignAgentActionContext,

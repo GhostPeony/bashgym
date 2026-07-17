@@ -15,12 +15,14 @@ import os
 import secrets
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, ConfigDict, Field
+
+from bashgym._compat import UTC
 
 
 class CampaignHintV1(BaseModel):
@@ -212,12 +214,8 @@ class ConnectionManager:
         self.subscriptions: dict[str, set[WebSocket]] = {}
         self.loop: asyncio.AbstractEventLoop | None = None
         self.campaign_tickets: dict[str, CampaignLiveTicketBinding] = {}
-        self.campaign_ticket_mint_windows: dict[
-            tuple[str, str], tuple[datetime, int]
-        ] = {}
-        self.campaign_subscriptions: dict[
-            WebSocket, dict[str, CampaignLiveSubscription]
-        ] = {}
+        self.campaign_ticket_mint_windows: dict[tuple[str, str], tuple[datetime, int]] = {}
+        self.campaign_subscriptions: dict[WebSocket, dict[str, CampaignLiveSubscription]] = {}
         self.campaign_poll_task: asyncio.Task[None] | None = None
 
     async def connect(self, websocket: WebSocket) -> None:
@@ -398,12 +396,9 @@ class ConnectionManager:
         now = datetime.now(UTC)
         expires_at = min(now + ttl, principal.expires_at)
         for digest, existing in tuple(self.campaign_tickets.items()):
-            if (
-                existing.expires_at <= now
-                or (
-                    existing.credential_id == principal.credential_id
-                    and existing.workspace_id == workspace_id
-                )
+            if existing.expires_at <= now or (
+                existing.credential_id == principal.credential_id
+                and existing.workspace_id == workspace_id
             ):
                 self.campaign_tickets.pop(digest, None)
         while len(self.campaign_tickets) >= 1_024:
@@ -430,20 +425,19 @@ class ConnectionManager:
     ) -> bool:
         checked_at = now or datetime.now(UTC)
         window = timedelta(seconds=30)
-        for scope, (started_at, _count) in tuple(
-            self.campaign_ticket_mint_windows.items()
-        ):
+        for scope, (started_at, _count) in tuple(self.campaign_ticket_mint_windows.items()):
             if started_at + window <= checked_at:
                 self.campaign_ticket_mint_windows.pop(scope, None)
         scope = (credential_id, workspace_id)
-        started_at, count = self.campaign_ticket_mint_windows.get(
-            scope, (checked_at, 0)
-        )
+        started_at, count = self.campaign_ticket_mint_windows.get(scope, (checked_at, 0))
         if started_at + window <= checked_at:
             started_at, count = checked_at, 0
         if count >= 30:
             return False
-        while len(self.campaign_ticket_mint_windows) >= 1_024 and scope not in self.campaign_ticket_mint_windows:
+        while (
+            len(self.campaign_ticket_mint_windows) >= 1_024
+            and scope not in self.campaign_ticket_mint_windows
+        ):
             oldest_scope = next(iter(self.campaign_ticket_mint_windows))
             self.campaign_ticket_mint_windows.pop(oldest_scope, None)
         self.campaign_ticket_mint_windows[scope] = (started_at, count + 1)
@@ -459,13 +453,10 @@ class ConnectionManager:
         if parent.authorization_revision != binding.authorization_revision:
             return False
         return (
-            "desktop-local" in parent.workspace_ids
-            or binding.workspace_id in parent.workspace_ids
+            "desktop-local" in parent.workspace_ids or binding.workspace_id in parent.workspace_ids
         )
 
-    def consume_campaign_live_ticket(
-        self, ticket: str | None
-    ) -> CampaignLiveTicketBinding | None:
+    def consume_campaign_live_ticket(self, ticket: str | None) -> CampaignLiveTicketBinding | None:
         if not isinstance(ticket, str) or len(ticket) > 256:
             return None
         binding = self.campaign_tickets.pop(self._ticket_hash(ticket), None)
@@ -475,11 +466,11 @@ class ConnectionManager:
         binding = self.consume_campaign_live_ticket(ticket)
         if binding is None:
             return False
-        self.campaign_subscriptions.setdefault(websocket, {})[
-            binding.workspace_id
-        ] = CampaignLiveSubscription(
-            binding=binding,
-            cursor=binding.after_cursor,
+        self.campaign_subscriptions.setdefault(websocket, {})[binding.workspace_id] = (
+            CampaignLiveSubscription(
+                binding=binding,
+                cursor=binding.after_cursor,
+            )
         )
         await self.send_personal(
             websocket,

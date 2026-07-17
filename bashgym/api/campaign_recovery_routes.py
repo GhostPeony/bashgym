@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import re
-from typing import Annotated, Any, Literal, Never
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from typing_extensions import Never
 
 from bashgym.campaigns.artifacts import ArtifactSealer
 from bashgym.campaigns.auth import CampaignAuthenticationError, CampaignAuthService

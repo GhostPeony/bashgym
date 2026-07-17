@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import hmac
 import os
-from datetime import UTC
-from typing import Annotated, Any, Literal, Never
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from typing_extensions import Never
 
+from bashgym._compat import UTC
 from bashgym.campaigns.auth import CampaignAuthenticationError, CampaignAuthService
 from bashgym.campaigns.campaign_agent_contracts import (
     CampaignAgentAttachRequest,

@@ -12,10 +12,11 @@ import subprocess
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import IO, Any
 
+from bashgym._compat import UTC
 from bashgym.campaigns.contracts import canonical_hash
 from bashgym.campaigns.nemo_gym_ingestion import (
     NEMO_GYM_BUNDLE_MANIFEST_FILENAME,

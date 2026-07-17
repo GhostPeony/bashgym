@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, Never
+from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from typing_extensions import Never
 
 from bashgym.config import get_bashgym_dir
 from bashgym.mcp.claude_compat import preview_claude_mcp_config

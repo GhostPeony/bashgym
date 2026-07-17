@@ -19,12 +19,14 @@ import re
 import shutil
 import uuid
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from fastapi import BackgroundTasks, Body, FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
+
+from bashgym._compat import UTC
 
 # Set up logging for API routes
 logger = logging.getLogger(__name__)
@@ -174,17 +176,11 @@ def _start_desktop_campaign_worker(
         app.state.campaign_worker_managed = True
         try:
             if getattr(existing, "is_alive", True) is False and not existing.start():
-                app.state.campaign_worker_bootstrap_failure_code = (
-                    "campaign_worker_duplicate_start"
-                )
+                app.state.campaign_worker_bootstrap_failure_code = "campaign_worker_duplicate_start"
                 return False
-            return bool(
-                existing.wait_until_ready(timeout_seconds=ready_timeout_seconds)
-            )
+            return bool(existing.wait_until_ready(timeout_seconds=ready_timeout_seconds))
         except Exception:
-            app.state.campaign_worker_bootstrap_failure_code = (
-                "campaign_worker_readiness_failed"
-            )
+            app.state.campaign_worker_bootstrap_failure_code = "campaign_worker_readiness_failed"
             return False
 
     from bashgym.campaigns.worker_service import (
@@ -204,15 +200,11 @@ def _start_desktop_campaign_worker(
         result = prepare(root)
         supervisor = make_supervisor(result.config)
         if not supervisor.start():
-            app.state.campaign_worker_bootstrap_failure_code = (
-                "campaign_worker_duplicate_start"
-            )
+            app.state.campaign_worker_bootstrap_failure_code = "campaign_worker_duplicate_start"
             return False
         app.state.campaign_worker_config_path = result.config_path
         app.state.campaign_worker_supervisor = supervisor
-        ready = bool(
-            supervisor.wait_until_ready(timeout_seconds=ready_timeout_seconds)
-        )
+        ready = bool(supervisor.wait_until_ready(timeout_seconds=ready_timeout_seconds))
         if not ready:
             logger.warning("Desktop campaign worker has not acquired its scheduler lease")
         return ready
@@ -243,9 +235,7 @@ def _stop_desktop_campaign_worker(
         return True
     stopped = bool(supervisor.stop(timeout_seconds=timeout_seconds))
     if not stopped:
-        app.state.campaign_worker_bootstrap_failure_code = (
-            "campaign_worker_shutdown_timeout"
-        )
+        app.state.campaign_worker_bootstrap_failure_code = "campaign_worker_shutdown_timeout"
         logger.error("Desktop campaign worker did not stop before the shutdown deadline")
     return stopped
 
@@ -287,7 +277,9 @@ def create_app() -> FastAPI:
     app.state.tasks = {}  # In-memory task storage
     app.state.training_runs = {}  # In-memory training run storage
     app.state.experiment_ledger_repository = None
-    app.state.workspace_canvas_snapshots = {}  # Live renderer-owned canvas context, keyed by workspace_id
+    app.state.workspace_canvas_snapshots = (
+        {}
+    )  # Live renderer-owned canvas context, keyed by workspace_id
     app.state.workspace_events = {}  # Recent semantic canvas intents, keyed by workspace_id
     app.state.runtime_observer = RuntimeObserver(Path.cwd())
     app.state.mcp_workbench = None
@@ -1305,7 +1297,9 @@ def create_app() -> FastAPI:
                 is_simulation=app.state.trainer is None,
             )
         except LedgerConflictError as exc:
-            raise HTTPException(status_code=409, detail={"code": exc.code, "message": str(exc)}) from exc
+            raise HTTPException(
+                status_code=409, detail={"code": exc.code, "message": str(exc)}
+            ) from exc
         except (LedgerPersistenceError, ValueError) as exc:
             raise HTTPException(
                 status_code=422,
@@ -1910,7 +1904,9 @@ def create_app() -> FastAPI:
                         error=error_msg,
                     )
             except Exception as ledger_exc:
-                logger.error(f"[Training] Failed to finalize ledger state for {run_id}: {ledger_exc}")
+                logger.error(
+                    f"[Training] Failed to finalize ledger state for {run_id}: {ledger_exc}"
+                )
             # Persist failed state to disk (output_dir may not exist for early failures)
             try:
                 run_output_dir = str(Path("data/models") / run_id)

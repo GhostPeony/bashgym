@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Iterable
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import Enum
 from importlib import resources
 from pathlib import Path
@@ -19,6 +19,7 @@ from typing import Any, Literal
 
 from pydantic import Field, field_validator, model_validator
 
+from bashgym._compat import UTC
 from bashgym.campaigns.contracts import (
     TERMINAL_CAMPAIGN_STATES,
     ActorPrincipal,
@@ -294,9 +295,7 @@ class AutoResearchState(FrozenContractModel):
 class AutoResearchTemplatePolicy(FrozenContractModel):
     """Portable AutoResearch policy paired with a scientific campaign template."""
 
-    schema_version: Literal["autoresearch_template_policy.v1"] = (
-        "autoresearch_template_policy.v1"
-    )
+    schema_version: Literal["autoresearch_template_policy.v1"] = "autoresearch_template_policy.v1"
     template_revision: Identifier
     primary_metric: Identifier
     metric_direction: MetricDirection
@@ -349,7 +348,9 @@ class AutoResearchTemplateDefinition(FrozenContractModel):
     def definition_digest(self) -> str:
         return canonical_hash(self.model_dump(mode="json"))
 
-    def materialize_spec(self, workspace_id: str, campaign_id: str) -> AutoResearchCampaignSpec | None:
+    def materialize_spec(
+        self, workspace_id: str, campaign_id: str
+    ) -> AutoResearchCampaignSpec | None:
         if self.policy is None:
             return None
         return AutoResearchCampaignSpec(
@@ -578,16 +579,14 @@ class AutoResearchRepository(CampaignRuntimeRepository):
     def initialize(self) -> None:
         super().initialize()
         with self._connection(immediate=True) as connection:
-            connection.execute(
-                """
+            connection.execute("""
                 CREATE TABLE IF NOT EXISTS autoresearch_schema_migrations (
                     version INTEGER PRIMARY KEY,
                     name TEXT NOT NULL,
                     checksum TEXT NOT NULL,
                     applied_at TEXT NOT NULL
                 )
-                """
-            )
+                """)
             for version, name, statements in _AUTORESEARCH_MIGRATIONS:
                 checksum = canonical_hash(list(statements))
                 row = connection.execute(
@@ -823,9 +822,7 @@ class AutoResearchRepository(CampaignRuntimeRepository):
         if run["campaign_id"] != result.campaign_id:
             raise AutoResearchInvariantError("autoresearch_run_campaign_lineage_mismatch")
 
-        evidence_refs = tuple(
-            dict.fromkeys((result.result_id, *result.evidence_references))
-        )
+        evidence_refs = tuple(dict.fromkeys((result.result_id, *result.evidence_references)))
         ledger_decision = DecisionSpec(
             workspace_id=result.workspace_id,
             project_id=context.project_id,
@@ -1032,9 +1029,7 @@ class AutoResearchRepository(CampaignRuntimeRepository):
             )
             outcome = AutoResearchOutcomeRecord(result=result, decision=decision)
             if ledger_context is not None:
-                self._record_outcome_ledger_in_connection(
-                    connection, spec, outcome, ledger_context
-                )
+                self._record_outcome_ledger_in_connection(connection, spec, outcome, ledger_context)
         return outcome
 
 
@@ -1363,13 +1358,16 @@ class AutoResearchCampaignCore:
         registered_control = self.repository.register_autoresearch_proposal(control)
         if lineage_kind is not None:
             assert source_repository_profile_id is not None
-            lineage_id = "lineage-" + canonical_hash(
-                [
-                    registered_control.control_digest,
-                    lineage_kind.value,
-                    source_repository_profile_id,
-                ]
-            )[:32]
+            lineage_id = (
+                "lineage-"
+                + canonical_hash(
+                    [
+                        registered_control.control_digest,
+                        lineage_kind.value,
+                        source_repository_profile_id,
+                    ]
+                )[:32]
+            )
             self.repository.register_code_lineage_requirement(
                 CodeLineageRecord(
                     lineage_id=lineage_id,
@@ -1487,9 +1485,7 @@ class AutoResearchCampaignCore:
             proposal.proposal
         ):
             raise AutoResearchInvariantError("autoresearch_fake_executor_cannot_claim_real_result")
-        return self.repository.record_autoresearch_result(
-            result, ledger_context=ledger_context
-        )
+        return self.repository.record_autoresearch_result(result, ledger_context=ledger_context)
 
     def ingest_evaluation_result(
         self,
@@ -1557,9 +1553,7 @@ class AutoResearchCampaignCore:
         ledger_attempt_id = evaluation.get("attempt_id")
         if not ledger_attempt_id:
             raise AutoResearchInvariantError("autoresearch_evaluation_attempt_required")
-        ledger_attempt = self.ledger.get_attempt_record(
-            workspace_id, project_id, ledger_attempt_id
-        )
+        ledger_attempt = self.ledger.get_attempt_record(workspace_id, project_id, ledger_attempt_id)
         if ledger_attempt["run_id"] != run["run_id"]:
             raise AutoResearchInvariantError("autoresearch_evaluation_attempt_run_mismatch")
         if ledger_attempt["status"] != RunStatus.COMPLETED.value:
@@ -1568,11 +1562,7 @@ class AutoResearchCampaignCore:
             raise AutoResearchInvariantError("autoresearch_evaluation_model_mismatch")
         source_attempt_id = ledger_attempt.get("source_attempt_id")
         mapped_attempt = next(
-            (
-                attempt
-                for attempt in campaign_attempts
-                if attempt.attempt_id == source_attempt_id
-            ),
+            (attempt for attempt in campaign_attempts if attempt.attempt_id == source_attempt_id),
             None,
         )
         if mapped_attempt is None or mapped_attempt.action_id != run["action_id"]:
@@ -1614,7 +1604,9 @@ class AutoResearchCampaignCore:
             if ledger_artifact is None:
                 raise AutoResearchInvariantError("autoresearch_evaluation_artifact_missing")
             if ledger_artifact.get("attempt_id") not in {None, ledger_attempt_id}:
-                raise AutoResearchInvariantError("autoresearch_evaluation_artifact_attempt_mismatch")
+                raise AutoResearchInvariantError(
+                    "autoresearch_evaluation_artifact_attempt_mismatch"
+                )
             campaign_artifact = next(
                 (
                     artifact
@@ -1634,17 +1626,13 @@ class AutoResearchCampaignCore:
             if artifact.schema_name == NEMO_GYM_CAMPAIGN_EVIDENCE_SCHEMA
         )
 
-        simulated = bool(run["is_simulation"]) or self._proposal_is_simulated(
-            proposal.proposal
-        )
+        simulated = bool(run["is_simulation"]) or self._proposal_is_simulated(proposal.proposal)
         if not simulated and any(
             run.get(field) is None
             for field in ("model_version_id", "dataset_version_id", "environment_id")
         ):
             raise AutoResearchInvariantError("autoresearch_real_run_context_pins_required")
-        provenance = (
-            ExperimentProvenance.SIMULATED if simulated else ExperimentProvenance.REAL
-        )
+        provenance = ExperimentProvenance.SIMULATED if simulated else ExperimentProvenance.REAL
         result = AutoResearchResult(
             result_id=f"autoresearch-result-{canonical_hash([project_id, evaluation_result_id])[:32]}",
             workspace_id=workspace_id,

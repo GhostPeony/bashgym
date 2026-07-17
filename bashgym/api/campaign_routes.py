@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal, Never
+from typing import Any, Literal
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from typing_extensions import Never
 
+from bashgym._compat import UTC
 from bashgym.api.websocket import manager as websocket_manager
 from bashgym.campaigns.artifacts import ArtifactSealer
 from bashgym.campaigns.auth import CampaignAuthenticationError, CampaignAuthService
@@ -298,9 +300,7 @@ def _services(
         )
     repository = getattr(request.app.state, "campaign_repository", None)
     if not isinstance(repository, CampaignRuntimeRepository):
-        repository = AutoResearchRepository(
-            get_bashgym_dir() / "campaigns" / "campaigns.sqlite3"
-        )
+        repository = AutoResearchRepository(get_bashgym_dir() / "campaigns" / "campaigns.sqlite3")
         repository.initialize()
         request.app.state.campaign_repository = repository
     auth = getattr(request.app.state, "campaign_auth_service", None)
@@ -395,9 +395,7 @@ def _autoresearch_definitions(request: Request) -> dict[str, AutoResearchTemplat
             raise ValueError("AutoResearch installation template path must be a directory")
         installed = {
             definition.template_id: definition
-            for definition in load_autoresearch_template_definitions(
-                Path(installation_path)
-            )
+            for definition in load_autoresearch_template_definitions(Path(installation_path))
         }
     raw = getattr(request.app.state, "campaign_autoresearch_templates", {})
     configured = {
@@ -554,15 +552,11 @@ def _control_room_definition_matches(
         return False
     if durable.autoresearch_spec is None:
         return True
-    materialized = definition.materialize_spec(
-        campaign.workspace_id, campaign.campaign_id
-    )
+    materialized = definition.materialize_spec(campaign.workspace_id, campaign.campaign_id)
     if materialized is None:
         return False
     persisted_spec = {
-        key: value
-        for key, value in durable.autoresearch_spec.items()
-        if key != "created_at"
+        key: value for key, value in durable.autoresearch_spec.items() if key != "created_at"
     }
     return canonical_hash(
         materialized.model_dump(mode="json", exclude={"created_at"})
@@ -608,9 +602,7 @@ def _control_room_readiness(
             canonical_hash(
                 {
                     "status": code,
-                    "definitions": sorted(
-                        item.definition_digest for item in matches
-                    ),
+                    "definitions": sorted(item.definition_digest for item in matches),
                 }
             ),
         )
@@ -621,12 +613,10 @@ def _control_room_readiness(
     readiness_inputs = {
         "definition": definition.definition_digest,
         "executor_profiles": [
-            profile.model_dump(mode="json")
-            for _key, profile in sorted(executor_profiles.items())
+            profile.model_dump(mode="json") for _key, profile in sorted(executor_profiles.items())
         ],
         "source_profiles": [
-            profile.model_dump(mode="json")
-            for _key, profile in sorted(source_profiles.items())
+            profile.model_dump(mode="json") for _key, profile in sorted(source_profiles.items())
         ],
     }
     ledger = getattr(request.app.state, "campaign_experiment_ledger", None)
@@ -667,9 +657,7 @@ def _control_room_readiness(
     return readiness, canonical_hash(
         {
             **readiness_inputs,
-            "readiness": readiness.model_dump(
-                mode="json", exclude={"checked_at"}
-            ),
+            "readiness": readiness.model_dump(mode="json", exclude={"checked_at"}),
         }
     )
 
@@ -1145,20 +1133,14 @@ def _campaign_ledger_projection(
         projection["autoresearch"] = {
             "spec": spec.model_dump(mode="json"),
             "state": core.state(workspace_id, campaign_id).model_dump(mode="json"),
-            "diagnostics": core.diagnostics(workspace_id, campaign_id).model_dump(
-                mode="json"
-            ),
+            "diagnostics": core.diagnostics(workspace_id, campaign_id).model_dump(mode="json"),
             "proposals": [
                 item.model_dump(mode="json")
-                for item in core.repository.list_autoresearch_proposals(
-                    workspace_id, campaign_id
-                )
+                for item in core.repository.list_autoresearch_proposals(workspace_id, campaign_id)
             ],
             "outcomes": [
                 item.model_dump(mode="json")
-                for item in core.repository.list_autoresearch_outcomes(
-                    workspace_id, campaign_id
-                )
+                for item in core.repository.list_autoresearch_outcomes(workspace_id, campaign_id)
             ],
             "code_lineages": [
                 item.model_dump(mode="json")
@@ -1291,9 +1273,7 @@ def create_campaign_from_template(
         if spec is not None:
             core = _autoresearch_core(_repository)
             core.register(spec)
-            setup_key = canonical_hash(
-                [body.workspace_id, body.campaign_id, body.template_id]
-            )[:24]
+            setup_key = canonical_hash([body.workspace_id, body.campaign_id, body.template_id])[:24]
             prepared = core.prepare(
                 body.workspace_id,
                 body.campaign_id,
@@ -1302,9 +1282,9 @@ def create_campaign_from_template(
                 idempotency_prefix=f"autoresearch-prepare-{setup_key}",
             )
             payload["campaign"] = prepared.model_dump(mode="json")
-            payload["autoresearch"] = core.state(
-                body.workspace_id, body.campaign_id
-            ).model_dump(mode="json")
+            payload["autoresearch"] = core.state(body.workspace_id, body.campaign_id).model_dump(
+                mode="json"
+            )
         return payload
     except Exception as exc:
         _raise_api(exc)
@@ -1325,9 +1305,9 @@ def list_campaigns(
                 item.model_dump(mode="json")
                 for item in service.list(workspace_id, principal, kind=kind, status=status)
             ],
-            "controller": project_controller_status(
-                repository, get_bashgym_dir()
-            ).model_dump(mode="json"),
+            "controller": project_controller_status(repository, get_bashgym_dir()).model_dump(
+                mode="json"
+            ),
         }
     except Exception as exc:
         _raise_api(exc)
@@ -1575,24 +1555,18 @@ def get_autoresearch_campaign(
         service.get(workspace_id, campaign_id, _principal(request))
         core = _autoresearch_core(repository)
         return {
-            "spec": core.repository.get_autoresearch_spec(
-                workspace_id, campaign_id
-            ).model_dump(mode="json"),
-            "state": core.state(workspace_id, campaign_id).model_dump(mode="json"),
-            "diagnostics": core.diagnostics(workspace_id, campaign_id).model_dump(
+            "spec": core.repository.get_autoresearch_spec(workspace_id, campaign_id).model_dump(
                 mode="json"
             ),
+            "state": core.state(workspace_id, campaign_id).model_dump(mode="json"),
+            "diagnostics": core.diagnostics(workspace_id, campaign_id).model_dump(mode="json"),
             "proposals": [
                 item.model_dump(mode="json")
-                for item in core.repository.list_autoresearch_proposals(
-                    workspace_id, campaign_id
-                )
+                for item in core.repository.list_autoresearch_proposals(workspace_id, campaign_id)
             ],
             "outcomes": [
                 item.model_dump(mode="json")
-                for item in core.repository.list_autoresearch_outcomes(
-                    workspace_id, campaign_id
-                )
+                for item in core.repository.list_autoresearch_outcomes(workspace_id, campaign_id)
             ],
             "code_lineages": [
                 item.model_dump(mode="json")
@@ -1749,25 +1723,18 @@ def record_autoresearch_result(
         principal = _principal(request)
         principal.require(body.workspace_id, Capability.EXPERIMENT_LEDGER_WRITE)
         service.get(body.workspace_id, campaign_id, principal)
-        if (
-            body.result.workspace_id != body.workspace_id
-            or body.result.campaign_id != campaign_id
-        ):
+        if body.result.workspace_id != body.workspace_id or body.result.campaign_id != campaign_id:
             raise AutoResearchInvariantError("autoresearch_result_identity_mismatch")
         if body.result.provenance.value == "real":
             raise AutoResearchInvariantError(
                 "autoresearch_real_result_requires_authoritative_evaluation"
             )
-        return _autoresearch_core(repository).record_result(body.result).model_dump(
-            mode="json"
-        )
+        return _autoresearch_core(repository).record_result(body.result).model_dump(mode="json")
     except Exception as exc:
         _raise_api(exc)
 
 
-@campaign_router.post(
-    "/{campaign_id}/proposals/{proposal_id}/code-lineage/prepare"
-)
+@campaign_router.post("/{campaign_id}/proposals/{proposal_id}/code-lineage/prepare")
 def prepare_campaign_code_lineage(
     campaign_id: str,
     proposal_id: str,
@@ -1784,9 +1751,7 @@ def prepare_campaign_code_lineage(
         record = repository.get_code_lineage(body.workspace_id, proposal_id)
         if record.campaign_id != campaign_id:
             raise RecordNotFoundError("campaign code lineage not found")
-        profile = _approved_source_profiles(request).get(
-            record.source_repository_profile_id
-        )
+        profile = _approved_source_profiles(request).get(record.source_repository_profile_id)
         if profile is None:
             raise GitLineageError("campaign_git_lineage_source_profile_unavailable")
         receipt = _lineage_manager(request).prepare(profile, record)
@@ -1799,9 +1764,7 @@ def prepare_campaign_code_lineage(
         _raise_api(exc)
 
 
-@campaign_router.post(
-    "/{campaign_id}/proposals/{proposal_id}/code-lineage/capture"
-)
+@campaign_router.post("/{campaign_id}/proposals/{proposal_id}/code-lineage/capture")
 def capture_campaign_code_lineage(
     campaign_id: str,
     proposal_id: str,
@@ -1818,9 +1781,7 @@ def capture_campaign_code_lineage(
         record = repository.get_code_lineage(body.workspace_id, proposal_id)
         if record.campaign_id != campaign_id:
             raise RecordNotFoundError("campaign code lineage not found")
-        profile = _approved_source_profiles(request).get(
-            record.source_repository_profile_id
-        )
+        profile = _approved_source_profiles(request).get(record.source_repository_profile_id)
         if profile is None:
             raise GitLineageError("campaign_git_lineage_source_profile_unavailable")
         captured = _lineage_manager(request).capture(profile, record)
@@ -1840,12 +1801,16 @@ def ingest_autoresearch_evaluation(
         principal = _principal(request)
         principal.require(body.workspace_id, Capability.EXPERIMENT_LEDGER_WRITE)
         service.get(body.workspace_id, campaign_id, principal)
-        return _autoresearch_core(repository).ingest_evaluation_result(
-            workspace_id=body.workspace_id,
-            campaign_id=campaign_id,
-            project_id=body.project_id,
-            evaluation_result_id=body.evaluation_result_id,
-        ).model_dump(mode="json")
+        return (
+            _autoresearch_core(repository)
+            .ingest_evaluation_result(
+                workspace_id=body.workspace_id,
+                campaign_id=campaign_id,
+                project_id=body.project_id,
+                evaluation_result_id=body.evaluation_result_id,
+            )
+            .model_dump(mode="json")
+        )
     except Exception as exc:
         _raise_api(exc)
 
@@ -1879,9 +1844,7 @@ def list_campaign_studies(
         return {
             "studies": [
                 item.model_dump(mode="json")
-                for item in service.studies(
-                    workspace_id, campaign_id, _principal(request)
-                )
+                for item in service.studies(workspace_id, campaign_id, _principal(request))
             ]
         }
     except Exception as exc:
@@ -1897,9 +1860,9 @@ def get_campaign_study(
 ):
     try:
         _repository, _auth, service = _services(request)
-        return service.study(
-            workspace_id, campaign_id, study_id, _principal(request)
-        ).model_dump(mode="json")
+        return service.study(workspace_id, campaign_id, study_id, _principal(request)).model_dump(
+            mode="json"
+        )
     except Exception as exc:
         _raise_api(exc)
 
@@ -2289,9 +2252,7 @@ def start_campaign(
         principal.require(body.workspace_id, Capability.CAMPAIGN_START)
 
         def require_launch_ready(_current_campaign: Campaign) -> None:
-            durable = repository.read_control_room_projection(
-                body.workspace_id, campaign_id
-            )
+            durable = repository.read_control_room_projection(body.workspace_id, campaign_id)
             if durable.autoresearch_spec is not None:
                 _require_autoresearch_launch_ready(request, repository, durable)
 
@@ -2441,10 +2402,7 @@ def campaign_artifacts(
             limit=limit,
         )
         return {
-            "artifacts": [
-                item.model_dump(mode="json")
-                for item in artifacts
-            ],
+            "artifacts": [item.model_dump(mode="json") for item in artifacts],
             "next_cursor": next_cursor,
             "has_more": has_more,
         }

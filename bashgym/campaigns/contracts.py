@@ -6,7 +6,7 @@ import hashlib
 import json
 import math
 import re
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import Enum
 from pathlib import PurePosixPath
 from typing import Annotated, Any, Literal
@@ -19,6 +19,8 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
+from bashgym._compat import UTC
 
 
 def utc_now() -> datetime:
@@ -364,8 +366,7 @@ HERMES_CAPABILITIES = frozenset(
     }
 )
 CODEX_CAPABILITIES = frozenset(
-    capability for capability in Capability
-    if capability is not Capability.PROMOTION_OVERRIDE
+    capability for capability in Capability if capability is not Capability.PROMOTION_OVERRIDE
 )
 DESKTOP_LOCAL_SCOPE = "desktop-local"
 
@@ -782,9 +783,7 @@ class ControlRoomCollectionSummaryV1(FrozenContractModel):
 class ControlRoomArtifactSummaryV1(FrozenContractModel):
     """Artifact counts without URI, metadata, or restricted evaluation content."""
 
-    schema_version: Literal["control_room_artifact_summary.v1"] = (
-        "control_room_artifact_summary.v1"
-    )
+    schema_version: Literal["control_room_artifact_summary.v1"] = "control_room_artifact_summary.v1"
     total: int = Field(ge=0)
     sealed: int = Field(ge=0)
     valid: int = Field(ge=0)
@@ -909,9 +908,7 @@ class DecisionBlockerV1(FrozenContractModel):
 class JourneyPhaseSummaryV1(FrozenContractModel):
     schema_version: Literal["journey_phase_summary.v1"] = "journey_phase_summary.v1"
     phase_id: Literal["setup", "baseline", "experiments", "human_review", "decision"]
-    state: Literal[
-        "not_started", "ready", "active", "blocked", "complete", "failed", "skipped"
-    ]
+    state: Literal["not_started", "ready", "active", "blocked", "complete", "failed", "skipped"]
     execution_owner: Literal["bashgym", "human", "none"]
     attention_owner: Literal["bashgym", "agent", "human", "none"]
     primary_blocker: DecisionBlockerV1 | None
@@ -1206,9 +1203,7 @@ class CampaignEvent(FrozenContractModel):
 class PublicCampaignEventSummaryV1(FrozenContractModel):
     """Bounded workspace-safe fields classified for public campaign timelines."""
 
-    schema_version: Literal["public_campaign_event_summary.v1"] = (
-        "public_campaign_event_summary.v1"
-    )
+    schema_version: Literal["public_campaign_event_summary.v1"] = "public_campaign_event_summary.v1"
     action_id: Identifier | None = None
     attempt_id: Identifier | None = None
     study_id: Identifier | None = None
@@ -1244,9 +1239,7 @@ class PublicCampaignEventV1(FrozenContractModel):
 class PublicCampaignArtifactV1(FrozenContractModel):
     """Opaque artifact identity and seal metadata safe for campaign readers."""
 
-    schema_version: Literal["public_campaign_artifact.v1"] = (
-        "public_campaign_artifact.v1"
-    )
+    schema_version: Literal["public_campaign_artifact.v1"] = "public_campaign_artifact.v1"
     workspace_id: Identifier
     campaign_id: Identifier
     artifact_id: Identifier
@@ -1371,9 +1364,7 @@ class SealedActionResult(FrozenContractModel):
 class ProtectedEvaluationResult(FrozenContractModel):
     """Candidate-locked, bounded result for a one-use protected evaluation epoch."""
 
-    schema_version: Literal["campaign_protected_evaluation.v1"] = (
-        "campaign_protected_evaluation.v1"
-    )
+    schema_version: Literal["campaign_protected_evaluation.v1"] = "campaign_protected_evaluation.v1"
     protected_epoch_id: Identifier
     candidate_digest: HexDigest
     passed: bool

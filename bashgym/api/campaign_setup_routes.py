@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Literal, Never, TypeVar
+from typing import Any, Literal, TypeVar
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from typing_extensions import Never
 
 from bashgym.api.campaign_routes import (
     CampaignTemplateCreateInput,

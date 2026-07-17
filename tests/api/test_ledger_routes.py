@@ -45,7 +45,7 @@ def ledger_client(tmp_path):
 
 
 def test_create_app_registers_ledger_routes():
-    paths = {route.path for route in create_app().routes}
+    paths = set(create_app().openapi()["paths"])
     assert {
         "/api/ledger/health",
         "/api/ledger/projects",

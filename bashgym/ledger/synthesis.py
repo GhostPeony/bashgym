@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from collections import Counter
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
+from bashgym._compat import UTC
 from bashgym.ledger.persistence import ExperimentLedgerRepository
 
 
@@ -105,20 +106,26 @@ def build_project_context(
 
     signals: list[dict[str, Any]] = []
     if stale_runs:
-        signals.append(
-            {"severity": "warning", "code": "stale_active_runs", "run_ids": stale_runs}
-        )
+        signals.append({"severity": "warning", "code": "stale_active_runs", "run_ids": stale_runs})
     if missing_context:
         signals.append(
             {"severity": "warning", "code": "incomplete_lineage", "run_ids": missing_context}
         )
     if completed_without_eval:
         signals.append(
-            {"severity": "warning", "code": "completed_without_eval", "run_ids": completed_without_eval}
+            {
+                "severity": "warning",
+                "code": "completed_without_eval",
+                "run_ids": completed_without_eval,
+            }
         )
     if terminal_without_artifact:
         signals.append(
-            {"severity": "info", "code": "terminal_without_artifact", "run_ids": terminal_without_artifact}
+            {
+                "severity": "info",
+                "code": "terminal_without_artifact",
+                "run_ids": terminal_without_artifact,
+            }
         )
     if status_counts.get("failed", 0):
         signals.append(
@@ -129,7 +136,9 @@ def build_project_context(
             }
         )
 
-    health = "attention" if any(signal["severity"] == "warning" for signal in signals) else "healthy"
+    health = (
+        "attention" if any(signal["severity"] == "warning" for signal in signals) else "healthy"
+    )
     return {
         "schema_version": "experiment_project_context.v1",
         "workspace_id": workspace_id,
@@ -174,7 +183,9 @@ def build_project_context(
         "recent_events": events,
         "evidence": {
             "run_ids": [run["run_id"] for run in recent_runs],
-            "evaluation_result_ids": [result["evaluation_result_id"] for result in evaluations[:recent_limit]],
+            "evaluation_result_ids": [
+                result["evaluation_result_id"] for result in evaluations[:recent_limit]
+            ],
             "artifact_ids": [artifact["artifact_id"] for artifact in artifacts[:recent_limit]],
             "decision_ids": [decision["decision_id"] for decision in decisions],
             "event_cursors": [event["cursor"] for event in events],
@@ -201,9 +212,7 @@ def compare_runs(
     }
     results = [
         result
-        for result in repository.list_evaluation_results(
-            workspace_id, project_id, limit=1000
-        )
+        for result in repository.list_evaluation_results(workspace_id, project_id, limit=1000)
         if result["run_id"] in ordered_run_ids and result["status"] == "completed"
     ]
     grouped: dict[str, dict[str, dict[str, Any]]] = {}
@@ -220,9 +229,7 @@ def compare_runs(
         baseline_id = next(run_id for run_id in ordered_run_ids if run_id in by_run)
         metric_contract = suite["metric_contract"]
         metric_names = sorted(
-            set.intersection(
-                *(set(result["metrics"]) for result in by_run.values())
-            )
+            set.intersection(*(set(result["metrics"]) for result in by_run.values()))
         )
         metrics = []
         for metric_name in metric_names:
@@ -236,15 +243,12 @@ def compare_runs(
             values = {
                 run_id: {
                     "value": float(by_run[run_id]["metrics"][metric_name]),
-                    "delta_from_baseline": float(by_run[run_id]["metrics"][metric_name])
-                    - baseline,
+                    "delta_from_baseline": float(by_run[run_id]["metrics"][metric_name]) - baseline,
                 }
                 for run_id in ordered_run_ids
                 if run_id in by_run
             }
-            metrics.append(
-                {"metric_name": metric_name, "direction": direction, "values": values}
-            )
+            metrics.append({"metric_name": metric_name, "direction": direction, "values": values})
         comparisons.append(
             {
                 "evaluation_suite_id": suite_id,

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import logging
-from typing import Never
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from typing_extensions import Never
 
 from bashgym.api.campaign_routes import _autoresearch_core, _principal, _raise_api
 from bashgym.campaigns.autoresearch import AutoResearchError
@@ -162,11 +162,16 @@ def ledger_health(request: Request, workspace_id: str = Query(min_length=1, max_
 @router.get("/projects")
 def list_projects(request: Request, workspace_id: str = Query(min_length=1, max_length=160)):
     _authorize(request, workspace_id)
-    return {"schema_version": "experiment_projects.v1", "projects": _repository(request).list_projects(workspace_id)}
+    return {
+        "schema_version": "experiment_projects.v1",
+        "projects": _repository(request).list_projects(workspace_id),
+    }
 
 
 @router.get("/projects/{project_id}")
-def get_project(project_id: str, request: Request, workspace_id: str = Query(min_length=1, max_length=160)):
+def get_project(
+    project_id: str, request: Request, workspace_id: str = Query(min_length=1, max_length=160)
+):
     _authorize(request, workspace_id)
     try:
         return _repository(request).get_project(workspace_id, project_id)

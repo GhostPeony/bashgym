@@ -346,6 +346,9 @@ data-designer = [
 ]
 dev = [
     { name = "black" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
+    { name = "numpy", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
@@ -384,6 +387,7 @@ requires-dist = [
     { name = "liger-kernel", marker = "extra == 'training-optimized'", specifier = ">=0.5.0" },
     { name = "mcp", specifier = ">=1.27,<2" },
     { name = "nemo-microservices", marker = "extra == 'nemo-customizer'", specifier = ">=0.1.0" },
+    { name = "numpy", marker = "extra == 'dev'", specifier = ">=1.26.0" },
     { name = "pandas", marker = "extra == 'data-designer'", specifier = ">=2.0.0" },
     { name = "peft", marker = "extra == 'training'", specifier = ">=0.7.0" },
     { name = "pillow", specifier = ">=10.0.0" },

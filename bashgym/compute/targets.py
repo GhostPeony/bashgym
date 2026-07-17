@@ -212,7 +212,7 @@ def launch_plan(target: ComputeTarget, *, plan_path: str | Path | None = None) -
         provider_config = {
             "host_env": host_env,
             "workdir_env": workdir_env,
-            "command": f"ssh ${host_env} 'cd ${{{workdir_env}:-~/ghostwork}} && {command}'",
+            "command": (f"ssh ${host_env} 'cd ${{{workdir_env}:?set {workdir_env}}} && {command}'"),
         }
     elif target.launcher == ComputeLauncher.SKYPILOT:
         provider_config = {

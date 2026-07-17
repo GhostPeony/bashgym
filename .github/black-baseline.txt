@@ -4,7 +4,6 @@
 f805e0e3324dd190a01eb8482b29322d59b04034  bashgym/agent/hf_context_tools.py
 758468bb384fb75542160592c544eacc24c55dc9  bashgym/agent/skill_lab_tools.py
 b833c78ad2cd032bd26ecf5c652ce5fb6fc8d8e0  bashgym/agent/tools.py
-1f949158dc46c80050a52283d0d68b70a0cbdc90  bashgym/api/agent_routes.py
 e2a54c40f3273990c06cb56487a07f716ec02418  bashgym/api/hf_routes.py
 154929dfeb1a12b44fdeb97b79d45f8d6545c6ae  bashgym/api/knowledge_routes.py
 6d3bcabebed5d6a4074492f499e497171bd3741b  bashgym/api/schemas.py
@@ -19,7 +18,6 @@ c5ca03d419d07229a0789893bbb4f547dc20ed2f  bashgym/campaigns/evaluation.py
 166d6edd3ac10563f79ddf314e4e64797a372022  bashgym/campaigns/metrics.py
 7c2c39ed909bc7dc27c0fbec5b835bdda1be0036  bashgym/campaigns/nemo_gym_evidence.py
 f310431a0d4f4397905e7eaf0940b0b07c570bef  bashgym/campaigns/persistence.py
-bee66e084acd908b55b07203f706838fbfc3ef34  bashgym/campaigns/proposals.py
 d1df3a0a085e405a2a5af2d11eef7baec5992362  bashgym/campaigns/research_diagnostics.py
 3e0c3072434e9b6bb63d0dfab8e99784d266b656  bashgym/campaigns/runtime.py
 f39288cdac85c21c8522d92a74fc42d1cddff1af  bashgym/campaigns/service.py

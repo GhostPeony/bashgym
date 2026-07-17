@@ -278,6 +278,7 @@ PUBLIC_CAMPAIGN_ARTIFACT_SCHEMA_NAMES = frozenset(
         "huggingface_model_file.v1",
         "memexai_query_format_ablation_manifest.v1",
         "nemo_gym_campaign_evidence.v1",
+        "query_format_ablation_manifest.v2",
         "training_manifest.v1",
         "training_metrics_jsonl.v1",
         "unclassified_artifact.v1",
@@ -344,6 +345,7 @@ class Capability(str, Enum):
     PROMOTION_DECIDE = "promotion.decide"
     PROMOTION_OVERRIDE = "promotion.override"
     ARTIFACT_PUBLISH_HF = "artifact.publish_hf"
+    HANDOFF_EXTERNAL_PREPARE = "handoff.external_prepare"
     HANDOFF_MEMEXAI_PREPARE = "handoff.memexai_prepare"
 
 
@@ -366,7 +368,13 @@ HERMES_CAPABILITIES = frozenset(
     }
 )
 CODEX_CAPABILITIES = frozenset(
-    capability for capability in Capability if capability is not Capability.PROMOTION_OVERRIDE
+    capability
+    for capability in Capability
+    if capability
+    not in {
+        Capability.PROMOTION_OVERRIDE,
+        Capability.HANDOFF_MEMEXAI_PREPARE,
+    }
 )
 DESKTOP_LOCAL_SCOPE = "desktop-local"
 
@@ -394,6 +402,7 @@ class CampaignManifest(FrozenContractModel):
     max_proposal_rounds: int = Field(default=5, ge=1, le=100)
     retention_days_failed: int = Field(default=90, ge=1)
     allow_hf_publication: bool = False
+    allow_external_handoff: bool = False
     allow_memexai_handoff: bool = False
 
     @field_validator("approved_data_scopes")

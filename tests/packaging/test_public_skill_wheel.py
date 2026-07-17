@@ -9,6 +9,7 @@ import sys
 import threading
 import venv
 import zipfile
+from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -46,6 +47,29 @@ PUBLIC_SKILL_NAMES = {
     "traces",
     "training",
 }
+LEGACY_WHEEL_RESIDUE = {
+    "bashgym/campaigns/campaign_agents.py": Counter(
+        {"capability.handoff_memexai_prepare": 1}
+    ),
+    "bashgym/campaigns/contracts.py": Counter(
+        {
+            "allow_memexai_handoff": 1,
+            "capability.handoff_memexai_prepare": 1,
+            "handoff.memexai_prepare": 1,
+            "handoff_memexai_prepare": 1,
+            "memexai_query_format_ablation_manifest.v1": 1,
+        }
+    ),
+    "bashgym/campaigns/executors.py": Counter({"memexai_youtube": 2}),
+    "bashgym/campaigns/installation.py": Counter({"allow_memexai_handoff": 1}),
+    "bashgym/campaigns/proposals.py": Counter(
+        {"capability.handoff_memexai_prepare": 1}
+    ),
+}
+LEGACY_RESIDUE_TOKEN = re.compile(
+    r"[a-z0-9_.]*memexai[a-z0-9_.]*",
+    re.IGNORECASE,
+)
 
 
 @pytest.fixture(scope="module")
@@ -155,6 +179,40 @@ def test_wheel_does_not_capture_unrelated_checkout_content(public_skill_wheel: P
         ]
 
     assert unexpected == []
+
+
+def test_every_text_wheel_member_has_no_unreviewed_private_residue(
+    public_skill_wheel: Path,
+):
+    private_term = re.compile(
+        r"(?<![a-z0-9])(?:memexai|ponyo|gx10|cade|ghostwork)(?![a-z0-9])",
+        re.IGNORECASE,
+    )
+    private_path = re.compile(
+        r"(?:[a-z]:[\\/]users[\\/][^\\/\s\"']+|/(?:users|home)/(?![\"'])[^/\s\"']+)",
+        re.IGNORECASE,
+    )
+    observed_legacy: dict[str, Counter[str]] = {}
+    with zipfile.ZipFile(public_skill_wheel) as archive:
+        for name in archive.namelist():
+            if name.endswith("/"):
+                continue
+            try:
+                content = archive.read(name).decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+            searchable = f"{name}\n{content}"
+            legacy = Counter(
+                match.group(0).casefold()
+                for match in LEGACY_RESIDUE_TOKEN.finditer(searchable)
+            )
+            if legacy:
+                observed_legacy[name] = legacy
+            scrubbed = LEGACY_RESIDUE_TOKEN.sub("", searchable)
+            assert private_term.search(scrubbed) is None, name
+            assert private_path.search(scrubbed) is None, name
+
+    assert observed_legacy == LEGACY_WHEEL_RESIDUE
 
 
 def test_installed_wheel_skill_loader_discovers_the_public_operator_skills(

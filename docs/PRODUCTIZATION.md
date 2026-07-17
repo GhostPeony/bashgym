@@ -48,11 +48,14 @@ release claim.
 | Run durable AutoResearch control smoke | 3.03 s | All seven control checks passed |
 | **Source-to-first-working-result** | **48.71 s** | Build through bounded control proof |
 
-The current clean-source wheel proof contains 409 entries (1,694,105 bytes) and
-excludes checkout tests, frontend output, build artifacts, local model caches,
-private plans, and machine profiles. It retains the eight packaged Hugging Face
-skill manifests, the judge shell verifier, the public training documents, and
-the explicit public workspace-skill bundle described below.
+The current clean-source wheel proof excludes checkout tests, frontend output,
+build artifacts, local model caches, private plans, and machine profiles. It
+retains the eight packaged Hugging Face skill manifests, the judge shell
+verifier, the public training documents, and the explicit public
+workspace-skill bundle described below. Every UTF-8 text member of the wheel is
+scanned for private paths and installation-specific identifiers. Frozen v1
+compatibility tokens are accepted only through an exact file-and-count
+allowlist, so a new occurrence fails the build.
 
 The wheel regression now also packages the seven source-managed workspace skills
 (`bashgym`, `bashgym-operator`, `factory`, `models`, `system`, `traces`, and
@@ -88,13 +91,12 @@ development-renderer origin. The legacy Electron `BASHGYM_API_URL` name remains
 a validated compatibility alias; it is not a second source of truth.
 
 The source-free resolution path has a renderer/main unit contract and the wheel
-smoke imports and constructs the API from outside the checkout. CI now builds an
+smoke imports and constructs the API from outside the checkout. CI builds an
 unsigned unpacked app natively on Windows, Linux, and macOS, launches it with the
 backend deliberately unavailable, verifies the preload boundary, and creates,
-lists, kills, and confirms removal of a real PTY. An existing Windows unpacked
-artifact passed that probe locally. Retaining passing current-source results on
-all three CI hosts remains a release gate; package construction by itself is not
-counted as startup proof.
+lists, kills, and confirms removal of a real PTY. Current-source hosted runs
+have passed that startup probe on all three operating systems; package
+construction by itself is not counted as startup proof.
 
 Run the equivalent checkout path with:
 
@@ -215,15 +217,19 @@ utility in the repository. Legacy machine-specific scripts and environment
 aliases elsewhere in the tree still need to be removed or generalized before
 BashGym can claim repository-wide portability.
 
-The public Git tree also still contains a project-specific experiment toolkit,
-an external-feedback memo with author contact details, a legacy device bootstrap
-script, and frozen v1 campaign identifiers used by historical records. They are
-excluded from the workspace-skill allowlist, but wheel exclusion is not a
-repository privacy boundary. The repository owner must explicitly retain,
-generalize, move private, or remove those materials. Frozen durable identifiers
-need a distinct generic v2 contract plus read compatibility; they must never be
-renamed in place because their canonical JSON participates in hashes, sealed
-artifact signatures, and idempotency keys.
+The public Git tree still contains a project-specific experiment toolkit, an
+external-feedback memo with author contact details, and a legacy device
+bootstrap script. They are excluded from the workspace-skill allowlist, but
+wheel exclusion is not a repository privacy boundary. The repository owner must
+explicitly retain, generalize, move private, or remove those materials.
+
+The packaged campaign boundary now uses generic v2 defaults for registered
+development scorers and external handoff authority. Frozen v1 scorer and
+handoff identifiers remain parseable for historical records but cannot receive
+new Codex authority or execute a new scorer run. Their exact remaining wheel
+tokens are count-locked by the privacy test; durable names are never rewritten
+in place because their canonical JSON participates in hashes, sealed artifact
+signatures, and idempotency keys.
 
 ## DX scorecard
 
@@ -234,16 +240,17 @@ artifact signatures, and idempotency keys.
 | Error guidance | 8/10 | Model inspection, guided activation, and campaign doctor fail closed with identity, source, runtime, and compute diagnostics. |
 | Documentation | 8/10 | Public entry points link the durable campaign, training, portability, and contribution contracts; live hardware evidence remains operator-owned. |
 | Upgrade path | 4/10 | Changelog exists, but migrations and compatibility policy need a release-grade guide. |
-| Developer environment | 8/10 | CI defines Python 3.10–3.12/Linux plus Windows/macOS 3.12 packaging cells, the full Node 22 frontend gate, and native three-OS Electron startup/PTY smokes. Historical Black debt is hash-locked so new files and any touched legacy file cannot add formatting drift. Current-source hosted results still need to be retained. |
+| Developer environment | 8/10 | CI defines Python 3.10–3.12/Linux plus Windows/macOS 3.12 packaging cells, the full Node 22 frontend gate, and native three-OS Electron startup/PTY smokes. Historical Black debt is hash-locked so new files and any touched legacy file cannot add formatting drift. Packaging, frontend, and all three native startup jobs have retained current-source hosted passes; the complete Linux suite remains the final software gate. |
 | Community | 5/10 | Contributing guide and issue URL exist; support/discussion workflow is still thin. |
 | DX measurement | 6/10 | CI now measures installed-artifact behavior; recurring cold-install and hardware-lane telemetry are not yet automated. |
 | **Overall** | **6.6/10** | The control plane and guided activation are usable; release-grade upgrades and live hardware proof remain. |
 
 ## Remaining productization milestones
 
-1. Retain passing hosted results for the five-cell Python compatibility matrix,
-   full frontend gate, and three native Electron startup/PTY smokes. Restore the
-   existing whole-tree Black baseline before treating that check as a merge gate.
+1. Retain a green complete Linux suite after the POSIX virtualenv MCP launch-path
+   fix. The five-cell packaging matrix, full frontend gate, cross-platform Black
+   ratchet, and three native Electron startup/PTY smokes already have
+   current-source hosted passes.
 2. Add a hardware-gated local/private smoke that inspects an existing approved
    trainable model, runs a bounded real baseline, and ingests the authoritative
    evaluation without downloading or substituting a model.

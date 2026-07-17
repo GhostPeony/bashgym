@@ -26,6 +26,16 @@ def test_private_gpu_uses_only_machine_neutral_configuration_names():
     assert set(target.metadata) == {"description", "host_env", "workdir_env"}
 
 
+def test_private_gpu_launch_plan_requires_registered_remote_workdir():
+    target = get_compute_target("private_gpu")
+
+    plan = launch_plan(target, plan_path="runs/demo/plan.json")
+
+    command = plan["provider_config"]["command"]
+    assert "${BASHGYM_PRIVATE_GPU_WORKDIR:?set BASHGYM_PRIVATE_GPU_WORKDIR}" in command
+    assert "~/" not in command
+
+
 def test_skypilot_launch_plan_generates_yaml_without_secrets():
     target = get_compute_target("skypilot_a10g")
 

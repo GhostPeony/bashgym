@@ -218,6 +218,13 @@ renderer origin. The legacy Electron-only `BASHGYM_API_URL` name is accepted as
 a normalized compatibility alias, while browser builds may still inject
 `VITE_API_URL` at build time.
 
+Release CI builds and installs the wheel on Python 3.10–3.12, runs the complete
+Node 22 frontend gate, and builds, launches, and exercises an unsigned Electron
+package on Windows, Linux, and macOS. The wheel privacy regression scans every
+UTF-8 text member for private paths and installation-specific identifiers. A
+small frozen-v1 compatibility allowlist is exact and count-checked; new campaign
+contracts use generic v2 scorer and external-handoff identifiers.
+
 ### 5. Use Your AI Coding Tools
 
 That's it. Work on your projects with Claude Code, Gemini CLI, OpenCode, Copilot CLI, or any other configured tool like you always do. Every session is captured automatically. Check the **Traces** tab in the dashboard to watch them accumulate.

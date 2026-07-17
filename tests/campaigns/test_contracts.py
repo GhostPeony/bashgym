@@ -1,12 +1,16 @@
 """Executable campaign-contract and state-machine tests."""
 
 from itertools import product
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
 
+from bashgym.campaigns.artifacts import ArtifactSealer
 from bashgym.campaigns.contracts import (
+    CODEX_CAPABILITIES,
     HERMES_CAPABILITIES,
+    PUBLIC_CAMPAIGN_ARTIFACT_SCHEMA_NAMES,
     AutonomyProfile,
     CampaignEvent,
     CampaignStatus,
@@ -17,6 +21,10 @@ from bashgym.campaigns.contracts import (
     StageKind,
     StagePlan,
     StagePlanItem,
+)
+from bashgym.campaigns.executors import (
+    DevelopmentEvaluationExecutor,
+    DevelopmentScorerConfig,
 )
 from bashgym.campaigns.transitions import (
     InvalidCampaignTransitionError,
@@ -38,6 +46,21 @@ def test_campaign_transition_matrix_is_total_and_fail_closed():
             with pytest.raises(InvalidCampaignTransitionError) as error:
                 transition_campaign(status, trigger)
             assert error.value.code == "campaign_invalid_transition"
+
+
+def test_codex_grants_generic_external_handoff_without_new_legacy_authority():
+    values = {capability.value for capability in Capability}
+    assert "handoff.external_prepare" in values
+    assert Capability.HANDOFF_EXTERNAL_PREPARE in CODEX_CAPABILITIES
+    assert Capability.HANDOFF_MEMEXAI_PREPARE not in CODEX_CAPABILITIES
+
+
+def test_public_artifact_schemas_add_generic_v2_without_renaming_legacy_v1():
+    assert "query_format_ablation_manifest.v2" in PUBLIC_CAMPAIGN_ARTIFACT_SCHEMA_NAMES
+    assert (
+        "memexai_query_format_ablation_manifest.v1"
+        in PUBLIC_CAMPAIGN_ARTIFACT_SCHEMA_NAMES
+    )
 
 
 def test_authority_round_trip_preserves_prior_pause_intent():
@@ -84,6 +107,58 @@ def test_stage_plan_is_immutable_unique_and_explicit():
 
     with pytest.raises(ValidationError, match="cannot repeat"):
         StagePlan(items=(plan.items[0], plan.items[0]))
+
+
+def test_development_scorer_uses_generic_v2_defaults_and_parses_explicit_legacy_v1(
+    tmp_path,
+):
+    values = {
+        "scorer_script_path": tmp_path / "scorer.py",
+        "expected_scorer_sha256": "a" * 64,
+        "embedding_model_path": tmp_path / "model",
+        "corpus_path": tmp_path / "corpus.jsonl",
+        "expected_corpus_sha256": "b" * 64,
+        "corpus_embedding_matrix": tmp_path / "corpus.npy",
+        "expected_matrix_sha256": "c" * 64,
+        "corpus_embedding_chunk_ids": tmp_path / "chunk-ids.json",
+        "expected_chunk_ids_sha256": "d" * 64,
+    }
+
+    current = DevelopmentScorerConfig(**values)
+    assert current.schema_version == "campaign_development_scorer_config.v2"
+    assert current.query_prefix_mode == "raw"
+
+    legacy = DevelopmentScorerConfig(
+        **values,
+        schema_version="campaign_development_scorer_config.v1",
+        query_prefix_mode="memexai_youtube",
+    )
+    assert legacy.schema_version == "campaign_development_scorer_config.v1"
+    with pytest.raises(ValidationError, match="legacy scorer mode requires the v1 schema"):
+        DevelopmentScorerConfig(**values, query_prefix_mode="memexai_youtube")
+
+
+def test_development_executor_keeps_legacy_v1_scorer_records_read_only(tmp_path):
+    legacy = DevelopmentScorerConfig(
+        scorer_script_path=tmp_path / "scorer.py",
+        expected_scorer_sha256="a" * 64,
+        embedding_model_path=tmp_path / "model",
+        corpus_path=tmp_path / "corpus.jsonl",
+        expected_corpus_sha256="b" * 64,
+        corpus_embedding_matrix=tmp_path / "corpus.npy",
+        expected_matrix_sha256="c" * 64,
+        corpus_embedding_chunk_ids=tmp_path / "chunk-ids.json",
+        expected_chunk_ids_sha256="d" * 64,
+        schema_version="campaign_development_scorer_config.v1",
+        query_prefix_mode="memexai_youtube",
+    )
+    executor = DevelopmentEvaluationExecutor(
+        tmp_path / "artifacts",
+        ArtifactSealer(b"x" * 32, key_version="test-v1"),
+    )
+
+    with pytest.raises(RuntimeError, match="campaign_development_legacy_scorer_read_only"):
+        executor._score(SimpleNamespace(scorer=legacy), tmp_path / "temporary")
 
 
 def test_campaign_event_rejects_secret_shaped_payload_fields():

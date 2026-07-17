@@ -2091,7 +2091,7 @@ def create_app() -> FastAPI:
     def _resolve_training_log(run_id: str) -> Path | None:
         # Run layout is nested: <root>/<stage>/<run>/training.log. Match any depth.
         # Treat run_id as the immediate parent dir name (e.g. 'cascade-foo-123')
-        # or a relative path like 'stage_1_repo_ghostwork/cascade-foo-123'.
+        # or a relative path like 'stage_1_repo_example/cascade-foo-123'.
         for root in _CHECKPOINT_ROOTS:
             if not root.exists():
                 continue

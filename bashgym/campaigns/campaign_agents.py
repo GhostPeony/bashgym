@@ -161,6 +161,7 @@ PROHIBITED_CAMPAIGN_AGENT_CAPABILITIES = frozenset(
         Capability.PROMOTION_DECIDE,
         Capability.PROMOTION_OVERRIDE,
         Capability.ARTIFACT_PUBLISH_HF,
+        Capability.HANDOFF_EXTERNAL_PREPARE,
         Capability.HANDOFF_MEMEXAI_PREPARE,
     }
 )

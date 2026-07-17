@@ -1007,6 +1007,7 @@ def test_attachment_lifetime_uses_bounded_rolling_window_without_exhaustion(setu
 def test_fixed_agent_capability_map_excludes_every_prohibited_authority():
     mapped = mapped_campaign_capabilities(tuple(CampaignAgentCapability))
 
+    assert Capability.HANDOFF_EXTERNAL_PREPARE in PROHIBITED_CAMPAIGN_AGENT_CAPABILITIES
     assert mapped.isdisjoint(PROHIBITED_CAMPAIGN_AGENT_CAPABILITIES)
     assert Capability.COMPUTE_AMEND_BUDGET not in mapped
     assert Capability.PROMOTION_DECIDE not in mapped

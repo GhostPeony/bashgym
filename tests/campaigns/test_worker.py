@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from bashgym._compat import UTC
-from bashgym.campaigns.artifacts import ArtifactSealer
+from bashgym.campaigns.artifacts import SEAL_FILENAME, ArtifactSealer
 from bashgym.campaigns.auth import CampaignAuthService
 from bashgym.campaigns.contracts import (
     AttemptStatus,
@@ -1177,11 +1177,11 @@ for row in rows:
         'channel': 'Channel A',
         'source_set': 'fixture',
     })
-rows_path = args.output_dir / 'memexai_youtube-retrieval_eval_queries.jsonl'
+rows_path = args.output_dir / 'domain_retrieval-retrieval_eval_queries.jsonl'
 rows_path.write_text(''.join(json.dumps(row, sort_keys=True) + '\\n' for row in rows), encoding='utf-8')
 manifest = {
     'model_footprint_bytes': 4321,
-    'runs': {'memexai_youtube': {'median_query_latency_ms': 12.5}},
+    'runs': {'domain_retrieval': {'median_query_latency_ms': 12.5}},
 }
 (args.output_dir / 'query_format_ablation_manifest.json').write_text(
     json.dumps(manifest, sort_keys=True), encoding='utf-8'
@@ -1221,7 +1221,7 @@ manifest = {
                 "protected_hashes": ["f" * 64],
                 "protected_path_fragments": ["heldout-test"],
                 "corpus_sha256": digest(corpus),
-                "representation_contract": {"query_prefix_mode": "memexai_youtube"},
+                "representation_contract": {"query_prefix_mode": "domain_retrieval"},
                 "gate_contract": {"bootstrap_samples": 100},
                 "scorer": {
                     "scorer_script_path": str(scorer),
@@ -1233,7 +1233,7 @@ manifest = {
                     "expected_matrix_sha256": digest(matrix),
                     "corpus_embedding_chunk_ids": str(chunk_ids),
                     "expected_chunk_ids_sha256": digest(chunk_ids),
-                    "query_prefix_mode": "memexai_youtube",
+                    "query_prefix_mode": "domain_retrieval",
                     "embedding_device": "cpu",
                 },
             },
@@ -1247,6 +1247,15 @@ manifest = {
     completed = repository.get_attempt("workspace-a", scheduled.attempt_id)
     sealed = Path(completed.sealed_result_uri)
     assert (sealed / "scoring" / "query_format_ablation_manifest.json").is_file()
+    envelope = json.loads((sealed / SEAL_FILENAME).read_text(encoding="utf-8"))
+    output_schemas = {
+        output["path"]: output["schema_name"]
+        for output in envelope["manifest"]["outputs"]
+    }
+    assert (
+        output_schemas["scoring/query_format_ablation_manifest.json"]
+        == "query_format_ablation_manifest.v2"
+    )
     evaluation = json.loads((sealed / "evaluation.json").read_text(encoding="utf-8"))
     assert evaluation["median_latency_ms"] == 12.5
     assert evaluation["model_footprint_bytes"] == 4321

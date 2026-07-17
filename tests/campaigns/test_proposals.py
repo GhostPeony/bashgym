@@ -24,8 +24,9 @@ from bashgym.campaigns.persistence import (
     IdempotencyConflictError,
     InvalidProposalTransitionError,
 )
+from bashgym.campaigns.proposals import validate_proposal_submission
 from bashgym.campaigns.service import CampaignControllerService, CampaignService
-from tests.campaigns.test_persistence import campaign, create
+from tests.campaigns.test_persistence import campaign, create, manifest
 
 
 def principal(repository, profile=AutonomyProfile.CODEX_TRUSTED):
@@ -186,6 +187,50 @@ def test_live_training_requires_declared_compute_capabilities(repository):
         "proposal_compute_smoke_capability_missing",
         "proposal_compute_training_capability_missing",
     )
+
+
+def test_external_handoff_uses_generic_opt_in_and_keeps_legacy_capability_read_only(
+    repository,
+):
+    actor = principal(repository)
+    generic = proposal("proposal-generic-handoff").model_copy(
+        update={"required_capabilities": frozenset({Capability.HANDOFF_EXTERNAL_PREPARE})}
+    )
+
+    denied = validate_proposal_submission(
+        generic,
+        manifest(),
+        actor,
+        existing_prerequisite_ids=frozenset(),
+    )
+    assert denied.reason_codes == ("proposal_external_handoff_not_approved",)
+
+    allowed = validate_proposal_submission(
+        generic,
+        manifest().model_copy(update={"allow_external_handoff": True}),
+        actor,
+        existing_prerequisite_ids=frozenset(),
+    )
+    assert allowed.valid is True
+
+    legacy_actor = actor.model_copy(
+        update={
+            "capabilities": actor.capabilities | {Capability.HANDOFF_MEMEXAI_PREPARE}
+        }
+    )
+    legacy = generic.model_copy(
+        update={
+            "proposal_id": "proposal-legacy-handoff",
+            "required_capabilities": frozenset({Capability.HANDOFF_MEMEXAI_PREPARE}),
+        }
+    )
+    legacy_result = validate_proposal_submission(
+        legacy,
+        manifest().model_copy(update={"allow_memexai_handoff": True}),
+        legacy_actor,
+        existing_prerequisite_ids=frozenset(),
+    )
+    assert legacy_result.reason_codes == ("proposal_legacy_handoff_read_only",)
 
 
 def test_live_training_rejects_actor_supplied_execution_material(repository):

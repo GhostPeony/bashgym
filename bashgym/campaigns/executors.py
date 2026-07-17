@@ -29,6 +29,18 @@ from bashgym.campaigns.evaluation import (
     compare_development_evaluations,
     load_retrieval_evaluation_artifact,
 )
+from bashgym.campaigns.nemo_gym_evidence import (
+    NEMO_GYM_CAMPAIGN_EVIDENCE_FILENAME,
+    NEMO_GYM_CAMPAIGN_EVIDENCE_SCHEMA,
+    load_nemo_gym_campaign_evidence,
+)
+from bashgym.campaigns.nemo_gym_ingestion import (
+    NEMO_GYM_BUNDLE_MANIFEST_FILENAME,
+    NEMO_GYM_ENVIRONMENT_CONTRACT_FILENAME,
+    NEMO_GYM_REFIT_RECEIPT_FILENAME,
+    NEMO_GYM_TRAJECTORIES_FILENAME,
+    convert_nemo_gym_outputs,
+)
 from bashgym.campaigns.remote import RemoteObservation, RemoteRunIdentity
 
 
@@ -150,6 +162,34 @@ class RemoteOutputSealer:
     ) -> tuple[Path, SealedActionResult]:
         if observation.exit_code != 0 or observation.state.value != "completed":
             raise ValueError("remote completion must have a proven zero exit code")
+        evidence_path = temporary / NEMO_GYM_CAMPAIGN_EVIDENCE_FILENAME
+        if evidence_path.exists():
+            load_nemo_gym_campaign_evidence(evidence_path, expected_attempt=attempt)
+        else:
+            companions = {
+                name: tuple(
+                    path
+                    for path in temporary.rglob(name)
+                    if path.is_file() and not path.is_symlink()
+                )
+                for name in (
+                    NEMO_GYM_BUNDLE_MANIFEST_FILENAME,
+                    NEMO_GYM_ENVIRONMENT_CONTRACT_FILENAME,
+                    NEMO_GYM_TRAJECTORIES_FILENAME,
+                    NEMO_GYM_REFIT_RECEIPT_FILENAME,
+                )
+            }
+            if any(companions.values()):
+                if any(len(paths) != 1 for paths in companions.values()):
+                    raise ValueError("NeMo Gym raw evidence companions are incomplete or ambiguous")
+                convert_nemo_gym_outputs(
+                    attempt,
+                    bundle_manifest=companions[NEMO_GYM_BUNDLE_MANIFEST_FILENAME][0],
+                    environment_contract=companions[NEMO_GYM_ENVIRONMENT_CONTRACT_FILENAME][0],
+                    trajectories=companions[NEMO_GYM_TRAJECTORIES_FILENAME][0],
+                    refit_receipt_path=companions[NEMO_GYM_REFIT_RECEIPT_FILENAME][0],
+                    output_directory=temporary,
+                )
         schemas = {
             path.relative_to(temporary).as_posix(): self._schema_for(path, temporary)
             for path in temporary.rglob("*")
@@ -158,9 +198,7 @@ class RemoteOutputSealer:
         if not schemas:
             raise ValueError("remote completion has no downloaded evidence")
         outputs = self.sealer.describe_outputs(temporary, schemas)
-        elapsed_seconds = max(
-            0.0, (observation.observed_at - identity.launched_at).total_seconds()
-        )
+        elapsed_seconds = max(0.0, (observation.observed_at - identity.launched_at).total_seconds())
         manifest = SealedActionResult(
             workspace_id=attempt.workspace_id,
             campaign_id=attempt.campaign_id,
@@ -223,9 +261,7 @@ class RemoteOutputSealer:
         if not required.issubset(schemas):
             raise ValueError("remote terminal evidence is incomplete")
         outputs = self.sealer.describe_outputs(temporary, schemas)
-        elapsed_seconds = max(
-            0.0, (observation.observed_at - identity.launched_at).total_seconds()
-        )
+        elapsed_seconds = max(0.0, (observation.observed_at - identity.launched_at).total_seconds())
         manifest = SealedActionResult(
             workspace_id=attempt.workspace_id,
             campaign_id=attempt.campaign_id,
@@ -277,9 +313,7 @@ class RemoteOutputSealer:
 
         observed_at = utc_now()
         temporary = (
-            self.artifact_root
-            / ".tmp"
-            / f"{attempt.action_id}.{attempt.attempt_id}.{uuid4().hex}"
+            self.artifact_root / ".tmp" / f"{attempt.action_id}.{attempt.attempt_id}.{uuid4().hex}"
         )
         temporary.mkdir(parents=True, exist_ok=False)
         evidence = {
@@ -328,12 +362,14 @@ class RemoteOutputSealer:
     @staticmethod
     def _schema_for(path: Path, root: Path) -> str:
         relative = path.relative_to(root).as_posix()
+        if relative == NEMO_GYM_CAMPAIGN_EVIDENCE_FILENAME:
+            return NEMO_GYM_CAMPAIGN_EVIDENCE_SCHEMA
         if relative == "training_metrics.jsonl":
             return "training_metrics_jsonl.v1"
         if relative == "training_manifest.json":
             return "embedding_training_manifest.v1"
         if relative == "launch_manifest.json":
-            return "campaign_remote_launch_manifest.v1"
+            return "campaign_remote_launch_manifest.v2"
         if relative == "training.log":
             return "campaign_training_log.v1"
         if relative == "exit_code":
@@ -344,9 +380,12 @@ class RemoteOutputSealer:
 
 
 class DevelopmentScorerConfig(ContractModel):
-    """Hash-pinned inputs for invoking the MemexAI development scorer."""
+    """Hash-pinned inputs for invoking a registered development scorer."""
 
-    schema_version: str = "campaign_development_scorer_config.v1"
+    schema_version: Literal[
+        "campaign_development_scorer_config.v1",
+        "campaign_development_scorer_config.v2",
+    ] = "campaign_development_scorer_config.v2"
     scorer_script_path: Path
     expected_scorer_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     embedding_model_path: Path
@@ -356,14 +395,26 @@ class DevelopmentScorerConfig(ContractModel):
     expected_matrix_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     corpus_embedding_chunk_ids: Path
     expected_chunk_ids_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    query_prefix_mode: Literal["raw", "qwen_retrieval", "memexai_youtube"] = (
-        "memexai_youtube"
-    )
+    query_prefix_mode: Literal[
+        "raw",
+        "domain_retrieval",
+        "qwen_retrieval",
+        "memexai_youtube",
+    ] = "raw"
     embedding_device: str = Field(default="cuda", min_length=1, max_length=80)
     embedding_batch_size: int = Field(default=32, ge=1, le=4096)
     latency_repetitions: int = Field(default=3, ge=1, le=100)
     truncate_dim: int = Field(default=768, ge=1, le=8192)
     timeout_seconds: int = Field(default=3600, ge=1, le=86400)
+
+    @model_validator(mode="after")
+    def require_legacy_schema_for_legacy_mode(self) -> DevelopmentScorerConfig:
+        if (
+            self.query_prefix_mode == "memexai_youtube"
+            and self.schema_version != "campaign_development_scorer_config.v1"
+        ):
+            raise ValueError("legacy scorer mode requires the v1 schema")
+        return self
 
 
 class DevelopmentEvaluationConfig(ContractModel):
@@ -435,6 +486,8 @@ class DevelopmentEvaluationExecutor:
         scorer = config.scorer
         if scorer is None:
             raise ValueError("campaign_development_scorer_missing")
+        if scorer.schema_version == "campaign_development_scorer_config.v1":
+            raise RuntimeError("campaign_development_legacy_scorer_read_only")
         script = self._require_file_hash(
             scorer.scorer_script_path, scorer.expected_scorer_sha256, "scorer"
         )
@@ -523,9 +576,7 @@ class DevelopmentEvaluationExecutor:
             minimum_videos=config.gate_contract.minimum_videos,
         ).validate_file(config.development_path)
         temporary = (
-            self.artifact_root
-            / ".tmp"
-            / f"{attempt.action_id}.{attempt.attempt_id}.{uuid4().hex}"
+            self.artifact_root / ".tmp" / f"{attempt.action_id}.{attempt.attempt_id}.{uuid4().hex}"
         )
         temporary.mkdir(parents=True, exist_ok=False)
         scored_rows_path = config.scored_rows_path
@@ -570,7 +621,7 @@ class DevelopmentEvaluationExecutor:
             schemas.update(
                 {
                     "scoring/query_format_ablation_manifest.json": (
-                        "memexai_query_format_ablation_manifest.v1"
+                        "query_format_ablation_manifest.v2"
                     ),
                     f"scoring/{config.scorer.query_prefix_mode}-retrieval_eval_queries.jsonl": (
                         "campaign_scored_development_rows.v1"

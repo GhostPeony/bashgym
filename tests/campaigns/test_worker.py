@@ -3,14 +3,17 @@
 import asyncio
 import hashlib
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 
-from bashgym.campaigns.artifacts import ArtifactSealer
+from bashgym._compat import UTC
+from bashgym.campaigns.artifacts import SEAL_FILENAME, ArtifactSealer
+from bashgym.campaigns.auth import CampaignAuthService
 from bashgym.campaigns.contracts import (
     AttemptStatus,
+    AutonomyProfile,
     CampaignTrigger,
     CredentialKind,
     StageDisposition,
@@ -22,7 +25,14 @@ from bashgym.campaigns.contracts import (
 )
 from bashgym.campaigns.evaluation import load_retrieval_evaluation_artifact
 from bashgym.campaigns.executors import FakeExecutionRequest, fake_digest
+from bashgym.campaigns.human_oversight import HumanOversightRepository
+from bashgym.campaigns.nemo_gym_evidence import (
+    NEMO_GYM_CAMPAIGN_EVIDENCE_FILENAME,
+    build_nemo_gym_campaign_evidence,
+    write_nemo_gym_campaign_evidence,
+)
 from bashgym.campaigns.remote import (
+    ApprovedCodeLineageExecutionBinding,
     ApprovedRemoteExecutorProfile,
     PinnedRemoteStageProfile,
     RemoteCapacitySnapshot,
@@ -37,10 +47,29 @@ from bashgym.campaigns.runtime import (
     ActionSpec,
     CampaignRuntimeRepository,
 )
-from bashgym.campaigns.worker import CampaignWorker, SimulatedWorkerCrashError
+from bashgym.campaigns.worker import (
+    CampaignWorker,
+    SimulatedWorkerCrashError,
+    _controller_selection_idempotency_key,
+)
+from bashgym.environments.nemo_gym import export_star_count_nemo_gym_bundle
+from bashgym.environments.star_count import (
+    generate_star_count_dataset,
+    star_count_environment_spec,
+)
 from tests.campaigns.test_persistence import campaign, create, transition
 
 START = datetime(2026, 7, 13, 12, 0, tzinfo=UTC)
+
+
+def test_controller_selection_idempotency_is_campaign_scoped():
+    first = _controller_selection_idempotency_key("workspace-a", "campaign-1", 5)
+    replay = _controller_selection_idempotency_key("workspace-a", "campaign-1", 5)
+    second = _controller_selection_idempotency_key("workspace-a", "campaign-2", 5)
+
+    assert first == replay
+    assert first != second
+    assert len(first) <= 160
 
 
 def active_repository(path) -> CampaignRuntimeRepository:
@@ -231,9 +260,7 @@ class FakeRemoteAdapter:
         (local_directory / "launch_manifest.json").write_text("{}", encoding="utf-8")
         return tuple(path for path in local_directory.rglob("*") if path.is_file())
 
-    async def collect_terminal_evidence(
-        self, identity, local_directory, *, observation
-    ):
+    async def collect_terminal_evidence(self, identity, local_directory, *, observation):
         self.collect_count += 1
         (local_directory / "training.log").write_text("failed\n", encoding="utf-8")
         (local_directory / "exit_code").write_text("7\n", encoding="utf-8")
@@ -248,7 +275,12 @@ class FakeRemoteAdapter:
         return True
 
 
-def approved_remote_profile(tmp_path, *, stage=StageKind.FULL_TRAINING):
+def approved_remote_profile(
+    tmp_path,
+    *,
+    stage=StageKind.FULL_TRAINING,
+    code_lineage_binding: ApprovedCodeLineageExecutionBinding | None = None,
+):
     script = tmp_path / "train.py"
     data = tmp_path / "train.jsonl"
     key = tmp_path / "campaign-key"
@@ -266,6 +298,7 @@ def approved_remote_profile(tmp_path, *, stage=StageKind.FULL_TRAINING):
         budget_unit="gpu_hours",
         budget_reservation=0.25,
         python_executable="/approved/venv/bin/python",
+        code_lineage_binding=code_lineage_binding,
     )
     return ApprovedRemoteExecutorProfile(
         profile_id="memexai-approved-v1",
@@ -283,9 +316,9 @@ def approved_remote_profile(tmp_path, *, stage=StageKind.FULL_TRAINING):
 
 def schedule_remote(repository, worker, plan, tmp_path):
     profile = approved_remote_profile(tmp_path)
-    worker.remote_executor_profiles[
-        (profile.compute_profile_id, profile.target_contract_key)
-    ] = profile
+    worker.remote_executor_profiles[(profile.compute_profile_id, profile.target_contract_key)] = (
+        profile
+    )
     if worker.leader is None:
         assert worker.run_once(now=START) == "idle"
     return repository.schedule_action_under_leader(
@@ -430,9 +463,7 @@ def test_controller_skips_not_applicable_stage_then_executes_next_required_stage
     events = repository.list_events("workspace-a", "campaign-1")
     skipped = [event for _, event in events if event.event_type == "campaign:stages-skipped"]
     assert len(skipped) == 1
-    assert skipped[0].payload["skipped"] == [
-        {"stage_index": 0, "stage": "contract_evaluation"}
-    ]
+    assert skipped[0].payload["skipped"] == [{"stage_index": 0, "stage": "contract_evaluation"}]
 
 
 def test_restart_registers_sealed_result_without_reexecution(tmp_path):
@@ -543,6 +574,114 @@ def test_remote_worker_launches_once_then_completes_on_a_later_tick(tmp_path):
     }
 
 
+def test_nemo_gym_receipt_is_registered_with_bounded_metadata(tmp_path):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plan = seed_validated_study(repository)
+    worker = make_worker(repository, tmp_path, "worker-a")
+    schedule(repository, worker, plan)
+    claimed = repository.claim_next_action(
+        worker.leader,
+        ttl=timedelta(seconds=15),
+        now=START + timedelta(seconds=1),
+    )
+    assert claimed is not None
+
+    dataset = tmp_path / "star-count-dataset"
+    generate_star_count_dataset(
+        dataset,
+        train_size=1,
+        validation_size=1,
+        heldout_size=1,
+        seed=7,
+    )
+    bundle = export_star_count_nemo_gym_bundle(
+        dataset,
+        tmp_path / "nemo-gym-bundle",
+        nemo_gym_revision="a" * 40,
+        bashgym_revision="b" * 40,
+        dataset_license="MIT",
+    )
+    environment = star_count_environment_spec()
+    rollout = {
+        "session_id": "session-a",
+        "example_index": 0,
+        "environment_id": environment.id,
+        "environment_digest": canonical_hash(environment.to_dict()),
+        "response": {
+            "output": [
+                {
+                    "id": "message-a",
+                    "prompt_token_ids": [1, 2],
+                    "generation_token_ids": [3, 4],
+                    "generation_log_probs": [-0.1, -0.2],
+                }
+            ]
+        },
+        "reward_components": {"count_accuracy": 1.0, "format_accuracy": 1.0},
+        "total_reward": 1.0,
+        "refit": {
+            "refit_id": "refit-4",
+            "training_step": 4,
+            "source_checkpoint_sha256": "c" * 64,
+            "policy_revision": 4,
+            "generation_revision": 4,
+            "synchronized": True,
+        },
+    }
+    evidence = build_nemo_gym_campaign_evidence(
+        claimed,
+        bundle_manifest=bundle,
+        environment=environment,
+        rollout_payloads=[rollout],
+    )
+    temporary = tmp_path / "artifacts" / ".tmp" / "nemo-evidence"
+    temporary.mkdir(parents=True)
+    write_nemo_gym_campaign_evidence(
+        temporary / NEMO_GYM_CAMPAIGN_EVIDENCE_FILENAME,
+        evidence,
+    )
+    identity = RemoteRunIdentity(
+        compute_profile_id="private-compute-a",
+        run_id=claimed.attempt_id,
+        remote_run_directory=f"/private/{claimed.attempt_id}",
+        remote_pid=42,
+        process_group_id=42,
+        process_start_ticks=7,
+        boot_id="boot-a",
+        command_hash="d" * 64,
+        launch_manifest_sha256="e" * 64,
+        launched_at=START,
+    )
+    observation = RemoteObservation(
+        identity=identity,
+        state=RemoteRunState.COMPLETED,
+        observed_at=START + timedelta(seconds=2),
+        exit_code=0,
+        safe_reason="completed",
+    )
+    sealed, _manifest = worker.remote_output_sealer.seal_completed(
+        claimed,
+        identity,
+        observation,
+        temporary,
+    )
+    verified = worker._verify(claimed, sealed)
+    repository.complete_from_seal(
+        verified,
+        sealed,
+        worker_id=worker.worker_id,
+        now=START + timedelta(seconds=2),
+    )
+
+    artifact = repository.list_artifacts("workspace-a", "campaign-1")[0]
+    reference = artifact.metadata["nemo_gym"]
+    assert reference["artifact_id"] == artifact.artifact_id
+    assert reference["bundle_digest"] == bundle["bundle_digest"]
+    assert reference["token_evidence_digest"] == evidence.token_evidence_digest
+    assert reference["refit_receipt_digest"] == evidence.refit_receipt_digest
+    assert reference["rollout_count"] == 1
+
+
 def test_controller_resolves_server_profile_and_launches_without_actor_material(tmp_path):
     repository = active_repository(tmp_path / "campaigns.sqlite3")
     plan = seed_validated_study(repository)
@@ -599,9 +738,7 @@ def test_controller_missing_profile_blocks_once_without_budget_or_launch(tmp_pat
     assert worker.run_once(now=START) == "action_blocked"
     assert worker.run_once(now=START + timedelta(seconds=1)) == "action_blocked"
     assert repository.list_attempts("workspace-a", "campaign-1") == ()
-    assert repository.budget_totals("workspace-a", "campaign-1", "gpu_hours")[
-        "reserved"
-    ] == 0.0
+    assert repository.budget_totals("workspace-a", "campaign-1", "gpu_hours")["reserved"] == 0.0
     assert adapter.launch_count == 0
     blocked = [
         event
@@ -609,7 +746,38 @@ def test_controller_missing_profile_blocks_once_without_budget_or_launch(tmp_pat
         if event.event_type == "campaign:action-blocked"
     ]
     assert len(blocked) == 1
-    assert blocked[0].payload["code"] == "campaign_remote_profile_unavailable"
+    assert blocked[0].payload["code"] == "campaign_controller_action_blocked"
+
+
+def test_registered_compute_resolves_remote_development_evaluation(tmp_path):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plan = seed_validated_study(repository, stage=StageKind.DEVELOPMENT_EVALUATION)
+    activate_controller_live_study(repository, plan)
+    proposal_payload = {
+        "dataset_recipe": {"schema_version": "recipe.v1"},
+        "training_recipe": {"schema_version": "recipe.v1"},
+        "evaluation_recipe": {
+            "schema_version": "recipe.v1",
+            "runtime": {"executor_kind": "registered_compute"},
+        },
+    }
+    with repository._connection(immediate=True) as connection:
+        connection.execute(
+            "UPDATE campaign_proposals SET proposal_json = ? WHERE proposal_id = ?",
+            (json.dumps(proposal_payload), "proposal-study-1"),
+        )
+    profile = approved_remote_profile(tmp_path, stage=StageKind.DEVELOPMENT_EVALUATION)
+
+    action = repository.next_action_spec(
+        "workspace-a",
+        "campaign-1",
+        "study-1",
+        executor_profiles={(profile.compute_profile_id, profile.target_contract_key): profile},
+    )
+
+    assert action.stage == StageKind.DEVELOPMENT_EVALUATION
+    assert action.executor_kind == "ssh_remote"
+    assert action.executor_config["stage"] == "development_evaluation"
 
 
 def test_controller_profile_hash_change_blocks_before_remote_side_effect(tmp_path):
@@ -669,9 +837,7 @@ def test_remote_worker_executes_only_persisted_exact_identity_force_stop(tmp_pat
     assert worker.run_once(now=START + timedelta(seconds=2)) == "remote_force_stopping"
     assert adapter.force_stop_count == 1
     assert (
-        repository.pending_force_stop_request(
-            "workspace-a", scheduled.action_id, remote.identity
-        )
+        repository.pending_force_stop_request("workspace-a", scheduled.action_id, remote.identity)
         is None
     )
     with repository._connection() as connection:
@@ -852,6 +1018,23 @@ def test_development_evaluation_stage_validates_seals_and_persists_rows(tmp_path
     champion_id = repository.store_retrieval_evaluation(
         "workspace-a", "campaign-1", champion, now=START
     )
+    with repository._connection(immediate=True) as connection:
+        manifest_row = connection.execute("""
+            SELECT manifest_json FROM campaign_manifest_revisions
+            WHERE workspace_id = 'workspace-a' AND campaign_id = 'campaign-1' AND revision = 1
+            """).fetchone()
+        manifest_payload = json.loads(manifest_row["manifest_json"])
+        manifest_payload["promotion_gates"]["quality_claim_eligible"] = True
+        connection.execute(
+            """
+            UPDATE campaign_manifest_revisions SET manifest_json = ?, manifest_hash = ?
+            WHERE workspace_id = 'workspace-a' AND campaign_id = 'campaign-1' AND revision = 1
+            """,
+            (
+                json.dumps(manifest_payload, sort_keys=True, separators=(",", ":")),
+                canonical_hash(manifest_payload),
+            ),
+        )
     scheduled = repository.schedule_action_under_leader(
         ActionSpec(
             workspace_id="workspace-a",
@@ -884,7 +1067,15 @@ def test_development_evaluation_stage_validates_seals_and_persists_rows(tmp_path
         now=START,
     )
 
-    assert worker.run_once(now=START + timedelta(seconds=1)) == "completed"
+    original_persist = worker._persist_development_evaluation_evidence
+    worker._persist_development_evaluation_evidence = lambda *_args, **_kwargs: (
+        _ for _ in ()
+    ).throw(SimulatedWorkerCrashError("crash after development seal"))
+    with pytest.raises(SimulatedWorkerCrashError):
+        worker.run_once(now=START + timedelta(seconds=1))
+    worker._persist_development_evaluation_evidence = original_persist
+    successor = make_worker(repository, tmp_path, "worker-b")
+    assert successor.run_once(now=START + timedelta(seconds=17)) == "reconciled"
     completed = repository.get_attempt("workspace-a", scheduled.attempt_id)
     assert completed.status == AttemptStatus.COMPLETED
     assert (Path(completed.sealed_result_uri) / "evaluation.json").is_file()
@@ -898,10 +1089,54 @@ def test_development_evaluation_stage_validates_seals_and_persists_rows(tmp_path
         ).fetchone()[0]
     evaluation = repository.get_retrieval_evaluation("workspace-a", row["evaluation_id"])
     assert len(evaluation.rows) == 18
-    assert {item.eval_id for item in evaluation.rows} == {
-        f"dev-{index}" for index in range(18)
-    }
-    assert decision_count == 1
+    assert {item.eval_id for item in evaluation.rows} == {f"dev-{index}" for index in range(18)}
+    assert decision_count == 0
+
+    oversight = HumanOversightRepository(
+        repository,
+        sealer=ArtifactSealer(b"w" * 32, key_version="worker-test-v1"),
+    )
+    auth = CampaignAuthService(repository)
+    refresh = auth.issue_refresh_credential(
+        actor_id="desktop-reviewer",
+        autonomy_profile=AutonomyProfile.DESKTOP_USER,
+        workspace_ids=("workspace-a",),
+    )
+    reviewer = auth.authenticate_access(auth.exchange_refresh(refresh.raw_token).raw_token)
+    queue = oversight.read_queue(
+        "workspace-a", "campaign-1", reviewer, now=START + timedelta(seconds=18)
+    )
+    assert len(queue["items"]) == 1
+    assert champion.candidate_digest not in json.dumps(queue)
+    work = queue["items"][0]
+    claimed = oversight.claim(
+        workspace_id="workspace-a",
+        campaign_id="campaign-1",
+        work_id=work["work_id"],
+        expected_campaign_revision=1,
+        expected_version=1,
+        expected_state="pending",
+        principal=reviewer,
+        correlation_id="worker-review-claim",
+        idempotency_key=work["claim_idempotency_key"],
+        now=START + timedelta(seconds=18),
+    )
+    oversight.submit(
+        workspace_id="workspace-a",
+        campaign_id="campaign-1",
+        work_id=work["work_id"],
+        expected_campaign_revision=1,
+        expected_version=2,
+        expected_rubric_version=1,
+        decision="no_material_difference",
+        rationale="Equivalent under the blinded rubric.",
+        principal=reviewer,
+        correlation_id="worker-review-submit",
+        idempotency_key=claimed.queue["items"][0]["submit_idempotency_key"],
+        now=START + timedelta(seconds=19),
+    )
+    with repository._connection() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM campaign_gate_decisions").fetchone()[0] == 1
 
 
 def test_development_evaluation_invokes_hash_pinned_physical_dev_scorer(tmp_path):
@@ -945,17 +1180,16 @@ for row in rows:
         'channel': 'Channel A',
         'source_set': 'fixture',
     })
-rows_path = args.output_dir / 'memexai_youtube-retrieval_eval_queries.jsonl'
+rows_path = args.output_dir / 'domain_retrieval-retrieval_eval_queries.jsonl'
 rows_path.write_text(''.join(json.dumps(row, sort_keys=True) + '\\n' for row in rows), encoding='utf-8')
 manifest = {
     'model_footprint_bytes': 4321,
-    'runs': {'memexai_youtube': {'median_query_latency_ms': 12.5}},
+    'runs': {'domain_retrieval': {'median_query_latency_ms': 12.5}},
 }
 (args.output_dir / 'query_format_ablation_manifest.json').write_text(
     json.dumps(manifest, sort_keys=True), encoding='utf-8'
 )
-""".strip()
-        + "\n",
+""".strip() + "\n",
         encoding="utf-8",
     )
     corpus = tmp_path / "corpus.jsonl"
@@ -989,7 +1223,7 @@ manifest = {
                 "protected_hashes": ["f" * 64],
                 "protected_path_fragments": ["heldout-test"],
                 "corpus_sha256": digest(corpus),
-                "representation_contract": {"query_prefix_mode": "memexai_youtube"},
+                "representation_contract": {"query_prefix_mode": "domain_retrieval"},
                 "gate_contract": {"bootstrap_samples": 100},
                 "scorer": {
                     "scorer_script_path": str(scorer),
@@ -1001,7 +1235,7 @@ manifest = {
                     "expected_matrix_sha256": digest(matrix),
                     "corpus_embedding_chunk_ids": str(chunk_ids),
                     "expected_chunk_ids_sha256": digest(chunk_ids),
-                    "query_prefix_mode": "memexai_youtube",
+                    "query_prefix_mode": "domain_retrieval",
                     "embedding_device": "cpu",
                 },
             },
@@ -1015,6 +1249,14 @@ manifest = {
     completed = repository.get_attempt("workspace-a", scheduled.attempt_id)
     sealed = Path(completed.sealed_result_uri)
     assert (sealed / "scoring" / "query_format_ablation_manifest.json").is_file()
+    envelope = json.loads((sealed / SEAL_FILENAME).read_text(encoding="utf-8"))
+    output_schemas = {
+        output["path"]: output["schema_name"] for output in envelope["manifest"]["outputs"]
+    }
+    assert (
+        output_schemas["scoring/query_format_ablation_manifest.json"]
+        == "query_format_ablation_manifest.v2"
+    )
     evaluation = json.loads((sealed / "evaluation.json").read_text(encoding="utf-8"))
     assert evaluation["median_latency_ms"] == 12.5
     assert evaluation["model_footprint_bytes"] == 4321
@@ -1121,3 +1363,59 @@ def test_resident_loop_heartbeats_during_idle_backoff_and_releases_leader(tmp_pa
         now=current,
     )
     assert replacement.generation == 2
+
+
+def test_worker_reacquires_an_expired_cached_scheduler_lease(tmp_path):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    worker = make_worker(repository, tmp_path, "worker-a")
+
+    assert worker.run_once(now=START) == "idle"
+    assert worker.leader is not None
+    assert worker.leader.generation == 1
+
+    assert worker.run_once(now=START + timedelta(seconds=16)) == "idle"
+    assert worker.leader is not None
+    assert worker.leader.generation == 2
+    assert worker.leader.expires_at == START + timedelta(seconds=31)
+
+
+def test_worker_drops_an_expired_cached_lease_after_a_successor_takes_over(tmp_path):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    worker = make_worker(repository, tmp_path, "worker-a")
+
+    assert worker.run_once(now=START) == "idle"
+    successor = repository.acquire_lease(
+        worker.leader_key,
+        "worker-b",
+        ttl=timedelta(seconds=15),
+        now=START + timedelta(seconds=16),
+    )
+
+    assert successor.generation == 2
+    assert worker.run_once(now=START + timedelta(seconds=17)) == "not_leader"
+    assert worker.leader is None
+    assert repository.get_lease(worker.leader_key) == successor
+
+
+def test_reconcile_skips_remote_attempt_leased_by_a_live_foreign_worker(tmp_path):
+    repository = active_repository(tmp_path / "campaigns.sqlite3")
+    plan = seed_validated_study(repository)
+    predecessor = make_worker(repository, tmp_path, "worker-a")
+    schedule_remote(repository, predecessor, plan, tmp_path)
+    claimed = repository.claim_next_action(
+        predecessor.leader, ttl=timedelta(hours=1), now=START + timedelta(seconds=1)
+    )
+    assert claimed is not None
+    assert claimed.executor.get("kind") == "ssh_remote"
+
+    successor = make_worker(repository, tmp_path, "worker-b")
+    later = START + timedelta(minutes=2)
+    successor._ensure_leader(later)
+
+    assert successor.reconcile_once(now=later) is None
+
+    refreshed = {item.attempt_id: item for item in repository.list_unfinished_attempts()}[
+        claimed.attempt_id
+    ]
+    assert refreshed.lease_owner == claimed.lease_owner
+    assert refreshed.claim_generation == claimed.claim_generation

@@ -444,7 +444,7 @@ def _explicit_action_approval(message: str) -> bool:
 
 
 def _encode_sse(event: str, payload: dict[str, Any]) -> str:
-    """Encode one normalized SSE event for the GhostWork chat client."""
+    """Encode one normalized SSE event for the desktop chat client."""
     return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
@@ -587,9 +587,9 @@ def _looks_like_agent_runtime_failure(text: str) -> bool:
 # In-memory pending actions (shell confirmation gate)
 # ---------------------------------------------------------------------------
 
-PENDING_ACTIONS: dict[
-    str, dict
-] = {}  # token → {cmd, reason, messages, tool_use_id, expires_at, tools}
+PENDING_ACTIONS: dict[str, dict] = (
+    {}
+)  # token → {cmd, reason, messages, tool_use_id, expires_at, tools}
 
 
 # ---------------------------------------------------------------------------
@@ -2292,8 +2292,7 @@ async def _probe_agent_endpoint_profile(profile: dict[str, Any]) -> dict[str, An
     toolsets_data = probes.get("toolsets", {}).get("data")
     authenticated_probe_names = ("capabilities", "models", "skills", "toolsets")
     rejected_auth = any(
-        probes.get(name, {}).get("status_code") in {401, 403}
-        for name in authenticated_probe_names
+        probes.get(name, {}).get("status_code") in {401, 403} for name in authenticated_probe_names
     )
     if rejected_auth:
         warnings.insert(

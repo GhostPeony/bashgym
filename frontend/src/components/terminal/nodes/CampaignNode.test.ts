@@ -2,8 +2,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { readFileSync } from 'node:fs'
 
 import type { CampaignDetailState } from '../../../stores/campaignStore'
+import { useUIStore } from '../../../stores/uiStore'
 
 const storage = new Map<string, string>()
 Object.defineProperty(globalThis, 'localStorage', {
@@ -39,6 +41,7 @@ function realisticDetail(): CampaignDetailState {
     updated_at: '2026-07-13T21:14:34Z',
   }
   const attempt = {
+    schema_version: 'public_campaign_attempt.v1' as const,
     attempt_id: 'candidate-b-full-b128-realized17-mb4-e2-bf16-r1',
     workspace_id: campaign.workspace_id,
     campaign_id: campaign.campaign_id,
@@ -51,11 +54,34 @@ function realisticDetail(): CampaignDetailState {
     candidate_digest: 'b'.repeat(64),
     manifest_revision: 4,
     stage: 'full_training',
-    executor: { kind: 'ssh_remote', compute_profile_id: 'ssh-gpu-lab' },
+    executor_kind: 'ssh_remote',
     created_at: '2026-07-13T21:03:39Z',
     updated_at: '2026-07-13T21:14:34Z',
   }
   return {
+    snapshot: null,
+    freshness: 'live',
+    lastVerifiedAt: null,
+    reconciliation: {
+      freshness: 'live', generation: 0, connectionGeneration: 1, subscribed: true,
+      appliedCursor: 0, appliedVersion: 8, targetCursor: 0, targetVersion: 8,
+      semanticKey: null, inFlightGeneration: null, retryCount: 0,
+      lastHintAt: null, lastVerifiedAt: null, errorCode: null,
+    },
+    pages: {
+      events: [],
+      artifacts: [],
+      eventCursor: 0,
+      artifactCursor: null,
+      eventsHasMore: true,
+      artifactsHasMore: true,
+      eventsLoading: false,
+      eventsLoaded: false,
+      eventsError: null,
+      artifactsLoading: false,
+      artifactsLoaded: false,
+      artifactsError: null,
+    },
     campaign,
     studies: [{
       study_id: 'study-cached-mnrl',
@@ -120,14 +146,16 @@ function realisticDetail(): CampaignDetailState {
       updated_at: '2026-07-13T21:20:00Z',
     }, attempt],
     artifacts: [{
+      schema_version: 'public_campaign_artifact.v1',
+      workspace_id: 'workspace-a',
+      campaign_id: 'campaign-1',
       artifact_id: 'artifact-training-metrics',
       producer_action_id: 'action-full-training',
       sha256: 'd'.repeat(64),
       size_bytes: 1_572_864,
-      schema_name: 'training_metrics.v1',
+      schema_name: 'training_metrics_jsonl.v1',
       sealed: true,
       valid: true,
-      metadata: { metric_name: 'loss' },
       created_at: '2026-07-13T21:14:34Z',
     }],
     comparisons: [{
@@ -197,14 +225,89 @@ function realisticDetail(): CampaignDetailState {
           decision_ids: ['decision-retain-champion'],
         },
       }],
+      autoresearch: {
+        spec: {
+          primary_metric: 'exact_mrr',
+          metric_direction: 'maximize',
+          stop_rules: { max_attempts: 3 },
+        },
+        state: {
+          campaign_status: 'active',
+          next_action: 'propose_candidate',
+          reason_code: 'ready_for_controlled_hypothesis',
+          ready_for_next_proposal: true,
+          baseline_verified: true,
+          best_metric: 0.271,
+          attempts_used: 2,
+          proposals_used: 2,
+          budget_used: 1.5,
+          budget_remaining: 10.32,
+        },
+        proposals: [],
+        outcomes: [],
+        diagnostics: {
+          schema_version: 'autoresearch_diagnostics.v1',
+          workspace_id: campaign.workspace_id,
+          campaign_id: campaign.campaign_id,
+          primary_metric: 'exact_mrr',
+          metric_direction: 'maximize',
+          low_signal: true,
+          signals: [{
+            code: 'checkpoint_evidence_missing',
+            severity: 'warning',
+            summary: 'Only the terminal candidate is evaluated; retained checkpoints cannot yet be compared.',
+            evidence_references: ['eval-positive-aware-dev'],
+          }],
+          checkpoint_comparisons: [{
+            evaluation_result_id: 'eval-positive-aware-dev',
+            run_id: attempt.attempt_id,
+            role: 'final',
+            step: null,
+            metric_name: 'exact_mrr',
+            metric_value: 0.308144,
+            improvement_from_previous: null,
+            improvement_from_baseline: 0.037144,
+          }],
+          error_slices: [{
+            slice_path: 'source.youtube.exact_mrr',
+            direction: 'maximize',
+            candidate_value: 0.308144,
+            baseline_value: 0.315,
+            improvement: -0.006856,
+            status: 'regressed',
+            evidence_references: ['eval-positive-aware-dev', 'eval-base-model-dev'],
+          }],
+          ranked_hypotheses: [{
+            hypothesis_id: 'hypothesis-checkpoint-selection',
+            rank: 1,
+            action_kind: 'evaluation',
+            changed_variable: 'evaluation.checkpoint_selection',
+            hypothesis: 'An earlier retained checkpoint may outperform the terminal checkpoint on the same fixed suite.',
+            rationale: 'The terminal checkpoint is the only measured checkpoint.',
+            expected_outcome: 'Identify the best observed checkpoint.',
+            falsification_criterion: 'All retained checkpoints underperform the terminal checkpoint.',
+            evidence_references: ['eval-positive-aware-dev'],
+            eligible_for_submission: false,
+          }],
+        },
+      },
     },
     events: [{
       cursor: 41,
       event: {
+        schema_version: 'public_campaign_event.v1',
         event_id: 'event-metrics-appended',
+        workspace_id: 'workspace-a',
+        campaign_id: 'campaign-1',
+        sequence: 41,
+        aggregate_version: 7,
         event_type: 'campaign:training-metrics-appended',
-        payload: { attempt_id: attempt.attempt_id },
-        idempotency_key: 'metrics-appended-once',
+        summary: {
+          schema_version: 'public_campaign_event_summary.v1',
+          attempt_id: attempt.attempt_id,
+        },
+        actor_id: 'campaign-controller',
+        credential_kind: 'controller',
         created_at: '2026-07-13T21:14:34Z',
       },
     }],
@@ -250,6 +353,7 @@ test('campaign evidence panel renders the durable API/store projection and contr
     onSelect: () => undefined,
     onTransition: () => undefined,
     onRefresh: () => undefined,
+    onOpenAutoResearch: () => undefined,
   }))
 
   assert.match(markup, /Memex embedding Candidate B/)
@@ -264,6 +368,7 @@ test('campaign evidence panel renders the durable API/store projection and contr
   assert.match(markup, /Pause<\/button>/)
   assert.match(markup, /Cancel<\/button>/)
   assert.match(markup, /Refresh<\/button>/)
+  assert.match(markup, /Open in AutoResearch<\/button>/)
   assert.match(markup, /Resident Controller/)
   assert.match(markup, /aria-label="Campaign controller stale"/)
   assert.match(markup, /heartbeat 20s ago/)
@@ -281,6 +386,14 @@ test('campaign evidence panel renders the durable API/store projection and contr
   assert.match(markup, /eval-positive-aware-dev/)
   assert.match(markup, /Decisions/)
   assert.match(markup, /Retain the current champion/)
+  assert.match(markup, /AutoResearch Diagnostics/)
+  assert.match(markup, /aria-label="AutoResearch diagnostics"/)
+  assert.match(markup, /low signal detected/)
+  assert.match(markup, /checkpoint evidence missing/)
+  assert.match(markup, /Checkpoint trajectory/)
+  assert.match(markup, /source\.youtube\.exact mrr/)
+  assert.match(markup, /Ranked next hypotheses · advisory only/)
+  assert.match(markup, /An earlier retained checkpoint may outperform/)
 
   assert.match(markup, /aria-label="Campaign policy evidence"/)
   assert.match(markup, /ssh-gpu-lab/)
@@ -290,8 +403,38 @@ test('campaign evidence panel renders the durable API/store projection and contr
   assert.match(markup, /training-metrics-appended/)
   assert.match(markup, /Sealed Evidence \(1\)/)
   assert.match(markup, /aria-label="Sealed campaign evidence"/)
-  assert.match(markup, /training metrics\.v1/)
+  assert.match(markup, /training metrics jsonl\.v1/)
   assert.match(markup, /1\.5 MB/)
+})
+
+test('campaign control-room deep link uses exact workspace and campaign IDs', async () => {
+  const { openCampaignInAutoResearch } = await import('./campaignNodeActions')
+  const prior = useUIStore.getState().openTraining
+  const calls: unknown[][] = []
+  useUIStore.setState({
+    openTraining: (subview, selection) => { calls.push([subview, selection]) },
+  })
+  try {
+    openCampaignInAutoResearch('workspace-exact', 'campaign-exact')
+    assert.deepEqual(calls, [[
+      'autoresearch',
+      { workspaceId: 'workspace-exact', campaignId: 'campaign-exact' },
+    ]])
+  } finally {
+    useUIStore.setState({ openTraining: prior })
+  }
+})
+
+test('campaign node keeps legacy drill-down lazy until the evidence modal opens', async () => {
+  const { shouldLoadCampaignDrillDown } = await import('./campaignNodeActions')
+  assert.equal(shouldLoadCampaignDrillDown(false, 7), false)
+  assert.equal(shouldLoadCampaignDrillDown(true, null), false)
+  assert.equal(shouldLoadCampaignDrillDown(true, 7), true)
+
+  const source = readFileSync(new URL('./CampaignNode.tsx', import.meta.url), 'utf8')
+  assert.match(source, /const loadLegacyDetail = useCampaignStore/)
+  assert.match(source, /shouldLoadCampaignDrillDown\(configOpen, snapshotVersion\)/)
+  assert.match(source, /void loadLegacyDetail\(workspaceId, campaignId\)/)
 })
 
 test('campaign evidence panel exposes lifecycle controls for ready and paused states', async () => {
@@ -315,4 +458,49 @@ test('campaign evidence panel exposes lifecycle controls for ready and paused st
 
   assert.match(renderStatus('ready'), /Start<\/button>/)
   assert.match(renderStatus('paused'), /Resume<\/button>/)
+})
+
+test('campaign evidence panel hides lifecycle mutations unless authority is exactly live', async () => {
+  const { CampaignEvidencePanel } = await import('./CampaignNode')
+  const base = realisticDetail()
+
+  for (const freshness of ['reconciling', 'stale', 'offline', 'error'] as const) {
+    const detail = { ...base, freshness }
+    const markup = renderToStaticMarkup(createElement(CampaignEvidencePanel, {
+      campaignId: detail.campaign.campaign_id,
+      campaigns: [detail.campaign],
+      detail,
+      controller: null,
+      chartData: [],
+      latestAttempt: undefined,
+      latestComparison: undefined,
+      mutating: false,
+      onSelect: () => undefined,
+      onTransition: () => { throw new Error(`transition rendered for ${freshness}`) },
+      onRefresh: () => undefined,
+      onOpenAutoResearch: () => undefined,
+    }))
+
+    assert.doesNotMatch(markup, />Start<|>Pause<|>Resume<|>Cancel</)
+    assert.match(markup, />Refresh</)
+    assert.match(markup, />Open in AutoResearch</)
+  }
+})
+
+test('campaign transition submission never calls the bridge without live authority', async () => {
+  const { submitCampaignTransitionIfLive } = await import('./campaignNodeActions')
+  const calls: unknown[][] = []
+  const transition = async (...args: unknown[]) => { calls.push(args) }
+
+  for (const freshness of ['reconciling', 'stale', 'offline', 'error'] as const) {
+    const submitted = await submitCampaignTransitionIfLive({
+      detail: { ...realisticDetail(), freshness },
+      mutating: false,
+      action: 'pause',
+      workspaceId: 'workspace-a',
+      transition,
+    })
+    assert.equal(submitted, false)
+  }
+  assert.deepEqual(calls, [])
 })

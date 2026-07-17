@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url'
 import {
   buildPowerShellArgs,
   TerminalIpcBatcher,
+  TerminalOutputFlowController,
+  TerminalOutputFlowOwnership,
   TerminalSizeTracker,
   TerminalScrollbackBuffer,
   type TerminalTimerApi,
@@ -42,6 +44,26 @@ test('terminal input uses fire-and-forget IPC while retaining reload compatibili
   assert.match(main, /ipcMain\.on\('terminal:write'/)
   assert.match(main, /ipcMain\.handle\('terminal:write'/)
   assert.match(main, /ipcMain\.handle\('terminal:resize'/)
+  assert.match(main, /ipcMain\.on\('terminal:output-ack'/)
+  assert.match(preload, /ackOutput:[\s\S]*?ipcRenderer\.send\('terminal:output-ack'/)
+  assert.match(
+    readFrontendFile('src/components/terminal/TerminalPane.tsx'),
+    /terminal\.write\(data, frameId === undefined \? undefined : \(\) => \([\s\S]*?terminal\.ackOutput\?\.\(id, outputFlowOwner, frameId\)/,
+  )
+})
+
+test('terminal remount lifecycle cannot activate flow control after disposal', () => {
+  const pane = readFrontendFile('src/components/terminal/TerminalPane.tsx')
+
+  assert.match(pane, /let disposed = false[\s\S]*?\.then\(async \(result\) => \{\s*if \(disposed\) return/)
+  assert.match(
+    pane,
+    /if \(!removeDataListener\) removeDataListener =[\s\S]*?setOutputFlowControl\?\.\(id, outputFlowOwner, true\)/,
+  )
+  assert.match(
+    pane,
+    /return \(\) => \{\s*disposed = true\s*window\.bashgym\?\.terminal\.setOutputFlowControl\?\.\(id, outputFlowOwner, false\)/,
+  )
 })
 
 test('hidden terminal layouts never trigger PTY fitting or resize churn', () => {
@@ -144,4 +166,114 @@ test('single-character PTY echoes bypass redraw batching', () => {
   batcher.push('x')
 
   assert.deepEqual(flushed, ['x'])
+})
+
+test('Claude redraws wait for xterm parser acknowledgement and apply bounded PTY backpressure', () => {
+  const delivered: string[] = []
+  const pauseStates: boolean[] = []
+  const flow = new TerminalOutputFlowController(
+    (data) => delivered.push(data),
+    (paused) => pauseStates.push(paused),
+    { highWatermarkChars: 12, lowWatermarkChars: 4 },
+  )
+
+  flow.enable()
+  flow.push('frame-1')
+  flow.push('abcdefgh')
+  flow.push('ijklmnop')
+
+  assert.deepEqual(delivered, ['frame-1'])
+  assert.deepEqual(pauseStates, [true])
+
+  flow.acknowledge(flow.frameId)
+  assert.deepEqual(delivered, ['frame-1', 'abcdefghijkl'])
+  assert.deepEqual(pauseStates, [true, false])
+
+  flow.push('qrst')
+  assert.deepEqual(delivered, ['frame-1', 'abcdefghijkl'])
+
+  flow.acknowledge(flow.frameId)
+  assert.deepEqual(delivered, ['frame-1', 'abcdefghijkl', 'mnopqrst'])
+  flow.acknowledge(flow.frameId)
+
+  assert.deepEqual(delivered.join(''), 'frame-1abcdefghijklmnopqrst')
+  assert.equal(flow.inFlight, false)
+  assert.equal(flow.pendingChars, 0)
+})
+
+test('large redraws are chunked and disabling a paused flow releases the PTY', () => {
+  const delivered: string[] = []
+  const pauseStates: boolean[] = []
+  const flow = new TerminalOutputFlowController(
+    (data) => delivered.push(data),
+    (paused) => pauseStates.push(paused),
+    { highWatermarkChars: 12, lowWatermarkChars: 4 },
+  )
+
+  flow.enable()
+  flow.acknowledge(flow.frameId)
+  flow.push('abcdefghijklmnopqrstuvwxyz')
+
+  assert.deepEqual(delivered, ['abcdefghijkl'])
+  assert.equal(flow.pendingChars, 14)
+  assert.deepEqual(pauseStates, [true])
+
+  flow.disable()
+  assert.equal(flow.inFlight, false)
+  assert.equal(flow.pendingChars, 0)
+  assert.deepEqual(pauseStates, [true, false])
+
+  flow.push('passthrough')
+  assert.deepEqual(delivered, ['abcdefghijkl', 'passthrough'])
+})
+
+test('stale terminal owners cannot acknowledge or release replacement panes', () => {
+  const delivered: string[] = []
+  const pauseStates: boolean[] = []
+  const flow = new TerminalOutputFlowController(
+    (data) => delivered.push(data),
+    (paused) => pauseStates.push(paused),
+    { highWatermarkChars: 4, lowWatermarkChars: 0 },
+  )
+  const ownership = new TerminalOutputFlowOwnership(flow)
+
+  ownership.acquire('pane-a')
+  flow.push('aaaa')
+  flow.push('bbbb')
+  ownership.acquire('pane-b')
+  flow.push('cccc')
+  flow.push('dddd')
+
+  const paneBFrame = flow.frameId
+  ownership.acknowledge('pane-a', paneBFrame ?? -1)
+  ownership.release('pane-a')
+  assert.deepEqual(delivered, ['aaaa', 'cccc'])
+  assert.equal(flow.inFlight, true)
+
+  ownership.acknowledge('pane-b', paneBFrame ?? -1)
+  ownership.release('pane-b')
+  assert.deepEqual(delivered, ['aaaa', 'cccc', 'dddd'])
+  assert.equal(flow.inFlight, false)
+  assert.deepEqual(pauseStates, [true, false, true, false])
+})
+
+test('a passthrough callback cannot acknowledge a different controlled frame', () => {
+  const delivered: Array<{ data: string; frameId?: number }> = []
+  const flow = new TerminalOutputFlowController(
+    (data, frameId) => delivered.push({ data, frameId }),
+    () => {},
+    { highWatermarkChars: 4, lowWatermarkChars: 0 },
+  )
+
+  flow.push('old')
+  flow.enable()
+  flow.push('aaaa')
+  flow.push('bbbb')
+
+  flow.acknowledge(undefined)
+  flow.acknowledge((delivered[1].frameId ?? 0) + 1)
+  assert.deepEqual(delivered.map(({ data }) => data), ['old', 'aaaa'])
+
+  flow.acknowledge(delivered[1].frameId)
+  assert.deepEqual(delivered.map(({ data }) => data), ['old', 'aaaa', 'bbbb'])
 })

@@ -8,6 +8,7 @@ Config Module
 """
 
 import os
+import tempfile
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -112,11 +113,12 @@ class APISettings:
     nim_model: str = field(default_factory=lambda: get_env("NIM_MODEL"))
 
     def validate(self) -> list[str]:
-        """Validate required API keys are present."""
-        errors = []
-        if not self.anthropic_api_key:
-            errors.append("ANTHROPIC_API_KEY is required")
-        return errors
+        """Validate global provider settings.
+
+        Provider credentials are capability-specific, not install requirements.
+        Individual provider operations report their own missing credential.
+        """
+        return []
 
 
 class InferenceProvider(Enum):
@@ -263,7 +265,8 @@ class DockerSettings:
     sandbox_timeout: int = field(default_factory=lambda: get_env_int("SANDBOX_TIMEOUT", 3600))
     sandbox_network_mode: str = field(default_factory=lambda: get_env("SANDBOX_NETWORK", "none"))
     workspace_base: str = field(
-        default_factory=lambda: get_env("WORKSPACE_BASE", "/tmp/bashgym_workspaces")
+        default_factory=lambda: get_env("WORKSPACE_BASE")
+        or str(Path(tempfile.gettempdir()) / "bashgym_workspaces")
     )
 
 
@@ -276,7 +279,7 @@ class TrainingSettings:
         # No default model — the user chooses one (set BASE_MODEL or pass it per run).
         default_factory=lambda: get_env("BASE_MODEL", "")
     )
-    model_type: str = field(default_factory=lambda: get_env("MODEL_TYPE", "qwen"))
+    model_type: str = field(default_factory=lambda: get_env("MODEL_TYPE", "auto"))
 
     # Training hyperparameters
     learning_rate: float = field(default_factory=lambda: get_env_float("LEARNING_RATE", 2e-5))
@@ -607,9 +610,7 @@ class Settings:
     orchestration_enabled: bool = field(
         default_factory=lambda: get_env_bool("ORCHESTRATION_ENABLED", False)
     )
-    campaigns_enabled: bool = field(
-        default_factory=lambda: get_env_bool("CAMPAIGNS_ENABLED", True)
-    )
+    campaigns_enabled: bool = field(default_factory=lambda: get_env_bool("CAMPAIGNS_ENABLED", True))
 
     # Web hosting
     mode: str = field(
@@ -772,11 +773,11 @@ SANDBOX_MEMORY=2g
 SANDBOX_CPU=2.0
 SANDBOX_TIMEOUT=3600
 SANDBOX_NETWORK=none
-WORKSPACE_BASE=/tmp/bashgym_workspaces
+WORKSPACE_BASE=
 
 # Training Settings
 # BASE_MODEL=    # Required to train: HuggingFace model ID to fine-tune (no default)
-MODEL_TYPE=qwen
+MODEL_TYPE=auto
 LEARNING_RATE=2e-5
 BATCH_SIZE=4
 GRAD_ACCUM_STEPS=4
@@ -786,7 +787,7 @@ USE_LORA=true
 LORA_R=16
 LORA_ALPHA=32
 LOAD_IN_4BIT=true
-USE_NEMO_GYM=false
+USE_NEMO_CUSTOMIZER=false
 
 # Data Settings
 DATA_DIR=data

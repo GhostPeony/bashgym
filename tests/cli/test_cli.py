@@ -2,7 +2,7 @@ import json
 import sys
 from pathlib import Path
 
-from bashgym.cli import main
+from bashgym.cli import DOCS, build_parser, main
 from bashgym.environments.contracts import EnvironmentSpec
 from bashgym.environments.rollout import (
     CommandObservation,
@@ -19,6 +19,7 @@ def test_manifest_json_is_agent_readable(capsys):
     assert payload["ok"] is True
     assert "training plan" in payload["commands"]
     assert "campaign list" in payload["commands"]
+    assert "campaign provision-local-operator" in payload["commands"]
     assert "campaign status" in payload["commands"]
     assert "campaign study status" in payload["commands"]
     assert "campaign attempts" in payload["commands"]
@@ -867,6 +868,8 @@ def test_campaign_setup_autoresearch_installs_explicit_binding_without_credentia
         "dataset-version-1",
         "--compute-profile",
         "private-training-1",
+        "--source-repository-profile",
+        "bashgym-source-1",
         "--project",
         "project-1",
         "--evaluation-suite",
@@ -890,11 +893,420 @@ def test_campaign_setup_autoresearch_installs_explicit_binding_without_credentia
     assert payload["created"] is True
     assert payload["binding_plan"]["model_ref"].endswith(f"@{revision}")
     assert payload["binding_plan"]["compute_profile_id"] == "private-training-1"
+    assert payload["binding_plan"]["source_repository_profile_id"] == "bashgym-source-1"
     assert payload["binding_plan"]["required_training_stages"] == [
         "smoke_training",
         "full_training",
     ]
     assert (install_dir / "autoresearch-installed-v1.json").is_file()
+
+
+def test_campaign_provision_local_operator_stores_refresh_by_reference_only(
+    tmp_path, monkeypatch, capsys
+):
+    from bashgym.campaigns.autoresearch import AutoResearchRepository
+
+    stored: dict[str, str] = {}
+
+    def store_secret(reference: str, value: str) -> None:
+        stored[reference] = value
+
+    monkeypatch.setattr("bashgym.secrets.get_secret", lambda _reference: None)
+    monkeypatch.setattr("bashgym.secrets.set_secret", store_secret)
+
+    assert (
+        main(
+            [
+                "campaign",
+                "provision-local-operator",
+                "--workspace-id",
+                "workspace-a",
+                "--credential-ref",
+                "BASHGYM_CAMPAIGN_OPERATOR",
+                "--data-dir",
+                str(tmp_path),
+                "--json",
+            ]
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    raw_token = stored["BASHGYM_CAMPAIGN_OPERATOR"]
+    assert raw_token.startswith("bgcr.")
+    assert raw_token not in captured.out
+    assert raw_token not in captured.err
+    assert payload == {
+        "actor_id": "local-operator",
+        "autonomy_profile": "desktop_user",
+        "credential_id": payload["credential_id"],
+        "credential_ref": "BASHGYM_CAMPAIGN_OPERATOR",
+        "expires_at": payload["expires_at"],
+        "next": [
+            {
+                "command": (
+                    "bashgym campaign list --workspace-id workspace-a "
+                    "--credential-ref BASHGYM_CAMPAIGN_OPERATOR --json"
+                ),
+                "reason": "Verify authenticated campaign access.",
+            }
+        ],
+        "ok": True,
+        "title": "BashGym Local Campaign Operator Provisioned",
+        "workspace_id": "workspace-a",
+    }
+
+    database = tmp_path / "campaigns" / "campaigns.sqlite3"
+    assert database.is_file()
+    repository = AutoResearchRepository(database)
+    repository.initialize()
+    credential = repository.get_actor_credential(payload["credential_id"])
+    assert credential is not None
+    assert credential.actor_id == "local-operator"
+    assert credential.autonomy_profile == "desktop_user"
+    assert credential.workspace_ids == ("workspace-a",)
+    assert credential.revoked_at is None
+
+
+def test_campaign_provision_local_operator_refuses_configured_environment_reference(
+    tmp_path, monkeypatch, capsys
+):
+    configured_token = "already-configured-without-being-printed"
+    monkeypatch.setenv("BASHGYM_CAMPAIGN_OPERATOR", configured_token)
+    stored: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "bashgym.secrets.set_secret", lambda reference, value: stored.append((reference, value))
+    )
+
+    assert (
+        main(
+            [
+                "campaign",
+                "provision-local-operator",
+                "--workspace-id",
+                "workspace-a",
+                "--credential-ref",
+                "BASHGYM_CAMPAIGN_OPERATOR",
+                "--data-dir",
+                str(tmp_path),
+                "--json",
+            ]
+        )
+        == 2
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["error"]["code"] == "campaign_cli_invalid"
+    assert configured_token not in captured.out
+    assert configured_token not in captured.err
+    assert stored == []
+    assert not (tmp_path / "campaigns" / "campaigns.sqlite3").exists()
+
+
+def test_campaign_provision_local_operator_rejects_invalid_bounded_inputs(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr("bashgym.secrets.get_secret", lambda _reference: None)
+    invalid_arguments = [
+        ["--workspace-id", "workspace!"],
+        ["--workspace-id", "w" * 161],
+        ["--credential-ref", "unsafe-ref"],
+        ["--credential-ref", "bgcr.raw.tokens-are-never-cli-input"],
+        ["--credential-ref", "R" * 129],
+        ["--actor-id", "operator!"],
+        ["--ttl-days", "0"],
+        ["--ttl-days", "91"],
+    ]
+
+    for replacement in invalid_arguments:
+        arguments = [
+            "campaign",
+            "provision-local-operator",
+            "--workspace-id",
+            "workspace-a",
+            "--credential-ref",
+            "BASHGYM_CAMPAIGN_OPERATOR",
+            "--data-dir",
+            str(tmp_path / replacement[-1].replace("/", "_")),
+            "--json",
+        ]
+        flag = replacement[0]
+        if flag in arguments:
+            index = arguments.index(flag)
+            arguments[index : index + 2] = replacement
+        else:
+            arguments[-1:-1] = replacement
+
+        assert main(arguments) == 2
+        captured = capsys.readouterr()
+        assert json.loads(captured.out)["error"]["code"] == "campaign_cli_invalid"
+        if replacement[-1].startswith("bgcr."):
+            assert replacement[-1] not in captured.out
+            assert replacement[-1] not in captured.err
+
+
+def test_campaign_provision_local_operator_revokes_issued_credential_when_storage_fails(
+    tmp_path, monkeypatch, capsys
+):
+    from bashgym.campaigns.autoresearch import AutoResearchRepository
+
+    attempted: dict[str, str] = {}
+
+    def fail_storage(reference: str, value: str) -> None:
+        attempted[reference] = value
+        raise RuntimeError(f"storage failed for {value}")
+
+    monkeypatch.setattr("bashgym.secrets.get_secret", lambda _reference: None)
+    monkeypatch.setattr("bashgym.secrets.set_secret", fail_storage)
+
+    assert (
+        main(
+            [
+                "campaign",
+                "provision-local-operator",
+                "--workspace-id",
+                "workspace-a",
+                "--credential-ref",
+                "BASHGYM_CAMPAIGN_OPERATOR",
+                "--data-dir",
+                str(tmp_path),
+                "--json",
+            ]
+        )
+        == 2
+    )
+
+    captured = capsys.readouterr()
+    raw_token = attempted["BASHGYM_CAMPAIGN_OPERATOR"]
+    credential_id = raw_token.split(".", 2)[1]
+    assert raw_token not in captured.out
+    assert raw_token not in captured.err
+    assert json.loads(captured.out)["error"]["code"] == "campaign_cli_invalid"
+
+    repository = AutoResearchRepository(tmp_path / "campaigns" / "campaigns.sqlite3")
+    repository.initialize()
+    credential = repository.get_actor_credential(credential_id)
+    assert credential is not None
+    assert credential.revoked_at is not None
+
+
+def test_campaign_inspect_model_artifact_reports_secret_free_training_plan(tmp_path, capsys):
+    artifact_dir = tmp_path / "operator-selected-snapshot"
+    artifact_dir.mkdir()
+    (artifact_dir / "config.json").write_text(
+        json.dumps(
+            {
+                "architectures": ["Gemma3ForCausalLM"],
+                "model_type": "gemma3",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (artifact_dir / "model.safetensors").write_bytes(b"local-test-weights")
+    revision = "c" * 40
+
+    assert (
+        main(
+            [
+                "campaign",
+                "inspect-model-artifact",
+                "--artifact-dir",
+                str(artifact_dir),
+                "--model-id",
+                "example/modern-open-model",
+                "--model-revision",
+                revision,
+                "--json",
+            ]
+        )
+        == 0
+    )
+
+    raw = capsys.readouterr().out
+    payload = json.loads(raw)
+    plan = payload["model_onboarding_plan"]
+    assert payload["ok"] is True
+    assert plan["model_ref"] == f"hf://example/modern-open-model@{revision}"
+    assert plan["task"] == "causal_lm"
+    assert plan["artifact_role"] == "trainable_base"
+    assert plan["ready_for_binding"] is True
+    assert str(artifact_dir) not in raw
+
+
+def test_campaign_setup_autoresearch_can_bind_inspected_trainable_artifact(tmp_path, capsys):
+    artifact_dir = tmp_path / "selected-model"
+    artifact_dir.mkdir()
+    (artifact_dir / "config.json").write_text(
+        json.dumps(
+            {
+                "architectures": ["Gemma3ForCausalLM"],
+                "model_type": "gemma3",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (artifact_dir / "model.safetensors").write_bytes(b"local-test-weights")
+    install_dir = tmp_path / "autoresearch-templates"
+    revision = "d" * 40
+
+    assert (
+        main(
+            [
+                "campaign",
+                "setup-autoresearch",
+                "--template",
+                "autoresearch-inspected-v1",
+                "--objective",
+                "Improve a fixed held-out metric with one controlled change.",
+                "--model-ref",
+                f"hf://example/modern-open-model@{revision}",
+                "--model-artifact-dir",
+                str(artifact_dir),
+                "--target-contract",
+                "modern-open-model-v1",
+                "--task",
+                "causal_lm",
+                "--dataset-version",
+                "dataset-version-1",
+                "--compute-profile",
+                "private-training-1",
+                "--source-repository-profile",
+                "bashgym-source-1",
+                "--project",
+                "project-1",
+                "--evaluation-suite",
+                "evaluation-suite-1",
+                "--primary-metric",
+                "heldout_pass_at_1",
+                "--metric-direction",
+                "maximize",
+                "--budget-unit",
+                "gpu_hours",
+                "--budget-limit",
+                "4",
+                "--max-attempts",
+                "4",
+                "--install-dir",
+                str(install_dir),
+                "--json",
+            ]
+        )
+        == 0
+    )
+
+    raw = capsys.readouterr().out
+    payload = json.loads(raw)
+    assert payload["model_onboarding_plan"]["ready_for_binding"] is True
+    assert payload["binding_plan"]["model_ref"] == f"hf://example/modern-open-model@{revision}"
+    assert str(artifact_dir) not in raw
+    assert (install_dir / "autoresearch-inspected-v1.json").is_file()
+
+
+def test_campaign_setup_autoresearch_rejects_inspected_task_mismatch(tmp_path, capsys):
+    artifact_dir = tmp_path / "selected-model"
+    artifact_dir.mkdir()
+    (artifact_dir / "config.json").write_text(
+        json.dumps(
+            {
+                "architectures": ["Gemma3ForCausalLM"],
+                "model_type": "gemma3",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (artifact_dir / "model.safetensors").write_bytes(b"local-test-weights")
+    install_dir = tmp_path / "autoresearch-templates"
+    revision = "e" * 40
+
+    exit_code = main(
+        [
+            "campaign",
+            "setup-autoresearch",
+            "--template",
+            "autoresearch-mismatch-v1",
+            "--objective",
+            "Improve a fixed metric.",
+            "--model-ref",
+            f"hf://example/modern-open-model@{revision}",
+            "--model-artifact-dir",
+            str(artifact_dir),
+            "--target-contract",
+            "modern-open-model-v1",
+            "--task",
+            "vision_language",
+            "--dataset-version",
+            "dataset-version-1",
+            "--compute-profile",
+            "private-training-1",
+            "--source-repository-profile",
+            "bashgym-source-1",
+            "--project",
+            "project-1",
+            "--evaluation-suite",
+            "evaluation-suite-1",
+            "--primary-metric",
+            "heldout_pass_at_1",
+            "--metric-direction",
+            "maximize",
+            "--budget-unit",
+            "gpu_hours",
+            "--budget-limit",
+            "4",
+            "--max-attempts",
+            "4",
+            "--install-dir",
+            str(install_dir),
+            "--json",
+        ]
+    )
+
+    assert exit_code != 0
+    assert json.loads(capsys.readouterr().out)["error"]["code"] == "campaign_cli_invalid"
+    assert not install_dir.exists()
+
+
+def test_campaign_code_lineage_cli_routes_prepare_and_capture(monkeypatch, capsys):
+    class Client:
+        def __init__(self):
+            self.calls = []
+
+        def request_json(self, method, path, *, query=None, payload=None, headers=None):
+            self.calls.append((method, path, payload, headers))
+            return {"record": {"state": path.rsplit("/", 1)[-1]}}
+
+    client = Client()
+    monkeypatch.setattr("bashgym.cli._campaign_client", lambda _args: client)
+    common = [
+        "--campaign",
+        "campaign-1",
+        "--proposal",
+        "proposal-1",
+        "--workspace-id",
+        "workspace-a",
+        "--credential-ref",
+        "CAMPAIGN_REFRESH",
+        "--json",
+    ]
+    for operation in ("prepare", "capture"):
+        assert main(
+            [
+                "campaign",
+                "proposal",
+                f"lineage-{operation}",
+                *common,
+                "--idempotency-key",
+                f"lineage-{operation}-1",
+            ]
+        ) == 0
+        json.loads(capsys.readouterr().out)
+
+    assert [call[1] for call in client.calls] == [
+        "/campaigns/campaign-1/proposals/proposal-1/code-lineage/prepare",
+        "/campaigns/campaign-1/proposals/proposal-1/code-lineage/capture",
+    ]
+    assert all(call[2] == {"workspace_id": "workspace-a"} for call in client.calls)
 
 
 def test_campaign_autoresearch_cli_routes_explicit_roles_and_result_identity(
@@ -2239,7 +2651,8 @@ def test_training_capabilities_matrix_maps_full_training_and_eval_spread(capsys)
         "backend_smoke_bundle",
         "release_evidence_json",
     } <= artifact_ids
-    assert {"gemma4", "qwen3", "qwen2.5", "llama3", "generic_hf_causal_lm"} <= family_ids
+    assert {"gemma4", "qwen3", "llama3", "generic_hf_causal_lm"} <= family_ids
+    assert "qwen2.5" not in family_ids
     assert {"local_12gb", "local_24gb", "private_compute_target", "cloud_backend"} <= hardware_ids
     assert {
         "data_scope",
@@ -2313,11 +2726,39 @@ def test_training_docs_terminal_recipe_and_private_compute_checklist_are_readabl
     assert "Private Compute Eval And Backend Smoke Checklist" in checklist["content"]
     assert "backend_smoke_readiness.json" in checklist["content"]
 
-    assert main(["training", "docs", "--topic", "gx10-checklist", "--json"]) == 0
-    alias = json.loads(capsys.readouterr().out)
-    assert alias["ok"] is True
-    assert alias["topic"] == "private-compute-checklist"
-    assert alias["requested_topic"] == "gx10-checklist"
+
+def test_training_plan_hardware_choices_are_machine_neutral():
+    parser = build_parser()
+    training = next(action for action in parser._actions if action.dest == "command")
+    training_parser = training.choices["training"]
+    training_command = next(
+        action for action in training_parser._actions if action.dest == "training_command"
+    )
+    plan_parser = training_command.choices["plan"]
+    hardware = next(action for action in plan_parser._actions if action.dest == "hardware")
+
+    assert set(hardware.choices) == {
+        "local_12gb",
+        "local_24gb",
+        "private_compute",
+        "private-compute",
+        "remote",
+        "remote_gpu",
+        "cloud",
+    }
+
+
+def test_training_docs_expose_only_canonical_topics():
+    parser = build_parser()
+    training = next(action for action in parser._actions if action.dest == "command")
+    training_parser = training.choices["training"]
+    training_command = next(
+        action for action in training_parser._actions if action.dest == "training_command"
+    )
+    docs_parser = training_command.choices["docs"]
+    topic = next(action for action in docs_parser._actions if action.dest == "topic")
+
+    assert set(topic.choices) == set(DOCS)
 
 
 def test_training_plan_session_distillation_defaults(capsys):
@@ -2419,7 +2860,20 @@ def test_training_plan_reward_model_aliases_are_canonical(capsys):
 
 
 def test_training_plan_grpo_adjusts_group_size_for_hardware(capsys):
-    assert main(["training", "plan", "--strategy", "grpo", "--hardware", "dgx", "--json"]) == 0
+    assert (
+        main(
+            [
+                "training",
+                "plan",
+                "--strategy",
+                "grpo",
+                "--hardware",
+                "private_compute",
+                "--json",
+            ]
+        )
+        == 0
+    )
 
     payload = json.loads(capsys.readouterr().out)
     ladder_stages = {step["stage"] for step in payload["readiness_ladder"]}

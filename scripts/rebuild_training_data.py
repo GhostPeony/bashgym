@@ -97,6 +97,30 @@ def find_all_sessions() -> list[Path]:
     return sorted(sessions, key=lambda f: f.stat().st_mtime, reverse=True)
 
 
+def project_name_from_session_path(source_path: Path) -> str:
+    """Return a portable project label from a Claude projects directory.
+
+    Claude encodes an absolute project path into the parent directory name.
+    For example, a Windows checkout may be stored as
+    ``C--Users-Developer-projects-myapp`` and a POSIX checkout as
+    ``-home-developer-projects-myapp``.  User and machine identities are not
+    part of the project label, so strip either home prefix when a projects
+    marker is present.  A session rooted directly at a user home is labelled
+    ``home``.
+    """
+    directory_name = source_path.parent.name
+    home_prefixes = (re.compile(r"^[A-Za-z]--Users-.+$"), re.compile(r"^-home-.+$"))
+
+    encoded_prefix, marker, project = directory_name.partition("-projects-")
+    if marker and project and any(pattern.fullmatch(encoded_prefix) for pattern in home_prefixes):
+        return project
+
+    if any(pattern.fullmatch(directory_name) for pattern in home_prefixes):
+        return "home"
+
+    return directory_name
+
+
 def parse_session(path: Path) -> list[dict]:
     """Parse a raw Claude Code session JSONL into training messages.
 
@@ -259,8 +283,8 @@ def _segment_messages(
     if not user_indices:
         return []
 
-    # Determine project from path
-    project = source_path.parent.name.replace("C--Users-Cade-projects-", "").replace("C--Users-Cade-", "home")
+    # Determine project from Claude's platform-specific encoded path.
+    project = project_name_from_session_path(source_path)
 
     segments = []
     for seg_idx, start in enumerate(user_indices):
@@ -425,7 +449,7 @@ def main():
     # Count by project
     projects = Counter()
     for s in sessions:
-        proj = s.parent.name.replace("C--Users-Cade-projects-", "").replace("C--Users-Cade-", "home")
+        proj = project_name_from_session_path(s)
         projects[proj] += 1
     logger.info("  By project:")
     for proj, count in projects.most_common(10):

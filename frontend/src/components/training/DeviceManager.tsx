@@ -131,6 +131,9 @@ export function DeviceManager() {
                       <p className="font-mono text-xs text-text-muted mt-0.5">
                         <MaskedHost username={device.username} host={device.host} port={device.port} />
                       </p>
+                      <p className="font-mono text-[10px] text-text-muted mt-0.5 break-all">
+                        Device ID: {device.id}
+                      </p>
                       <p className="font-mono text-xs text-text-secondary mt-0.5">
                         {formatGpuSummary(device)}
                         {diskFree && <span className="text-text-muted ml-2">· {diskFree}</span>}

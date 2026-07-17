@@ -72,7 +72,7 @@ try {
             $frontendJob = Start-Job -Name "frontend" -ScriptBlock {
                 param($dir, $port)
                 Set-Location $dir
-                $env:BASHGYM_API_URL = "http://127.0.0.1:$port"
+                $env:BASHGYM_API_BASE = "http://127.0.0.1:$port/api"
                 & npm run electron:dev 2>&1
                 if ($LASTEXITCODE -ne 0) { throw "Electron host exited with code $LASTEXITCODE" }
             } -ArgumentList $frontendDir, $Port

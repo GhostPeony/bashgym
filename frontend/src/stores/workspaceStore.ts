@@ -46,7 +46,14 @@ interface WorkspaceState {
     targetWsId: string,
     opts?: { switchAfter?: boolean }
   ) => boolean
+  adoptTerminalIntoWorkspace: (
+    workspaceId: string,
+    terminal: { terminalId: string; title: string; cwd: string }
+  ) => boolean
 }
+
+let adoptedPanelCounter = 0
+const generateAdoptedPanelId = () => `panel-adopted-${++adoptedPanelCounter}-${Date.now()}`
 
 function serializeWorkspaceState(wsId: string): void {
   const state = useTerminalStore.getState()
@@ -213,6 +220,53 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
     set((state) => ({ sessionIndexVersion: state.sessionIndexVersion + 1 }))
     if (opts?.switchAfter !== false) get().switchWorkspace(targetWsId)
+    return true
+  },
+
+  adoptTerminalIntoWorkspace: (workspaceId, terminal) => {
+    const { workspaces, activeWorkspaceId } = get()
+    if (!workspaces.some((workspace) => workspace.id === workspaceId)) return false
+
+    if (workspaceId === activeWorkspaceId) {
+      const terminalState = useTerminalStore.getState()
+      const existingPanel = terminalState.panels.find(
+        (panel) => panel.terminalId === terminal.terminalId
+      )
+      if (existingPanel) {
+        terminalState.setActivePanel(existingPanel.id)
+        return true
+      }
+
+      terminalState.createTerminal(
+        terminal.terminalId,
+        terminal.title,
+        undefined,
+        terminal.cwd
+      )
+      set((state) => ({ sessionIndexVersion: state.sessionIndexVersion + 1 }))
+      return true
+    }
+
+    const snapshot = loadWorkspaceSnapshot(workspaceId)
+    if (snapshot.panels.some((panel) => panel.terminalId === terminal.terminalId)) {
+      return true
+    }
+
+    const appended = appendPanelToWorkspace(workspaceId, {
+      id: generateAdoptedPanelId(),
+      type: 'terminal',
+      title: terminal.title,
+      terminalId: terminal.terminalId,
+      cwd: terminal.cwd,
+      sessionState: {
+        status: 'idle',
+        attention: 'none',
+        lastActivity: Date.now()
+      }
+    })
+    if (!appended) return false
+
+    set((state) => ({ sessionIndexVersion: state.sessionIndexVersion + 1 }))
     return true
   }
 }))

@@ -12,6 +12,7 @@ import type {
   TrainingStrategy,
 } from '../../../stores/trainingStore'
 import { API_BASE, trainingApi } from '../../../services/api'
+import { DEFAULT_TRAINING_BASE_MODEL } from '../../common/baseModels'
 import { DataNodeShell } from './DataNodeShell'
 import { hueFor } from './dataPanels'
 import { ConfigPill, ConfigRow, ConfigRows, ConfigSection, NodeConfigModal } from './NodeConfigModal'
@@ -135,7 +136,7 @@ function draftFromTraining(node: TrainingNodeConfig, run: TrainingRun | null): T
       : node.backend || (node.computeTarget?.startsWith('ssh:') ? 'remote' : node.computeTarget === 'cloud' ? 'cloud' : 'local')
   return {
     strategy: launchableStrategy(config?.strategy || node.strategy),
-    baseModel: config?.baseModel || node.baseModel || 'Qwen/Qwen2.5-Coder-1.5B-Instruct',
+    baseModel: config?.baseModel || node.baseModel || DEFAULT_TRAINING_BASE_MODEL,
     datasetPath: config?.datasetPath || node.datasetPath || '',
     epochs: config?.epochs ?? node.epochs ?? 3,
     batchSize: config?.batchSize ?? node.batchSize ?? 1,

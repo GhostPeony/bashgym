@@ -1,10 +1,11 @@
 """Baseline-first AutoResearch campaign control-loop tests."""
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime
 
 import pytest
 
+from bashgym._compat import UTC
 from bashgym.campaigns.autoresearch import (
     AUTORESEARCH_CONTROL_SMOKE_TEMPLATE_ID,
     AutoResearchCampaignCore,
@@ -26,6 +27,8 @@ from bashgym.campaigns.autoresearch import (
 from bashgym.campaigns.contracts import (
     CampaignStatus,
     CampaignTrigger,
+    CodeLineageState,
+    CodeMutationKind,
     StageDisposition,
     StageKind,
     StagePlan,
@@ -218,6 +221,33 @@ def result(proposal_id, study_id, attempt_id, metric, *, role, provenance="real"
     )
 
 
+def test_result_write_rejects_unbounded_candidate_references_before_lineage_lookup(
+    tmp_path,
+):
+    _path, _repository, core = fresh_core(tmp_path)
+    oversized = result(
+        "candidate-oversized",
+        "study-missing",
+        "attempt-000",
+        0.5,
+        role=ExperimentRole.CANDIDATE,
+        provenance="simulated",
+    ).model_copy(
+        update={
+            "attempt_ids": tuple(f"attempt-{index:03d}" for index in range(101)),
+            "evidence_references": tuple(
+                f"artifact-{index:03d}" for index in range(101)
+            ),
+        }
+    )
+
+    with pytest.raises(
+        AutoResearchInvariantError,
+        match="autoresearch_result_reference_limit_exceeded",
+    ):
+        core.record_result(oversized)
+
+
 def test_fresh_draft_campaign_has_controller_owned_preparation_and_source_template(tmp_path):
     _path, repository, core = fresh_core(tmp_path)
 
@@ -285,7 +315,9 @@ def test_fresh_draft_campaign_has_controller_owned_preparation_and_source_templa
     )
 
 
-def test_authoritative_evaluation_derives_metric_cost_attempts_and_evidence(tmp_path):
+def test_authoritative_evaluation_derives_metric_cost_attempts_and_evidence(
+    tmp_path, monkeypatch
+):
     _path, repository, core = fresh_core(tmp_path, evaluation_binding=True)
     activate(core)
     actor = principal(repository)
@@ -336,6 +368,25 @@ def test_authoritative_evaluation_derives_metric_cost_attempts_and_evidence(tmp_
                 "artifact://campaign/eval.json",
                 artifact_sha,
                 "evaluation-result.v1",
+                NOW.isoformat(),
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO campaign_artifacts(
+                workspace_id, campaign_id, artifact_id, producer_action_id,
+                uri, sha256, size_bytes, schema_name, sealed, valid,
+                metadata_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 24, ?, 1, 1, '{}', ?)
+            """,
+            (
+                "workspace-a",
+                "campaign-1",
+                "campaign-nemo-gym-evidence",
+                attempt.action_id,
+                "artifact://campaign/nemo-gym-evidence.json",
+                "9" * 64,
+                "nemo_gym_campaign_evidence.v1",
                 NOW.isoformat(),
             ),
         )
@@ -482,6 +533,24 @@ def test_authoritative_evaluation_derives_metric_cost_attempts_and_evidence(tmp_
         )
     )
 
+    original_append_event = repository._append_event_in_connection
+
+    def fail_event_write(*_args, **_kwargs):
+        raise RuntimeError("injected ledger event failure")
+
+    monkeypatch.setattr(repository, "_append_event_in_connection", fail_event_write)
+    with pytest.raises(RuntimeError, match="injected ledger event failure"):
+        core.ingest_evaluation_result(
+            workspace_id="workspace-a",
+            campaign_id="campaign-1",
+            project_id="project-a",
+            evaluation_result_id="evaluation-baseline-ledger",
+        )
+    assert repository.list_autoresearch_outcomes("workspace-a", "campaign-1") == ()
+    assert ledger.list_decisions("workspace-a", "project-a") == []
+    assert ledger.list_events("workspace-a", "project-a") == []
+
+    monkeypatch.setattr(repository, "_append_event_in_connection", original_append_event)
     outcome = core.ingest_evaluation_result(
         workspace_id="workspace-a",
         campaign_id="campaign-1",
@@ -497,7 +566,26 @@ def test_authoritative_evaluation_derives_metric_cost_attempts_and_evidence(tmp_
         "run-baseline-ledger",
         "ledger-eval-artifact",
         "campaign-eval-artifact",
+        "campaign-nemo-gym-evidence",
     }
+    decisions = ledger.list_decisions("workspace-a", "project-a")
+    assert len(decisions) == 1
+    assert decisions[0]["experiment_id"] == "experiment-baseline-ledger"
+    assert decisions[0]["run_id"] == "run-baseline-ledger"
+    assert decisions[0]["decision_type"] == "autoresearch_outcome"
+    assert decisions[0]["outcome"] == ResultDecision.BASELINE.value
+    assert decisions[0]["evidence_refs"] == [
+        outcome.result.result_id,
+        *outcome.result.evidence_references,
+    ]
+    events = ledger.list_events("workspace-a", "project-a")
+    assert len(events) == 1
+    assert events[0]["experiment_id"] == "experiment-baseline-ledger"
+    assert events[0]["run_id"] == "run-baseline-ledger"
+    assert events[0]["attempt_id"] == "ledger-attempt-baseline"
+    assert events[0]["event_type"] == "autoresearch_outcome_recorded"
+    assert events[0]["payload"]["result_digest"] == outcome.result.result_digest
+    assert events[0]["payload"]["decision"] == ResultDecision.BASELINE.value
     replay = core.ingest_evaluation_result(
         workspace_id="workspace-a",
         campaign_id="campaign-1",
@@ -505,6 +593,54 @@ def test_authoritative_evaluation_derives_metric_cost_attempts_and_evidence(tmp_
         evaluation_result_id="evaluation-baseline-ledger",
     )
     assert replay.replayed is True
+    assert len(ledger.list_decisions("workspace-a", "project-a")) == 1
+    assert len(ledger.list_events("workspace-a", "project-a")) == 1
+
+
+def test_code_candidate_registers_required_source_lineage(tmp_path):
+    _path, repository, core = fresh_core(tmp_path)
+    activate(core)
+    actor = principal(repository)
+    core.submit_baseline(
+        proposal("baseline-lineage", estimated_cost=0.5),
+        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        principal=actor,
+        correlation_id="baseline-lineage-submit",
+        idempotency_key="baseline-lineage-submit",
+    )
+    baseline_study, baseline_attempt = select_and_finish(
+        repository, "baseline-lineage"
+    )
+    core.record_result(
+        result(
+            "baseline-lineage",
+            baseline_study,
+            baseline_attempt,
+            0.50,
+            role=ExperimentRole.BASELINE,
+        )
+    )
+    candidate = proposal("candidate-code", estimated_cost=0.5).model_copy(
+        update={
+            "primary_variable": "trainer.optimizer",
+            "prerequisite_study_ids": (baseline_study,),
+        }
+    )
+
+    core.submit_controlled_candidate(
+        candidate,
+        parent_proposal_id="baseline-lineage",
+        changed_variable="trainer.optimizer",
+        expected_version=repository.get_campaign("workspace-a", "campaign-1").version,
+        principal=actor,
+        correlation_id="candidate-code-submit",
+        idempotency_key="candidate-code-submit",
+    )
+
+    lineage = repository.get_code_lineage("workspace-a", "candidate-code")
+    assert lineage.state == CodeLineageState.REQUIRED
+    assert lineage.mutation_kind == CodeMutationKind.TRAINER
+    assert lineage.source_repository_profile_id == "bashgym-source-v1"
 
 
 def test_baseline_candidate_decisions_persist_and_stop_at_attempt_limit(tmp_path):

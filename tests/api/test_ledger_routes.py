@@ -1,10 +1,11 @@
 """Authenticated experiment-ledger REST projections."""
 
-from datetime import UTC, datetime
+from datetime import datetime
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from bashgym._compat import UTC
 from bashgym.api.campaign_routes import campaign_auth_router
 from bashgym.api.ledger_routes import router as ledger_router
 from bashgym.api.routes import create_app
@@ -45,7 +46,7 @@ def ledger_client(tmp_path):
 
 
 def test_create_app_registers_ledger_routes():
-    paths = {route.path for route in create_app().routes}
+    paths = set(create_app().openapi()["paths"])
     assert {
         "/api/ledger/health",
         "/api/ledger/projects",
@@ -354,6 +355,32 @@ def test_completed_campaign_evaluation_triggers_authoritative_autoresearch_inges
             "evaluation_result_id": "eval-result-campaign-1",
         }
     ]
+
+    checkpoint = result.model_copy(
+        update={
+            "evaluation_result_id": "eval-result-checkpoint-1",
+            "slice_metrics": {
+                "autoresearch_role": "checkpoint",
+                "checkpoint_step": 80,
+            },
+        }
+    )
+    checkpoint_response = http.post(
+        "/api/ledger/projects/project-a/evaluation-results",
+        params={"workspace_id": "workspace-a"},
+        headers=bearer(token),
+        json=checkpoint.model_dump(mode="json"),
+    )
+
+    assert checkpoint_response.status_code == 200
+    assert checkpoint_response.json()["autoresearch_ingestion"] == {
+        "schema_version": "autoresearch_evaluation_ingestion.v1",
+        "status": "not_applicable",
+        "code": "autoresearch_checkpoint_evaluation",
+        "campaign_id": "campaign-1",
+        "outcome": None,
+    }
+    assert len(calls) == 1
 
     class DeferredCore:
         def ingest_evaluation_result(self, **_kwargs):

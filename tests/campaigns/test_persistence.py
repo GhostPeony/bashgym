@@ -1,5 +1,7 @@
 """Campaign migrations, workspace ownership, CAS, event, and replay tests."""
 
+import hashlib
+import json
 import sqlite3
 
 import pytest
@@ -13,8 +15,10 @@ from bashgym.campaigns.contracts import (
     CredentialKind,
     ManifestRevision,
     TargetModelContract,
+    canonical_hash,
 )
 from bashgym.campaigns.persistence import (
+    MIGRATIONS,
     CampaignRepository,
     IdempotencyConflictError,
     RecordNotFoundError,
@@ -45,7 +49,10 @@ def manifest() -> CampaignManifest:
         approved_data_scopes=("memexai-approved-training",),
         compute_profile_id="ssh-gpu-lab",
         budget_limits={"gpu_hours": 12.0, "study_count": 5.0},
-        evaluation_plan={"development_query_set": "dev-18-v1"},
+        evaluation_plan={
+            "development_query_set": "dev-18-v1",
+            "source_repository_binding_id": "bashgym-source-v1",
+        },
         promotion_gates={"mrr_at_10_delta_min": 0.0},
         protected_artifact_refs=("frozen-test-36-v1",),
     )
@@ -95,8 +102,46 @@ def transition(repository, trigger, version, *, key, payload=None):
     )
 
 
+def persist_legacy_v1_manifest(
+    repository: CampaignRepository,
+    *,
+    workspace_id: str = "workspace-a",
+    campaign_id: str = "campaign-1",
+) -> tuple[dict, str]:
+    """Reproduce the exact manifest JSON and digest persisted before generic handoff."""
+
+    with sqlite3.connect(repository.db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT revision, manifest_json
+            FROM campaign_manifest_revisions
+            WHERE workspace_id = ? AND campaign_id = ?
+            """,
+            (workspace_id, campaign_id),
+        ).fetchone()
+        assert row is not None
+        payload = json.loads(row[1])
+        assert payload.pop("allow_external_handoff") is False
+        digest = canonical_hash(payload)
+        connection.execute(
+            """
+            UPDATE campaign_manifest_revisions
+            SET manifest_json = ?, manifest_hash = ?
+            WHERE workspace_id = ? AND campaign_id = ? AND revision = ?
+            """,
+            (
+                json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                digest,
+                workspace_id,
+                campaign_id,
+                row[0],
+            ),
+        )
+    return payload, digest
+
+
 def test_initialize_applies_checksum_migration_and_all_owned_tables(repository):
-    assert repository.schema_versions() == [1, 2, 3, 4, 5, 6, 7, 8]
+    assert repository.schema_versions() == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
     assert repository.journal_mode() == "wal"
     assert repository.foreign_keys_enabled() is True
 
@@ -127,7 +172,81 @@ def test_initialize_applies_checksum_migration_and_all_owned_tables(repository):
         "campaign_source_approvals",
         "campaign_action_control_requests",
         "campaign_exports",
+        "campaign_code_lineages",
+        "campaign_human_work",
+        "campaign_human_receipts",
+        "campaign_human_promotions",
+        "campaign_human_mutations",
     } <= tables
+
+
+def test_v9_database_migrates_existing_auth_and_controller_rows_to_revision_one(tmp_path):
+    path = tmp_path / "campaigns-v9.sqlite3"
+    applied_at = "2026-07-16T00:00:00+00:00"
+    with sqlite3.connect(path) as connection:
+        connection.execute("""
+            CREATE TABLE campaign_schema_migrations (
+                version INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                checksum TEXT NOT NULL,
+                applied_at TEXT NOT NULL
+            )
+            """)
+        for version, name, statements in MIGRATIONS[:-1]:
+            for statement in statements:
+                connection.execute(statement)
+            checksum = hashlib.sha256("\n".join(statements).encode("utf-8")).hexdigest()
+            connection.execute(
+                """
+                INSERT INTO campaign_schema_migrations(version, name, checksum, applied_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (version, name, checksum, applied_at),
+            )
+        connection.execute(
+            """
+            INSERT INTO campaign_actor_credentials(
+                credential_id, actor_id, autonomy_profile, credential_kind,
+                workspace_ids_json, token_salt, token_hash, issued_at,
+                expires_at, token_not_before, revoked_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+            """,
+            (
+                "cred-legacy",
+                "codex-agent",
+                "codex_trusted",
+                "refresh",
+                '["workspace-a"]',
+                "salt",
+                "hash",
+                applied_at,
+                "2026-08-16T00:00:00+00:00",
+                applied_at,
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO campaign_scheduler_leases(
+                lease_key, owner_id, generation, expires_at, heartbeat_at
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                "scheduler:legacy",
+                "worker-a",
+                1,
+                "2026-07-16T00:00:15+00:00",
+                applied_at,
+            ),
+        )
+
+    migrated = CampaignRepository(path)
+    migrated.initialize()
+
+    credential = migrated.get_actor_credential("cred-legacy")
+    lease = migrated.get_lease("scheduler:legacy")
+    assert migrated.schema_versions()[-1] == 15
+    assert credential is not None and credential.authorization_revision == 1
+    assert lease is not None and lease.controller_observation_version == 1
 
 
 def test_create_is_atomic_manifest_is_immutable_and_replay_is_exact(repository):
@@ -142,6 +261,93 @@ def test_create_is_atomic_manifest_is_immutable_and_replay_is_exact(repository):
     saved_manifest = repository.get_manifest_revision("workspace-a", "campaign-1", 1)
     assert saved_manifest.manifest == manifest()
     assert saved_manifest.manifest_hash == revision(value).manifest_hash
+
+
+def test_legacy_v1_manifest_revision_loads_without_rewriting_digest(repository):
+    create(repository)
+    legacy_payload, legacy_digest = persist_legacy_v1_manifest(repository)
+
+    loaded = repository.get_manifest_revision("workspace-a", "campaign-1", 1)
+
+    assert loaded.manifest.allow_external_handoff is False
+    assert loaded.manifest_hash == legacy_digest
+    with sqlite3.connect(repository.db_path) as connection:
+        persisted = connection.execute(
+            """
+            SELECT manifest_json, manifest_hash
+            FROM campaign_manifest_revisions
+            WHERE workspace_id = ? AND campaign_id = ? AND revision = 1
+            """,
+            ("workspace-a", "campaign-1"),
+        ).fetchone()
+    assert persisted == (
+        json.dumps(legacy_payload, sort_keys=True, separators=(",", ":")),
+        legacy_digest,
+    )
+
+
+def test_legacy_v1_manifest_digest_cannot_authorize_external_handoff(repository):
+    create(repository)
+    with sqlite3.connect(repository.db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT manifest_json FROM campaign_manifest_revisions
+            WHERE workspace_id = ? AND campaign_id = ? AND revision = 1
+            """,
+            ("workspace-a", "campaign-1"),
+        ).fetchone()
+        assert row is not None
+        payload = json.loads(row[0])
+        legacy_payload = {
+            field: value for field, value in payload.items() if field != "allow_external_handoff"
+        }
+        payload["allow_external_handoff"] = True
+        legacy_digest = canonical_hash(legacy_payload)
+        connection.execute(
+            """
+            UPDATE campaign_manifest_revisions
+            SET manifest_json = ?, manifest_hash = ?
+            WHERE workspace_id = ? AND campaign_id = ? AND revision = 1
+            """,
+            (
+                json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                legacy_digest,
+                "workspace-a",
+                "campaign-1",
+            ),
+        )
+
+    with pytest.raises(ValueError, match="manifest_hash does not match manifest"):
+        repository.get_manifest_revision("workspace-a", "campaign-1", 1)
+
+
+def test_current_manifest_revision_tampering_still_fails(repository):
+    create(repository)
+    with sqlite3.connect(repository.db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT manifest_json FROM campaign_manifest_revisions
+            WHERE workspace_id = ? AND campaign_id = ? AND revision = 1
+            """,
+            ("workspace-a", "campaign-1"),
+        ).fetchone()
+        assert row is not None
+        payload = json.loads(row[0])
+        payload["budget_limits"]["gpu_hours"] = 999.0
+        connection.execute(
+            """
+            UPDATE campaign_manifest_revisions SET manifest_json = ?
+            WHERE workspace_id = ? AND campaign_id = ? AND revision = 1
+            """,
+            (
+                json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                "workspace-a",
+                "campaign-1",
+            ),
+        )
+
+    with pytest.raises(ValueError, match="manifest_hash does not match manifest"):
+        repository.get_manifest_revision("workspace-a", "campaign-1", 1)
 
 
 def test_idempotency_key_with_different_body_conflicts(repository):

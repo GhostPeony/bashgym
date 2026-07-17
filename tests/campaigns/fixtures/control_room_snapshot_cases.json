@@ -1,0 +1,101 @@
+[
+  {
+    "name": "empty_draft",
+    "campaign_status": "draft",
+    "controller_state": "offline",
+    "readiness": "blocked",
+    "journey_states": ["blocked", "skipped", "skipped", "not_started", "not_started"],
+    "blocker": "campaign_not_ready",
+    "secondary_codes": ["controller_offline"],
+    "next_actions": [],
+    "recovery_actions": ["inspect"]
+  },
+  {
+    "name": "ready",
+    "campaign_status": "ready",
+    "controller_state": "online",
+    "readiness": "ready",
+    "journey_states": ["ready", "skipped", "skipped", "not_started", "not_started"],
+    "blocker": null,
+    "secondary_codes": [],
+    "next_actions": ["cancel", "start"],
+    "recovery_actions": ["inspect"]
+  },
+  {
+    "name": "running",
+    "campaign_status": "active",
+    "controller_state": "online",
+    "readiness": "ready",
+    "journey_states": ["ready", "skipped", "skipped", "not_started", "not_started"],
+    "blocker": null,
+    "secondary_codes": [],
+    "next_actions": ["cancel", "pause"],
+    "recovery_actions": ["inspect"]
+  },
+  {
+    "name": "failed",
+    "campaign_status": "failed",
+    "controller_state": "offline",
+    "readiness": "blocked",
+    "journey_states": ["blocked", "failed", "failed", "not_started", "failed"],
+    "blocker": "campaign_not_ready",
+    "secondary_codes": ["controller_offline"],
+    "next_actions": [],
+    "recovery_actions": ["inspect"]
+  },
+  {
+    "name": "exhausted",
+    "campaign_status": "exhausted",
+    "controller_state": "online",
+    "readiness": "ready",
+    "journey_states": ["ready", "complete", "complete", "not_started", "blocked"],
+    "blocker": null,
+    "secondary_codes": [],
+    "next_actions": [],
+    "recovery_actions": ["inspect"]
+  },
+  {
+    "name": "cancelled",
+    "campaign_status": "cancelled",
+    "controller_state": "offline",
+    "readiness": "blocked",
+    "journey_states": ["blocked", "failed", "complete", "not_started", "not_started"],
+    "blocker": "campaign_not_ready",
+    "secondary_codes": ["controller_offline"],
+    "next_actions": [],
+    "recovery_actions": ["inspect"]
+  },
+  {
+    "name": "completed",
+    "campaign_status": "completed",
+    "controller_state": "online",
+    "readiness": "ready",
+    "journey_states": ["ready", "complete", "complete", "not_started", "complete"],
+    "blocker": null,
+    "secondary_codes": [],
+    "next_actions": [],
+    "recovery_actions": ["inspect"]
+  },
+  {
+    "name": "stale_controller",
+    "campaign_status": "active",
+    "controller_state": "stale",
+    "readiness": "ready",
+    "journey_states": ["ready", "skipped", "skipped", "not_started", "not_started"],
+    "blocker": "controller_stale",
+    "secondary_codes": [],
+    "next_actions": ["cancel", "pause"],
+    "recovery_actions": ["inspect", "reconcile_controller"]
+  },
+  {
+    "name": "invariant_failure",
+    "campaign_status": "failed",
+    "controller_state": "online",
+    "readiness": "ready",
+    "journey_states": ["ready", "failed", "blocked", "not_started", "failed"],
+    "blocker": "campaign_projection_invariant_failed",
+    "secondary_codes": [],
+    "next_actions": [],
+    "recovery_actions": ["inspect", "reconcile_controller", "reconcile_attempt"]
+  }
+]

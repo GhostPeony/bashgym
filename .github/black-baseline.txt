@@ -1,0 +1,33 @@
+# Historical Black debt. Each entry is locked to a Git blob identity, so line
+# ending conversion cannot change it. Editing one of these files requires
+# formatting it and removing the entry, or explicitly reviewing a new blob.
+f805e0e3324dd190a01eb8482b29322d59b04034  bashgym/agent/hf_context_tools.py
+758468bb384fb75542160592c544eacc24c55dc9  bashgym/agent/skill_lab_tools.py
+b833c78ad2cd032bd26ecf5c652ce5fb6fc8d8e0  bashgym/agent/tools.py
+e2a54c40f3273990c06cb56487a07f716ec02418  bashgym/api/hf_routes.py
+154929dfeb1a12b44fdeb97b79d45f8d6545c6ae  bashgym/api/knowledge_routes.py
+6d3bcabebed5d6a4074492f499e497171bd3741b  bashgym/api/schemas.py
+5f7cd415cfc2be9edb74a7973b0b85af4e370191  bashgym/api/skill_lab_routes.py
+ae3e9bbd93bbdb65ad870825a38ce04f7065741a  bashgym/api/workspace_routes.py
+4bd8fcdd15aeaad761dc0fadd4e61b9dc4fa6385  bashgym/campaigns/auth.py
+c5ca03d419d07229a0789893bbb4f547dc20ed2f  bashgym/campaigns/evaluation.py
+0241cbc6b0ebbedf5b1ca7afb339c0c197f70f44  bashgym/campaigns/export.py
+8c50b181fa5ee9dc53d795ecce91c856fac9ee3a  bashgym/campaigns/history_import.py
+7a3a2351b97768473ed607eb2dcfde442be122ef  bashgym/campaigns/installation.py
+166d6edd3ac10563f79ddf314e4e64797a372022  bashgym/campaigns/metrics.py
+7c2c39ed909bc7dc27c0fbec5b835bdda1be0036  bashgym/campaigns/nemo_gym_evidence.py
+f310431a0d4f4397905e7eaf0940b0b07c570bef  bashgym/campaigns/persistence.py
+d1df3a0a085e405a2a5af2d11eef7baec5992362  bashgym/campaigns/research_diagnostics.py
+3e0c3072434e9b6bb63d0dfab8e99784d266b656  bashgym/campaigns/runtime.py
+27920cb7aba2b1bf3748500a9f698aa12d2ea11e  bashgym/campaigns/worker_service.py
+a9446e73ed4a2c6aee8d07c9b02bcfb451f3e4d1  bashgym/environments/contracts.py
+d0d825ae4277854192de3d77620534ea83c47feb  bashgym/environments/rollout.py
+416e883fb646de50d191073f5cb9dedb69e830d9  bashgym/environments/star_count.py
+b96fb964546bab6848a6e9646d58b37abab0e4d4  bashgym/gym/star_count_vlm.py
+baca9c3fca06019ff7fa39599d974afb7de8dcf9  bashgym/integrations/huggingface/context_persistence.py
+141133e061acec0fb33a84da8ce08ce424ec57f0  bashgym/integrations/huggingface/context_projection.py
+3d6127660fbdd0c88dcb9f7c7c5613b6d6da3334  bashgym/integrations/huggingface/context_service.py
+00c18be3f31d82b42ccd1edd97456013d6209bfd  bashgym/integrations/huggingface/context_sources.py
+7689f43b7f23a39a80f4cbfd385903e1b420c5c2  bashgym/ledger/contracts.py
+f9bea56cf8e5de24e2b98a3b7eaebe2dd77c7886  bashgym/ledger/persistence.py
+0c5c4ede519047e17eb18a8e60e1914bc7f2a647  bashgym/mcp/campaign_server.py

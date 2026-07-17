@@ -1,6 +1,12 @@
 import { create } from 'zustand'
 
 export type ViewMode = 'home' | 'workspace' | 'training' | 'autoresearch' | 'router' | 'traces' | 'factory' | 'evaluator' | 'guardrails' | 'profiler' | 'models' | 'huggingface' | 'integration' | 'achievements' | 'orchestrator' | 'pipeline' | 'download'
+export type TrainingSubview = 'runs' | 'autoresearch'
+
+export interface TrainingSelection {
+  workspaceId: string | null
+  campaignId: string | null
+}
 
 /** What the left sidebar renders: the nav menu or the Agent Sessions feed */
 export type SidebarMode = 'nav' | 'sessions'
@@ -27,10 +33,18 @@ interface UIState {
 
   // Overlays - terminals persist behind these
   overlayView: ViewMode | null
+  trainingSubview: TrainingSubview
+  trainingSelection: TrainingSelection
 
   // Actions
   setView: (view: ViewMode) => void
   openOverlay: (view: ViewMode) => void
+  openTraining: (
+    subview?: TrainingSubview,
+    selection?: Partial<TrainingSelection>,
+    historyMode?: 'push' | 'replace',
+  ) => void
+  hydrateNavigationFromUrl: (search?: string) => void
   closeOverlay: () => void
   toggleSidebar: () => void
   setSidebarOpen: (open: boolean) => void
@@ -51,7 +65,51 @@ interface UIState {
   clearPanelPresentationRequest: (requestedAt: number) => void
 }
 
-export const useUIStore = create<UIState>((set) => ({
+function canonicalTrainingUrl(
+  subview: TrainingSubview,
+  selection: TrainingSelection,
+): string | null {
+  if (typeof window === 'undefined') return null
+  const params = new URLSearchParams()
+  params.set('view', 'training')
+  params.set('tab', subview)
+  if (subview === 'autoresearch') {
+    if (selection.workspaceId) params.set('workspace_id', selection.workspaceId)
+    if (selection.campaignId) params.set('campaign_id', selection.campaignId)
+  }
+  return `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`
+}
+
+function canonicalViewUrl(view: ViewMode | 'workspace'): string | null {
+  if (typeof window === 'undefined') return null
+  const params = new URLSearchParams()
+  params.set('view', view)
+  return `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`
+}
+
+const CANONICAL_OVERLAY_VIEWS = new Set<ViewMode>([
+  'home',
+  'router',
+  'traces',
+  'factory',
+  'evaluator',
+  'guardrails',
+  'profiler',
+  'models',
+  'huggingface',
+  'integration',
+  'achievements',
+  'orchestrator',
+  'pipeline',
+  'download',
+])
+
+function normalizedId(value: string | null): string | null {
+  const normalized = value?.trim() || ''
+  return /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(normalized) ? normalized : null
+}
+
+export const useUIStore = create<UIState>((set, get) => ({
   currentView: 'home',
   isSidebarOpen: true,
   sidebarMode: 'nav',
@@ -63,12 +121,92 @@ export const useUIStore = create<UIState>((set) => ({
   isAgentStreamOpen: false,
   panelPresentationRequest: null,
   overlayView: 'home',
+  trainingSubview: 'runs',
+  trainingSelection: { workspaceId: null, campaignId: null },
 
   setView: (view) => set({ currentView: view, overlayView: null }),
 
-  openOverlay: (view) => set({ overlayView: view }),
+  openOverlay: (view) => {
+    if (view === 'workspace') {
+      get().closeOverlay()
+      return
+    }
+    if (view === 'autoresearch') {
+      get().openTraining('autoresearch', undefined, 'replace')
+      return
+    }
+    if (view === 'training') {
+      get().openTraining('runs')
+      return
+    }
+    set({ overlayView: view })
+    const target = canonicalViewUrl(view)
+    if (target && typeof window !== 'undefined') {
+      window.history.pushState({}, '', target)
+    }
+  },
 
-  closeOverlay: () => set({ overlayView: null }),
+  openTraining: (subview = 'runs', selection, historyMode = 'push') => {
+    const prior = get().trainingSelection
+    const nextSelection = subview === 'runs'
+      ? { workspaceId: null, campaignId: null }
+      : {
+          workspaceId: selection?.workspaceId ?? prior.workspaceId,
+          campaignId: selection?.campaignId ?? prior.campaignId,
+        }
+    set({
+      overlayView: 'training',
+      trainingSubview: subview,
+      trainingSelection: nextSelection,
+    })
+    const target = canonicalTrainingUrl(subview, nextSelection)
+    if (target && typeof window !== 'undefined') {
+      window.history[historyMode === 'replace' ? 'replaceState' : 'pushState']({}, '', target)
+    }
+  },
+
+  hydrateNavigationFromUrl: (search) => {
+    if (typeof window === 'undefined' && search === undefined) return
+    const params = new URLSearchParams(search ?? window.location.search)
+    const view = params.get('view')
+    if (view !== 'training' && view !== 'autoresearch') {
+      if (view === 'workspace') {
+        set({ overlayView: null })
+      } else if (view && CANONICAL_OVERLAY_VIEWS.has(view as ViewMode)) {
+        set({ overlayView: view as ViewMode })
+      } else {
+        set({ overlayView: 'home' })
+      }
+      return
+    }
+    const legacy = view === 'autoresearch'
+    const subview: TrainingSubview = legacy || params.get('tab') === 'autoresearch'
+      ? 'autoresearch'
+      : 'runs'
+    const selection: TrainingSelection = subview === 'autoresearch'
+      ? {
+          workspaceId: normalizedId(params.get('workspace_id')),
+          campaignId: normalizedId(params.get('campaign_id')),
+        }
+      : { workspaceId: null, campaignId: null }
+    set({
+      overlayView: 'training',
+      trainingSubview: subview,
+      trainingSelection: selection,
+    })
+    if (legacy && typeof window !== 'undefined') {
+      const target = canonicalTrainingUrl(subview, selection)
+      if (target) window.history.replaceState({}, '', target)
+    }
+  },
+
+  closeOverlay: () => {
+    set({ overlayView: null })
+    const target = canonicalViewUrl('workspace')
+    if (target && typeof window !== 'undefined') {
+      window.history.pushState({}, '', target)
+    }
+  },
 
   toggleSidebar: () => set((state) => ({ isSidebarOpen: !state.isSidebarOpen })),
 

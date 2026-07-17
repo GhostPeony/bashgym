@@ -24,8 +24,9 @@ from bashgym.campaigns.persistence import (
     IdempotencyConflictError,
     InvalidProposalTransitionError,
 )
+from bashgym.campaigns.proposals import validate_proposal_submission
 from bashgym.campaigns.service import CampaignControllerService, CampaignService
-from tests.campaigns.test_persistence import campaign, create
+from tests.campaigns.test_persistence import campaign, create, manifest
 
 
 def principal(repository, profile=AutonomyProfile.CODEX_TRUSTED):
@@ -188,6 +189,50 @@ def test_live_training_requires_declared_compute_capabilities(repository):
     )
 
 
+def test_external_handoff_uses_generic_opt_in_and_keeps_legacy_capability_read_only(
+    repository,
+):
+    actor = principal(repository)
+    generic = proposal("proposal-generic-handoff").model_copy(
+        update={"required_capabilities": frozenset({Capability.HANDOFF_EXTERNAL_PREPARE})}
+    )
+
+    denied = validate_proposal_submission(
+        generic,
+        manifest(),
+        actor,
+        existing_prerequisite_ids=frozenset(),
+    )
+    assert denied.reason_codes == ("proposal_external_handoff_not_approved",)
+
+    allowed = validate_proposal_submission(
+        generic,
+        manifest().model_copy(update={"allow_external_handoff": True}),
+        actor,
+        existing_prerequisite_ids=frozenset(),
+    )
+    assert allowed.valid is True
+
+    legacy_actor = actor.model_copy(
+        update={
+            "capabilities": actor.capabilities | {Capability.HANDOFF_MEMEXAI_PREPARE}
+        }
+    )
+    legacy = generic.model_copy(
+        update={
+            "proposal_id": "proposal-legacy-handoff",
+            "required_capabilities": frozenset({Capability.HANDOFF_MEMEXAI_PREPARE}),
+        }
+    )
+    legacy_result = validate_proposal_submission(
+        legacy,
+        manifest().model_copy(update={"allow_memexai_handoff": True}),
+        legacy_actor,
+        existing_prerequisite_ids=frozenset(),
+    )
+    assert legacy_result.reason_codes == ("proposal_legacy_handoff_read_only",)
+
+
 def test_live_training_rejects_actor_supplied_execution_material(repository):
     service = CampaignService(repository)
     value = _live_training_proposal("proposal-live-command").model_copy(
@@ -225,6 +270,45 @@ def test_live_training_accepts_mode_only_with_declared_capabilities(repository):
 
     assert result.record.validation.valid is True
     assert result.record.proposal.status == ProposalStatus.SUBMITTED
+
+
+def test_registered_compute_evaluation_requires_declared_capability(repository):
+    service = CampaignService(repository)
+    value = proposal("proposal-live-evaluation").model_copy(
+        update={
+            "evaluation_recipe": {
+                "schema_version": "recipe.v1",
+                "runtime": {"executor_kind": "registered_compute"},
+            },
+            "stage_plan": StagePlan(
+                items=(
+                    StagePlanItem(
+                        stage=StageKind.DEVELOPMENT_EVALUATION,
+                        disposition=StageDisposition.REQUIRED,
+                        reason="Evaluate the immutable base on approved private compute.",
+                    ),
+                )
+            ),
+        }
+    )
+    missing = submit(service, value, principal(repository), 4, "live-eval-missing")
+    assert missing.record.validation.reason_codes == (
+        "proposal_development_evaluation_capability_missing",
+    )
+
+    accepted = submit(
+        service,
+        value.model_copy(
+            update={
+                "proposal_id": "proposal-live-evaluation-valid",
+                "required_capabilities": frozenset({Capability.EVAL_DEVELOPMENT}),
+            }
+        ),
+        principal(repository),
+        missing.campaign.version,
+        "live-eval-valid",
+    )
+    assert accepted.record.validation.valid is True
 
 
 def test_withdraw_requires_submitted_status_and_expected_version(repository):
@@ -435,6 +519,43 @@ def test_evidence_snapshot_is_bounded_and_excludes_rows_and_uris(repository, tmp
                 campaign().created_at.isoformat(),
             ),
         )
+        nemo_reference = {
+            "artifact_id": "artifact-nemo",
+            "artifact_sha256": "b" * 64,
+            "bundle_digest": "c" * 64,
+            "environment_id": "star-count-v1",
+            "environment_digest": "d" * 64,
+            "rollout_batch_digest": "e" * 64,
+            "token_evidence_digest": "f" * 64,
+            "refit_receipt_digest": "1" * 64,
+            "rollout_count": 2,
+            "mean_total_reward": 0.75,
+            "training_step": 4,
+            "policy_revision": 4,
+        }
+        connection.execute(
+            """
+            INSERT INTO campaign_artifacts(
+                workspace_id, campaign_id, artifact_id, producer_action_id, uri,
+                sha256, size_bytes, schema_name, sealed, valid, metadata_json, created_at
+            ) VALUES (?, ?, ?, NULL, ?, ?, 10, ?, 1, 1, ?, ?)
+            """,
+            (
+                "workspace-a",
+                "campaign-1",
+                "artifact-nemo",
+                str(tmp_path / "private" / "nemo_gym_campaign_evidence.json"),
+                "b" * 64,
+                "nemo_gym_campaign_evidence.v1",
+                json.dumps(
+                    {
+                        "nemo_gym": nemo_reference,
+                        "raw_rollout": "NEVER_SURFACE_THIS",
+                    }
+                ),
+                campaign().created_at.isoformat(),
+            ),
+        )
         connection.execute(
             """
             INSERT INTO campaign_artifacts(
@@ -459,6 +580,8 @@ def test_evidence_snapshot_is_bounded_and_excludes_rows_and_uris(repository, tmp
     assert snapshot.campaign_version == rejected.campaign.version
     assert snapshot.proposal_counts[ProposalStatus.REJECTED] == 1
     assert snapshot.artifact_references[0].artifact_id == "artifact-safe"
+    assert snapshot.nemo_gym_evidence_references[0].artifact_id == "artifact-nemo"
+    assert snapshot.nemo_gym_evidence_references[0].rollout_count == 2
     assert "NEVER_SURFACE_THIS" not in serialized
     assert "model.bin" not in serialized
     assert "uri" not in serialized.casefold()

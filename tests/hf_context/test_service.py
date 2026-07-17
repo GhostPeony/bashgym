@@ -1,8 +1,9 @@
 import json
 import threading
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 
+from bashgym._compat import UTC
 from bashgym.integrations.huggingface.context_contracts import (
     CompletionOutcome,
     EvidenceKind,

@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import { systemInfoApi } from '../../services/api'
-import { BASE_MODEL_GROUPS, type BaseModelGroup } from './baseModels'
+import type { BaseModelGroup } from './baseModels'
+import { selectBaseModelGroups } from './modelSelectOptions'
 
 interface Props {
   value: string
   onChange: (value: string) => void
   className?: string
+  catalogOnly?: boolean
 }
 
 /**
@@ -19,7 +21,7 @@ interface Props {
  * so new releases (e.g. Qwen3.6) appear without a code change. Discovery failure
  * is non-fatal — the static groups still render.
  */
-export function BaseModelSelect({ value, onChange, className }: Props) {
+export function BaseModelSelect({ value, onChange, className, catalogOnly = false }: Props) {
   const [discovered, setDiscovered] = useState<BaseModelGroup[]>([])
 
   useEffect(() => {
@@ -43,7 +45,7 @@ export function BaseModelSelect({ value, onChange, className }: Props) {
     }
   }, [])
 
-  const groups = [...BASE_MODEL_GROUPS, ...discovered]
+  const groups = selectBaseModelGroups(discovered, catalogOnly)
   const isKnown = groups.some((g) => g.models.some((m) => m.value === value))
   const [custom, setCustom] = useState<boolean>(!!value && !isKnown)
 

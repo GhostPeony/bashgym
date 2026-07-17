@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import subprocess
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from bashgym._compat import UTC
 from bashgym.factory.session_distillation import validate_session_distillation_records
 from bashgym.preferences import (
     REWARD_MODEL_EVAL_SCHEMA_VERSION,

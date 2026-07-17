@@ -22,6 +22,29 @@ function project(
 
 function detail(): CampaignDetailState {
   return {
+    snapshot: null,
+    freshness: 'live',
+    lastVerifiedAt: null,
+    reconciliation: {
+      freshness: 'live', generation: 0, connectionGeneration: 1, subscribed: true,
+      appliedCursor: 0, appliedVersion: 3, targetCursor: 0, targetVersion: 3,
+      semanticKey: null, inFlightGeneration: null, retryCount: 0,
+      lastHintAt: null, lastVerifiedAt: null, errorCode: null,
+    },
+    pages: {
+      events: [],
+      artifacts: [],
+      eventCursor: 0,
+      artifactCursor: null,
+      eventsHasMore: true,
+      artifactsHasMore: true,
+      eventsLoading: false,
+      eventsLoaded: false,
+      eventsError: null,
+      artifactsLoading: false,
+      artifactsLoaded: false,
+      artifactsError: null,
+    },
     campaign: {
       schema_version: 'campaign.v1',
       campaign_id: 'campaign-auto-1',
@@ -101,6 +124,7 @@ function detail(): CampaignDetailState {
       created_at: '2026-07-14T01:00:00Z',
     },
     attempts: [{
+      schema_version: 'public_campaign_attempt.v1' as const,
       attempt_id: 'attempt-active',
       workspace_id: 'workspace-a',
       campaign_id: 'campaign-auto-1',
@@ -113,7 +137,7 @@ function detail(): CampaignDetailState {
       candidate_digest: 'e'.repeat(64),
       manifest_revision: 1,
       stage: 'full_training',
-      executor: { kind: 'local' },
+      executor_kind: 'local',
       created_at: '2026-07-14T00:50:00Z',
       updated_at: '2026-07-14T01:00:00Z',
     }],
@@ -233,6 +257,7 @@ test('projection exposes the durable AutoResearch decision and safe next action'
       campaign_status: 'active',
       next_action: 'submit_baseline',
       reason_code: 'real_baseline_required',
+      ready_for_next_proposal: true,
       baseline_verified: false,
       attempts_used: 1,
       proposals_used: 1,
@@ -273,6 +298,51 @@ test('projection exposes the durable AutoResearch decision and safe next action'
   assert.deepEqual(research.nextAction, {
     kind: 'planned',
     label: 'submit real baseline',
+    actionId: null,
+  })
+})
+
+test('projection surfaces the Git lineage gate before a code study stage', () => {
+  const source = detail()
+  source.campaign.active_action_id = null
+  source.evidence!.active_action_id = null
+  source.ledger!.autoresearch = {
+    spec: {
+      primary_metric: 'pass_at_1',
+      metric_direction: 'maximize',
+      stop_rules: { max_attempts: 3 },
+    },
+    state: {
+      campaign_status: 'active',
+      next_action: 'wait_for_result',
+      reason_code: 'experiment_result_pending',
+      ready_for_next_proposal: false,
+      baseline_verified: true,
+      attempts_used: 1,
+      proposals_used: 2,
+      budget_used: 0.5,
+      budget_remaining: 1.5,
+    },
+    proposals: [],
+    outcomes: [],
+    code_lineages: [{
+      lineage_id: 'lineage-proposal-active',
+      campaign_id: 'campaign-auto-1',
+      proposal_id: 'proposal-active',
+      mutation_kind: 'trainer',
+      source_repository_profile_id: 'source-profile-1',
+      state: 'prepared',
+      base_commit: 'a'.repeat(40),
+      branch_name: 'bashgym/autoresearch/proposal-active-deadbeef',
+      changed_paths: [],
+      created_at: '2026-07-14T00:05:00Z',
+      updated_at: '2026-07-14T00:06:00Z',
+    }],
+  }
+
+  assert.deepEqual(projectCampaignResearch(source).nextAction, {
+    kind: 'attention',
+    label: 'edit and capture code lineage',
     actionId: null,
   })
 })

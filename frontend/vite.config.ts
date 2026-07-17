@@ -42,9 +42,7 @@ export default defineConfig({
     })
   ],
   server: {
-    // 5173 is taken by another project (memexai); pin ghostwork to 5190 and fail
-    // loudly (strictPort) rather than silently drifting onto another taken port.
-    port: 5190,
+    port: 5173,
     strictPort: true
   },
   resolve: {

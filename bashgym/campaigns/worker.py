@@ -11,11 +11,23 @@ from pathlib import Path
 from uuid import uuid4
 
 from bashgym.campaigns.artifacts import ArtifactSealer
+from bashgym.campaigns.campaign_recovery import (
+    CampaignRecoveryRepository,
+    RecoveryAction,
+    RecoveryWorkClaim,
+)
 from bashgym.campaigns.contracts import (
     ActionAttempt,
     AttemptStatus,
     CampaignStatus,
+    CampaignTrigger,
+    CredentialKind,
+    canonical_hash,
     utc_now,
+)
+from bashgym.campaigns.evaluation import (
+    DevelopmentComparison,
+    RetrievalEvaluationArtifact,
 )
 from bashgym.campaigns.executors import (
     DevelopmentEvaluationConfig,
@@ -24,9 +36,24 @@ from bashgym.campaigns.executors import (
     FakeExecutor,
     RemoteOutputSealer,
 )
-from bashgym.campaigns.persistence import CampaignPersistenceError, LeaseBusyError, LeaseRecord
+from bashgym.campaigns.human_oversight import HumanOversightRepository
+from bashgym.campaigns.lineage import (
+    ApprovedSourceRepositoryProfile,
+    CodeLineageSnapshotReceipt,
+    GitHypothesisLineageManager,
+    GitLineageError,
+)
+from bashgym.campaigns.persistence import (
+    CampaignPersistenceError,
+    LeaseBusyError,
+    LeaseLostError,
+    LeaseRecord,
+    RecordNotFoundError,
+    RevisionConflictError,
+)
 from bashgym.campaigns.remote import (
     ApprovedRemoteExecutorProfile,
+    CodeLineageLaunchSnapshot,
     RemoteCapacityPolicy,
     RemoteLaunchRequest,
     RemoteRunState,
@@ -34,6 +61,7 @@ from bashgym.campaigns.remote import (
     remote_executor_config,
 )
 from bashgym.campaigns.runtime import CampaignRuntimeRepository
+from bashgym.campaigns.transitions import InvalidCampaignTransitionError
 
 
 class SimulatedWorkerCrashError(RuntimeError):
@@ -46,6 +74,11 @@ def scheduler_lease_key(data_directory: Path) -> str:
     canonical = str(data_directory.resolve()).casefold()
     directory_digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     return f"scheduler:{directory_digest}"
+
+
+def _controller_selection_idempotency_key(workspace_id: str, campaign_id: str, version: int) -> str:
+    identity = canonical_hash([workspace_id, campaign_id, version])[:32]
+    return f"controller-select-{identity}"
 
 
 class CampaignWorker:
@@ -62,9 +95,11 @@ class CampaignWorker:
         leader_ttl: timedelta = timedelta(seconds=15),
         action_ttl: timedelta = timedelta(seconds=15),
         remote_adapters: dict[str, RemoteTrainingAdapter] | None = None,
-        remote_executor_profiles: Mapping[
-            tuple[str, str], ApprovedRemoteExecutorProfile
-        ] | None = None,
+        remote_executor_profiles: (
+            Mapping[tuple[str, str], ApprovedRemoteExecutorProfile] | None
+        ) = None,
+        source_repository_profiles: Mapping[str, ApprovedSourceRepositoryProfile] | None = None,
+        lineage_manager: GitHypothesisLineageManager | None = None,
     ):
         self.repository = repository
         self.artifact_root = artifact_root.resolve()
@@ -80,8 +115,17 @@ class CampaignWorker:
         self.development_evaluation_executor = DevelopmentEvaluationExecutor(
             self.artifact_root, sealer
         )
+        self.human_oversight = HumanOversightRepository(repository, sealer=sealer)
+        self.recovery = CampaignRecoveryRepository(repository.db_path, sealer=sealer)
+        self.recovery.initialize()
         self.remote_adapters = dict(remote_adapters or {})
         self.remote_executor_profiles = dict(remote_executor_profiles or {})
+        self.source_repository_profiles = dict(source_repository_profiles or {})
+        self.lineage_manager = lineage_manager or GitHypothesisLineageManager(
+            data_directory.resolve() / "campaigns" / "source-worktrees"
+        )
+        self.lineage_snapshot_root = data_directory.resolve() / "campaigns" / "source-snapshots"
+        self._lineage_snapshots: dict[str, CodeLineageSnapshotReceipt] = {}
 
     @property
     def leader(self) -> LeaseRecord | None:
@@ -101,13 +145,22 @@ class CampaignWorker:
                 now=now,
             )
         else:
-            self._leader = self.repository.heartbeat_lease(
-                self._leader.lease_key,
-                self._leader.owner_id,
-                self._leader.generation,
-                ttl=self.leader_ttl,
-                now=now,
-            )
+            try:
+                self._leader = self.repository.heartbeat_lease(
+                    self._leader.lease_key,
+                    self._leader.owner_id,
+                    self._leader.generation,
+                    ttl=self.leader_ttl,
+                    now=now,
+                )
+            except LeaseLostError:
+                self._leader = None
+                self._leader = self.repository.acquire_lease(
+                    self.leader_key,
+                    self.worker_id,
+                    ttl=self.leader_ttl,
+                    now=now,
+                )
         return self._leader
 
     def sealed_path(self, attempt: ActionAttempt) -> Path:
@@ -134,7 +187,9 @@ class CampaignWorker:
             expected_claim_generation=attempt.claim_generation,
         )
 
-    def _ingest_sealed_metrics(self, attempt: ActionAttempt, sealed_path: Path, *, now: datetime) -> None:
+    def _ingest_sealed_metrics(
+        self, attempt: ActionAttempt, sealed_path: Path, *, now: datetime
+    ) -> None:
         metrics_path = sealed_path / "training_metrics.jsonl"
         if not metrics_path.is_file() or metrics_path.is_symlink():
             return
@@ -144,6 +199,72 @@ class CampaignWorker:
             tuple(payload.splitlines()),
             source="training_metrics.jsonl",
             cursor_end=len(payload.encode("utf-8")),
+            now=now,
+        )
+
+    def _persist_development_evaluation_evidence(
+        self,
+        attempt: ActionAttempt,
+        sealed_path: Path,
+        *,
+        now: datetime,
+    ) -> None:
+        try:
+            evaluation = RetrievalEvaluationArtifact.model_validate_json(
+                (sealed_path / "evaluation.json").read_text(encoding="utf-8")
+            )
+        except (OSError, ValueError) as exc:
+            raise CampaignPersistenceError("campaign_development_evaluation_seal_invalid") from exc
+        self.repository.store_retrieval_evaluation(
+            attempt.workspace_id,
+            attempt.campaign_id,
+            evaluation,
+            now=now,
+        )
+        comparison_path = sealed_path / "comparison.json"
+        if not comparison_path.is_file() or comparison_path.is_symlink():
+            return
+        try:
+            comparison = DevelopmentComparison.model_validate_json(
+                comparison_path.read_text(encoding="utf-8")
+            )
+        except (OSError, ValueError) as exc:
+            raise CampaignPersistenceError("campaign_development_comparison_seal_invalid") from exc
+        manifest = self.repository.get_manifest_revision(
+            attempt.workspace_id,
+            attempt.campaign_id,
+            attempt.manifest_revision,
+        ).manifest
+        requires_human_review = bool(
+            manifest.promotion_gates.get(
+                "requires_human_review",
+                manifest.promotion_gates.get("quality_claim_eligible", False),
+            )
+        )
+        if not requires_human_review:
+            self.repository.store_development_comparison(
+                attempt.workspace_id,
+                attempt.campaign_id,
+                comparison,
+                now=now,
+            )
+            return
+        config = DevelopmentEvaluationConfig.model_validate(
+            {key: value for key, value in attempt.executor.items() if key != "kind"}
+        )
+        if not config.champion_evaluation_id:
+            raise CampaignPersistenceError("campaign_human_review_champion_missing")
+        champion = self.repository.get_retrieval_evaluation(
+            attempt.workspace_id,
+            config.champion_evaluation_id,
+        )
+        self.human_oversight.enqueue_development_comparison(
+            workspace_id=attempt.workspace_id,
+            campaign_id=attempt.campaign_id,
+            campaign_revision=attempt.manifest_revision,
+            comparison=comparison,
+            champion=champion,
+            candidate=evaluation,
             now=now,
         )
 
@@ -157,17 +278,29 @@ class CampaignWorker:
                     or attempt.lease_expires_at is None
                     or attempt.lease_expires_at <= now
                 ):
-                    attempt = self.repository.adopt_remote_attempt(
-                        attempt,
-                        self._leader,
-                        ttl=self.action_ttl,
-                        now=now,
-                    )
+                    try:
+                        attempt = self.repository.adopt_remote_attempt(
+                            attempt,
+                            self._leader,
+                            ttl=self.action_ttl,
+                            now=now,
+                        )
+                    except LeaseBusyError:
+                        # Another live worker still holds this attempt's lease.
+                        # Leave it for the owner (or for adoption after expiry)
+                        # instead of failing the whole reconcile pass.
+                        continue
                 return asyncio.run(self._remote_tick(attempt, now=now))
             sealed_path = self.sealed_path(attempt)
             if sealed_path.is_dir():
                 manifest = self._verify(attempt, sealed_path)
                 self._ingest_sealed_metrics(attempt, sealed_path, now=now)
+                if attempt.executor.get("kind") == "development_evaluation":
+                    self._persist_development_evaluation_evidence(
+                        attempt,
+                        sealed_path,
+                        now=now,
+                    )
                 self.repository.complete_from_seal(
                     manifest,
                     sealed_path,
@@ -185,6 +318,102 @@ class CampaignWorker:
                 return "unknown"
         return None
 
+    def _repair_recovery(self, claim: RecoveryWorkClaim, *, now: datetime) -> str:
+        """Reconcile only one exact existing sealed local attempt, or block safely."""
+
+        attempt = None
+        if claim.attempt_id is not None:
+            try:
+                attempt = self.repository.get_attempt(claim.workspace_id, claim.attempt_id)
+            except RecordNotFoundError:
+                self.recovery.settle(
+                    claim, status="blocked", outcome_code="needs_operator", now=now
+                )
+                return "recovery_blocked"
+            if attempt.campaign_id != claim.campaign_id:
+                self.recovery.settle(
+                    claim, status="blocked", outcome_code="authority_changed", now=now
+                )
+                return "recovery_blocked"
+            if attempt.status == AttemptStatus.COMPLETED:
+                self.recovery.settle(
+                    claim, status="completed", outcome_code="attempt_reconciled", now=now
+                )
+                return "recovery_repaired"
+        else:
+            candidates = tuple(
+                value
+                for value in self.repository.list_attempts(claim.workspace_id, claim.campaign_id)
+                if value.status in {AttemptStatus.RUNNING, AttemptStatus.UNKNOWN}
+                and value.executor.get("kind") != "ssh_remote"
+                and self.sealed_path(value).is_dir()
+            )
+            if len(candidates) != 1:
+                self.recovery.settle(
+                    claim, status="blocked", outcome_code="needs_operator", now=now
+                )
+                return "recovery_blocked"
+            attempt = candidates[0]
+            claim = self.recovery.set_repair_target(claim, attempt.attempt_id)
+
+        sealed_path = self.sealed_path(attempt)
+        if not sealed_path.is_dir() or attempt.executor.get("kind") == "ssh_remote":
+            self.recovery.settle(claim, status="blocked", outcome_code="needs_operator", now=now)
+            return "recovery_blocked"
+        try:
+            manifest = self._verify(attempt, sealed_path)
+            self._ingest_sealed_metrics(attempt, sealed_path, now=now)
+            if attempt.executor.get("kind") == "development_evaluation":
+                self._persist_development_evaluation_evidence(attempt, sealed_path, now=now)
+            self.repository.complete_from_seal(
+                manifest,
+                sealed_path,
+                worker_id=self.worker_id,
+                reconcile=True,
+                now=now,
+            )
+        except (CampaignPersistenceError, OSError, ValueError):
+            self.recovery.settle(claim, status="blocked", outcome_code="needs_operator", now=now)
+            return "recovery_blocked"
+        self.recovery.settle(claim, status="completed", outcome_code="attempt_reconciled", now=now)
+        return "recovery_repaired"
+
+    def _consume_recovery_once(self, leader: LeaseRecord, *, now: datetime) -> str | None:
+        """Execute one durable recovery request beneath the resident leader fence."""
+
+        claim = self.recovery.claim_next(
+            leader=leader,
+            worker_id=self.worker_id,
+            ttl=self.action_ttl,
+            now=now,
+        )
+        if claim is None:
+            return None
+        if claim.status == "blocked":
+            return "recovery_blocked"
+        if claim.action == RecoveryAction.REPAIR:
+            return self._repair_recovery(claim, now=now)
+        if claim.action != RecoveryAction.RESUME:
+            self.recovery.settle(claim, status="blocked", outcome_code="needs_operator", now=now)
+            return "recovery_blocked"
+        try:
+            self.repository.transition_campaign(
+                claim.workspace_id,
+                claim.campaign_id,
+                CampaignTrigger.RESUME,
+                expected_version=claim.expected_aggregate_version,
+                actor_id="campaign-recovery-worker",
+                credential_kind=CredentialKind.CONTROLLER,
+                correlation_id=f"recovery-{claim.request_id}",
+                idempotency_key=f"recovery-resume-{claim.request_id}",
+                payload={"recovery_request_id": claim.request_id},
+            )
+        except (InvalidCampaignTransitionError, RevisionConflictError):
+            self.recovery.settle(claim, status="blocked", outcome_code="authority_changed", now=now)
+            return "recovery_blocked"
+        self.recovery.settle(claim, status="completed", outcome_code="campaign_resumed", now=now)
+        return "recovery_resumed"
+
     def controller_once(self, leader: LeaseRecord, *, now: datetime) -> str | None:
         """Select one proposal and schedule its next safe stage under the leader fence."""
 
@@ -198,7 +427,9 @@ class CampaignWorker:
                 expected_version=campaign.version,
                 controller_id="campaign-controller",
                 correlation_id=f"worker-{self.worker_id}",
-                idempotency_key=f"controller-select-v{campaign.version}",
+                idempotency_key=_controller_selection_idempotency_key(
+                    campaign.workspace_id, campaign.campaign_id, campaign.version
+                ),
             )
             if selected is None:
                 return None
@@ -227,7 +458,7 @@ class CampaignWorker:
                 campaign.campaign_id,
                 campaign.active_study_id,
                 leader,
-                code=str(exc),
+                code=getattr(type(exc), "code", "campaign_controller_action_blocked"),
                 now=now,
             )
             return "action_blocked"
@@ -261,15 +492,73 @@ class CampaignWorker:
         except KeyError as exc:
             raise RuntimeError("campaign_remote_executor_profile_unavailable") from exc
         try:
+            study = self.repository.get_study(
+                attempt.workspace_id, attempt.campaign_id, attempt.study_id
+            )
+        except RecordNotFoundError as exc:
+            raise RuntimeError("campaign_remote_study_unavailable") from exc
+        try:
+            code_lineage = self.repository.get_code_lineage(attempt.workspace_id, study.proposal_id)
+        except RecordNotFoundError as exc:
+            if "code_lineage_execution" in executor:
+                raise RuntimeError("campaign_code_lineage_execution_record_unavailable") from exc
+            code_lineage = None
+        try:
             expected = remote_executor_config(
                 profile,
                 attempt.stage,
                 recipe_digest=executor["recipe_digest"],
+                code_lineage=code_lineage,
             )
         except (KeyError, OSError, ValueError) as exc:
             raise RuntimeError("campaign_remote_executor_material_invalid") from exc
         if executor != {"kind": "ssh_remote", **expected}:
             raise RuntimeError("campaign_remote_executor_profile_mismatch")
+        source_snapshot = None
+        if code_lineage is not None:
+            binding = profile.stage_profile(attempt.stage).code_lineage_binding
+            if binding is None:
+                raise RuntimeError("campaign_code_lineage_execution_binding_unavailable")
+            try:
+                source_profile = self.source_repository_profiles[
+                    binding.source_repository_profile_id
+                ]
+            except KeyError as exc:
+                raise RuntimeError("campaign_code_lineage_source_profile_unavailable") from exc
+            try:
+                receipt = self._lineage_snapshots.get(code_lineage.record_digest)
+                if receipt is None:
+                    receipt = self.lineage_manager.materialize_snapshot(
+                        source_profile,
+                        code_lineage,
+                        self.lineage_snapshot_root,
+                        entrypoint_path=binding.entrypoint_path,
+                        max_archive_bytes=binding.max_archive_bytes,
+                    )
+                    self._lineage_snapshots[code_lineage.record_digest] = receipt
+                else:
+                    self.lineage_manager.verify_snapshot_receipt(
+                        receipt,
+                        code_lineage,
+                        max_archive_bytes=binding.max_archive_bytes,
+                    )
+            except GitLineageError as exc:
+                raise RuntimeError("campaign_code_lineage_snapshot_invalid") from exc
+            source_snapshot = CodeLineageLaunchSnapshot(
+                binding_id=binding.binding_id,
+                binding_revision=binding.binding_revision,
+                binding_digest=binding.binding_digest,
+                source_repository_profile_id=receipt.source_repository_profile_id,
+                lineage_id=receipt.lineage_id,
+                record_digest=receipt.record_digest,
+                commit_sha=receipt.commit_sha,
+                patch_sha256=receipt.patch_sha256,
+                entrypoint_path=receipt.entrypoint_path,
+                working_directory=binding.working_directory,
+                archive_path=receipt.archive_path,
+                archive_sha256=receipt.archive_sha256,
+                archive_size_bytes=receipt.archive_size_bytes,
+            )
         return RemoteLaunchRequest(
             compute_profile_id=executor["compute_profile_id"],
             run_id=attempt.attempt_id,
@@ -284,6 +573,7 @@ class CampaignWorker:
                     ("final", "training_manifest.json", "training_metrics.jsonl"),
                 )
             ),
+            source_snapshot=source_snapshot,
         )
 
     async def _remote_tick(self, attempt: ActionAttempt, *, now: datetime) -> str:
@@ -298,10 +588,8 @@ class CampaignWorker:
             identity = await adapter.discover(request)
             if identity is None:
                 if campaign.status == CampaignStatus.CANCELLING:
-                    sealed_path, manifest = (
-                        self.remote_output_sealer.seal_unlaunched_cancelled(
-                            attempt, compute_profile_id=request.compute_profile_id
-                        )
+                    sealed_path, manifest = self.remote_output_sealer.seal_unlaunched_cancelled(
+                        attempt, compute_profile_id=request.compute_profile_id
                     )
                     verified = self._verify(attempt, sealed_path)
                     self.repository.settle_terminal_from_seal(
@@ -362,7 +650,9 @@ class CampaignWorker:
             cursor_end=metric_cursor.byte_offset,
             now=now,
         )
-        collection_ttl = timedelta(hours=1) if observation.state == RemoteRunState.COMPLETED else self.action_ttl
+        collection_ttl = (
+            timedelta(hours=1) if observation.state == RemoteRunState.COMPLETED else self.action_ttl
+        )
         record = self.repository.update_remote_run(
             record,
             observation,
@@ -396,11 +686,7 @@ class CampaignWorker:
                 temporary,
                 observation=observation,
             )
-            outcome = (
-                "cancelled"
-                if campaign.status == CampaignStatus.CANCELLING
-                else "failed"
-            )
+            outcome = "cancelled" if campaign.status == CampaignStatus.CANCELLING else "failed"
             sealed_path, _manifest = self.remote_output_sealer.seal_terminal(
                 attempt,
                 record.identity,
@@ -418,9 +704,7 @@ class CampaignWorker:
             return "remote_cancelled" if outcome == "cancelled" else "remote_failed"
 
         temporary = (
-            self.artifact_root
-            / ".tmp"
-            / f"{attempt.action_id}.{attempt.attempt_id}.{uuid4().hex}"
+            self.artifact_root / ".tmp" / f"{attempt.action_id}.{attempt.attempt_id}.{uuid4().hex}"
         )
         temporary.mkdir(parents=True, exist_ok=False)
         await adapter.collect_outputs(
@@ -452,23 +736,13 @@ class CampaignWorker:
             if config.champion_evaluation_id
             else None
         )
-        execution = self.development_evaluation_executor.execute(
-            attempt, config, champion=champion
-        )
-        self.repository.store_retrieval_evaluation(
-            attempt.workspace_id,
-            attempt.campaign_id,
-            execution.evaluation,
+        execution = self.development_evaluation_executor.execute(attempt, config, champion=champion)
+        verified = self._verify(attempt, execution.sealed_path)
+        self._persist_development_evaluation_evidence(
+            attempt,
+            execution.sealed_path,
             now=now,
         )
-        if execution.comparison is not None:
-            self.repository.store_development_comparison(
-                attempt.workspace_id,
-                attempt.campaign_id,
-                execution.comparison,
-                now=now,
-            )
-        verified = self._verify(attempt, execution.sealed_path)
         self.repository.complete_from_seal(
             verified,
             execution.sealed_path,
@@ -490,6 +764,9 @@ class CampaignWorker:
             leader = self._ensure_leader(tick_at)
         except LeaseBusyError:
             return "not_leader"
+        recovery_result = self._consume_recovery_once(leader, now=tick_at)
+        if recovery_result is not None:
+            return recovery_result
         reconciled = self.reconcile_once(now=tick_at)
         if reconciled is not None:
             return reconciled

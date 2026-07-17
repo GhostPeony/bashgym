@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Never
+from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field
+from typing_extensions import Never
 
 from bashgym.api.workspace_routes import WorkspaceEvent, WorkspaceEventSource, post_workspace_event
 from bashgym.config import get_bashgym_dir
@@ -147,9 +148,7 @@ async def _run_discovery_task(
 
 
 @router.post("/discover", status_code=status.HTTP_202_ACCEPTED)
-async def discover_context(
-    request: Request, body: DiscoverInput, background: BackgroundTasks
-):
+async def discover_context(request: Request, body: DiscoverInput, background: BackgroundTasks):
     try:
         bundle = _service(request).begin_discovery(
             workspace_id=body.workspace_id,
@@ -189,7 +188,9 @@ async def list_bundles(
     try:
         service = _service(request)
         return {
-            "bundles": [item.model_dump(mode="json") for item in service.history(workspace_id, limit=limit)],
+            "bundles": [
+                item.model_dump(mode="json") for item in service.history(workspace_id, limit=limit)
+            ],
             "active": service.active_summary(workspace_id),
         }
     except Exception as exc:
@@ -212,15 +213,12 @@ async def get_bundle(
 @router.post("/bundles/{bundle_id}/versions/{version}/pin", status_code=status.HTTP_201_CREATED)
 async def pin_bundle(request: Request, bundle_id: str, version: int, body: PinInput):
     try:
-        bundle = (
-            _service(request)
-            .pin(
-                body.workspace_id,
-                bundle_id,
-                version,
-                selected_evidence_ids=body.selected_evidence_ids,
-                expected_version=body.expected_version,
-            )
+        bundle = _service(request).pin(
+            body.workspace_id,
+            bundle_id,
+            version,
+            selected_evidence_ids=body.selected_evidence_ids,
+            expected_version=body.expected_version,
         )
         await _publish_bundle_event(
             request,
@@ -278,9 +276,7 @@ async def refresh_bundle(
 
 
 @router.post("/bundles/{bundle_id}/versions/{version}/cancel")
-async def cancel_bundle(
-    request: Request, bundle_id: str, version: int, body: WorkspaceInput
-):
+async def cancel_bundle(request: Request, bundle_id: str, version: int, body: WorkspaceInput):
     try:
         bundle = _service(request).cancel(body.workspace_id, bundle_id, version)
         await _publish_bundle_event(
@@ -299,14 +295,9 @@ async def cancel_bundle(
 
 
 @router.post("/bundles/{bundle_id}/versions/{version}/activate")
-async def activate_bundle(
-    request: Request, bundle_id: str, version: int, body: WorkspaceInput
-):
+async def activate_bundle(request: Request, bundle_id: str, version: int, body: WorkspaceInput):
     try:
-        bundle = (
-            _service(request)
-            .activate(body.workspace_id, bundle_id, version)
-        )
+        bundle = _service(request).activate(body.workspace_id, bundle_id, version)
         await _publish_bundle_event(
             request,
             "hf-context:activated",

@@ -6,8 +6,9 @@ import hashlib
 import json
 import math
 import re
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import Enum
+from pathlib import PurePosixPath
 from typing import Annotated, Any, Literal
 
 from pydantic import (
@@ -18,6 +19,8 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
+from bashgym._compat import UTC
 
 
 def utc_now() -> datetime:
@@ -36,6 +39,10 @@ Identifier = Annotated[
     ),
 ]
 HexDigest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
+GitObjectId = Annotated[
+    str,
+    StringConstraints(pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$"),
+]
 
 
 class ContractModel(BaseModel):
@@ -182,6 +189,120 @@ class BudgetEntryKind(str, Enum):
     CORRECTION = "correction"
 
 
+CANONICAL_CAMPAIGN_EVENT_TYPES = frozenset(
+    {
+        "campaign:created",
+        "campaign:validation-started",
+        "campaign:validation-failed",
+        "campaign:ready",
+        "campaign:started",
+        "campaign:paused",
+        "campaign:resumed",
+        "campaign:authority-required",
+        "campaign:authority-satisfied",
+        "campaign:cancelling",
+        "campaign:cancelled",
+        "campaign:completed",
+        "campaign:failed",
+        "campaign:exhausted",
+        "campaign:proposal-submitted",
+        "campaign:proposal-rejected",
+        "campaign:proposal-withdrawn",
+        "campaign:proposal-accepted",
+        "campaign:advance-requested",
+        "campaign:manifest-revised",
+        "campaign:source-approved",
+        "campaign:study-abandoned",
+        "campaign:action-blocked",
+        "campaign:stages-skipped",
+        "campaign:action-retry-scheduled",
+        "campaign:force-stop-requested",
+        "campaign:training-metrics-appended",
+        "campaign:remote-run-registered",
+        "campaign:remote-run-adopted",
+        "campaign:remote-capacity-blocked",
+        "campaign:action-scheduled",
+        "campaign:action-claimed",
+        "campaign:action-unknown",
+        "campaign:action-completed",
+        "campaign:action-failed",
+        "campaign:action-cancelled",
+        "campaign:action-force-stopped",
+        "campaign:budget-recorded",
+        "campaign:budget-overrun",
+        "campaign:protected-lease-acquired",
+        "campaign:protected-evaluation-completed",
+        "campaign:promotion-committed",
+        "campaign:export-completed",
+        "campaign:human-work-claimed",
+        "campaign:human-work-enqueued",
+        "campaign:human-work-submitted",
+        "campaign:human-promotion-held",
+        "campaign:human-promotion-approved",
+    }
+)
+
+PUBLIC_CAMPAIGN_BLOCKER_CODES = frozenset(
+    {
+        "campaign_controller_action_blocked",
+        "campaign_not_found",
+        "campaign_stage_cursor_exhausted",
+        "campaign_code_lineage_not_captured",
+        "campaign_code_lineage_not_registered",
+        "campaign_code_lineage_mutation_kind_mismatch",
+        "campaign_code_lineage_execution_binding_required",
+        "campaign_code_lineage_execution_binding_mismatch",
+        "campaign_recipe_runtime_invalid",
+        "campaign_remote_stage_not_allowed",
+        "campaign_remote_profile_unavailable",
+        "campaign_remote_target_model_mismatch",
+        "campaign_remote_profile_material_invalid",
+        "campaign_executor_kind_not_registered",
+        "campaign_budget_unit_not_approved",
+    }
+)
+
+PUBLIC_CAMPAIGN_ARTIFACT_SCHEMA_NAMES = frozenset(
+    {
+        "campaign_development_comparison.v1",
+        "campaign_fake_summary.v1",
+        "campaign_remote_exit_code.v1",
+        "campaign_remote_launch_manifest.v2",
+        "campaign_remote_output.v1",
+        "campaign_retrieval_evaluation.v1",
+        "campaign_scored_development_rows.v1",
+        "campaign_training_log.v1",
+        "campaign_unlaunched_cancellation.v1",
+        "campaign_validated_dev_dataset.v1",
+        "embedding_training_manifest.v1",
+        "huggingface_model_file.v1",
+        "memexai_query_format_ablation_manifest.v1",
+        "nemo_gym_campaign_evidence.v1",
+        "query_format_ablation_manifest.v2",
+        "training_manifest.v1",
+        "training_metrics_jsonl.v1",
+        "unclassified_artifact.v1",
+    }
+)
+
+
+class CodeMutationKind(str, Enum):
+    """Operator-approved experiment-code surface changed by a hypothesis."""
+
+    TRAINER = "trainer"
+    GYM = "gym"
+    REWARD = "reward"
+    EVALUATOR = "evaluator"
+
+
+class CodeLineageState(str, Enum):
+    """Monotonic lifecycle for one isolated hypothesis branch."""
+
+    REQUIRED = "required"
+    PREPARED = "prepared"
+    CAPTURED = "captured"
+
+
 class AutonomyProfile(str, Enum):
     DESKTOP_USER = "desktop_user"
     HERMES_BOUNDED = "hermes_bounded"
@@ -220,9 +341,11 @@ class Capability(str, Enum):
     EVAL_PROTECTED_ACQUIRE = "eval.protected_acquire"
     EVAL_PROTECTED_EXECUTE = "eval.protected_execute"
     EXPERIMENT_LEDGER_WRITE = "experiment.ledger_write"
+    EXPERIMENT_CODE_MUTATE = "experiment.code_mutate"
     PROMOTION_DECIDE = "promotion.decide"
     PROMOTION_OVERRIDE = "promotion.override"
     ARTIFACT_PUBLISH_HF = "artifact.publish_hf"
+    HANDOFF_EXTERNAL_PREPARE = "handoff.external_prepare"
     HANDOFF_MEMEXAI_PREPARE = "handoff.memexai_prepare"
 
 
@@ -244,7 +367,15 @@ HERMES_CAPABILITIES = frozenset(
         Capability.EXPERIMENT_LEDGER_WRITE,
     }
 )
-CODEX_CAPABILITIES = frozenset(Capability)
+CODEX_CAPABILITIES = frozenset(
+    capability
+    for capability in Capability
+    if capability
+    not in {
+        Capability.PROMOTION_OVERRIDE,
+        Capability.HANDOFF_MEMEXAI_PREPARE,
+    }
+)
 DESKTOP_LOCAL_SCOPE = "desktop-local"
 
 
@@ -271,6 +402,7 @@ class CampaignManifest(FrozenContractModel):
     max_proposal_rounds: int = Field(default=5, ge=1, le=100)
     retention_days_failed: int = Field(default=90, ge=1)
     allow_hf_publication: bool = False
+    allow_external_handoff: bool = False
     allow_memexai_handoff: bool = False
 
     @field_validator("approved_data_scopes")
@@ -288,6 +420,23 @@ class CampaignManifest(FrozenContractModel):
         return value
 
 
+_LEGACY_MANIFEST_V1_HASH_FIELDS = frozenset(
+    {
+        "schema_version",
+        "approved_data_scopes",
+        "compute_profile_id",
+        "budget_limits",
+        "evaluation_plan",
+        "promotion_gates",
+        "protected_artifact_refs",
+        "max_proposal_rounds",
+        "retention_days_failed",
+        "allow_hf_publication",
+        "allow_memexai_handoff",
+    }
+)
+
+
 class ManifestRevision(FrozenContractModel):
     schema_version: Literal["campaign_manifest_revision.v1"] = "campaign_manifest_revision.v1"
     workspace_id: Identifier
@@ -303,7 +452,17 @@ class ManifestRevision(FrozenContractModel):
     def verify_manifest_hash(self) -> ManifestRevision:
         expected = canonical_hash(self.manifest.model_dump(mode="json"))
         if self.manifest_hash and self.manifest_hash != expected:
-            raise ValueError("manifest_hash does not match manifest")
+            normalized = self.manifest.model_dump(mode="json")
+            legacy_projection = {
+                field: normalized[field] for field in _LEGACY_MANIFEST_V1_HASH_FIELDS
+            }
+            legacy_hash_matches = (
+                self.manifest.model_fields_set == _LEGACY_MANIFEST_V1_HASH_FIELDS
+                and self.manifest.allow_external_handoff is False
+                and self.manifest_hash == canonical_hash(legacy_projection)
+            )
+            if not legacy_hash_matches:
+                raise ValueError("manifest_hash does not match manifest")
         if not self.manifest_hash:
             object.__setattr__(self, "manifest_hash", expected)
         return self
@@ -435,6 +594,100 @@ class ProposalRecord(FrozenContractModel):
     updated_at: datetime
 
 
+class CodeLineageRecord(FrozenContractModel):
+    """Secret-free, durable Git evidence for a code-mutating proposal."""
+
+    schema_version: Literal["campaign_code_lineage.v1"] = "campaign_code_lineage.v1"
+    lineage_id: Identifier
+    workspace_id: Identifier
+    campaign_id: Identifier
+    proposal_id: Identifier
+    mutation_kind: CodeMutationKind
+    source_repository_profile_id: Identifier
+    state: CodeLineageState
+    base_commit: GitObjectId | None = None
+    branch_name: str | None = Field(default=None, min_length=1, max_length=240)
+    commit_sha: GitObjectId | None = None
+    changed_paths: tuple[str, ...] = ()
+    patch_sha256: HexDigest | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+    captured_at: datetime | None = None
+
+    @field_validator("branch_name")
+    @classmethod
+    def validate_branch_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if (
+            not value.startswith("bashgym/autoresearch/")
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", value) is None
+            or ".." in value
+            or "//" in value
+            or value.endswith(("/", ".", ".lock"))
+            or any(part.startswith(".") for part in value.split("/"))
+        ):
+            raise ValueError("code lineage branch name is not safe")
+        return value
+
+    @field_validator("changed_paths")
+    @classmethod
+    def validate_changed_paths(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if tuple(sorted(set(value))) != value:
+            raise ValueError("code lineage changed paths must be sorted and unique")
+        for raw_path in value:
+            path = PurePosixPath(raw_path)
+            if (
+                not raw_path
+                or raw_path.startswith("/")
+                or "\\" in raw_path
+                or path.as_posix() != raw_path
+                or any(part in {"", ".", ".."} for part in path.parts)
+                or any(ord(character) < 32 for character in raw_path)
+            ):
+                raise ValueError("code lineage changed path is not a safe relative path")
+        return value
+
+    @model_validator(mode="after")
+    def validate_state(self) -> CodeLineageRecord:
+        has_preparation_evidence = self.base_commit is not None or self.branch_name is not None
+        prepared = self.base_commit is not None and self.branch_name is not None
+        captured = (
+            self.commit_sha is not None
+            and self.patch_sha256 is not None
+            and bool(self.changed_paths)
+            and self.captured_at is not None
+        )
+        if self.updated_at < self.created_at:
+            raise ValueError("code lineage updated_at cannot precede created_at")
+        if self.captured_at is not None and self.captured_at < self.created_at:
+            raise ValueError("code lineage captured_at cannot precede created_at")
+        if self.state == CodeLineageState.REQUIRED and (
+            has_preparation_evidence
+            or captured
+            or self.commit_sha is not None
+            or self.patch_sha256 is not None
+            or self.changed_paths
+            or self.captured_at is not None
+        ):
+            raise ValueError("required code lineage cannot contain Git evidence")
+        if self.state == CodeLineageState.PREPARED and (
+            not prepared
+            or self.commit_sha is not None
+            or self.patch_sha256 is not None
+            or self.changed_paths
+            or self.captured_at is not None
+        ):
+            raise ValueError("prepared code lineage requires only base and branch evidence")
+        if self.state == CodeLineageState.CAPTURED and (not prepared or not captured):
+            raise ValueError("captured code lineage requires complete Git evidence")
+        return self
+
+    @property
+    def record_digest(self) -> str:
+        return canonical_hash(self.model_dump(mode="json"))
+
+
 class CampaignArtifactReference(FrozenContractModel):
     schema_version: Literal["campaign_artifact_reference.v1"] = "campaign_artifact_reference.v1"
     artifact_id: Identifier
@@ -442,6 +695,33 @@ class CampaignArtifactReference(FrozenContractModel):
     size_bytes: int = Field(ge=0)
     schema_name: str = Field(min_length=1, max_length=240)
     valid: bool
+
+
+class NemoGymEvidenceReference(FrozenContractModel):
+    """Bounded NeMo Gym identity exposed to planners without raw rollout content."""
+
+    schema_version: Literal["campaign_nemo_gym_evidence_reference.v1"] = (
+        "campaign_nemo_gym_evidence_reference.v1"
+    )
+    artifact_id: Identifier
+    artifact_sha256: HexDigest
+    bundle_digest: HexDigest
+    environment_id: Identifier
+    environment_digest: HexDigest
+    rollout_batch_digest: HexDigest
+    token_evidence_digest: HexDigest
+    refit_receipt_digest: HexDigest
+    rollout_count: int = Field(ge=1, le=4096)
+    mean_total_reward: float
+    training_step: int = Field(ge=0)
+    policy_revision: int = Field(ge=0)
+
+    @field_validator("mean_total_reward")
+    @classmethod
+    def finite_reward(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("NeMo Gym mean total reward must be finite")
+        return value
 
 
 class CompletedHypothesisSummary(FrozenContractModel):
@@ -472,6 +752,9 @@ class CampaignEvidenceSnapshot(FrozenContractModel):
     proposal_counts: dict[ProposalStatus, int]
     completed_hypotheses: tuple[CompletedHypothesisSummary, ...] = Field(max_length=50)
     artifact_references: tuple[CampaignArtifactReference, ...] = Field(max_length=100)
+    nemo_gym_evidence_references: tuple[NemoGymEvidenceReference, ...] = Field(
+        default=(), max_length=100
+    )
     available_executors: tuple[Identifier, ...]
     active_study_id: Identifier | None = None
     active_action_id: Identifier | None = None
@@ -486,6 +769,394 @@ class CampaignEvidenceSnapshot(FrozenContractModel):
             raise ValueError("snapshot_digest does not match evidence snapshot")
         if not self.snapshot_digest:
             object.__setattr__(self, "snapshot_digest", digest)
+        return self
+
+
+class ControlRoomCampaignV1(FrozenContractModel):
+    """Safe campaign identity and lifecycle fields for the control room."""
+
+    schema_version: Literal["control_room_campaign.v1"] = "control_room_campaign.v1"
+    workspace_id: Identifier
+    campaign_id: Identifier
+    title: str = Field(min_length=1, max_length=240)
+    kind: CampaignKind
+    objective: str = Field(min_length=1, max_length=4000)
+    manifest_revision: int = Field(ge=1)
+    status: CampaignStatus
+    active_study_id: Identifier | None = None
+    active_action_id: Identifier | None = None
+    stop_reason: str | None = Field(default=None, max_length=2000)
+    version: int = Field(ge=1)
+    created_at: datetime
+    updated_at: datetime
+
+
+class ControlRoomStatusCountV1(FrozenContractModel):
+    schema_version: Literal["control_room_status_count.v1"] = "control_room_status_count.v1"
+    status: Identifier
+    count: int = Field(ge=1)
+
+
+class ControlRoomCollectionSummaryV1(FrozenContractModel):
+    """Bounded status histogram; never embeds collection rows."""
+
+    schema_version: Literal["control_room_collection_summary.v1"] = (
+        "control_room_collection_summary.v1"
+    )
+    total: int = Field(ge=0)
+    by_status: tuple[ControlRoomStatusCountV1, ...] = Field(default=(), max_length=64)
+
+    @model_validator(mode="after")
+    def validate_counts(self) -> ControlRoomCollectionSummaryV1:
+        statuses = tuple(item.status for item in self.by_status)
+        if statuses != tuple(sorted(set(statuses))):
+            raise ValueError("control-room status counts must be sorted and unique")
+        if sum(item.count for item in self.by_status) != self.total:
+            raise ValueError("control-room status counts must equal the collection total")
+        return self
+
+
+class ControlRoomArtifactSummaryV1(FrozenContractModel):
+    """Artifact counts without URI, metadata, or restricted evaluation content."""
+
+    schema_version: Literal["control_room_artifact_summary.v1"] = "control_room_artifact_summary.v1"
+    total: int = Field(ge=0)
+    sealed: int = Field(ge=0)
+    valid: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def validate_subtotals(self) -> ControlRoomArtifactSummaryV1:
+        if self.sealed > self.total or self.valid > self.total:
+            raise ValueError("artifact subtotals cannot exceed the total")
+        return self
+
+
+class CampaignControlRoomStateV1(FrozenContractModel):
+    """One-transaction durable state used to compose a control-room snapshot."""
+
+    schema_version: Literal["control_room_state.v1"] = "control_room_state.v1"
+    campaign: ControlRoomCampaignV1
+    latest_event_cursor: int = Field(ge=0)
+    proposals: ControlRoomCollectionSummaryV1
+    studies: ControlRoomCollectionSummaryV1
+    actions: ControlRoomCollectionSummaryV1
+    attempts: ControlRoomCollectionSummaryV1
+    artifacts: ControlRoomArtifactSummaryV1
+    state_observed_at: datetime
+
+
+class ControlRoomControllerObservationV1(FrozenContractModel):
+    """Separately timestamped controller observation outside the SQLite snapshot."""
+
+    schema_version: Literal["control_room_controller_observation.v1"] = (
+        "control_room_controller_observation.v1"
+    )
+    online: bool
+    controller_observation_version: int = Field(default=0, ge=0)
+    state: Literal["online", "stale", "offline"]
+    code: Identifier
+    observed_at: datetime
+    heartbeat_age_seconds: float | None = Field(default=None, ge=0)
+    guidance: str | None = Field(default=None, max_length=2000)
+    owner_id: Identifier | None = None
+    generation: int | None = Field(default=None, ge=1)
+    heartbeat_at: datetime | None = None
+    expires_at: datetime | None = None
+
+
+class CampaignSummaryV1(FrozenContractModel):
+    schema_version: Literal["campaign_summary.v1"] = "campaign_summary.v1"
+    campaign_id: Identifier
+    title: str
+    objective: str
+    kind: CampaignKind
+    status: CampaignStatus
+    aggregate_version: int = Field(ge=1)
+    manifest_revision: int = Field(ge=1)
+    active_study_id: Identifier | None
+    active_action_id: Identifier | None
+    champion_ref: str | None
+    stop_reason: str | None
+
+
+class ControllerObservationV1(FrozenContractModel):
+    schema_version: Literal["controller_observation.v1"] = "controller_observation.v1"
+    controller_observation_version: int = Field(ge=0)
+    state: Literal["online", "stale", "offline"]
+    observed_at: datetime
+    heartbeat_age_seconds: float | None = Field(ge=0)
+    lease_expires_at: datetime | None
+    controller_instance_id: Identifier | None
+    safe_guidance: str | None
+
+
+class ReadinessSummaryV1(FrozenContractModel):
+    schema_version: Literal["readiness_summary.v1"] = "readiness_summary.v1"
+    materializable: bool
+    launch_ready: bool
+    checked_at: datetime
+    activation_receipt_digest: HexDigest | None
+    doctor_receipt_digest: HexDigest | None
+    blocking_codes: tuple[Identifier, ...] = Field(max_length=64)
+
+    @field_validator("blocking_codes")
+    @classmethod
+    def validate_blocking_codes(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(value) != len(set(value)):
+            raise ValueError("readiness blocking codes must be unique")
+        return value
+
+
+class SafeBindingIdentityV1(FrozenContractModel):
+    schema_version: Literal["safe_binding_identity.v1"] = "safe_binding_identity.v1"
+    binding_id: Identifier
+    immutable_digest: HexDigest | None
+    display_label: str
+
+
+class BindingSummaryV1(FrozenContractModel):
+    schema_version: Literal["binding_summary.v1"] = "binding_summary.v1"
+    model: SafeBindingIdentityV1 | None
+    data: SafeBindingIdentityV1 | None
+    evaluator: SafeBindingIdentityV1 | None
+    source: SafeBindingIdentityV1 | None
+    compute: SafeBindingIdentityV1 | None
+
+
+class DecisionBlockerV1(FrozenContractModel):
+    schema_version: Literal["decision_blocker.v1"] = "decision_blocker.v1"
+    code: Identifier
+    summary: str
+    evidence_ids: tuple[Identifier, ...] = Field(max_length=64)
+    secondary_codes: tuple[Identifier, ...] = Field(max_length=64)
+
+    @model_validator(mode="after")
+    def validate_unique_codes_and_evidence(self) -> DecisionBlockerV1:
+        if self.code in self.secondary_codes or len(self.secondary_codes) != len(
+            set(self.secondary_codes)
+        ):
+            raise ValueError("decision blocker codes must be unique")
+        if len(self.evidence_ids) != len(set(self.evidence_ids)):
+            raise ValueError("decision blocker evidence IDs must be unique")
+        return self
+
+
+class JourneyPhaseSummaryV1(FrozenContractModel):
+    schema_version: Literal["journey_phase_summary.v1"] = "journey_phase_summary.v1"
+    phase_id: Literal["setup", "baseline", "experiments", "human_review", "decision"]
+    state: Literal["not_started", "ready", "active", "blocked", "complete", "failed", "skipped"]
+    execution_owner: Literal["bashgym", "human", "none"]
+    attention_owner: Literal["bashgym", "agent", "human", "none"]
+    primary_blocker: DecisionBlockerV1 | None
+    evidence_count: int = Field(ge=0)
+    next_action_ids: tuple[Identifier, ...] = Field(max_length=64)
+
+    @field_validator("next_action_ids")
+    @classmethod
+    def validate_next_action_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(value) != len(set(value)):
+            raise ValueError("journey action IDs must be unique")
+        return value
+
+
+class OpaqueProcessIdentityV1(FrozenContractModel):
+    schema_version: Literal["opaque_process_identity.v1"] = "opaque_process_identity.v1"
+    run_id: Identifier
+    compute_profile_id: Identifier
+    state: Literal["launching", "running", "paused", "completed", "failed", "cancelled", "unknown"]
+
+
+class ActiveWorkSummaryV1(FrozenContractModel):
+    schema_version: Literal["active_work_summary.v1"] = "active_work_summary.v1"
+    study_id: Identifier | None
+    proposal_id: Identifier | None
+    action_id: Identifier | None
+    attempt_id: Identifier | None
+    stage: StageKind | None
+    hypothesis_summary: str | None
+    primary_variable_summary: str | None
+    controlled_variable_summary: tuple[str, ...] = Field(max_length=64)
+    progress_fraction: float | None = Field(ge=0, le=1)
+    eta_seconds: float | None = Field(ge=0)
+    executor_type: Literal["fake", "ssh_remote", "development_evaluation"] | None
+    process_identity: OpaqueProcessIdentityV1 | None
+
+
+class CandidateSummaryV1(FrozenContractModel):
+    schema_version: Literal["candidate_summary.v1"] = "candidate_summary.v1"
+    candidate_ref: str
+    source_attempt_ids: tuple[Identifier, ...] = Field(max_length=100)
+    source_artifact_ids: tuple[Identifier, ...] = Field(max_length=100)
+    latest_comparable_evaluation_id: Identifier | None
+    comparison_verdict: Literal["passed", "failed", "insufficient_evidence"] | None
+    gate_state: Literal["not_evaluated", "blocked", "passed", "failed", "promoted"]
+
+
+class MetricDescriptorV1(FrozenContractModel):
+    schema_version: Literal["metric_descriptor.v1"] = "metric_descriptor.v1"
+    metric_id: Identifier
+    display_name: str
+    unit: str | None
+    direction: Literal["maximize", "minimize", "target"]
+    target: float | None
+    tolerance: float | None
+    evaluator_revision: str | None
+    sample_count: int | None = Field(ge=0)
+    uncertainty_method: str | None
+    comparability_key: HexDigest
+
+
+class BudgetResourceSummaryV1(FrozenContractModel):
+    schema_version: Literal["budget_resource_summary.v1"] = "budget_resource_summary.v1"
+    unit: Identifier
+    limit: float
+    reserved: float
+    settled: float
+    remaining: float
+    blocked: bool
+    blocker_code: Identifier | None
+
+
+class BudgetSummaryV1(FrozenContractModel):
+    schema_version: Literal["budget_summary.v1"] = "budget_summary.v1"
+    resources: tuple[BudgetResourceSummaryV1, ...] = Field(max_length=64)
+    blocked: bool
+
+
+class HumanWorkItemSummaryV1(FrozenContractModel):
+    schema_version: Literal["human_work_item_summary.v1"] = "human_work_item_summary.v1"
+    work_item_id: Identifier
+    kind: Literal["blinded_sample_evaluation", "promotion_decision"]
+    status: Literal[
+        "open",
+        "claimed",
+        "accepted",
+        "rejected",
+        "revision_requested",
+        "abstained",
+        "cancelled",
+        "expired",
+    ]
+    blocking_scope: Identifier
+    assigned_actor_id: Identifier | None
+    required_count: int = Field(ge=0)
+    completed_count: int = Field(ge=0)
+    due_at: datetime | None
+
+
+class HumanWorkSummaryV1(FrozenContractModel):
+    schema_version: Literal["human_work_summary.v1"] = "human_work_summary.v1"
+    blocking_count: int = Field(ge=0)
+    open_count: int = Field(ge=0)
+    newest: tuple[HumanWorkItemSummaryV1, ...] = Field(max_length=10)
+
+
+class AttachedAgentSummaryV1(FrozenContractModel):
+    schema_version: Literal["attached_agent_summary.v1"] = "attached_agent_summary.v1"
+    session_id: Identifier
+    actor_id: Identifier
+    origin_id: Identifier
+    bundle_id: Identifier
+    capability_revision: int = Field(ge=1)
+    expires_at: datetime
+    liveness: Literal["active", "disconnected", "expired", "revoked"]
+    last_cursor: int = Field(ge=0)
+    last_request_id: Identifier | None
+
+
+class CollectionCursorV1(FrozenContractModel):
+    schema_version: Literal["collection_cursor.v1"] = "collection_cursor.v1"
+    count: int = Field(ge=0)
+    next_cursor: str | None
+    has_more: bool
+
+    @model_validator(mode="after")
+    def validate_cursor(self) -> CollectionCursorV1:
+        if self.has_more != (self.next_cursor is not None):
+            raise ValueError("collection has_more must match next_cursor presence")
+        return self
+
+
+class CollectionSummaryV1(FrozenContractModel):
+    schema_version: Literal["collection_summary.v1"] = "collection_summary.v1"
+    events: CollectionCursorV1
+    proposals: CollectionCursorV1
+    studies: CollectionCursorV1
+    attempts: CollectionCursorV1
+    artifacts: CollectionCursorV1
+    comparisons: CollectionCursorV1
+    human_work: CollectionCursorV1
+
+
+class DecisionActionV1(FrozenContractModel):
+    schema_version: Literal["decision_action.v1"] = "decision_action.v1"
+    action: Identifier
+    capability: Capability
+    freshness_class: Literal["read", "lifecycle", "privileged"]
+    requires_human_work: bool
+
+
+class DecisionSurfaceV1(FrozenContractModel):
+    schema_version: Literal["decision_surface.v1"] = "decision_surface.v1"
+    execution_owner: Literal["bashgym", "human", "none"]
+    attention_owner: Literal["bashgym", "agent", "human", "none"]
+    blocker: DecisionBlockerV1 | None
+    next_actions: tuple[DecisionActionV1, ...] = Field(max_length=64)
+    recovery_actions: tuple[Identifier, ...] = Field(max_length=16)
+    promotion_eligible: bool
+
+    @model_validator(mode="after")
+    def validate_unique_actions(self) -> DecisionSurfaceV1:
+        actions = tuple(item.action for item in self.next_actions)
+        if len(actions) != len(set(actions)):
+            raise ValueError("decision actions must be unique")
+        if len(self.recovery_actions) != len(set(self.recovery_actions)):
+            raise ValueError("recovery actions must be unique")
+        return self
+
+
+class CampaignControlRoomSnapshotV1(FrozenContractModel):
+    """Complete principal-filtered public campaign projection."""
+
+    schema_version: Literal["control_room_snapshot.v1"] = "control_room_snapshot.v1"
+    workspace_id: Identifier
+    campaign_id: Identifier
+    aggregate_version: int = Field(ge=1)
+    manifest_revision: int = Field(ge=1)
+    authorization_revision: int = Field(ge=1)
+    snapshot_at: datetime
+    latest_event_cursor: int = Field(ge=0)
+    campaign: CampaignSummaryV1
+    controller: ControllerObservationV1
+    readiness: ReadinessSummaryV1
+    bindings: BindingSummaryV1
+    journey: tuple[JourneyPhaseSummaryV1, ...] = Field(min_length=5, max_length=5)
+    active_work: ActiveWorkSummaryV1 | None
+    champion: CandidateSummaryV1 | None
+    candidate: CandidateSummaryV1 | None
+    metrics: tuple[MetricDescriptorV1, ...] = Field(max_length=64)
+    budget: BudgetSummaryV1
+    human_work: HumanWorkSummaryV1
+    agents: tuple[AttachedAgentSummaryV1, ...] = Field(max_length=32)
+    collections: CollectionSummaryV1
+    decision_surface: DecisionSurfaceV1
+
+    @model_validator(mode="after")
+    def validate_identity_and_journey(self) -> CampaignControlRoomSnapshotV1:
+        if self.campaign_id != self.campaign.campaign_id:
+            raise ValueError("snapshot and campaign IDs must match")
+        if self.aggregate_version != self.campaign.aggregate_version:
+            raise ValueError("snapshot and campaign aggregate versions must match")
+        if self.manifest_revision != self.campaign.manifest_revision:
+            raise ValueError("snapshot and campaign manifest revisions must match")
+        if tuple(phase.phase_id for phase in self.journey) != (
+            "setup",
+            "baseline",
+            "experiments",
+            "human_review",
+            "decision",
+        ):
+            raise ValueError("control-room journey must use the exact ordered phases")
         return self
 
 
@@ -565,6 +1236,87 @@ class CampaignEvent(FrozenContractModel):
         return value
 
 
+class PublicCampaignEventSummaryV1(FrozenContractModel):
+    """Bounded workspace-safe fields classified for public campaign timelines."""
+
+    schema_version: Literal["public_campaign_event_summary.v1"] = "public_campaign_event_summary.v1"
+    action_id: Identifier | None = None
+    attempt_id: Identifier | None = None
+    study_id: Identifier | None = None
+    proposal_id: Identifier | None = None
+    entry_id: Identifier | None = None
+    stage: Identifier | None = None
+    code: Identifier | None = None
+    manifest_revision: int | None = Field(default=None, ge=1)
+    stage_index: int | None = Field(default=None, ge=0)
+    next_stage_index: int | None = Field(default=None, ge=0)
+    claim_generation: int | None = Field(default=None, ge=0)
+    cursor_end: int | None = Field(default=None, ge=0)
+    alert_count: int | None = Field(default=None, ge=0)
+    study_completed: bool | None = None
+
+
+class PublicCampaignEventV1(FrozenContractModel):
+    """Fail-closed campaign event projection for readers and presentation surfaces."""
+
+    schema_version: Literal["public_campaign_event.v1"] = "public_campaign_event.v1"
+    event_id: Identifier
+    workspace_id: Identifier
+    campaign_id: Identifier
+    sequence: int = Field(ge=1)
+    aggregate_version: int = Field(ge=1)
+    event_type: Identifier
+    summary: PublicCampaignEventSummaryV1 | None = None
+    actor_id: Identifier
+    credential_kind: CredentialKind
+    created_at: datetime
+
+
+class PublicCampaignArtifactV1(FrozenContractModel):
+    """Opaque artifact identity and seal metadata safe for campaign readers."""
+
+    schema_version: Literal["public_campaign_artifact.v1"] = "public_campaign_artifact.v1"
+    workspace_id: Identifier
+    campaign_id: Identifier
+    artifact_id: Identifier
+    producer_action_id: Identifier | None = None
+    sha256: HexDigest
+    size_bytes: int = Field(ge=0)
+    schema_name: Annotated[
+        str,
+        StringConstraints(
+            strip_whitespace=True,
+            min_length=1,
+            max_length=240,
+            pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        ),
+    ]
+    sealed: bool
+    valid: bool
+    created_at: datetime
+
+
+class PublicCampaignAttemptV1(FrozenContractModel):
+    """Bounded attempt identity and progress state without executor configuration."""
+
+    schema_version: Literal["public_campaign_attempt.v1"] = "public_campaign_attempt.v1"
+    workspace_id: Identifier
+    campaign_id: Identifier
+    study_id: Identifier
+    action_id: Identifier
+    attempt_id: Identifier
+    attempt_number: int = Field(ge=1)
+    claim_generation: int = Field(ge=0)
+    status: AttemptStatus
+    stage: StageKind
+    manifest_revision: int = Field(ge=1)
+    input_digest: HexDigest
+    candidate_digest: HexDigest
+    executor_kind: Identifier | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
 class ActorPrincipal(FrozenContractModel):
     schema_version: Literal["campaign_actor_principal.v1"] = "campaign_actor_principal.v1"
     actor_id: Identifier
@@ -573,6 +1325,7 @@ class ActorPrincipal(FrozenContractModel):
     credential_kind: CredentialKind
     workspace_ids: tuple[Identifier, ...]
     capabilities: frozenset[Capability]
+    authorization_revision: int = Field(default=1, ge=1)
     expires_at: datetime
 
     def require(self, workspace_id: str, capability: Capability) -> None:
@@ -668,9 +1421,7 @@ class SealedActionResult(FrozenContractModel):
 class ProtectedEvaluationResult(FrozenContractModel):
     """Candidate-locked, bounded result for a one-use protected evaluation epoch."""
 
-    schema_version: Literal["campaign_protected_evaluation.v1"] = (
-        "campaign_protected_evaluation.v1"
-    )
+    schema_version: Literal["campaign_protected_evaluation.v1"] = "campaign_protected_evaluation.v1"
     protected_epoch_id: Identifier
     candidate_digest: HexDigest
     passed: bool
@@ -740,38 +1491,75 @@ class BudgetLedgerEntry(FrozenContractModel):
 __all__ = [
     "ActionStatus",
     "ActionAttempt",
+    "ActiveWorkSummaryV1",
     "ActorPrincipal",
+    "AttachedAgentSummaryV1",
     "ArtifactOutput",
     "AttemptStatus",
     "AutonomyProfile",
     "BudgetEntryKind",
     "BudgetLedgerEntry",
+    "BudgetResourceSummaryV1",
+    "BudgetSummaryV1",
+    "BindingSummaryV1",
     "CODEX_CAPABILITIES",
     "DESKTOP_LOCAL_SCOPE",
     "Campaign",
+    "CANONICAL_CAMPAIGN_EVENT_TYPES",
     "CampaignArtifactReference",
+    "CampaignControlRoomSnapshotV1",
+    "CampaignControlRoomStateV1",
+    "CampaignSummaryV1",
     "CampaignEvidenceSnapshot",
     "CampaignEvent",
+    "PublicCampaignEventSummaryV1",
+    "PublicCampaignEventV1",
+    "PublicCampaignArtifactV1",
+    "PUBLIC_CAMPAIGN_ARTIFACT_SCHEMA_NAMES",
+    "PUBLIC_CAMPAIGN_BLOCKER_CODES",
     "CampaignKind",
     "CampaignManifest",
     "CampaignStatus",
     "CampaignTrigger",
+    "CandidateSummaryV1",
     "Capability",
+    "CodeLineageRecord",
+    "CodeLineageState",
+    "CodeMutationKind",
     "CredentialKind",
     "HERMES_CAPABILITIES",
     "IssuedCredential",
     "ManifestRevision",
+    "NemoGymEvidenceReference",
     "CompletedHypothesisSummary",
+    "CollectionCursorV1",
+    "CollectionSummaryV1",
+    "ControllerObservationV1",
+    "ControlRoomArtifactSummaryV1",
+    "ControlRoomCampaignV1",
+    "ControlRoomCollectionSummaryV1",
+    "ControlRoomControllerObservationV1",
+    "ControlRoomStatusCountV1",
+    "DecisionActionV1",
+    "DecisionBlockerV1",
+    "DecisionSurfaceV1",
+    "HumanWorkItemSummaryV1",
+    "HumanWorkSummaryV1",
+    "JourneyPhaseSummaryV1",
+    "MetricDescriptorV1",
+    "OpaqueProcessIdentityV1",
     "ProposalRecord",
     "ProposalStatus",
     "ProposalValidation",
     "ProtectedEvaluationResult",
+    "ReadinessSummaryV1",
     "ResourceUsage",
     "SealedActionResult",
     "StageDisposition",
     "StageKind",
     "StagePlan",
     "StagePlanItem",
+    "SafeBindingIdentityV1",
     "StudyStatus",
     "Study",
     "StudyProposal",

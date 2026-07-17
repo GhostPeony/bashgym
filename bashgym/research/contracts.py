@@ -2,7 +2,7 @@
 
 Tune the scorer here, not in scoring.py. The weights must sum to 1.0.
 
-Rationale for the weight distribution (from WORKSTREAMS.md):
+Rationale for the deterministic weight distribution:
   task match: 30%  — strongest signal; a dataset tagged 'code-generation' is
                      far more likely to help than one that merely mentions code.
   schema:     20%  — the second strongest signal: a dataset we can load into

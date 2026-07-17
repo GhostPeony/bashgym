@@ -1,1 +1,1 @@
-export { AutoResearchDashboard } from './AutoResearchDashboard'
+export { AutoResearchControlRoom } from './AutoResearchControlRoom'

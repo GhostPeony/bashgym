@@ -1,8 +1,9 @@
-from datetime import UTC, datetime
+from datetime import datetime
 
 import pytest
 from pydantic import ValidationError
 
+from bashgym._compat import UTC
 from bashgym.integrations.huggingface.context_contracts import (
     Comparability,
     CompletionOutcome,

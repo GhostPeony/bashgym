@@ -84,7 +84,7 @@ function MenuSection({ title, children }: { title?: string; children: React.Reac
   )
 }
 
-type SecondaryViewId = 'traces' | 'models' | 'evaluator' | 'router' | 'guardrails' | 'profiler' | 'huggingface' | 'integration' | 'achievements' | 'orchestrator' | 'pipeline' | 'autoresearch'
+type SecondaryViewId = 'traces' | 'models' | 'evaluator' | 'router' | 'guardrails' | 'profiler' | 'huggingface' | 'integration' | 'achievements' | 'orchestrator' | 'pipeline'
 
 interface CollapsibleSectionProps {
   title: string
@@ -152,7 +152,6 @@ function SecondarySections() {
   ]
 
   const toolsItems: CollapsibleSectionProps['items'] = [
-    { id: 'autoresearch', icon: <Zap className="w-4 h-4" />, label: 'AutoResearch' },
     { id: 'evaluator', icon: <FlaskConical className="w-4 h-4" />, label: 'Evaluator' },
     { id: 'router', icon: <GitBranch className="w-4 h-4" />, label: 'Router' },
     { id: 'guardrails', icon: <Shield className="w-4 h-4" />, label: 'Guardrails' },
@@ -187,7 +186,7 @@ function SecondarySections() {
 }
 
 export function Sidebar() {
-  const { isSidebarOpen, setSidebarOpen, overlayView, openOverlay, closeOverlay, setSettingsOpen, sidebarMode, setSidebarMode } = useUIStore()
+  const { isSidebarOpen, setSidebarOpen, overlayView, openOverlay, openTraining, trainingSubview, closeOverlay, setSettingsOpen, sidebarMode, setSidebarMode } = useUIStore()
   const { currentRun } = useTrainingStore()
   const hasLiveTrainingRun = isTrainingRunActive(currentRun?.status)
   const { dismissTooltip } = useTutorialStore()
@@ -252,7 +251,7 @@ export function Sidebar() {
             onClick={() => handleNavClick('home')}
             className="flex items-center gap-3 mb-7 w-full text-left hover-press transition-press"
           >
-            <img src="/bashgym-peony.png" alt="BashGym" className="w-14 h-14 -ml-1 object-contain" />
+            <img src="./bashgym-peony.png" alt="BashGym" className="w-14 h-14 -ml-1 object-contain" />
             <h2 className="font-brand text-2xl font-semibold leading-none text-text-primary">
               <span className="text-accent">/</span>BashGym
             </h2>
@@ -299,9 +298,22 @@ export function Sidebar() {
             <MenuItem
               icon={<BarChart3 className="w-4 h-4" />}
               label="Training"
-              onClick={() => handleNavClick('training')}
-              active={overlayView === 'training'}
+              onClick={() => {
+                dismissTooltip()
+                openTraining('runs')
+              }}
+              active={overlayView === 'training' && trainingSubview === 'runs'}
               badge={hasLiveTrainingRun ? 'Live' : undefined}
+              primary
+            />
+            <MenuItem
+              icon={<Zap className="w-4 h-4" />}
+              label="AutoResearch"
+              onClick={() => {
+                dismissTooltip()
+                openTraining('autoresearch')
+              }}
+              active={overlayView === 'training' && trainingSubview === 'autoresearch'}
               primary
             />
             {isWeb && (

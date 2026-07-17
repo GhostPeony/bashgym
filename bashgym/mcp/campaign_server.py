@@ -15,13 +15,22 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
+from bashgym.api_base import normalize_api_base
 from bashgym.campaigns.client import CampaignApiClient, CampaignClientError
+from bashgym.campaigns.visibility import (
+    project_public_campaign_artifact,
+    project_public_campaign_event,
+)
 from bashgym.mcp.policy import validate_secret_ref_name
 
 
 def _default_api_base() -> str:
-    configured = os.environ.get("BASHGYM_API_URL", "http://127.0.0.1:8003").rstrip("/")
-    return configured if configured.endswith("/api") else f"{configured}/api"
+    configured = (
+        os.environ.get("BASHGYM_API_BASE")
+        or os.environ.get("BASHGYM_API_URL")
+        or "http://127.0.0.1:8003/api"
+    )
+    return normalize_api_base(configured)
 
 
 DEFAULT_CAMPAIGN_API_BASE = _default_api_base()
@@ -41,6 +50,10 @@ MetricName = CampaignId
 MetricSource = Annotated[str, Field(min_length=1, max_length=240)]
 ExpectedVersion = Annotated[int, Field(ge=1)]
 EventCursor = Annotated[int, Field(ge=0)]
+ArtifactCursor = Annotated[
+    str,
+    Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$"),
+]
 MetricCursor = Annotated[int, Field(ge=-1)]
 ListLimit = Annotated[int, Field(ge=1, le=100)]
 EventLimit = Annotated[int, Field(ge=1, le=200)]
@@ -383,11 +396,51 @@ def build_server(
     @server.tool(structured_output=True, annotations=read_only)
     async def campaign_artifacts(
         campaign_id: CampaignId,
+        after_cursor: ArtifactCursor | None = None,
         limit: ListLimit = 50,
     ) -> dict[str, Any]:
-        """List bounded artifact metadata and authorized references."""
+        """List one bounded page of safe artifact identities and seal metadata."""
 
-        return await read_collection(campaign_id, "artifacts", "artifacts", limit)
+        result = await request(
+            "GET",
+            f"/campaigns/{campaign_id}/artifacts",
+            query={
+                "workspace_id": workspace_id,
+                **({"after_cursor": after_cursor} if after_cursor else {}),
+                "limit": limit,
+            },
+        )
+        if not result["ok"]:
+            return result
+        try:
+            _payload, values, truncated = _bounded_collection(
+                result["data"], key="artifacts", limit=limit
+            )
+            next_cursor = _payload.get("next_cursor")
+            has_more = _payload.get("has_more")
+            if next_cursor is not None and (
+                not isinstance(next_cursor, str) or not _IDENTIFIER.fullmatch(next_cursor)
+            ):
+                raise ValueError("invalid artifact continuation cursor")
+            if not isinstance(has_more, bool) or has_more != (next_cursor is not None):
+                raise ValueError("invalid artifact pagination state")
+            artifacts = [
+                project_public_campaign_artifact(item).model_dump(mode="json")
+                for item in values
+                if isinstance(item, dict)
+            ]
+            if len(artifacts) != len(values):
+                raise ValueError("invalid public artifact collection")
+        except (KeyError, TypeError, ValueError):
+            return _invalid_response()
+        return {
+            "ok": True,
+            "artifacts": artifacts,
+            "count": len(artifacts),
+            "next_cursor": next_cursor,
+            "has_more": has_more,
+            "truncated": truncated or has_more,
+        }
 
     @server.tool(structured_output=True, annotations=read_only)
     async def campaign_proposals(
@@ -468,11 +521,27 @@ def build_server(
             payload, items, truncated = _bounded_collection(
                 result["data"], key="items", limit=limit
             )
-        except ValueError:
+            safe_items = []
+            for item in items:
+                if (
+                    not isinstance(item, dict)
+                    or not isinstance(item.get("cursor"), int)
+                    or not isinstance(item.get("event"), dict)
+                ):
+                    raise ValueError("invalid public event page item")
+                safe_items.append(
+                    {
+                        "cursor": item["cursor"],
+                        "event": project_public_campaign_event(item["event"]).model_dump(
+                            mode="json", exclude_none=True
+                        ),
+                    }
+                )
+        except (KeyError, TypeError, ValueError):
             return _invalid_response()
         return {
             "ok": True,
-            "items": items,
+            "items": safe_items,
             "next_cursor": payload.get("next_cursor", after_cursor),
             "truncated": truncated,
         }
@@ -639,6 +708,34 @@ def build_server(
             campaign_id,
             f"/campaigns/{campaign_id}/proposals/{proposal_id}/withdraw",
             {"expected_version": expected_version},
+        )
+
+    @server.tool(structured_output=True, annotations=state_change)
+    async def campaign_prepare_code_lineage(
+        campaign_id: CampaignId,
+        proposal_id: ProposalId,
+    ) -> dict[str, Any]:
+        """Prepare the capability-gated private worktree for a code hypothesis."""
+
+        return await mutate(
+            "prepare-code-lineage",
+            campaign_id,
+            f"/campaigns/{campaign_id}/proposals/{proposal_id}/code-lineage/prepare",
+            {},
+        )
+
+    @server.tool(structured_output=True, annotations=state_change)
+    async def campaign_capture_code_lineage(
+        campaign_id: CampaignId,
+        proposal_id: ProposalId,
+    ) -> dict[str, Any]:
+        """Capture one approved code commit after editing the prepared worktree."""
+
+        return await mutate(
+            "capture-code-lineage",
+            campaign_id,
+            f"/campaigns/{campaign_id}/proposals/{proposal_id}/code-lineage/capture",
+            {},
         )
 
     @server.tool(structured_output=True, annotations=state_change)

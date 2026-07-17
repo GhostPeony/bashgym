@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Request
 
+from bashgym._compat import UTC
 from bashgym.api.runtime_observer import RuntimeObserver
 
 router = APIRouter(prefix="/api/runtime", tags=["Runtime"])

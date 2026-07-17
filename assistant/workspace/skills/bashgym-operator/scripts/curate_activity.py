@@ -8,7 +8,7 @@ import json
 import os
 import re
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 SCHEMA = "bashgym.activity.v1"
@@ -19,6 +19,16 @@ HIGH_VOLUME_KEY = re.compile(
     re.I,
 )
 WINDOWS_ABSOLUTE = re.compile(r"^[A-Za-z]:[\\/]")
+UNC_ABSOLUTE = re.compile(r"^(?:\\\\|//)[^\\/]+[\\/][^\\/]+")
+EMBEDDED_ABSOLUTE = re.compile(
+    r"(?:"
+    r"(?<![A-Za-z0-9_])[A-Za-z]:[\\/][^\s\"'<>]+"
+    r"|(?<![A-Za-z0-9_\\])\\\\[^\\/\s\"'<>]+[\\/][^\s\"'<>]+"
+    r"|(?<![A-Za-z0-9_/:])//[^\\/\s\"'<>]+[\\/][^\s\"'<>]+"
+    r"|(?<![A-Za-z0-9_/])/(?!/)(?:[^/\s\"'<>]+/)*[^/\s\"'<>]+"
+    r")"
+)
+PATH_TRAILING_PUNCTUATION = ".,;:!?)]}"
 SLUG_PART = re.compile(r"[^a-z0-9._-]+")
 MAX_STRING = 2_000
 MAX_ITEMS = 50
@@ -30,9 +40,38 @@ def _slug(value: Any, fallback: str) -> str:
 
 
 def _looks_local_path(value: str) -> bool:
-    return value.startswith(("/home/", "/Users/", "file://")) or bool(
-        WINDOWS_ABSOLUTE.match(value)
+    if value.startswith("file://") or WINDOWS_ABSOLUTE.match(value) or UNC_ABSOLUTE.match(value):
+        return True
+    if not value.startswith("/"):
+        return False
+    route_prefixes = (
+        "/api/",
+        "/factory/",
+        "/models/",
+        "/system/",
+        "/traces/",
+        "/training/",
     )
+    return value not in {"/health", "/stats"} and not value.startswith(route_prefixes)
+
+
+def _local_artifact_name(value: str) -> str:
+    path = value.removeprefix("file://")
+    if WINDOWS_ABSOLUTE.match(path) or UNC_ABSOLUTE.match(path):
+        return PureWindowsPath(path).name or "reference"
+    return PurePosixPath(path).name or "reference"
+
+
+def _redact_embedded_paths(value: str) -> str:
+    def replace_path(match: re.Match[str]) -> str:
+        candidate = match.group(0)
+        path = candidate.rstrip(PATH_TRAILING_PUNCTUATION)
+        suffix = candidate[len(path) :]
+        if not _looks_local_path(path):
+            return candidate
+        return f"[local artifact: {_local_artifact_name(path)}]{suffix}"
+
+    return EMBEDDED_ABSOLUTE.sub(replace_path, value)
 
 
 def _safe(value: Any, *, key: str = "") -> Any:
@@ -45,8 +84,8 @@ def _safe(value: Any, *, key: str = "") -> Any:
     if isinstance(value, str):
         cleaned = "".join(char for char in value if char in "\n\t" or ord(char) >= 32)
         if _looks_local_path(cleaned):
-            return f"[local artifact: {Path(cleaned.removeprefix('file://')).name or 'reference'}]"
-        return cleaned[:MAX_STRING]
+            return f"[local artifact: {_local_artifact_name(cleaned)}]"
+        return _redact_embedded_paths(cleaned[:MAX_STRING])
     if isinstance(value, dict):
         return {
             str(item_key)[:120]: _safe(item, key=str(item_key))
@@ -158,6 +197,9 @@ def _write_receipt(root: Path, receipt: dict[str, Any]) -> tuple[str, bool]:
 
 
 def _campaign_receipt(context: dict[str, Any], campaign: dict[str, Any]) -> dict[str, Any]:
+    workspace_id = str(context.get("workspace_id") or "").strip()
+    if not workspace_id:
+        raise ValueError("context workspace_id is required")
     campaign_id = str(campaign.get("campaign_id") or "campaign")
     events = [
         event
@@ -181,7 +223,7 @@ def _campaign_receipt(context: dict[str, Any], campaign: dict[str, Any]) -> dict
     return {
         "schema_version": SCHEMA,
         "kind": "training-session",
-        "workspace_id": context.get("workspace_id") or "default",
+        "workspace_id": workspace_id,
         "entity_id": campaign_id,
         "title": campaign.get("title") or campaign_id,
         "status": status,
@@ -219,10 +261,13 @@ def _campaign_receipt(context: dict[str, Any], campaign: dict[str, Any]) -> dict
 
 
 def _run_receipt(context: dict[str, Any], run: dict[str, Any]) -> dict[str, Any]:
+    workspace_id = str(context.get("workspace_id") or "").strip()
+    if not workspace_id:
+        raise ValueError("context workspace_id is required")
     return {
         "schema_version": SCHEMA,
         "kind": "run",
-        "workspace_id": context.get("workspace_id") or "default",
+        "workspace_id": workspace_id,
         "entity_id": run.get("run_id") or "run",
         "status": run.get("status") or "unknown",
         "occurred_at": run.get("completed_at") or run.get("started_at") or context.get("generated_at"),
@@ -280,6 +325,8 @@ def _run(args: argparse.Namespace) -> int:
     else:
         if not str(payload.get("schema_version") or "").startswith("bashgym.workspace.context."):
             raise ValueError("context input must be a BashGym workspace context projection")
+        if not str(payload.get("workspace_id") or "").strip():
+            raise ValueError("context workspace_id is required")
         receipts = [
             _campaign_receipt(payload, item)
             for item in payload.get("campaigns") or []
@@ -312,7 +359,7 @@ def _run(args: argparse.Namespace) -> int:
     return 0
 
 
-def main() -> int:
+def run(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
     for command in ("receipt", "context", "handoff"):
@@ -323,12 +370,16 @@ def main() -> int:
             child.add_argument("--include-active-runs", action="store_true")
         else:
             child.set_defaults(include_active_runs=False)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     try:
         return _run(args)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(json.dumps({"error": str(exc), "schema_version": SCHEMA}), file=sys.stderr)
         return 2
+
+
+def main() -> int:
+    return run()
 
 
 if __name__ == "__main__":

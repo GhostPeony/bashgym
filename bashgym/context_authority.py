@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any
+
+from bashgym._compat import UTC
 
 SOURCE_PRECEDENCE = (
     {

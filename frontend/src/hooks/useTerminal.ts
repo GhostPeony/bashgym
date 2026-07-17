@@ -71,7 +71,8 @@ export function useTerminal({
     })
 
     // Listen for output
-    const removeDataListener = window.bashgym?.terminal.onData(id, (data) => {
+    const removeDataListener = window.bashgym?.terminal.onData(id, (output) => {
+      const data = typeof output === 'string' ? output : output.data
       term.write(data)
       onData?.(data)
     })

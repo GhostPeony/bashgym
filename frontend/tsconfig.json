@@ -24,6 +24,5 @@
       "@services/*": ["src/services/*"]
     }
   },
-  "include": ["src", "electron"],
-  "references": [{ "path": "./tsconfig.node.json" }]
+  "include": ["src", "electron", "vite.config.ts", "vite.config.web.ts"]
 }

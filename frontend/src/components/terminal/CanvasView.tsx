@@ -43,9 +43,14 @@ import { buildCanvasGraphIndex, reconcileCanvasNodes, type CanvasGraphIndex } fr
 import { loadCanvasViewport, saveCanvasViewport } from './canvasViewport'
 import type { IntegrationNodeData, DataNodeData } from './nodes/types'
 import { createMcpWorkbenchApi, designerApi, trainingApi, workspaceApi } from '../../services/api'
+import { wsService } from '../../services/websocket'
 import { useActivityStore } from '../../stores/activityStore'
 import { trainingQueuedPayloadFromResponse } from '../../stores/trainingCanvasLifecycle'
-import { campaignsMissingPanels } from '../../stores/campaignCanvasLifecycle'
+import {
+  campaignsForCanvasAutoMaterialization,
+  materializeCampaignPanel,
+} from '../../stores/campaignCanvasLifecycle'
+import type { CampaignRecord } from '../../stores/campaignStore'
 import { MasterControlPanel } from './MasterControlPanel'
 import { useCanvasHotkeys } from '../../hooks/useCanvasHotkeys'
 import { AlertCircle } from 'lucide-react'
@@ -53,6 +58,7 @@ import { AlertCircle } from 'lucide-react'
 configureMcpWorkbenchApi(createMcpWorkbenchApi(getActiveWorkspaceId))
 
 const EDGE_STYLE = { stroke: 'var(--accent)', strokeWidth: 2 }
+const EMPTY_CAMPAIGNS: readonly CampaignRecord[] = []
 
 // Edges persist as {id, source, target} plus type/data for monitor edges;
 // style/animation re-applied on load (monitor edges style themselves)
@@ -330,6 +336,9 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
   const createTerminal = useTerminalStore((state) => state.createTerminal)
   const setCanvasEdges = useTerminalStore((state) => state.setCanvasEdges)
   const pollRuntime = useRuntimeStore((state) => state.poll)
+  const activeCampaigns = useCampaignStore((state) =>
+    state.workspaces[getActiveWorkspaceId()]?.campaigns || EMPTY_CAMPAIGNS
+  )
 
   const {
     gridEnabled,
@@ -370,42 +379,24 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
   }
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdgesRef.current)
 
-  // Campaigns are durable controller state, so reconstruct their nodes after a
-  // renderer reload even when the creation event was missed while the canvas was closed.
+  // Renderer reload begins with an authoritative fleet reconciliation. Live
+  // hints update that same fleet, and the reactive effect below materializes
+  // only durable campaign records (never WebSocket payload state).
   useEffect(() => {
     if (!CAMPAIGNS_ENABLED) return
-    let cancelled = false
     const workspaceId = wsIdRef.current
-    const reconcileCampaigns = async () => {
-      await useCampaignStore.getState().load(workspaceId)
-      if (cancelled) return
-      const campaigns = useCampaignStore.getState().workspaces[workspaceId]?.campaigns || []
-      const terminal = useTerminalStore.getState()
-      for (const campaign of campaignsMissingPanels(campaigns, terminal.panels)) {
-        const panelId = terminal.addPanel({
-          type: 'campaign',
-          title: campaign.title || 'Experiment Campaign',
-          adapterConfig: { campaignId: campaign.campaign_id },
-        })
-        const latest = useTerminalStore.getState()
-        const anchor = latest.activePanelId
-          ? latest.canvasNodes.get(latest.activePanelId)?.position
-          : undefined
-        latest.updateCanvasNode(
-          panelId,
-          findDynamicNodePosition(
-            'campaign',
-            anchor,
-            Array.from(latest.canvasNodes.values())
-              .filter((node) => node.panelId !== panelId)
-              .map((node) => node.position),
-          ),
-        )
-      }
-    }
-    void reconcileCampaigns()
-    return () => { cancelled = true }
+    const releaseLiveWorkspace = wsService.retainCampaignWorkspace(workspaceId)
+    void useCampaignStore.getState().load(workspaceId)
+    return releaseLiveWorkspace
   }, [])
+
+  useEffect(() => {
+    if (!CAMPAIGNS_ENABLED) return
+    if (useWorkspaceStore.getState().switching) return
+    for (const campaign of campaignsForCanvasAutoMaterialization(activeCampaigns)) {
+      materializeCampaignPanel(campaign)
+    }
+  }, [activeCampaigns])
 
   // Recover active runs after a renderer reload or a missed WebSocket event.
   // Completed history stays out of the active canvas unless it was already

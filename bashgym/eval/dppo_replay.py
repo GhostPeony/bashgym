@@ -6,13 +6,15 @@ import json
 import uuid
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from bashgym.environments.contracts import EnvironmentSpec
-from bashgym.environments.rollout import CommandObservation, EnvironmentRolloutResult
 from bashgym.gym.dppo import DPPODivergence, DPPOToken, analyze_dppo_batch
 from bashgym.gym.echo import ACTION_ROLE, OBSERVATION_ROLE
 from bashgym.gym.rwml import RWML_DEFAULT_HISTORY_WINDOW, extract_transitions
+
+if TYPE_CHECKING:
+    from bashgym.environments.rollout import CommandObservation, EnvironmentRolloutResult
 
 DPPO_REPLAY_SCHEMA_VERSION = "bashgym.dppo_replay.v1"
 TrainLogprobScorer = Callable[[dict[str, Any]], dict[str, Any]]

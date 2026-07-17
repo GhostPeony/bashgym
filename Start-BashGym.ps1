@@ -252,7 +252,7 @@ function Write-StackStatus {
     $electron = Get-MainElectronProcess
     [pscustomobject]@{
         Electron = if ($electron) { "running (PID $($electron.ProcessId))" } else { 'stopped' }
-        Renderer = if (Test-HttpEndpoint 'http://127.0.0.1:5190') { 'ready' } else { 'stopped' }
+        Renderer = if (Test-HttpEndpoint 'http://127.0.0.1:5173') { 'ready' } else { 'stopped' }
         Backend = if (Test-HttpEndpoint 'http://127.0.0.1:8003/api/health') { 'ready' } else { 'stopped' }
         Logs = $StateRoot
     }
@@ -315,7 +315,8 @@ try {
     $env:BASHGYM_PROJECT_ROOT = $ProjectRoot
     $env:BASHGYM_PYTHON = Get-UsablePython
     Write-LauncherEvent -Level 'INFO' -Message "Selected Python: $($env:BASHGYM_PYTHON)"
-    $env:BASHGYM_API_URL = 'http://127.0.0.1:8003'
+    $env:BASHGYM_API_BASE = 'http://127.0.0.1:8003/api'
+    $env:BASHGYM_DEV_SERVER_URL = 'http://127.0.0.1:5173'
     $env:PYTHONUTF8 = '1'
 
     New-Item -ItemType Directory -Path $StateRoot -Force | Out-Null
@@ -353,7 +354,7 @@ try {
             throw "The BashGym desktop host exited during startup. $stderrTail"
         }
         $electronReady = $null -ne (Get-MainElectronProcess)
-        $rendererReady = Test-HttpEndpoint 'http://127.0.0.1:5190'
+        $rendererReady = Test-HttpEndpoint 'http://127.0.0.1:5173'
         $backendReady = Test-HttpEndpoint 'http://127.0.0.1:8003/api/health'
     } while ((-not ($electronReady -and $rendererReady -and $backendReady)) -and
         [DateTime]::UtcNow -lt $deadline)

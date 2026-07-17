@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Iterable
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import Enum
 from importlib import resources
 from pathlib import Path
@@ -19,6 +19,7 @@ from typing import Any, Literal
 
 from pydantic import Field, field_validator, model_validator
 
+from bashgym._compat import UTC
 from bashgym.campaigns.contracts import (
     TERMINAL_CAMPAIGN_STATES,
     ActorPrincipal,
@@ -28,6 +29,9 @@ from bashgym.campaigns.contracts import (
     CampaignManifest,
     CampaignStatus,
     CampaignTrigger,
+    Capability,
+    CodeLineageRecord,
+    CodeMutationKind,
     CredentialKind,
     FrozenContractModel,
     Identifier,
@@ -39,15 +43,27 @@ from bashgym.campaigns.contracts import (
     canonical_hash,
     utc_now,
 )
+from bashgym.campaigns.lineage import code_mutation_kind_for_variable
+from bashgym.campaigns.nemo_gym_evidence import NEMO_GYM_CAMPAIGN_EVIDENCE_SCHEMA
 from bashgym.campaigns.persistence import (
     CampaignPersistenceError,
     MigrationChecksumError,
     ProposalMutation,
     RecordNotFoundError,
 )
+from bashgym.campaigns.research_diagnostics import (
+    AutoResearchDiagnostics,
+    build_autoresearch_diagnostics,
+)
 from bashgym.campaigns.runtime import CampaignRuntimeRepository
 from bashgym.campaigns.service import CampaignService
-from bashgym.ledger.contracts import ContextStatus, RunStatus
+from bashgym.ledger.contracts import (
+    ContextStatus,
+    DecisionSpec,
+    LedgerEventSpec,
+    RunStatus,
+    stable_ledger_id,
+)
 from bashgym.ledger.persistence import ExperimentLedgerRepository
 
 
@@ -245,6 +261,17 @@ class AutoResearchOutcomeRecord(FrozenContractModel):
     replayed: bool = False
 
 
+class AutoResearchLedgerCommitContext(FrozenContractModel):
+    """Authoritative ledger lineage required for an atomic outcome commit."""
+
+    project_id: Identifier
+    experiment_id: Identifier
+    run_id: Identifier
+    attempt_id: Identifier
+    correlation_id: Identifier
+    actor_id: Identifier = "autoresearch-controller"
+
+
 class AutoResearchState(FrozenContractModel):
     schema_version: Literal["autoresearch_state.v1"] = "autoresearch_state.v1"
     workspace_id: Identifier
@@ -268,9 +295,7 @@ class AutoResearchState(FrozenContractModel):
 class AutoResearchTemplatePolicy(FrozenContractModel):
     """Portable AutoResearch policy paired with a scientific campaign template."""
 
-    schema_version: Literal["autoresearch_template_policy.v1"] = (
-        "autoresearch_template_policy.v1"
-    )
+    schema_version: Literal["autoresearch_template_policy.v1"] = "autoresearch_template_policy.v1"
     template_revision: Identifier
     primary_metric: Identifier
     metric_direction: MetricDirection
@@ -323,7 +348,9 @@ class AutoResearchTemplateDefinition(FrozenContractModel):
     def definition_digest(self) -> str:
         return canonical_hash(self.model_dump(mode="json"))
 
-    def materialize_spec(self, workspace_id: str, campaign_id: str) -> AutoResearchCampaignSpec | None:
+    def materialize_spec(
+        self, workspace_id: str, campaign_id: str
+    ) -> AutoResearchCampaignSpec | None:
         if self.policy is None:
             return None
         return AutoResearchCampaignSpec(
@@ -552,16 +579,14 @@ class AutoResearchRepository(CampaignRuntimeRepository):
     def initialize(self) -> None:
         super().initialize()
         with self._connection(immediate=True) as connection:
-            connection.execute(
-                """
+            connection.execute("""
                 CREATE TABLE IF NOT EXISTS autoresearch_schema_migrations (
                     version INTEGER PRIMARY KEY,
                     name TEXT NOT NULL,
                     checksum TEXT NOT NULL,
                     applied_at TEXT NOT NULL
                 )
-                """
-            )
+                """)
             for version, name, statements in _AUTORESEARCH_MIGRATIONS:
                 checksum = canonical_hash(list(statements))
                 row = connection.execute(
@@ -774,7 +799,106 @@ class AutoResearchRepository(CampaignRuntimeRepository):
             else incumbent - candidate
         )
 
-    def record_autoresearch_result(self, result: AutoResearchResult) -> AutoResearchOutcomeRecord:
+    def _record_outcome_ledger_in_connection(
+        self,
+        connection: Any,
+        spec: AutoResearchCampaignSpec,
+        outcome: AutoResearchOutcomeRecord,
+        context: AutoResearchLedgerCommitContext,
+    ) -> None:
+        result = outcome.result
+        decision = outcome.decision
+        if spec.ledger_project_id != context.project_id:
+            raise AutoResearchInvariantError("autoresearch_ledger_project_mismatch")
+        run = connection.execute(
+            """SELECT experiment_id, campaign_id FROM ledger_runs
+               WHERE workspace_id = ? AND project_id = ? AND run_id = ?""",
+            (result.workspace_id, context.project_id, context.run_id),
+        ).fetchone()
+        if run is None:
+            raise RecordNotFoundError("ledger run not found")
+        if run["experiment_id"] != context.experiment_id:
+            raise AutoResearchInvariantError("autoresearch_ledger_experiment_mismatch")
+        if run["campaign_id"] != result.campaign_id:
+            raise AutoResearchInvariantError("autoresearch_run_campaign_lineage_mismatch")
+
+        evidence_refs = tuple(dict.fromkeys((result.result_id, *result.evidence_references)))
+        ledger_decision = DecisionSpec(
+            workspace_id=result.workspace_id,
+            project_id=context.project_id,
+            decision_id=stable_ledger_id(
+                "autoresearch-decision",
+                result.workspace_id,
+                result.campaign_id,
+                result.result_id,
+            ),
+            experiment_id=context.experiment_id,
+            run_id=context.run_id,
+            decision_type="autoresearch_outcome",
+            outcome=decision.decision.value,
+            rationale=(
+                f"{decision.reason_code}; primary_metric={result.metric_name}; "
+                f"metric_value={result.metric_value}; improvement={decision.improvement}; "
+                f"actual_cost={result.actual_cost}"
+            ),
+            evidence_refs=evidence_refs,
+            actor_id=context.actor_id,
+            created_at=decision.decided_at,
+        )
+        ledger_event = LedgerEventSpec(
+            workspace_id=result.workspace_id,
+            project_id=context.project_id,
+            event_type="autoresearch_outcome_recorded",
+            source_system="bashgym",
+            source_event_id=stable_ledger_id(
+                "autoresearch-outcome",
+                result.workspace_id,
+                result.campaign_id,
+                result.result_id,
+            ),
+            correlation_id=context.correlation_id,
+            experiment_id=context.experiment_id,
+            run_id=context.run_id,
+            attempt_id=context.attempt_id,
+            payload={
+                "campaign_id": result.campaign_id,
+                "proposal_id": result.proposal_id,
+                "study_id": result.study_id,
+                "result_id": result.result_id,
+                "result_digest": result.result_digest,
+                "decision": decision.decision.value,
+                "reason_code": decision.reason_code,
+                "eligible_for_best": decision.eligible_for_best,
+                "metric_name": result.metric_name,
+                "metric_value": result.metric_value,
+                "improvement": decision.improvement,
+                "actual_cost": result.actual_cost,
+            },
+            created_at=decision.decided_at,
+        )
+        self._record_decision_in_connection(connection, ledger_decision)
+        self._append_event_in_connection(connection, ledger_event)
+
+    def _record_decision_in_connection(
+        self, connection: Any, spec: DecisionSpec
+    ) -> tuple[dict[str, Any], bool]:
+        ledger = ExperimentLedgerRepository(self.db_path)
+        return ledger._record_decision_in_connection(connection, spec)
+
+    def _append_event_in_connection(
+        self, connection: Any, spec: LedgerEventSpec
+    ) -> tuple[dict[str, Any], bool]:
+        ledger = ExperimentLedgerRepository(self.db_path)
+        return ledger._append_event_in_connection(connection, spec)
+
+    def record_autoresearch_result(
+        self,
+        result: AutoResearchResult,
+        *,
+        ledger_context: AutoResearchLedgerCommitContext | None = None,
+    ) -> AutoResearchOutcomeRecord:
+        if len(result.attempt_ids) > 100 or len(result.evidence_references) > 100:
+            raise AutoResearchInvariantError("autoresearch_result_reference_limit_exceeded")
         spec = self.get_autoresearch_spec(result.workspace_id, result.campaign_id)
         with self._connection(immediate=True) as connection:
             by_proposal = connection.execute(
@@ -794,11 +918,16 @@ class AutoResearchRepository(CampaignRuntimeRepository):
             if by_proposal is not None:
                 if by_proposal["result_digest"] != result.result_digest:
                     raise AutoResearchConflictError("autoresearch_result_conflict")
-                return AutoResearchOutcomeRecord(
+                outcome = AutoResearchOutcomeRecord(
                     result=AutoResearchResult.model_validate_json(by_proposal["result_json"]),
                     decision=AutoResearchDecision.model_validate_json(by_proposal["decision_json"]),
                     replayed=True,
                 )
+                if ledger_context is not None:
+                    self._record_outcome_ledger_in_connection(
+                        connection, spec, outcome, ledger_context
+                    )
+                return outcome
             if by_id is not None:
                 raise AutoResearchConflictError("autoresearch_result_id_conflict")
 
@@ -898,7 +1027,10 @@ class AutoResearchRepository(CampaignRuntimeRepository):
                     result.recorded_at.isoformat(),
                 ),
             )
-        return AutoResearchOutcomeRecord(result=result, decision=decision)
+            outcome = AutoResearchOutcomeRecord(result=result, decision=decision)
+            if ledger_context is not None:
+                self._record_outcome_ledger_in_connection(connection, spec, outcome, ledger_context)
+        return outcome
 
 
 class AutoResearchCampaignCore:
@@ -1095,6 +1227,48 @@ class AutoResearchCampaignCore:
             latest_decision=latest,
         )
 
+    def diagnostics(
+        self,
+        workspace_id: str,
+        campaign_id: str,
+    ) -> AutoResearchDiagnostics:
+        """Derive advisory diagnostics from immutable campaign and ledger evidence."""
+
+        spec = self.repository.get_autoresearch_spec(workspace_id, campaign_id)
+        outcomes = self.repository.list_autoresearch_outcomes(workspace_id, campaign_id)
+        evaluations: list[dict[str, Any]] = []
+        runs: list[dict[str, Any]] = []
+        if spec.ledger_project_id is not None:
+            try:
+                evaluations = self.ledger.list_evaluation_results(
+                    workspace_id,
+                    spec.ledger_project_id,
+                    limit=1000,
+                )
+                runs = [
+                    run
+                    for run in self.ledger.list_runs(
+                        workspace_id,
+                        spec.ledger_project_id,
+                        limit=1000,
+                    )
+                    if run.get("campaign_id") == campaign_id
+                ]
+            except RecordNotFoundError:
+                # A registered campaign can precede materialization of its logical
+                # ledger binding; diagnostics remain an empty advisory projection.
+                pass
+        return build_autoresearch_diagnostics(
+            workspace_id=workspace_id,
+            campaign_id=campaign_id,
+            primary_metric=spec.primary_metric,
+            metric_direction=spec.metric_direction.value,
+            evaluation_suite_id=spec.evaluation_suite_id,
+            outcomes=[item.model_dump(mode="json") for item in outcomes],
+            evaluations=evaluations,
+            runs=runs,
+        )
+
     def _submit(
         self,
         submission: StudyProposalSubmission,
@@ -1121,6 +1295,8 @@ class AutoResearchCampaignCore:
             raise AutoResearchInvariantError(f"autoresearch_proposal_not_ready:{state.reason_code}")
         if submission.estimated_cost > state.budget_remaining:
             raise AutoResearchBudgetError("autoresearch_estimated_cost_exceeds_remaining_budget")
+        lineage_kind: CodeMutationKind | None = None
+        source_repository_profile_id: str | None = None
         if control.role == ExperimentRole.BASELINE:
             if submission.prerequisite_study_ids:
                 raise AutoResearchInvariantError("autoresearch_baseline_cannot_have_prerequisite")
@@ -1139,6 +1315,33 @@ class AutoResearchCampaignCore:
                 raise AutoResearchInvariantError(
                     "autoresearch_candidate_must_depend_on_incumbent_study"
                 )
+            lineage_kind = code_mutation_kind_for_variable(control.changed_variables[0])
+            if lineage_kind is not None:
+                principal.require(submission.workspace_id, Capability.EXPERIMENT_CODE_MUTATE)
+                campaign = self.repository.get_campaign(
+                    submission.workspace_id, submission.campaign_id
+                )
+                manifest = self.repository.get_manifest_revision(
+                    submission.workspace_id,
+                    submission.campaign_id,
+                    campaign.manifest_revision,
+                ).manifest
+                binding = manifest.evaluation_plan.get("source_repository_binding_id")
+                if (
+                    not isinstance(binding, str)
+                    or not binding
+                    or len(binding) > 160
+                    or not binding[0].isalnum()
+                    or any(
+                        character
+                        not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:-"
+                        for character in binding
+                    )
+                ):
+                    raise AutoResearchInvariantError(
+                        "autoresearch_source_repository_binding_required"
+                    )
+                source_repository_profile_id = binding
 
         mutation = self.service.submit_proposal(
             submission,
@@ -1152,7 +1355,32 @@ class AutoResearchCampaignCore:
                 "autoresearch_proposal_rejected:"
                 + ",".join(mutation.record.validation.reason_codes)
             )
-        self.repository.register_autoresearch_proposal(control)
+        registered_control = self.repository.register_autoresearch_proposal(control)
+        if lineage_kind is not None:
+            assert source_repository_profile_id is not None
+            lineage_id = (
+                "lineage-"
+                + canonical_hash(
+                    [
+                        registered_control.control_digest,
+                        lineage_kind.value,
+                        source_repository_profile_id,
+                    ]
+                )[:32]
+            )
+            self.repository.register_code_lineage_requirement(
+                CodeLineageRecord(
+                    lineage_id=lineage_id,
+                    workspace_id=submission.workspace_id,
+                    campaign_id=submission.campaign_id,
+                    proposal_id=submission.proposal_id,
+                    mutation_kind=lineage_kind,
+                    source_repository_profile_id=source_repository_profile_id,
+                    state="required",
+                    created_at=registered_control.created_at,
+                    updated_at=registered_control.created_at,
+                )
+            )
         return mutation
 
     def submit_baseline(
@@ -1216,7 +1444,14 @@ class AutoResearchCampaignCore:
             for item in submission.stage_plan.items
         )
 
-    def record_result(self, result: AutoResearchResult) -> AutoResearchOutcomeRecord:
+    def record_result(
+        self,
+        result: AutoResearchResult,
+        *,
+        ledger_context: AutoResearchLedgerCommitContext | None = None,
+    ) -> AutoResearchOutcomeRecord:
+        if len(result.attempt_ids) > 100 or len(result.evidence_references) > 100:
+            raise AutoResearchInvariantError("autoresearch_result_reference_limit_exceeded")
         spec = self.repository.get_autoresearch_spec(result.workspace_id, result.campaign_id)
         if result.metric_name != spec.primary_metric:
             raise AutoResearchInvariantError("autoresearch_primary_metric_mismatch")
@@ -1250,7 +1485,7 @@ class AutoResearchCampaignCore:
             proposal.proposal
         ):
             raise AutoResearchInvariantError("autoresearch_fake_executor_cannot_claim_real_result")
-        return self.repository.record_autoresearch_result(result)
+        return self.repository.record_autoresearch_result(result, ledger_context=ledger_context)
 
     def ingest_evaluation_result(
         self,
@@ -1318,9 +1553,7 @@ class AutoResearchCampaignCore:
         ledger_attempt_id = evaluation.get("attempt_id")
         if not ledger_attempt_id:
             raise AutoResearchInvariantError("autoresearch_evaluation_attempt_required")
-        ledger_attempt = self.ledger.get_attempt_record(
-            workspace_id, project_id, ledger_attempt_id
-        )
+        ledger_attempt = self.ledger.get_attempt_record(workspace_id, project_id, ledger_attempt_id)
         if ledger_attempt["run_id"] != run["run_id"]:
             raise AutoResearchInvariantError("autoresearch_evaluation_attempt_run_mismatch")
         if ledger_attempt["status"] != RunStatus.COMPLETED.value:
@@ -1329,11 +1562,7 @@ class AutoResearchCampaignCore:
             raise AutoResearchInvariantError("autoresearch_evaluation_model_mismatch")
         source_attempt_id = ledger_attempt.get("source_attempt_id")
         mapped_attempt = next(
-            (
-                attempt
-                for attempt in campaign_attempts
-                if attempt.attempt_id == source_attempt_id
-            ),
+            (attempt for attempt in campaign_attempts if attempt.attempt_id == source_attempt_id),
             None,
         )
         if mapped_attempt is None or mapped_attempt.action_id != run["action_id"]:
@@ -1375,7 +1604,9 @@ class AutoResearchCampaignCore:
             if ledger_artifact is None:
                 raise AutoResearchInvariantError("autoresearch_evaluation_artifact_missing")
             if ledger_artifact.get("attempt_id") not in {None, ledger_attempt_id}:
-                raise AutoResearchInvariantError("autoresearch_evaluation_artifact_attempt_mismatch")
+                raise AutoResearchInvariantError(
+                    "autoresearch_evaluation_artifact_attempt_mismatch"
+                )
             campaign_artifact = next(
                 (
                     artifact
@@ -1389,18 +1620,19 @@ class AutoResearchCampaignCore:
             evidence_references.extend(
                 [ledger_artifact["artifact_id"], campaign_artifact.artifact_id]
             )
-
-        simulated = bool(run["is_simulation"]) or self._proposal_is_simulated(
-            proposal.proposal
+        evidence_references.extend(
+            artifact.artifact_id
+            for artifact in campaign_artifacts
+            if artifact.schema_name == NEMO_GYM_CAMPAIGN_EVIDENCE_SCHEMA
         )
+
+        simulated = bool(run["is_simulation"]) or self._proposal_is_simulated(proposal.proposal)
         if not simulated and any(
             run.get(field) is None
             for field in ("model_version_id", "dataset_version_id", "environment_id")
         ):
             raise AutoResearchInvariantError("autoresearch_real_run_context_pins_required")
-        provenance = (
-            ExperimentProvenance.SIMULATED if simulated else ExperimentProvenance.REAL
-        )
+        provenance = ExperimentProvenance.SIMULATED if simulated else ExperimentProvenance.REAL
         result = AutoResearchResult(
             result_id=f"autoresearch-result-{canonical_hash([project_id, evaluation_result_id])[:32]}",
             workspace_id=workspace_id,
@@ -1417,7 +1649,16 @@ class AutoResearchCampaignCore:
             evidence_references=tuple(dict.fromkeys(evidence_references)),
             recorded_at=utc_now(),
         )
-        return self.record_result(result)
+        return self.record_result(
+            result,
+            ledger_context=AutoResearchLedgerCommitContext(
+                project_id=project_id,
+                experiment_id=run["experiment_id"],
+                run_id=run["run_id"],
+                attempt_id=ledger_attempt_id,
+                correlation_id=evaluation_result_id,
+            ),
+        )
 
     def enforce_stop(
         self,
@@ -1458,6 +1699,7 @@ __all__ = [
     "AutoResearchCampaignSpec",
     "AutoResearchConflictError",
     "AutoResearchDecision",
+    "AutoResearchDiagnostics",
     "AutoResearchError",
     "AutoResearchInvariantError",
     "AutoResearchNextAction",

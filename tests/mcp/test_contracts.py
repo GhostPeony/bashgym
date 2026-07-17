@@ -1,10 +1,11 @@
 """Contract tests for the SDK-independent MCP Workbench boundary."""
 
-from datetime import UTC, datetime
+from datetime import datetime
 
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
+from bashgym._compat import UTC
 from bashgym.mcp.contracts import (
     McpCapabilitySnapshot,
     McpOperation,

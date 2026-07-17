@@ -31,6 +31,7 @@ docs/
 !docs/
 docs/*
 !docs/TRAINING_SETUP.md
+!docs/PRODUCTIZATION.md
 !docs/hermes-agent-endpoints.md
 !docs/training-config-guide.md
 !docs/training/
@@ -48,6 +49,8 @@ docs/training/*
 !docs/training/metrics-runbook.md
 !docs/training/glossary.md
 !docs/training/agent-cli.md
+!docs/training/autoresearch-campaign.md
+!docs/training/bashgym-autoresearch-nvidia-brief.md
 
 # IDE
 .vscode/
@@ -91,6 +94,7 @@ data/designer_output/
 # Assistant secrets
 assistant/config/config.json
 assistant/.env
+assistant/workspace/USER.md
 .gstack/
 
 # design-sync build output
@@ -98,14 +102,12 @@ ds-bundle/
 .ds-sync/
 .design-sync/.cache/
 
-# Personal planning notes + local agent config (not for the public repo)
+# Personal planning notes, internal handoffs, and local agent config
+# (not for the public repo)
 tasks/
 .claude/
-
-# Installation-specific private operator materials
-assistant/workspace/skills/bashgym-operator/references/ponyo-memexai.md
-scripts/memexai/run_ponyo_campaign_smoke.py
-scripts/memexai/run_ponyo_positive_aware.sh
+.superpowers/
+WORKSTREAMS.md
 
 # Local BashGym state (never source-controlled)
 .bashgym/

@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useState } from 'react'
 import type { Node, NodeProps } from '@xyflow/react'
 import {
   AlertTriangle,
+  ExternalLink,
   Loader2,
   Pause,
   Play,
@@ -11,7 +12,10 @@ import {
 } from 'lucide-react'
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { clsx } from 'clsx'
-import { useCampaignStore } from '../../../stores/campaignStore'
+import {
+  retainCampaignSafetyReconcile,
+  useCampaignStore,
+} from '../../../stores/campaignStore'
 import { useTerminalStore } from '../../../stores/terminalStore'
 import { useWorkspaceStore } from '../../../stores/workspaceStore'
 import type {
@@ -26,12 +30,15 @@ import { DataNodeShell } from './DataNodeShell'
 import { projectCampaignResearch, type CampaignCanvasResearch } from './campaignCanvasModel'
 import { hueFor } from './dataPanels'
 import { ConfigPill, ConfigRow, ConfigRows, ConfigSection, NodeConfigModal } from './NodeConfigModal'
+import {
+  hasLiveCampaignAuthority,
+  openCampaignInAutoResearch,
+  shouldLoadCampaignDrillDown,
+  submitCampaignTransitionIfLive,
+} from './campaignNodeActions'
 import type { DataNodeData } from './types'
 
 export type CampaignNodeType = Node<DataNodeData, 'campaign'>
-
-const ACTIVE_POLL_MS = 3_000
-const IDLE_POLL_MS = 12_000
 
 const STATUS_BAR: Record<CampaignStatus, string> = {
   draft: 'bg-background-tertiary',
@@ -146,6 +153,7 @@ interface CampaignEvidencePanelProps {
   onSelect: (campaignId: string) => void
   onTransition: (action: 'start' | 'pause' | 'resume' | 'cancel') => void
   onRefresh: () => void
+  onOpenAutoResearch?: () => void
 }
 
 /** Pure modal body kept separate so the campaign evidence projection is DOM-testable. */
@@ -161,8 +169,11 @@ export function CampaignEvidencePanel({
   onSelect,
   onTransition,
   onRefresh,
+  onOpenAutoResearch,
 }: CampaignEvidencePanelProps) {
   const research = detail ? projectCampaignResearch(detail) : undefined
+  const diagnostics = detail?.ledger?.autoresearch?.diagnostics
+  const hasLifecycleAuthority = hasLiveCampaignAuthority(detail)
   return (
     <>
       <ConfigSection title="Campaign">
@@ -195,19 +206,22 @@ export function CampaignEvidencePanel({
               <ConfigRow label="Stop reason" value={detail.campaign.stop_reason} />
             </ConfigRows>
             <div className="mt-3 flex flex-wrap gap-2 nodrag" role="group" aria-label="Campaign controls">
-              {detail.campaign.status === 'ready' ? (
+              {hasLifecycleAuthority && detail.campaign.status === 'ready' ? (
                 <button className="btn-primary !py-1.5 !text-[10px]" disabled={mutating} onClick={() => onTransition('start')}><Play className="h-3 w-3" />Start</button>
               ) : null}
-              {detail.campaign.status === 'active' ? (
+              {hasLifecycleAuthority && detail.campaign.status === 'active' ? (
                 <button className="btn-secondary !py-1.5 !text-[10px]" disabled={mutating} onClick={() => onTransition('pause')}><Pause className="h-3 w-3" />Pause</button>
               ) : null}
-              {detail.campaign.status === 'paused' ? (
+              {hasLifecycleAuthority && detail.campaign.status === 'paused' ? (
                 <button className="btn-primary !py-1.5 !text-[10px]" disabled={mutating} onClick={() => onTransition('resume')}><Play className="h-3 w-3" />Resume</button>
               ) : null}
-              {!['completed', 'exhausted', 'failed', 'cancelled', 'cancelling'].includes(detail.campaign.status) ? (
+              {hasLifecycleAuthority && !['completed', 'exhausted', 'failed', 'cancelled', 'cancelling'].includes(detail.campaign.status) ? (
                 <button className="btn-secondary !py-1.5 !text-[10px] !text-status-error" disabled={mutating} onClick={() => onTransition('cancel')}><Square className="h-3 w-3" />Cancel</button>
               ) : null}
               <button className="btn-ghost !py-1.5 !text-[10px]" disabled={detail.loading} onClick={onRefresh}><RefreshCw className={clsx('h-3 w-3', detail.loading && 'animate-spin')} />Refresh</button>
+              {onOpenAutoResearch ? (
+                <button className="btn-secondary !py-1.5 !text-[10px]" onClick={onOpenAutoResearch}><ExternalLink className="h-3 w-3" />Open in AutoResearch</button>
+              ) : null}
             </div>
           </>
         ) : null}
@@ -232,6 +246,99 @@ export function CampaignEvidencePanel({
       ) : null}
 
       {research ? <CampaignResearchBrief research={research} /> : null}
+
+      {diagnostics ? (
+        <ConfigSection title="AutoResearch Diagnostics">
+          <div className="space-y-3" role="group" aria-label="AutoResearch diagnostics">
+            <div className="flex flex-wrap gap-1.5">
+              <ConfigPill tone={diagnostics.low_signal ? 'warning' : 'success'}>
+                {diagnostics.low_signal ? 'low signal detected' : 'signal healthy'}
+              </ConfigPill>
+              <ConfigPill tone="neutral">
+                {diagnostics.checkpoint_comparisons.length} checkpoint comparisons
+              </ConfigPill>
+              <ConfigPill tone="neutral">{diagnostics.error_slices.length} error slices</ConfigPill>
+            </div>
+
+            {diagnostics.signals.length ? (
+              <div className="space-y-1" aria-label="Diagnostic signals">
+                {diagnostics.signals.slice(0, 8).map((signal) => (
+                  <div key={signal.code} className="rounded-brutal border-brutal border-border-subtle px-2 py-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="font-mono text-[9px] font-bold text-text-primary">{readable(signal.code)}</div>
+                      <ConfigPill tone={signal.severity === 'critical' ? 'error' : signal.severity === 'warning' ? 'warning' : 'neutral'}>
+                        {signal.severity}
+                      </ConfigPill>
+                    </div>
+                    <div className="mt-0.5 text-[9px] leading-4 text-text-muted">{signal.summary}</div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            {diagnostics.checkpoint_comparisons.length ? (
+              <div>
+                <div className="mb-1 font-mono text-[8px] font-bold uppercase tracking-wide text-text-muted">Checkpoint trajectory</div>
+                <div className="space-y-1">
+                  {diagnostics.checkpoint_comparisons.slice(0, 8).map((checkpoint) => (
+                    <div key={checkpoint.evaluation_result_id} className="grid grid-cols-[1fr_auto_auto] gap-2 rounded-brutal border-brutal border-border-subtle px-2 py-1 font-mono text-[8px] text-text-muted">
+                      <span className="truncate">{checkpoint.step != null ? `step ${checkpoint.step}` : checkpoint.role}</span>
+                      <span>{compactNumber(checkpoint.metric_value)}</span>
+                      <span className={clsx(
+                        checkpoint.improvement_from_baseline != null && checkpoint.improvement_from_baseline > 0 && 'text-status-success',
+                        checkpoint.improvement_from_baseline != null && checkpoint.improvement_from_baseline < 0 && 'text-status-error',
+                      )}>
+                        {checkpoint.improvement_from_baseline == null
+                          ? 'no baseline delta'
+                          : `${checkpoint.improvement_from_baseline >= 0 ? '+' : ''}${compactNumber(checkpoint.improvement_from_baseline)}`}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {diagnostics.error_slices.length ? (
+              <div>
+                <div className="mb-1 font-mono text-[8px] font-bold uppercase tracking-wide text-text-muted">Error slices</div>
+                <div className="space-y-1">
+                  {diagnostics.error_slices.slice(0, 8).map((slice) => (
+                    <div key={slice.slice_path} className="flex items-center justify-between gap-2 rounded-brutal border-brutal border-border-subtle px-2 py-1 font-mono text-[8px]">
+                      <span className="truncate text-text-muted">{readable(slice.slice_path)}</span>
+                      <span className={clsx(
+                        slice.status === 'improved' && 'text-status-success',
+                        slice.status === 'regressed' && 'text-status-error',
+                        !['improved', 'regressed'].includes(slice.status) && 'text-text-muted',
+                      )}>
+                        {compactNumber(slice.candidate_value)} · {slice.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {diagnostics.ranked_hypotheses.length ? (
+              <div aria-label="Ranked next hypotheses">
+                <div className="mb-1 font-mono text-[8px] font-bold uppercase tracking-wide text-text-muted">Ranked next hypotheses · advisory only</div>
+                <div className="space-y-1">
+                  {diagnostics.ranked_hypotheses.map((hypothesis) => (
+                    <div key={hypothesis.hypothesis_id} className="rounded-brutal border-brutal border-border-subtle px-2 py-1.5">
+                      <div className="flex items-center gap-1.5 font-mono text-[8px] text-text-muted">
+                        <span className="font-bold text-text-primary">#{hypothesis.rank}</span>
+                        <ConfigPill tone={hypothesis.action_kind === 'candidate' ? 'accent' : 'neutral'}>{hypothesis.action_kind}</ConfigPill>
+                        <span className="truncate">{hypothesis.changed_variable}</span>
+                      </div>
+                      <div className="mt-1 text-[9px] leading-4 text-text-primary">{hypothesis.hypothesis}</div>
+                      <div className="mt-0.5 text-[8px] leading-3 text-text-muted">Falsify: {hypothesis.falsification_criterion}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </ConfigSection>
+      ) : null}
 
       {detail && chartData.length > 1 ? (
         <ConfigSection title={`Loss · ${latestAttempt?.attempt_id || 'latest attempt'}`}>
@@ -385,8 +492,8 @@ export const CampaignNode = memo(function CampaignNode({ data, selected }: NodeP
   const workspaceId = useWorkspaceStore((state) => state.activeWorkspaceId)
   const workspace = useCampaignStore((state) => state.workspaces[workspaceId])
   const load = useCampaignStore((state) => state.load)
+  const loadLegacyDetail = useCampaignStore((state) => state.loadLegacyDetail)
   const refresh = useCampaignStore((state) => state.refresh)
-  const refreshController = useCampaignStore((state) => state.refreshController)
   const selectCampaign = useCampaignStore((state) => state.select)
   const transition = useCampaignStore((state) => state.transition)
   const updatePanelConfig = useTerminalStore((state) => state.updatePanelConfig)
@@ -397,10 +504,16 @@ export const CampaignNode = memo(function CampaignNode({ data, selected }: NodeP
     : undefined
   const campaignId = configuredCampaignId || workspace?.selectedCampaignId || undefined
   const detail = campaignId ? workspace?.details[campaignId] : undefined
+  const snapshotVersion = detail?.snapshot?.aggregate_version ?? null
 
   useEffect(() => {
     void load(workspaceId, configuredCampaignId)
   }, [configuredCampaignId, load, workspaceId])
+
+  useEffect(() => {
+    if (!campaignId || !shouldLoadCampaignDrillDown(configOpen, snapshotVersion)) return
+    void loadLegacyDetail(workspaceId, campaignId)
+  }, [campaignId, configOpen, loadLegacyDetail, snapshotVersion, workspaceId])
 
   useEffect(() => {
     if (!campaignId || configuredCampaignId === campaignId) return
@@ -412,16 +525,8 @@ export const CampaignNode = memo(function CampaignNode({ data, selected }: NodeP
 
   useEffect(() => {
     if (!campaignId) return
-    const active = ['active', 'validating', 'cancelling'].includes(detail?.campaign.status || '')
-    const interval = active ? ACTIVE_POLL_MS : IDLE_POLL_MS
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        void refresh(workspaceId, campaignId)
-        void refreshController(workspaceId)
-      }
-    }, interval)
-    return () => window.clearInterval(timer)
-  }, [campaignId, detail?.campaign.status, refresh, refreshController, workspaceId])
+    return retainCampaignSafetyReconcile(workspaceId, campaignId)
+  }, [campaignId, workspaceId])
 
   const latestAttempt = detail?.attempts.at(-1)
   const loss = useMemo(
@@ -450,15 +555,10 @@ export const CampaignNode = memo(function CampaignNode({ data, selected }: NodeP
   }
 
   const runTransition = async (action: 'start' | 'pause' | 'resume' | 'cancel') => {
-    if (!detail || mutating) return
+    if (!hasLiveCampaignAuthority(detail) || !detail || mutating) return
     setMutating(true)
     try {
-      const reason = action === 'pause'
-        ? 'Paused from the BashGym campaign canvas.'
-        : action === 'cancel'
-          ? 'Cancelled from the BashGym campaign canvas.'
-          : undefined
-      await transition(workspaceId, detail.campaign.campaign_id, action, detail.campaign.version, reason)
+      await submitCampaignTransitionIfLive({ detail, mutating: false, action, workspaceId, transition })
     } finally {
       setMutating(false)
     }
@@ -624,9 +724,9 @@ export const CampaignNode = memo(function CampaignNode({ data, selected }: NodeP
 
             <div className="grid grid-cols-3 gap-px overflow-hidden rounded-brutal border-brutal border-border-subtle bg-border-subtle">
               {[
-                ['studies', detail.studies.length],
-                ['attempts', detail.attempts.length],
-                ['evidence', detail.artifacts.length],
+                ['studies', detail.snapshot?.collections.studies.count ?? detail.studies.length],
+                ['attempts', detail.snapshot?.collections.attempts.count ?? detail.attempts.length],
+                ['evidence', detail.snapshot?.collections.artifacts.count ?? detail.artifacts.length],
               ].map(([label, value]) => (
                 <div key={label} className="bg-background-card px-2 py-1 text-center">
                   <div className="font-mono text-[11px] font-bold text-text-primary">{value}</div>
@@ -666,7 +766,11 @@ export const CampaignNode = memo(function CampaignNode({ data, selected }: NodeP
               </div>
             ) : (
               <div className="rounded-brutal border-brutal border-border-subtle px-2 py-2 font-mono text-[9px] text-text-muted">
-                {latestAttempt ? `${readable(latestAttempt.stage)} · ${readable(latestAttempt.status)}` : 'Waiting for the first study attempt'}
+                {latestAttempt
+                  ? `${readable(latestAttempt.stage)} · ${readable(latestAttempt.status)}`
+                  : detail.snapshot?.active_work?.stage
+                    ? `${readable(detail.snapshot.active_work.stage)} · ${readable(detail.snapshot.active_work.process_identity?.state || 'observed')}`
+                    : 'Waiting for the first study attempt'}
               </div>
             )}
 
@@ -711,6 +815,10 @@ export const CampaignNode = memo(function CampaignNode({ data, selected }: NodeP
           onSelect={(nextId) => void handleSelect(nextId)}
           onTransition={(action) => void runTransition(action)}
           onRefresh={() => detail && void refresh(workspaceId, detail.campaign.campaign_id)}
+          onOpenAutoResearch={detail ? () => {
+            openCampaignInAutoResearch(workspaceId, detail.campaign.campaign_id)
+            setConfigOpen(false)
+          } : undefined}
         />
 
       </NodeConfigModal>

@@ -8,18 +8,22 @@ replay artifacts, and starting the existing API server.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from bashgym.api_base import normalize_api_base as _normalize_api_base
+from bashgym.api_base import open_api_url as _open_api_url
 from bashgym.compute import (
     get_compute_target,
     launch_plan,
@@ -63,6 +67,7 @@ from bashgym.trace_capture.status_protocol import scrub_trace_replay_file
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TRAINING_DOCS_DIR = REPO_ROOT / "docs" / "training"
+INSTALLED_TRAINING_DOCS_DIR = Path(sys.prefix) / "share" / "bashgym" / "docs" / "training"
 
 
 @dataclass(frozen=True)
@@ -137,11 +142,6 @@ DOCS = {
         "summary": "Private compute-target backend-smoke and eval checklist for DPPO/ECHO/RWML handoff.",
     },
 }
-
-DOC_ALIASES = {
-    "gx10-checklist": "private-compute-checklist",
-}
-
 
 SETTING_GUIDANCE: dict[str, dict[str, str]] = {
     "learning_rate": {
@@ -560,7 +560,7 @@ def _recipe(strategy: str, hardware: str, data: str) -> TrainingRecipe:
     if strategy in {"session", "session-distill", "session-distillation"}:
         strategy = "session-distillation"
     hardware = hardware.lower().replace("-", "_")
-    if hardware in {"dgx", "gx10", "remote", "remote_gpu"}:
+    if hardware in {"remote", "remote_gpu"}:
         hardware = "private_compute"
     artifact_defaults = {
         "checkpoint_limit": 1,
@@ -1308,7 +1308,7 @@ def _capability_matrix() -> dict[str, Any]:
                     "bashgym replay summarize <path> --json",
                     "bashgym training smoke-bundle --replay <path> --output-dir <dir> --json",
                     "bashgym training analyze --metrics <path> --replay <path> --smoke-bundle <path> --release-evidence <path> --json",
-                    "bashgym serve --host 127.0.0.1 --port 8000",
+                    "bashgym serve --host 127.0.0.1 --port 8003",
                 ],
                 "best_for": [
                     "new-session handoff",
@@ -1646,15 +1646,6 @@ def _capability_matrix() -> dict[str, Any]:
                 "training_notes": ["thinking template", "long-context coding/reasoning family"],
                 "checkpoint_guidance": "Prefer the newest compatible Qwen3.6, Qwen3-Coder, or provider-hosted Qwen3 checkpoint for the target hardware/backend.",
                 "best_fit": ["coding agents", "terminal RL", "long-context traces"],
-            },
-            {
-                "id": "qwen2.5",
-                "display_name": "Qwen2.5 family",
-                "status": "profiled",
-                "tool_call_format": "qwen_xml",
-                "training_notes": ["stable coder/instruct fallback family"],
-                "checkpoint_guidance": "Use as a stable fallback when the latest Qwen3/Qwen3.6 checkpoint is unavailable or too large.",
-                "best_fit": ["coding traces", "small-to-mid open model baselines"],
             },
             {
                 "id": "llama3",
@@ -2128,7 +2119,7 @@ def _emit(payload: dict[str, Any], *, as_json: bool) -> int:
 def _doc_entries() -> list[dict[str, Any]]:
     entries = []
     for topic, meta in DOCS.items():
-        path = REPO_ROOT / meta["path"]
+        path = _training_doc_path(meta)
         entries.append(
             {
                 "topic": topic,
@@ -2140,6 +2131,15 @@ def _doc_entries() -> list[dict[str, Any]]:
     return entries
 
 
+def _training_doc_path(meta: dict[str, str]) -> Path:
+    """Resolve docs from a checkout first, then wheel-installed shared data."""
+
+    checkout_path = REPO_ROOT / meta["path"]
+    if checkout_path.exists():
+        return checkout_path
+    return INSTALLED_TRAINING_DOCS_DIR / Path(meta["path"]).name
+
+
 def cmd_manifest(args: argparse.Namespace) -> int:
     payload = {
         "title": "BashGym Agent Manifest",
@@ -2148,8 +2148,32 @@ def cmd_manifest(args: argparse.Namespace) -> int:
             "manifest": "Show agent-readable command and docs map.",
             "workspace context": "Read the live sanitized workspace canvas context.",
             "workspace emit": "Emit a semantic canvas intent for dynamic node creation.",
+            "operator skills install": (
+                "Install the reviewed BashGym skill bundle into one supported agent host."
+            ),
+            "operator skills check": (
+                "Verify the active host copy and install receipt without changing it."
+            ),
             "campaign list": "List capability-scoped experiment campaigns.",
             "campaign templates": "List source-managed campaign templates.",
+            "campaign inspect-model-artifact": (
+                "Inspect one operator-selected local model snapshot for training readiness."
+            ),
+            "campaign control-smoke": (
+                "Run the durable AutoResearch control path without a GPU or API key."
+            ),
+            "campaign provision-local-operator": (
+                "Provision one local human operator credential by opaque secret reference."
+            ),
+            "campaign setup-context": (
+                "Discover registered AutoResearch choices and resume a sealed setup session."
+            ),
+            "campaign setup-step": "Persist one ordered guided-setup choice.",
+            "campaign setup-doctor": "Run read-only readiness checks on a setup draft.",
+            "campaign setup-validate": "Seal an exact launch-ready setup draft.",
+            "campaign setup-create": (
+                "Atomically create a READY campaign without starting compute."
+            ),
             "campaign status": "Read one campaign aggregate and its next valid action.",
             "campaign autoresearch": "Read durable AutoResearch state and decisions.",
             "campaign manifest": "Read one immutable campaign manifest revision.",
@@ -2252,12 +2276,12 @@ def cmd_training_capabilities(args: argparse.Namespace) -> int:
 
 def cmd_training_docs(args: argparse.Namespace) -> int:
     if args.topic:
-        topic = DOC_ALIASES.get(args.topic, args.topic)
+        topic = args.topic
         if topic not in DOCS:
-            choices = sorted([*DOCS, *DOC_ALIASES])
+            choices = sorted(DOCS)
             raise SystemExit(f"unknown topic {args.topic!r}; choose {', '.join(choices)}")
         meta = DOCS[topic]
-        path = REPO_ROOT / meta["path"]
+        path = _training_doc_path(meta)
         text = path.read_text(encoding="utf-8") if path.exists() else ""
         payload = {
             "title": f"BashGym Training Docs: {topic}",
@@ -2929,7 +2953,7 @@ def _workspace_api_base(args: argparse.Namespace) -> str:
         or os.environ.get("BASHGYM_API_BASE")
         or "http://localhost:8003/api"
     )
-    return raw.rstrip("/")
+    return _normalize_api_base(raw)
 
 
 def _workspace_http_json(
@@ -2948,20 +2972,158 @@ def _workspace_http_json(
         headers["X-BashGym-Origin-Terminal"] = os.environ["BASHGYM_TERMINAL_ID"]
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
-    url = f"{_workspace_api_base(args)}{path}"
+    base_url = _workspace_api_base(args)
+    normalized_path = path
+    if base_url.endswith("/api") and (path == "/api" or path.startswith("/api/")):
+        normalized_path = path.removeprefix("/api") or "/"
+    url = f"{base_url}{normalized_path}"
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with _open_api_url(req, timeout=15) as resp:
             body = resp.read().decode("utf-8")
             content_type = resp.headers.get("Content-Type", "")
             if "json" in content_type:
                 return json.loads(body)
             return body
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"{method} {url} failed: HTTP {exc.code} {detail}") from exc
+        raise RuntimeError(f"{method} API request failed with HTTP {exc.code}") from exc
     except urllib.error.URLError as exc:
-        raise RuntimeError(f"{method} {url} failed: {exc.reason}") from exc
+        raise RuntimeError(f"{method} API request failed: connection unavailable") from exc
+
+
+def _run_packaged_operator_script(script_name: str, arguments: list[str]) -> int:
+    allowed_scripts = {"curate_activity.py", "gbrain_bridge.py", "operator_context.py"}
+    if script_name not in allowed_scripts:
+        raise RuntimeError("packaged BashGym operator script is not allowlisted")
+    skill_root = Path(__file__).resolve().parents[1] / "assistant" / "workspace" / "skills"
+    script_path = skill_root / "bashgym-operator" / "scripts" / script_name
+    if not script_path.is_file():
+        raise RuntimeError("packaged BashGym operator context is unavailable")
+    spec = importlib.util.spec_from_file_location("bashgym_packaged_operator_context", script_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("packaged BashGym operator context is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+        return int(module.run(arguments))
+    finally:
+        sys.modules.pop(spec.name, None)
+
+
+def cmd_operator(args: argparse.Namespace) -> int:
+    arguments = [args.operator_command]
+    if args.operator_command == "context":
+        arguments.extend(["--workspace-id", args.workspace_id])
+        if args.project:
+            arguments.extend(["--project", args.project])
+        arguments.extend(["--limit", str(args.limit)])
+    elif args.operator_command == "workspace":
+        arguments.extend(
+            [
+                "--workspace-id",
+                args.workspace_id,
+                "--format",
+                args.format,
+            ]
+        )
+        if args.api_base:
+            arguments.extend(["--api-base", args.api_base])
+    elif args.operator_command == "ledger":
+        arguments.extend(["--workspace-id", args.workspace_id])
+        if args.project_id:
+            arguments.extend(["--project-id", args.project_id])
+        arguments.extend(["--limit", str(args.limit)])
+    elif args.operator_command == "curate":
+        arguments = [args.curate_command, args.input, "--output-root", args.output_root]
+        if args.include_active_runs:
+            arguments.append("--include-active-runs")
+        return _run_packaged_operator_script("curate_activity.py", arguments)
+    elif args.operator_command == "gbrain-bridge":
+        arguments = ["--profile", args.profile, args.bridge_command]
+        if args.bridge_command == "publish":
+            arguments.extend(["--file", args.file, "--relative", args.relative])
+            if args.execute:
+                arguments.append("--execute")
+            if args.sync:
+                arguments.append("--sync")
+        return _run_packaged_operator_script("gbrain_bridge.py", arguments)
+    return _run_packaged_operator_script("operator_context.py", arguments)
+
+
+def cmd_operator_skills(args: argparse.Namespace) -> int:
+    from bashgym.operator_skills import check_skills, install_skills
+
+    if args.skills_command == "install":
+        result = install_skills(host=args.host)
+    else:
+        result = check_skills(host=args.host)
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if result["verified"] else 2
+
+
+def _nonblank_identifier(value: str) -> str:
+    normalized = str(value).strip()
+    if not normalized:
+        raise argparse.ArgumentTypeError("identifier cannot be blank")
+    return normalized
+
+
+def _portable_api_path(raw_path: str, query_arguments: Sequence[str] = ()) -> str:
+    parsed = urllib.parse.urlsplit(raw_path)
+    if parsed.scheme or parsed.netloc or not parsed.path.startswith("/api/"):
+        raise ValueError("API path must be an absolute /api/... path, not a URL")
+    if any(part == ".." for part in parsed.path.split("/")):
+        raise ValueError("API path cannot contain parent traversal")
+    query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+    for argument in query_arguments:
+        key, separator, value = argument.partition("=")
+        if not separator or not key:
+            raise ValueError("--query must use KEY=VALUE")
+        query.append((key, value))
+    if any(
+        re.search(
+            r"(?:api[-_]?key|auth|bearer|credential|password|secret|token)",
+            key,
+            re.IGNORECASE,
+        )
+        for key, _value in query
+    ):
+        raise ValueError("credentials and secrets are not allowed in API query arguments")
+    encoded_query = urllib.parse.urlencode(query)
+    return urllib.parse.urlunsplit(("", "", parsed.path, encoded_query, ""))
+
+
+def _read_api_json_file(path: Any) -> Any:
+    with path.open("rb") as handle:
+        content = handle.read(1024 * 1024 + 1)
+    if len(content) > 1024 * 1024:
+        raise ValueError("API request data file exceeds 1 MiB")
+    try:
+        text = content.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise ValueError("API request data file must be valid UTF-8") from exc
+    return json.loads(text)
+
+
+def cmd_api(args: argparse.Namespace) -> int:
+    payload: Any | None = None
+    if args.data_file:
+        data_path = Path(args.data_file).expanduser()
+        payload = _read_api_json_file(data_path)
+    if args.method in {"GET", "DELETE"} and payload is not None:
+        raise ValueError(f"{args.method} requests cannot include --data-file")
+    response = _workspace_http_json(
+        args,
+        _portable_api_path(args.path, args.query),
+        method=args.method,
+        payload=payload,
+    )
+    if isinstance(response, str):
+        print(response)
+    else:
+        print(json.dumps(response, indent=2, sort_keys=True))
+    return 0
 
 
 def cmd_workspace_context(args: argparse.Namespace) -> int:
@@ -3171,9 +3333,519 @@ def cmd_campaign_doctor(args: argparse.Namespace) -> int:
         query={"workspace_id": args.workspace_id},
     )
     return (
+        error if error is not None else _emit_campaign_result(args, response, collection="doctor")
+    )
+
+
+def cmd_campaign_setup_context(args: argparse.Namespace) -> int:
+    response, error = _campaign_request(
+        args,
+        "GET",
+        "/campaigns/setup/context",
+        query={"workspace_id": args.workspace_id, "session_id": args.session_id},
+    )
+    return (
+        error if error is not None else _emit_campaign_result(args, response, collection="context")
+    )
+
+
+def cmd_campaign_setup_step(args: argparse.Namespace) -> int:
+    response, error = _campaign_request(
+        args,
+        "POST",
+        "/campaigns/setup/session",
+        payload={
+            "workspace_id": args.workspace_id,
+            "session_id": args.session_id,
+            "expected_version": args.expected_version,
+            "step": args.step,
+            "selection_id": args.selection_id,
+        },
+        headers={"Idempotency-Key": args.idempotency_key},
+    )
+    return (
+        error if error is not None else _emit_campaign_result(args, response, collection="session")
+    )
+
+
+def _guided_setup_draft(args: argparse.Namespace) -> dict[str, Any]:
+    draft = _read_campaign_json(args.draft, label="guided setup draft")
+    supplied_workspace = draft.pop("workspace_id", args.workspace_id)
+    if supplied_workspace != args.workspace_id:
+        raise ValueError("guided setup draft workspace does not match --workspace-id")
+    if set(draft) != {"template_id", "installation_id", "bindings"}:
+        raise ValueError("guided setup draft has unsupported fields")
+    return {"workspace_id": args.workspace_id, **draft}
+
+
+def cmd_campaign_setup_doctor(args: argparse.Namespace) -> int:
+    response, error = _campaign_request(
+        args,
+        "POST",
+        "/campaigns/setup/doctor",
+        payload=_guided_setup_draft(args),
+    )
+    return (
+        error if error is not None else _emit_campaign_result(args, response, collection="doctor")
+    )
+
+
+def cmd_campaign_setup_validate(args: argparse.Namespace) -> int:
+    response, error = _campaign_request(
+        args,
+        "POST",
+        "/campaigns/setup/validate",
+        payload=_guided_setup_draft(args),
+        headers={"Idempotency-Key": args.idempotency_key},
+    )
+    return (
         error
         if error is not None
-        else _emit_campaign_result(args, response, collection="doctor")
+        else _emit_campaign_result(args, response, collection="validation")
+    )
+
+
+def cmd_campaign_setup_create(args: argparse.Namespace) -> int:
+    response, error = _campaign_request(
+        args,
+        "POST",
+        "/campaigns/setup/create",
+        payload={
+            "workspace_id": args.workspace_id,
+            "campaign_id": args.campaign_id,
+            "title": args.title,
+            "validation_receipt_id": args.validation_receipt_id,
+        },
+        headers=_campaign_headers(args),
+    )
+    return (
+        error if error is not None else _emit_campaign_result(args, response, collection="campaign")
+    )
+
+
+def cmd_campaign_inspect_model_artifact(args: argparse.Namespace) -> int:
+    """Inspect one explicit local model snapshot without cache discovery or downloads."""
+
+    from bashgym.campaigns.model_onboarding import inspect_model_artifact
+
+    plan = inspect_model_artifact(
+        args.artifact_dir,
+        model_id=args.model_id,
+        model_revision=args.model_revision,
+    )
+    return _emit(
+        {
+            "title": "BashGym Model Artifact Inspection",
+            "ok": plan.ready_for_binding,
+            "model_onboarding_plan": plan.model_dump(mode="json"),
+        },
+        as_json=bool(args.json),
+    )
+
+
+def cmd_campaign_control_smoke(args: argparse.Namespace) -> int:
+    """Run the durable AutoResearch path without a GPU, model, or API key."""
+
+    from tempfile import TemporaryDirectory
+
+    from bashgym.campaigns.control_smoke import run_autoresearch_control_smoke
+
+    try:
+        if args.output_dir:
+            output_directory = Path(args.output_dir)
+            report = run_autoresearch_control_smoke(output_directory)
+            report["output_directory"] = str(output_directory.expanduser().resolve())
+            report["retained"] = True
+        else:
+            with TemporaryDirectory(prefix="bashgym-autoresearch-smoke-") as temporary:
+                report = run_autoresearch_control_smoke(Path(temporary))
+            report["retained"] = False
+    except RuntimeError as exc:
+        raise ValueError(str(exc)) from exc
+    return _emit(
+        {"title": "BashGym AutoResearch Control Smoke", **report},
+        as_json=bool(args.json),
+    )
+
+
+def cmd_campaign_activate_autoresearch(args: argparse.Namespace) -> int:
+    """Bind an installed definition to one registered private/local SSH device."""
+
+    import asyncio
+    import hashlib
+
+    from bashgym.campaigns.activation import (
+        AutoResearchActivationRequest,
+        activate_autoresearch,
+    )
+    from bashgym.campaigns.autoresearch import load_autoresearch_template_definitions
+    from bashgym.campaigns.contracts import CodeMutationKind, StageKind
+    from bashgym.campaigns.installation import autoresearch_binding_plan
+    from bashgym.campaigns.lineage import ApprovedSourceRepositoryProfile
+    from bashgym.campaigns.remote import (
+        ApprovedCodeLineageExecutionBinding,
+        ApprovedRemoteExecutorProfile,
+        PinnedRemoteStageProfile,
+        RemoteCapacityPolicy,
+    )
+    from bashgym.config import get_bashgym_dir
+    from bashgym.device_registry import DeviceRegistry
+    from bashgym.gym.remote_trainer import RemoteTrainer, SSHConfig
+    from bashgym.ledger.contracts import (
+        DatasetSpec,
+        DatasetVersionSpec,
+        EvaluationSuiteSpec,
+        ProjectSpec,
+    )
+
+    def sha256_file(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            while block := handle.read(1024 * 1024):
+                digest.update(block)
+        return digest.hexdigest()
+
+    root = Path(args.data_dir).expanduser().resolve() if args.data_dir else get_bashgym_dir()
+    install_dir = (
+        Path(args.install_dir).expanduser().resolve()
+        if args.install_dir
+        else root / "campaigns" / "autoresearch-templates"
+    )
+    definitions = {
+        definition.template_id: definition
+        for definition in load_autoresearch_template_definitions(install_dir)
+    }
+    definition = definitions.get(args.template_id)
+    if definition is None:
+        raise ValueError("installed AutoResearch template was not found")
+    binding = autoresearch_binding_plan(definition)
+
+    registry = DeviceRegistry(Path(args.device_registry) if args.device_registry else None)
+
+    async def resolve_and_preflight():
+        device = await registry.get_device(args.device_id)
+        if device is None:
+            raise ValueError("registered compute device was not found")
+        result = await RemoteTrainer(
+            SSHConfig(
+                host=device.host,
+                port=device.port,
+                username=device.username,
+                key_path=device.key_path,
+                remote_work_dir=device.work_dir,
+            )
+        ).preflight_check(require_unsloth=False)
+        if not result.ok:
+            raise ValueError("registered compute device failed SSH preflight")
+        if args.apply:
+            await registry.update_capabilities(device.id, result.capabilities())
+        return device, result
+
+    device, preflight = asyncio.run(resolve_and_preflight())
+    dataset_file = Path(args.dataset_file).expanduser().resolve()
+    evaluator_file = Path(args.evaluator_file).expanduser().resolve()
+    training_script = Path(args.training_script).expanduser().resolve()
+    training_inputs = tuple(
+        sorted(
+            {
+                dataset_file,
+                *(Path(value).expanduser().resolve() for value in args.training_input),
+            },
+            key=lambda path: path.name,
+        )
+    )
+    source_repository = Path(args.source_repository).expanduser().resolve()
+    mutation_paths: dict[CodeMutationKind, list[str]] = {}
+    for raw in args.mutation_path:
+        kind_raw, separator, relative_path = raw.partition("=")
+        if not separator:
+            raise ValueError("--mutation-path must use KIND=repository/relative/path")
+        kind = CodeMutationKind(kind_raw)
+        mutation_paths.setdefault(kind, []).append(relative_path)
+    source_profile = ApprovedSourceRepositoryProfile(
+        profile_id=binding.source_repository_profile_id,
+        repository_path=source_repository,
+        allowed_mutation_paths={
+            kind: tuple(sorted(set(paths))) for kind, paths in mutation_paths.items()
+        },
+    )
+    input_hashes = {path.name: sha256_file(path) for path in training_inputs}
+    capacity = RemoteCapacityPolicy(
+        minimum_available_memory_gib=args.minimum_available_memory_gib,
+        minimum_available_disk_gib=args.minimum_available_disk_gib,
+        maximum_external_gpu_processes=args.maximum_external_gpu_processes,
+    )
+    reservations = {
+        StageKind.FULL_TRAINING: args.full_budget_reservation,
+        StageKind.SMOKE_TRAINING: args.smoke_budget_reservation,
+    }
+    stages = tuple(
+        PinnedRemoteStageProfile(
+            stage=stage,
+            script_path=training_script,
+            script_sha256=sha256_file(training_script),
+            input_files=training_inputs,
+            input_sha256=input_hashes,
+            script_args=tuple(args.training_arg),
+            capacity_policy=capacity,
+            budget_unit=definition.policy.stop_rules.budget_unit,  # type: ignore[union-attr]
+            budget_reservation=reservations[stage],
+            python_executable=args.python_executable,
+            code_lineage_binding=ApprovedCodeLineageExecutionBinding(
+                binding_id=f"{args.executor_profile_id}-{stage.value}-source-v1",
+                binding_revision=1,
+                source_repository_profile_id=source_profile.profile_id,
+                entrypoint_path=args.source_entrypoint,
+            ),
+        )
+        for stage in (StageKind.FULL_TRAINING, StageKind.SMOKE_TRAINING)
+    )
+    executor = ApprovedRemoteExecutorProfile(
+        profile_id=args.executor_profile_id,
+        profile_revision=args.executor_profile_revision,
+        compute_profile_id=binding.compute_profile_id,
+        target_contract_key=binding.target_contract_key,
+        target_model_digest=binding.target_model_digest,
+        host=device.host,
+        username=device.username,
+        port=device.port,
+        key_path=device.key_path,
+        remote_work_dir=device.work_dir,
+        stages=stages,
+    )
+    task_type = definition.target_model.task
+    request = AutoResearchActivationRequest(
+        workspace_id=args.workspace_id,
+        project=ProjectSpec(
+            workspace_id=args.workspace_id,
+            project_id=binding.ledger_project_id,
+            display_name=args.project_name,
+            description=args.project_description,
+            owner_actor_id=args.owner_actor_id,
+            tags=tuple(sorted(set(args.project_tag))),
+        ),
+        dataset=DatasetSpec(
+            workspace_id=args.workspace_id,
+            project_id=binding.ledger_project_id,
+            dataset_id=args.dataset_id,
+            display_name=args.dataset_name,
+            task_type=task_type,
+        ),
+        dataset_version=DatasetVersionSpec(
+            workspace_id=args.workspace_id,
+            project_id=binding.ledger_project_id,
+            dataset_id=args.dataset_id,
+            dataset_version_id=binding.dataset_version_id,
+            source_uri=args.dataset_source_uri,
+            content_digest=sha256_file(dataset_file),
+        ),
+        evaluation_suite=EvaluationSuiteSpec(
+            workspace_id=args.workspace_id,
+            project_id=binding.ledger_project_id,
+            evaluation_suite_id=binding.evaluation_suite_id,
+            name=args.evaluation_name,
+            task_type=task_type,
+            dataset_version_id=binding.dataset_version_id,
+            metric_contract={
+                "primary_metric": binding.primary_metric,
+                "metric_direction": binding.metric_direction.value,
+            },
+            code_digest=sha256_file(evaluator_file),
+        ),
+        source_profile=source_profile,
+        executor_profile=executor,
+    )
+    receipt = activate_autoresearch(
+        definition,
+        request,
+        data_directory=root,
+        apply=bool(args.apply),
+        install_service=bool(args.install_worker),
+    )
+    return _emit(
+        {
+            "title": "BashGym AutoResearch Activation",
+            "ok": bool(receipt.doctor.materializable) if receipt.doctor else True,
+            "activation": receipt.model_dump(mode="json"),
+            "compute_preflight": {
+                "device_id": device.id,
+                "ok": preflight.ok,
+                "effective_vram_gb": preflight.effective_vram_gb,
+                "unified_memory": preflight.unified_memory,
+                "disk_free_gb": preflight.disk_free_gb,
+                "gpu_count": len(preflight.gpus or []),
+                "warnings": preflight.warnings,
+            },
+            "next": (
+                "Re-run with --apply after reviewing this plan."
+                if not args.apply
+                else (
+                    "The resident worker is online and the template is launch-ready."
+                    if receipt.doctor and receipt.doctor.launch_ready
+                    else "Install/start the resident worker, then run campaign doctor."
+                )
+            ),
+        },
+        as_json=bool(args.json),
+    )
+
+
+def cmd_campaign_sync_autoresearch_registry(args: argparse.Namespace) -> int:
+    """Plan or atomically apply logical setup bindings from activation evidence."""
+
+    from bashgym.campaigns.autoresearch import load_autoresearch_template_definitions
+    from bashgym.campaigns.registry_sync import (
+        MAX_REGISTRY_SYNC_DEFINITIONS,
+        apply_autoresearch_registry_sync,
+        plan_autoresearch_registry_sync,
+        resolve_autoresearch_installation_id,
+    )
+    from bashgym.campaigns.worker_service import read_worker_config
+    from bashgym.config import get_bashgym_dir
+    from bashgym.ledger.persistence import ExperimentLedgerRepository
+
+    root = Path(args.data_dir).expanduser().resolve() if args.data_dir else get_bashgym_dir()
+    install_dir = (
+        Path(args.install_dir).expanduser().resolve()
+        if args.install_dir
+        else root / "campaigns" / "autoresearch-templates"
+    )
+    worker_config_path = (
+        Path(args.worker_config).expanduser().resolve()
+        if args.worker_config
+        else root / "campaigns" / "worker-config.v1.json"
+    )
+    database_path = root / "campaigns" / "campaigns.sqlite3"
+    if not worker_config_path.is_file():
+        raise ValueError("activation_worker_config_unavailable: run activate-autoresearch --apply")
+    if not database_path.is_file():
+        raise ValueError("activation_ledger_unavailable: run activate-autoresearch --apply")
+    definition_files = 0
+    directory_entries = 0
+    if install_dir.is_dir():
+        with os.scandir(install_dir) as entries:
+            for entry in entries:
+                directory_entries += 1
+                if directory_entries > MAX_REGISTRY_SYNC_DEFINITIONS * 4:
+                    raise ValueError("installed_definition_directory_limit_exceeded")
+                if entry.name.endswith(".json"):
+                    definition_files += 1
+                    if definition_files > MAX_REGISTRY_SYNC_DEFINITIONS:
+                        raise ValueError("installed_definitions_limit_exceeded")
+    definitions = load_autoresearch_template_definitions(install_dir)
+    if args.template_ids:
+        requested = set(args.template_ids)
+        definitions = tuple(item for item in definitions if item.template_id in requested)
+        if requested != {item.template_id for item in definitions}:
+            raise ValueError("installed_autoresearch_template_not_found")
+    installation_id = resolve_autoresearch_installation_id(
+        args.installation_id,
+        apply=bool(args.apply),
+    )
+    plan = plan_autoresearch_registry_sync(
+        definitions=definitions,
+        workspace_id=args.workspace_id,
+        installation_id=installation_id,
+        ledger=ExperimentLedgerRepository.open_existing(database_path),
+        worker_config=read_worker_config(worker_config_path),
+    )
+    payload: dict[str, Any] = {
+        "title": "BashGym AutoResearch Registry Sync",
+        "mode": "plan",
+        "plan": plan.model_dump(mode="json"),
+    }
+    if args.apply:
+        if not args.controller_owner_id or not args.controller_lease_key_ref:
+            raise ValueError("registry_apply_authority_incomplete")
+        from bashgym.secrets import get_secret
+
+        lease_key = get_secret(args.controller_lease_key_ref)
+        if not lease_key:
+            raise ValueError("registry_apply_lease_authority_unavailable")
+        receipt = apply_autoresearch_registry_sync(
+            plan,
+            database_path=database_path,
+            controller_owner_id=args.controller_owner_id,
+            controller_lease_key=lease_key,
+        )
+        payload["mode"] = "apply"
+        payload["receipt"] = receipt.model_dump(mode="json")
+    return _emit(payload, as_json=bool(args.json))
+
+
+_CAMPAIGN_LOCAL_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
+
+
+def cmd_campaign_provision_local_operator(args: argparse.Namespace) -> int:
+    """Provision one local human credential without exposing its raw token."""
+
+    from bashgym import secrets as secret_store
+    from bashgym.campaigns.auth import CampaignAuthService
+    from bashgym.campaigns.autoresearch import AutoResearchRepository
+    from bashgym.campaigns.contracts import AutonomyProfile
+    from bashgym.config import get_bashgym_dir
+    from bashgym.mcp.policy import validate_secret_ref_name
+
+    workspace_id = args.workspace_id
+    actor_id = args.actor_id
+    credential_ref = args.credential_ref
+    if not _CAMPAIGN_LOCAL_IDENTIFIER_RE.fullmatch(workspace_id):
+        raise ValueError("workspace ID must be a bounded campaign identifier")
+    if not _CAMPAIGN_LOCAL_IDENTIFIER_RE.fullmatch(actor_id):
+        raise ValueError("actor ID must be a bounded campaign identifier")
+    validate_secret_ref_name(credential_ref)
+    if not 1 <= args.ttl_days <= 90:
+        raise ValueError("operator credential TTL must be between 1 and 90 days")
+    if secret_store.get_secret(credential_ref) is not None:
+        raise ValueError("campaign credential reference is already configured")
+
+    root = Path(args.data_dir).expanduser().resolve() if args.data_dir else get_bashgym_dir()
+    repository = AutoResearchRepository(root / "campaigns" / "campaigns.sqlite3")
+    repository.initialize()
+    auth = CampaignAuthService(repository)
+    issued = auth.issue_refresh_credential(
+        actor_id=actor_id,
+        autonomy_profile=AutonomyProfile.DESKTOP_USER,
+        workspace_ids=(workspace_id,),
+        ttl=timedelta(days=args.ttl_days),
+    )
+    try:
+        secret_store.set_secret(credential_ref, issued.raw_token)
+    except Exception:
+        try:
+            auth.revoke_credential(
+                issued.credential_id,
+                reason="local_operator_secret_storage_failed",
+            )
+        except Exception:
+            raise ValueError(
+                "campaign credential storage failed and the issued credential could not be revoked"
+            ) from None
+        raise ValueError(
+            "campaign credential storage failed; issued credential was revoked"
+        ) from None
+
+    return _emit(
+        {
+            "title": "BashGym Local Campaign Operator Provisioned",
+            "ok": True,
+            "credential_id": issued.credential_id,
+            "credential_ref": credential_ref,
+            "actor_id": actor_id,
+            "autonomy_profile": AutonomyProfile.DESKTOP_USER.value,
+            "workspace_id": workspace_id,
+            "expires_at": issued.expires_at.isoformat(),
+            "next": [
+                {
+                    "reason": "Verify authenticated campaign access.",
+                    "command": (
+                        f"bashgym campaign list --workspace-id {workspace_id} "
+                        f"--credential-ref {credential_ref} --json"
+                    ),
+                }
+            ],
+        },
+        as_json=bool(args.json),
     )
 
 
@@ -3194,6 +3866,27 @@ def cmd_campaign_setup_autoresearch(args: argparse.Namespace) -> int:
             raise ValueError("deadline must be an ISO-8601 datetime") from exc
         if deadline.tzinfo is None:
             raise ValueError("deadline must include a timezone")
+    model_onboarding_plan = None
+    if args.model_artifact_dir:
+        from bashgym.campaigns.model_onboarding import inspect_model_artifact
+
+        if not args.model_ref.startswith("hf://") or "@" not in args.model_ref:
+            raise ValueError(
+                "--model-artifact-dir requires --model-ref in hf://organization/repository@revision format"
+            )
+        model_id, model_revision = args.model_ref.removeprefix("hf://").rsplit("@", 1)
+        model_onboarding_plan = inspect_model_artifact(
+            args.model_artifact_dir,
+            model_id=model_id,
+            model_revision=model_revision,
+        )
+        if model_onboarding_plan.model_ref != args.model_ref:
+            raise ValueError("inspected artifact identity does not match --model-ref")
+        if model_onboarding_plan.task != args.task:
+            raise ValueError("inspected artifact task does not match --task")
+        if not model_onboarding_plan.ready_for_binding:
+            raise ValueError("inspected artifact is not a training-ready base model")
+
     definition = build_quality_autoresearch_definition(
         template_id=args.template_id,
         template_revision=args.template_revision,
@@ -3203,6 +3896,7 @@ def cmd_campaign_setup_autoresearch(args: argparse.Namespace) -> int:
         task=args.task,
         dataset_version_id=args.dataset_version_id,
         compute_profile_id=args.compute_profile_id,
+        source_repository_profile_id=args.source_repository_profile_id,
         ledger_project_id=args.ledger_project_id,
         evaluation_suite_id=args.evaluation_suite_id,
         primary_metric=args.primary_metric,
@@ -3238,7 +3932,210 @@ def cmd_campaign_setup_autoresearch(args: argparse.Namespace) -> int:
             }
         ],
     }
+    if model_onboarding_plan is not None:
+        payload["model_onboarding_plan"] = model_onboarding_plan.model_dump(mode="json")
     return _emit(payload, as_json=bool(args.json))
+
+
+def cmd_campaign_setup_nemo_rl(args: argparse.Namespace) -> int:
+    """Install one exact NeMo RL backend into a registered compute profile."""
+
+    import asyncio
+
+    from bashgym.campaigns.contracts import StageKind
+    from bashgym.campaigns.nemo_rl import (
+        ApprovedNemoGymBinding,
+        ApprovedNemoRLProfile,
+        NemoRLExecutionMode,
+        NemoRLInstallationReceipt,
+        NemoRLModelSupportLevel,
+        NemoRLStageBinding,
+        sha256_file,
+    )
+    from bashgym.campaigns.nemo_rl_installation import bind_nemo_rl_profile
+    from bashgym.campaigns.remote import RemoteTrainingAdapter
+    from bashgym.campaigns.worker_service import (
+        WorkerRunConfig,
+        read_worker_config,
+        write_worker_config,
+    )
+    from bashgym.config import get_bashgym_dir
+    from bashgym.environments.nemo_gym import inspect_nemo_gym_bundle_archive
+    from bashgym.gym.remote_trainer import SSHConfig
+
+    worker_config_path = (
+        Path(args.worker_config).expanduser().resolve()
+        if args.worker_config
+        else get_bashgym_dir() / "campaigns" / "worker-config.v1.json"
+    )
+    config = read_worker_config(worker_config_path)
+    matches = [
+        profile
+        for profile in config.approved_remote_profiles
+        if profile.profile_id == args.executor_profile_id
+    ]
+    if len(matches) != 1:
+        raise ValueError("executor profile must resolve exactly once in the worker config")
+    executor = matches[0]
+    if executor.nemo_rl is None and not args.allow_training_stage_replacement:
+        raise ValueError(
+            "initial NeMo RL setup replaces smoke/full training stages; "
+            "select a dedicated executor profile and pass "
+            "--allow-training-stage-replacement"
+        )
+    image_digest = args.image_reference.rpartition("@sha256:")[2]
+    dataset = Path(args.dataset).expanduser().resolve()
+    nemo_gym = None
+    if args.nemo_gym_bundle:
+        bundle_archive = Path(args.nemo_gym_bundle).expanduser().resolve()
+        bundle_manifest = inspect_nemo_gym_bundle_archive(bundle_archive)
+        resources_config = args.nemo_gym_resources_config
+        if resources_config is None:
+            prefix = f"resources_servers/{bundle_manifest['resources_server_id']}/configs/"
+            candidates = tuple(
+                item["path"]
+                for item in bundle_manifest["files"]
+                if str(item["path"]).startswith(prefix)
+                and str(item["path"]).endswith((".yaml", ".yml"))
+            )
+            if len(candidates) != 1:
+                raise ValueError(
+                    "NeMo Gym bundle resources config must resolve exactly once; "
+                    "pass --nemo-gym-resources-config"
+                )
+            resources_config = candidates[0]
+        nemo_gym = ApprovedNemoGymBinding(
+            bundle_archive_path=bundle_archive,
+            bundle_archive_sha256=sha256_file(bundle_archive),
+            bundle_digest=bundle_manifest["bundle_digest"],
+            nemo_gym_source_revision=bundle_manifest["nemo_gym_source_revision"],
+            environment_id=bundle_manifest["environment_id"],
+            environment_digest=bundle_manifest["environment_digest"],
+            resources_server_id=bundle_manifest["resources_server_id"],
+            resources_config_path=resources_config,
+        )
+    elif args.nemo_gym_resources_config:
+        raise ValueError("--nemo-gym-resources-config requires --nemo-gym-bundle")
+    entrypoint = args.entrypoint or (
+        "examples/nemo_gym/run_grpo_nemo_gym.py" if nemo_gym is not None else "examples/run_grpo.py"
+    )
+    provisional = ApprovedNemoRLProfile(
+        profile_id=args.nemo_profile_id,
+        profile_revision=args.profile_revision,
+        compute_profile_id=executor.compute_profile_id,
+        target_contract_key=executor.target_contract_key,
+        target_model_digest=executor.target_model_digest,
+        release=args.release,
+        source_revision=args.source_revision,
+        image_reference=args.image_reference,
+        image_digest=image_digest,
+        platform=args.platform,
+        model_id=args.model_id,
+        model_revision=args.model_revision,
+        remote_model_path=args.remote_model_path,
+        model_support_level=NemoRLModelSupportLevel(args.model_support_level),
+        entrypoint_path=entrypoint,
+        recipe_path=args.recipe,
+        recipe_sha256=args.recipe_sha256,
+        dataset_path=dataset,
+        dataset_sha256=sha256_file(dataset),
+        verifier_id=args.verifier_id,
+        verifier_digest=args.verifier_digest,
+        stage_bindings=(
+            NemoRLStageBinding(
+                stage=StageKind.FULL_TRAINING,
+                mode=NemoRLExecutionMode.GRPO,
+                max_steps=args.max_steps,
+                learning_rate=args.learning_rate,
+            ),
+            NemoRLStageBinding(
+                stage=StageKind.SMOKE_TRAINING,
+                mode=NemoRLExecutionMode.NO_UPDATE,
+                max_steps=1,
+                learning_rate=0,
+            ),
+        ),
+        gpu_count=args.gpu_count,
+        shared_memory_gib=args.shared_memory_gib,
+        minimum_available_disk_gib=args.minimum_available_disk_gib,
+        overrides=tuple(sorted(args.override or ())),
+        nemo_gym=nemo_gym,
+    )
+    adapter = RemoteTrainingAdapter(
+        SSHConfig(
+            host=executor.host,
+            username=executor.username,
+            port=executor.port,
+            key_path=executor.key_path,
+            remote_work_dir=executor.remote_work_dir,
+        ),
+        compute_profile_id=executor.compute_profile_id,
+    )
+    runtime_receipt = asyncio.run(
+        adapter.nemo_rl_preflight(provisional, pull_image=bool(args.pull_image))
+    )
+    runtime_ready = bool(
+        runtime_receipt.docker_ready
+        and runtime_receipt.nvidia_runtime_ready
+        and runtime_receipt.image_ready
+        and runtime_receipt.source_ready
+        and runtime_receipt.recipe_ready
+        and runtime_receipt.model_ready
+        and runtime_receipt.platform == provisional.platform
+        and runtime_receipt.gpu_count >= provisional.gpu_count
+        and runtime_receipt.available_disk_gib >= provisional.minimum_available_disk_gib
+        and runtime_receipt.shared_memory_gib >= provisional.shared_memory_gib
+        and (provisional.nemo_gym is None or runtime_receipt.nemo_gym_source_ready is True)
+    )
+    if not runtime_ready:
+        raise RuntimeError("nemo_rl_runtime_not_ready")
+    profile_payload = provisional.model_dump(
+        mode="python",
+        exclude={"profile_digest", "runtime_receipt"},
+    )
+    nemo_profile = ApprovedNemoRLProfile.model_validate(
+        {**profile_payload, "runtime_receipt": runtime_receipt}
+    )
+    revised = bind_nemo_rl_profile(
+        executor,
+        nemo_profile,
+        replace=bool(args.replace),
+        allow_training_stage_replacement=bool(args.allow_training_stage_replacement),
+    )
+    remote_profiles = tuple(
+        sorted(
+            (
+                revised if profile.profile_id == executor.profile_id else profile
+                for profile in config.approved_remote_profiles
+            ),
+            key=lambda profile: (
+                profile.compute_profile_id,
+                profile.target_contract_key,
+                profile.profile_id,
+                profile.profile_revision,
+            ),
+        )
+    )
+    config_payload = config.model_dump(mode="python")
+    config_payload["approved_remote_profiles"] = remote_profiles
+    write_worker_config(worker_config_path, WorkerRunConfig.model_validate(config_payload))
+    receipt = NemoRLInstallationReceipt(
+        worker_config_path=str(worker_config_path),
+        executor_profile_id=executor.profile_id,
+        nemo_profile_id=nemo_profile.profile_id,
+        nemo_profile_digest=nemo_profile.profile_digest,
+        runtime_receipt=runtime_receipt,
+        replaced=executor.nemo_rl is not None,
+    )
+    return _emit(
+        {
+            "title": "BashGym NeMo RL Installation",
+            "ok": True,
+            **receipt.model_dump(mode="json"),
+            "restart_required": True,
+        },
+        as_json=bool(args.json),
+    )
 
 
 def cmd_campaign_status(args: argparse.Namespace) -> int:
@@ -3359,9 +4256,7 @@ def _ledger_get(
 ) -> int:
     response, error = _campaign_request(args, "GET", path, query=query)
     return (
-        error
-        if error is not None
-        else _emit_campaign_result(args, response, collection=collection)
+        error if error is not None else _emit_campaign_result(args, response, collection=collection)
     )
 
 
@@ -3593,6 +4488,18 @@ def cmd_campaign_autoresearch_result(args: argparse.Namespace) -> int:
             "project_id": args.project_id,
             "evaluation_result_id": args.evaluation_result_id,
         },
+    )
+
+
+def cmd_campaign_code_lineage(args: argparse.Namespace) -> int:
+    return _campaign_post(
+        args,
+        (
+            f"/campaigns/{_quoted_identifier(args.campaign_id)}/proposals/"
+            f"{_quoted_identifier(args.proposal_id)}/code-lineage/"
+            f"{args.lineage_operation}"
+        ),
+        {"workspace_id": args.workspace_id},
     )
 
 
@@ -3864,6 +4771,125 @@ def build_parser() -> argparse.ArgumentParser:
     )
     manifest.set_defaults(func=cmd_manifest)
 
+    operator = subparsers.add_parser(
+        "operator",
+        help="Run the installed BashGym operator preflight and context helpers",
+        parents=[json_parent],
+    )
+    operator_sub = operator.add_subparsers(dest="operator_command", required=True)
+    operator_doctor = operator_sub.add_parser(
+        "doctor",
+        help="Verify local operator abilities without mutation",
+        parents=[json_parent],
+    )
+    operator_doctor.set_defaults(func=cmd_operator)
+    operator_skills = operator_sub.add_parser(
+        "skills",
+        help="Install or verify BashGym's public skills in an agent host",
+        description=(
+            "Install or verify BashGym's public skills in an agent host. "
+            "Home precedence: Codex uses CODEX_HOME, then ~/.codex; Claude uses "
+            "CLAUDE_CONFIG_DIR, then CLAUDE_HOME, then ~/.claude; Hermes uses "
+            "HERMES_HOME, then ~/.hermes. Each host installs under its selected "
+            "home's skills directory."
+        ),
+        parents=[json_parent],
+    )
+    operator_skills_sub = operator_skills.add_subparsers(dest="skills_command", required=True)
+    for skills_command in ("install", "check"):
+        skills_parser = operator_skills_sub.add_parser(
+            skills_command,
+            description=operator_skills.description,
+            parents=[json_parent],
+        )
+        skills_parser.add_argument(
+            "--host",
+            choices=("codex", "claude", "hermes"),
+            help="Agent host (auto-detected only when unambiguous)",
+        )
+        skills_parser.set_defaults(func=cmd_operator_skills)
+    operator_context = operator_sub.add_parser(
+        "context",
+        help="Read live runtime and project-isolated ledger context",
+        parents=[json_parent],
+    )
+    operator_context.add_argument("--workspace-id", required=True, type=_nonblank_identifier)
+    operator_context.add_argument("--project", type=_nonblank_identifier)
+    operator_context.add_argument("--limit", type=int, default=8)
+    operator_context.set_defaults(func=cmd_operator)
+    operator_workspace = operator_sub.add_parser(
+        "workspace",
+        help="Read one explicit workspace projection from the BashGym API",
+        parents=[json_parent],
+    )
+    operator_workspace.add_argument("--workspace-id", required=True, type=_nonblank_identifier)
+    operator_workspace.add_argument("--format", choices=("json", "markdown"), default="json")
+    operator_workspace.add_argument(
+        "--api-base",
+        help="Backend /api base URL (default: BASHGYM_API_BASE or http://localhost:8003/api)",
+    )
+    operator_workspace.set_defaults(func=cmd_operator)
+    operator_ledger = operator_sub.add_parser(
+        "ledger",
+        help="Read project-isolated local experiment context",
+        parents=[json_parent],
+    )
+    operator_ledger.add_argument("--workspace-id", required=True, type=_nonblank_identifier)
+    operator_ledger.add_argument("--project-id", type=_nonblank_identifier)
+    operator_ledger.add_argument("--limit", type=int, default=20)
+    operator_ledger.set_defaults(func=cmd_operator)
+    operator_curate = operator_sub.add_parser(
+        "curate",
+        help="Write sanitized, idempotent GBrain activity receipts",
+        parents=[json_parent],
+    )
+    curate_sub = operator_curate.add_subparsers(dest="curate_command", required=True)
+    for curate_name in ("receipt", "context", "handoff"):
+        curate_command = curate_sub.add_parser(curate_name, parents=[json_parent])
+        curate_command.add_argument("input", help="JSON file path or - for stdin")
+        curate_command.add_argument("--output-root", required=True)
+        if curate_name == "context":
+            curate_command.add_argument("--include-active-runs", action="store_true")
+        else:
+            curate_command.set_defaults(include_active_runs=False)
+        curate_command.set_defaults(func=cmd_operator)
+    operator_bridge = operator_sub.add_parser(
+        "gbrain-bridge",
+        help="Preview or publish a curated receipt through an ignored bridge profile",
+        parents=[json_parent],
+    )
+    operator_bridge.add_argument("--profile", required=True)
+    bridge_sub = operator_bridge.add_subparsers(dest="bridge_command", required=True)
+    bridge_status = bridge_sub.add_parser("status", parents=[json_parent])
+    bridge_status.set_defaults(func=cmd_operator)
+    bridge_publish = bridge_sub.add_parser("publish", parents=[json_parent])
+    bridge_publish.add_argument("--file", required=True)
+    bridge_publish.add_argument("--relative", required=True)
+    bridge_publish.add_argument("--execute", action="store_true")
+    bridge_publish.add_argument("--sync", action="store_true")
+    bridge_publish.set_defaults(func=cmd_operator)
+
+    api = subparsers.add_parser(
+        "api",
+        help="Call a BashGym API path without shell-specific curl helpers",
+        parents=[json_parent],
+    )
+    api.add_argument("method", choices=("GET", "POST", "PUT", "DELETE"))
+    api.add_argument("path", help="Absolute backend path beginning with /api/")
+    api.add_argument("--data-file", help="Portable UTF-8 JSON request body file (POST/PUT only)")
+    api.add_argument(
+        "--query",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Repeatable query argument encoded by BashGym (never use for credentials)",
+    )
+    api.add_argument(
+        "--api-base",
+        help="Backend /api base URL (default: BASHGYM_API_BASE or http://localhost:8003/api)",
+    )
+    api.set_defaults(func=cmd_api)
+
     workspace = subparsers.add_parser(
         "workspace",
         help="Canvas-aware workspace context and intent helpers",
@@ -3917,6 +4943,39 @@ def build_parser() -> argparse.ArgumentParser:
     )
     campaign_sub = campaign.add_subparsers(dest="campaign_command", required=True)
 
+    campaign_operator = campaign_sub.add_parser(
+        "provision-local-operator",
+        help="Provision a local human campaign operator credential into the secret store",
+        parents=[json_parent],
+    )
+    operator_credential_default = os.environ.get("BASHGYM_CAMPAIGN_CREDENTIAL_REF")
+    campaign_operator.add_argument(
+        "--workspace-id",
+        required=True,
+        help="Single campaign workspace authorized for this local operator",
+    )
+    campaign_operator.add_argument(
+        "--credential-ref",
+        default=operator_credential_default,
+        required=operator_credential_default is None,
+        help=(
+            "Opaque secret-store key to create (or BASHGYM_CAMPAIGN_CREDENTIAL_REF); "
+            "raw tokens are never accepted"
+        ),
+    )
+    campaign_operator.add_argument("--actor-id", default="local-operator")
+    campaign_operator.add_argument(
+        "--ttl-days",
+        type=int,
+        default=30,
+        help="Refresh credential lifetime from 1 through 90 days (default: 30)",
+    )
+    campaign_operator.add_argument(
+        "--data-dir",
+        help="BashGym data root containing campaigns/campaigns.sqlite3",
+    )
+    campaign_operator.set_defaults(func=cmd_campaign_provision_local_operator)
+
     campaign_setup = campaign_sub.add_parser(
         "setup-autoresearch",
         help="Build and install an explicit revision-pinned AutoResearch definition",
@@ -3930,18 +4989,25 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="Trainable base URI plus immutable revision; no model is selected by default",
     )
+    campaign_setup.add_argument(
+        "--model-artifact-dir",
+        help=(
+            "Explicit local model snapshot to inspect before installation; "
+            "never scans caches or downloads models"
+        ),
+    )
     campaign_setup.add_argument("--target-contract", dest="target_contract_key", required=True)
     campaign_setup.add_argument("--task", required=True)
+    campaign_setup.add_argument("--dataset-version", dest="dataset_version_id", required=True)
+    campaign_setup.add_argument("--compute-profile", dest="compute_profile_id", required=True)
     campaign_setup.add_argument(
-        "--dataset-version", dest="dataset_version_id", required=True
-    )
-    campaign_setup.add_argument(
-        "--compute-profile", dest="compute_profile_id", required=True
+        "--source-repository-profile",
+        dest="source_repository_profile_id",
+        required=True,
+        help="Logical installation-owned source repository binding for code hypotheses",
     )
     campaign_setup.add_argument("--project", dest="ledger_project_id", required=True)
-    campaign_setup.add_argument(
-        "--evaluation-suite", dest="evaluation_suite_id", required=True
-    )
+    campaign_setup.add_argument("--evaluation-suite", dest="evaluation_suite_id", required=True)
     campaign_setup.add_argument("--primary-metric", required=True)
     campaign_setup.add_argument(
         "--metric-direction", choices=("maximize", "minimize"), required=True
@@ -3963,6 +5029,206 @@ def build_parser() -> argparse.ArgumentParser:
         help="Replace a different installed definition with the same template ID",
     )
     campaign_setup.set_defaults(func=cmd_campaign_setup_autoresearch)
+
+    campaign_inspect_model = campaign_sub.add_parser(
+        "inspect-model-artifact",
+        help="Inspect one explicit local model snapshot for training readiness",
+        parents=[json_parent],
+    )
+    campaign_inspect_model.add_argument(
+        "--artifact-dir",
+        required=True,
+        help="Operator-selected local model snapshot; no caches are searched",
+    )
+    campaign_inspect_model.add_argument(
+        "--model-id",
+        required=True,
+        help="Exact organization/repository identity expected for this snapshot",
+    )
+    campaign_inspect_model.add_argument(
+        "--model-revision",
+        required=True,
+        help="Immutable 40- or 64-character content revision",
+    )
+    campaign_inspect_model.set_defaults(func=cmd_campaign_inspect_model_artifact)
+
+    campaign_control_smoke = campaign_sub.add_parser(
+        "control-smoke",
+        help="Run the durable AutoResearch control path without a GPU or API key",
+        parents=[json_parent],
+    )
+    campaign_control_smoke.add_argument(
+        "--output-dir",
+        help="Retain the isolated smoke database and artifacts in this directory",
+    )
+    campaign_control_smoke.set_defaults(func=cmd_campaign_control_smoke)
+
+    campaign_activate = campaign_sub.add_parser(
+        "activate-autoresearch",
+        help=(
+            "Plan or apply ledger, source, and registered SSH-compute bindings "
+            "for an installed AutoResearch definition"
+        ),
+        parents=[json_parent],
+    )
+    campaign_activate.add_argument("--template", dest="template_id", required=True)
+    campaign_activate.add_argument("--workspace-id", required=True)
+    campaign_activate.add_argument("--device-id", required=True)
+    campaign_activate.add_argument("--device-registry", help=argparse.SUPPRESS)
+    campaign_activate.add_argument("--project-name", required=True)
+    campaign_activate.add_argument("--project-description", default="")
+    campaign_activate.add_argument("--owner-actor-id", required=True)
+    campaign_activate.add_argument("--project-tag", action="append", default=[])
+    campaign_activate.add_argument("--dataset-id", required=True)
+    campaign_activate.add_argument("--dataset-name", required=True)
+    campaign_activate.add_argument("--dataset-file", required=True)
+    campaign_activate.add_argument(
+        "--dataset-source-uri",
+        required=True,
+        help="Stable logical/artifact URI stored in the ledger; local rows are never copied",
+    )
+    campaign_activate.add_argument("--evaluator-file", required=True)
+    campaign_activate.add_argument("--evaluation-name", required=True)
+    campaign_activate.add_argument("--source-repository", required=True)
+    campaign_activate.add_argument("--source-entrypoint", required=True)
+    campaign_activate.add_argument(
+        "--mutation-path",
+        action="append",
+        required=True,
+        help="Approved source scope as trainer|gym|reward|evaluator=relative/path",
+    )
+    campaign_activate.add_argument("--training-script", required=True)
+    campaign_activate.add_argument("--training-input", action="append", default=[])
+    campaign_activate.add_argument("--training-arg", action="append", default=[])
+    campaign_activate.add_argument("--python-executable", default="python3")
+    campaign_activate.add_argument("--executor-profile", dest="executor_profile_id", required=True)
+    campaign_activate.add_argument("--executor-profile-revision", type=int, default=1)
+    campaign_activate.add_argument("--smoke-budget-reservation", type=float, required=True)
+    campaign_activate.add_argument("--full-budget-reservation", type=float, required=True)
+    campaign_activate.add_argument("--minimum-available-memory-gib", type=float, default=0.0)
+    campaign_activate.add_argument("--minimum-available-disk-gib", type=float, default=50.0)
+    campaign_activate.add_argument("--maximum-external-gpu-processes", type=int, default=0)
+    campaign_activate.add_argument("--data-dir")
+    campaign_activate.add_argument("--install-dir")
+    campaign_activate.add_argument(
+        "--apply",
+        action="store_true",
+        help="Write replay-safe ledger records and atomically merge the worker config",
+    )
+    campaign_activate.add_argument(
+        "--install-worker",
+        action="store_true",
+        help="With --apply, install/start the per-user resident worker service",
+    )
+    campaign_activate.set_defaults(func=cmd_campaign_activate_autoresearch)
+
+    campaign_registry_sync = campaign_sub.add_parser(
+        "sync-autoresearch-registry",
+        help="Plan or apply guided-setup bindings from existing activation records",
+        parents=[json_parent],
+    )
+    campaign_registry_sync.add_argument("--workspace-id", required=True)
+    campaign_registry_sync.add_argument(
+        "--installation-id",
+        help=(
+            "Reviewed ins_<32-hex> identity. Plan mode generates one when omitted; "
+            "apply requires the reviewed value explicitly."
+        ),
+    )
+    campaign_registry_sync.add_argument(
+        "--template", dest="template_ids", action="append", default=[]
+    )
+    campaign_registry_sync.add_argument("--data-dir")
+    campaign_registry_sync.add_argument("--install-dir")
+    campaign_registry_sync.add_argument("--worker-config")
+    campaign_registry_sync.add_argument("--controller-owner-id")
+    campaign_registry_sync.add_argument("--controller-lease-key-ref")
+    campaign_registry_sync.add_argument(
+        "--apply",
+        action="store_true",
+        help="Atomically write the explicit installation and logical binding registry",
+    )
+    campaign_registry_sync.set_defaults(func=cmd_campaign_sync_autoresearch_registry)
+
+    nemo_setup = campaign_sub.add_parser(
+        "setup-nemo-rl",
+        help="Install an optional digest-pinned NeMo RL backend on registered private compute",
+        parents=[json_parent],
+    )
+    nemo_setup.add_argument("--worker-config")
+    nemo_setup.add_argument("--executor-profile", dest="executor_profile_id", required=True)
+    nemo_setup.add_argument("--nemo-profile", dest="nemo_profile_id", required=True)
+    nemo_setup.add_argument("--profile-revision", type=int, default=1)
+    nemo_setup.add_argument("--release", required=True)
+    nemo_setup.add_argument("--source-revision", required=True)
+    nemo_setup.add_argument(
+        "--image-reference",
+        required=True,
+        help="Platform image pinned as registry/path@sha256:<digest>",
+    )
+    nemo_setup.add_argument("--platform", choices=("linux/amd64", "linux/arm64"), required=True)
+    nemo_setup.add_argument("--model-id", required=True)
+    nemo_setup.add_argument("--model-revision", required=True)
+    nemo_setup.add_argument(
+        "--remote-model-path",
+        required=True,
+        help="Existing immutable model snapshot on registered compute; never downloads implicitly",
+    )
+    nemo_setup.add_argument(
+        "--model-support-level",
+        choices=("unsupported", "broad_api_compatible", "recipe_reproduced", "optimized"),
+        required=True,
+    )
+    nemo_setup.add_argument(
+        "--entrypoint",
+        help=(
+            "Pinned NeMo RL entrypoint; defaults to generic GRPO or the exact "
+            "Gym GRPO entrypoint when --nemo-gym-bundle is supplied"
+        ),
+    )
+    nemo_setup.add_argument("--recipe", required=True)
+    nemo_setup.add_argument("--recipe-sha256", required=True)
+    nemo_setup.add_argument("--dataset", required=True)
+    nemo_setup.add_argument(
+        "--nemo-gym-bundle",
+        help="Deterministic, content-validated NeMo Gym bundle ZIP for this dedicated profile",
+    )
+    nemo_setup.add_argument(
+        "--nemo-gym-resources-config",
+        help="Bundle-relative resources-server YAML; inferred when the bundle has exactly one",
+    )
+    nemo_setup.add_argument("--verifier-id", required=True)
+    nemo_setup.add_argument("--verifier-digest", required=True)
+    nemo_setup.add_argument("--max-steps", type=int, default=10)
+    nemo_setup.add_argument("--learning-rate", type=float, required=True)
+    nemo_setup.add_argument("--gpu-count", type=int, default=1)
+    nemo_setup.add_argument("--shared-memory-gib", type=int, default=16)
+    nemo_setup.add_argument("--minimum-available-disk-gib", type=float, default=80.0)
+    nemo_setup.add_argument(
+        "--override",
+        action="append",
+        default=[],
+        help="Exact non-controller-owned NeMo config override; repeat as needed",
+    )
+    nemo_setup.add_argument(
+        "--pull-image",
+        action="store_true",
+        help="Explicitly pull the pinned image before probing; otherwise setup is read-only remotely",
+    )
+    nemo_setup.add_argument(
+        "--replace",
+        action="store_true",
+        help="Replace an existing NeMo binding on this executor profile",
+    )
+    nemo_setup.add_argument(
+        "--allow-training-stage-replacement",
+        action="store_true",
+        help=(
+            "Acknowledge that initial setup replaces smoke/full stages; "
+            "use only with a dedicated NeMo executor profile"
+        ),
+    )
+    nemo_setup.set_defaults(func=cmd_campaign_setup_nemo_rl)
 
     campaign_connection = argparse.ArgumentParser(add_help=False)
     workspace_default = os.environ.get("BASHGYM_WORKSPACE_ID")
@@ -4018,6 +5284,61 @@ def build_parser() -> argparse.ArgumentParser:
     )
     campaign_doctor.add_argument("--template", dest="template_id", required=True)
     campaign_doctor.set_defaults(func=cmd_campaign_doctor)
+
+    campaign_setup_context = campaign_sub.add_parser(
+        "setup-context",
+        help="Discover registered AutoResearch setup choices and resume one sealed session",
+        parents=[json_parent, campaign_connection],
+    )
+    campaign_setup_context.add_argument("--session-id")
+    campaign_setup_context.set_defaults(func=cmd_campaign_setup_context)
+
+    campaign_setup_step = campaign_sub.add_parser(
+        "setup-step",
+        help="Record one ordered guided-setup choice",
+        parents=[json_parent, campaign_connection],
+    )
+    campaign_setup_step.add_argument("--session-id", required=True)
+    campaign_setup_step.add_argument("--expected-version", type=int, required=True)
+    campaign_setup_step.add_argument(
+        "--step",
+        choices=("template", "installation", "model", "data", "compute", "evaluation"),
+        required=True,
+    )
+    campaign_setup_step.add_argument("--selection-id", required=True)
+    campaign_setup_step.add_argument("--idempotency-key", required=True)
+    campaign_setup_step.set_defaults(func=cmd_campaign_setup_step)
+
+    campaign_setup_doctor = campaign_sub.add_parser(
+        "setup-doctor",
+        help="Run the read-only doctor for one guided-setup draft",
+        parents=[json_parent, campaign_connection],
+    )
+    campaign_setup_doctor.add_argument("--draft", required=True)
+    campaign_setup_doctor.set_defaults(func=cmd_campaign_setup_doctor)
+
+    campaign_setup_validate = campaign_sub.add_parser(
+        "setup-validate",
+        help="Seal a validated guided-setup draft without starting work",
+        parents=[json_parent, campaign_connection],
+    )
+    campaign_setup_validate.add_argument("--draft", required=True)
+    campaign_setup_validate.add_argument("--idempotency-key", required=True)
+    campaign_setup_validate.set_defaults(func=cmd_campaign_setup_validate)
+
+    campaign_setup_create = campaign_sub.add_parser(
+        "setup-create",
+        help="Atomically create a READY campaign from a sealed setup receipt",
+        parents=[json_parent, campaign_connection],
+    )
+    campaign_setup_create.add_argument("--campaign", dest="campaign_id", required=True)
+    campaign_setup_create.add_argument("--title", required=True)
+    campaign_setup_create.add_argument(
+        "--validation-receipt", dest="validation_receipt_id", required=True
+    )
+    campaign_setup_create.add_argument("--idempotency-key", required=True)
+    campaign_setup_create.add_argument("--correlation-id")
+    campaign_setup_create.set_defaults(func=cmd_campaign_setup_create)
 
     campaign_status = campaign_sub.add_parser(
         "status",
@@ -4171,9 +5492,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Ingest an authoritative ledger evaluation into AutoResearch",
         parents=[json_parent, campaign_connection],
     )
-    campaign_autoresearch_result.add_argument(
-        "--campaign", dest="campaign_id", required=True
-    )
+    campaign_autoresearch_result.add_argument("--campaign", dest="campaign_id", required=True)
     campaign_autoresearch_result.add_argument("--project", dest="project_id", required=True)
     campaign_autoresearch_result.add_argument(
         "--evaluation-result", dest="evaluation_result_id", required=True
@@ -4301,6 +5620,25 @@ def build_parser() -> argparse.ArgumentParser:
     add_campaign_mutation_arguments(campaign_withdraw)
     campaign_withdraw.add_argument("--proposal", dest="proposal_id", required=True)
     campaign_withdraw.set_defaults(func=cmd_campaign_withdraw_proposal)
+
+    for operation in ("prepare", "capture"):
+        lineage = campaign_proposal_sub.add_parser(
+            f"lineage-{operation}",
+            help=(
+                "Prepare the private code-hypothesis worktree"
+                if operation == "prepare"
+                else "Capture one approved code-hypothesis commit"
+            ),
+            parents=[json_parent, campaign_connection],
+        )
+        lineage.add_argument("--campaign", dest="campaign_id", required=True)
+        lineage.add_argument("--proposal", dest="proposal_id", required=True)
+        lineage.add_argument("--idempotency-key", required=True)
+        lineage.add_argument("--correlation-id")
+        lineage.set_defaults(
+            func=cmd_campaign_code_lineage,
+            lineage_operation=operation,
+        )
 
     campaign_study = campaign_sub.add_parser("study", help="Manage campaign studies")
     campaign_study_sub = campaign_study.add_subparsers(dest="campaign_study_command", required=True)
@@ -4588,7 +5926,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="List or read training docs",
         parents=[json_parent],
     )
-    docs.add_argument("--topic", choices=sorted([*DOCS, *DOC_ALIASES]), help="Doc topic to read")
+    docs.add_argument("--topic", choices=sorted(DOCS), help="Doc topic to read")
     docs.add_argument(
         "--include-content",
         action="store_true",
@@ -4640,8 +5978,6 @@ def build_parser() -> argparse.ArgumentParser:
             "private-compute",
             "remote",
             "remote_gpu",
-            "dgx",
-            "gx10",
             "cloud",
         ],
     )

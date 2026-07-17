@@ -3,7 +3,32 @@
  * Handles communication with the Python backend
  */
 
-export const API_BASE = import.meta.env?.VITE_API_URL || 'http://localhost:8002/api'
+import {
+  parseCampaignRecovery,
+  type CampaignRecoveryPublicV1,
+} from '../components/autoresearch/campaignRecoveryModel'
+import {
+  parseCampaignAgentPublicView,
+  type CampaignAgentPublicView,
+} from '../components/autoresearch/campaignAgentModel'
+import {
+  parseGuidedSetupContext,
+  parseGuidedSetupCreation,
+  parseGuidedSetupDoctor,
+  parseGuidedSetupMutation,
+  parseGuidedSetupValidation,
+  type GuidedSetupBindings,
+  type GuidedSetupContext,
+  type GuidedSetupCreation,
+  type GuidedSetupDoctor,
+  type GuidedSetupMutation,
+  type GuidedSetupStep,
+  type GuidedSetupValidation,
+} from '../components/autoresearch/guidedSetupModel'
+
+export const API_BASE = (
+  typeof window !== 'undefined' ? window.bashgym?.runtime?.apiBase : undefined
+) || import.meta.env?.VITE_API_URL || 'http://127.0.0.1:8003/api'
 
 function backendStartCommand(apiBase: string): string {
   try {
@@ -13,7 +38,7 @@ function backendStartCommand(apiBase: string): string {
     const port = url.port || (url.protocol === 'https:' ? '443' : '80')
     return `bashgym serve --host ${host} --port ${port}`
   } catch {
-    return 'bashgym serve --host 127.0.0.1 --port 8002'
+    return 'bashgym serve --host 127.0.0.1 --port 8003'
   }
 }
 
@@ -36,7 +61,7 @@ function normalizeApiError(error: unknown): string {
   return [
     `Backend API is not reachable at ${API_BASE}.`,
     `Start it with: ${BACKEND_START_COMMAND}`,
-    'If the backend is already running on another port, set VITE_API_URL to that /api URL.',
+    'If the backend is already running on another port, set BASHGYM_API_BASE to that /api URL.',
     `Original error: ${raw}`,
   ].join(' ')
 }
@@ -480,6 +505,7 @@ export interface PreflightResult {
 
 export interface ApiResponse<T> {
   ok: boolean
+  status?: number
   data?: T
   error?: string
   code?: string
@@ -539,13 +565,294 @@ type CampaignBridgeRequest = (
   route: string,
   body?: Record<string, unknown>,
   query?: Record<string, string | number | boolean>,
+  authority?: { idempotencyKey?: string },
 ) => Promise<ApiResponse<unknown>>
+
+export interface CampaignSummaryV1 {
+  schema_version: 'campaign_summary.v1'
+  campaign_id: string
+  title: string
+  objective: string
+  kind: 'embedding_retrieval' | 'general'
+  status: import('../stores/campaignStore').CampaignStatus
+  aggregate_version: number
+  manifest_revision: number
+  active_study_id: string | null
+  active_action_id: string | null
+  champion_ref: string | null
+  stop_reason: string | null
+}
+
+export interface ControllerObservationV1 {
+  schema_version: 'controller_observation.v1'
+  controller_observation_version: number
+  state: 'online' | 'stale' | 'offline'
+  observed_at: string
+  heartbeat_age_seconds: number | null
+  lease_expires_at: string | null
+  controller_instance_id: string | null
+  safe_guidance: string | null
+}
+
+export interface ReadinessSummaryV1 {
+  schema_version: 'readiness_summary.v1'
+  materializable: boolean
+  launch_ready: boolean
+  checked_at: string
+  activation_receipt_digest: string | null
+  doctor_receipt_digest: string | null
+  blocking_codes: string[]
+}
+
+export interface SafeBindingIdentityV1 {
+  schema_version: 'safe_binding_identity.v1'
+  binding_id: string
+  immutable_digest: string | null
+  display_label: string
+}
+
+export interface BindingSummaryV1 {
+  schema_version: 'binding_summary.v1'
+  model: SafeBindingIdentityV1 | null
+  data: SafeBindingIdentityV1 | null
+  evaluator: SafeBindingIdentityV1 | null
+  source: SafeBindingIdentityV1 | null
+  compute: SafeBindingIdentityV1 | null
+}
+
+export interface DecisionBlockerV1 {
+  schema_version: 'decision_blocker.v1'
+  code: string
+  summary: string
+  evidence_ids: string[]
+  secondary_codes: string[]
+}
+
+export interface JourneyPhaseSummaryV1 {
+  schema_version: 'journey_phase_summary.v1'
+  phase_id: 'setup' | 'baseline' | 'experiments' | 'human_review' | 'decision'
+  state: 'not_started' | 'ready' | 'active' | 'blocked' | 'complete' | 'failed' | 'skipped'
+  execution_owner: 'bashgym' | 'human' | 'none'
+  attention_owner: 'bashgym' | 'agent' | 'human' | 'none'
+  primary_blocker: DecisionBlockerV1 | null
+  evidence_count: number
+  next_action_ids: string[]
+}
+
+export interface OpaqueProcessIdentityV1 {
+  schema_version: 'opaque_process_identity.v1'
+  run_id: string
+  compute_profile_id: string
+  state: 'launching' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled' | 'unknown'
+}
+
+export interface ActiveWorkSummaryV1 {
+  schema_version: 'active_work_summary.v1'
+  study_id: string | null
+  proposal_id: string | null
+  action_id: string | null
+  attempt_id: string | null
+  stage: 'data_build' | 'contract_evaluation' | 'smoke_training' | 'full_training' | 'development_evaluation' | 'comparison' | 'recipe_lock' | 'protected_evaluation' | 'promotion' | null
+  hypothesis_summary: string | null
+  primary_variable_summary: string | null
+  controlled_variable_summary: string[]
+  progress_fraction: number | null
+  eta_seconds: number | null
+  executor_type: 'fake' | 'ssh_remote' | 'development_evaluation' | null
+  process_identity: OpaqueProcessIdentityV1 | null
+}
+
+export interface CandidateSummaryV1 {
+  schema_version: 'candidate_summary.v1'
+  candidate_ref: string
+  source_attempt_ids: string[]
+  source_artifact_ids: string[]
+  latest_comparable_evaluation_id: string | null
+  comparison_verdict: 'passed' | 'failed' | 'insufficient_evidence' | null
+  gate_state: 'not_evaluated' | 'blocked' | 'passed' | 'failed' | 'promoted'
+}
+
+export interface MetricDescriptorV1 {
+  schema_version: 'metric_descriptor.v1'
+  metric_id: string
+  display_name: string
+  unit: string | null
+  direction: 'maximize' | 'minimize' | 'target'
+  target: number | null
+  tolerance: number | null
+  evaluator_revision: string | null
+  sample_count: number | null
+  uncertainty_method: string | null
+  comparability_key: string
+}
+
+export interface BudgetResourceSummaryV1 {
+  schema_version: 'budget_resource_summary.v1'
+  unit: string
+  limit: number
+  reserved: number
+  settled: number
+  remaining: number
+  blocked: boolean
+  blocker_code: string | null
+}
+
+export interface BudgetSummaryV1 {
+  schema_version: 'budget_summary.v1'
+  resources: BudgetResourceSummaryV1[]
+  blocked: boolean
+}
+
+export interface HumanWorkItemSummaryV1 {
+  schema_version: 'human_work_item_summary.v1'
+  work_item_id: string
+  kind: 'blinded_sample_evaluation' | 'promotion_decision'
+  status: 'open' | 'claimed' | 'accepted' | 'rejected' | 'revision_requested' | 'abstained' | 'cancelled' | 'expired'
+  blocking_scope: string
+  assigned_actor_id: string | null
+  required_count: number
+  completed_count: number
+  due_at: string | null
+}
+
+export interface HumanWorkSummaryV1 {
+  schema_version: 'human_work_summary.v1'
+  blocking_count: number
+  open_count: number
+  newest: HumanWorkItemSummaryV1[]
+}
+
+export interface AttachedAgentSummaryV1 {
+  schema_version: 'attached_agent_summary.v1'
+  session_id: string
+  actor_id: string
+  origin_id: string
+  bundle_id: string
+  capability_revision: number
+  expires_at: string
+  liveness: 'active' | 'disconnected' | 'expired' | 'revoked'
+  last_cursor: number
+  last_request_id: string | null
+}
+
+export interface CollectionCursorV1 {
+  schema_version: 'collection_cursor.v1'
+  count: number
+  next_cursor: string | null
+  has_more: boolean
+}
+
+export interface CollectionSummaryV1 {
+  schema_version: 'collection_summary.v1'
+  events: CollectionCursorV1
+  proposals: CollectionCursorV1
+  studies: CollectionCursorV1
+  attempts: CollectionCursorV1
+  artifacts: CollectionCursorV1
+  comparisons: CollectionCursorV1
+  human_work: CollectionCursorV1
+}
+
+export interface DecisionActionV1 {
+  schema_version: 'decision_action.v1'
+  action: string
+  capability: string
+  freshness_class: 'read' | 'lifecycle' | 'privileged'
+  requires_human_work: boolean
+}
+
+export interface DecisionSurfaceV1 {
+  schema_version: 'decision_surface.v1'
+  execution_owner: 'bashgym' | 'human' | 'none'
+  attention_owner: 'bashgym' | 'agent' | 'human' | 'none'
+  blocker: DecisionBlockerV1 | null
+  next_actions: DecisionActionV1[]
+  recovery_actions: string[]
+  promotion_eligible: boolean
+}
+
+export interface CampaignControlRoomSnapshotV1 {
+  schema_version: 'control_room_snapshot.v1'
+  workspace_id: string
+  campaign_id: string
+  aggregate_version: number
+  manifest_revision: number
+  authorization_revision: number
+  snapshot_at: string
+  latest_event_cursor: number
+  campaign: CampaignSummaryV1
+  controller: ControllerObservationV1
+  readiness: ReadinessSummaryV1
+  bindings: BindingSummaryV1
+  journey: JourneyPhaseSummaryV1[]
+  active_work: ActiveWorkSummaryV1 | null
+  champion: CandidateSummaryV1 | null
+  candidate: CandidateSummaryV1 | null
+  metrics: MetricDescriptorV1[]
+  budget: BudgetSummaryV1
+  human_work: HumanWorkSummaryV1
+  agents: AttachedAgentSummaryV1[]
+  collections: CollectionSummaryV1
+  decision_surface: DecisionSurfaceV1
+}
+
+export interface CampaignLiveTicketV1 {
+  schema_version: 'campaign_live_ticket.v1'
+  ticket: string
+  workspace_id: string
+  after_cursor: number
+  expires_at: string
+}
+
+export interface GuidedSetupDraftRequest {
+  workspaceId: string
+  templateId: string
+  installationId: string
+  bindings: GuidedSetupBindings
+}
+
+export interface GuidedSetupSessionRequest {
+  workspaceId: string
+  sessionId: string
+  expectedVersion: number
+  step: GuidedSetupStep
+  selectionId: string
+  idempotencyKey: string
+}
+
+export interface GuidedSetupCreateRequest {
+  workspaceId: string
+  campaignId: string
+  title: string
+  validationReceiptId: string
+  idempotencyKey: string
+}
+
+function invalidGuidedSetupProjection<T>(): ApiResponse<T> {
+  return {
+    ok: false,
+    status: 502,
+    code: 'campaign_guided_setup_projection_invalid',
+    error: 'Guided setup returned an invalid public projection. Durable actions remain disabled.',
+  }
+}
+
+function failedGuidedSetupResponse<T>(response: ApiResponse<unknown>): ApiResponse<T> {
+  return {
+    ok: false,
+    status: response.status,
+    error: response.error,
+    code: response.code,
+    details: response.details,
+  }
+}
 
 async function campaignRequest<T>(
   method: 'GET' | 'POST',
   route: string,
   body?: Record<string, unknown>,
   query?: Record<string, string | number | boolean>,
+  authority?: { idempotencyKey?: string },
 ): Promise<ApiResponse<T>> {
   const bridge = (window.bashgym as typeof window.bashgym & {
     campaignRequest?: CampaignBridgeRequest
@@ -558,17 +865,115 @@ async function campaignRequest<T>(
     }
   }
   try {
-    return await bridge(method, route, body, query) as ApiResponse<T>
+    return await bridge(method, route, body, query, authority) as ApiResponse<T>
   } catch (error) {
     return { ok: false, error: normalizeApiError(error) }
   }
 }
 
 export const campaignApi = {
+  campaignAgentView: async (workspaceId: string, campaignId: string): Promise<ApiResponse<CampaignAgentPublicView>> => {
+    const response = await campaignRequest<unknown>(
+      'GET',
+      `/api/campaigns/${encodeURIComponent(campaignId)}/agent-attachment`,
+      undefined,
+      { workspace_id: workspaceId, after_sequence: 0, limit: 20 },
+    )
+    if (!response.ok) {
+      return {
+        ok: false,
+        status: response.status,
+        error: response.error,
+        code: response.code,
+        details: response.details,
+      }
+    }
+    try {
+      const parsed = parseCampaignAgentPublicView(response.data)
+      if (parsed.scope.workspaceId !== workspaceId || parsed.scope.campaignId !== campaignId) throw new Error('scope mismatch')
+      return { ...response, data: parsed }
+    } catch {
+      return {
+        ok: false,
+        status: 502,
+        code: 'campaign_agent_projection_invalid',
+        error: 'The campaign-agent service returned an invalid public projection. Session actions remain disabled.',
+      }
+    }
+  },
+  guidedSetupContext: async (workspaceId: string, sessionId?: string): Promise<ApiResponse<GuidedSetupContext>> => {
+    const response = await campaignRequest<unknown>(
+      'GET', '/api/campaigns/setup/context', undefined,
+      { workspace_id: workspaceId, ...(sessionId ? { session_id: sessionId } : {}) },
+    )
+    if (!response.ok) return failedGuidedSetupResponse(response)
+    const parsed = parseGuidedSetupContext(response.data)
+    return parsed && parsed.workspace_id === workspaceId ? { ...response, data: parsed } : invalidGuidedSetupProjection()
+  },
+  advanceGuidedSetupSession: async (request: GuidedSetupSessionRequest): Promise<ApiResponse<GuidedSetupMutation>> => {
+    const response = await campaignRequest<unknown>(
+      'POST', '/api/campaigns/setup/session', {
+        workspace_id: request.workspaceId,
+        session_id: request.sessionId,
+        expected_version: request.expectedVersion,
+        step: request.step,
+        selection_id: request.selectionId,
+      }, undefined, { idempotencyKey: request.idempotencyKey },
+    )
+    if (!response.ok) return failedGuidedSetupResponse(response)
+    const parsed = parseGuidedSetupMutation(response.data)
+    return parsed && parsed.session.workspace_id === request.workspaceId && parsed.session.session_id === request.sessionId
+      ? { ...response, data: parsed } : invalidGuidedSetupProjection()
+  },
+  doctorGuidedSetup: async (draft: GuidedSetupDraftRequest): Promise<ApiResponse<GuidedSetupDoctor>> => {
+    const response = await campaignRequest<unknown>('POST', '/api/campaigns/setup/doctor', {
+      workspace_id: draft.workspaceId, template_id: draft.templateId,
+      installation_id: draft.installationId, bindings: draft.bindings,
+    })
+    if (!response.ok) return failedGuidedSetupResponse(response)
+    const parsed = parseGuidedSetupDoctor(response.data)
+    return parsed && parsed.workspace_id === draft.workspaceId && parsed.template_id === draft.templateId
+      ? { ...response, data: parsed } : invalidGuidedSetupProjection()
+  },
+  validateGuidedSetup: async (draft: GuidedSetupDraftRequest, idempotencyKey: string): Promise<ApiResponse<GuidedSetupValidation>> => {
+    const response = await campaignRequest<unknown>('POST', '/api/campaigns/setup/validate', {
+      workspace_id: draft.workspaceId, template_id: draft.templateId,
+      installation_id: draft.installationId, bindings: draft.bindings,
+    }, undefined, { idempotencyKey })
+    if (!response.ok) return failedGuidedSetupResponse(response)
+    const parsed = parseGuidedSetupValidation(response.data)
+    return parsed && parsed.workspace_id === draft.workspaceId && parsed.template_id === draft.templateId
+      ? { ...response, data: parsed } : invalidGuidedSetupProjection()
+  },
+  createGuidedSetup: async (request: GuidedSetupCreateRequest): Promise<ApiResponse<GuidedSetupCreation>> => {
+    const response = await campaignRequest<unknown>('POST', '/api/campaigns/setup/create', {
+      workspace_id: request.workspaceId,
+      campaign_id: request.campaignId,
+      title: request.title,
+      validation_receipt_id: request.validationReceiptId,
+    }, undefined, { idempotencyKey: request.idempotencyKey })
+    if (!response.ok) return failedGuidedSetupResponse(response)
+    const parsed = parseGuidedSetupCreation(response.data)
+    return parsed && parsed.workspace_id === request.workspaceId && parsed.campaign_id === request.campaignId
+      && parsed.validation_receipt_id === request.validationReceiptId
+      ? { ...response, data: parsed } : invalidGuidedSetupProjection()
+  },
   list: (workspaceId: string) => campaignRequest<{
     campaigns: import('../stores/campaignStore').CampaignRecord[]
     controller: import('../stores/campaignStore').CampaignControllerStatus
   }>('GET', '/api/campaigns', undefined, { workspace_id: workspaceId }),
+  liveTicket: (workspaceId: string) => campaignRequest<CampaignLiveTicketV1>(
+    'POST',
+    '/api/campaigns/live-ticket',
+    { workspace_id: workspaceId },
+  ),
+  snapshot: (workspaceId: string, campaignId: string) =>
+    campaignRequest<CampaignControlRoomSnapshotV1>(
+      'GET',
+      `/api/campaigns/${encodeURIComponent(campaignId)}/control-room-snapshot`,
+      undefined,
+      { workspace_id: workspaceId },
+    ),
   get: (workspaceId: string, campaignId: string) =>
     campaignRequest<import('../stores/campaignStore').CampaignRecord>(
       'GET', `/api/campaigns/${encodeURIComponent(campaignId)}`, undefined,
@@ -594,10 +999,19 @@ export const campaignApi = {
       'GET', `/api/campaigns/${encodeURIComponent(campaignId)}/evidence`, undefined,
       { workspace_id: workspaceId },
     ),
-  artifacts: (workspaceId: string, campaignId: string) => campaignRequest<{
+  artifacts: (
+    workspaceId: string,
+    campaignId: string,
+    afterCursor: string | null = null,
+    limit = 50,
+  ) => campaignRequest<{
     artifacts: import('../stores/campaignStore').CampaignArtifact[]
+    next_cursor: string | null
+    has_more: boolean
   }>('GET', `/api/campaigns/${encodeURIComponent(campaignId)}/artifacts`, undefined, {
     workspace_id: workspaceId,
+    ...(afterCursor ? { after_cursor: afterCursor } : {}),
+    limit,
   }),
   comparisons: (workspaceId: string, campaignId: string) => campaignRequest<{
     comparisons: import('../stores/campaignStore').CampaignComparison[]
@@ -665,6 +1079,126 @@ export const campaignApi = {
       expected_version: expectedVersion,
       ...(reason ? { stop_reason: reason } : {}),
     },
+  ),
+  humanWork: (workspaceId: string, campaignId: string) =>
+    campaignRequest<import('../components/autoresearch/humanWorkModel').HumanWorkQueuePublicV1>(
+      'GET',
+      `/api/campaigns/${encodeURIComponent(campaignId)}/human-work`,
+      undefined,
+      { workspace_id: workspaceId, limit: 50 },
+    ),
+  claimHumanWork: (request: import('../components/autoresearch/humanWorkModel').HumanWorkClaimRequest) =>
+    campaignRequest<{
+      queue: import('../components/autoresearch/humanWorkModel').HumanWorkQueuePublicV1
+      event: Record<string, unknown>
+      replayed: boolean
+    }>(
+      'POST',
+      `/api/campaigns/${encodeURIComponent(request.campaignId)}/human-work/${encodeURIComponent(request.workId)}/claim`,
+      {
+        workspace_id: request.workspaceId,
+        expected_campaign_revision: request.expectedCampaignRevision,
+        expected_version: request.expectedVersion,
+        expected_state: request.expectedState,
+      },
+      undefined,
+      { idempotencyKey: request.idempotencyKey },
+    ),
+  submitHumanWork: (
+    request: import('../components/autoresearch/humanWorkModel').HumanWorkSubmitRequest,
+    decision: import('../components/autoresearch/humanWorkModel').HumanReviewDecision,
+    rationale: string,
+  ) => campaignRequest<{
+    queue: import('../components/autoresearch/humanWorkModel').HumanWorkQueuePublicV1
+    event: Record<string, unknown>
+    replayed: boolean
+  }>(
+    'POST',
+    `/api/campaigns/${encodeURIComponent(request.campaignId)}/human-work/${encodeURIComponent(request.workId)}/submit`,
+    {
+      workspace_id: request.workspaceId,
+      expected_campaign_revision: request.expectedCampaignRevision,
+      expected_version: request.expectedVersion,
+      expected_rubric_version: request.expectedRubricVersion,
+      decision,
+      rationale,
+    },
+    undefined,
+    { idempotencyKey: request.idempotencyKey },
+  ),
+  decideHumanPromotion: (
+    request: import('../components/autoresearch/humanWorkModel').HumanPromotionRequestBinding,
+    decision: 'promote' | 'hold',
+  ) => campaignRequest<{
+    queue: import('../components/autoresearch/humanWorkModel').HumanWorkQueuePublicV1
+    event: Record<string, unknown>
+    replayed: boolean
+  }>(
+    'POST',
+    `/api/campaigns/${encodeURIComponent(request.campaignId)}/human-promotion`,
+    {
+      workspace_id: request.workspaceId,
+      receipt_id: request.receiptId,
+      work_id: request.workId,
+      expected_campaign_revision: request.expectedCampaignRevision,
+      expected_item_version: request.expectedItemVersion,
+      expected_rubric_version: request.expectedRubricVersion,
+      expected_promotion_version: request.expectedPromotionVersion,
+      expected_promotion_state: request.expectedPromotionState,
+      decision,
+    },
+    undefined,
+    { idempotencyKey: request.idempotencyKey },
+  ),
+  recovery: async (workspaceId: string, campaignId: string): Promise<ApiResponse<CampaignRecoveryPublicV1>> => {
+    const response = await campaignRequest<unknown>(
+      'GET',
+      `/api/campaigns/${encodeURIComponent(campaignId)}/recovery`,
+      undefined,
+      { workspaceId },
+    )
+    if (!response.ok) {
+      return {
+        ok: false,
+        status: response.status,
+        error: response.error,
+        code: response.code,
+        details: response.details,
+      }
+    }
+    const projection = parseCampaignRecovery(response.data)
+    if (!projection || projection.workspace_id !== workspaceId || projection.campaign_id !== campaignId) {
+      return {
+        ok: false,
+        status: 502,
+        code: 'campaign_recovery_projection_invalid',
+        error: 'The recovery service returned an invalid public projection. Controls remain disabled.',
+      }
+    }
+    return { ...response, data: projection }
+  },
+  requestRecovery: (
+    request: import('../components/autoresearch/campaignRecoveryModel').RecoveryRequest,
+  ) => campaignRequest<Record<string, unknown>>(
+    'POST',
+    `/api/campaigns/${encodeURIComponent(request.campaignId)}/recovery/${request.action}`,
+    {
+      action: request.action,
+      idempotency_key: request.idempotencyKey,
+      workspace_id: request.workspaceId,
+      campaign_id: request.campaignId,
+      eligibility_receipt_id: request.eligibilityReceiptId,
+      doctor_evidence_id: request.doctorEvidenceId,
+      expected_campaign_revision: request.expectedCampaignRevision,
+      expected_event_cursor: request.expectedEventCursor,
+      expected_aggregate_version: request.expectedAggregateVersion,
+      expected_controller_lease_id: request.expectedControllerLeaseId,
+      checkpoint_id: request.checkpointId,
+      artifact_id: request.artifactId,
+      human_confirmed: request.humanConfirmed,
+    },
+    undefined,
+    { idempotencyKey: request.idempotencyKey },
   ),
 }
 

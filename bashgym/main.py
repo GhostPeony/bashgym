@@ -7,7 +7,7 @@ Starts the FastAPI server for the Bash Gym frontend interface.
 Usage:
     python -m bashgym.main
     python bashgym/main.py
-    python bashgym/main.py --host 0.0.0.0 --port 8000 --reload
+    python bashgym/main.py --host 0.0.0.0 --port 8003 --reload
 """
 
 import argparse
@@ -28,7 +28,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    # Start server with defaults (localhost:8000)
+    # Start server with defaults (localhost:8003)
     python -m bashgym.main
 
     # Start with auto-reload for development
@@ -49,7 +49,7 @@ Examples:
         help="Host to bind the server to (default: 127.0.0.1)",
     )
     parser.add_argument(
-        "--port", type=int, default=8000, help="Port to bind the server to (default: 8000)"
+        "--port", type=int, default=8003, help="Port to bind the server to (default: 8003)"
     )
     parser.add_argument("--reload", action="store_true", help="Enable auto-reload for development")
     parser.add_argument(

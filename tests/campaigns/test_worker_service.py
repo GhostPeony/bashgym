@@ -5,16 +5,19 @@ from __future__ import annotations
 import hashlib
 import os
 import plistlib
+import threading
 import xml.etree.ElementTree as ET
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
+from bashgym._compat import UTC
 from bashgym.campaigns.contracts import StageKind
 from bashgym.campaigns.persistence import CampaignRepository
 from bashgym.campaigns.remote import (
+    ApprovedCodeLineageExecutionBinding,
     ApprovedRemoteExecutorProfile,
     PinnedRemoteStageProfile,
     RemoteCapacityPolicy,
@@ -24,6 +27,7 @@ from bashgym.campaigns.worker_service import (
     CONTROLLER_OFFLINE_GUIDANCE,
     CONTROLLER_STALE_GUIDANCE,
     CommandResult,
+    DesktopWorkerSupervisor,
     WorkerLifecycleStatus,
     WorkerPlatform,
     WorkerRunConfig,
@@ -31,11 +35,15 @@ from bashgym.campaigns.worker_service import (
     WorkerServiceManager,
     build_service_definition,
     build_worker,
+    ensure_worker_bootstrap,
     load_approved_remote_profiles,
+    load_approved_source_profiles,
     project_controller_status,
     read_worker_config,
     run_foreground,
+    write_worker_config,
 )
+from tests.campaigns.test_lineage import initialized_repository, source_profile
 
 NOW = datetime(2026, 7, 13, 12, 0, tzinfo=UTC)
 
@@ -51,6 +59,7 @@ def approved_profile(
     compute_profile_id: str = "ssh-gpu-lab",
     target_contract_key: str = "memexai-embedding-v1",
     host: str = "192.0.2.10",
+    code_lineage_binding: ApprovedCodeLineageExecutionBinding | None = None,
 ) -> ApprovedRemoteExecutorProfile:
     script = tmp_path / f"{profile_id}-train.py"
     dataset = tmp_path / f"{profile_id}-train.jsonl"
@@ -72,6 +81,7 @@ def approved_profile(
             minimum_available_disk_gib=50,
             maximum_external_gpu_processes=0,
         ),
+        code_lineage_binding=code_lineage_binding,
     )
     return ApprovedRemoteExecutorProfile(
         profile_id=profile_id,
@@ -126,7 +136,10 @@ def test_service_definitions_are_user_scoped_typed_and_restartable(
     )
     assert restart_marker in definition.definition_payload
     assert all(isinstance(argv, tuple) for argv in definition.install_argvs)
-    assert all(argv[0] not in {"sh", "bash", "cmd.exe", "powershell.exe"} for argv in definition.install_argvs)
+    assert all(
+        argv[0] not in {"sh", "bash", "cmd.exe", "powershell.exe"}
+        for argv in definition.install_argvs
+    )
 
     if target is WorkerPlatform.WINDOWS:
         root = ET.fromstring(definition.definition_payload)
@@ -136,8 +149,8 @@ def test_service_definitions_are_user_scoped_typed_and_restartable(
         assert root.findtext(".//task:RunLevel", namespaces=namespace) == "LeastPrivilege"
     elif target is WorkerPlatform.LINUX:
         text = definition.definition_payload.decode("utf-8")
-        assert "ExecStart=\"" in text
-        assert ";and&symbols.json\"" in text
+        assert 'ExecStart="' in text
+        assert ';and&symbols.json"' in text
         assert "RestartSec=5" in text
     else:
         payload = plistlib.loads(definition.definition_payload)
@@ -227,9 +240,7 @@ def test_controller_projection_distinguishes_absent_current_and_stale_leases(
     assert current.heartbeat_age_seconds == 5
     assert current.guidance is None
 
-    stale = project_controller_status(
-        repository, data_directory, now=NOW + timedelta(seconds=16)
-    )
+    stale = project_controller_status(repository, data_directory, now=NOW + timedelta(seconds=16))
     assert stale.online is False
     assert stale.state == "stale"
     assert stale.code == "controller_stale"
@@ -287,6 +298,179 @@ def test_foreground_crash_is_restartable_and_next_run_records_recovery(tmp_path:
     assert recovered.intervals == (5.0, 2.0, 30.0)
 
 
+def test_desktop_bootstrap_creates_idempotent_config_and_seal_material(
+    tmp_path: Path,
+) -> None:
+    data_directory = tmp_path / "managed data"
+    stored_secrets: dict[str, str] = {}
+
+    first = ensure_worker_bootstrap(
+        data_directory,
+        secret_resolver=stored_secrets.get,
+        secret_writer=stored_secrets.__setitem__,
+        key_factory=lambda: "generated-seal-material" * 2,
+    )
+
+    assert first.config_created is True
+    assert first.seal_key_created is True
+    assert first.config_path == data_directory.resolve() / "campaigns" / "worker-config.v1.json"
+    assert read_worker_config(first.config_path) == first.config
+    assert stored_secrets == {first.config.seal_key_ref: "generated-seal-material" * 2}
+    assert "generated-seal-material" not in first.config_path.read_text(encoding="utf-8")
+    original_config = first.config_path.read_bytes()
+
+    second = ensure_worker_bootstrap(
+        data_directory,
+        secret_resolver=stored_secrets.get,
+        secret_writer=stored_secrets.__setitem__,
+        key_factory=lambda: "must-not-replace-existing-material",
+    )
+
+    assert second.config == first.config
+    assert second.config_created is False
+    assert second.seal_key_created is False
+    assert second.config_path.read_bytes() == original_config
+    assert stored_secrets == {first.config.seal_key_ref: "generated-seal-material" * 2}
+
+
+def test_desktop_bootstrap_rejects_config_for_another_data_directory(tmp_path: Path) -> None:
+    data_directory = tmp_path / "managed"
+    config_path = data_directory / "campaigns" / "worker-config.v1.json"
+    write_worker_config(
+        config_path,
+        WorkerRunConfig.for_data_directory(tmp_path / "different-installation"),
+    )
+
+    with pytest.raises(
+        WorkerServiceError,
+        match="campaign_worker_config_data_directory_mismatch",
+    ):
+        ensure_worker_bootstrap(
+            data_directory,
+            secret_resolver=lambda _reference: "existing-material",
+            secret_writer=lambda _reference, _value: None,
+        )
+
+
+def test_desktop_supervisor_starts_once_becomes_ready_and_releases_lease(
+    tmp_path: Path,
+) -> None:
+    config = WorkerRunConfig.model_validate(
+        {
+            **WorkerRunConfig.for_data_directory(tmp_path / "managed").model_dump(),
+            "leader_ttl_seconds": 0.3,
+            "action_ttl_seconds": 0.3,
+            "heartbeat_seconds": 0.02,
+            "ready_poll_seconds": 0.02,
+            "idle_poll_seconds": 0.05,
+        }
+    )
+    supervisor = DesktopWorkerSupervisor(
+        config,
+        worker_factory=lambda value: build_worker(
+            value,
+            secret_resolver=lambda _reference: "s" * 32,
+        ),
+        restart_delay_seconds=0.01,
+    )
+    try:
+        assert supervisor.start() is True
+        assert supervisor.start() is False
+        assert supervisor.wait_until_ready(timeout_seconds=2, poll_seconds=0.01) is True
+        status = supervisor.status()
+        assert status.managed is True
+        assert status.state == "online"
+        assert status.code == "worker_online"
+        assert status.thread_alive is True
+    finally:
+        assert supervisor.stop(timeout_seconds=2) is True
+
+    repository = CampaignRepository(config.database_path)
+    repository.initialize()
+    released = repository.get_lease(scheduler_lease_key(config.data_directory))
+    assert released is not None
+    assert released.expires_at <= datetime.now(UTC)
+    stopped = supervisor.status(repository=repository)
+    assert stopped.state == "stopped"
+    assert stopped.thread_alive is False
+
+
+def test_desktop_supervisor_restarts_a_crashed_worker_and_stops_replacement(
+    tmp_path: Path,
+) -> None:
+    config = config_for(tmp_path)
+    replacement_started = threading.Event()
+    replacement_stopped = threading.Event()
+    created: list[FakeWorker] = []
+
+    class BlockingWorker(FakeWorker):
+        def run_forever(
+            self,
+            *,
+            heartbeat_seconds: float,
+            ready_poll_seconds: float,
+            idle_poll_seconds: float,
+        ) -> None:
+            self.intervals = (heartbeat_seconds, ready_poll_seconds, idle_poll_seconds)
+            replacement_started.set()
+            replacement_stopped.wait(timeout=3)
+
+        def request_stop(self) -> None:
+            super().request_stop()
+            replacement_stopped.set()
+
+    def factory(_config: WorkerRunConfig) -> FakeWorker:
+        worker: FakeWorker = FakeWorker(crash=True) if not created else BlockingWorker(crash=False)
+        created.append(worker)
+        return worker
+
+    supervisor = DesktopWorkerSupervisor(
+        config,
+        worker_factory=factory,
+        restart_delay_seconds=0.01,
+    )
+    assert supervisor.start() is True
+    assert replacement_started.wait(timeout=2), "replacement worker did not start"
+    assert supervisor.restart_count == 1
+    assert len(created) == 2
+    assert supervisor.stop(timeout_seconds=2) is True
+    assert created[1].stop_requested is True
+    assert supervisor.is_alive is False
+
+
+def test_desktop_supervisor_stop_during_construction_stops_late_worker(
+    tmp_path: Path,
+) -> None:
+    config = config_for(tmp_path)
+    construction_started = threading.Event()
+    allow_construction = threading.Event()
+    worker = FakeWorker(crash=False)
+
+    def delayed_factory(_config: WorkerRunConfig) -> FakeWorker:
+        construction_started.set()
+        allow_construction.wait(timeout=2)
+        return worker
+
+    supervisor = DesktopWorkerSupervisor(
+        config,
+        worker_factory=delayed_factory,
+        restart_delay_seconds=0.01,
+    )
+    assert supervisor.start() is True
+    assert construction_started.wait(timeout=2)
+    stop_result: list[bool] = []
+    stopper = threading.Thread(
+        target=lambda: stop_result.append(supervisor.stop(timeout_seconds=2))
+    )
+    stopper.start()
+    allow_construction.set()
+    stopper.join(timeout=3)
+
+    assert stop_result == [True]
+    assert worker.stop_requested is True
+    assert supervisor.is_alive is False
+
+
 def test_config_rejects_unsafe_boundaries_and_secret_values(tmp_path: Path) -> None:
     root = (tmp_path / "data").resolve()
     with pytest.raises(ValidationError, match="inside data_directory"):
@@ -308,9 +492,14 @@ def test_config_rejects_unsafe_boundaries_and_secret_values(tmp_path: Path) -> N
 
 def test_protected_profile_round_trips_and_is_the_only_adapter_authority(tmp_path: Path) -> None:
     profile = approved_profile(tmp_path)
+    source_root = tmp_path / "source-fixture"
+    source_root.mkdir()
+    source_repository, _base_commit = initialized_repository(source_root)
+    source = source_profile(source_repository)
     config = WorkerRunConfig.for_data_directory(
         tmp_path / "data",
         approved_remote_profiles=(profile,),
+        approved_source_profiles=(source,),
         # A legacy ID remains loadable but does not create an adapter.
         compute_profile_ids=("actor-mutated-device",),
     )
@@ -322,6 +511,8 @@ def test_protected_profile_round_trips_and_is_the_only_adapter_authority(tmp_pat
     assert registry[("ssh-gpu-lab", "memexai-embedding-v1")].profile_digest == (
         profile.profile_digest
     )
+    source_registry = load_approved_source_profiles(loaded)
+    assert source_registry["bashgym-source-v1"].profile_digest == source.profile_digest
     with pytest.raises(ValidationError, match="profile digest mismatch"):
         ApprovedRemoteExecutorProfile(
             **profile.model_dump(exclude={"profile_digest"}),
@@ -330,6 +521,10 @@ def test_protected_profile_round_trips_and_is_the_only_adapter_authority(tmp_pat
     worker = build_worker(loaded, secret_resolver=lambda _reference: "s" * 32)
     assert set(worker.remote_adapters) == {"ssh-gpu-lab"}
     assert worker.remote_executor_profiles == registry
+    assert worker.source_repository_profiles == source_registry
+    assert worker.lineage_snapshot_root == (
+        config.data_directory / "campaigns" / "source-snapshots"
+    )
     adapter = worker.remote_adapters["ssh-gpu-lab"]
     assert adapter.config.host == "192.0.2.10"
     assert adapter.config.username == "trainer"
@@ -343,6 +538,40 @@ def test_legacy_compute_ids_remain_parseable_but_cannot_authorize_remote_adapter
     config = config_for(tmp_path, compute_profile_ids=("legacy-device",))
     worker = build_worker(config, secret_resolver=lambda _reference: "s" * 32)
     assert worker.remote_adapters == {}
+
+
+def test_worker_bootstrap_cross_checks_code_lineage_entrypoint_binding(
+    tmp_path: Path,
+) -> None:
+    binding = ApprovedCodeLineageExecutionBinding(
+        binding_id="bashgym-trainer-entrypoint-v1",
+        binding_revision=1,
+        source_repository_profile_id="bashgym-source-v1",
+        entrypoint_path="bashgym/gym/trainer.py",
+    )
+    profile = approved_profile(tmp_path, code_lineage_binding=binding)
+    missing_source = WorkerRunConfig.for_data_directory(
+        tmp_path / "missing-source-data", approved_remote_profiles=(profile,)
+    )
+
+    with pytest.raises(
+        WorkerServiceError,
+        match="campaign_worker_code_lineage_execution_binding_invalid",
+    ):
+        build_worker(missing_source, secret_resolver=lambda _reference: "s" * 32)
+
+    source_root = tmp_path / "binding-source-fixture"
+    source_root.mkdir()
+    source_repository, _base_commit = initialized_repository(source_root)
+    source = source_profile(source_repository)
+    configured = WorkerRunConfig.for_data_directory(
+        tmp_path / "configured-data",
+        approved_remote_profiles=(profile,),
+        approved_source_profiles=(source,),
+    )
+
+    worker = build_worker(configured, secret_resolver=lambda _reference: "s" * 32)
+    assert worker.source_repository_profiles == {source.profile_id: source}
 
 
 def test_profile_material_hash_mismatch_and_post_load_change_fail_closed(
@@ -360,9 +589,7 @@ def test_profile_material_hash_mismatch_and_post_load_change_fail_closed(
         tmp_path / "data", approved_remote_profiles=(profile,)
     )
     stage.script_path.write_text("print('changed after approval')\n", encoding="utf-8")
-    with pytest.raises(
-        WorkerServiceError, match="campaign_worker_remote_profile_material_invalid"
-    ):
+    with pytest.raises(WorkerServiceError, match="campaign_worker_remote_profile_material_invalid"):
         load_approved_remote_profiles(config)
 
 

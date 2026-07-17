@@ -29,7 +29,7 @@ shortcut, an easy task slice, or a verifier artifact.
 The same ladder is exposed for agents:
 
 ```bash
-bashgym training plan --strategy grpo --data terminal_envs --hardware dgx --json
+bashgym training plan --strategy grpo --data terminal_envs --hardware private_compute --json
 ```
 
 Read the `readiness_ladder` field before launching a long job and the

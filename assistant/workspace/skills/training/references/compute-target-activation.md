@@ -46,7 +46,7 @@ Before spending compute, verify and record:
 Start with the environment-local ability check:
 
 ```bash
-python3 scripts/operator_context.py doctor
+bashgym operator doctor
 bashgym manifest --json
 bashgym training capabilities --json
 ```
@@ -60,9 +60,9 @@ The BashGym API and trainer must be running on the device that will perform the
 work, and the dataset path must be readable there.
 
 ```bash
-scripts/api.sh GET /api/health
-scripts/api.sh GET /api/system/info
-scripts/api.sh GET /api/system/recommendations
+bashgym api GET /api/health
+bashgym api GET /api/system/info
+bashgym api GET /api/system/recommendations
 bashgym training start \
   --strategy sft \
   --model <model-id> \
@@ -84,8 +84,8 @@ the script and dataset, launches the registered remote environment, streams
 logs, and retrieves the retained artifacts.
 
 ```bash
-scripts/api.sh GET /api/devices
-scripts/api.sh POST /api/devices/<device_id>/preflight '{}'
+bashgym api GET /api/devices
+bashgym api POST /api/devices/<device_id>/preflight
 bashgym training start \
   --strategy dpo \
   --model <model-id> \
@@ -177,18 +177,26 @@ dataset, verifier, outputs, and budget must be installation-owned and pinned.
 Until that executor is doctor-ready, do not substitute the Customizer path or
 claim NeMo RL execution from a target label.
 
-Managed fine-tune APIs use a separate endpoint:
+Managed fine-tune APIs use a separate endpoint. Save the request object as
+`managed-submit.json` so the same command works in PowerShell, cmd.exe, and POSIX shells:
 
 ```bash
-scripts/api.sh POST /api/training/managed/submit '{
+bashgym api POST /api/training/managed/submit --data-file managed-submit.json
+```
+
+```json
+{
   "platform": "<connected-provider>",
   "base_model": "<provider-model-id>",
   "dataset_path": "/path/to/provider-compatible.jsonl",
   "n_epochs": 1,
   "learning_rate": 0.00001,
   "suffix": "<run-label>"
-}'
-scripts/api.sh GET /api/training/managed/<provider>/<job-id>
+}
+```
+
+```text
+bashgym api GET /api/training/managed/<provider>/<job-id>
 ```
 
 This surface currently submits and polls. If cancellation is not exposed by the
@@ -201,10 +209,10 @@ controls it.
 Native BashGym runs:
 
 ```bash
-scripts/api.sh GET /api/training/<run_id>
-scripts/api.sh GET "/api/training/<run_id>/log?tail=200"
-scripts/api.sh GET /api/training/runs/<run_id>/metrics
-scripts/api.sh POST /api/training/<run_id>/stop '{}'
+bashgym api GET /api/training/<run_id>
+bashgym api GET /api/training/<run_id>/log --query tail=200
+bashgym api GET /api/training/runs/<run_id>/metrics
+bashgym api POST /api/training/<run_id>/stop
 ```
 
 Stopping/cancelling compute is destructive and requires the session's authority.

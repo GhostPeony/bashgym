@@ -1,180 +1,124 @@
-"""Held-out trace evaluation: structured tool-call metrics + session-clustered
-paired-bootstrap statistics for answering "is this fine-tune actually better?".
-"""
+"""Held-out and executable evaluation APIs with lazy public exports."""
 
-from .benchmarks_ext import (
-    BenchmarkReport,
-    BenchmarkResult,
-    BenchmarkSpec,
-    bfcl_command,
-    forgetting_suite_spec,
-    harbor_terminal_bench_command,
-    normalize_external_benchmark_results,
-    parse_bfcl_results,
-    parse_cua_rewardbench_results,
-    parse_rewardbench_results,
-    parse_swebench_results,
-    record_benchmarks,
-    run_benchmarks,
-    swebench_command,
-    terminal_bench_command,
-)
-from .dppo_replay import (
-    DPPO_REPLAY_SCHEMA_VERSION,
-    build_dppo_replay_records,
-    enrich_dppo_replay_jsonl,
-    enrich_dppo_replay_records,
-    read_dppo_replay_jsonl,
-    summarize_dppo_replay_records,
-    summarize_world_model_payloads,
-    write_dppo_records_jsonl,
-    write_dppo_replay_jsonl,
-)
-from .environment_holdout_comparison import (
-    ENVIRONMENT_HOLDOUT_COMPARISON_SCHEMA_VERSION,
-    evaluate_environment_holdout_comparison_gate,
-)
-from .environment_passk import (
-    EnvironmentAttempt,
-    EnvironmentPassKReport,
-    evaluate_environment_attempts,
-    evaluate_environment_pass_at_k,
-)
-from .environment_spurious_reward import (
-    ENVIRONMENT_SPURIOUS_REWARD_SCHEMA_VERSION,
-    evaluate_environment_spurious_reward_control,
-)
-from .forgetting import (
-    DEFAULT_FORGETTING_TASKS,
-    ForgettingReport,
-    compute_forgetting,
-    lm_eval_command,
-    parse_lm_eval_results,
-)
-from .gate import GateThresholds, GateVerdict, evaluate_gate
-from .heldout import (
-    ExampleEval,
-    HeldoutReport,
-    evaluate_candidate,
-    first_gold_tool_call,
-    run_heldout_eval,
-    score_predictions,
-)
-from .metrics import score_tool_call, tool_arg_f1, tool_name_match
-from .passk import (
-    EpisodeResult,
-    PassKReport,
-    compute_pass_at_k,
-    evaluate_pass_at_k,
-    pass_at_k,
-)
-from .predictors import build_prompt_messages, endpoint_predictor, openai_complete, parse_tool_call
-from .release_gate import RELEASE_GATE_SCHEMA_VERSION, combine_release_gate_evidence
-from .service import (
-    EndpointConfig,
-    benchmark_commands,
-    ingest_external_benchmarks,
-    ingest_forgetting,
-    load_jsonl_examples,
-    record_environment_passk,
-    record_external_benchmarks,
-    record_forgetting,
-    resolve_endpoint,
-    run_environment_holdout_comparison_gate,
-    run_environment_passk,
-    run_environment_spurious_reward_control,
-    run_heldout,
-    run_local_environment_rollout_passk,
-    run_model_environment_rollout_passk,
-    thresholds_from,
-)
-from .soft import soft_call_score, soft_trajectory_score
-from .split import HoldoutSplit, contamination, example_hash, make_holdout_split
-from .stats import BootstrapResult, paired_bootstrap
+from __future__ import annotations
 
-__all__ = [
-    "tool_name_match",
-    "tool_arg_f1",
-    "score_tool_call",
-    "paired_bootstrap",
-    "BootstrapResult",
-    "make_holdout_split",
-    "HoldoutSplit",
-    "contamination",
-    "example_hash",
-    "evaluate_gate",
-    "GateThresholds",
-    "GateVerdict",
-    "ExampleEval",
-    "HeldoutReport",
-    "score_predictions",
-    "run_heldout_eval",
-    "evaluate_candidate",
-    "first_gold_tool_call",
-    "compute_forgetting",
-    "ForgettingReport",
-    "parse_lm_eval_results",
-    "lm_eval_command",
-    "DEFAULT_FORGETTING_TASKS",
-    "soft_call_score",
-    "soft_trajectory_score",
-    "pass_at_k",
-    "compute_pass_at_k",
-    "evaluate_pass_at_k",
-    "EpisodeResult",
-    "PassKReport",
-    "EnvironmentAttempt",
-    "EnvironmentPassKReport",
-    "evaluate_environment_attempts",
-    "evaluate_environment_pass_at_k",
-    "ENVIRONMENT_HOLDOUT_COMPARISON_SCHEMA_VERSION",
-    "evaluate_environment_holdout_comparison_gate",
-    "ENVIRONMENT_SPURIOUS_REWARD_SCHEMA_VERSION",
-    "evaluate_environment_spurious_reward_control",
-    "DPPO_REPLAY_SCHEMA_VERSION",
-    "build_dppo_replay_records",
-    "enrich_dppo_replay_jsonl",
-    "enrich_dppo_replay_records",
-    "read_dppo_replay_jsonl",
-    "summarize_dppo_replay_records",
-    "summarize_world_model_payloads",
-    "write_dppo_records_jsonl",
-    "write_dppo_replay_jsonl",
-    "endpoint_predictor",
-    "openai_complete",
-    "parse_tool_call",
-    "build_prompt_messages",
-    "RELEASE_GATE_SCHEMA_VERSION",
-    "combine_release_gate_evidence",
-    "BenchmarkResult",
-    "BenchmarkReport",
-    "BenchmarkSpec",
-    "run_benchmarks",
-    "record_benchmarks",
-    "forgetting_suite_spec",
-    "terminal_bench_command",
-    "harbor_terminal_bench_command",
-    "bfcl_command",
-    "swebench_command",
-    "parse_bfcl_results",
-    "parse_swebench_results",
-    "parse_rewardbench_results",
-    "parse_cua_rewardbench_results",
-    "normalize_external_benchmark_results",
-    "EndpointConfig",
-    "resolve_endpoint",
-    "load_jsonl_examples",
-    "run_heldout",
-    "thresholds_from",
-    "benchmark_commands",
-    "ingest_forgetting",
-    "ingest_external_benchmarks",
-    "record_forgetting",
-    "record_external_benchmarks",
-    "run_environment_passk",
-    "run_environment_holdout_comparison_gate",
-    "run_environment_spurious_reward_control",
-    "run_local_environment_rollout_passk",
-    "run_model_environment_rollout_passk",
-    "record_environment_passk",
-]
+import importlib
+from typing import Any
+
+_MODULE_EXPORTS = {
+    "bashgym.eval.metrics": ("tool_name_match", "tool_arg_f1", "score_tool_call"),
+    "bashgym.eval.stats": ("paired_bootstrap", "BootstrapResult"),
+    "bashgym.eval.split": ("make_holdout_split", "HoldoutSplit", "contamination", "example_hash"),
+    "bashgym.eval.gate": ("evaluate_gate", "GateThresholds", "GateVerdict"),
+    "bashgym.eval.heldout": (
+        "ExampleEval",
+        "HeldoutReport",
+        "score_predictions",
+        "run_heldout_eval",
+        "evaluate_candidate",
+        "first_gold_tool_call",
+    ),
+    "bashgym.eval.forgetting": (
+        "compute_forgetting",
+        "ForgettingReport",
+        "parse_lm_eval_results",
+        "lm_eval_command",
+        "DEFAULT_FORGETTING_TASKS",
+    ),
+    "bashgym.eval.soft": ("soft_call_score", "soft_trajectory_score"),
+    "bashgym.eval.passk": (
+        "pass_at_k",
+        "compute_pass_at_k",
+        "evaluate_pass_at_k",
+        "EpisodeResult",
+        "PassKReport",
+    ),
+    "bashgym.eval.environment_passk": (
+        "EnvironmentAttempt",
+        "EnvironmentPassKReport",
+        "evaluate_environment_attempts",
+        "evaluate_environment_pass_at_k",
+    ),
+    "bashgym.eval.environment_holdout_comparison": (
+        "ENVIRONMENT_HOLDOUT_COMPARISON_SCHEMA_VERSION",
+        "evaluate_environment_holdout_comparison_gate",
+    ),
+    "bashgym.eval.environment_spurious_reward": (
+        "ENVIRONMENT_SPURIOUS_REWARD_SCHEMA_VERSION",
+        "evaluate_environment_spurious_reward_control",
+    ),
+    "bashgym.eval.dppo_replay": (
+        "DPPO_REPLAY_SCHEMA_VERSION",
+        "build_dppo_replay_records",
+        "enrich_dppo_replay_jsonl",
+        "enrich_dppo_replay_records",
+        "read_dppo_replay_jsonl",
+        "summarize_dppo_replay_records",
+        "summarize_world_model_payloads",
+        "write_dppo_records_jsonl",
+        "write_dppo_replay_jsonl",
+    ),
+    "bashgym.eval.predictors": (
+        "endpoint_predictor",
+        "openai_complete",
+        "parse_tool_call",
+        "build_prompt_messages",
+    ),
+    "bashgym.eval.release_gate": (
+        "RELEASE_GATE_SCHEMA_VERSION",
+        "combine_release_gate_evidence",
+    ),
+    "bashgym.eval.benchmarks_ext": (
+        "BenchmarkResult",
+        "BenchmarkReport",
+        "BenchmarkSpec",
+        "run_benchmarks",
+        "record_benchmarks",
+        "forgetting_suite_spec",
+        "terminal_bench_command",
+        "harbor_terminal_bench_command",
+        "bfcl_command",
+        "swebench_command",
+        "parse_bfcl_results",
+        "parse_swebench_results",
+        "parse_rewardbench_results",
+        "parse_cua_rewardbench_results",
+        "normalize_external_benchmark_results",
+    ),
+    "bashgym.eval.service": (
+        "EndpointConfig",
+        "resolve_endpoint",
+        "load_jsonl_examples",
+        "run_heldout",
+        "thresholds_from",
+        "benchmark_commands",
+        "ingest_forgetting",
+        "ingest_external_benchmarks",
+        "record_forgetting",
+        "record_external_benchmarks",
+        "run_environment_passk",
+        "run_environment_holdout_comparison_gate",
+        "run_environment_spurious_reward_control",
+        "run_local_environment_rollout_passk",
+        "run_model_environment_rollout_passk",
+        "record_environment_passk",
+    ),
+}
+
+_EXPORTS = {name: module_name for module_name, names in _MODULE_EXPORTS.items() for name in names}
+
+
+def __getattr__(name: str) -> Any:
+    module_name = _EXPORTS.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(importlib.import_module(module_name), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted({*globals(), *_EXPORTS})
+
+
+__all__ = list(_EXPORTS)

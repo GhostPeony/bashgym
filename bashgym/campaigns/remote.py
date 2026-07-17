@@ -16,14 +16,18 @@ from typing import Any, Literal, Protocol
 from pydantic import Field, ValidationError, field_validator, model_validator
 
 from bashgym.campaigns.contracts import (
+    CodeLineageRecord,
+    CodeLineageState,
     ContractModel,
     FrozenContractModel,
+    GitObjectId,
     HexDigest,
     Identifier,
     StageKind,
     canonical_hash,
     utc_now,
 )
+from bashgym.campaigns.nemo_rl import ApprovedNemoRLProfile, NemoRLRuntimeReceipt
 from bashgym.gym.remote_trainer import HAS_ASYNCSSH, SSHConfig
 
 
@@ -48,6 +52,21 @@ CONTROL_SIGNALS = {
     RemoteControl.TERMINATE: "TERM",
     RemoteControl.FORCE_STOP: "KILL",
 }
+
+
+def _safe_python_entrypoint(value: str) -> str:
+    path = PurePosixPath(value)
+    if (
+        not value
+        or value.startswith("/")
+        or "\\" in value
+        or path.as_posix() != value
+        or path.suffix.casefold() != ".py"
+        or any(part in {"", ".", ".."} for part in path.parts)
+        or any(ord(character) < 32 for character in value)
+    ):
+        raise ValueError("code lineage entrypoint must be a safe repository-relative Python file")
+    return value
 
 
 class RemoteCommandResult(FrozenContractModel):
@@ -91,10 +110,86 @@ class RemoteSupervisorState(FrozenContractModel):
         return RemoteRunIdentity(**self.model_dump(exclude={"schema_version"}))
 
 
+class ApprovedCodeLineageExecutionBinding(FrozenContractModel):
+    """Installation-owned mapping from captured source to one training entrypoint."""
+
+    schema_version: Literal["campaign_code_lineage_execution_binding.v1"] = (
+        "campaign_code_lineage_execution_binding.v1"
+    )
+    binding_id: Identifier
+    binding_revision: int = Field(ge=1)
+    binding_digest: HexDigest = ""
+    source_repository_profile_id: Identifier
+    entrypoint_path: str
+    working_directory: Literal["run", "source"] = "run"
+    max_archive_bytes: int = Field(default=512 * 1024 * 1024, ge=1024, le=4 * 1024**3)
+
+    @field_validator("entrypoint_path")
+    @classmethod
+    def safe_entrypoint(cls, value: str) -> str:
+        return _safe_python_entrypoint(value)
+
+    @model_validator(mode="after")
+    def verify_binding_digest(self) -> ApprovedCodeLineageExecutionBinding:
+        expected = canonical_hash(self.model_dump(mode="json", exclude={"binding_digest"}))
+        if self.binding_digest and self.binding_digest != expected:
+            raise ValueError("code lineage execution binding digest mismatch")
+        if not self.binding_digest:
+            object.__setattr__(self, "binding_digest", expected)
+        return self
+
+
+class CodeLineageLaunchSnapshot(FrozenContractModel):
+    """Transient verified archive consumed by one private-compute launch."""
+
+    schema_version: Literal["campaign_code_lineage_launch_snapshot.v1"] = (
+        "campaign_code_lineage_launch_snapshot.v1"
+    )
+    binding_id: Identifier
+    binding_revision: int = Field(ge=1)
+    binding_digest: HexDigest
+    source_repository_profile_id: Identifier
+    lineage_id: Identifier
+    record_digest: HexDigest
+    commit_sha: GitObjectId
+    patch_sha256: HexDigest
+    entrypoint_path: str
+    working_directory: Literal["run", "source"]
+    archive_path: Path
+    archive_sha256: HexDigest
+    archive_size_bytes: int = Field(ge=1)
+
+    @field_validator("entrypoint_path")
+    @classmethod
+    def safe_entrypoint(cls, value: str) -> str:
+        return _safe_python_entrypoint(value)
+
+    @field_validator("archive_path")
+    @classmethod
+    def verified_archive_path(cls, value: Path) -> Path:
+        candidate = value.expanduser()
+        if (
+            not candidate.is_absolute()
+            or candidate.is_symlink()
+            or not candidate.is_file()
+            or candidate.suffix.casefold() != ".tar"
+        ):
+            raise ValueError("code lineage snapshot must be an absolute regular tar file")
+        return candidate.resolve()
+
+    @model_validator(mode="after")
+    def verify_archive_material(self) -> CodeLineageLaunchSnapshot:
+        if self.archive_path.stat().st_size != self.archive_size_bytes:
+            raise ValueError("code lineage snapshot size mismatch")
+        if _sha256_file(self.archive_path) != self.archive_sha256:
+            raise ValueError("code lineage snapshot digest mismatch")
+        return self
+
+
 class RemoteLaunchRequest(ContractModel):
     """Typed launch inputs; an approved recipe builds these arguments."""
 
-    schema_version: str = "campaign_remote_launch_request.v2"
+    schema_version: str = "campaign_remote_launch_request.v3"
     compute_profile_id: str
     run_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
     script_path: Path
@@ -107,6 +202,7 @@ class RemoteLaunchRequest(ContractModel):
         "training_manifest.json",
         "training_metrics.jsonl",
     )
+    source_snapshot: CodeLineageLaunchSnapshot | None = None
 
     @field_validator("script_path")
     @classmethod
@@ -160,8 +256,14 @@ class RemoteLaunchRequest(ContractModel):
 
     @model_validator(mode="after")
     def reject_script_input_collision(self) -> RemoteLaunchRequest:
-        if self.script_path.name in {path.name for path in self.input_files}:
+        input_names = {path.name for path in self.input_files}
+        if self.source_snapshot is None and self.script_path.name in input_names:
             raise ValueError("training script and input files must have distinct basenames")
+        if (
+            self.source_snapshot is not None
+            and self.source_snapshot.archive_path.name in input_names
+        ):
+            raise ValueError("code snapshot and input files must have distinct basenames")
         return self
 
 
@@ -216,6 +318,12 @@ class RemoteSession(Protocol):
 
 
 SessionFactory = Callable[[], Any]
+_SOURCE_ENTRYPOINT_BOOTSTRAP = (
+    "import runpy,sys;"
+    "source=sys.argv.pop(1);entrypoint=sys.argv.pop(1);"
+    "sys.path.insert(0,source);"
+    "runpy.run_path(entrypoint,run_name='__main__')"
+)
 
 
 def _sha256_file(path: Path) -> str:
@@ -227,7 +335,7 @@ def _sha256_file(path: Path) -> str:
 
 
 class PinnedRemoteStageProfile(FrozenContractModel):
-    """Exact server-owned launch material for one approved training stage."""
+    """Exact server-owned launch material for one approved private-compute stage."""
 
     schema_version: Literal["campaign_pinned_remote_stage_profile.v1"] = (
         "campaign_pinned_remote_stage_profile.v1"
@@ -247,12 +355,17 @@ class PinnedRemoteStageProfile(FrozenContractModel):
     budget_unit: Identifier = "gpu_hours"
     budget_reservation: float = Field(gt=0)
     python_executable: str = Field(default="python3", min_length=1, max_length=512)
+    code_lineage_binding: ApprovedCodeLineageExecutionBinding | None = None
 
     @field_validator("stage")
     @classmethod
-    def training_stage_only(cls, value: StageKind) -> StageKind:
-        if value not in {StageKind.SMOKE_TRAINING, StageKind.FULL_TRAINING}:
-            raise ValueError("remote executor profiles are restricted to training stages")
+    def approved_compute_stage_only(cls, value: StageKind) -> StageKind:
+        if value not in {
+            StageKind.SMOKE_TRAINING,
+            StageKind.FULL_TRAINING,
+            StageKind.DEVELOPMENT_EVALUATION,
+        }:
+            raise ValueError("remote executor profiles are restricted to approved compute stages")
         return value
 
     @field_validator("script_path")
@@ -260,9 +373,9 @@ class PinnedRemoteStageProfile(FrozenContractModel):
     def pinned_script(cls, value: Path) -> Path:
         candidate = value.expanduser()
         if candidate.is_symlink() or not candidate.is_file():
-            raise ValueError("approved training script must be a regular non-symlink file")
+            raise ValueError("approved compute script must be a regular non-symlink file")
         if candidate.suffix.casefold() != ".py":
-            raise ValueError("approved training script must be a Python file")
+            raise ValueError("approved compute script must be a Python file")
         return candidate.resolve()
 
     @field_validator("input_files")
@@ -356,6 +469,7 @@ class ApprovedRemoteExecutorProfile(FrozenContractModel):
     key_path: str = Field(min_length=1, max_length=4096)
     remote_work_dir: str = Field(default="~/bashgym-training", min_length=1, max_length=4096)
     stages: tuple[PinnedRemoteStageProfile, ...]
+    nemo_rl: ApprovedNemoRLProfile | None = None
 
     @field_validator("host", "username")
     @classmethod
@@ -391,7 +505,7 @@ class ApprovedRemoteExecutorProfile(FrozenContractModel):
         cls, value: tuple[PinnedRemoteStageProfile, ...]
     ) -> tuple[PinnedRemoteStageProfile, ...]:
         if not value:
-            raise ValueError("approved remote executor profile requires a training stage")
+            raise ValueError("approved remote executor profile requires a compute stage")
         keys = tuple(stage.stage.value for stage in value)
         if tuple(sorted(set(keys))) != keys:
             raise ValueError("approved remote stages must be sorted and unique")
@@ -399,7 +513,25 @@ class ApprovedRemoteExecutorProfile(FrozenContractModel):
 
     @model_validator(mode="after")
     def verify_profile_digest(self) -> ApprovedRemoteExecutorProfile:
-        payload = self.model_dump(mode="json", exclude={"profile_digest"})
+        if self.nemo_rl is not None:
+            required_stages = {
+                StageKind.SMOKE_TRAINING,
+                StageKind.FULL_TRAINING,
+            }
+            configured_stages = {stage.stage for stage in self.stages}
+            if (
+                self.nemo_rl.compute_profile_id != self.compute_profile_id
+                or self.nemo_rl.target_contract_key != self.target_contract_key
+                or self.nemo_rl.target_model_digest != self.target_model_digest
+                or not required_stages.issubset(configured_stages)
+            ):
+                raise ValueError("NeMo RL profile does not match its remote executor")
+        excluded = {"profile_digest"}
+        if self.nemo_rl is None:
+            # Preserve the v2 digest of profiles written before the optional
+            # NeMo RL extension existed.
+            excluded.add("nemo_rl")
+        payload = self.model_dump(mode="json", exclude=excluded)
         expected = canonical_hash(payload)
         if self.profile_digest and self.profile_digest != expected:
             raise ValueError("approved remote executor profile digest mismatch")
@@ -424,12 +556,13 @@ def remote_executor_config(
     stage: StageKind,
     *,
     recipe_digest: HexDigest,
+    code_lineage: CodeLineageRecord | None = None,
 ) -> dict[str, Any]:
     """Project one protected profile stage into the persisted executor contract."""
 
     profile.verify_materials()
     configured = profile.stage_profile(stage)
-    return {
+    result: dict[str, Any] = {
         "profile_id": profile.profile_id,
         "profile_revision": profile.profile_revision,
         "profile_digest": profile.profile_digest,
@@ -449,6 +582,45 @@ def remote_executor_config(
         "budget_reservation": configured.budget_reservation,
         "recipe_digest": recipe_digest,
     }
+    if profile.nemo_rl is not None and stage in {
+        StageKind.SMOKE_TRAINING,
+        StageKind.FULL_TRAINING,
+    }:
+        result["nemo_rl"] = {
+            "profile_id": profile.nemo_rl.profile_id,
+            "profile_revision": profile.nemo_rl.profile_revision,
+            "profile_digest": profile.nemo_rl.profile_digest,
+            "release": profile.nemo_rl.release,
+            "source_revision": profile.nemo_rl.source_revision,
+            "image_digest": profile.nemo_rl.image_digest,
+            "model_support_level": profile.nemo_rl.model_support_level.value,
+            "recipe_sha256": profile.nemo_rl.recipe_sha256,
+            "dataset_sha256": profile.nemo_rl.dataset_sha256,
+            "verifier_digest": profile.nemo_rl.verifier_digest,
+        }
+    if code_lineage is not None:
+        if code_lineage.state != CodeLineageState.CAPTURED:
+            raise ValueError("code lineage must be captured before remote execution")
+        binding = configured.code_lineage_binding
+        if binding is None:
+            raise ValueError("remote stage has no code lineage execution binding")
+        if binding.source_repository_profile_id != code_lineage.source_repository_profile_id:
+            raise ValueError("code lineage execution binding source profile mismatch")
+        assert code_lineage.commit_sha is not None and code_lineage.patch_sha256 is not None
+        result["code_lineage_execution"] = {
+            "binding_id": binding.binding_id,
+            "binding_revision": binding.binding_revision,
+            "binding_digest": binding.binding_digest,
+            "source_repository_profile_id": binding.source_repository_profile_id,
+            "entrypoint_path": binding.entrypoint_path,
+            "working_directory": binding.working_directory,
+            "max_archive_bytes": binding.max_archive_bytes,
+            "lineage_id": code_lineage.lineage_id,
+            "record_digest": code_lineage.record_digest,
+            "commit_sha": code_lineage.commit_sha,
+            "patch_sha256": code_lineage.patch_sha256,
+        }
+    return result
 
 
 class AsyncSSHSession:
@@ -531,31 +703,218 @@ class RemoteTrainingAdapter:
             raise RuntimeError("campaign_remote_root_must_be_absolute")
         return root.rstrip("/")
 
+    async def nemo_rl_preflight(
+        self,
+        profile: ApprovedNemoRLProfile,
+        *,
+        pull_image: bool = False,
+    ) -> NemoRLRuntimeReceipt:
+        """Probe an approved optional NeMo RL runtime without exposing host identity."""
+
+        if profile.compute_profile_id != self.compute_profile_id:
+            raise ValueError("NeMo RL profile does not match remote adapter")
+
+        async with self._session() as session:
+            if pull_image:
+                pulled = await session.run(
+                    f"docker pull {shlex.quote(profile.image_reference)}",
+                    timeout=3600,
+                )
+                if pulled.exit_status != 0:
+                    raise RuntimeError("nemo_rl_image_pull_failed")
+
+            async def probe(command: str, code: str, *, timeout: float = 30) -> str:
+                result = await session.run(command, timeout=timeout)
+                if result.exit_status != 0:
+                    raise RuntimeError(code)
+                return result.stdout.strip()
+
+            docker_version = await probe(
+                "docker version --format '{{.Server.Version}}'",
+                "nemo_rl_docker_unavailable",
+            )
+            runtimes = await probe(
+                "docker info --format '{{json .Runtimes}}'",
+                "nemo_rl_docker_info_unavailable",
+            )
+            architecture = (await probe("uname -m", "nemo_rl_platform_unavailable")).casefold()
+            platform = {
+                "amd64": "linux/amd64",
+                "x86_64": "linux/amd64",
+                "aarch64": "linux/arm64",
+                "arm64": "linux/arm64",
+            }.get(architecture)
+            if platform is None:
+                raise RuntimeError("nemo_rl_platform_unsupported")
+
+            gpu_lines = await probe(
+                "nvidia-smi -L",
+                "nemo_rl_gpu_unavailable",
+            )
+            disk_kib = float(
+                await probe(
+                    "df -Pk . | awk 'NR==2 {print $4}'",
+                    "nemo_rl_disk_probe_failed",
+                )
+            )
+            shared_memory_kib = float(
+                await probe(
+                    "df -Pk /dev/shm | awk 'NR==2 {print $4}'",
+                    "nemo_rl_shared_memory_probe_failed",
+                )
+            )
+            repo_digests = await probe(
+                "docker image inspect "
+                f"{shlex.quote(profile.image_reference)} "
+                "--format '{{join .RepoDigests \"\\n\"}}'",
+                "nemo_rl_image_not_ready",
+            )
+            source_revision = await probe(
+                "docker run --rm --network=none --entrypoint git "
+                f"{shlex.quote(profile.image_reference)} "
+                "-C /opt/nemo-rl rev-parse HEAD",
+                "nemo_rl_source_probe_failed",
+                timeout=60,
+            )
+            nemo_gym_source_revision = None
+            if profile.nemo_gym is not None:
+                nemo_gym_source_revision = await probe(
+                    "docker run --rm --network=none --entrypoint git "
+                    f"{shlex.quote(profile.image_reference)} "
+                    "-C /opt/nemo-rl/3rdparty/Gym-workspace/Gym rev-parse HEAD",
+                    "nemo_gym_source_probe_failed",
+                    timeout=60,
+                )
+            recipe_sha256 = (
+                await probe(
+                    "docker run --rm --network=none "
+                    "--entrypoint sha256sum "
+                    f"{shlex.quote(profile.image_reference)} "
+                    f"{shlex.quote(profile.recipe_path)}",
+                    "nemo_rl_recipe_probe_failed",
+                    timeout=60,
+                )
+            ).split(maxsplit=1)[0]
+
+            remote_model_path = profile.remote_model_path
+            if remote_model_path == "~" or remote_model_path.startswith("~/"):
+                home = await probe('printf %s "$HOME"', "nemo_rl_remote_home_unavailable")
+                remote_model_path = home + remote_model_path[1:]
+            quoted_model = shlex.quote(remote_model_path)
+            quoted_revision = shlex.quote(profile.model_revision)
+            model_check = await session.run(
+                f"test -f {quoted_model}/config.json && "
+                f'(test "$(basename {quoted_model})" = {quoted_revision} || '
+                f'test "$(cat {quoted_model}/.bashgym-model-revision 2>/dev/null)" = {quoted_revision})',
+                timeout=10,
+            )
+
+        return NemoRLRuntimeReceipt(
+            compute_profile_id=self.compute_profile_id,
+            platform=platform,
+            docker_version=docker_version,
+            docker_ready=True,
+            nvidia_runtime_ready="nvidia" in runtimes.casefold(),
+            gpu_count=sum(1 for line in gpu_lines.splitlines() if line.strip().startswith("GPU ")),
+            available_disk_gib=disk_kib / 1024 / 1024,
+            shared_memory_gib=shared_memory_kib / 1024 / 1024,
+            image_digest=profile.image_digest,
+            image_ready=profile.image_reference in repo_digests,
+            source_revision=profile.source_revision,
+            source_ready=source_revision == profile.source_revision,
+            recipe_sha256=profile.recipe_sha256,
+            recipe_ready=recipe_sha256 == profile.recipe_sha256,
+            model_revision=profile.model_revision,
+            model_ready=model_check.exit_status == 0,
+            nemo_gym_source_revision=nemo_gym_source_revision,
+            nemo_gym_source_ready=(
+                nemo_gym_source_revision == profile.nemo_gym.nemo_gym_source_revision
+                if profile.nemo_gym is not None
+                else None
+            ),
+        )
+
     @staticmethod
     def _argv(request: RemoteLaunchRequest, remote_directory: str) -> tuple[str, ...]:
+        if request.source_snapshot is not None:
+            entrypoint = f"{remote_directory}/source/{request.source_snapshot.entrypoint_path}"
+            return (
+                request.python_executable,
+                "-c",
+                _SOURCE_ENTRYPOINT_BOOTSTRAP,
+                f"{remote_directory}/source",
+                entrypoint,
+                *request.script_args,
+            )
+        entrypoint = f"{remote_directory}/{request.script_path.name}"
         return (
             request.python_executable,
-            f"{remote_directory}/{request.script_path.name}",
+            entrypoint,
             *request.script_args,
         )
 
     @staticmethod
-    def _launch_manifest(request: RemoteLaunchRequest, remote_directory: str) -> dict[str, Any]:
-        files = (request.script_path, *request.input_files)
-        argv = RemoteTrainingAdapter._argv(request, remote_directory)
+    def _launch_files(request: RemoteLaunchRequest) -> tuple[Path, ...]:
+        entrypoint_material = (
+            (request.source_snapshot.archive_path,)
+            if request.source_snapshot is not None
+            else (request.script_path,)
+        )
+        return (*entrypoint_material, *request.input_files)
+
+    @staticmethod
+    def _execution_context(
+        request: RemoteLaunchRequest, remote_directory: str
+    ) -> dict[str, str | None]:
+        if request.source_snapshot is None:
+            return {
+                "entrypoint_kind": "pinned_script",
+                "working_directory": remote_directory,
+                "python_path": None,
+            }
+        working_directory = (
+            f"{remote_directory}/source"
+            if request.source_snapshot.working_directory == "source"
+            else remote_directory
+        )
         return {
-            "schema_version": "campaign_remote_launch_manifest.v1",
+            "entrypoint_kind": "captured_source_snapshot",
+            "working_directory": working_directory,
+            "python_path": f"{remote_directory}/source",
+        }
+
+    @staticmethod
+    def _launch_manifest(request: RemoteLaunchRequest, remote_directory: str) -> dict[str, Any]:
+        files = RemoteTrainingAdapter._launch_files(request)
+        if request.source_snapshot is not None and (
+            request.source_snapshot.archive_path.stat().st_size
+            != request.source_snapshot.archive_size_bytes
+            or _sha256_file(request.source_snapshot.archive_path)
+            != request.source_snapshot.archive_sha256
+        ):
+            raise ValueError("code lineage snapshot changed before launch")
+        argv = RemoteTrainingAdapter._argv(request, remote_directory)
+        execution_context = RemoteTrainingAdapter._execution_context(request, remote_directory)
+        command_contract = {"argv": list(argv), **execution_context}
+        manifest: dict[str, Any] = {
+            "schema_version": "campaign_remote_launch_manifest.v2",
             "compute_profile_id": request.compute_profile_id,
             "run_id": request.run_id,
             "recipe_digest": request.recipe_digest,
             "argv": list(argv),
-            "command_hash": canonical_hash(list(argv)),
+            "execution_context": execution_context,
+            "command_hash": canonical_hash(command_contract),
             "files": [
                 {"name": path.name, "sha256": _sha256_file(path), "size_bytes": path.stat().st_size}
                 for path in files
             ],
             "output_paths": list(request.output_paths),
         }
+        if request.source_snapshot is not None:
+            manifest["code_lineage"] = request.source_snapshot.model_dump(
+                mode="json", exclude={"archive_path"}
+            )
+        return manifest
 
     async def launch(self, request: RemoteLaunchRequest) -> RemoteRunIdentity:
         if request.compute_profile_id != self.compute_profile_id:
@@ -570,19 +929,27 @@ class RemoteTrainingAdapter:
             )
             if created.exit_status != 0:
                 raise RuntimeError("campaign_remote_run_already_exists")
-            files = (request.script_path, *request.input_files)
-            for path in files:
-                await session.upload(path, f"{remote_directory}/{path.name}")
-
+            files = self._launch_files(request)
             manifest = self._launch_manifest(request, remote_directory)
             manifest_json = json.dumps(manifest, sort_keys=True, separators=(",", ":"))
             manifest_sha256 = hashlib.sha256(manifest_json.encode()).hexdigest()
+            for path in files:
+                await session.upload(path, f"{remote_directory}/{path.name}")
             checks = " && ".join(
                 f"printf '%s  %s\\n' {item['sha256']} {shlex.quote(item['name'])} | sha256sum -c -"
                 for item in manifest["files"]
             )
+            source_preparation = ""
+            if request.source_snapshot is not None:
+                archive_name = shlex.quote(request.source_snapshot.archive_path.name)
+                entrypoint = shlex.quote(f"source/{request.source_snapshot.entrypoint_path}")
+                source_preparation = (
+                    " && test ! -e source"
+                    f" && tar --extract --file {archive_name} --no-same-owner"
+                    f" && test -f {entrypoint} && test ! -L {entrypoint}"
+                )
             prepared = await session.run(
-                f"cd {quoted_directory} && {checks} && "
+                f"cd {quoted_directory} && {checks}{source_preparation} && "
                 f"printf %s {shlex.quote(manifest_json)} > launch_manifest.json && "
                 f"printf '%s  launch_manifest.json\\n' {manifest_sha256} | sha256sum -c -",
                 timeout=30,
@@ -593,10 +960,16 @@ class RemoteTrainingAdapter:
             argv = self._argv(request, remote_directory)
             command_hash = manifest["command_hash"]
             command = " ".join(shlex.quote(item) for item in argv)
+            execution_context = self._execution_context(request, remote_directory)
+            working_directory = shlex.quote(str(execution_context["working_directory"]))
+            python_path = execution_context["python_path"]
+            python_environment = (
+                f"PYTHONPATH={shlex.quote(str(python_path))} " if python_path is not None else ""
+            )
             inner = (
-                f"cd {quoted_directory} || exit 125; "
+                f"cd {working_directory} || exit 125; "
                 f"source {shlex.quote(root + '/venv/bin/activate')} 2>/dev/null || true; "
-                f"PYTHONUNBUFFERED=1 {command}; code=$?; "
+                f"{python_environment}PYTHONUNBUFFERED=1 {command}; code=$?; "
                 "printf '%s\\n' \"$code\" > exit_code.tmp && mv exit_code.tmp exit_code; "
                 'exit "$code"'
             )
@@ -701,7 +1074,7 @@ class RemoteTrainingAdapter:
             "start=$(awk '{print $22}' /proc/$pid/stat 2>/dev/null); "
             "pgid=$(ps -o pgid= -p $pid 2>/dev/null | tr -d ' '); "
             "stat=$(ps -o stat= -p $pid 2>/dev/null | tr -d ' '); "
-            'manifest=$(sha256sum "$dir/launch_manifest.json" 2>/dev/null | awk \'{print $1}\'); '
+            "manifest=$(sha256sum \"$dir/launch_manifest.json\" 2>/dev/null | awk '{print $1}'); "
             'exit_code=$(cat "$dir/exit_code" 2>/dev/null); '
             'printf \'%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n\' "$boot" "$start" "$pgid" '
             '"$stat" "$manifest" "$exit_code"'
@@ -872,7 +1245,7 @@ class RemoteTrainingAdapter:
             quoted = shlex.quote(remote)
             predicates.append(
                 f"test -e {quoted} && test ! -L {quoted} && "
-                f"test -z \"$(find {quoted} -type l -print -quit 2>/dev/null)\""
+                f'test -z "$(find {quoted} -type l -print -quit 2>/dev/null)"'
             )
         async with self._session() as session:
             checked = await session.run(" && ".join(predicates), timeout=30)
@@ -905,24 +1278,30 @@ class RemoteTrainingAdapter:
         if proven.identity != identity or proven.state != RemoteRunState.FAILED:
             raise RuntimeError("campaign_remote_terminal_evidence_not_ready")
         required = ("training.log", "exit_code", "launch_manifest.json")
-        optional = "training_metrics.jsonl"
+        optional = (
+            "effective_config.json",
+            "training_manifest.json",
+            "training_metrics.jsonl",
+        )
         predicates = []
         for relative in required:
             remote = f"{identity.remote_run_directory}/{relative}"
             quoted = shlex.quote(remote)
             predicates.append(f"test -f {quoted} && test ! -L {quoted}")
-        optional_remote = f"{identity.remote_run_directory}/{optional}"
-        optional_quoted = shlex.quote(optional_remote)
-        check_command = (
-            " && ".join(predicates)
-            + f" && if test -f {optional_quoted} -a ! -L {optional_quoted}; "
-            "then printf present; else printf absent; fi"
+        optional_checks = " ".join(
+            "if test -f {path} -a ! -L {path}; then printf '%s\\n' {name}; fi;".format(
+                path=shlex.quote(f"{identity.remote_run_directory}/{relative}"),
+                name=shlex.quote(relative),
+            )
+            for relative in optional
         )
+        check_command = " && ".join(predicates) + f" && {optional_checks}"
         async with self._session() as session:
             checked = await session.run(check_command, timeout=30)
-            if checked.exit_status != 0 or checked.stdout not in {"present", "absent"}:
+            present = tuple(line for line in checked.stdout.splitlines() if line)
+            if checked.exit_status != 0 or not set(present).issubset(optional):
                 raise RuntimeError("campaign_remote_terminal_evidence_invalid")
-            paths = (*required, optional) if checked.stdout == "present" else required
+            paths = (*required, *(relative for relative in optional if relative in present))
             downloaded: list[Path] = []
             for relative in paths:
                 local_path = local_directory / PurePosixPath(relative)
@@ -947,7 +1326,7 @@ class RemoteTrainingAdapter:
             "boot=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null); "
             "start=$(awk '{print $22}' /proc/$pid/stat 2>/dev/null); "
             "pgid=$(ps -o pgid= -p $pid 2>/dev/null | tr -d ' '); "
-            'manifest=$(sha256sum "$dir/launch_manifest.json" 2>/dev/null | awk \'{print $1}\'); '
+            "manifest=$(sha256sum \"$dir/launch_manifest.json\" 2>/dev/null | awk '{print $1}'); "
             'test "$boot" = "$expected_boot" -a "$start" = "$expected_start" '
             '-a "$pgid" = "$expected_pgid" -a "$manifest" = "$expected_manifest" || exit 42; '
             f'kill -{signal} -- "-$pgid"'
@@ -985,12 +1364,19 @@ class RemoteTrainingAdapter:
 
 
 def remote_command_fingerprint(request: RemoteLaunchRequest, remote_directory: str) -> str:
-    return canonical_hash(list(RemoteTrainingAdapter._argv(request, remote_directory)))
+    return canonical_hash(
+        {
+            "argv": list(RemoteTrainingAdapter._argv(request, remote_directory)),
+            **RemoteTrainingAdapter._execution_context(request, remote_directory),
+        }
+    )
 
 
 __all__ = [
+    "ApprovedCodeLineageExecutionBinding",
     "ApprovedRemoteExecutorProfile",
     "AsyncSSHSession",
+    "CodeLineageLaunchSnapshot",
     "PinnedRemoteStageProfile",
     "RemoteCommandResult",
     "RemoteCapacityPolicy",

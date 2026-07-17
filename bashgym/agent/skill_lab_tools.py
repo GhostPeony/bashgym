@@ -8,7 +8,13 @@ from uuid import uuid4
 
 import httpx
 
-DEFAULT_API_BASE = os.environ.get("BASHGYM_API_URL", "http://127.0.0.1:8003").rstrip("/")
+from bashgym.api_base import normalize_api_base
+
+DEFAULT_API_BASE = normalize_api_base(
+    os.environ.get("BASHGYM_API_BASE")
+    or os.environ.get("BASHGYM_API_URL")
+    or "http://127.0.0.1:8003/api"
+).removesuffix("/api")
 
 
 def _common_properties() -> dict[str, Any]:

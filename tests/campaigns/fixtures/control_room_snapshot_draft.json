@@ -1,0 +1,193 @@
+{
+  "schema_version": "control_room_snapshot.v1",
+  "workspace_id": "workspace-a",
+  "campaign_id": "campaign-1",
+  "aggregate_version": 1,
+  "manifest_revision": 1,
+  "authorization_revision": 1,
+  "snapshot_at": "2026-07-16T12:00:00Z",
+  "latest_event_cursor": 0,
+  "campaign": {
+    "schema_version": "campaign_summary.v1",
+    "campaign_id": "campaign-1",
+    "title": "Draft campaign",
+    "objective": "Establish a safe baseline",
+    "kind": "general",
+    "status": "draft",
+    "aggregate_version": 1,
+    "manifest_revision": 1,
+    "active_study_id": null,
+    "active_action_id": null,
+    "champion_ref": null,
+    "stop_reason": null
+  },
+  "controller": {
+    "schema_version": "controller_observation.v1",
+    "controller_observation_version": 0,
+    "state": "offline",
+    "observed_at": "2026-07-16T12:00:00Z",
+    "heartbeat_age_seconds": null,
+    "lease_expires_at": null,
+    "controller_instance_id": null,
+    "safe_guidance": "Start or reconcile the resident controller."
+  },
+  "readiness": {
+    "schema_version": "readiness_summary.v1",
+    "materializable": false,
+    "launch_ready": false,
+    "checked_at": "2026-07-16T12:00:00Z",
+    "activation_receipt_digest": null,
+    "doctor_receipt_digest": null,
+    "blocking_codes": [
+      "campaign_not_ready"
+    ]
+  },
+  "bindings": {
+    "schema_version": "binding_summary.v1",
+    "model": null,
+    "data": null,
+    "evaluator": null,
+    "source": null,
+    "compute": null
+  },
+  "journey": [
+    {
+      "schema_version": "journey_phase_summary.v1",
+      "phase_id": "setup",
+      "state": "blocked",
+      "execution_owner": "none",
+      "attention_owner": "bashgym",
+      "primary_blocker": {
+        "schema_version": "decision_blocker.v1",
+        "code": "campaign_not_ready",
+        "summary": "Campaign readiness checks have not passed.",
+        "evidence_ids": [],
+        "secondary_codes": [
+          "controller_offline"
+        ]
+      },
+      "evidence_count": 0,
+      "next_action_ids": []
+    },
+    {
+      "schema_version": "journey_phase_summary.v1",
+      "phase_id": "baseline",
+      "state": "skipped",
+      "execution_owner": "none",
+      "attention_owner": "none",
+      "primary_blocker": null,
+      "evidence_count": 0,
+      "next_action_ids": []
+    },
+    {
+      "schema_version": "journey_phase_summary.v1",
+      "phase_id": "experiments",
+      "state": "skipped",
+      "execution_owner": "none",
+      "attention_owner": "none",
+      "primary_blocker": null,
+      "evidence_count": 0,
+      "next_action_ids": []
+    },
+    {
+      "schema_version": "journey_phase_summary.v1",
+      "phase_id": "human_review",
+      "state": "not_started",
+      "execution_owner": "none",
+      "attention_owner": "none",
+      "primary_blocker": null,
+      "evidence_count": 0,
+      "next_action_ids": []
+    },
+    {
+      "schema_version": "journey_phase_summary.v1",
+      "phase_id": "decision",
+      "state": "not_started",
+      "execution_owner": "none",
+      "attention_owner": "none",
+      "primary_blocker": null,
+      "evidence_count": 0,
+      "next_action_ids": []
+    }
+  ],
+  "active_work": null,
+  "champion": null,
+  "candidate": null,
+  "metrics": [],
+  "budget": {
+    "schema_version": "budget_summary.v1",
+    "resources": [],
+    "blocked": false
+  },
+  "human_work": {
+    "schema_version": "human_work_summary.v1",
+    "blocking_count": 0,
+    "open_count": 0,
+    "newest": []
+  },
+  "agents": [],
+  "collections": {
+    "schema_version": "collection_summary.v1",
+    "events": {
+      "schema_version": "collection_cursor.v1",
+      "count": 0,
+      "next_cursor": null,
+      "has_more": false
+    },
+    "proposals": {
+      "schema_version": "collection_cursor.v1",
+      "count": 0,
+      "next_cursor": null,
+      "has_more": false
+    },
+    "studies": {
+      "schema_version": "collection_cursor.v1",
+      "count": 0,
+      "next_cursor": null,
+      "has_more": false
+    },
+    "attempts": {
+      "schema_version": "collection_cursor.v1",
+      "count": 0,
+      "next_cursor": null,
+      "has_more": false
+    },
+    "artifacts": {
+      "schema_version": "collection_cursor.v1",
+      "count": 0,
+      "next_cursor": null,
+      "has_more": false
+    },
+    "comparisons": {
+      "schema_version": "collection_cursor.v1",
+      "count": 0,
+      "next_cursor": null,
+      "has_more": false
+    },
+    "human_work": {
+      "schema_version": "collection_cursor.v1",
+      "count": 0,
+      "next_cursor": null,
+      "has_more": false
+    }
+  },
+  "decision_surface": {
+    "schema_version": "decision_surface.v1",
+    "execution_owner": "none",
+    "attention_owner": "bashgym",
+    "blocker": {
+      "schema_version": "decision_blocker.v1",
+      "code": "campaign_not_ready",
+      "summary": "Campaign readiness checks have not passed.",
+      "evidence_ids": [],
+      "secondary_codes": [
+        "controller_offline"
+      ]
+    },
+    "next_actions": [],
+    "recovery_actions": [
+      "inspect"
+    ],
+    "promotion_eligible": false
+  }
+}

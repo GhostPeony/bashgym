@@ -1,9 +1,11 @@
 """Experiment-ledger identity, isolation, replay, and lineage tests."""
 
-from datetime import UTC, datetime, timedelta
+import sqlite3
+from datetime import datetime, timedelta
 
 import pytest
 
+from bashgym._compat import UTC
 from bashgym.campaigns.contracts import canonical_hash
 from bashgym.campaigns.persistence import RecordNotFoundError
 from bashgym.ledger.contracts import (
@@ -28,6 +30,7 @@ from bashgym.ledger.contracts import (
 from bashgym.ledger.persistence import (
     ExperimentLedgerRepository,
     LedgerConflictError,
+    LedgerPersistenceError,
     LedgerTransitionError,
 )
 from bashgym.ledger.synthesis import build_project_context, compare_runs, metric_trend
@@ -38,6 +41,34 @@ def repository(tmp_path) -> ExperimentLedgerRepository:
     value = ExperimentLedgerRepository(tmp_path / "campaigns.sqlite3")
     value.initialize()
     return value
+
+
+def test_open_existing_ledger_is_read_only(repository):
+    seed_project(repository)
+
+    reader = ExperimentLedgerRepository.open_existing(repository.db_path)
+
+    assert reader.get_project("workspace-a", "project-a")["project_id"] == "project-a"
+    with pytest.raises(LedgerPersistenceError, match="ledger_read_only"):
+        reader.register_project(
+            ProjectSpec(
+                workspace_id="workspace-a",
+                project_id="project-read-only",
+                display_name="Must not be written",
+                owner_actor_id="codex",
+            )
+        )
+
+
+def test_open_existing_ledger_rejects_migration_checksum_mismatch(repository):
+    with sqlite3.connect(repository.db_path) as connection:
+        connection.execute(
+            "UPDATE campaign_schema_migrations SET checksum = ? WHERE version = 1",
+            ("0" * 64,),
+        )
+
+    with pytest.raises(LedgerPersistenceError, match="ledger_schema_unavailable"):
+        ExperimentLedgerRepository.open_existing(repository.db_path)
 
 
 def seed_project(

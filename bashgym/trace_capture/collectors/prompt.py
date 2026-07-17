@@ -9,7 +9,7 @@ Each line in history.jsonl is a JSON object:
         "display": "prompt text",
         "pastedContents": {"hash1": true},
         "timestamp": 1759817571796,
-        "project": "C:\\Users\\Cade\\projects\\myapp"
+        "project": "C:\\Users\\developer\\projects\\myapp"
     }
 
 Pasted content is resolved from ~/.claude/paste-cache/<hash>.txt files.

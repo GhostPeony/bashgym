@@ -33,10 +33,9 @@ _FORBIDDEN_EXECUTION_KEYS = frozenset(
         "process_group_id",
     }
 )
-_FAKE_RUNTIME_KEYS = frozenset(
-    {"executor_kind", "budget_unit", "budget_reservation", "fake_steps"}
-)
+_FAKE_RUNTIME_KEYS = frozenset({"executor_kind", "budget_unit", "budget_reservation", "fake_steps"})
 _LIVE_RUNTIME_KEYS = frozenset({"executor_kind"})
+_REGISTERED_COMPUTE_KINDS = frozenset({"registered_compute", "registered_training", "ssh_remote"})
 
 
 def _recipe_has_schema_version(recipe: Mapping[str, Any]) -> bool:
@@ -67,9 +66,7 @@ def _contains_forbidden_execution_material(value: Any) -> bool:
     return False
 
 
-def _runtime_policy_reasons(
-    recipe: Mapping[str, Any], *, live_training_allowed: bool
-) -> set[str]:
+def _runtime_policy_reasons(recipe: Mapping[str, Any], *, live_compute_allowed: bool) -> set[str]:
     runtime = recipe.get("runtime")
     if runtime is None:
         return set()
@@ -78,7 +75,7 @@ def _runtime_policy_reasons(
     executor_kind = runtime.get("executor_kind", "fake")
     if executor_kind == "fake":
         allowed = _FAKE_RUNTIME_KEYS
-    elif executor_kind in {"registered_training", "ssh_remote"} and live_training_allowed:
+    elif executor_kind in _REGISTERED_COMPUTE_KINDS and live_compute_allowed:
         allowed = _LIVE_RUNTIME_KEYS
     else:
         return {"proposal_executor_kind_not_allowed"}
@@ -130,11 +127,9 @@ def validate_proposal_submission(
         reasons.add("proposal_recipe_schema_missing")
     if any(_contains_forbidden_execution_material(recipe) for recipe in recipes):
         reasons.add("proposal_executable_material_forbidden")
-    reasons.update(_runtime_policy_reasons(submission.dataset_recipe, live_training_allowed=False))
-    reasons.update(_runtime_policy_reasons(submission.training_recipe, live_training_allowed=True))
-    reasons.update(
-        _runtime_policy_reasons(submission.evaluation_recipe, live_training_allowed=False)
-    )
+    reasons.update(_runtime_policy_reasons(submission.dataset_recipe, live_compute_allowed=False))
+    reasons.update(_runtime_policy_reasons(submission.training_recipe, live_compute_allowed=True))
+    reasons.update(_runtime_policy_reasons(submission.evaluation_recipe, live_compute_allowed=True))
 
     required = set(submission.required_capabilities)
     if not required.issubset(principal.capabilities):
@@ -152,19 +147,27 @@ def validate_proposal_submission(
     training_runtime = submission.training_recipe.get("runtime")
     live_training = (
         isinstance(training_runtime, Mapping)
-        and training_runtime.get("executor_kind") in {"registered_training", "ssh_remote"}
+        and training_runtime.get("executor_kind") in _REGISTERED_COMPUTE_KINDS
+    )
+    evaluation_runtime = submission.evaluation_recipe.get("runtime")
+    live_evaluation = (
+        isinstance(evaluation_runtime, Mapping)
+        and evaluation_runtime.get("executor_kind") in _REGISTERED_COMPUTE_KINDS
     )
     if live_training:
-        if (
-            StageKind.SMOKE_TRAINING in required_stages
-            and Capability.COMPUTE_SMOKE not in required
-        ):
+        if StageKind.SMOKE_TRAINING in required_stages and Capability.COMPUTE_SMOKE not in required:
             reasons.add("proposal_compute_smoke_capability_missing")
         if (
             StageKind.FULL_TRAINING in required_stages
             and Capability.COMPUTE_TRAIN_WITHIN_BUDGET not in required
         ):
             reasons.add("proposal_compute_training_capability_missing")
+    if (
+        live_evaluation
+        and StageKind.DEVELOPMENT_EVALUATION in required_stages
+        and Capability.EVAL_DEVELOPMENT not in required
+    ):
+        reasons.add("proposal_development_evaluation_capability_missing")
     if StageKind.PROTECTED_EVALUATION in required_stages:
         if not manifest.protected_artifact_refs:
             reasons.add("proposal_protected_evaluation_not_configured")
@@ -178,8 +181,10 @@ def validate_proposal_submission(
         reasons.add("proposal_promotion_capability_missing")
     if Capability.ARTIFACT_PUBLISH_HF in required and not manifest.allow_hf_publication:
         reasons.add("proposal_hf_publication_not_approved")
-    if Capability.HANDOFF_MEMEXAI_PREPARE in required and not manifest.allow_memexai_handoff:
-        reasons.add("proposal_memexai_handoff_not_approved")
+    if Capability.HANDOFF_EXTERNAL_PREPARE in required and not manifest.allow_external_handoff:
+        reasons.add("proposal_external_handoff_not_approved")
+    if Capability.HANDOFF_MEMEXAI_PREPARE in required:
+        reasons.add("proposal_legacy_handoff_read_only")
 
     reason_codes = tuple(sorted(reasons))
     return ProposalValidation(valid=not reason_codes, reason_codes=reason_codes)

@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
+requires = ["setuptools>=77.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +7,7 @@ name = "bashgym"
 version = "0.2.0"
 description = "A Self-Improving Agentic Development Gym"
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
 requires-python = ">=3.10"
 authors = [
     {name = "Bash Gym Team"}
@@ -17,7 +17,6 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -27,9 +26,14 @@ classifiers = [
 
 dependencies = [
     "anthropic>=0.20.0",
+    "asyncssh>=2.14.0",
+    "cryptography>=46.0.0",
+    "fastapi>=0.109.0",
     "httpx>=0.26.0",
     "docker>=7.0.0",
     "python-dotenv>=1.0.0",
+    "python-multipart>=0.0.7",
+    "pydantic>=2.5.0",
     "psutil>=5.9.0",
     "keyring>=25.0.0",
     "mcp>=1.27,<2",
@@ -37,6 +41,10 @@ dependencies = [
     "Pillow>=10.0.0",
     "python-docx>=1.1.0",
     "reportlab>=4.0.0",
+    "PyYAML>=6.0.0",
+    "typing-extensions>=4.10.0",
+    "uvicorn>=0.27.0",
+    "watchdog>=4.0.0",
 ]
 
 [project.optional-dependencies]
@@ -49,9 +57,11 @@ training = [
     "accelerate>=0.25.0",
 ]
 dev = [
+    "numpy>=1.26.0",
     "pytest>=7.4.0",
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.1.0",
+    "pytest-timeout>=2.0.0",
     "black>=23.0.0",
     "ruff>=0.1.0",
 ]
@@ -62,7 +72,12 @@ data-designer = [
     "data-designer>=0.6.1",
     "pandas>=2.0.0",
 ]
-all = ["bashgym[training,dev]"]
+training-optimized = [
+    "liger-kernel>=0.5.0",
+]
+nemo-customizer = [
+    "nemo-microservices>=0.1.0",
+]
 
 [project.scripts]
 bashgym = "bashgym.cli:main"
@@ -74,22 +89,69 @@ bashgym = "bashgym.cli:main"
 bashgym-gold-trace = "bashgym.factory.dd_plugin.plugin:gold_trace_plugin"
 
 [project.urls]
-Homepage = "https://github.com/your-org/project-bashgym"
-Documentation = "https://github.com/your-org/project-bashgym#readme"
-Repository = "https://github.com/your-org/project-bashgym.git"
-Issues = "https://github.com/your-org/project-bashgym/issues"
+Homepage = "https://github.com/GhostPeony/bashgym"
+Documentation = "https://github.com/GhostPeony/bashgym#readme"
+Repository = "https://github.com/GhostPeony/bashgym.git"
+Issues = "https://github.com/GhostPeony/bashgym/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
+include = ["bashgym*", "assistant.workspace.skills"]
+exclude = ["bashgym.tests*"]
+
+[tool.setuptools]
+include-package-data = false
 
 [tool.setuptools.package-data]
 "bashgym.campaigns.templates" = ["*.json"]
+"bashgym.agent.skills" = ["**/*.json"]
+"bashgym.judge" = ["verify.sh"]
+"assistant.workspace.skills" = [
+    "bashgym-operator/SKILL.md",
+    "bashgym-operator/bundle.lock.json",
+    "bashgym-operator/references/operator-contract.md",
+    "bashgym-operator/scripts/curate_activity.py",
+    "bashgym-operator/scripts/gbrain_bridge.py",
+    "bashgym-operator/scripts/operator_context.py",
+    "bashgym/SKILL.md",
+    "bashgym/references/architecture-overview.md",
+    "bashgym/references/eval-capabilities.md",
+    "factory/SKILL.md",
+    "models/SKILL.md",
+    "system/SKILL.md",
+    "traces/SKILL.md",
+    "training/SKILL.md",
+    "training/references/bashgym-launch-recipes.md",
+    "training/references/bashgym-methods-and-evals.md",
+    "training/references/compute-target-activation.md",
+]
+
+[tool.setuptools.data-files]
+"share/bashgym/docs/training" = [
+    "docs/training/overview.md",
+    "docs/training/capability-map.md",
+    "docs/training/training-methods-reference.md",
+    "docs/training/external-review-packet.md",
+    "docs/training/rlhf-handbook-comparison.md",
+    "docs/training/strategy-guide.md",
+    "docs/training/world-models.md",
+    "docs/training/metrics-runbook.md",
+    "docs/training/glossary.md",
+    "docs/training/agent-cli.md",
+    "docs/training/tmax-terminal-rl-recipe.md",
+    "docs/training/session-distillation.md",
+    "docs/training/private-compute-eval-checklist.md",
+    "docs/training/platform-flywheels.md",
+    "docs/training/autoresearch-campaign.md",
+    "docs/training/bashgym-autoresearch-nvidia-brief.md",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["."]
+testpaths = ["tests"]
+pythonpath = ["."]
 python_files = ["test_*.py", "*_test.py"]
-addopts = "-v --tb=short --timeout=120"
+addopts = "-v --tb=short --timeout=120 --import-mode=importlib"
 markers = [
     "network: makes real network/SSH/subprocess calls to external services (deselect with -m 'not network')",
     "integration: end-to-end integration test needing live services",

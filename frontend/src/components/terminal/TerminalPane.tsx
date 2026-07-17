@@ -30,6 +30,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
   const terminalRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const outputBatcherRef = useRef<TerminalOutputBatcher | null>(null)
+  const outputFlowOwnerRef = useRef(crypto.randomUUID())
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const startPtyRef = useRef<(() => void) | null>(null)
   const lastSummaryPublishRef = useRef(0)
@@ -238,6 +239,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
   // Initialize terminal (only runs once per terminal ID)
   useEffect(() => {
     if (!containerRef.current || terminalRef.current) return
+    const outputFlowOwner = outputFlowOwnerRef.current
 
     // Use accent-aware theme colors for initialization
     const initialColors = getThemeColors()
@@ -393,24 +395,33 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
     // the replayed scrollback (snapshotted at create time in main) is written
     // before any live chunks. Registering earlier double-writes bytes that
     // arrive between subscription and the snapshot.
+    let disposed = false
     let removeDataListener: (() => void) | undefined
     const ensureDataListener = () => {
-      if (removeDataListener) return
-      removeDataListener = window.bashgym?.terminal.onData(id, (data) => {
+      if (!removeDataListener) removeDataListener = window.bashgym?.terminal.onData(id, (output) => {
+        const data = typeof output === 'string' ? output : output.data
+        const frameId = typeof output === 'string' ? undefined : output.frameId
         // Show banner after first output (shell is ready) - only for first terminal
         if (shouldShowBanner && !bannerShown) {
           bannerShown = true
           // Small delay to let shell fully initialize
           setTimeout(() => {
-            writeBanner()
+            if (!disposed) writeBanner()
           }, 100)
         }
 
-        terminal.write(data)
+        // ACK only after xterm's parser finishes this frame. Main keeps one
+        // frame in flight and coalesces Claude's later redraws behind it.
+        terminal.write(data, frameId === undefined ? undefined : () => (
+          window.bashgym?.terminal.ackOutput?.(id, outputFlowOwner, frameId)
+        ))
 
         // Parse output for session state detection
         parseTerminalOutput(data)
       })
+      // Re-acquire on every successful create. A restarted PTY is a new
+      // main-process session even when this pane's data listener is unchanged.
+      window.bashgym?.terminal.setOutputFlowControl?.(id, outputFlowOwner, true)
     }
 
     const syncPtySize = async (): Promise<boolean> => {
@@ -427,6 +438,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
     const startPty = () => {
       const requestedCwd = useTerminalStore.getState().sessions.get(id)?.cwd
       window.bashgym?.terminal.create(id, requestedCwd !== '~' ? requestedCwd : undefined).then(async (result) => {
+        if (disposed) return
         if (!result.success) {
           terminal.writeln(`\x1b[31mFailed to create terminal: ${result.error}\x1b[0m`)
           return
@@ -439,6 +451,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
         // arrive before the PTY exists. Synchronize once after create succeeds,
         // before a full-screen Claude/Codex TUI is launched into the default 80x24 PTY.
         await syncPtySize()
+        if (disposed) return
         // Auto-type the launch command into a fresh PTY (not on re-attach)
         if (!result.attached) {
           const pending = useTerminalStore.getState().sessions.get(id)?.launchCommand
@@ -455,6 +468,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
                 terminalId: id,
                 panelId,
               })
+              if (disposed) return
               if (bridge.success && bridge.command) {
                 command = bridge.command
               } else {
@@ -462,12 +476,13 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
               }
             }
             setTimeout(() => {
-              window.bashgym?.terminal.write(id, command + '\r')
+              if (!disposed) window.bashgym?.terminal.write(id, command + '\r')
             }, 500)
           }
         }
         // Re-attached to a live PTY: replay retained scrollback
         if (result.attached && result.buffer) {
+          if (disposed) return
           terminal.write(result.buffer)
           parseTerminalOutput(result.buffer)
           // Sync PTY size to this (possibly new) viewport
@@ -513,6 +528,8 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
     currentContainer.addEventListener('contextmenu', handleContextMenu)
 
     return () => {
+      disposed = true
+      window.bashgym?.terminal.setOutputFlowControl?.(id, outputFlowOwner, false)
       removeDataListener?.()
       removeExitListener?.()
       resizeObserver.disconnect()

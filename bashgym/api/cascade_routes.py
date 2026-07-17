@@ -62,7 +62,7 @@ class CascadeStartRequest(BaseModel):
     repo_domains_filter: list[str] = Field(
         default_factory=list,
         description="If non-empty, only run repo domains whose name is in this list "
-        "(e.g. ['repo_ghostwork']). Requires repo_domains_enabled=True.",
+        "(e.g. ['repo_example']). Requires repo_domains_enabled=True.",
     )
     grpo_reward_mode: str = Field(
         "",
@@ -138,7 +138,7 @@ async def start_cascade(request: Request, body: CascadeStartRequest):
     scheduler = CascadeScheduler(config)
 
     # If caller passed a repo_domains_filter, trim stages down to just those.
-    # This lets you train a single repo (e.g. 'repo_ghostwork') via the API.
+    # This lets you train a single repo (e.g. 'repo_example') via the API.
     if body.repo_domains_enabled and body.repo_domains_filter:
         wanted = set(body.repo_domains_filter)
         scheduler.stages = [s for s in scheduler.stages if s.domain.name in wanted]

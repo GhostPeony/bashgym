@@ -18,12 +18,15 @@ import os
 import re
 import shutil
 import uuid
-from datetime import UTC, datetime
+from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from fastapi import BackgroundTasks, Body, FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
+
+from bashgym._compat import UTC
 
 # Set up logging for API routes
 logger = logging.getLogger(__name__)
@@ -31,7 +34,13 @@ logger = logging.getLogger(__name__)
 from bashgym.api.achievements_routes import router as achievements_router  # noqa: E402
 from bashgym.api.agent_routes import router as agent_router  # noqa: E402
 from bashgym.api.autoresearch_routes import router as autoresearch_router  # noqa: E402
+from bashgym.api.campaign_agent_routes import (  # noqa: E402
+    campaign_agent_credential_router,
+    campaign_agent_router,
+)
+from bashgym.api.campaign_recovery_routes import campaign_recovery_router  # noqa: E402
 from bashgym.api.campaign_routes import campaign_auth_router, campaign_router  # noqa: E402
+from bashgym.api.campaign_setup_routes import campaign_setup_router  # noqa: E402
 from bashgym.api.cascade_routes import router as cascade_router  # noqa: E402
 from bashgym.api.dev_routes import router as dev_router  # noqa: E402
 from bashgym.api.device_routes import get_registry as get_device_registry  # noqa: E402
@@ -142,6 +151,95 @@ from bashgym.compute import normalize_training_target_payload  # noqa: E402
 from bashgym.factory.quality_calculator import calculate_quality_breakdown  # noqa: E402
 
 
+def _start_desktop_campaign_worker(
+    app: FastAPI,
+    settings: Any,
+    *,
+    data_directory: Path | None = None,
+    bootstrapper: Callable[[Path], Any] | None = None,
+    supervisor_factory: Callable[[Any], Any] | None = None,
+    ready_timeout_seconds: float = 3.0,
+) -> bool:
+    """Attach one worker supervisor to an Electron-owned desktop backend."""
+
+    desktop_bootstrap = os.environ.get("BASHGYM_DESKTOP_BOOTSTRAP_SECRET", "").strip()
+    if (
+        str(getattr(settings, "mode", "")).casefold() != "desktop"
+        or not bool(getattr(settings, "campaigns_enabled", False))
+        or not desktop_bootstrap
+    ):
+        app.state.campaign_worker_managed = False
+        return False
+
+    existing = getattr(app.state, "campaign_worker_supervisor", None)
+    if existing is not None:
+        app.state.campaign_worker_managed = True
+        try:
+            if getattr(existing, "is_alive", True) is False and not existing.start():
+                app.state.campaign_worker_bootstrap_failure_code = "campaign_worker_duplicate_start"
+                return False
+            return bool(existing.wait_until_ready(timeout_seconds=ready_timeout_seconds))
+        except Exception:
+            app.state.campaign_worker_bootstrap_failure_code = "campaign_worker_readiness_failed"
+            return False
+
+    from bashgym.campaigns.worker_service import (
+        DesktopWorkerSupervisor,
+        WorkerServiceError,
+        ensure_worker_bootstrap,
+    )
+    from bashgym.config import get_bashgym_dir
+
+    app.state.campaign_worker_managed = True
+    app.state.campaign_worker_bootstrap_failure_code = None
+    root = (data_directory or get_bashgym_dir()).expanduser().resolve()
+    prepare = bootstrapper or ensure_worker_bootstrap
+    make_supervisor = supervisor_factory or DesktopWorkerSupervisor
+    supervisor = None
+    try:
+        result = prepare(root)
+        supervisor = make_supervisor(result.config)
+        if not supervisor.start():
+            app.state.campaign_worker_bootstrap_failure_code = "campaign_worker_duplicate_start"
+            return False
+        app.state.campaign_worker_config_path = result.config_path
+        app.state.campaign_worker_supervisor = supervisor
+        ready = bool(supervisor.wait_until_ready(timeout_seconds=ready_timeout_seconds))
+        if not ready:
+            logger.warning("Desktop campaign worker has not acquired its scheduler lease")
+        return ready
+    except WorkerServiceError as exc:
+        code = exc.code
+    except Exception:
+        code = "campaign_worker_bootstrap_failed"
+    if supervisor is not None:
+        try:
+            supervisor.stop(timeout_seconds=ready_timeout_seconds)
+        except Exception:
+            pass
+    app.state.campaign_worker_supervisor = None
+    app.state.campaign_worker_bootstrap_failure_code = code
+    logger.error("Desktop campaign worker bootstrap failed: %s", code)
+    return False
+
+
+def _stop_desktop_campaign_worker(
+    app: FastAPI,
+    *,
+    timeout_seconds: float = 10.0,
+) -> bool:
+    """Stop the worker owned by this backend without touching external services."""
+
+    supervisor = getattr(app.state, "campaign_worker_supervisor", None)
+    if supervisor is None:
+        return True
+    stopped = bool(supervisor.stop(timeout_seconds=timeout_seconds))
+    if not stopped:
+        app.state.campaign_worker_bootstrap_failure_code = "campaign_worker_shutdown_timeout"
+        logger.error("Desktop campaign worker did not stop before the shutdown deadline")
+    return stopped
+
+
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
 
@@ -179,7 +277,9 @@ def create_app() -> FastAPI:
     app.state.tasks = {}  # In-memory task storage
     app.state.training_runs = {}  # In-memory training run storage
     app.state.experiment_ledger_repository = None
-    app.state.workspace_canvas_snapshots = {}  # Live renderer-owned canvas context, keyed by workspace_id
+    app.state.workspace_canvas_snapshots = (
+        {}
+    )  # Live renderer-owned canvas context, keyed by workspace_id
     app.state.workspace_events = {}  # Recent semantic canvas intents, keyed by workspace_id
     app.state.runtime_observer = RuntimeObserver(Path.cwd())
     app.state.mcp_workbench = None
@@ -190,6 +290,9 @@ def create_app() -> FastAPI:
     app.state.provider_registry = None
     app.state.autoresearcher = None  # AutoResearch hyperparameter search
     app.state.trace_researcher = None  # Trace Research data curation search
+    app.state.campaign_worker_supervisor = None
+    app.state.campaign_worker_bootstrap_failure_code = None
+    app.state.campaign_worker_managed = False
     from bashgym.api.trace_cache import TraceIndexCache
 
     app.state.trace_cache = TraceIndexCache()
@@ -452,9 +555,12 @@ def create_app() -> FastAPI:
         except Exception as e:
             logger.error(f"Failed to build trace index: {e}")
 
+        await asyncio.to_thread(_start_desktop_campaign_worker, app, settings)
+
     @app.on_event("shutdown")
     async def shutdown():
         """Cleanup on shutdown."""
+        await asyncio.to_thread(_stop_desktop_campaign_worker, app)
         if app.state.mcp_workbench:
             await app.state.mcp_workbench.aclose()
         if hasattr(app.state, "provider_registry") and app.state.provider_registry:
@@ -1191,7 +1297,9 @@ def create_app() -> FastAPI:
                 is_simulation=app.state.trainer is None,
             )
         except LedgerConflictError as exc:
-            raise HTTPException(status_code=409, detail={"code": exc.code, "message": str(exc)}) from exc
+            raise HTTPException(
+                status_code=409, detail={"code": exc.code, "message": str(exc)}
+            ) from exc
         except (LedgerPersistenceError, ValueError) as exc:
             raise HTTPException(
                 status_code=422,
@@ -1398,7 +1506,7 @@ def create_app() -> FastAPI:
                     )
                 config = TrainerConfig(
                     base_model=resolved_base_model,
-                    model_type=request.model_type or "qwen",
+                    model_type=request.model_type or "auto",
                     strategy=TS(request.strategy.value),
                     num_epochs=request.num_epochs,
                     batch_size=request.batch_size,
@@ -1796,7 +1904,9 @@ def create_app() -> FastAPI:
                         error=error_msg,
                     )
             except Exception as ledger_exc:
-                logger.error(f"[Training] Failed to finalize ledger state for {run_id}: {ledger_exc}")
+                logger.error(
+                    f"[Training] Failed to finalize ledger state for {run_id}: {ledger_exc}"
+                )
             # Persist failed state to disk (output_dir may not exist for early failures)
             try:
                 run_output_dir = str(Path("data/models") / run_id)
@@ -1981,7 +2091,7 @@ def create_app() -> FastAPI:
     def _resolve_training_log(run_id: str) -> Path | None:
         # Run layout is nested: <root>/<stage>/<run>/training.log. Match any depth.
         # Treat run_id as the immediate parent dir name (e.g. 'cascade-foo-123')
-        # or a relative path like 'stage_1_repo_ghostwork/cascade-foo-123'.
+        # or a relative path like 'stage_1_repo_example/cascade-foo-123'.
         for root in _CHECKPOINT_ROOTS:
             if not root.exists():
                 continue
@@ -5726,6 +5836,10 @@ def create_app() -> FastAPI:
     # Campaign routes enforce their own bearer even when desktop middleware is permissive.
     app.include_router(campaign_auth_router)
     app.include_router(campaign_router)
+    app.include_router(campaign_recovery_router)
+    app.include_router(campaign_setup_router)
+    app.include_router(campaign_agent_router)
+    app.include_router(campaign_agent_credential_router)
     app.include_router(ledger_router)
 
     # Include Factory routes (synthetic data generation)
@@ -6096,4 +6210,4 @@ app = create_app()
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8003)

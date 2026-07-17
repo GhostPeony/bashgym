@@ -80,8 +80,6 @@ DEFAULT_TARGETS: tuple[ComputeTarget, ...] = (
             "description": "User-managed private compute target for larger local-network training jobs.",
             "host_env": "BASHGYM_PRIVATE_GPU_HOST",
             "workdir_env": "BASHGYM_PRIVATE_GPU_WORKDIR",
-            "legacy_host_env": "BASHGYM_GX10_HOST",
-            "legacy_workdir_env": "BASHGYM_GX10_WORKDIR",
         },
     ),
     ComputeTarget(
@@ -111,31 +109,21 @@ DEFAULT_TARGETS: tuple[ComputeTarget, ...] = (
 )
 
 
-TARGET_ALIASES = {
-    "gx10_ssh": "private_gpu",
-}
-
-
 def list_compute_targets() -> list[ComputeTarget]:
     return list(DEFAULT_TARGETS)
 
 
 def get_compute_target(target_id: str) -> ComputeTarget:
-    target_id = TARGET_ALIASES.get(target_id, target_id)
     for target in DEFAULT_TARGETS:
         if target.id == target_id:
             return target
     raise KeyError(target_id)
 
 
-def _env_value(primary: str, legacy: str | None = None) -> tuple[str, str | None]:
+def _env_value(primary: str) -> tuple[str, str | None]:
     value = os.environ.get(primary, "")
     if value:
         return value, primary
-    if legacy:
-        legacy_value = os.environ.get(legacy, "")
-        if legacy_value:
-            return legacy_value, legacy
     return "", None
 
 
@@ -158,8 +146,7 @@ def preflight_compute_target(target: ComputeTarget) -> dict[str, Any]:
         )
     elif target.launcher == ComputeLauncher.SSH:
         host_env = target.metadata.get("host_env", "")
-        legacy_host_env = target.metadata.get("legacy_host_env")
-        host, configured_env = _env_value(host_env, legacy_host_env)
+        host, configured_env = _env_value(host_env)
         checks.append(
             {
                 "code": "private_compute_target_configured",
@@ -222,14 +209,10 @@ def launch_plan(target: ComputeTarget, *, plan_path: str | Path | None = None) -
     elif target.launcher == ComputeLauncher.SSH:
         host_env = target.metadata.get("host_env", "BASHGYM_REMOTE_HOST")
         workdir_env = target.metadata.get("workdir_env", "BASHGYM_REMOTE_WORKDIR")
-        legacy_host_env = target.metadata.get("legacy_host_env")
-        legacy_workdir_env = target.metadata.get("legacy_workdir_env")
         provider_config = {
             "host_env": host_env,
             "workdir_env": workdir_env,
-            "legacy_host_env": legacy_host_env,
-            "legacy_workdir_env": legacy_workdir_env,
-            "command": f"ssh ${host_env} 'cd ${{{workdir_env}:-~/ghostwork}} && {command}'",
+            "command": (f"ssh ${host_env} 'cd ${{{workdir_env}:?set {workdir_env}}} && {command}'"),
         }
     elif target.launcher == ComputeLauncher.SKYPILOT:
         provider_config = {

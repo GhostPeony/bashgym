@@ -11,12 +11,14 @@ import subprocess
 import threading
 import time
 from collections.abc import Iterable
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 import psutil
+
+from bashgym._compat import UTC
 
 _IGNORED_MARKERS = (
     "uvicorn",
@@ -337,9 +339,10 @@ def completed_runtime_jobs_from_manifests(
             str(workspace_root),
         )
         path_key = hashlib.sha256(str(output_dir).encode("utf-8")).hexdigest()[:12]
-        started_at = str(manifest.get("created_at") or "") or datetime.fromtimestamp(
-            stat.st_ctime, UTC
-        ).isoformat()
+        started_at = (
+            str(manifest.get("created_at") or "")
+            or datetime.fromtimestamp(stat.st_ctime, UTC).isoformat()
+        )
         jobs.append(
             {
                 "job_id": f"runtime_designer_manifest_{path_key}",
@@ -356,9 +359,7 @@ def completed_runtime_jobs_from_manifests(
                 "dataset": manifest.get("corpus_jsonl"),
                 "model": designer_meta.get("model"),
                 "provider": provider,
-                "execution": runtime_execution_label(
-                    {"llm_endpoint": endpoint}, provider
-                ),
+                "execution": runtime_execution_label({"llm_endpoint": endpoint}, provider),
                 "log_path": None,
                 "strategy": None,
                 "output_dir": str(output_dir),
@@ -429,7 +430,8 @@ def runtime_job_from_process_info(
         "script": script,
         "cwd": cwd,
         "started_at": datetime.fromtimestamp(create_time, UTC).isoformat(),
-        "pipeline": options.get("pipeline") or (script.removesuffix(".py") if kind == "designer" else None),
+        "pipeline": options.get("pipeline")
+        or (script.removesuffix(".py") if kind == "designer" else None),
         "job_name": job_name,
         "dataset": dataset,
         "model": log_metadata.get("model"),

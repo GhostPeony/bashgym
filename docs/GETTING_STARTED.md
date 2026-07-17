@@ -7,10 +7,10 @@ This guide walks you from a fresh install to your first trained model.
 ## Prerequisites
 
 - **Python 3.10+** — Backend and training
-- **Node.js 18+** (LTS) — Frontend
+- **Node.js 22+** (LTS) — Frontend and native Electron packaging
 - **Git** — Version control
-- **CUDA-capable GPU** (optional) — Only needed for local training. 8GB+ VRAM for 1.5B models, 16GB+ for 7B. Alternatively, use [HuggingFace Cloud Training](#cloud-training-alternative) with no local GPU.
-- **Anthropic API key** — The only required key. Get one at [console.anthropic.com](https://console.anthropic.com/)
+- **CUDA-capable GPU** (optional) — Needed only for real local training. Private hardware over SSH and explicitly selected hosted backends are alternatives.
+- **Provider API keys** (optional) — Add credentials only for teacher, augmentation, hosted training, or publication features you use.
 
 ---
 
@@ -21,26 +21,51 @@ This guide walks you from a fresh install to your first trained model.
 git clone https://github.com/GhostPeony/bashgym.git
 cd bashgym
 
-# Install Python dependencies
-pip install -r requirements.txt
+# Create and activate an isolated environment
+python -m venv .venv
+# Windows: .\.venv\Scripts\Activate.ps1
+# macOS/Linux: source .venv/bin/activate
 
-# For training capabilities (optional, needs CUDA)
-pip install -r requirements-training.txt
+# Install BashGym and register its CLI
+python -m pip install -e .
+
+# Optional real local/private training dependencies
+python -m pip install -e ".[training]"
 
 # Install frontend dependencies
-cd frontend && npm install && cd ..
+cd frontend && npm ci && cd ..
 
 # Create your environment file
 cp .env.example .env
 ```
 
-Open `.env` and add your Anthropic API key:
+The copied file contains no credential or model default. Add only the provider
+credentials you intend to use. Verify the package and durable AutoResearch
+control plane without a GPU or API key:
 
-```
-ANTHROPIC_API_KEY=sk-ant-...
+```bash
+bashgym --help
+bashgym campaign control-smoke --json
 ```
 
-That's the only required key. NVIDIA and HuggingFace keys are optional.
+The control smoke proves the durable controller without claiming model quality.
+To graduate it to a real local/private AutoResearch campaign, keep the full
+values in the canonical guide and use this order:
+
+```bash
+bashgym campaign inspect-model-artifact --help
+bashgym campaign setup-autoresearch --help
+bashgym campaign activate-autoresearch --help
+bashgym campaign doctor --help
+```
+
+Inspect an operator-selected trainable snapshot, create the portable definition,
+run activation once as a non-applying plan, repeat with `--apply`, and then run
+`campaign doctor`. Require `materializable`, bring the resident controller
+online through `--install-worker` or an existing service, then re-run doctor and
+require `launch_ready`. A bounded real baseline comes before any candidate. See
+[Durable AutoResearch Campaigns](training/autoresearch-campaign.md) for the exact
+flags and evidence contract.
 
 ---
 
@@ -73,11 +98,13 @@ Or use the dashboard **Settings > Agents** tab for one-click installation. Verif
 .\dev.ps1 -Electron    # Windows
 ./dev.sh --electron     # macOS/Linux
 
-# Docker (any platform)
-docker compose up
+# Docker backend API only (any platform)
+docker compose up bashgym-api
 ```
 
 Open `http://localhost:5173` in your browser (or the Electron window opens automatically).
+Docker Compose does not currently package the frontend, so run the Vite or
+Electron command separately when using the containerized API.
 
 ---
 
@@ -124,20 +151,21 @@ The factory segments multi-task sessions into individual training examples, scru
 Open the **Training** dashboard:
 
 1. Select **SFT** (Supervised Fine-Tuning) as the strategy
-2. Choose a base model — any HuggingFace model works (training is accelerated with Unsloth). Smaller models train fast on a consumer GPU; larger ones use private or cloud GPU targets. See the [Unsloth model catalog](https://unsloth.ai/docs/get-started/unsloth-model-catalog) for current options
+2. Choose a compatible, registered trainable base supported by an installed backend. Pin its immutable revision for a durable campaign; adapters and inference quants are not substitutes. Smaller models train on consumer GPUs, while larger ones use private or explicitly selected hosted targets.
 3. Select which repos to train on (or use all gold traces)
 4. Click **Start Training**
 5. Watch the live loss curve and training logs
 
 Training a small model with LoRA typically takes 30-90 minutes depending on your GPU and trace count. The model auto-exports to GGUF when complete.
 
-### Cloud Training Alternative
+### Optional Hosted Training
 
-No local GPU? Use HuggingFace Cloud Training:
+If you explicitly choose a supported hosted backend instead of registered
+local/private hardware:
 
-1. Add `HF_TOKEN` to your `.env` file (requires a [HuggingFace Pro subscription](https://huggingface.co/subscribe/pro))
+1. Configure the credential and account entitlement required by the selected provider
 2. Open the **HuggingFace** dashboard from the sidebar
-3. Submit a cloud training job — supports T4, A10G, A100, and H100 hardware starting at $0.60/hr
+3. Review the current hardware and price at submission, then submit the job
 
 ---
 
@@ -168,9 +196,9 @@ Every week, retrain with your accumulated traces. Each cycle produces a better s
 
 ## Next Steps
 
-- **[Orchestrator](../README.md#orchestrator)** — Decompose complex specs into parallel tasks
-- **[Peony Assistant](../README.md#peony-assistant)** — Control Bash Gym via Discord or Telegram
-- **[HuggingFace Integration](../README.md#huggingface-integration)** — Cloud training and model sharing
+- **[Durable AutoResearch](training/autoresearch-campaign.md)** — Run the no-GPU control smoke, bind local/private compute, and execute a real baseline/candidate campaign
+- **[Peony Assistant](../README.md#agent-peony)** — Control Bash Gym via Discord or Telegram
+- **[Optional hosted training](../README.md#optional-hosted-training)** — Explicit hosted training and model sharing
 - **[API Reference](API.md)** — Full REST and WebSocket endpoint documentation
 
 ---
@@ -180,11 +208,15 @@ Every week, retrain with your accumulated traces. Each cycle produces a better s
 **Port 8003 is already in use:**
 ```bash
 # Windows (PowerShell)
-Get-Process -Name "python" | Where-Object { $_.CommandLine -like "*uvicorn*" } | Stop-Process
+$listener = Get-NetTCPConnection -LocalPort 8003 -State Listen
+Get-Process -Id $listener.OwningProcess
+# After verifying that PID belongs to BashGym:
+Stop-Process -Id <verified-PID>
 
 # macOS/Linux
-lsof -i :8003 | grep LISTEN
-kill -9 <PID>
+lsof -nP -iTCP:8003 -sTCP:LISTEN
+# After verifying that PID belongs to BashGym:
+kill <verified-PID>
 ```
 
 **Frontend can't connect to the API:**
@@ -202,12 +234,12 @@ Or use **Settings > Agents** in the app to install hooks from the UI.
 
 **`npm install` fails:**
 The frontend uses `node-pty` which requires native compilation. Ensure you have:
-- Node.js 18+ (LTS recommended)
+- Node.js 22+ (LTS recommended)
 - Python 3.10+ (for node-gyp)
 - On Windows: Visual Studio Build Tools with "Desktop development with C++"
 
 **Training fails with "CUDA out of memory":**
-1. Use QLoRA (4-bit quantization) — enabled by default
+1. Enable QLoRA/4-bit quantization when the selected model/backend supports it
 2. Reduce batch size to 1-2
-3. Use the smaller 1.5B model instead of 7B
+3. Select a smaller compatible operator-approved trainable base
 4. Close other GPU-consuming applications

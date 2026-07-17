@@ -189,6 +189,17 @@ function projectNextAction(
       actionId,
     }
   }
+  const codeLineage = study
+    ? (detail.ledger?.autoresearch?.code_lineages || []).find(
+        (item) => item.proposal_id === study.proposal_id,
+      )
+    : undefined
+  if (codeLineage?.state === 'required') {
+    return { kind: 'attention', label: 'prepare code lineage', actionId: null }
+  }
+  if (codeLineage?.state === 'prepared') {
+    return { kind: 'attention', label: 'edit and capture code lineage', actionId: null }
+  }
   const stage = study?.stage_plan.items[study.current_stage_index]?.stage
   if (stage) return { kind: 'planned', label: stage, actionId: null }
 

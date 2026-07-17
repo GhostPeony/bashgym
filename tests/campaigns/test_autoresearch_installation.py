@@ -24,6 +24,7 @@ def definition(**overrides):
         "task": "heldout-task-autoresearch",
         "dataset_version_id": "dataset-version-1",
         "compute_profile_id": "private-training-1",
+        "source_repository_profile_id": "bashgym-source-1",
         "ledger_project_id": "project-1",
         "evaluation_suite_id": "evaluation-suite-1",
         "primary_metric": "heldout_pass_at_1",
@@ -51,6 +52,9 @@ def test_builder_requires_an_explicit_immutable_trainable_base():
         "smoke_training",
         "full_training",
     ]
+    assert built.manifest.evaluation_plan["source_repository_binding_id"] == (
+        "bashgym-source-1"
+    )
 
 
 def test_install_is_atomic_idempotent_and_emits_exact_binding_plan(tmp_path):
@@ -68,6 +72,7 @@ def test_install_is_atomic_idempotent_and_emits_exact_binding_plan(tmp_path):
     assert first.binding_plan == autoresearch_binding_plan(built)
     assert first.binding_plan.target_model_digest
     assert first.binding_plan.compute_profile_id == "private-training-1"
+    assert first.binding_plan.source_repository_profile_id == "bashgym-source-1"
     assert tuple(stage.value for stage in first.binding_plan.required_training_stages) == (
         "smoke_training",
         "full_training",

@@ -33,6 +33,8 @@ services:
       context: ./assistant
       dockerfile: Dockerfile
     container_name: peony-gateway
+    profiles:
+      - assistant
     depends_on:
       bashgym-api:
         condition: service_healthy
@@ -56,6 +58,7 @@ services:
       dockerfile: Dockerfile
     container_name: peony-agent
     profiles:
+      - assistant
       - agent
     depends_on:
       bashgym-api:

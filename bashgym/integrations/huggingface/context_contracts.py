@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import Enum
 from typing import Annotated, Any, Literal
 
@@ -16,6 +16,8 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
+from bashgym._compat import UTC
 
 SCHEMA_VERSION = "2"
 SCORING_RULE_VERSION = "hf-context-rank-v1"

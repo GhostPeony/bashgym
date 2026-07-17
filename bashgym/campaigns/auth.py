@@ -128,6 +128,7 @@ class CampaignAuthService:
                 autonomy_profile=autonomy_profile.value,
                 credential_kind=CredentialKind.REFRESH.value,
                 workspace_ids=normalized_workspaces,
+                authorization_revision=1,
                 token_salt=salt,
                 token_hash=token_hash,
                 issued_at=now,
@@ -176,6 +177,7 @@ class CampaignAuthService:
                 autonomy_profile=AutonomyProfile.DESKTOP_USER.value,
                 credential_kind=CredentialKind.DESKTOP_BOOTSTRAP.value,
                 workspace_ids=(DESKTOP_LOCAL_SCOPE,),
+                authorization_revision=1,
                 token_salt=_encode(salt),
                 token_hash=_derive(secret, salt),
                 issued_at=now,
@@ -285,7 +287,28 @@ class CampaignAuthService:
             credential_kind=CredentialKind.ACCESS,
             workspace_ids=parent.workspace_ids,
             capabilities=capabilities_for(profile),
+            authorization_revision=parent.authorization_revision,
             expires_at=access.expires_at,
+        )
+
+    def revise_credential_authorization(
+        self,
+        credential_id: str,
+        *,
+        autonomy_profile: AutonomyProfile,
+        workspace_ids: tuple[str, ...],
+    ) -> int:
+        """Revise stored profile/scope authority with one durable revision bump."""
+
+        normalized_workspaces = tuple(sorted(set(workspace_ids)))
+        if not normalized_workspaces:
+            raise ValueError("a campaign credential requires at least one workspace")
+        capabilities_for(autonomy_profile)
+        return self.repository.revise_actor_authorization(
+            credential_id,
+            autonomy_profile=autonomy_profile.value,
+            workspace_ids=normalized_workspaces,
+            audit_event_id=f"auth-{uuid4().hex}",
         )
 
     def revoke_credential(self, credential_id: str, *, reason: str) -> int:

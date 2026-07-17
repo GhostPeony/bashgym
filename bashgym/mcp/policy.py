@@ -337,7 +337,8 @@ def prepare_stdio_launch(
     if resolved is None:
         raise McpPolicyError(f"stdio executable was not found: {command}")
 
-    fingerprint = fingerprint_executable(resolved)
+    invocation_path = str(Path(resolved).absolute())
+    fingerprint = fingerprint_executable(invocation_path)
     if expected_fingerprint is not None:
         expected = (
             expected_fingerprint.to_dict()
@@ -348,4 +349,4 @@ def prepare_stdio_launch(
             raise ExecutableFingerprintMismatchError(
                 "stdio executable fingerprint changed after approval"
             )
-    return StdioLaunch(command=fingerprint.path, args=argv, fingerprint=fingerprint)
+    return StdioLaunch(command=invocation_path, args=argv, fingerprint=fingerprint)

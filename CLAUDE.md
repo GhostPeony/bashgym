@@ -9,7 +9,22 @@ Before planning or launching training, read
 `assistant/workspace/skills/training/references/bashgym-launch-recipes.md`, and
 `assistant/workspace/skills/training/references/compute-target-activation.md`.
 Those files are the executable source for current strategy, artifact-retention,
-Hugging Face destination, and local/SSH/cloud activation guidance.
+Hugging Face destination, and local/private/optional-hosted activation guidance.
+
+For durable AutoResearch, also read
+`assistant/workspace/skills/bashgym-operator/SKILL.md`. In a source clone, make
+the reviewed bundle available to Claude Code with:
+
+```bash
+bashgym operator skills install --host claude
+bashgym operator skills check --host claude
+```
+
+This installs operating instructions; it does not launch or register an agent.
+Begin with `campaign setup-context`, use only registered choices, and ask only
+for missing or ambiguous decisions. The initial request authorizes preparation
+only. Once the campaign is `READY`, present its exact contract and stop for a
+later explicit Start confirmation.
 
 ## Quick Reference
 
@@ -141,7 +156,7 @@ The model router delegates inference to pluggable providers via a `ProviderRegis
 |----------|-------|--------|---------|----------|
 | Anthropic | `AnthropicProvider` | No | Yes | Teacher (Claude) |
 | NVIDIA NIM | `NIMProvider` | No | Yes | Cloud student inference |
-| Ollama | `OllamaProvider` | Yes | No | Local student inference (DGX Spark) |
+| Ollama | `OllamaProvider` | Yes | No | Local student inference |
 
 **Key files:**
 - `bashgym/providers/base.py` — `InferenceProvider` ABC, `ProviderResponse`, `HealthStatus`
@@ -152,18 +167,20 @@ The model router delegates inference to pluggable providers via a `ProviderRegis
 
 **API endpoints:**
 - `GET /api/providers/health` — Health status of all providers
-- `POST /api/router/student-provider?provider_type=ollama&model_name=qwen2.5-coder:7b` — Set student model
+- `POST /api/router/student-provider?provider_type=ollama&model_name=<served-model>` — Set student model
 - `GET /api/router/config` — Full router config with active Teacher/Student models
 - `POST /api/providers/ollama/warmup?model_name=...` — Pre-load model into VRAM
 
-**Local inference loop (DGX Spark):**
+**Local inference loop:**
 ```
 Train → GGUF export → Deploy to Ollama → Set as Student → Router sends inference locally → Collect traces → Train again
 ```
 
-### Remote Training (DGX Spark)
+### Local/Private Training over SSH
 
-Remote SSH training enables executing training runs on a DGX Spark via SSH, streaming logs back to the dashboard.
+Registered SSH training executes runs on operator-owned local or private
+hardware and streams logs back to the dashboard. Same-machine hardware can use
+localhost SSH; a native same-process campaign executor is not currently claimed.
 
 **Key files:**
 - `bashgym/gym/remote_trainer.py` — SSH-based remote training execution
@@ -175,7 +192,7 @@ Remote SSH training enables executing training runs on a DGX Spark via SSH, stre
 - `GET /api/ssh/preflight` — verify remote machine is ready
 - `POST /api/training/start` with `use_remote_ssh: true` — start remote training
 
-**UI:** "DGX Spark" backend option in Training Config, SSH status in SystemInfoPanel
+**UI:** registered SSH target selection in Training Config and connection status in SystemInfoPanel
 
 **Process control:** pause/resume/cancel via SSH signals (SIGSTOP/SIGCONT/SIGTERM)
 
@@ -183,7 +200,7 @@ Remote SSH training enables executing training runs on a DGX Spark via SSH, stre
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SSH_REMOTE_ENABLED` | `false` | Enable remote training |
-| `SSH_REMOTE_HOST` | | DGX Spark IP/hostname |
+| `SSH_REMOTE_HOST` | | Registered target IP/hostname |
 | `SSH_REMOTE_USER` | | SSH username |
 | `SSH_REMOTE_PORT` | `22` | SSH port |
 | `SSH_REMOTE_KEY_PATH` | `~/.ssh/id_rsa` | Path to SSH private key |
@@ -197,10 +214,10 @@ Copy `.env.example` to `.env` and configure:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `ANTHROPIC_API_KEY` | Yes | Claude API key |
+| `ANTHROPIC_API_KEY` | No | Claude provider features only |
 | `NVIDIA_API_KEY` | No | NVIDIA NIM API key |
-| `BASE_MODEL` | No | Fine-tuning base model (default: Qwen2.5-Coder-1.5B) |
-| `USE_NEMO_GYM` | No | Enable cloud training (default: false) |
+| `BASE_MODEL` | No | Explicit operator-selected trainable-base ID (no default) |
+| `USE_NEMO_GYM` | No | Enable the optional NeMo Gym compatibility path (default: false) |
 | `OLLAMA_ENABLED` | No | Enable Ollama local inference (default: true) |
 | `OLLAMA_BASE_URL` | No | Ollama server URL (default: http://localhost:11434) |
 | `OLLAMA_MODEL` | No | Default Ollama model (empty = auto-detect) |
@@ -208,50 +225,27 @@ Copy `.env.example` to `.env` and configure:
 
 See `.env.example` for complete list.
 
-### Available Models
+### Model Selection Contract
 
-#### Anthropic Claude 4.5 Models (Current)
+Do not add a repository-owned default model or static “recommended model” list.
+Provider catalogs change independently and are discovered by their provider
+integrations. Training requires an operator-selected artifact plus an immutable
+revision that passes the installed backend's task, architecture, tokenizer,
+quantization, runtime, and hardware checks. Never substitute a cache hit,
+adapter, served model, or GGUF/inference quant for a trainable base.
 
-| Model | API ID | Use Case | Pricing |
-|-------|--------|----------|---------|
-| **Claude Opus 4.5** | `claude-opus-4-5-20251101` | Best quality, premium tasks | $5/$25 per MTok |
-| **Claude Sonnet 4.5** | `claude-sonnet-4-5-20250929` | Recommended for most tasks | $3/$15 per MTok |
-| **Claude Haiku 4.5** | `claude-haiku-4-5-20251001` | Fast, cost-effective | $1/$5 per MTok |
+For durable AutoResearch work, use this sequence:
 
-#### Anthropic Claude 4 Models (Legacy)
+```bash
+bashgym campaign inspect-model-artifact --help
+bashgym campaign setup-autoresearch --help
+bashgym campaign activate-autoresearch --help
+bashgym campaign doctor --help
+```
 
-| Model | API ID |
-|-------|--------|
-| Claude Sonnet 4 | `claude-sonnet-4-20250514` |
-| Claude Opus 4 | `claude-opus-4-20250514` |
-| Claude Opus 4.1 | `claude-opus-4-1-20250805` |
-
-#### Data Augmentation (Synthetic Data Generation)
-
-| Provider | Model | Use Case |
-|----------|-------|----------|
-| **Anthropic** | `claude-sonnet-4-5-20250929` | High-quality augmentation (recommended) |
-| **Anthropic** | `claude-haiku-4-5-20251001` | Faster, lower cost |
-| **NVIDIA NIM** | `qwen/qwen2.5-coder-32b-instruct` | Cost-effective code augmentation |
-| **NVIDIA NIM** | `qwen/qwen2.5-coder-7b-instruct` | Fastest, lowest cost |
-
-#### Fine-Tuning Base Models
-
-| Model | Parameters | Use Case |
-|-------|------------|----------|
-| `Qwen/Qwen2.5-Coder-1.5B-Instruct` | 1.5B | Default, fast training |
-| `Qwen/Qwen2.5-Coder-7B-Instruct` | 7B | Better quality, needs more VRAM |
-| `meta-llama/Llama-3.2-3B-Instruct` | 3B | Alternative base model |
-
-#### NVIDIA NIM Available Models (183 total)
-
-Key coding models available via `NIM_ENDPOINT`:
-- `qwen/qwen2.5-coder-32b-instruct` - Best Qwen coder
-- `qwen/qwen2.5-coder-7b-instruct` - Fast Qwen coder
-- `meta/codellama-70b` - Meta's CodeLlama
-- `mistralai/codestral-22b-instruct-v0.1` - Mistral coder
-- `deepseek-ai/deepseek-coder-6.7b-instruct` - DeepSeek coder
-- `bigcode/starcoder2-15b` - StarCoder 2
+Run activation without `--apply` first. Repeat with `--apply` only after review;
+add `--install-worker` only when the per-user resident worker should be
+installed and started. See `docs/training/autoresearch-campaign.md`.
 
 ---
 
@@ -361,12 +355,14 @@ python -c "from settings import get_settings; get_settings().api.validate()"
 bashgym/                 # Core Python package
 ├── api/                 # FastAPI routes, schemas, WebSocket
 ├── arena/               # Docker sandbox, Claude CLI wrapper
+├── campaigns/           # Durable AutoResearch control, bindings, workers, evidence
+├── compute/             # Registered execution and capacity contracts
 ├── judge/               # Verification and evaluation
 ├── factory/             # Training data synthesis
-├── gym/                 # Training loop, autoresearch, model router
+├── gym/                 # Training loop, search implementations, model router
+├── ledger/              # Project-isolated experiment and evaluation lineage
 ├── providers/           # Inference providers (Anthropic, NIM, Ollama)
 ├── trace_capture/       # Import traces from Claude, Gemini, Copilot
-├── orchestrator/        # Task decomposition and multi-agent dispatch
 ├── pipeline/            # Pipeline config and threshold monitoring
 ├── integrations/        # HuggingFace, NeMo
 ├── agent/               # Memory, tools, skills
@@ -379,8 +375,8 @@ dev.ps1 / dev.sh         # Dev environment launchers
 requirements.txt         # Core dependencies
 requirements-training.txt # ML dependencies
 Dockerfile.api           # API container
-Dockerfile.web           # Full-stack container
-docker-compose.yml       # Production stack
+Dockerfile.web           # Frontend container definition
+docker-compose.yml       # Backend API plus opt-in assistant profiles
 ```
 
 ### Workspace Canvas (Electron)
@@ -390,7 +386,7 @@ The Workspace canvas (`frontend/src/components/terminal/CanvasView.tsx`, React F
 - **Data nodes** (`frontend/src/components/terminal/nodes/`): `TrainingRunNode` (live `useTrainingStore` metrics + pause/resume/stop), `EvalNode` (polls `GET /api/eval/heldout`), `DataDesignerNode` (polls `GET /api/factory/designer/jobs`), `ActivityFeedNode` (WebSocket activity feed). All share `DataNodeShell`; registry in `nodes/dataPanels.ts`.
 - **Edge routing** — connect any data node to a terminal and press Send to write a markdown context file path into the agent's input (`utils/edgeRouting.ts`).
 - **Monitor edges** — a terminal→terminal edge makes the source the *watched* terminal and the target the *watcher* (`edges/MonitorEdge.tsx`, `utils/monitorRouting.ts`). Selecting the edge exposes Send Snapshot (prefills an ANSI-stripped scrollback markdown file path into the watcher's input), a per-edge AUTO toggle (off → prefill → send; fires when the watched agent finishes a step, ≥20s apart, skips a busy watcher), and Swap. Scrollback is read on demand from the main process via `terminal:snapshot` IPC — zero overhead when no monitor edges exist.
-- **Workspace instances** — named, isolated canvas workspaces (`stores/workspaceStore.ts` + `stores/workspacePersistence.ts`). Exactly one workspace is materialized in the terminalStore globals; switching serializes out / loads in synchronously and remounts the canvas (`<CanvasViewWrapper key={activeWorkspaceId}>`). Background workspaces render and poll nothing, but their PTYs stay alive in the Electron main process and re-attach with scrollback replay on switch-back. State persists per workspace under `bashgym_ws_<id>_*` keys (registry: `bashgym_workspaces`; legacy single-canvas keys migrate once into the default `MAIN` workspace). Switchers: WorkspaceStrip chips in the Agent Sessions rail, a Workspace section in the Master Control Panel, and popover actions (OPEN/MOVE TO NEW WORKSPACE). Backend workspace context is keyed by `workspace_id` (`bashgym/api/workspace_routes.py`; `GET /api/workspace/context?workspace_id=`), and orchestrator events only materialize nodes when their origin lives in the active workspace.
+- **Workspace instances** — named, isolated canvas workspaces (`stores/workspaceStore.ts` + `stores/workspacePersistence.ts`). Exactly one workspace is materialized in the terminalStore globals; switching serializes out / loads in synchronously and remounts the canvas (`<CanvasViewWrapper key={activeWorkspaceId}>`). Background workspaces render and poll nothing, but their PTYs stay alive in the Electron main process and re-attach with scrollback replay on switch-back. State persists per workspace under `bashgym_ws_<id>_*` keys (registry: `bashgym_workspaces`; legacy single-canvas keys migrate once into the default `MAIN` workspace). Switchers: WorkspaceStrip chips in the Agent Sessions rail, a Workspace section in the Master Control Panel, and popover actions (OPEN/MOVE TO NEW WORKSPACE). Backend workspace context is keyed by `workspace_id` (`bashgym/api/workspace_routes.py`; `GET /api/workspace/context?workspace_id=`).
 - Non-terminal panels persist per workspace (see above); canvas hotkeys live in `hooks/useCanvasHotkeys.ts`.
 - **Agent Sessions rail** — the sidebar nav swaps into a live feed of all agent terminals (`components/sessions/`, `stores/agentSessionsStore.ts`). Repo-grouped cards show agent badge, status, session identity, context-window meter, token totals/cost, connections, and a quick-prompt. Intel comes from tailing the local CLI session journals (`~/.claude/projects`, `~/.codex/sessions`) via path-restricted `sessions:*` IPC (`services/agentSessions/` adapters port `trace_capture` parsing knowledge; keep the pricing table in sync with `bashgym/trace_capture/core.py`). Polling runs only while the rail is mounted; account info is opt-in, whitelisted in the main process, and masked by default. Electron-only — the web build tree-shakes it (do not re-export `agentSessionsStore` from the stores barrel).
 
@@ -543,9 +539,9 @@ nvidia-smi -l 1
 - **Generated examples**: `~/.bashgym/training_batches/train.jsonl`
 
 **Python environment for training:**
-- Training requires Python 3.12 with CUDA support (Python 3.14 lacks PyTorch CUDA wheels)
-- Unsloth + PyTorch CUDA 13.0: `pip install torch==2.10.0+cu130 --index-url https://download.pytorch.org/whl/cu130`
-- The trainer auto-detects Python 3.12 at `C:\Users\{user}\AppData\Local\Programs\Python\Python312\python.exe`
+- Keep the training runtime isolated from the lightweight control-plane environment.
+- Use the Python, CUDA, PyTorch, and trainer combination accepted by the explicitly selected backend and model doctor.
+- Register the exact training executable in the installation-owned executor profile; do not rely on a repository-owned machine path.
 
 **Real-time training logs:**
 - Logs are streamed via WebSocket (`training:log` message type)
@@ -588,7 +584,10 @@ cd frontend && npm run dev
 
 **Kill bashgym processes** (Windows):
 ```powershell
-Get-Process -Name "python" | Where-Object { $_.CommandLine -like "*uvicorn*" } | Stop-Process
+$listener = Get-NetTCPConnection -LocalPort 8003 -State Listen
+Get-Process -Id $listener.OwningProcess
+# After verifying that PID belongs to BashGym:
+Stop-Process -Id <verified-PID>
 ```
 
 ### Known Issues

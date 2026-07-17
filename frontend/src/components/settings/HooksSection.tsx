@@ -97,12 +97,9 @@ const OPENCODE_OLLAMA_CONFIG = `{
       "options": {
         "baseURL": "http://localhost:11434/v1"
       },
-      "models": {
-        "qwen2.5-coder:7b": { "name": "Qwen 2.5 Coder 7B" }
-      }
+      "models": {}
     }
-  },
-  "model": "ollama/qwen2.5-coder:7b"
+  }
 }`
 
 interface ToolCardProps {
@@ -212,7 +209,7 @@ function OpenCodeLocalModelGuide() {
       {expanded && (
         <div className="p-4 border-t border-border bg-background-secondary space-y-4">
           <p className="text-xs text-text-secondary">
-            To use OpenCode with local Ollama models instead of cloud APIs, create this config file:
+            To use OpenCode with local Ollama models instead of cloud APIs, create this config file. Choose a model available in your Ollama catalog when you open OpenCode.
           </p>
 
           <div className="space-y-2">
@@ -245,7 +242,7 @@ function OpenCodeLocalModelGuide() {
           <div className="text-xs text-text-muted space-y-1">
             <p><strong className="font-mono text-text-primary">Prerequisites:</strong></p>
             <p>1. Install Ollama: <a href="https://ollama.com/download" target="_blank" rel="noopener noreferrer" className="text-accent-dark hover:text-accent font-mono">ollama.com/download</a></p>
-            <p>2. Pull a model: <code className="px-1 bg-background-secondary border border-border rounded-brutal font-mono">ollama pull qwen2.5-coder:7b</code></p>
+            <p>2. Pull a model from your preferred catalog: <code className="px-1 bg-background-secondary border border-border rounded-brutal font-mono">ollama pull &lt;model-id&gt;</code></p>
             <p>3. Start Ollama: <code className="px-1 bg-background-secondary border border-border rounded-brutal font-mono">ollama serve</code></p>
           </div>
 

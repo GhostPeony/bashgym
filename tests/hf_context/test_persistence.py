@@ -1,7 +1,8 @@
-from datetime import UTC, datetime
+from datetime import datetime
 
 import pytest
 
+from bashgym._compat import UTC
 from bashgym.integrations.huggingface.context_contracts import (
     CompletionOutcome,
     EvidenceKind,

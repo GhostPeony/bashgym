@@ -30,31 +30,27 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def _load_nvidia_key() -> str:
-    """Load NVIDIA API key from desktop .env."""
-    env_file = Path.home() / "desktop-home" / "Projects" / "ghostwork" / ".env"
+def _load_key(name: str) -> str:
+    """Load a credential from the environment or BashGym's neutral config path."""
+    if os.environ.get(name):
+        return os.environ[name]
+    env_file = Path.home() / ".bashgym" / ".env"
     if env_file.exists():
         for line in env_file.read_text().splitlines():
             line = line.strip()
-            if line.startswith("NVIDIA_API_KEY="):
+            if line.startswith(f"{name}="):
                 return line.split("=", 1)[1].strip()
-    return os.environ.get("NVIDIA_API_KEY", "")
+    return ""
+
+
+def _load_nvidia_key() -> str:
+    """Load the NVIDIA API key from an explicit or platform-neutral source."""
+    return _load_key("NVIDIA_API_KEY")
 
 
 def _load_anthropic_key() -> str:
-    """Load Anthropic API key from env or desktop .env."""
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        return os.environ["ANTHROPIC_API_KEY"]
-    for env_file in [
-        Path.home() / "desktop-home" / "Projects" / "ghostwork" / ".env",
-        Path.home() / ".bashgym" / ".env",
-    ]:
-        if env_file.exists():
-            for line in env_file.read_text().splitlines():
-                line = line.strip()
-                if line.startswith("ANTHROPIC_API_KEY="):
-                    return line.split("=", 1)[1].strip()
-    return ""
+    """Load the Anthropic API key from an explicit or platform-neutral source."""
+    return _load_key("ANTHROPIC_API_KEY")
 
 
 def _extract_user_prompt(trace: dict) -> str:
@@ -85,24 +81,38 @@ def load_seed_prompts(traces_dir: Path, max_seeds: int) -> list[dict]:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--num-records", type=int, default=10, help="Number of DPO pairs to generate (small to start)")
+    parser.add_argument(
+        "--num-records",
+        type=int,
+        default=10,
+        help="Number of DPO pairs to generate (small to start)",
+    )
     parser.add_argument(
         "--gold-traces",
         type=Path,
-        default=Path.home() / "desktop-home" / ".bashgym" / "gold_traces",
+        default=Path.home() / ".bashgym" / "gold_traces",
     )
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path.home() / "bashgym" / "data" / "dpo_synthetic",
+        default=Path.home() / ".bashgym" / "data" / "dpo_synthetic",
     )
-    parser.add_argument("--code-model-a", default="qwen/qwen3-next-80b-a3b-instruct",
-                        help="Model for solution A (the strong one)")
-    parser.add_argument("--code-model-b", default="claude-haiku-4-5-20251001",
-                        help="Model for solution B (intentionally weaker for clear pairs)")
-    parser.add_argument("--code-provider-b", default="anthropic",
-                        choices=["nvidia", "anthropic"],
-                        help="Provider for code-model-b")
+    parser.add_argument(
+        "--code-model-a",
+        default="qwen/qwen3-next-80b-a3b-instruct",
+        help="Model for solution A (the strong one)",
+    )
+    parser.add_argument(
+        "--code-model-b",
+        default="claude-haiku-4-5-20251001",
+        help="Model for solution B (intentionally weaker for clear pairs)",
+    )
+    parser.add_argument(
+        "--code-provider-b",
+        default="anthropic",
+        choices=["nvidia", "anthropic"],
+        help="Provider for code-model-b",
+    )
     parser.add_argument("--judge-model", default="mistralai/mistral-large-3-675b-instruct-2512")
     parser.add_argument("--preview", action="store_true")
     args = parser.parse_args()
@@ -113,7 +123,7 @@ def main():
         logger.error("NVIDIA_API_KEY not found")
         sys.exit(1)
     os.environ["NVIDIA_API_KEY"] = api_key
-    logger.info(f"NVIDIA_API_KEY loaded ({api_key[:12]}...)")
+    logger.info("NVIDIA_API_KEY resolved")
 
     # Load Anthropic key if we're using it
     if args.code_provider_b == "anthropic":
@@ -122,7 +132,7 @@ def main():
             logger.error("ANTHROPIC_API_KEY required for --code-provider-b=anthropic")
             sys.exit(1)
         os.environ["ANTHROPIC_API_KEY"] = anth_key
-        logger.info(f"ANTHROPIC_API_KEY loaded ({anth_key[:14]}...)")
+        logger.info("ANTHROPIC_API_KEY resolved")
 
     # Load gold trace seeds
     seeds = load_seed_prompts(args.gold_traces, max_seeds=args.num_records * 2)
@@ -132,7 +142,8 @@ def main():
         sys.exit(1)
 
     import pandas as pd
-    seed_df = pd.DataFrame(seeds[:args.num_records])
+
+    seed_df = pd.DataFrame(seeds[: args.num_records])
 
     # Build pipeline
     import data_designer.config as dd
@@ -142,6 +153,7 @@ def main():
     custom_providers = None
     if args.code_provider_b == "anthropic":
         from data_designer.config.models import ModelProvider
+
         # Anthropic OpenAI-compatible endpoint:
         # https://docs.anthropic.com/en/api/openai-sdk
         custom_providers = [
@@ -159,7 +171,9 @@ def main():
             ),
         ]
 
-    designer = DataDesigner(model_providers=custom_providers) if custom_providers else DataDesigner()
+    designer = (
+        DataDesigner(model_providers=custom_providers) if custom_providers else DataDesigner()
+    )
     builder = dd.DataDesignerConfigBuilder(
         model_configs=[
             dd.ModelConfig(
@@ -286,7 +300,9 @@ def main():
     # Dataset object. Convert that to a pandas DataFrame.
     if hasattr(result, "load_dataset"):
         hf_dataset = result.load_dataset()
-        df = hf_dataset.to_pandas() if hasattr(hf_dataset, "to_pandas") else pd.DataFrame(hf_dataset)
+        df = (
+            hf_dataset.to_pandas() if hasattr(hf_dataset, "to_pandas") else pd.DataFrame(hf_dataset)
+        )
     elif hasattr(result, "to_pandas"):
         df = result.to_pandas()
     elif hasattr(result, "dataset"):
@@ -331,20 +347,23 @@ def main():
         else:
             chosen, rejected = row["solution_b"], row["solution_a"]
 
-        dpo_examples.append({
-            "prompt": row["task_prompt"],
-            "chosen": chosen,
-            "rejected": rejected,
-            "metadata": {
-                "score_chosen": max(score_a, score_b),
-                "score_rejected": min(score_a, score_b),
-            },
-        })
+        dpo_examples.append(
+            {
+                "prompt": row["task_prompt"],
+                "chosen": chosen,
+                "rejected": rejected,
+                "metadata": {
+                    "score_chosen": max(score_a, score_b),
+                    "score_rejected": min(score_a, score_b),
+                },
+            }
+        )
 
     logger.info(f"\nFiltered to {len(dpo_examples)} DPO pairs (skipped ties)")
 
     # Save train/val
     import random
+
     random.seed(42)
     random.shuffle(dpo_examples)
     split = max(1, int(len(dpo_examples) * 0.9))
@@ -361,7 +380,8 @@ def main():
     logger.info(f"Val:   {len(val)} → {args.output_dir / 'val.jsonl'}")
 
     # Validate against our DPO contract
-    from bashgym.datasets.validator import validate_dataset, print_validation_report
+    from bashgym.datasets.validator import print_validation_report, validate_dataset
+
     result = validate_dataset(args.output_dir / "train.jsonl", format="dpo", quiet=True)
     print_validation_report(result, max_issues=5)
 

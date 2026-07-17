@@ -58,6 +58,196 @@ Gold traces teach the model what good behavior looks like. Terminal
 environments prove whether the behavior survives interaction with a real shell,
 repo, and verifier.
 
+### AutoResearch across models and backends
+
+AutoResearch is BashGym's shared research control plane, not a feature of one
+model, environment, or trainer. Every registered open model uses the same agent
+intake, baseline-first hypotheses, budgets, attempts, leases, cancellation,
+restart recovery, artifact sealing, heldout evaluation, experiment ledger,
+keep/discard decision, promotion gates, and workspace canvas.
+
+| Layer | All registered BashGym models | Optional NeMo RL/Gym extension |
+|---|---|---|
+| Research controller and operator skills | Shared | Reused unchanged |
+| Local/private-SSH execution authority | Shared | Reused unchanged |
+| Evaluation, evidence, ledger, and promotion | Shared | Reused unchanged |
+| Model loader and training recipe | Selected per registered model/backend | NeMo RL recipe adapter |
+| Distributed rollout/generation topology | Backend-dependent | Ray plus async vLLM |
+| Multi-turn environment isolation | Backend-dependent | NeMo Gym servers/sessions |
+| Training-to-generation refit | Backend-dependent | NeMo RL refit contract |
+
+A model appearing in a local cache is not enough to activate training. Each new
+trainable base must resolve an immutable model revision, compatible installed
+trainer recipe, approved data/evaluator binding, and compute profile. Inference
+quants and served deployment artifacts cannot silently satisfy that contract.
+Inspect an operator-selected snapshot without scanning caches or downloading a
+substitute model:
+
+```bash
+bashgym campaign inspect-model-artifact \
+  --artifact-dir /path/to/selected/snapshot \
+  --model-id organization/model \
+  --model-revision <immutable-commit> \
+  --json
+```
+
+The secret-free plan distinguishes a trainable base from an adapter or
+inference quant, hashes the complete selected artifact, and identifies candidate
+standard, Unsloth, and optional NeMo backends. Pass the same directory as
+`--model-artifact-dir` to `campaign setup-autoresearch` to require the inspected
+model identity, task, and training readiness before the installation definition
+is written. `campaign doctor` remains authoritative for installed runtime,
+data, evaluator, credential-material, and compute readiness.
+
+For a new installation, graduate the no-GPU control smoke through one canonical
+activation and guided-setup sequence:
+
+1. Provision one workspace-scoped local operator with
+   `campaign provision-local-operator`, using the opaque secret-reference path
+   documented in [autoresearch-campaign.md](autoresearch-campaign.md).
+2. Inspect the operator-selected snapshot with
+   `campaign inspect-model-artifact`.
+3. Create the portable definition with `campaign setup-autoresearch`.
+4. Run `campaign activate-autoresearch` without `--apply` to preflight the
+   registered SSH device, source scope, dataset, evaluator, launch material, and
+   identity conflicts.
+5. Review the plan and repeat with `--apply`.
+6. Run `campaign sync-autoresearch-registry` in its default read-only mode.
+   Review the logical model, data, evaluator, and compute evidence plus the
+   generated installation ID. Repeat with that exact ID, installation-owned
+   controller authority, and `--apply`; the command never discovers, downloads,
+   or substitutes a model.
+7. Require `campaign doctor` to become `materializable`, bring the resident
+   controller online through `--install-worker` or an existing service, re-run
+   doctor, and require `launch_ready` before a bounded real baseline. Only then
+   launch a one-variable candidate.
+
+The guided-setup API projects at most 32 templates, 32 installations, and 32
+bindings of each kind per installation, with explicit truncation reason codes.
+Its resumable session records exactly six ordered selections and chains
+workspace- and actor-scoped receipts under external campaign sealing authority.
+No-session discovery is read-only and does not require that authority; resuming
+or mutating a session does. The desktop renderer exposes the same six ordered
+registered choices, persists only opaque session/idempotency identifiers, runs
+doctor and sealed validation, and creates without automatically starting the
+campaign. Its workflow remains visible but write-disabled while offline.
+
+Restart recovery uses the same portable/install-local split. The repository
+defines recovery policy and public evidence shape, while each installation owns
+its controller lease and binding authority. Recovery receipts and mutable
+accepted/executing/terminal request state are externally sealed. The resident
+worker consumes one request beneath its scheduler-leader fence, can reclaim a
+stale execution after restart, and repairs only one exact sealed local attempt.
+The UI must keep recovery controls disabled unless the live projection proves a
+ready consumer.
+
+Campaign-scoped Codex and Hermes attachment is a separate fail-closed boundary.
+The backend can issue human-approved grants, constrain capabilities, authorize
+each action, attest short-lived host sessions, and encrypt a one-time credential
+to an ephemeral host key without storing the raw token. The compact Control Room
+session panel and Electron main-process key, registration, reconciliation, and
+revocation lifecycle are wired and remain visible-disabled when no trusted
+session exists. A genuine main-spawned Codex/Hermes child and fixed-capability
+credential proxy are still pending, so the page correctly reports no eligible
+session rather than treating an arbitrary terminal as trusted execution.
+
+Registered SSH is the protected execution boundary for both private hardware
+and hardware on the BashGym machine via localhost SSH. See
+[autoresearch-campaign.md](autoresearch-campaign.md) for the exact flags,
+receipts, and evidence requirements.
+
+Named multi-reward environments can bind their declared component order and
+weights through `NamedRewardGDPOAdapter`. The adapter emits NeMo's stable
+`reward1`, `reward2`, ... and `total_reward` columns, selects the GDPO advantage
+estimator with per-component normalization, and records deterministic batch,
+configuration, and advantage digests. Its consumed advantages are computed by
+the same dependency-free `gdpo_advantages` reference used in BashGym parity
+tests, so trainer-side component/order/weight drift fails before launch.
+
+### Optional NeMo Gym environment export
+
+BashGym can export its deterministic star-count environment into the current
+NeMo Gym resources-server, simple-agent, and Responses API dataset layout
+without installing NeMo Gym into BashGym's core Python environment:
+
+```python
+from bashgym.environments import (
+    create_nemo_gym_bundle_archive,
+    export_star_count_nemo_gym_bundle,
+)
+
+manifest = export_star_count_nemo_gym_bundle(
+    "star-count-dataset",
+    "nemo-gym-bundle",
+    nemo_gym_revision="<40-character NeMo Gym commit>",
+    bashgym_revision="<40-character BashGym commit>",
+    dataset_license="MIT",
+)
+archive = create_nemo_gym_bundle_archive(
+    "nemo-gym-bundle",
+    "nemo-gym-bundle.zip",
+)
+```
+
+The exported directory can be turned into a deterministic, content-validated
+single-file transport artifact with `create_nemo_gym_bundle_archive`. A
+Gym-enabled executor binds that archive digest, requires NVIDIA's
+`examples/nemo_gym/run_grpo_nemo_gym.py` entrypoint, verifies the embedded Gym
+source revision, mounts only the approved resources server, includes
+`vllm_model_for_training.yaml`, and enables async vLLM HTTP generation.
+`no_update` smoke stages use Gym trajectory-collection mode instead of taking an
+optimizer step.
+
+The bundle embeds portable image data, BashGym's exact component verifier,
+immutable source revisions, and content hashes. Its resources server imports
+BashGym only when launched inside the operator's separately pinned NeMo Gym
+runtime. Rollout evidence validation requires model-server message-level prompt
+IDs, generation IDs, and generation logprobs to pass through unchanged, unique
+session IDs for concurrent rollouts, exact component totals, and a synchronized
+policy-to-generation refit receipt.
+
+For campaign execution, the registered runner returns the exact bundle manifest
+and environment contract alongside runtime logs. The Gym runtime integration
+must also emit `nemo_gym_trajectories.jsonl` and an independently observed
+`nemo_gym_refit_receipt.json`. When all four raw companions are downloaded, the
+remote sealer automatically converts them into the canonical
+`nemo_gym_campaign_evidence.json` receipt:
+
+```python
+from bashgym.campaigns.nemo_gym_ingestion import convert_nemo_gym_outputs
+
+convert_nemo_gym_outputs(
+    attempt,
+    bundle_manifest="nemo_gym_bundle_manifest.json",
+    environment_contract="nemo_gym_environment_contract.json",
+    trajectories="logs/nemo_gym_trajectories.jsonl",
+    refit_receipt_path="logs/nemo_gym_refit_receipt.json",
+    output_directory=output_directory,
+)
+```
+
+Each trajectory must carry the same full exact refit receipt as the separate
+receipt file. Missing, ambiguous, stale, unsynchronized, or cross-refit output
+is rejected; process completion and checkpoint presence are never interpreted
+as synchronization evidence.
+
+The receipt binds the exact workspace, campaign, study, action, attempt,
+candidate, manifest revision, and claim generation to the bundle and environment
+digests. It also preserves the full message-level token arrays, named component
+rewards, weighted totals, ordered rollout identities, checkpoint digest, and
+policy/generation refit revision. The remote output sealer validates that binding
+before assigning the artifact schema. AutoResearch outcome evidence then includes
+the sealed artifact ID, while planner snapshots expose only bounded digests,
+counts, mean reward, training step, and policy revision—not raw rollouts or
+artifact paths.
+
+This is an adapter and evidence boundary, not a claim that a live NeMo RL refit
+has run. The live proof remains gated on a dedicated NeMo executor and an
+already approved compatible campaign model. See NVIDIA's
+[environment model](https://docs.nvidia.com/nemo/gym/main/about/concepts/environments/),
+[on-policy token contract](https://docs.nvidia.com/nemo/gym/main/contribute/rl-framework-integration/openai-compatible-http-server-on-policy-correction),
+and [NeMo RL integration flow](https://docs.nvidia.com/nemo/rl/nightly/design-docs/nemo-gym-integration.html).
+
 ---
 
 ## What the training strategies teach
@@ -97,8 +287,9 @@ RL improves outcomes only after the model can produce attempts worth comparing.
 
 4. Train the first student with SFT.
 
-   Use QLoRA on small/local hardware. Use a private compute target or cloud path for
-   larger models, longer sequences, or full fine-tunes.
+   Use LoRA/QLoRA on constrained local hardware only when the selected
+   model/backend supports it. Use a registered private compute target for larger
+   models, longer sequences, or full fine-tunes; hosted compute is optional.
 
 5. Evaluate before routing.
 
@@ -196,18 +387,17 @@ gates by themselves.
 - [strategy-guide.md](strategy-guide.md) - concrete starting settings and when to use each strategy.
 - [session-distillation.md](session-distillation.md) - targeted self-distillation from failed trace spans.
 - [tmax-terminal-rl-recipe.md](tmax-terminal-rl-recipe.md) - environment-to-replay-to-backend recipe for terminal RL.
-- [private-compute-eval-checklist.md](private-compute-eval-checklist.md) - private/cloud compute backend-smoke and eval checklist.
+- [private-compute-eval-checklist.md](private-compute-eval-checklist.md) - local/private compute backend-smoke and eval checklist.
 - [world-models.md](world-models.md) - ECHO/RWML contracts, defaults, replay telemetry, and boundaries.
 - [metrics-runbook.md](metrics-runbook.md) - how to diagnose flat pass@k, zero reward variance, timeouts, verifier errors, and tamper attempts.
 - [glossary.md](glossary.md) - compact definitions for the training vocabulary.
 - [agent-cli.md](agent-cli.md) - machine-readable CLI commands agents can call for setup and replay analysis.
+- [autoresearch-campaign.md](autoresearch-campaign.md) - durable AutoResearch setup, control smoke, bindings, and real-evidence path.
 - [../TRAINING_DATA_GUIDE.md](../TRAINING_DATA_GUIDE.md) - trace format and data pipeline reference.
 - [../training-config-guide.md](../training-config-guide.md) - existing Training Config panel reference.
 
 ## Source references
 
-- [../../tasks/jepa-bashgym-action-plan-2026-06-23.md](../../tasks/jepa-bashgym-action-plan-2026-06-23.md)
-- [../../tasks/jepa-worldmodel-hardware-handoff-2026-06-23.md](../../tasks/jepa-worldmodel-hardware-handoff-2026-06-23.md)
 - [../../bashgym/gym/trainer.py](../../bashgym/gym/trainer.py)
 - [../../bashgym/gym/terminal_rl.py](../../bashgym/gym/terminal_rl.py)
 - [../../bashgym/eval/dppo_replay.py](../../bashgym/eval/dppo_replay.py)

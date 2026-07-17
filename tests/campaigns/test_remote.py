@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from bashgym.campaigns.contracts import utc_now
 from bashgym.campaigns.remote import (
+    CodeLineageLaunchSnapshot,
     RemoteCapacityPolicy,
     RemoteCommandResult,
     RemoteLaunchRequest,
@@ -88,6 +89,28 @@ def launch_request(tmp_path):
     )
 
 
+def lineage_launch_request(tmp_path):
+    request = launch_request(tmp_path)
+    archive = (tmp_path / ("d" * 64)).with_suffix(".tar")
+    archive.write_bytes(b"deterministic source snapshot")
+    snapshot = CodeLineageLaunchSnapshot(
+        binding_id="bashgym-trainer-entrypoint-v1",
+        binding_revision=1,
+        binding_digest="a" * 64,
+        source_repository_profile_id="bashgym-source-v1",
+        lineage_id="lineage-candidate-1",
+        record_digest="b" * 64,
+        commit_sha="c" * 40,
+        patch_sha256="d" * 64,
+        entrypoint_path="bashgym/gym/trainer.py",
+        working_directory="source",
+        archive_path=archive,
+        archive_sha256=hashlib.sha256(archive.read_bytes()).hexdigest(),
+        archive_size_bytes=archive.stat().st_size,
+    )
+    return request.model_copy(update={"source_snapshot": snapshot})
+
+
 def identity():
     return RemoteRunIdentity(
         compute_profile_id="ssh-gpu-lab",
@@ -118,6 +141,55 @@ def test_launch_request_pins_exact_python_executable(tmp_path):
         )
 
 
+@pytest.mark.asyncio
+async def test_launch_executes_verified_captured_source_snapshot(tmp_path):
+    request = lineage_launch_request(tmp_path)
+    adapter = RemoteTrainingAdapter(config(), compute_profile_id="ssh-gpu-lab")
+    remote_directory = "/home/trainer/bashgym-training/campaign-action-1"
+    manifest = adapter._launch_manifest(request, remote_directory)
+    launched_identity = identity().model_copy(
+        update={
+            "command_hash": manifest["command_hash"],
+            "launch_manifest_sha256": hashlib.sha256(
+                json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest(),
+        }
+    )
+    session = MockSession(
+        [result("/home/trainer"), result(), result(), result(supervisor_json(launched_identity))]
+    )
+    adapter._session_factory = lambda: session
+
+    recovered = await adapter.launch(request)
+
+    assert recovered == launched_identity
+    assert manifest["code_lineage"]["commit_sha"] == "c" * 40
+    assert manifest["execution_context"] == {
+        "entrypoint_kind": "captured_source_snapshot",
+        "working_directory": f"{remote_directory}/source",
+        "python_path": f"{remote_directory}/source",
+    }
+    assert manifest["argv"][1] == "-c"
+    assert "sys.path.insert(0,source)" in manifest["argv"][2]
+    assert manifest["argv"][3] == f"{remote_directory}/source"
+    assert manifest["argv"][4] == f"{remote_directory}/source/bashgym/gym/trainer.py"
+    assert [local for local, _remote in session.uploads] == [
+        request.source_snapshot.archive_path,
+        request.input_files[0],
+    ]
+    assert "tar --extract" in session.commands[2][0]
+    assert "test ! -L source/bashgym/gym/trainer.py" in session.commands[2][0]
+    assert f"PYTHONPATH={remote_directory}/source" in session.commands[3][0]
+
+
+def test_launch_rechecks_snapshot_after_request_construction(tmp_path):
+    request = lineage_launch_request(tmp_path)
+    request.source_snapshot.archive_path.write_bytes(b"changed after request validation")
+
+    with pytest.raises(ValueError, match="snapshot changed before launch"):
+        RemoteTrainingAdapter._launch_manifest(request, "/remote/run")
+
+
 def supervisor_json(value: RemoteRunIdentity) -> str:
     payload = value.model_dump(mode="json", exclude={"schema_version"})
     payload["schema_version"] = "campaign_remote_supervisor_state.v1"
@@ -133,9 +205,9 @@ async def test_launch_exclusively_creates_verifies_and_returns_server_neutral_id
     launched_identity = identity().model_copy(
         update={
             "command_hash": manifest["command_hash"],
-            "launch_manifest_sha256": __import__("hashlib").sha256(
-                json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
-            ).hexdigest(),
+            "launch_manifest_sha256": __import__("hashlib")
+            .sha256(json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode())
+            .hexdigest(),
         }
     )
     session = MockSession(
@@ -168,9 +240,9 @@ async def test_discover_recovers_exact_manifest_without_starting_a_second_proces
     expected = identity().model_copy(
         update={
             "command_hash": manifest["command_hash"],
-            "launch_manifest_sha256": __import__("hashlib").sha256(
-                manifest_json.encode()
-            ).hexdigest(),
+            "launch_manifest_sha256": __import__("hashlib")
+            .sha256(manifest_json.encode())
+            .hexdigest(),
         }
     )
     session = MockSession([result("/home/trainer"), result(supervisor_json(expected))])
@@ -200,8 +272,16 @@ async def test_discover_returns_none_only_for_absent_state(tmp_path):
         (f"boot-1\t9001\t4242\tT\t{'b' * 64}\t\n", RemoteRunState.PAUSED, "remote_process_paused"),
         (f"boot-1\t\t\t\t{'b' * 64}\t0\n", RemoteRunState.COMPLETED, "remote_exit_code_recorded"),
         (f"boot-1\t\t\t\t{'b' * 64}\t7\n", RemoteRunState.FAILED, "remote_exit_code_recorded"),
-        (f"boot-1\tbad\t4242\tS\t{'b' * 64}\t\n", RemoteRunState.UNKNOWN, "remote_observation_malformed"),
-        (f"boot-2\t9001\t4242\tS\t{'b' * 64}\t\n", RemoteRunState.UNKNOWN, "remote_process_identity_mismatch"),
+        (
+            f"boot-1\tbad\t4242\tS\t{'b' * 64}\t\n",
+            RemoteRunState.UNKNOWN,
+            "remote_observation_malformed",
+        ),
+        (
+            f"boot-2\t9001\t4242\tS\t{'b' * 64}\t\n",
+            RemoteRunState.UNKNOWN,
+            "remote_process_identity_mismatch",
+        ),
         (f"boot-1\t9001\t4242\tZ\t{'b' * 64}\t\n", RemoteRunState.UNKNOWN, "remote_exit_unproven"),
     ],
 )
@@ -228,16 +308,14 @@ async def test_controls_validate_identity_and_signal_process_group_in_one_comman
     first = session.commands[0][0]
     assert "expected_start=9001" in first
     assert "expected_pgid=4242" in first
-    assert "kill -TERM -- \"-$pgid\"" in first
-    assert "kill -KILL -- \"-$pgid\"" in session.commands[1][0]
+    assert 'kill -TERM -- "-$pgid"' in first
+    assert 'kill -KILL -- "-$pgid"' in session.commands[1][0]
 
 
 @pytest.mark.asyncio
 async def test_collect_requires_every_non_symlink_output(tmp_path):
     request = launch_request(tmp_path)
-    session = MockSession(
-        [result(f"boot-1\t\t\t\t{'b' * 64}\t0\n"), result()]
-    )
+    session = MockSession([result(f"boot-1\t\t\t\t{'b' * 64}\t0\n"), result()])
     adapter = RemoteTrainingAdapter(
         config(), compute_profile_id="ssh-gpu-lab", session_factory=lambda: session
     )
@@ -249,7 +327,13 @@ async def test_collect_requires_every_non_symlink_output(tmp_path):
 
 @pytest.mark.asyncio
 async def test_collect_terminal_evidence_requires_closed_supervisor_files(tmp_path):
-    session = MockSession([result("present")])
+    session = MockSession(
+        [
+            result(
+                "effective_config.json\ntraining_manifest.json\ntraining_metrics.jsonl\n"
+            )
+        ]
+    )
     adapter = RemoteTrainingAdapter(
         config(), compute_profile_id="ssh-gpu-lab", session_factory=lambda: session
     )
@@ -270,6 +354,8 @@ async def test_collect_terminal_evidence_requires_closed_supervisor_files(tmp_pa
         "training.log",
         "exit_code",
         "launch_manifest.json",
+        "effective_config.json",
+        "training_manifest.json",
         "training_metrics.jsonl",
     }
     assert "test -f" in session.commands[0][0]
@@ -317,9 +403,7 @@ def test_supervisor_state_writer_uses_typed_json_instead_of_printf_placeholders(
                         "boot_id": "boot-proof",
                         "command_hash": manifest["command_hash"],
                         "launch_manifest_sha256": hashlib.sha256(
-                            json.dumps(
-                                manifest, sort_keys=True, separators=(",", ":")
-                            ).encode()
+                            json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
                         ).hexdigest(),
                         "launched_at": "2026-07-13T21:00:00Z",
                     }
@@ -343,7 +427,7 @@ def test_supervisor_state_writer_uses_typed_json_instead_of_printf_placeholders(
 @pytest.mark.asyncio
 async def test_stream_cursor_preserves_partial_lines_across_reads():
     first_bytes = b'{"step":1}\n{"step"'
-    second_bytes = b':2}\n'
+    second_bytes = b":2}\n"
     session = MockSession(
         [
             result(
@@ -370,9 +454,7 @@ async def test_stream_cursor_preserves_partial_lines_across_reads():
     first = await adapter.read_stream(identity(), "training_metrics.jsonl")
     assert first.complete_lines == ('{"step":1}',)
     assert first.next_cursor.partial_line == '{"step"'
-    second = await adapter.read_stream(
-        identity(), "training_metrics.jsonl", first.next_cursor
-    )
+    second = await adapter.read_stream(identity(), "training_metrics.jsonl", first.next_cursor)
     assert second.complete_lines == ('{"step":2}',)
     assert second.next_cursor == RemoteStreamCursor(
         byte_offset=len(first_bytes) + len(second_bytes), partial_line=""

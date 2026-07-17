@@ -5,25 +5,29 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from bashgym.campaigns.contracts import (
     BudgetLedgerEntry,
     Campaign,
     CampaignArtifactReference,
+    CampaignControlRoomStateV1,
     CampaignEvent,
     CampaignEvidenceSnapshot,
     CampaignManifest,
     CampaignStatus,
     CampaignTrigger,
+    CodeLineageRecord,
+    CodeLineageState,
     CompletedHypothesisSummary,
     CredentialKind,
     ManifestRevision,
+    NemoGymEvidenceReference,
     ProposalRecord,
     ProposalStatus,
     ProposalValidation,
@@ -35,7 +39,15 @@ from bashgym.campaigns.contracts import (
     canonical_hash,
     utc_now,
 )
-from bashgym.campaigns.transitions import transition_campaign
+from bashgym.campaigns.nemo_gym_evidence import NEMO_GYM_CAMPAIGN_EVIDENCE_SCHEMA
+from bashgym.campaigns.transitions import (
+    evaluate_promotion_gate,
+    human_promotion_authorized,
+    transition_campaign,
+)
+
+if TYPE_CHECKING:
+    from bashgym.campaigns.control_room import ControlRoomDurableProjection
 
 
 class CampaignPersistenceError(RuntimeError):
@@ -86,6 +98,13 @@ class BudgetInvariantError(CampaignPersistenceError):
     code = "campaign_budget_invariant"
 
 
+class CampaignBudgetResourceLimitError(CampaignPersistenceError):
+    code = "campaign_budget_resource_limit_exceeded"
+
+    def __init__(self) -> None:
+        super().__init__(self.code)
+
+
 class InvalidProposalTransitionError(CampaignPersistenceError):
     code = "campaign_invalid_transition"
 
@@ -106,6 +125,18 @@ class CampaignMutation:
     campaign: Campaign
     event: CampaignEvent
     replayed: bool = False
+
+
+@dataclass(frozen=True)
+class CampaignHintSource:
+    """Payload-free durable event columns used only for live wake-up hints."""
+
+    cursor: int
+    workspace_id: str
+    campaign_id: str
+    aggregate_version: int
+    event_type: str
+    correlation_id: str
 
 
 @dataclass(frozen=True)
@@ -132,6 +163,7 @@ class StoredCredential:
     autonomy_profile: str
     credential_kind: str
     workspace_ids: tuple[str, ...]
+    authorization_revision: int
     token_salt: str
     token_hash: str
     issued_at: datetime
@@ -156,6 +188,7 @@ class LeaseRecord:
     lease_key: str
     owner_id: str
     generation: int
+    controller_observation_version: int
     expires_at: datetime
     heartbeat_at: datetime
 
@@ -936,6 +969,157 @@ MIGRATIONS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             "CREATE INDEX idx_ledger_decisions_project ON ledger_decisions(workspace_id, project_id, experiment_id, created_at)",
         ),
     ),
+    (
+        9,
+        "autoresearch_code_lineage",
+        (
+            """
+            CREATE TABLE campaign_code_lineages (
+                workspace_id TEXT NOT NULL,
+                campaign_id TEXT NOT NULL,
+                proposal_id TEXT NOT NULL,
+                lineage_id TEXT NOT NULL,
+                state TEXT NOT NULL,
+                record_json TEXT NOT NULL,
+                record_digest TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(workspace_id, proposal_id),
+                UNIQUE(workspace_id, lineage_id),
+                FOREIGN KEY(workspace_id, campaign_id)
+                    REFERENCES campaigns(workspace_id, campaign_id) ON DELETE RESTRICT,
+                FOREIGN KEY(workspace_id, proposal_id)
+                    REFERENCES campaign_proposals(workspace_id, proposal_id) ON DELETE RESTRICT
+            )
+            """,
+            "CREATE INDEX idx_campaign_code_lineages_campaign ON campaign_code_lineages(workspace_id, campaign_id, state, created_at)",
+        ),
+    ),
+    (
+        10,
+        "control_room_cache_revisions",
+        (
+            "ALTER TABLE campaign_actor_credentials ADD COLUMN authorization_revision INTEGER NOT NULL DEFAULT 1 CHECK(authorization_revision >= 1)",
+            "ALTER TABLE campaign_scheduler_leases ADD COLUMN controller_observation_version INTEGER NOT NULL DEFAULT 1 CHECK(controller_observation_version >= 1)",
+        ),
+    ),
+    (
+        11,
+        "workspace_campaign_hint_cursor",
+        (
+            "CREATE INDEX idx_campaign_events_workspace_cursor ON campaign_events(workspace_id, cursor)",
+        ),
+    ),
+    (
+        12,
+        "durable_human_oversight",
+        (
+            """
+            CREATE TABLE campaign_human_work (
+                workspace_id TEXT NOT NULL,
+                campaign_id TEXT NOT NULL,
+                work_id TEXT NOT NULL,
+                campaign_revision INTEGER NOT NULL CHECK(campaign_revision >= 1),
+                item_version INTEGER NOT NULL CHECK(item_version >= 1),
+                state TEXT NOT NULL CHECK(state IN ('pending', 'claimed', 'submitted', 'expired', 'replaced')),
+                blocking INTEGER NOT NULL CHECK(blocking IN (0, 1)),
+                rubric_json TEXT NOT NULL,
+                public_sample_json TEXT NOT NULL,
+                protected_context_json TEXT NOT NULL,
+                claimed_by_actor_id TEXT,
+                lease_expires_at TEXT,
+                claim_idempotency_key TEXT NOT NULL,
+                submit_idempotency_key TEXT NOT NULL,
+                receipt_id TEXT,
+                replacement_for_work_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(workspace_id, campaign_id, work_id),
+                UNIQUE(workspace_id, claim_idempotency_key),
+                UNIQUE(workspace_id, submit_idempotency_key),
+                FOREIGN KEY(workspace_id, campaign_id)
+                    REFERENCES campaigns(workspace_id, campaign_id) ON DELETE RESTRICT,
+                FOREIGN KEY(workspace_id, campaign_id, replacement_for_work_id)
+                    REFERENCES campaign_human_work(workspace_id, campaign_id, work_id) ON DELETE RESTRICT
+            )
+            """,
+            """
+            CREATE TABLE campaign_human_receipts (
+                workspace_id TEXT NOT NULL,
+                campaign_id TEXT NOT NULL,
+                receipt_id TEXT NOT NULL,
+                work_id TEXT NOT NULL,
+                campaign_revision INTEGER NOT NULL CHECK(campaign_revision >= 1),
+                item_version INTEGER NOT NULL CHECK(item_version >= 1),
+                rubric_version INTEGER NOT NULL CHECK(rubric_version >= 1),
+                decision TEXT NOT NULL CHECK(decision IN ('prefer_left', 'prefer_right', 'no_material_difference')),
+                rationale TEXT NOT NULL,
+                sealed_payload_json TEXT NOT NULL,
+                receipt_digest TEXT NOT NULL,
+                sealed_at TEXT NOT NULL,
+                PRIMARY KEY(workspace_id, campaign_id, receipt_id),
+                UNIQUE(workspace_id, campaign_id, work_id, campaign_revision, item_version),
+                FOREIGN KEY(workspace_id, campaign_id, work_id)
+                    REFERENCES campaign_human_work(workspace_id, campaign_id, work_id) ON DELETE RESTRICT
+            )
+            """,
+            """
+            CREATE TABLE campaign_human_promotions (
+                workspace_id TEXT NOT NULL,
+                campaign_id TEXT NOT NULL,
+                campaign_revision INTEGER NOT NULL CHECK(campaign_revision >= 1),
+                state TEXT NOT NULL CHECK(state IN ('blocked_by_review', 'awaiting_human_decision', 'promoted', 'not_required')),
+                version INTEGER NOT NULL CHECK(version >= 1),
+                eligible_receipt_id TEXT,
+                idempotency_key TEXT NOT NULL,
+                decided_by_actor_id TEXT,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(workspace_id, campaign_id, campaign_revision),
+                UNIQUE(workspace_id, idempotency_key),
+                FOREIGN KEY(workspace_id, campaign_id)
+                    REFERENCES campaigns(workspace_id, campaign_id) ON DELETE RESTRICT
+            )
+            """,
+            """
+            CREATE TABLE campaign_human_mutations (
+                workspace_id TEXT NOT NULL,
+                actor_id TEXT NOT NULL,
+                mutation_kind TEXT NOT NULL,
+                idempotency_key TEXT NOT NULL,
+                request_hash TEXT NOT NULL,
+                campaign_id TEXT NOT NULL,
+                event_id TEXT NOT NULL,
+                response_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY(workspace_id, actor_id, mutation_kind, idempotency_key),
+                FOREIGN KEY(event_id) REFERENCES campaign_events(event_id) ON DELETE RESTRICT
+            )
+            """,
+            "CREATE INDEX idx_campaign_human_queue ON campaign_human_work(workspace_id, campaign_id, campaign_revision DESC, created_at DESC)",
+            "CREATE INDEX idx_campaign_human_receipts_work ON campaign_human_receipts(workspace_id, campaign_id, work_id, sealed_at)",
+        ),
+    ),
+    (
+        13,
+        "human_oversight_replay_digest",
+        (
+            "ALTER TABLE campaign_human_mutations ADD COLUMN response_digest TEXT NOT NULL DEFAULT ''",
+        ),
+    ),
+    (
+        14,
+        "human_oversight_authenticated_receipts",
+        (
+            "ALTER TABLE campaign_human_receipts ADD COLUMN seal_key_version TEXT NOT NULL DEFAULT ''",
+        ),
+    ),
+    (
+        15,
+        "human_oversight_authenticated_replay",
+        (
+            "ALTER TABLE campaign_human_mutations ADD COLUMN response_seal_key_version TEXT NOT NULL DEFAULT ''",
+        ),
+    ),
 )
 
 
@@ -1036,6 +1220,164 @@ class CampaignRepository:
         self._require_initialized()
         with self._connection() as connection:
             return bool(connection.execute("PRAGMA foreign_keys").fetchone()[0])
+
+    @staticmethod
+    def _code_lineage_from_row(row: sqlite3.Row) -> CodeLineageRecord:
+        record = CodeLineageRecord.model_validate_json(row["record_json"])
+        if record.record_digest != row["record_digest"] or record.state.value != row["state"]:
+            raise CampaignPersistenceError("campaign_code_lineage_record_corrupt")
+        return record
+
+    def register_code_lineage_requirement(
+        self, value: CodeLineageRecord
+    ) -> CodeLineageRecord:
+        """Persist one required lineage record with exact replay semantics."""
+
+        self._require_initialized()
+        record = CodeLineageRecord.model_validate(value.model_dump(mode="python"))
+        if record.state != CodeLineageState.REQUIRED:
+            raise ValueError("campaign_code_lineage_requirement_state_invalid")
+        with self._connection(immediate=True) as connection:
+            proposal = connection.execute(
+                """
+                SELECT campaign_id FROM campaign_proposals
+                WHERE workspace_id = ? AND proposal_id = ?
+                """,
+                (record.workspace_id, record.proposal_id),
+            ).fetchone()
+            if proposal is None:
+                raise RecordNotFoundError("campaign proposal not found")
+            if proposal["campaign_id"] != record.campaign_id:
+                raise ValueError("campaign_code_lineage_proposal_campaign_mismatch")
+            existing = connection.execute(
+                """
+                SELECT * FROM campaign_code_lineages
+                WHERE workspace_id = ? AND proposal_id = ?
+                """,
+                (record.workspace_id, record.proposal_id),
+            ).fetchone()
+            if existing is not None:
+                current = self._code_lineage_from_row(existing)
+                if current == record:
+                    return current
+                raise ValueError("campaign_code_lineage_identity_conflict")
+            connection.execute(
+                """
+                INSERT INTO campaign_code_lineages(
+                    workspace_id, campaign_id, proposal_id, lineage_id, state,
+                    record_json, record_digest, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.workspace_id,
+                    record.campaign_id,
+                    record.proposal_id,
+                    record.lineage_id,
+                    record.state.value,
+                    _json(record.model_dump(mode="json")),
+                    record.record_digest,
+                    _iso(record.created_at),
+                    _iso(record.updated_at),
+                ),
+            )
+        return record
+
+    def advance_code_lineage(self, value: CodeLineageRecord) -> CodeLineageRecord:
+        """Advance required -> prepared -> captured without mutable evidence."""
+
+        self._require_initialized()
+        record = CodeLineageRecord.model_validate(value.model_dump(mode="python"))
+        ranks = {
+            CodeLineageState.REQUIRED: 0,
+            CodeLineageState.PREPARED: 1,
+            CodeLineageState.CAPTURED: 2,
+        }
+        with self._connection(immediate=True) as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM campaign_code_lineages
+                WHERE workspace_id = ? AND proposal_id = ?
+                """,
+                (record.workspace_id, record.proposal_id),
+            ).fetchone()
+            if row is None:
+                raise RecordNotFoundError("campaign code lineage not found")
+            current = self._code_lineage_from_row(row)
+            if current == record:
+                return current
+            immutable_fields = (
+                "lineage_id",
+                "workspace_id",
+                "campaign_id",
+                "proposal_id",
+                "mutation_kind",
+                "source_repository_profile_id",
+                "created_at",
+            )
+            immutable_changed = any(
+                getattr(current, field) != getattr(record, field)
+                for field in immutable_fields
+            )
+            evidence_rewritten = (
+                current.state != CodeLineageState.REQUIRED
+                and (
+                    current.base_commit != record.base_commit
+                    or current.branch_name != record.branch_name
+                )
+            )
+            if (
+                immutable_changed
+                or evidence_rewritten
+                or ranks[record.state] != ranks[current.state] + 1
+                or record.updated_at < current.updated_at
+            ):
+                raise ValueError("campaign_code_lineage_transition_invalid")
+            connection.execute(
+                """
+                UPDATE campaign_code_lineages
+                SET state = ?, record_json = ?, record_digest = ?, updated_at = ?
+                WHERE workspace_id = ? AND proposal_id = ? AND record_digest = ?
+                """,
+                (
+                    record.state.value,
+                    _json(record.model_dump(mode="json")),
+                    record.record_digest,
+                    _iso(record.updated_at),
+                    record.workspace_id,
+                    record.proposal_id,
+                    current.record_digest,
+                ),
+            )
+        return record
+
+    def get_code_lineage(self, workspace_id: str, proposal_id: str) -> CodeLineageRecord:
+        self._require_initialized()
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM campaign_code_lineages
+                WHERE workspace_id = ? AND proposal_id = ?
+                """,
+                (workspace_id, proposal_id),
+            ).fetchone()
+        if row is None:
+            raise RecordNotFoundError("campaign code lineage not found")
+        return self._code_lineage_from_row(row)
+
+    def list_code_lineages(
+        self, workspace_id: str, campaign_id: str
+    ) -> tuple[CodeLineageRecord, ...]:
+        self._require_initialized()
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM campaign_code_lineages
+                WHERE workspace_id = ? AND campaign_id = ?
+                ORDER BY created_at, lineage_id
+                """,
+                (workspace_id, campaign_id),
+            ).fetchall()
+        return tuple(self._code_lineage_from_row(row) for row in rows)
 
     @staticmethod
     def _campaign_from_row(row: sqlite3.Row) -> Campaign:
@@ -1308,6 +1650,8 @@ class CampaignRepository:
         """Create the aggregate, immutable manifest, event, and replay record atomically."""
 
         self._require_initialized()
+        if len(manifest_revision.manifest.budget_limits) > 64:
+            raise CampaignBudgetResourceLimitError()
         if campaign.status != CampaignStatus.DRAFT or campaign.version != 1:
             raise ValueError("new campaigns must start at draft version 1")
         if (
@@ -1424,6 +1768,35 @@ class CampaignRepository:
         if row is None:
             raise RecordNotFoundError("campaign not found")
         return self._campaign_from_row(row)
+
+    def read_control_room_snapshot(
+        self, workspace_id: str, campaign_id: str
+    ) -> CampaignControlRoomStateV1:
+        """Read the bounded durable control-room state in one SQLite transaction."""
+
+        self._require_initialized()
+        from bashgym.campaigns.control_room import read_control_room_state
+
+        with self._connection() as connection:
+            connection.execute("BEGIN")
+            return read_control_room_state(connection, workspace_id, campaign_id)
+
+    def read_control_room_projection(
+        self, workspace_id: str, campaign_id: str, *, preview_limit: int = 10
+    ) -> ControlRoomDurableProjection:
+        """Read every durable control-room input in one explicit read transaction."""
+
+        self._require_initialized()
+        from bashgym.campaigns.control_room import read_control_room_projection
+
+        with self._connection() as connection:
+            connection.execute("BEGIN")
+            return read_control_room_projection(
+                connection,
+                workspace_id,
+                campaign_id,
+                preview_limit=preview_limit,
+            )
 
     def list_campaigns(self, workspace_id: str) -> list[Campaign]:
         self._require_initialized()
@@ -2224,7 +2597,7 @@ class CampaignRepository:
             )
             artifact_rows = connection.execute(
                 """
-                SELECT artifact_id, sha256, size_bytes, schema_name, valid
+                SELECT artifact_id, sha256, size_bytes, schema_name, valid, metadata_json
                 FROM campaign_artifacts
                 WHERE workspace_id = ? AND campaign_id = ? AND sealed = 1
                 ORDER BY created_at DESC, artifact_id DESC LIMIT 100
@@ -2241,6 +2614,26 @@ class CampaignRepository:
                 )
                 for row in artifact_rows
             )
+            nemo_gym_references = []
+            for row in artifact_rows:
+                metadata = json.loads(row["metadata_json"])
+                raw_reference = metadata.get("nemo_gym")
+                if raw_reference is None:
+                    continue
+                if row["schema_name"] != NEMO_GYM_CAMPAIGN_EVIDENCE_SCHEMA:
+                    raise CampaignPersistenceError(
+                        "campaign_nemo_gym_evidence_schema_mismatch"
+                    )
+                reference = NemoGymEvidenceReference.model_validate(raw_reference)
+                if (
+                    reference.artifact_id != row["artifact_id"]
+                    or reference.artifact_sha256 != row["sha256"]
+                    or not bool(row["valid"])
+                ):
+                    raise CampaignPersistenceError(
+                        "campaign_nemo_gym_evidence_reference_mismatch"
+                    )
+                nemo_gym_references.append(reference)
         return CampaignEvidenceSnapshot(
             workspace_id=workspace_id,
             campaign_id=campaign_id,
@@ -2258,6 +2651,7 @@ class CampaignRepository:
             proposal_counts=proposal_counts,
             completed_hypotheses=summaries,
             artifact_references=artifacts,
+            nemo_gym_evidence_references=tuple(nemo_gym_references),
             available_executors=("fake", "registered_remote"),
             active_study_id=campaign.active_study_id,
             active_action_id=campaign.active_action_id,
@@ -2279,6 +2673,8 @@ class CampaignRepository:
         """Append an immutable manifest revision while no action is in flight."""
 
         self._require_initialized()
+        if len(manifest.budget_limits) > 64:
+            raise CampaignBudgetResourceLimitError()
         mutation_kind = "campaign.manifest.revise"
         request_hash = canonical_hash(
             {
@@ -3041,7 +3437,50 @@ class CampaignRepository:
                     )
             if not candidate_digest:
                 candidate_digest = current.best_development_candidate_ref
-            if not candidate_digest or (not override_reason and not (gate_passed and protected_passed)):
+            human_authority_row = connection.execute(
+                """
+                SELECT
+                    (SELECT state FROM campaign_human_promotions
+                     WHERE workspace_id = ? AND campaign_id = ? AND campaign_revision = ?)
+                        AS promotion_state,
+                    EXISTS(
+                        SELECT 1 FROM campaign_human_work
+                        WHERE workspace_id = ? AND campaign_id = ?
+                          AND campaign_revision = ? AND blocking = 1 AND state != 'replaced'
+                    ) AS has_current_blocking_work
+                """,
+                (
+                    workspace_id,
+                    campaign_id,
+                    current.manifest_revision,
+                    workspace_id,
+                    campaign_id,
+                    current.manifest_revision,
+                ),
+            ).fetchone()
+            human_work_complete = human_promotion_authorized(
+                promotion_state=(
+                    str(human_authority_row["promotion_state"])
+                    if human_authority_row["promotion_state"] is not None
+                    else None
+                ),
+                has_current_blocking_work=bool(
+                    human_authority_row["has_current_blocking_work"]
+                ),
+            )
+            promotion_gate = evaluate_promotion_gate(
+                active_action_id=current.active_action_id,
+                comparison_verdict=decision.get("verdict"),
+                candidate_digest=candidate_digest,
+                protected_required=bool(manifest.protected_artifact_refs),
+                protected_passed=protected_passed,
+                human_work_complete=human_work_complete,
+            )
+            if (
+                not candidate_digest
+                or not human_work_complete
+                or (not override_reason and not promotion_gate.eligible)
+            ):
                 raise PromotionGateFailedError("campaign_gate_failed")
             promoted_at = utc_now()
             target_key = current.target_model.target_contract_key
@@ -3265,6 +3704,7 @@ class CampaignRepository:
         idempotency_key: str,
         payload: dict[str, Any] | None = None,
         stop_reason: str | None = None,
+        precondition: Callable[[Campaign], None] | None = None,
     ) -> CampaignMutation:
         """Apply one explicit transition with CAS, event, and idempotent replay."""
 
@@ -3306,6 +3746,8 @@ class CampaignRepository:
                 trigger,
                 prior_scheduling_status=current.prior_scheduling_status,
             )
+            if precondition is not None:
+                precondition(current)
             now = utc_now()
             updated = current.model_copy(
                 update={
@@ -3390,6 +3832,52 @@ class CampaignRepository:
                 (workspace_id, campaign_id, after_cursor, limit),
             ).fetchall()
         return [(int(row["cursor"]), self._event_from_row(row)) for row in rows]
+
+    def list_workspace_campaign_hint_sources(
+        self, workspace_id: str, *, after_cursor: int, limit: int = 200
+    ) -> tuple[CampaignHintSource, ...]:
+        """Read only classified hint columns; payload_json is never selected."""
+
+        self._require_initialized()
+        bounded_limit = max(1, min(limit, 200))
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT cursor, workspace_id, campaign_id, aggregate_version,
+                       event_type, correlation_id
+                FROM campaign_events
+                WHERE workspace_id = ? AND cursor > ?
+                ORDER BY cursor
+                LIMIT ?
+                """,
+                (workspace_id, after_cursor, bounded_limit),
+            ).fetchall()
+        return tuple(
+            CampaignHintSource(
+                cursor=int(row["cursor"]),
+                workspace_id=str(row["workspace_id"]),
+                campaign_id=str(row["campaign_id"]),
+                aggregate_version=int(row["aggregate_version"]),
+                event_type=str(row["event_type"]),
+                correlation_id=str(row["correlation_id"]),
+            )
+            for row in rows
+        )
+
+    def latest_workspace_campaign_event_cursor(self, workspace_id: str) -> int:
+        """Return a workspace cursor watermark without loading event payloads."""
+
+        self._require_initialized()
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT COALESCE(MAX(cursor), 0) AS latest_cursor
+                FROM campaign_events
+                WHERE workspace_id = ?
+                """,
+                (workspace_id,),
+            ).fetchone()
+        return int(row["latest_cursor"])
 
     def list_recent_events(
         self, workspace_id: str, campaign_id: str, *, limit: int = 50
@@ -3689,13 +4177,22 @@ class CampaignRepository:
             ).fetchone()
             if row is None:
                 generation = 1
+                observation_version = 1
                 connection.execute(
                     """
                     INSERT INTO campaign_scheduler_leases(
-                        lease_key, owner_id, generation, expires_at, heartbeat_at
-                    ) VALUES (?, ?, ?, ?, ?)
+                        lease_key, owner_id, generation, controller_observation_version,
+                        expires_at, heartbeat_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
                     """,
-                    (lease_key, owner_id, generation, _iso(expires_at), _iso(heartbeat)),
+                    (
+                        lease_key,
+                        owner_id,
+                        generation,
+                        observation_version,
+                        _iso(expires_at),
+                        _iso(heartbeat),
+                    ),
                 )
             else:
                 current_expiry = _dt(row["expires_at"])
@@ -3707,15 +4204,31 @@ class CampaignRepository:
                     raise LeaseBusyError(
                         f"{LeaseBusyError.code}: held by another owner until {current_expiry.isoformat()}"
                     )
+                observation_version = int(row["controller_observation_version"]) + 1
                 connection.execute(
                     """
                     UPDATE campaign_scheduler_leases
-                    SET owner_id = ?, generation = ?, expires_at = ?, heartbeat_at = ?
+                    SET owner_id = ?, generation = ?, controller_observation_version = ?,
+                        expires_at = ?, heartbeat_at = ?
                     WHERE lease_key = ?
                     """,
-                    (owner_id, generation, _iso(expires_at), _iso(heartbeat), lease_key),
+                    (
+                        owner_id,
+                        generation,
+                        observation_version,
+                        _iso(expires_at),
+                        _iso(heartbeat),
+                        lease_key,
+                    ),
                 )
-        return LeaseRecord(lease_key, owner_id, generation, expires_at, heartbeat)
+        return LeaseRecord(
+            lease_key,
+            owner_id,
+            generation,
+            observation_version,
+            expires_at,
+            heartbeat,
+        )
 
     def heartbeat_lease(
         self,
@@ -3734,11 +4247,13 @@ class CampaignRepository:
         heartbeat = now or utc_now()
         expires_at = heartbeat + ttl
         with self._connection(immediate=True) as connection:
-            cursor = connection.execute(
+            row = connection.execute(
                 """
                 UPDATE campaign_scheduler_leases
-                SET expires_at = ?, heartbeat_at = ?
+                SET expires_at = ?, heartbeat_at = ?,
+                    controller_observation_version = controller_observation_version + 1
                 WHERE lease_key = ? AND owner_id = ? AND generation = ? AND expires_at > ?
+                RETURNING controller_observation_version
                 """,
                 (
                     _iso(expires_at),
@@ -3748,10 +4263,18 @@ class CampaignRepository:
                     generation,
                     _iso(heartbeat),
                 ),
-            )
-            if cursor.rowcount != 1:
+            ).fetchone()
+            if row is None:
                 raise LeaseLostError(LeaseLostError.code)
-        return LeaseRecord(lease_key, owner_id, generation, expires_at, heartbeat)
+            observation_version = int(row["controller_observation_version"])
+        return LeaseRecord(
+            lease_key,
+            owner_id,
+            generation,
+            observation_version,
+            expires_at,
+            heartbeat,
+        )
 
     def get_lease(self, lease_key: str) -> LeaseRecord | None:
         """Read one scheduler lease for controller health projection."""
@@ -3772,6 +4295,7 @@ class CampaignRepository:
             lease_key=row["lease_key"],
             owner_id=row["owner_id"],
             generation=int(row["generation"]),
+            controller_observation_version=int(row["controller_observation_version"]),
             expires_at=expires_at,
             heartbeat_at=heartbeat_at,
         )
@@ -3792,7 +4316,8 @@ class CampaignRepository:
             cursor = connection.execute(
                 """
                 UPDATE campaign_scheduler_leases
-                SET expires_at = ?, heartbeat_at = ?
+                SET expires_at = ?, heartbeat_at = ?,
+                    controller_observation_version = controller_observation_version + 1
                 WHERE lease_key = ? AND owner_id = ? AND generation = ?
                 """,
                 (_iso(released_at), _iso(released_at), lease_key, owner_id, generation),
@@ -3808,9 +4333,9 @@ class CampaignRepository:
                 """
                 INSERT INTO campaign_actor_credentials(
                     credential_id, actor_id, autonomy_profile, credential_kind,
-                    workspace_ids_json,
+                    workspace_ids_json, authorization_revision,
                     token_salt, token_hash, issued_at, expires_at, token_not_before, revoked_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     value.credential_id,
@@ -3818,6 +4343,7 @@ class CampaignRepository:
                     value.autonomy_profile,
                     value.credential_kind,
                     _json(value.workspace_ids),
+                    value.authorization_revision,
                     value.token_salt,
                     value.token_hash,
                     _iso(value.issued_at),
@@ -3842,6 +4368,7 @@ class CampaignRepository:
             autonomy_profile=row["autonomy_profile"],
             credential_kind=row["credential_kind"],
             workspace_ids=tuple(json.loads(row["workspace_ids_json"])),
+            authorization_revision=int(row["authorization_revision"]),
             token_salt=row["token_salt"],
             token_hash=row["token_hash"],
             issued_at=_dt(row["issued_at"]),
@@ -3897,7 +4424,7 @@ class CampaignRepository:
                     a.token_hash AS access_hash, a.issued_at AS access_issued_at,
                     a.expires_at AS access_expires_at, a.revoked_at AS access_revoked_at,
                     c.actor_id, c.autonomy_profile, c.workspace_ids_json,
-                    c.credential_kind,
+                    c.credential_kind, c.authorization_revision,
                     c.token_salt AS credential_salt, c.token_hash AS credential_hash,
                     c.issued_at AS credential_issued_at, c.expires_at AS credential_expires_at,
                     c.token_not_before, c.revoked_at AS credential_revoked_at
@@ -3924,6 +4451,7 @@ class CampaignRepository:
             autonomy_profile=row["autonomy_profile"],
             credential_kind=row["credential_kind"],
             workspace_ids=tuple(json.loads(row["workspace_ids_json"])),
+            authorization_revision=int(row["authorization_revision"]),
             token_salt=row["credential_salt"],
             token_hash=row["credential_hash"],
             issued_at=_dt(row["credential_issued_at"]),
@@ -3932,6 +4460,70 @@ class CampaignRepository:
             revoked_at=_dt(row["credential_revoked_at"]),
         )
         return access, parent
+
+    def revise_actor_authorization(
+        self,
+        credential_id: str,
+        *,
+        autonomy_profile: str,
+        workspace_ids: tuple[str, ...],
+        audit_event_id: str,
+    ) -> int:
+        """Atomically revise durable authority and advance its cache revision."""
+
+        self._require_initialized()
+        now = utc_now()
+        with self._connection(immediate=True) as connection:
+            parent = connection.execute(
+                """
+                SELECT actor_id, autonomy_profile, workspace_ids_json,
+                       authorization_revision, revoked_at
+                FROM campaign_actor_credentials WHERE credential_id = ?
+                """,
+                (credential_id,),
+            ).fetchone()
+            if parent is None:
+                raise RecordNotFoundError("campaign credential not found")
+            if parent["revoked_at"] is not None:
+                raise CampaignPersistenceError("campaign_refresh_credential_invalid")
+            encoded_workspaces = _json(workspace_ids)
+            current_revision = int(parent["authorization_revision"])
+            if (
+                parent["autonomy_profile"] == autonomy_profile
+                and parent["workspace_ids_json"] == encoded_workspaces
+            ):
+                return current_revision
+            next_revision = current_revision + 1
+            connection.execute(
+                """
+                UPDATE campaign_actor_credentials
+                SET autonomy_profile = ?, workspace_ids_json = ?, authorization_revision = ?
+                WHERE credential_id = ?
+                """,
+                (autonomy_profile, encoded_workspaces, next_revision, credential_id),
+            )
+            connection.execute(
+                """
+                INSERT INTO campaign_auth_audit_events(
+                    event_id, credential_id, event_type, actor_id, safe_payload_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    audit_event_id,
+                    credential_id,
+                    "campaign-auth:authorization-revised",
+                    parent["actor_id"],
+                    _json(
+                        {
+                            "autonomy_profile": autonomy_profile,
+                            "workspace_count": len(workspace_ids),
+                            "authorization_revision": next_revision,
+                        }
+                    ),
+                    _iso(now),
+                ),
+            )
+        return next_revision
 
     def revoke_actor_credential(
         self, credential_id: str, *, audit_event_id: str, reason: str
@@ -3942,7 +4534,10 @@ class CampaignRepository:
         now = utc_now()
         with self._connection(immediate=True) as connection:
             parent = connection.execute(
-                "SELECT actor_id, revoked_at FROM campaign_actor_credentials WHERE credential_id = ?",
+                """
+                SELECT actor_id, authorization_revision, revoked_at
+                FROM campaign_actor_credentials WHERE credential_id = ?
+                """,
                 (credential_id,),
             ).fetchone()
             if parent is None:
@@ -3950,8 +4545,12 @@ class CampaignRepository:
             if parent["revoked_at"] is not None:
                 return 0
             connection.execute(
-                "UPDATE campaign_actor_credentials SET revoked_at = ? WHERE credential_id = ?",
-                (_iso(now), credential_id),
+                """
+                UPDATE campaign_actor_credentials
+                SET revoked_at = ?, authorization_revision = ?
+                WHERE credential_id = ?
+                """,
+                (_iso(now), int(parent["authorization_revision"]) + 1, credential_id),
             )
             children = connection.execute(
                 """
@@ -3971,7 +4570,13 @@ class CampaignRepository:
                     credential_id,
                     "campaign-auth:credential-revoked",
                     parent["actor_id"],
-                    _json({"reason": reason, "descendants_revoked": children.rowcount}),
+                    _json(
+                        {
+                            "reason": reason,
+                            "descendants_revoked": children.rowcount,
+                            "authorization_revision": int(parent["authorization_revision"]) + 1,
+                        }
+                    ),
                     _iso(now),
                 ),
             )

@@ -3,10 +3,13 @@ from __future__ import annotations
 import os
 import socket
 import sys
+from pathlib import Path
 
 import pytest
 
+from bashgym.mcp import policy
 from bashgym.mcp.policy import (
+    ExecutableFingerprint,
     ExecutableFingerprintMismatchError,
     McpPolicyError,
     SecretResolutionError,
@@ -122,7 +125,8 @@ def test_inline_credentials_are_rejected_but_opaque_refs_work(monkeypatch):
 
 def test_stdio_launch_is_argv_only_and_fingerprint_is_enforced():
     launch = prepare_stdio_launch(sys.executable, ["-V"])
-    assert launch.command == launch.fingerprint.path
+    assert launch.command == str(Path(sys.executable).absolute())
+    assert launch.fingerprint.path == str(Path(sys.executable).resolve(strict=True))
     assert launch.args == ("-V",)
     assert len(launch.fingerprint.sha256) == 64
     assert (
@@ -140,3 +144,28 @@ def test_stdio_launch_is_argv_only_and_fingerprint_is_enforced():
         prepare_stdio_launch(sys.executable, ["-V"], expected_fingerprint=changed)
     with pytest.raises(McpPolicyError, match="argv sequence"):
         prepare_stdio_launch(sys.executable, "-V")
+
+
+def test_stdio_launch_preserves_virtualenv_invocation_path_when_fingerprint_resolves_target(
+    monkeypatch,
+    tmp_path,
+):
+    invocation = tmp_path / "venv" / "bin" / "python"
+    target = tmp_path / "base" / "bin" / "python"
+    invocation.parent.mkdir(parents=True)
+    invocation.write_bytes(b"venv launcher")
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"base interpreter")
+    fingerprint = ExecutableFingerprint(
+        path=str(target.resolve()),
+        size=target.stat().st_size,
+        modified_ns=target.stat().st_mtime_ns,
+        sha256="a" * 64,
+    )
+    monkeypatch.setattr(policy.shutil, "which", lambda _command: str(invocation))
+    monkeypatch.setattr(policy, "fingerprint_executable", lambda _path: fingerprint)
+
+    launch = prepare_stdio_launch("python", ["-m", "example"])
+
+    assert launch.command == str(invocation)
+    assert launch.fingerprint == fingerprint

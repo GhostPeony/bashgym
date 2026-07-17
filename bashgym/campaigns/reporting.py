@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import io
 import zipfile
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+from bashgym._compat import UTC
 
 
 class CampaignReportingUnavailableError(RuntimeError):
@@ -99,8 +101,12 @@ def write_loss_png(snapshot: dict[str, Any], path: Path) -> None:
         label = f"{attempt_id} | {stage}"
         draw.text((left + 10, top + 12 + index * 16), label, fill=color, font=font)
     if not series:
-        draw.text((width // 2 - 65, height // 2), "No persisted loss series", fill="#6b645d", font=font)
-    draw.text((width - 224, height - 18), "Dashed = smoke engineering evidence", fill="#6b645d", font=font)
+        draw.text(
+            (width // 2 - 65, height // 2), "No persisted loss series", fill="#6b645d", font=font
+        )
+    draw.text(
+        (width - 224, height - 18), "Dashed = smoke engineering evidence", fill="#6b645d", font=font
+    )
     image.save(path, format="PNG", optimize=False, compress_level=9)
 
 
@@ -157,7 +163,9 @@ def write_campaign_docx(
         from docx.oxml.ns import qn
         from docx.shared import Inches, Pt, RGBColor
     except ImportError as exc:  # pragma: no cover - installation-dependent
-        raise CampaignReportingUnavailableError("Install bashgym[reports] for DOCX exports") from exc
+        raise CampaignReportingUnavailableError(
+            "Install bashgym[reports] for DOCX exports"
+        ) from exc
 
     def set_font(run, size: float, color: str = _INK, *, bold: bool = False) -> None:
         run.font.name = "Calibri"
@@ -218,7 +226,9 @@ def write_campaign_docx(
     section = document.sections[0]
     section.start_type = WD_SECTION.NEW_PAGE
     section.page_width, section.page_height = Inches(8.5), Inches(11)
-    section.top_margin = section.right_margin = section.bottom_margin = section.left_margin = Inches(1)
+    section.top_margin = section.right_margin = section.bottom_margin = section.left_margin = (
+        Inches(1)
+    )
     section.header_distance = section.footer_distance = Inches(0.492)
     normal = document.styles["Normal"]
     normal.font.name, normal.font.size = "Calibri", Pt(11)
@@ -253,7 +263,11 @@ def write_campaign_docx(
     set_font(title.add_run("CAMPAIGN EVIDENCE REPORT"), 24, _INK, bold=True)
     subtitle = document.add_paragraph()
     subtitle.paragraph_format.space_after = Pt(16)
-    set_font(subtitle.add_run(str(snapshot["campaign"].get("objective", "Experiment campaign"))), 13, _MUTED)
+    set_font(
+        subtitle.add_run(str(snapshot["campaign"].get("objective", "Experiment campaign"))),
+        13,
+        _MUTED,
+    )
     metadata = (
         ("Campaign", snapshot["campaign"].get("campaign_id", "unknown")),
         ("Status", snapshot["campaign"].get("status", "unknown")),
@@ -275,7 +289,9 @@ def write_campaign_docx(
         "Training loss by persisted step; dashed series identify smoke engineering evidence.",
     )
     picture._inline.docPr.set("title", "Campaign training loss")
-    caption = document.add_paragraph("Figure 1. Persisted loss series. Dashed lines are smoke engineering evidence.")
+    caption = document.add_paragraph(
+        "Figure 1. Persisted loss series. Dashed lines are smoke engineering evidence."
+    )
     caption.paragraph_format.space_before, caption.paragraph_format.space_after = Pt(4), Pt(4)
     set_font(caption.runs[0], 9, _MUTED)
 
@@ -292,7 +308,9 @@ def write_campaign_docx(
     header_properties.append(header_marker)
     for item in snapshot["attempts"]:
         values = (
-            item.get("attempt_id", ""), item.get("stage", ""), item.get("status", ""),
+            item.get("attempt_id", ""),
+            item.get("stage", ""),
+            item.get("status", ""),
             str(item.get("candidate_digest", ""))[:12],
         )
         cells = table.add_row().cells
@@ -352,24 +370,51 @@ def write_campaign_pdf(
 
     styles = getSampleStyleSheet()
     body = ParagraphStyle(
-        "CampaignBody", parent=styles["BodyText"], fontName="Helvetica", fontSize=10.5,
-        leading=14, spaceAfter=6, textColor=colors.HexColor(f"#{_INK}"), alignment=TA_LEFT,
+        "CampaignBody",
+        parent=styles["BodyText"],
+        fontName="Helvetica",
+        fontSize=10.5,
+        leading=14,
+        spaceAfter=6,
+        textColor=colors.HexColor(f"#{_INK}"),
+        alignment=TA_LEFT,
     )
     heading = ParagraphStyle(
-        "CampaignHeading", parent=styles["Heading1"], fontName="Helvetica-Bold", fontSize=15,
-        leading=18, spaceBefore=14, spaceAfter=7, textColor=colors.HexColor(f"#{_ACCENT}"),
+        "CampaignHeading",
+        parent=styles["Heading1"],
+        fontName="Helvetica-Bold",
+        fontSize=15,
+        leading=18,
+        spaceBefore=14,
+        spaceAfter=7,
+        textColor=colors.HexColor(f"#{_ACCENT}"),
     )
     title = ParagraphStyle(
-        "CampaignTitle", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=23,
-        leading=27, spaceAfter=5, textColor=colors.HexColor(f"#{_INK}"), alignment=TA_LEFT,
+        "CampaignTitle",
+        parent=styles["Title"],
+        fontName="Helvetica-Bold",
+        fontSize=23,
+        leading=27,
+        spaceAfter=5,
+        textColor=colors.HexColor(f"#{_INK}"),
+        alignment=TA_LEFT,
     )
     subtitle = ParagraphStyle(
-        "CampaignSubtitle", parent=body, fontSize=12.5, leading=16, spaceAfter=14,
+        "CampaignSubtitle",
+        parent=body,
+        fontSize=12.5,
+        leading=16,
+        spaceAfter=14,
         textColor=colors.HexColor(f"#{_MUTED}"),
     )
     document = SimpleDocTemplate(
-        str(path), pagesize=letter, leftMargin=inch, rightMargin=inch,
-        topMargin=inch, bottomMargin=inch, title="Campaign Evidence Report",
+        str(path),
+        pagesize=letter,
+        leftMargin=inch,
+        rightMargin=inch,
+        topMargin=inch,
+        bottomMargin=inch,
+        title="Campaign Evidence Report",
         author="BashGym Campaign Controller",
     )
     campaign = snapshot["campaign"]
@@ -390,7 +435,10 @@ def write_campaign_pdf(
             Paragraph(_quality_text(snapshot), body),
             Paragraph("Training evidence", heading),
             Image(str(loss_png), width=6.5 * inch, height=3.25 * inch),
-            Paragraph("Figure 1. Persisted loss series. Dashed lines are smoke engineering evidence.", body),
+            Paragraph(
+                "Figure 1. Persisted loss series. Dashed lines are smoke engineering evidence.",
+                body,
+            ),
             PageBreak(),
             Paragraph("Attempts", heading),
         ]
@@ -398,12 +446,16 @@ def write_campaign_pdf(
     rows = [["Attempt", "Stage", "Status", "Candidate"]]
     rows.extend(
         [
-            str(item.get("attempt_id", "")), str(item.get("stage", "")),
-            str(item.get("status", "")), str(item.get("candidate_digest", ""))[:12],
+            str(item.get("attempt_id", "")),
+            str(item.get("stage", "")),
+            str(item.get("status", "")),
+            str(item.get("candidate_digest", ""))[:12],
         ]
         for item in snapshot["attempts"]
     )
-    table = Table(rows, colWidths=[1.55 * inch, 1.75 * inch, 1.15 * inch, 2.05 * inch], repeatRows=1)
+    table = Table(
+        rows, colWidths=[1.55 * inch, 1.75 * inch, 1.15 * inch, 2.05 * inch], repeatRows=1
+    )
     table.setStyle(
         TableStyle(
             [
@@ -425,7 +477,8 @@ def write_campaign_pdf(
     story.append(
         Paragraph(
             f"{len(snapshot['artifacts'])} sealed artifact records and "
-            f"{len(snapshot['comparisons'])} comparison records are included.", body,
+            f"{len(snapshot['comparisons'])} comparison records are included.",
+            body,
         )
     )
     flags = snapshot["flags"] or ["No implementation flags were recorded for this export."]
@@ -436,7 +489,8 @@ def write_campaign_pdf(
             Paragraph("Reconciliation", heading),
             Paragraph(
                 "Every table and chart is derived from campaign_evidence.json. "
-                "export_manifest.json records the SHA-256 of every generated file.", body,
+                "export_manifest.json records the SHA-256 of every generated file.",
+                body,
             ),
         ]
     )

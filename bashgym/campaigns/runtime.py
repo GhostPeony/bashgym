@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
 import sqlite3
@@ -14,6 +16,7 @@ from typing import Any, Literal
 from pydantic import Field
 
 from bashgym.campaigns.contracts import (
+    PUBLIC_CAMPAIGN_BLOCKER_CODES,
     ActionAttempt,
     ActionStatus,
     AttemptStatus,
@@ -23,6 +26,7 @@ from bashgym.campaigns.contracts import (
     CampaignEvent,
     CampaignManifest,
     CampaignStatus,
+    CodeLineageState,
     ContractModel,
     CredentialKind,
     FrozenContractModel,
@@ -37,12 +41,17 @@ from bashgym.campaigns.evaluation import (
     DevelopmentComparison,
     RetrievalEvaluationArtifact,
 )
+from bashgym.campaigns.lineage import code_mutation_kind_for_variable
 from bashgym.campaigns.metrics import (
     MetricSeriesValue,
     TrainingAlert,
     TrainingMetricPoint,
     detect_training_alerts,
     parse_metric_lines,
+)
+from bashgym.campaigns.nemo_gym_evidence import (
+    NEMO_GYM_CAMPAIGN_EVIDENCE_SCHEMA,
+    load_nemo_gym_campaign_evidence,
 )
 from bashgym.campaigns.persistence import (
     BudgetExceededError,
@@ -98,15 +107,14 @@ class ActionSpec(ContractModel):
         if self.executor_kind == "ssh_remote" and self.stage not in {
             StageKind.SMOKE_TRAINING,
             StageKind.FULL_TRAINING,
+            StageKind.DEVELOPMENT_EVALUATION,
         }:
-            raise ValueError("remote executor is restricted to approved training stages")
+            raise ValueError("remote executor is restricted to approved compute stages")
         if (
             self.executor_kind == "development_evaluation"
             and self.stage != StageKind.DEVELOPMENT_EVALUATION
         ):
-            raise ValueError(
-                "development evaluation executor is restricted to its approved stage"
-            )
+            raise ValueError("development evaluation executor is restricted to its approved stage")
 
     @property
     def input_digest(self) -> str:
@@ -162,6 +170,30 @@ class CampaignArtifactRecord(FrozenContractModel):
     valid: bool
     metadata: dict[str, Any]
     created_at: datetime
+
+
+_ARTIFACT_CURSOR_PREFIX = "a1."
+
+
+def _encode_artifact_cursor(sequence: int) -> str:
+    payload = base64.urlsafe_b64encode(sequence.to_bytes(8, "big")).decode("ascii")
+    return f"{_ARTIFACT_CURSOR_PREFIX}{payload.rstrip('=')}"
+
+
+def _decode_artifact_cursor(cursor: str) -> int:
+    if not cursor.startswith(_ARTIFACT_CURSOR_PREFIX):
+        raise ValueError("invalid artifact continuation cursor")
+    payload = cursor.removeprefix(_ARTIFACT_CURSOR_PREFIX)
+    try:
+        raw = base64.b64decode(f"{payload}=", altchars=b"-_", validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("invalid artifact continuation cursor") from exc
+    if len(raw) != 8:
+        raise ValueError("invalid artifact continuation cursor")
+    sequence = int.from_bytes(raw, "big")
+    if sequence < 1:
+        raise ValueError("invalid artifact continuation cursor")
+    return sequence
 
 
 def _study_status_for_stage(stage: StageKind) -> StudyStatus:
@@ -243,9 +275,7 @@ class CampaignRuntimeRepository(CampaignRepository):
             raise RecordNotFoundError("campaign attempt not found")
         return self._attempt_from_row(row)
 
-    def list_attempts(
-        self, workspace_id: str, campaign_id: str
-    ) -> tuple[ActionAttempt, ...]:
+    def list_attempts(self, workspace_id: str, campaign_id: str) -> tuple[ActionAttempt, ...]:
         self._require_initialized()
         with self._connection() as connection:
             rows = connection.execute(
@@ -289,9 +319,7 @@ class CampaignRuntimeRepository(CampaignRepository):
         campaign_id: str,
         study_id: str,
         *,
-        executor_profiles: Mapping[
-            tuple[str, str], ApprovedRemoteExecutorProfile
-        ] | None = None,
+        executor_profiles: Mapping[tuple[str, str], ApprovedRemoteExecutorProfile] | None = None,
     ) -> ActionSpec:
         """Build a safe controller action from immutable study/manifest evidence.
 
@@ -328,6 +356,13 @@ class CampaignRuntimeRepository(CampaignRepository):
                 """,
                 (workspace_id, campaign_id, study.proposal_id),
             ).fetchone()
+            lineage_row = connection.execute(
+                """
+                SELECT * FROM campaign_code_lineages
+                WHERE workspace_id = ? AND campaign_id = ? AND proposal_id = ?
+                """,
+                (workspace_id, campaign_id, study.proposal_id),
+            ).fetchone()
             manifest_row = connection.execute(
                 """
                 SELECT manifest_json FROM campaign_manifest_revisions
@@ -337,6 +372,19 @@ class CampaignRuntimeRepository(CampaignRepository):
             ).fetchone()
         proposal = json.loads(proposal_row["proposal_json"])
         manifest = CampaignManifest.model_validate_json(manifest_row["manifest_json"])
+        required_lineage_kind = code_mutation_kind_for_variable(
+            str(proposal.get("primary_variable", ""))
+        )
+        code_lineage = None
+        if lineage_row is not None:
+            code_lineage = self._code_lineage_from_row(lineage_row)
+            if code_lineage.state != CodeLineageState.CAPTURED:
+                raise CampaignPersistenceError("campaign_code_lineage_not_captured")
+        if required_lineage_kind is not None:
+            if code_lineage is None:
+                raise CampaignPersistenceError("campaign_code_lineage_not_registered")
+            if code_lineage.mutation_kind != required_lineage_kind:
+                raise CampaignPersistenceError("campaign_code_lineage_mutation_kind_mismatch")
         if item.stage == StageKind.DATA_BUILD:
             recipe = dict(proposal["dataset_recipe"])
         elif item.stage in {StageKind.SMOKE_TRAINING, StageKind.FULL_TRAINING}:
@@ -348,8 +396,12 @@ class CampaignRuntimeRepository(CampaignRepository):
             raise CampaignPersistenceError("campaign_recipe_runtime_invalid")
         executor_kind = runtime.get("executor_kind", "fake")
         executor_config: dict[str, Any] = {}
-        if executor_kind in {"registered_training", "ssh_remote"}:
-            if item.stage not in {StageKind.SMOKE_TRAINING, StageKind.FULL_TRAINING}:
+        if executor_kind in {"registered_compute", "registered_training", "ssh_remote"}:
+            if item.stage not in {
+                StageKind.SMOKE_TRAINING,
+                StageKind.FULL_TRAINING,
+                StageKind.DEVELOPMENT_EVALUATION,
+            }:
                 raise CampaignPersistenceError("campaign_remote_stage_not_allowed")
             profile_key = (
                 manifest.compute_profile_id,
@@ -361,22 +413,42 @@ class CampaignRuntimeRepository(CampaignRepository):
             target_model_digest = canonical_hash(campaign.target_model.model_dump(mode="json"))
             if profile.target_model_digest != target_model_digest:
                 raise CampaignPersistenceError("campaign_remote_target_model_mismatch")
+            try:
+                configured_stage = profile.stage_profile(item.stage)
+            except KeyError as exc:
+                raise CampaignPersistenceError("campaign_remote_profile_material_invalid") from exc
+            if code_lineage is not None:
+                binding = configured_stage.code_lineage_binding
+                if binding is None:
+                    raise CampaignPersistenceError(
+                        "campaign_code_lineage_execution_binding_required"
+                    )
+                if (
+                    binding.source_repository_profile_id
+                    != code_lineage.source_repository_profile_id
+                ):
+                    raise CampaignPersistenceError(
+                        "campaign_code_lineage_execution_binding_mismatch"
+                    )
             recipe_digest = canonical_hash(
                 {
                     "training_recipe": proposal["training_recipe"],
                     "profile_digest": profile.profile_digest,
                     "stage": item.stage.value,
+                    "code_lineage_record_digest": (
+                        code_lineage.record_digest if code_lineage is not None else None
+                    ),
                 }
             )
             try:
                 executor_config = remote_executor_config(
-                    profile, item.stage, recipe_digest=recipe_digest
+                    profile,
+                    item.stage,
+                    recipe_digest=recipe_digest,
+                    code_lineage=code_lineage,
                 )
-                configured_stage = profile.stage_profile(item.stage)
             except (KeyError, OSError, ValueError) as exc:
-                raise CampaignPersistenceError(
-                    "campaign_remote_profile_material_invalid"
-                ) from exc
+                raise CampaignPersistenceError("campaign_remote_profile_material_invalid") from exc
             budget_unit = configured_stage.budget_unit
             reservation = configured_stage.budget_reservation
         elif executor_kind == "fake":
@@ -396,25 +468,38 @@ class CampaignRuntimeRepository(CampaignRepository):
         if budget_unit not in manifest.budget_limits:
             raise CampaignPersistenceError("campaign_budget_unit_not_approved")
         fake_steps = int(runtime.get("fake_steps", 8))
+        input_contract = {
+            "stage_input": item.input_contract,
+            "dataset_recipe_digest": canonical_hash(proposal["dataset_recipe"]),
+            "training_recipe_digest": canonical_hash(proposal["training_recipe"]),
+            "evaluation_recipe_digest": canonical_hash(proposal["evaluation_recipe"]),
+        }
+        if code_lineage is not None:
+            input_contract["code_lineage"] = {
+                "lineage_id": code_lineage.lineage_id,
+                "record_digest": code_lineage.record_digest,
+                "mutation_kind": code_lineage.mutation_kind.value,
+                "source_repository_profile_id": (code_lineage.source_repository_profile_id),
+                "base_commit": code_lineage.base_commit,
+                "commit_sha": code_lineage.commit_sha,
+                "patch_sha256": code_lineage.patch_sha256,
+                "changed_paths": list(code_lineage.changed_paths),
+            }
         return ActionSpec(
             workspace_id=workspace_id,
             campaign_id=campaign_id,
             study_id=study_id,
             stage_index=study.current_stage_index,
             stage=item.stage,
-            input_contract={
-                "stage_input": item.input_contract,
-                "dataset_recipe_digest": canonical_hash(proposal["dataset_recipe"]),
-                "training_recipe_digest": canonical_hash(proposal["training_recipe"]),
-                "evaluation_recipe_digest": canonical_hash(proposal["evaluation_recipe"]),
-            },
+            input_contract=input_contract,
             candidate_digest=study.candidate_digest,
             manifest_revision=campaign.manifest_revision,
             budget_unit=budget_unit,
             budget_reservation=reservation,
             executor_kind=(
                 "ssh_remote"
-                if executor_kind in {"registered_training", "ssh_remote"}
+                if executor_kind
+                in {"registered_compute", "registered_training", "ssh_remote"}
                 else executor_kind
             ),
             executor_config=executor_config,
@@ -434,9 +519,7 @@ class CampaignRuntimeRepository(CampaignRepository):
         """Append one bounded blocker event without reserving budget or scheduling."""
 
         self._require_initialized()
-        if not code or len(code) > 160 or any(
-            character not in "abcdefghijklmnopqrstuvwxyz0123456789_.-" for character in code
-        ):
+        if code not in PUBLIC_CAMPAIGN_BLOCKER_CODES:
             code = "campaign_controller_action_blocked"
         observed_at = now or utc_now()
         with self._connection(immediate=True) as connection:
@@ -1017,7 +1100,9 @@ class CampaignRuntimeRepository(CampaignRepository):
             ).fetchone()
         return str(row["request_id"]) if row is not None else None
 
-    def settle_force_stop_request(self, workspace_id: str, request_id: str, *, executed: bool) -> None:
+    def settle_force_stop_request(
+        self, workspace_id: str, request_id: str, *, executed: bool
+    ) -> None:
         settled_at = utc_now()
         with self._connection(immediate=True) as connection:
             connection.execute(
@@ -1025,7 +1110,12 @@ class CampaignRuntimeRepository(CampaignRepository):
                 UPDATE campaign_action_control_requests SET state = ?, updated_at = ?
                 WHERE workspace_id = ? AND request_id = ? AND state = 'pending'
                 """,
-                ("executed" if executed else "identity_mismatch", _iso(settled_at), workspace_id, request_id),
+                (
+                    "executed" if executed else "identity_mismatch",
+                    _iso(settled_at),
+                    workspace_id,
+                    request_id,
+                ),
             )
 
     def append_remote_metrics(
@@ -1107,9 +1197,12 @@ class CampaignRuntimeRepository(CampaignRepository):
             ).fetchone()
             event_identity = f"metrics:{attempt.attempt_id}:{source}:{cursor_end}"
             event_id = f"evt-{hashlib.sha256(event_identity.encode()).hexdigest()[:24]}"
-            if connection.execute(
-                "SELECT 1 FROM campaign_events WHERE event_id = ?", (event_id,)
-            ).fetchone() is None:
+            if (
+                connection.execute(
+                    "SELECT 1 FROM campaign_events WHERE event_id = ?", (event_id,)
+                ).fetchone()
+                is None
+            ):
                 self._insert_event(
                     connection,
                     CampaignEvent(
@@ -1218,6 +1311,60 @@ class CampaignRuntimeRepository(CampaignRepository):
             for row in rows
         )
 
+    def list_artifact_page(
+        self,
+        workspace_id: str,
+        campaign_id: str,
+        *,
+        after_cursor: str | None = None,
+        limit: int = 50,
+    ) -> tuple[tuple[CampaignArtifactRecord, ...], str | None, bool]:
+        """Return an append-stable artifact page with an opaque continuation cursor."""
+
+        self._require_initialized()
+        limit = max(1, min(limit, 200))
+        after_sequence = _decode_artifact_cursor(after_cursor) if after_cursor else 0
+        with self._connection() as connection:
+            campaign = connection.execute(
+                "SELECT 1 FROM campaigns WHERE workspace_id = ? AND campaign_id = ?",
+                (workspace_id, campaign_id),
+            ).fetchone()
+            if campaign is None:
+                raise RecordNotFoundError("campaign not found")
+            rows = connection.execute(
+                """
+                SELECT rowid AS artifact_sequence, * FROM campaign_artifacts
+                WHERE workspace_id = ? AND campaign_id = ? AND rowid > ?
+                ORDER BY rowid LIMIT ?
+                """,
+                (workspace_id, campaign_id, after_sequence, limit + 1),
+            ).fetchall()
+        has_more = len(rows) > limit
+        page_rows = rows[:limit]
+        artifacts = tuple(
+            CampaignArtifactRecord(
+                workspace_id=row["workspace_id"],
+                campaign_id=row["campaign_id"],
+                artifact_id=row["artifact_id"],
+                producer_action_id=row["producer_action_id"],
+                uri=row["uri"],
+                sha256=row["sha256"],
+                size_bytes=row["size_bytes"],
+                schema_name=row["schema_name"],
+                sealed=bool(row["sealed"]),
+                valid=bool(row["valid"]),
+                metadata=json.loads(row["metadata_json"]),
+                created_at=row["created_at"],
+            )
+            for row in page_rows
+        )
+        next_cursor = (
+            _encode_artifact_cursor(int(page_rows[-1]["artifact_sequence"]))
+            if has_more and page_rows
+            else None
+        )
+        return artifacts, next_cursor, has_more
+
     def store_retrieval_evaluation(
         self,
         workspace_id: str,
@@ -1294,6 +1441,23 @@ class CampaignRuntimeRepository(CampaignRepository):
                 if existing["decision_json"] != payload:
                     raise CampaignPersistenceError("campaign_gate_identity_conflict")
                 return decision_id
+            blocking_human_work = connection.execute(
+                """
+                SELECT 1
+                FROM campaign_human_work AS work
+                JOIN campaigns AS campaign
+                  ON campaign.workspace_id = work.workspace_id
+                 AND campaign.campaign_id = work.campaign_id
+                WHERE work.workspace_id = ? AND work.campaign_id = ?
+                  AND work.campaign_revision = campaign.manifest_revision
+                  AND work.blocking = 1
+                  AND work.state NOT IN ('submitted', 'replaced')
+                LIMIT 1
+                """,
+                (workspace_id, campaign_id),
+            ).fetchone()
+            if blocking_human_work is not None:
+                raise CampaignPersistenceError("campaign_human_work_incomplete")
             connection.execute(
                 """
                 INSERT INTO campaign_gate_decisions(
@@ -1334,8 +1498,7 @@ class CampaignRuntimeRepository(CampaignRepository):
                 (workspace_id, campaign_id),
             ).fetchall()
         return tuple(
-            DevelopmentComparison.model_validate_json(row["decision_json"])
-            for row in rows
+            DevelopmentComparison.model_validate_json(row["decision_json"]) for row in rows
         )
 
     def register_remote_identity(
@@ -2313,8 +2476,7 @@ class CampaignRuntimeRepository(CampaignRepository):
                             "seal_uri": str(sealed_directory),
                             "outcome": manifest.outcome,
                             "resource_usage": [
-                                item.model_dump(mode="json")
-                                for item in manifest.resource_usage
+                                item.model_dump(mode="json") for item in manifest.resource_usage
                             ],
                         }
                     ),
@@ -2435,9 +2597,7 @@ class CampaignRuntimeRepository(CampaignRepository):
                 self._attempt_select() + " WHERE t.workspace_id = ? AND t.attempt_id = ?",
                 (manifest.workspace_id, manifest.attempt_id),
             ).fetchone()
-        return RuntimeCompletion(
-            self._attempt_from_row(updated), campaign.version + 1, event
-        )
+        return RuntimeCompletion(self._attempt_from_row(updated), campaign.version + 1, event)
 
     def complete_from_seal(
         self,
@@ -2532,6 +2692,16 @@ class CampaignRuntimeRepository(CampaignRepository):
             reservation = json.loads(action_row["reservation_json"])
             for output in manifest.outputs:
                 artifact_id = f"artifact-{hashlib.sha256(f'{manifest.attempt_id}:{output.path}'.encode()).hexdigest()[:24]}"
+                metadata: dict[str, Any] = {"attempt_id": manifest.attempt_id}
+                if output.schema_name == NEMO_GYM_CAMPAIGN_EVIDENCE_SCHEMA:
+                    evidence = load_nemo_gym_campaign_evidence(
+                        sealed_directory / output.path,
+                        expected_attempt=attempt,
+                    )
+                    metadata["nemo_gym"] = evidence.bounded_reference(
+                        artifact_id=artifact_id,
+                        artifact_sha256=output.sha256,
+                    )
                 connection.execute(
                     """
                     INSERT OR IGNORE INTO campaign_artifacts(
@@ -2549,7 +2719,7 @@ class CampaignRuntimeRepository(CampaignRepository):
                         output.sha256,
                         output.size_bytes,
                         output.schema_name,
-                        _json({"attempt_id": manifest.attempt_id}),
+                        _json(metadata),
                         _iso(completed_at),
                     ),
                 )

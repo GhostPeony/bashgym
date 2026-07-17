@@ -1,4 +1,4 @@
-# Bash Gym
+# BashGym
 
 **Turn your AI coding sessions into fine-tuned models.**
 
@@ -8,7 +8,7 @@
 
 ---
 
-Every AI coding session is a chain-of-thought reasoning trace — step-by-step problem solving with verifiable outcomes. Every session from Claude Code, Gemini CLI, OpenCode, Codex, or Copilot CLI — tool calls, file edits, bash commands, multi-step reasoning — is a structured trace of expert coding behavior. Bash Gym captures these traces and uses them to train a reasoning language model with the same techniques behind frontier RLMs: GRPO for reinforcement learning, RLVR for verifiable reward signals from test results, and distillation to transfer reasoning from a large teacher into a small local model. The result is a personal RLM trained on how you actually think through code — your conventions, your repos, your patterns.
+Every AI coding session is a chain-of-thought reasoning trace — step-by-step problem solving with verifiable outcomes. Every session from Claude Code, Gemini CLI, OpenCode, Codex, or Copilot CLI — tool calls, file edits, bash commands, multi-step reasoning — is a structured trace of expert coding behavior. BashGym captures these traces and uses them to train a reasoning language model with the same techniques behind frontier RLMs: GRPO for reinforcement learning, RLVR for verifiable reward signals from test results, and distillation to transfer reasoning from a large teacher into a small local model. The result is a personal RLM trained on how you actually think through code — your conventions, your repos, your patterns.
 
 ---
 
@@ -16,9 +16,13 @@ Every AI coding session is a chain-of-thought reasoning trace — step-by-step p
 
 - **[docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)** — install to first trained model, step by step.
 - **[docs/training/overview.md](docs/training/overview.md)** — training gym curriculum: how strategies, rewards, world models, and gates fit together.
+- **[docs/training/autoresearch-campaign.md](docs/training/autoresearch-campaign.md)** — fresh-clone AutoResearch guide: durable campaigns versus direct runs, private SSH setup, doctor/readiness, Control Room, and privacy boundaries.
+- **[docs/training/bashgym-autoresearch-nvidia-brief.md](docs/training/bashgym-autoresearch-nvidia-brief.md)** — what BashGym adopted from NVIDIA's workflow, what remains platform-native, and the current capability gaps.
+- `bashgym campaign sync-autoresearch-registry` safely projects applied activation evidence into guided setup; planning is read-only and apply requires explicit installation authority.
+- **[docs/PRODUCTIZATION.md](docs/PRODUCTIZATION.md)** — tested fresh-clone contract, measured time to first success, portability boundary, and remaining gaps.
 - **[docs/training/capability-map.md](docs/training/capability-map.md)** — full training/eval spread, including ready, backend-dependent, and diagnostic surfaces.
 - **[docs/training/tmax-terminal-rl-recipe.md](docs/training/tmax-terminal-rl-recipe.md)** — TMax-style terminal RL recipe from environment pool to backend smoke and release gates.
-- **[docs/training/private-compute-eval-checklist.md](docs/training/private-compute-eval-checklist.md)** — private/cloud compute backend-smoke and eval checklist for DPPO/ECHO/RWML runs.
+- **[docs/training/private-compute-eval-checklist.md](docs/training/private-compute-eval-checklist.md)** — local/private compute backend-smoke and eval checklist for DPPO/ECHO/RWML runs.
 - **[docs/TRAINING_DATA_GUIDE.md](docs/TRAINING_DATA_GUIDE.md)** — trace format, quality tiers, and example generation.
 - **[docs/training/strategy-guide.md](docs/training/strategy-guide.md)** — concrete SFT, DPO, GRPO/RLVR, distillation, cascade, and DPPO starting recipes.
 - **[docs/API.md](docs/API.md)** — REST API reference.
@@ -99,14 +103,16 @@ The workspace is an infinite canvas where terminals, browsers, and integration n
 
 | Requirement | Version | Notes |
 |-------------|---------|-------|
-| **Python** | 3.10+ | Backend API and training scripts |
-| **Node.js** | 18+ LTS | Frontend dashboard |
-| **Anthropic API key** | — | Get one at [console.anthropic.com](https://console.anthropic.com/) |
+| **Python** | 3.10+ | Backend API and control plane; use a backend-supported Python/CUDA combination for training |
+| **Node.js** | 22+ LTS | Frontend dashboard and native Electron packaging |
+| **Provider API key** | Optional | Add Anthropic, NVIDIA, OpenAI, or Hugging Face credentials only for features that use them |
 | **CUDA GPU** | 8GB+ VRAM | Only needed for local training. Not required for trace capture or the dashboard. |
 
 On Windows, `npm install` requires Visual Studio Build Tools with "Desktop development with C++" (for `node-pty` native compilation).
 
-No GPU? Use [HuggingFace Cloud Training](#cloud-training) instead.
+No GPU is required for installation, trace capture, campaign control, or the
+AutoResearch control smoke. Real training can run on local hardware, private
+hardware over SSH, or an explicitly selected hosted backend.
 
 ### 1. Install
 
@@ -114,14 +120,19 @@ No GPU? Use [HuggingFace Cloud Training](#cloud-training) instead.
 git clone https://github.com/GhostPeony/bashgym.git
 cd bashgym
 
-# Python dependencies
-pip install -r requirements.txt
+# Isolated Python environment
+python -m venv .venv
+# Windows: .\.venv\Scripts\Activate.ps1
+# macOS/Linux: source .venv/bin/activate
 
-# Training dependencies (optional — skip if no local GPU)
-pip install -r requirements-training.txt
+# Install BashGym and register the `bashgym` command
+python -m pip install -e .
+
+# Optional local/private model training stack
+python -m pip install -e ".[training]"
 
 # Frontend dependencies
-cd frontend && npm install && cd ..
+cd frontend && npm ci && cd ..
 ```
 
 ### 2. Configure
@@ -130,13 +141,50 @@ cd frontend && npm install && cd ..
 cp .env.example .env
 ```
 
-Open `.env` and add your API key:
+The default file contains no credential or model selection. Add only the
+providers you intend to use. Real training requires an explicit compatible
+trainable base; BashGym does not select or download an example model for you.
 
-```
-ANTHROPIC_API_KEY=sk-ant-...
+Verify the install and durable campaign control plane before launching the app:
+
+```bash
+bashgym --help
+bashgym campaign control-smoke --json
 ```
 
-That's the only required key. Everything else has working defaults. See [Configuration](#configuration) for optional keys.
+For authenticated AutoResearch work, provision one local operator by opaque
+secret reference after choosing the workspace (the first desktop workspace is
+`default`):
+
+```bash
+bashgym campaign provision-local-operator \
+  --workspace-id default \
+  --credential-ref BASHGYM_CAMPAIGN_OPERATOR --json
+```
+
+The raw refresh credential is stored by BashGym's secret manager and is never
+printed or accepted as a CLI argument. See the
+[durable AutoResearch campaign guide](docs/training/autoresearch-campaign.md)
+for private-compute registration and the full guided path.
+
+To operate AutoResearch from an already-running Codex, Claude Code, or Hermes
+session, install the packaged BashGym skill bundle into that host and verify
+the exact installed receipt:
+
+```bash
+bashgym operator skills install --host codex   # or: claude, hermes
+bashgym operator skills check --host codex
+```
+
+This installs operating instructions; it does not launch, register, or replace
+the agent. Re-run `check` after upgrading BashGym so a stale or modified bundle
+fails closed before campaign mutation or compute launch.
+
+The destination is deterministic: Codex uses `CODEX_HOME`, then `~/.codex`;
+Claude uses `CLAUDE_CONFIG_DIR`, then `CLAUDE_HOME`, then `~/.claude`; and
+Hermes uses `HERMES_HOME`, then `~/.hermes`. Each host receives the bundle in
+its selected `skills/` directory. Set the relevant variable for an isolated or
+CI installation.
 
 ### 3. Install Trace Capture Hooks
 
@@ -168,11 +216,33 @@ Verify: launch the app and check **Settings > Agents** — each configured tool 
 ./dev.sh                   # Backend + frontend
 ./dev.sh --electron        # Backend + desktop app
 
-# Docker (any platform)
-docker compose up
+# Docker API only (any platform)
+docker compose up bashgym-api
 ```
 
 Backend starts on `localhost:8003`, frontend on `localhost:5173`.
+The Compose file does not currently package the frontend; run it with `npm run
+dev` or use the desktop launchers above.
+
+The current Electron distribution is a thin desktop client, not a bundled
+Python appliance. In a source checkout it discovers that checkout; outside a
+checkout it starts the `bashgym` package installed in the interpreter selected
+by `BASHGYM_PYTHON` (or `python` on `PATH`). Run `bashgym operator doctor`
+before first launch. Set `BASHGYM_PROJECT_ROOT` only when intentionally using a
+specific source checkout; an invalid override fails closed instead of silently
+falling back. `BASHGYM_API_BASE` is the shared API endpoint contract and must be
+a credential-free loopback URL ending in `/api`; the desktop derives its
+WebSocket endpoint from it. `BASHGYM_DEV_SERVER_URL` changes only the local
+renderer origin. The legacy Electron-only `BASHGYM_API_URL` name is accepted as
+a normalized compatibility alias, while browser builds may still inject
+`VITE_API_URL` at build time.
+
+Release CI builds and installs the wheel on Python 3.10–3.12, runs the complete
+Node 22 frontend gate, and builds, launches, and exercises an unsigned Electron
+package on Windows, Linux, and macOS. The wheel privacy regression scans every
+UTF-8 text member for private paths and installation-specific identifiers. A
+small frozen-v1 compatibility allowlist is exact and count-checked; new campaign
+contracts use generic v2 scorer and external-handoff identifiers.
 
 ### 5. Use Your AI Coding Tools
 
@@ -223,7 +293,7 @@ See [Training](#training) for details.
 - **Compute**: Local GPU, private compute target, or HuggingFace cloud
 - **Output**: LoRA adapter, merged weights (16-bit), GGUF (for Ollama/llama.cpp/LM Studio)
 - **Training goals**: Define weighted success criteria and hard/soft constraints instead of optimizing a single loss scalar. The outcome aggregator tracks progress and recommends when to stop, adjust, or continue.
-- **AutoResearch**: Three evolutionary search modes (hyperparameters, trace curation, schema evolution) — see [AutoResearch](#autoresearch) for the full breakdown
+- **AutoResearch**: Durable baseline-first campaigns with controlled hypotheses, budgets, authoritative evaluation, evidence lineage, human oversight, and restart-safe decisions — see [AutoResearch](#autoresearch)
 
 ### Dual-Loop Evolution
 
@@ -234,26 +304,9 @@ Two feedback loops that improve agent behavior at different speeds:
 | **Fast loop** | Prompt evolution — analyze failure patterns, mutate worker prompts, evaluate, deploy best variant | Minutes | Immediate behavioral change |
 | **Slow loop** | Weight training — accumulate traces, generate examples, fine-tune model | Hours | Deep, permanent learning |
 
-The fast loop extracts recurring failure patterns from decision logs (wrong tool choices, missing context, anti-patterns) and uses an LLM to generate targeted prompt patches. Variants are scored against held-out traces and kept only if they improve quality. The best variant feeds into the orchestrator's worker prompts automatically.
+The fast loop extracts recurring failure patterns from decision logs (wrong tool choices, missing context, anti-patterns) and uses an LLM to generate targeted prompt patches. Variants are scored against held-out traces and retained only when they improve quality.
 
 The slow loop continues as before: gold traces become training examples, the model gets fine-tuned. But now gold traces are generated by workers using evolved prompts, so training data quality improves from both loops.
-
-### Orchestrator
-
-Multi-agent task decomposition across LLM providers with git worktree isolation.
-
-| Provider | Default planner model |
-|----------|---------------|
-| **Anthropic** | `claude-opus-4-6` |
-| **OpenAI** | `gpt-4o` |
-| **Gemini** | `gemini-2.5-pro` |
-| **Ollama** | Any local model |
-
-Defaults are configurable per provider; the Ollama brain uses any model you've pulled. Four phases: PLAN → DISPATCH → MONITOR → SYNTHESIZE. Workers always use Claude Code CLI regardless of the planning provider.
-
-**Three-layer prompt composition** structures worker context into Identity (static role/standards), Narrative (dynamic sibling progress, shared discoveries, file ownership), and Focus (task-specific requirements). Transition markers update running workers when siblings complete.
-
-**Shared memory** provides per-key locked state that parallel workers can read and write. Workers share discoveries (e.g., "the API uses Bearer auth") via a file-based IPC protocol. The orchestrator polls worktree state files and merges entries into a central store with conflict detection.
 
 ### Event System
 
@@ -334,19 +387,17 @@ Gamified progress tracking across trace collection, quality, training, and maste
 
 ### Base Models
 
-Any HuggingFace model compatible with Unsloth works. Set `BASE_MODEL` in the dashboard or `.env` to any model ID. Ollama models are auto-discovered for inference — train on HuggingFace weights, deploy via Ollama.
+BashGym has no repository-owned default or suggested base model. Select an
+operator-approved trainable artifact and immutable revision, then use an
+installed backend's model doctor to prove that the model task, architecture,
+quantization, tokenizer, runtime, and hardware are compatible. A cache hit,
+Ollama/GGUF artifact, or LoRA adapter is not a trainable-base substitute.
 
-**Examples (mid-2026 — not requirements; see the [Unsloth model catalog](https://unsloth.ai/docs/get-started/unsloth-model-catalog) for the live list):**
-
-| Model family | Notes |
-|--------------|-------|
-| Gemma 4 (E2B / E4B / 12B / 26B-A4B / 31B) | E2B trains in ~8 GB locally; dense and MoE variants for more capacity. |
-| Qwen3.5 / Qwen3.6 (dense 0.8B–27B; MoE 30B-A3B / 35B-A3B / 235B-A22B) | Apache-2.0. Strong coding/reasoning; small dense models fit consumer GPUs, MoE variants need larger local, private, or cloud GPU capacity. |
-| DeepSeek V4 | Large MoE, long context, MIT; use larger private or cloud GPUs. |
-| Llama 4 (Scout / Maverick) | Very long context. |
-| Mistral Small 4 / Devstral · Phi-4 | Apache-2.0 efficient general, coding, and instruct options. |
-
-These are suggestions, not restrictions. Any `AutoModelForCausalLM`-compatible model from HuggingFace will work. All training uses QLoRA (4-bit quantization) by default, so VRAM requirements are roughly `model_params / 2` GB.
+Backend catalogs describe candidates, not BashGym guarantees. For example, the
+[Unsloth model catalog](https://unsloth.ai/docs/get-started/unsloth-model-catalog)
+lists models supported by current Unsloth releases; optional NeMo recipes have
+their own pinned compatibility contract. QLoRA is available when the selected
+backend and model support it, but is not silently forced for every run.
 
 ### Output Formats
 
@@ -372,7 +423,101 @@ Plug-and-play SSH device registry for remote training targets. No manual `.env` 
 
 ### AutoResearch
 
-Three evolutionary search loops that continuously improve your training pipeline. Each runs independently, keeps improvements, and converges on optimal configurations.
+The authoritative AutoResearch path is a durable, baseline-first campaign over
+registered model, data, evaluator, and local/private-compute bindings. Start
+with `bashgym campaign control-smoke --json`, then follow the
+[durable campaign guide](docs/training/autoresearch-campaign.md) for a real
+baseline and one-variable candidate.
+
+Use direct **Training** for one selected run. Use **AutoResearch** when a
+baseline, controlled candidates, evidence, budget, and restart-safe decisions
+must share one durable campaign record.
+
+The normal agent path begins inside an already-running Codex, Claude Code,
+Hermes, or compatible skill host. Install and check the packaged BashGym skills
+for that host, then ask the current agent to prepare AutoResearch. The shared
+operator skill reads registered setup state, resumes any sealed setup session,
+and asks only for missing or ambiguous choices. Preparation ends at a reviewable
+`READY` campaign. Starting compute is a separate approval: the agent must show
+the exact model, data, evaluator, compute, budget, and stop rules, then stop
+until the user explicitly confirms **Start** for that campaign.
+
+The guided backend, Control Room, and current-source CLI implement the ordered
+setup, doctor, validation, and create contracts. The direct wrappers are
+`campaign setup-context`, `setup-step`, `setup-doctor`, `setup-validate`, and
+`setup-create`; the packaged operator skill uses those registered surfaces
+rather than inventing IDs or bypassing setup state.
+
+The lower-level installation path behind that guided flow is:
+
+1. Provision the exact workspace-scoped local operator with
+   `campaign provision-local-operator` using the opaque reference shown in
+   [Setup](#2-configure).
+2. `campaign inspect-model-artifact` — validate the operator-selected snapshot
+   and immutable revision without scanning caches or downloading a substitute.
+3. `campaign setup-autoresearch` — write the portable campaign definition with
+   exact model, data, evaluator, metric, compute, budget, and stop-rule IDs.
+4. `campaign activate-autoresearch` without `--apply` — preflight the registered
+   SSH device, source scopes, dataset, evaluator, launch material, and identity
+   conflicts.
+5. Repeat activation with `--apply`; add `--install-worker` only when BashGym
+   should install and start the per-user resident worker.
+6. Run `campaign sync-autoresearch-registry` in plan mode, then apply the exact
+   reviewed installation ID and logical bindings with installation-owned
+   controller authority.
+7. Run `campaign doctor` and require `materializable`, bring the resident
+   controller online through `--install-worker` or an existing service, then
+   re-run doctor and require `launch_ready` before a bounded real baseline.
+   Only then launch a one-variable candidate.
+
+Registered SSH covers private hardware and hardware on the BashGym machine via
+localhost SSH. Hosted compute and NeMo RL/Gym are explicit optional adapters,
+not fallbacks for this path.
+
+In the desktop app, **AutoResearch** is a literal sidebar destination directly
+below **Training**. Its compact Control Room keeps the campaign journey and
+last verified evidence visible through backend outages, and places the
+server-revalidated Start gate in a narrow authority rail rather than replacing
+the page with an error screen.
+
+When no campaign exists, the Control Room renders the guided setup shell even
+if the backend is offline; it stays read-only until authority reconnects. The
+live six-step flow accepts only installation-registered logical IDs, in order:
+template, installation, model, data, compute, and evaluation. It then runs
+doctor, seals validation, and creates the campaign. Creation never starts work:
+**Start** remains a separate, server-revalidated decision in the campaign's
+authority rail. The read-only context request creates no setup state, and the
+renderer cannot claim hardware or model reachability.
+
+An optional campaign-agent compatibility boundary also remains fail-closed in
+the backend. It provides sealed campaign grants, encrypted one-time credential
+delivery, fixed read-only `campaign_observe` and `campaign_artifacts` actions,
+and an isolated loopback MCP host. An Electron adapter can bind that authority
+to a scope-bound Codex PTY without exposing its credential to the renderer.
+This is low-level security and integration plumbing: it is not mounted as a
+required Control Room feature, does not make Codex the canonical launcher, and
+is not required for the shared-skill workflow above. It cannot launch or pause
+training, propose artifacts, or forward arbitrary requests. Agent-host parity
+and any future mutation actions require their own bounded verification. The
+Control Room remains visible when this optional host boundary or the backend is
+unavailable.
+
+When a development comparison requires review, BashGym now creates a durable,
+blinded one-reviewer work item. Claim, rubric submission, hold, and promotion
+are revision-bound and idempotent; signed receipts survive worker restarts, and
+ordinary promotion cannot bypass pending human authority. Recovery evidence is
+also rendered without hiding the rest of the Control Room. Accepted resume and
+repair requests are consumed by the fenced resident worker, survive restart,
+and expose a separately sealed execution lifecycle. The desktop enables a
+mutation only when the authenticated projection proves that the registered
+consumer has a live controller lease; an acceptance receipt is never presented
+as an executed resume.
+
+Three earlier prototype loops remain behind the temporary
+`/api/autoresearch/*` compatibility API for hyperparameter, trace-curation, and
+schema exploration. They are not part of the official Control Room, have no
+renderer-owned state surface, and must not be presented as durable campaign
+evidence:
 
 | Mode | What It Evolves | What It Searches | How It Evaluates |
 |------|----------------|-----------------|-----------------|
@@ -382,13 +527,18 @@ Three evolutionary search loops that continuously improve your training pipeline
 
 **Schema evolution** is the newest mode — the AutoCurriculum Compiler. Instead of tuning hyperparameters or data curation rules, it evolves the entire data generation pipeline. A `SchemaSearchSpace` mutates Data Designer configs (which models generate code vs judge quality, what temperature, how many judge dimensions, whether to include code validation), evaluates each mutant by generating real training data and measuring downstream training loss, and keeps winners. The template library maps failure patterns from your traces to starting templates — if your model keeps picking the wrong tool, the schema evolves toward tool-use-focused training data.
 
-All three modes share the same evolutionary engine (`SearchSpace` ABC → `AutoResearcher` loop) and UI (start/stop/pause/resume, real-time experiment streaming via WebSocket, loss curves, generation cards with mutation diffs).
+The prototype hyperparameter loop uses the older `SearchSpace` ABC →
+`AutoResearcher` engine. Compatibility events may still enter the general
+Activity feed, but they never update durable campaign authority. New product
+work belongs under `/api/campaigns/*` and the AutoResearch sidebar destination.
 
 **Embedding-based dedup** runs across all modes via NIM API: computes semantic similarity between training examples and removes near-duplicates (configurable threshold, default 0.95). Diversity scores are tracked in the quality dashboard.
 
-### Cloud Training
+### Optional Hosted Training
 
-No local GPU? Use HuggingFace Cloud Training (Unsloth Jobs). Multiple GPU tiers available from T4 to H100. Requires HuggingFace Pro subscription.
+Hosted training can be selected explicitly when an installation supports it.
+It is not required for BashGym and never replaces an already registered
+local/private target during campaign resolution.
 
 ---
 
@@ -398,10 +548,10 @@ Copy `.env.example` to `.env`:
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `ANTHROPIC_API_KEY` | Yes | — | Claude API key |
-| `OPENAI_API_KEY` | No | — | OpenAI API key (for Codex trace capture and orchestrator routing) |
-| `GOOGLE_API_KEY` | No | — | Google/Gemini API key (for Gemini CLI trace capture and orchestrator routing) |
-| `BASE_MODEL` | No | (set per run) | Any HuggingFace model ID for fine-tuning (Unsloth-accelerated) |
+| `ANTHROPIC_API_KEY` | No | — | Claude teacher/provider features only |
+| `OPENAI_API_KEY` | No | — | OpenAI provider features only |
+| `GOOGLE_API_KEY` | No | — | Google/Gemini provider features only |
+| `BASE_MODEL` | No | — | Explicit compatible trainable-base ID; durable campaigns also pin an immutable revision |
 | `HF_TOKEN` | No | — | HuggingFace token (for cloud training and model push) |
 | `NVIDIA_API_KEY` | No | — | NVIDIA NIM API key (for synthetic data augmentation) |
 | `ROUTING_STRATEGY` | No | `confidence_based` | Model routing strategy |
@@ -423,6 +573,8 @@ bashgym/
 ├── bashgym/                  # Python package
 │   ├── api/                  # REST API + WebSocket
 │   ├── arena/                # Execution (runner, sandbox)
+│   ├── campaigns/            # Durable AutoResearch state, workers, bindings, evidence
+│   ├── compute/              # Registered execution and capacity contracts
 │   ├── events/               # Typed EventBus (bus, event types, WebSocket bridge)
 │   ├── factory/              # Data synthesis (trace processor, example generator, decision extractor)
 │   ├── gym/                  # Training (trainer, autoresearch, cascade, training goals)
@@ -433,8 +585,8 @@ bashgym/
 │   │   ├── trace_researcher.py # Data curation optimization
 │   │   └── remote_trainer.py # SSH-based remote training
 │   ├── judge/                # Verification (evaluator, semantic judge, guardrails, benchmarks)
+│   ├── ledger/               # Project-isolated experiments and evaluation lineage
 │   ├── models/               # Model registry and lifecycle
-│   ├── orchestrator/         # Multi-agent decomposition (agent, DAG, shared state, context builder)
 │   ├── pipeline/             # Automated watcher, quality gate, semantic evaluation
 │   ├── providers/            # Inference providers (Anthropic, NIM, Ollama)
 │   ├── device_registry.py    # JSON-backed SSH device storage
@@ -448,13 +600,14 @@ bashgym/
 │   ├── observability/        # Profiler, span tracing, backend integrations
 │   ├── api/                  # REST API + WebSocket
 │   │   ├── device_routes.py  # Device management endpoints
-│   │   ├── autoresearch_routes.py # AutoResearch + schema research endpoints
+│   │   ├── autoresearch_routes.py # Temporary prototype compatibility endpoints
 │   │   └── cascade_routes.py # Cascade RL + MOPD endpoints
 │   └── integrations/         # HuggingFace, NeMo, Ollama
 │
 ├── frontend/                 # Electron + React dashboard
 │   ├── src/components/       # 100+ React components
-│   │   └── training/         # DeviceManager, AutoResearchPanel, TrainingConfig, etc.
+│   │   ├── autoresearch/     # Official durable campaign Control Room
+│   │   └── training/         # DeviceManager, TrainingConfig, TrainingDashboard, etc.
 │   ├── src/stores/           # Zustand state management
 │   └── electron/             # Main process + secure storage
 │
@@ -464,7 +617,7 @@ bashgym/
 ├── tests/                    # Test suite
 ├── run_backend.py            # Backend entry point (uvicorn)
 ├── dev.ps1 / dev.sh          # Dev environment launchers
-└── docker-compose.yml        # Full stack deployment
+└── docker-compose.yml        # Backend API plus opt-in assistant profiles
 ```
 
 ---
@@ -486,7 +639,9 @@ See [TODOS.md](TODOS.md) for the full roadmap with details.
 ## FAQ
 
 **Do I need a GPU?**
-No. Trace capture, curation, and the dashboard work without one. Training requires a CUDA GPU (8GB+ VRAM) or you can use HuggingFace Cloud Training.
+No. Trace capture, curation, the dashboard, and the campaign control smoke work
+without one. Real training uses an explicitly registered compatible target:
+local hardware, private hardware over SSH, or an optional hosted backend.
 
 **How many traces before I can train?**
 20–30 gold traces for a basic SFT run. 100+ traces produce noticeably better results. More repos and task diversity = more generalizable model.
@@ -498,7 +653,11 @@ Only to the LLM providers you already use (Anthropic, etc.). Traces, training da
 A trace is a complete coding session from any supported tool (many tool calls, potentially 30+ minutes). A training example is a single task-response pair extracted from that trace. One trace typically produces 1–5 examples.
 
 **Can I use other base models?**
-Yes — any HuggingFace model that works with Unsloth/transformers. Qwen3.5/3.6, Llama 4, Gemma 4, Mistral, DeepSeek, Phi, and more. Set `BASE_MODEL` in the dashboard or `.env`. Larger models need more VRAM (or use cloud training). After training, export to GGUF and run via Ollama, llama.cpp, LM Studio, or any GGUF-compatible runtime.
+Yes, when the operator-selected trainable artifact passes the installed
+backend's compatibility and hardware checks. BashGym does not choose, download,
+or substitute a model. Pin the exact revision for durable campaigns; treat GGUF,
+served models, and adapters as inference or derived artifacts rather than base
+weights for training.
 
 **What about synthetic data?**
 The data factory supports NVIDIA NeMo Data Designer for structured synthetic generation, plus LLM-based augmentation using Anthropic or NVIDIA NIM models. Useful for filling gaps in your trace coverage.

@@ -9,14 +9,71 @@ Provides real-time updates for:
 """
 
 import asyncio
+import hashlib
 import json
+import os
+import secrets
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
+from pydantic import BaseModel, ConfigDict, Field
+
+from bashgym._compat import UTC
+
+
+class CampaignHintV1(BaseModel):
+    """Low-entropy notification; durable REST state remains authoritative."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: str = Field(default="campaign_hint.v1", pattern=r"^campaign_hint\.v1$")
+    workspace_id: str = Field(
+        min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$"
+    )
+    campaign_id: str = Field(
+        min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$"
+    )
+    event_cursor: int = Field(ge=1)
+    aggregate_version: int = Field(ge=1)
+    event_type: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9_.:-]+$")
+    correlation_id: str = Field(
+        min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$"
+    )
+    emitted_at: datetime
+
+
+def build_campaign_hint(source: Any, *, emitted_at: datetime | None = None) -> CampaignHintV1:
+    """Project one payload-free persistence row at hint-send time."""
+
+    return CampaignHintV1(
+        workspace_id=source.workspace_id,
+        campaign_id=source.campaign_id,
+        event_cursor=source.cursor,
+        aggregate_version=source.aggregate_version,
+        event_type=source.event_type,
+        correlation_id=source.correlation_id,
+        emitted_at=emitted_at or datetime.now(UTC),
+    )
+
+
+@dataclass(frozen=True)
+class CampaignLiveTicketBinding:
+    workspace_id: str
+    after_cursor: int
+    expires_at: datetime
+    credential_id: str
+    authorization_revision: int
+    repository: Any
+
+
+@dataclass
+class CampaignLiveSubscription:
+    binding: CampaignLiveTicketBinding
+    cursor: int
 
 
 class MessageType(str, Enum):
@@ -57,6 +114,9 @@ class MessageType(str, Enum):
     # Workspace canvas events
     WORKSPACE_CANVAS_INTENT = "workspace:canvas:intent"
     WORKSPACE_CONTEXT_UPDATED = "workspace:context:updated"
+
+    # Durable campaign notification; payload is CampaignHintV1 only.
+    CAMPAIGN_HINT = "campaign:hint"
 
     # HuggingFace events
     HF_JOB_STARTED = "hf:job:started"
@@ -152,6 +212,11 @@ class ConnectionManager:
     def __init__(self):
         self.active_connections: set[WebSocket] = set()
         self.subscriptions: dict[str, set[WebSocket]] = {}
+        self.loop: asyncio.AbstractEventLoop | None = None
+        self.campaign_tickets: dict[str, CampaignLiveTicketBinding] = {}
+        self.campaign_ticket_mint_windows: dict[tuple[str, str], tuple[datetime, int]] = {}
+        self.campaign_subscriptions: dict[WebSocket, dict[str, CampaignLiveSubscription]] = {}
+        self.campaign_poll_task: asyncio.Task[None] | None = None
 
     async def connect(self, websocket: WebSocket) -> None:
         """Accept and track a new connection."""
@@ -160,6 +225,7 @@ class ConnectionManager:
         logger = logging.getLogger(__name__)
 
         await websocket.accept()
+        self.loop = asyncio.get_running_loop()
         self.active_connections.add(websocket)
         logger.info(
             f"[WebSocket] Client connected. Total connections: {len(self.active_connections)}"
@@ -185,6 +251,10 @@ class ConnectionManager:
         # Remove from all subscriptions
         for topic_subs in self.subscriptions.values():
             topic_subs.discard(websocket)
+        self.campaign_subscriptions.pop(websocket, None)
+        if not self.campaign_subscriptions and self.campaign_poll_task is not None:
+            self.campaign_poll_task.cancel()
+            self.campaign_poll_task = None
 
     def subscribe(self, websocket: WebSocket, topic: str) -> None:
         """Subscribe a connection to a topic."""
@@ -309,6 +379,180 @@ class ConnectionManager:
         # Clean up disconnected clients
         for conn in disconnected:
             self.disconnect(conn)
+
+    @staticmethod
+    def _ticket_hash(ticket: str) -> str:
+        return hashlib.sha256(ticket.encode("utf-8")).hexdigest()
+
+    def issue_campaign_live_ticket(
+        self,
+        repository: Any,
+        principal: Any,
+        workspace_id: str,
+        *,
+        after_cursor: int,
+        ttl: timedelta = timedelta(seconds=30),
+    ) -> tuple[str, CampaignLiveTicketBinding]:
+        now = datetime.now(UTC)
+        expires_at = min(now + ttl, principal.expires_at)
+        for digest, existing in tuple(self.campaign_tickets.items()):
+            if existing.expires_at <= now or (
+                existing.credential_id == principal.credential_id
+                and existing.workspace_id == workspace_id
+            ):
+                self.campaign_tickets.pop(digest, None)
+        while len(self.campaign_tickets) >= 1_024:
+            oldest_digest = next(iter(self.campaign_tickets))
+            self.campaign_tickets.pop(oldest_digest, None)
+        ticket = f"bgclt.{secrets.token_urlsafe(32)}"
+        binding = CampaignLiveTicketBinding(
+            workspace_id=workspace_id,
+            after_cursor=after_cursor,
+            expires_at=expires_at,
+            credential_id=principal.credential_id,
+            authorization_revision=principal.authorization_revision,
+            repository=repository,
+        )
+        self.campaign_tickets[self._ticket_hash(ticket)] = binding
+        return ticket, binding
+
+    def allow_campaign_ticket_mint(
+        self,
+        credential_id: str,
+        workspace_id: str,
+        *,
+        now: datetime | None = None,
+    ) -> bool:
+        checked_at = now or datetime.now(UTC)
+        window = timedelta(seconds=30)
+        for scope, (started_at, _count) in tuple(self.campaign_ticket_mint_windows.items()):
+            if started_at + window <= checked_at:
+                self.campaign_ticket_mint_windows.pop(scope, None)
+        scope = (credential_id, workspace_id)
+        started_at, count = self.campaign_ticket_mint_windows.get(scope, (checked_at, 0))
+        if started_at + window <= checked_at:
+            started_at, count = checked_at, 0
+        if count >= 30:
+            return False
+        while (
+            len(self.campaign_ticket_mint_windows) >= 1_024
+            and scope not in self.campaign_ticket_mint_windows
+        ):
+            oldest_scope = next(iter(self.campaign_ticket_mint_windows))
+            self.campaign_ticket_mint_windows.pop(oldest_scope, None)
+        self.campaign_ticket_mint_windows[scope] = (started_at, count + 1)
+        return True
+
+    def _binding_authorized(self, binding: CampaignLiveTicketBinding) -> bool:
+        now = datetime.now(UTC)
+        if binding.expires_at <= now:
+            return False
+        parent = binding.repository.get_actor_credential(binding.credential_id)
+        if parent is None or parent.revoked_at is not None or parent.expires_at <= now:
+            return False
+        if parent.authorization_revision != binding.authorization_revision:
+            return False
+        return (
+            "desktop-local" in parent.workspace_ids or binding.workspace_id in parent.workspace_ids
+        )
+
+    def consume_campaign_live_ticket(self, ticket: str | None) -> CampaignLiveTicketBinding | None:
+        if not isinstance(ticket, str) or len(ticket) > 256:
+            return None
+        binding = self.campaign_tickets.pop(self._ticket_hash(ticket), None)
+        return binding if binding is not None and self._binding_authorized(binding) else None
+
+    async def subscribe_campaign(self, websocket: WebSocket, ticket: str | None) -> bool:
+        binding = self.consume_campaign_live_ticket(ticket)
+        if binding is None:
+            return False
+        self.campaign_subscriptions.setdefault(websocket, {})[binding.workspace_id] = (
+            CampaignLiveSubscription(
+                binding=binding,
+                cursor=binding.after_cursor,
+            )
+        )
+        await self.send_personal(
+            websocket,
+            WSMessage(
+                type="campaign:subscribed",
+                payload={
+                    "workspace_id": binding.workspace_id,
+                    "accepted_cursor": binding.after_cursor,
+                },
+            ),
+        )
+        self._ensure_campaign_poller()
+        return True
+
+    def unsubscribe_campaign(self, websocket: WebSocket, workspace_id: str) -> None:
+        subscriptions = self.campaign_subscriptions.get(websocket)
+        if subscriptions is not None:
+            subscriptions.pop(workspace_id, None)
+            if not subscriptions:
+                self.campaign_subscriptions.pop(websocket, None)
+        if not self.campaign_subscriptions and self.campaign_poll_task is not None:
+            self.campaign_poll_task.cancel()
+            self.campaign_poll_task = None
+
+    def _ensure_campaign_poller(self) -> None:
+        if self.campaign_poll_task is None or self.campaign_poll_task.done():
+            self.campaign_poll_task = asyncio.create_task(self._campaign_poll_loop())
+
+    async def _campaign_poll_loop(self) -> None:
+        try:
+            while self.campaign_subscriptions:
+                try:
+                    await self.poll_campaign_subscriptions_once()
+                except Exception:
+                    # A transient repository/projection failure must not advance
+                    # subscriber cursors or permanently stop every workspace.
+                    import logging
+
+                    logging.getLogger(__name__).exception(
+                        "Campaign hint poll failed; retrying without cursor advance"
+                    )
+                await asyncio.sleep(0.35)
+        except asyncio.CancelledError:
+            return
+        finally:
+            self.campaign_poll_task = None
+
+    async def poll_campaign_subscriptions_once(self) -> None:
+        grouped: dict[str, list[tuple[WebSocket, CampaignLiveSubscription]]] = {}
+        for websocket, subscriptions in tuple(self.campaign_subscriptions.items()):
+            for workspace_id, subscription in tuple(subscriptions.items()):
+                if not self._binding_authorized(subscription.binding):
+                    subscriptions.pop(workspace_id, None)
+                    continue
+                grouped.setdefault(workspace_id, []).append((websocket, subscription))
+            if not subscriptions:
+                self.campaign_subscriptions.pop(websocket, None)
+        for workspace_id, subscribers in grouped.items():
+            after_cursor = min(subscription.cursor for _, subscription in subscribers)
+            repository = subscribers[0][1].binding.repository
+            sources = await asyncio.to_thread(
+                repository.list_workspace_campaign_hint_sources,
+                workspace_id,
+                after_cursor=after_cursor,
+                limit=200,
+            )
+            for websocket, subscription in subscribers:
+                for source in sources:
+                    if source.cursor <= subscription.cursor:
+                        continue
+                    hint = build_campaign_hint(source)
+                    try:
+                        await websocket.send_text(
+                            WSMessage(
+                                type=MessageType.CAMPAIGN_HINT,
+                                payload=hint.model_dump(mode="json"),
+                            ).to_json()
+                        )
+                    except Exception:
+                        self.disconnect(websocket)
+                        break
+                    subscription.cursor = source.cursor
 
 
 # Global connection manager
@@ -964,8 +1208,6 @@ async def handle_websocket(websocket: WebSocket) -> None:
     - Incoming messages
     """
     # In web mode, verify session cookie before accepting connection
-    import os
-
     if os.environ.get("BASHGYM_MODE", "").lower() == "web":
         from bashgym.api.auth_routes import COOKIE_NAME
         from bashgym.api.database import get_session_user
@@ -977,6 +1219,12 @@ async def handle_websocket(websocket: WebSocket) -> None:
 
     await manager.connect(websocket)
 
+    async def invalid_frame() -> None:
+        await manager.send_personal(
+            websocket,
+            WSMessage(type=MessageType.ERROR, payload={"code": "invalid_frame"}),
+        )
+
     try:
         while True:
             # Receive and parse messages
@@ -984,8 +1232,37 @@ async def handle_websocket(websocket: WebSocket) -> None:
 
             try:
                 message = json.loads(data)
+                if not isinstance(message, dict):
+                    await invalid_frame()
+                    continue
                 msg_type = message.get("type", "")
                 payload = message.get("payload", {})
+                if not isinstance(msg_type, str) or not isinstance(payload, dict):
+                    await invalid_frame()
+                    continue
+
+                if msg_type == "campaign:subscribe":
+                    if set(payload) != {"ticket"}:
+                        await invalid_frame()
+                        continue
+                    if not await manager.subscribe_campaign(websocket, payload.get("ticket")):
+                        await manager.send_personal(
+                            websocket,
+                            WSMessage(
+                                type="campaign:subscription-error",
+                                payload={"code": "campaign_subscription_denied"},
+                            ),
+                        )
+                    continue
+
+                if msg_type == "campaign:unsubscribe":
+                    if set(payload) != {"workspace_id"}:
+                        await invalid_frame()
+                        continue
+                    workspace_id = payload.get("workspace_id")
+                    if isinstance(workspace_id, str):
+                        manager.unsubscribe_campaign(websocket, workspace_id)
+                    continue
 
                 # Handle subscription requests
                 if msg_type == "subscribe":
@@ -1009,10 +1286,9 @@ async def handle_websocket(websocket: WebSocket) -> None:
                     await manager.send_personal(websocket, WSMessage(type="pong", payload={}))
 
             except json.JSONDecodeError:
-                await manager.send_personal(
-                    websocket,
-                    WSMessage(type=MessageType.ERROR, payload={"message": "Invalid JSON"}),
-                )
+                await invalid_frame()
 
     except WebSocketDisconnect:
+        pass
+    finally:
         manager.disconnect(websocket)

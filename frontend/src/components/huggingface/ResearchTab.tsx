@@ -10,8 +10,9 @@ import {
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { API_BASE } from '../../services/api'
 
-const API_URL = import.meta.env.VITE_API_URL || '/api'
+const API_URL = API_BASE
 
 async function fetchJSON(path: string, opts?: RequestInit) {
   try {

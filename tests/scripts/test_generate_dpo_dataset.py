@@ -66,8 +66,8 @@ def test_main_logs_resolution_without_credential_values(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    nvidia_secret = "nvidia-full-secret-value"
-    anthropic_secret = "anthropic-full-secret-value"
+    nvidia_secret = "7F3KQ9PX2MVD-nv-canary-secret"
+    anthropic_secret = "4Z8MTRD6YQWBCA-an-canary-secret"
     monkeypatch.setenv("NVIDIA_API_KEY", nvidia_secret)
     monkeypatch.setenv("ANTHROPIC_API_KEY", anthropic_secret)
     monkeypatch.setattr(
@@ -86,7 +86,19 @@ def test_main_logs_resolution_without_credential_values(
         with pytest.raises(SystemExit):
             script_module.main()
 
-    assert "NVIDIA_API_KEY resolved" in caplog.text
-    assert "ANTHROPIC_API_KEY resolved" in caplog.text
-    assert nvidia_secret not in caplog.text
-    assert anthropic_secret not in caplog.text
+    emitted_messages = "\n".join(caplog.messages)
+    assert "NVIDIA_API_KEY resolved" in emitted_messages
+    assert "ANTHROPIC_API_KEY resolved" in emitted_messages
+
+    secret_fragments = {
+        nvidia_secret[:8],
+        nvidia_secret[:12],  # Former NVIDIA prefix slice.
+        nvidia_secret[:20],
+        anthropic_secret[:8],
+        anthropic_secret[:14],  # Former Anthropic prefix slice.
+        anthropic_secret[:22],
+        nvidia_secret,
+        anthropic_secret,
+    }
+    for fragment in secret_fragments:
+        assert fragment not in emitted_messages

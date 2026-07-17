@@ -420,6 +420,23 @@ class CampaignManifest(FrozenContractModel):
         return value
 
 
+_LEGACY_MANIFEST_V1_HASH_FIELDS = frozenset(
+    {
+        "schema_version",
+        "approved_data_scopes",
+        "compute_profile_id",
+        "budget_limits",
+        "evaluation_plan",
+        "promotion_gates",
+        "protected_artifact_refs",
+        "max_proposal_rounds",
+        "retention_days_failed",
+        "allow_hf_publication",
+        "allow_memexai_handoff",
+    }
+)
+
+
 class ManifestRevision(FrozenContractModel):
     schema_version: Literal["campaign_manifest_revision.v1"] = "campaign_manifest_revision.v1"
     workspace_id: Identifier
@@ -435,7 +452,17 @@ class ManifestRevision(FrozenContractModel):
     def verify_manifest_hash(self) -> ManifestRevision:
         expected = canonical_hash(self.manifest.model_dump(mode="json"))
         if self.manifest_hash and self.manifest_hash != expected:
-            raise ValueError("manifest_hash does not match manifest")
+            normalized = self.manifest.model_dump(mode="json")
+            legacy_projection = {
+                field: normalized[field] for field in _LEGACY_MANIFEST_V1_HASH_FIELDS
+            }
+            legacy_hash_matches = (
+                self.manifest.model_fields_set == _LEGACY_MANIFEST_V1_HASH_FIELDS
+                and self.manifest.allow_external_handoff is False
+                and self.manifest_hash == canonical_hash(legacy_projection)
+            )
+            if not legacy_hash_matches:
+                raise ValueError("manifest_hash does not match manifest")
         if not self.manifest_hash:
             object.__setattr__(self, "manifest_hash", expected)
         return self

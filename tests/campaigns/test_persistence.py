@@ -1,6 +1,7 @@
 """Campaign migrations, workspace ownership, CAS, event, and replay tests."""
 
 import hashlib
+import json
 import sqlite3
 
 import pytest
@@ -14,6 +15,7 @@ from bashgym.campaigns.contracts import (
     CredentialKind,
     ManifestRevision,
     TargetModelContract,
+    canonical_hash,
 )
 from bashgym.campaigns.persistence import (
     MIGRATIONS,
@@ -98,6 +100,44 @@ def transition(repository, trigger, version, *, key, payload=None):
         idempotency_key=key,
         payload=payload,
     )
+
+
+def persist_legacy_v1_manifest(
+    repository: CampaignRepository,
+    *,
+    workspace_id: str = "workspace-a",
+    campaign_id: str = "campaign-1",
+) -> tuple[dict, str]:
+    """Reproduce the exact manifest JSON and digest persisted before generic handoff."""
+
+    with sqlite3.connect(repository.db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT revision, manifest_json
+            FROM campaign_manifest_revisions
+            WHERE workspace_id = ? AND campaign_id = ?
+            """,
+            (workspace_id, campaign_id),
+        ).fetchone()
+        assert row is not None
+        payload = json.loads(row[1])
+        assert payload.pop("allow_external_handoff") is False
+        digest = canonical_hash(payload)
+        connection.execute(
+            """
+            UPDATE campaign_manifest_revisions
+            SET manifest_json = ?, manifest_hash = ?
+            WHERE workspace_id = ? AND campaign_id = ? AND revision = ?
+            """,
+            (
+                json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                digest,
+                workspace_id,
+                campaign_id,
+                row[0],
+            ),
+        )
+    return payload, digest
 
 
 def test_initialize_applies_checksum_migration_and_all_owned_tables(repository):
@@ -223,6 +263,58 @@ def test_create_is_atomic_manifest_is_immutable_and_replay_is_exact(repository):
     saved_manifest = repository.get_manifest_revision("workspace-a", "campaign-1", 1)
     assert saved_manifest.manifest == manifest()
     assert saved_manifest.manifest_hash == revision(value).manifest_hash
+
+
+def test_legacy_v1_manifest_revision_loads_without_rewriting_digest(repository):
+    create(repository)
+    legacy_payload, legacy_digest = persist_legacy_v1_manifest(repository)
+
+    loaded = repository.get_manifest_revision("workspace-a", "campaign-1", 1)
+
+    assert loaded.manifest.allow_external_handoff is False
+    assert loaded.manifest_hash == legacy_digest
+    with sqlite3.connect(repository.db_path) as connection:
+        persisted = connection.execute(
+            """
+            SELECT manifest_json, manifest_hash
+            FROM campaign_manifest_revisions
+            WHERE workspace_id = ? AND campaign_id = ? AND revision = 1
+            """,
+            ("workspace-a", "campaign-1"),
+        ).fetchone()
+    assert persisted == (
+        json.dumps(legacy_payload, sort_keys=True, separators=(",", ":")),
+        legacy_digest,
+    )
+
+
+def test_current_manifest_revision_tampering_still_fails(repository):
+    create(repository)
+    with sqlite3.connect(repository.db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT manifest_json FROM campaign_manifest_revisions
+            WHERE workspace_id = ? AND campaign_id = ? AND revision = 1
+            """,
+            ("workspace-a", "campaign-1"),
+        ).fetchone()
+        assert row is not None
+        payload = json.loads(row[0])
+        payload["budget_limits"]["gpu_hours"] = 999.0
+        connection.execute(
+            """
+            UPDATE campaign_manifest_revisions SET manifest_json = ?
+            WHERE workspace_id = ? AND campaign_id = ? AND revision = 1
+            """,
+            (
+                json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                "workspace-a",
+                "campaign-1",
+            ),
+        )
+
+    with pytest.raises(ValueError, match="manifest_hash does not match manifest"):
+        repository.get_manifest_revision("workspace-a", "campaign-1", 1)
 
 
 def test_idempotency_key_with_different_body_conflicts(repository):

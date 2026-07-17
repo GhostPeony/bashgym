@@ -1,6 +1,7 @@
 """Fail-closed campaign REST authentication, authority, and projection tests."""
 
 import json
+import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -62,7 +63,7 @@ from tests.campaigns.test_autoresearch_readiness import (
     registered_profile,
 )
 from tests.campaigns.test_lineage import initialized_repository, source_profile
-from tests.campaigns.test_persistence import campaign, manifest
+from tests.campaigns.test_persistence import campaign, manifest, persist_legacy_v1_manifest
 from tests.campaigns.test_proposals import proposal as study_proposal
 from tests.campaigns.test_remote_persistence import _claimed_attempt
 from tests.campaigns.test_worker import START
@@ -1328,6 +1329,38 @@ def test_control_room_snapshot_requires_auth_and_sets_private_cache_headers(tmp_
         == observed_at
     )
     assert payload["controller"]["heartbeat_age_seconds"] == 7.5
+
+
+def test_control_room_snapshot_loads_legacy_v1_manifest_without_rewriting_digest(
+    tmp_path, monkeypatch
+):
+    http, repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    assert create_from_template(http, access).status_code == 200
+    _payload, legacy_digest = persist_legacy_v1_manifest(repository)
+    observed_at = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr(
+        campaign_routes,
+        "project_controller_status",
+        lambda *_args, **_kwargs: _fixed_controller_observation(observed_at),
+    )
+
+    response = http.get(
+        "/api/campaigns/campaign-1/control-room-snapshot",
+        params={"workspace_id": "workspace-a"},
+        headers=bearer(access),
+    )
+
+    assert response.status_code == 200
+    with sqlite3.connect(repository.db_path) as connection:
+        persisted_digest = connection.execute(
+            """
+            SELECT manifest_hash FROM campaign_manifest_revisions
+            WHERE workspace_id = ? AND campaign_id = ? AND revision = 1
+            """,
+            ("workspace-a", "campaign-1"),
+        ).fetchone()
+    assert persisted_digest == (legacy_digest,)
 
 
 def test_fresh_control_room_process_attaches_existing_ledger_without_writes(

@@ -14,6 +14,7 @@ from typing import Any, Literal
 from pydantic import Field
 
 from bashgym.campaigns.contracts import (
+    PUBLIC_CAMPAIGN_BLOCKER_CODES,
     ActionAttempt,
     ActionStatus,
     AttemptStatus,
@@ -492,11 +493,7 @@ class CampaignRuntimeRepository(CampaignRepository):
         """Append one bounded blocker event without reserving budget or scheduling."""
 
         self._require_initialized()
-        if (
-            not code
-            or len(code) > 160
-            or any(character not in "abcdefghijklmnopqrstuvwxyz0123456789_.-" for character in code)
-        ):
+        if code not in PUBLIC_CAMPAIGN_BLOCKER_CODES:
             code = "campaign_controller_action_blocked"
         observed_at = now or utc_now()
         with self._connection(immediate=True) as connection:

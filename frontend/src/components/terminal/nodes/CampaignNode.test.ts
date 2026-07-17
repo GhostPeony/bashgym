@@ -120,14 +120,16 @@ function realisticDetail(): CampaignDetailState {
       updated_at: '2026-07-13T21:20:00Z',
     }, attempt],
     artifacts: [{
+      schema_version: 'public_campaign_artifact.v1',
+      workspace_id: 'workspace-a',
+      campaign_id: 'campaign-1',
       artifact_id: 'artifact-training-metrics',
       producer_action_id: 'action-full-training',
       sha256: 'd'.repeat(64),
       size_bytes: 1_572_864,
-      schema_name: 'training_metrics.v1',
+      schema_name: 'training_metrics_jsonl.v1',
       sealed: true,
       valid: true,
-      metadata: { metric_name: 'loss' },
       created_at: '2026-07-13T21:14:34Z',
     }],
     comparisons: [{
@@ -280,8 +282,6 @@ function realisticDetail(): CampaignDetailState {
         },
         actor_id: 'campaign-controller',
         credential_kind: 'controller',
-        correlation_identity: 'a'.repeat(64),
-        idempotency_identity: 'b'.repeat(64),
         created_at: '2026-07-13T21:14:34Z',
       },
     }],
@@ -375,7 +375,7 @@ test('campaign evidence panel renders the durable API/store projection and contr
   assert.match(markup, /training-metrics-appended/)
   assert.match(markup, /Sealed Evidence \(1\)/)
   assert.match(markup, /aria-label="Sealed campaign evidence"/)
-  assert.match(markup, /training metrics\.v1/)
+  assert.match(markup, /training metrics jsonl\.v1/)
   assert.match(markup, /1\.5 MB/)
 })
 

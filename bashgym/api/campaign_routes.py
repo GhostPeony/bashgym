@@ -1991,7 +1991,7 @@ def campaign_artifacts(campaign_id: str, request: Request, workspace_id: str = Q
         _repository, _auth, service = _services(request)
         return {
             "artifacts": [
-                item.model_dump(mode="json", exclude={"uri"})
+                item.model_dump(mode="json")
                 for item in service.artifacts(workspace_id, campaign_id, _principal(request))
             ]
         }

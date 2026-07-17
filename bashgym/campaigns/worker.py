@@ -268,7 +268,7 @@ class CampaignWorker:
                 campaign.campaign_id,
                 campaign.active_study_id,
                 leader,
-                code=str(exc),
+                code=getattr(type(exc), "code", "campaign_controller_action_blocked"),
                 now=now,
             )
             return "action_blocked"

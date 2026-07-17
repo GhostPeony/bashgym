@@ -1289,8 +1289,6 @@ def test_events_endpoint_projects_fail_closed_public_events(tmp_path):
         "event_type",
         "actor_id",
         "credential_kind",
-        "correlation_identity",
-        "idempotency_identity",
         "created_at",
     }
     assert item["event"]["schema_version"] == "public_campaign_event.v1"
@@ -1318,7 +1316,7 @@ def test_artifact_projection_redacts_absolute_uri(tmp_path):
             INSERT INTO campaign_artifacts(
                 workspace_id, campaign_id, artifact_id, producer_action_id, uri,
                 sha256, size_bytes, schema_name, sealed, valid, metadata_json, created_at
-            ) VALUES (?, ?, ?, NULL, ?, ?, 10, ?, 1, 1, '{}', ?)
+            ) VALUES (?, ?, ?, NULL, ?, ?, 10, ?, 1, 1, ?, ?)
             """,
             (
                 "workspace-a",
@@ -1327,6 +1325,13 @@ def test_artifact_projection_redacts_absolute_uri(tmp_path):
                 str(tmp_path / "private" / "model.bin"),
                 "a" * 64,
                 "huggingface_model_file.v1",
+                json.dumps(
+                    {
+                        "location": str(tmp_path / "operator" / "restricted.json"),
+                        "reference": "candidate-map-canary",
+                        "nested": {"ordinary": "protected-epoch-canary"},
+                    }
+                ),
                 campaign().created_at.isoformat(),
             ),
         )
@@ -1336,7 +1341,27 @@ def test_artifact_projection_redacts_absolute_uri(tmp_path):
         params={"workspace_id": "workspace-a"},
     )
     assert response.status_code == 200
-    assert "uri" not in response.json()["artifacts"][0]
+    artifact = response.json()["artifacts"][0]
+    assert set(artifact) == {
+        "schema_version",
+        "workspace_id",
+        "campaign_id",
+        "artifact_id",
+        "producer_action_id",
+        "sha256",
+        "size_bytes",
+        "schema_name",
+        "sealed",
+        "valid",
+        "created_at",
+    }
+    assert artifact["schema_version"] == "public_campaign_artifact.v1"
+    serialized = json.dumps(response.json())
+    assert str(tmp_path) not in serialized
+    assert "uri" not in serialized
+    assert "metadata" not in serialized
+    assert "candidate-map-canary" not in serialized
+    assert "protected-epoch-canary" not in serialized
 
 
 def test_proposal_manifest_evidence_and_advance_rest_contract(tmp_path):

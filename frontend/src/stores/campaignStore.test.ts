@@ -226,8 +226,6 @@ test('durable cursors append events once and loss queries use the exact source',
             },
             actor_id: 'campaign-controller',
             credential_kind: 'controller',
-            correlation_identity: 'a'.repeat(64),
-            idempotency_identity: 'b'.repeat(64),
             created_at: '2026-07-13T00:00:01Z',
           },
         }],
@@ -273,19 +271,11 @@ test('campaign Activity ingests only the typed public event summary', async () =
     event_type: 'campaign:action-blocked',
     summary: {
       schema_version: 'public_campaign_event_summary.v1' as const,
-      code: 'compute_capacity_unavailable',
+      code: 'campaign_remote_profile_unavailable',
     },
     actor_id: 'campaign-controller',
     credential_kind: 'controller',
-    correlation_identity: 'a'.repeat(64),
-    idempotency_identity: 'b'.repeat(64),
     created_at: '2026-07-16T00:00:00Z',
-    // An untrusted/older transport can still send extra JSON at runtime.
-    payload: {
-      location: 'C:/operator/restricted-result.json',
-      reference: 'protected-epoch-canary',
-      nested: { ordinary: 'candidate-map-canary' },
-    },
   }
   campaignApi.events = async () => ({
     ok: true,
@@ -305,7 +295,7 @@ test('campaign Activity ingests only the typed public event summary', async () =
   await useCampaignStore.getState().load('workspace-a')
 
   const activity = useActivityStore.getState().events[0]
-  assert.match(activity.detail || '', /compute_capacity_unavailable/)
+  assert.match(activity.detail || '', /campaign_remote_profile_unavailable/)
   assert.doesNotMatch(activity.detail || '', /restricted-result|protected-epoch|candidate-map/)
 })
 

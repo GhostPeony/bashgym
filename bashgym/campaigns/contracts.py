@@ -187,6 +187,97 @@ class BudgetEntryKind(str, Enum):
     CORRECTION = "correction"
 
 
+CANONICAL_CAMPAIGN_EVENT_TYPES = frozenset(
+    {
+        "campaign:created",
+        "campaign:validation-started",
+        "campaign:validation-failed",
+        "campaign:ready",
+        "campaign:started",
+        "campaign:paused",
+        "campaign:resumed",
+        "campaign:authority-required",
+        "campaign:authority-satisfied",
+        "campaign:cancelling",
+        "campaign:cancelled",
+        "campaign:completed",
+        "campaign:failed",
+        "campaign:exhausted",
+        "campaign:proposal-submitted",
+        "campaign:proposal-rejected",
+        "campaign:proposal-withdrawn",
+        "campaign:proposal-accepted",
+        "campaign:advance-requested",
+        "campaign:manifest-revised",
+        "campaign:source-approved",
+        "campaign:study-abandoned",
+        "campaign:action-blocked",
+        "campaign:stages-skipped",
+        "campaign:action-retry-scheduled",
+        "campaign:force-stop-requested",
+        "campaign:training-metrics-appended",
+        "campaign:remote-run-registered",
+        "campaign:remote-run-adopted",
+        "campaign:remote-capacity-blocked",
+        "campaign:action-scheduled",
+        "campaign:action-claimed",
+        "campaign:action-unknown",
+        "campaign:action-completed",
+        "campaign:action-failed",
+        "campaign:action-cancelled",
+        "campaign:action-force-stopped",
+        "campaign:budget-recorded",
+        "campaign:budget-overrun",
+        "campaign:protected-lease-acquired",
+        "campaign:protected-evaluation-completed",
+        "campaign:promotion-committed",
+        "campaign:export-completed",
+    }
+)
+
+PUBLIC_CAMPAIGN_BLOCKER_CODES = frozenset(
+    {
+        "campaign_controller_action_blocked",
+        "campaign_not_found",
+        "campaign_stage_cursor_exhausted",
+        "campaign_code_lineage_not_captured",
+        "campaign_code_lineage_not_registered",
+        "campaign_code_lineage_mutation_kind_mismatch",
+        "campaign_code_lineage_execution_binding_required",
+        "campaign_code_lineage_execution_binding_mismatch",
+        "campaign_recipe_runtime_invalid",
+        "campaign_remote_stage_not_allowed",
+        "campaign_remote_profile_unavailable",
+        "campaign_remote_target_model_mismatch",
+        "campaign_remote_profile_material_invalid",
+        "campaign_executor_kind_not_registered",
+        "campaign_budget_unit_not_approved",
+    }
+)
+
+PUBLIC_CAMPAIGN_ARTIFACT_SCHEMA_NAMES = frozenset(
+    {
+        "campaign_development_comparison.v1",
+        "campaign_fake_summary.v1",
+        "campaign_remote_exit_code.v1",
+        "campaign_remote_launch_manifest.v2",
+        "campaign_remote_output.v1",
+        "campaign_retrieval_evaluation.v1",
+        "campaign_scored_development_rows.v1",
+        "campaign_training_log.v1",
+        "campaign_unlaunched_cancellation.v1",
+        "campaign_validated_dev_dataset.v1",
+        "embedding_training_manifest.v1",
+        "huggingface_model_file.v1",
+        "memexai_query_format_ablation_manifest.v1",
+        "nemo_gym_campaign_evidence.v1",
+        "training_manifest.v1",
+        "training_metrics_jsonl.v1",
+        "unclassified_artifact.v1",
+    }
+)
+
+
 class CodeMutationKind(str, Enum):
     """Operator-approved experiment-code surface changed by a hypothesis."""
 
@@ -1114,15 +1205,9 @@ class PublicCampaignEventSummaryV1(FrozenContractModel):
     attempt_id: Identifier | None = None
     study_id: Identifier | None = None
     proposal_id: Identifier | None = None
-    source_id: Identifier | None = None
     entry_id: Identifier | None = None
     stage: Identifier | None = None
-    status: Identifier | None = None
     code: Identifier | None = None
-    trigger: Identifier | None = None
-    outcome: Identifier | None = None
-    unit: Identifier | None = None
-    kind: Identifier | None = None
     manifest_revision: int | None = Field(default=None, ge=1)
     stage_index: int | None = Field(default=None, ge=0)
     next_stage_index: int | None = Field(default=None, ge=0)
@@ -1130,13 +1215,6 @@ class PublicCampaignEventSummaryV1(FrozenContractModel):
     cursor_end: int | None = Field(default=None, ge=0)
     alert_count: int | None = Field(default=None, ge=0)
     study_completed: bool | None = None
-    reserved: float | None = Field(default=None, ge=0)
-    actual: float | None = Field(default=None, ge=0)
-    effective_limit: float | None = Field(default=None, ge=0)
-    reason_codes: tuple[Identifier, ...] | None = Field(default=None, max_length=100)
-    metric_names: tuple[Identifier, ...] | None = Field(default=None, max_length=100)
-    evidence_ids: tuple[Identifier, ...] | None = Field(default=None, max_length=100)
-    artifact_ids: tuple[Identifier, ...] | None = Field(default=None, max_length=100)
 
 
 class PublicCampaignEventV1(FrozenContractModel):
@@ -1152,8 +1230,32 @@ class PublicCampaignEventV1(FrozenContractModel):
     summary: PublicCampaignEventSummaryV1 | None = None
     actor_id: Identifier
     credential_kind: CredentialKind
-    correlation_identity: HexDigest
-    idempotency_identity: HexDigest
+    created_at: datetime
+
+
+class PublicCampaignArtifactV1(FrozenContractModel):
+    """Opaque artifact identity and seal metadata safe for campaign readers."""
+
+    schema_version: Literal["public_campaign_artifact.v1"] = (
+        "public_campaign_artifact.v1"
+    )
+    workspace_id: Identifier
+    campaign_id: Identifier
+    artifact_id: Identifier
+    producer_action_id: Identifier | None = None
+    sha256: HexDigest
+    size_bytes: int = Field(ge=0)
+    schema_name: Annotated[
+        str,
+        StringConstraints(
+            strip_whitespace=True,
+            min_length=1,
+            max_length=240,
+            pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        ),
+    ]
+    sealed: bool
+    valid: bool
     created_at: datetime
 
 
@@ -1347,6 +1449,7 @@ __all__ = [
     "CODEX_CAPABILITIES",
     "DESKTOP_LOCAL_SCOPE",
     "Campaign",
+    "CANONICAL_CAMPAIGN_EVENT_TYPES",
     "CampaignArtifactReference",
     "CampaignControlRoomSnapshotV1",
     "CampaignControlRoomStateV1",
@@ -1355,6 +1458,9 @@ __all__ = [
     "CampaignEvent",
     "PublicCampaignEventSummaryV1",
     "PublicCampaignEventV1",
+    "PublicCampaignArtifactV1",
+    "PUBLIC_CAMPAIGN_ARTIFACT_SCHEMA_NAMES",
+    "PUBLIC_CAMPAIGN_BLOCKER_CODES",
     "CampaignKind",
     "CampaignManifest",
     "CampaignStatus",

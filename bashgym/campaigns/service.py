@@ -22,6 +22,7 @@ from bashgym.campaigns.contracts import (
     ManifestRevision,
     ProposalRecord,
     ProtectedEvaluationResult,
+    PublicCampaignArtifactV1,
     StudyProposalSubmission,
     canonical_hash,
 )
@@ -34,10 +35,12 @@ from bashgym.campaigns.persistence import (
 from bashgym.campaigns.proposals import validate_proposal_submission
 from bashgym.campaigns.remote import RemoteRunIdentity
 from bashgym.campaigns.runtime import (
-    CampaignArtifactRecord,
     CampaignRuntimeRepository,
 )
-from bashgym.campaigns.visibility import project_public_campaign_event
+from bashgym.campaigns.visibility import (
+    project_public_campaign_artifact,
+    project_public_campaign_event,
+)
 
 _TRIGGER_CAPABILITIES = {
     CampaignTrigger.START: Capability.CAMPAIGN_START,
@@ -151,9 +154,12 @@ class CampaignService:
 
     def artifacts(
         self, workspace_id: str, campaign_id: str, principal: ActorPrincipal
-    ) -> tuple[CampaignArtifactRecord, ...]:
+    ) -> tuple[PublicCampaignArtifactV1, ...]:
         self.get(workspace_id, campaign_id, principal)
-        return self.repository.list_artifacts(workspace_id, campaign_id)
+        return tuple(
+            project_public_campaign_artifact(artifact)
+            for artifact in self.repository.list_artifacts(workspace_id, campaign_id)
+        )
 
     def attempts(self, workspace_id: str, campaign_id: str, principal: ActorPrincipal):
         self.get(workspace_id, campaign_id, principal)

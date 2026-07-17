@@ -16,7 +16,10 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from bashgym.campaigns.client import CampaignApiClient, CampaignClientError
-from bashgym.campaigns.visibility import project_public_campaign_event
+from bashgym.campaigns.visibility import (
+    project_public_campaign_artifact,
+    project_public_campaign_event,
+)
 from bashgym.mcp.policy import validate_secret_ref_name
 
 
@@ -388,7 +391,32 @@ def build_server(
     ) -> dict[str, Any]:
         """List bounded artifact metadata and authorized references."""
 
-        return await read_collection(campaign_id, "artifacts", "artifacts", limit)
+        result = await request(
+            "GET",
+            f"/campaigns/{campaign_id}/artifacts",
+            query={"workspace_id": workspace_id},
+        )
+        if not result["ok"]:
+            return result
+        try:
+            _payload, values, truncated = _bounded_collection(
+                result["data"], key="artifacts", limit=limit
+            )
+            artifacts = [
+                project_public_campaign_artifact(item).model_dump(mode="json")
+                for item in values
+                if isinstance(item, dict)
+            ]
+            if len(artifacts) != len(values):
+                raise ValueError("invalid public artifact collection")
+        except (KeyError, TypeError, ValueError):
+            return _invalid_response()
+        return {
+            "ok": True,
+            "artifacts": artifacts,
+            "count": len(artifacts),
+            "truncated": truncated,
+        }
 
     @server.tool(structured_output=True, annotations=read_only)
     async def campaign_proposals(

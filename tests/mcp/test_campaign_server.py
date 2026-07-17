@@ -63,8 +63,6 @@ class RecordingClient:
                             "event_type": "campaign:created",
                             "actor_id": "codex-agent",
                             "credential_kind": "access",
-                            "correlation_identity": "a" * 64,
-                            "idempotency_identity": "b" * 64,
                             "created_at": "2026-07-16T00:00:00Z",
                         },
                     }
@@ -78,7 +76,21 @@ class RecordingClient:
                 "artifact_references": [f"evidence-{index}" for index in range(150)],
             }
         if path.endswith("/artifacts"):
-            return {"artifacts": [{"artifact_id": f"artifact-{index}"} for index in range(5)]}
+            return {
+                "artifacts": [{
+                    "schema_version": "public_campaign_artifact.v1",
+                    "workspace_id": "workspace-a",
+                    "campaign_id": "campaign-1",
+                    "artifact_id": f"artifact-{index}",
+                    "producer_action_id": None,
+                    "sha256": f"{index + 1:064x}",
+                    "size_bytes": index,
+                    "schema_name": "training_metrics_jsonl.v1",
+                    "sealed": True,
+                    "valid": True,
+                    "created_at": "2026-07-16T00:00:00Z",
+                } for index in range(5)],
+            }
         if path.endswith("/proposals") and method == "GET":
             return {"proposals": [{"proposal_id": f"proposal-{index}"} for index in range(5)]}
         if "/studies/" in path and method == "GET":
@@ -136,6 +148,32 @@ class LeakyEventClient(RecordingClient):
                     },
                 }],
                 "next_cursor": 7,
+            }
+        return super().request_json(method, path, **kwargs)
+
+
+class LeakyArtifactClient(RecordingClient):
+    def request_json(self, method: str, path: str, **kwargs) -> Any:
+        if path.endswith("/artifacts"):
+            return {
+                "artifacts": [{
+                    "schema_version": "campaign_artifact_record.v1",
+                    "workspace_id": "workspace-a",
+                    "campaign_id": "campaign-1",
+                    "artifact_id": "artifact-1",
+                    "producer_action_id": "action-1",
+                    "uri": "C:/operator/restricted-result.json",
+                    "sha256": "a" * 64,
+                    "size_bytes": 10,
+                    "schema_name": "training_metrics_jsonl.v1",
+                    "sealed": True,
+                    "valid": True,
+                    "metadata": {
+                        "reference": "candidate-map-canary",
+                        "nested": {"ordinary": "protected-epoch-canary"},
+                    },
+                    "created_at": "2026-07-16T00:00:00Z",
+                }],
             }
         return super().request_json(method, path, **kwargs)
 
@@ -361,6 +399,31 @@ async def test_campaign_events_tool_reprojects_untrusted_event_responses():
     assert "restricted-result.json" not in serialized
     assert "protected-eval-correlation-canary" not in serialized
     assert "protected-eval-idempotency-canary" not in serialized
+
+
+async def test_campaign_artifacts_tool_reprojects_untrusted_artifact_responses():
+    server = build_server(
+        workspace_id="workspace-a",
+        credential_ref="BASHGYM_CAMPAIGN_REFRESH",
+        agent="codex",
+        client=LeakyArtifactClient(),
+    )
+
+    result = await call_tool(
+        server,
+        "campaign_artifacts",
+        {"campaign_id": "campaign-1", "limit": 10},
+    )
+
+    assert result["ok"] is True
+    artifact = result["artifacts"][0]
+    assert artifact["schema_version"] == "public_campaign_artifact.v1"
+    assert "uri" not in artifact
+    assert "metadata" not in artifact
+    serialized = repr(result)
+    assert "restricted-result.json" not in serialized
+    assert "candidate-map-canary" not in serialized
+    assert "protected-epoch-canary" not in serialized
 
 
 async def test_campaign_extended_tools_use_strict_paths_bodies_and_persisted_identity():

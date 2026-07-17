@@ -1,6 +1,14 @@
 import { create } from 'zustand'
+import {
+  toCampaignActivityFields,
+  toCampaignPublicArtifact,
+  type CampaignArtifact,
+  type CampaignEventItem,
+} from '../campaignVisibility'
 import { campaignApi, type ApiResponse } from '../services/api'
 import { useActivityStore } from './activityStore'
+
+export type { CampaignArtifact, CampaignEventItem } from '../campaignVisibility'
 
 export type CampaignStatus =
   | 'draft'
@@ -125,18 +133,6 @@ export interface CampaignEvidence {
   created_at: string
 }
 
-export interface CampaignArtifact {
-  artifact_id: string
-  producer_action_id?: string | null
-  sha256: string
-  size_bytes: number
-  schema_name: string
-  sealed: boolean
-  valid: boolean
-  metadata: Record<string, unknown>
-  created_at: string
-}
-
 export interface CampaignComparison {
   champion_digest: string
   candidate_digest: string
@@ -149,56 +145,6 @@ export interface CampaignComparison {
   warnings: string[]
   comparison_digest: string
   created_at: string
-}
-
-export interface CampaignEventItem {
-  cursor: number
-  event: {
-    schema_version: 'public_campaign_event.v1'
-    event_id: string
-    workspace_id: string
-    campaign_id: string
-    sequence: number
-    aggregate_version: number
-    event_type: string
-    summary?: CampaignPublicEventSummary | null
-    actor_id: string
-    credential_kind: string
-    correlation_identity: string
-    idempotency_identity: string
-    created_at: string
-  }
-}
-
-export interface CampaignPublicEventSummary {
-  schema_version: 'public_campaign_event_summary.v1'
-  action_id?: string
-  attempt_id?: string
-  study_id?: string
-  proposal_id?: string
-  source_id?: string
-  entry_id?: string
-  stage?: string
-  status?: string
-  code?: string
-  trigger?: string
-  outcome?: string
-  unit?: string
-  kind?: string
-  manifest_revision?: number
-  stage_index?: number
-  next_stage_index?: number
-  claim_generation?: number
-  cursor_end?: number
-  alert_count?: number
-  study_completed?: boolean
-  reserved?: number
-  actual?: number
-  effective_limit?: number
-  reason_codes?: string[]
-  metric_names?: string[]
-  evidence_ids?: string[]
-  artifact_ids?: string[]
 }
 
 export interface CampaignMetricValue {
@@ -620,19 +566,19 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
     }
     const events = mergeEvents(previous?.events || [], eventsResponse.data.items)
     for (const item of eventsResponse.data.items) {
-      useActivityStore.getState().addEvent(item.event.event_type, {
-        ...(item.event.summary || {}),
-        event_id: item.event.event_id,
-        aggregate_version: item.event.aggregate_version,
-      })
+      const fields = toCampaignActivityFields(item.event)
+      if (fields) useActivityStore.getState().addEvent(item.event.event_type, fields)
     }
+    const artifacts = artifactsResponse.data.artifacts
+      .map((artifact) => toCampaignPublicArtifact(artifact))
+      .filter((artifact): artifact is CampaignArtifact => artifact !== null)
     const detail: CampaignDetailState = {
       campaign: campaignResponse.data,
       studies: studiesResponse.data.studies,
       proposals: proposalsResponse.data.proposals,
       evidence: evidenceResponse.data,
       attempts,
-      artifacts: artifactsResponse.data.artifacts,
+      artifacts,
       comparisons: comparisonsResponse.data.comparisons,
       ledger: ledgerResponse.data,
       events,

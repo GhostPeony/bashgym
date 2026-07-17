@@ -1,18 +1,24 @@
+import hashlib
 import json
 from datetime import UTC, datetime
 
 from bashgym.campaigns.contracts import (
+    CANONICAL_CAMPAIGN_EVENT_TYPES,
     CampaignEvent,
     CredentialKind,
+    PublicCampaignArtifactV1,
     PublicCampaignEventSummaryV1,
     PublicCampaignEventV1,
 )
 from bashgym.campaigns.visibility import (
+    PUBLIC_CAMPAIGN_ARTIFACT_FIELD_CLASSES,
+    PUBLIC_CAMPAIGN_ARTIFACT_FIELDS,
     PUBLIC_CAMPAIGN_EVENT_FIELD_CLASSES,
     PUBLIC_CAMPAIGN_EVENT_FIELDS,
     PUBLIC_EVENT_SUMMARY_CONTRACT_FIELDS,
     PUBLIC_EVENT_SUMMARY_FIELD_CLASSES,
     PUBLIC_EVENT_TYPE_FIELDS,
+    project_public_campaign_artifact,
     project_public_campaign_event,
 )
 
@@ -57,6 +63,11 @@ def test_public_event_contract_has_an_exact_recursive_visibility_allowlist():
     assert classified_summary_fields <= (
         PUBLIC_EVENT_SUMMARY_CONTRACT_FIELDS - {"schema_version"}
     )
+    assert set(PUBLIC_EVENT_TYPE_FIELDS) == CANONICAL_CAMPAIGN_EVENT_TYPES
+    assert "correlation_identity" not in PUBLIC_CAMPAIGN_EVENT_FIELDS
+    assert "idempotency_identity" not in PUBLIC_CAMPAIGN_EVENT_FIELDS
+    assert set(PublicCampaignArtifactV1.model_fields) == PUBLIC_CAMPAIGN_ARTIFACT_FIELDS
+    assert set(PUBLIC_CAMPAIGN_ARTIFACT_FIELD_CLASSES) == PUBLIC_CAMPAIGN_ARTIFACT_FIELDS
 
 
 def test_unknown_events_and_fields_fail_closed_to_safe_identity():
@@ -78,6 +89,12 @@ def test_unknown_events_and_fields_fail_closed_to_safe_identity():
     assert "future-result-canary" not in serialized
     assert "caller-controlled-correlation-canary" not in serialized
     assert "caller-controlled-idempotency-canary" not in serialized
+    assert "correlation_identity" not in serialized
+    assert "idempotency_identity" not in serialized
+    guessed = hashlib.sha256(
+        b"workspace-a\0campaign-1\0caller-controlled-correlation-canary"
+    ).hexdigest()
+    assert guessed not in serialized
 
 
 def test_known_event_keeps_only_registered_typed_summary_fields():
@@ -88,7 +105,7 @@ def test_known_event_keeps_only_registered_typed_summary_fields():
                 "study_id": "study-1",
                 "stage_index": 2,
                 "stage": "full_training",
-                "code": "compute_capacity_unavailable",
+                "code": "campaign_remote_profile_unavailable",
                 "message": "operator-error-canary",
                 "location": "C:/operator/private.json",
                 "result": {"candidate": "candidate-map-canary"},
@@ -101,13 +118,56 @@ def test_known_event_keeps_only_registered_typed_summary_fields():
         "schema_version": "public_campaign_event_summary.v1",
         "study_id": "study-1",
         "stage": "full_training",
-        "code": "compute_capacity_unavailable",
+        "code": "campaign_remote_profile_unavailable",
         "stage_index": 2,
     }
     serialized = json.dumps(projected.model_dump(mode="json"), sort_keys=True)
     assert "operator-error-canary" not in serialized
     assert "private.json" not in serialized
     assert "candidate-map-canary" not in serialized
+
+
+def test_allowed_field_names_reject_untrusted_values_and_non_finite_numbers():
+    projected = project_public_campaign_event(
+        raw_event(
+            event_type="campaign:action-blocked",
+            payload={
+                "study_id": "study-1",
+                "stage_index": float("inf"),
+                "stage": "candidate-map-canary",
+                "code": "private-case-identity",
+            },
+        )
+    )
+
+    assert projected.summary is not None
+    assert projected.summary.model_dump(mode="json", exclude_none=True) == {
+        "schema_version": "public_campaign_event_summary.v1",
+        "study_id": "study-1",
+    }
+
+    metrics = project_public_campaign_event(
+        raw_event(
+            event_type="campaign:training-metrics-appended",
+            payload={
+                "action_id": "action-1",
+                "attempt_id": "attempt-1",
+                "metric_names": ["candidate-map-canary"],
+                "reason_codes": ["private-case-identity"],
+            },
+        )
+    )
+    serialized = json.dumps(metrics.model_dump(mode="json"), sort_keys=True)
+    assert "candidate-map-canary" not in serialized
+    assert "private-case-identity" not in serialized
+
+
+def test_metadata_only_inventory_includes_validation_and_all_terminal_actions():
+    assert PUBLIC_EVENT_TYPE_FIELDS["campaign:validation-failed"] == frozenset()
+    assert PUBLIC_EVENT_TYPE_FIELDS["campaign:action-completed"]
+    assert PUBLIC_EVENT_TYPE_FIELDS["campaign:action-failed"]
+    assert PUBLIC_EVENT_TYPE_FIELDS["campaign:action-cancelled"]
+    assert PUBLIC_EVENT_TYPE_FIELDS["campaign:action-force-stopped"]
 
 
 def test_protected_event_types_never_expose_payload_shape_or_count():
@@ -130,3 +190,51 @@ def test_protected_event_types_never_expose_payload_shape_or_count():
 
     assert sparse.summary is dense.summary is None
     assert set(sparse.model_dump(mode="json")) == set(dense.model_dump(mode="json"))
+
+
+def test_public_artifact_projection_drops_uri_metadata_and_runtime_extras():
+    projected = project_public_campaign_artifact(
+        {
+            "schema_version": "campaign_artifact_record.v1",
+            "workspace_id": "workspace-a",
+            "campaign_id": "campaign-1",
+            "artifact_id": "artifact-1",
+            "producer_action_id": "action-1",
+            "uri": "C:/operator/restricted-result.json",
+            "sha256": "a" * 64,
+            "size_bytes": 10,
+            "schema_name": "training_metrics_jsonl.v1",
+            "sealed": True,
+            "valid": True,
+            "metadata": {
+                "reference": "candidate-map-canary",
+                "nested": {"ordinary": "protected-epoch-canary"},
+            },
+            "created_at": "2026-07-16T00:00:00Z",
+        }
+    )
+
+    assert set(projected.model_dump(mode="json")) == PUBLIC_CAMPAIGN_ARTIFACT_FIELDS
+    serialized = json.dumps(projected.model_dump(mode="json"), sort_keys=True)
+    assert "restricted-result.json" not in serialized
+    assert "candidate-map-canary" not in serialized
+    assert "protected-epoch-canary" not in serialized
+
+
+def test_public_artifact_projection_replaces_unproven_schema_names():
+    projected = project_public_campaign_artifact(
+        {
+            "workspace_id": "workspace-a",
+            "campaign_id": "campaign-1",
+            "artifact_id": "artifact-1",
+            "producer_action_id": None,
+            "sha256": "a" * 64,
+            "size_bytes": 10,
+            "schema_name": "candidate-map-canary",
+            "sealed": True,
+            "valid": True,
+            "created_at": "2026-07-16T00:00:00Z",
+        }
+    )
+
+    assert projected.schema_name == "unclassified_artifact.v1"

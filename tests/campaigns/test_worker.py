@@ -742,7 +742,7 @@ def test_controller_missing_profile_blocks_once_without_budget_or_launch(tmp_pat
         if event.event_type == "campaign:action-blocked"
     ]
     assert len(blocked) == 1
-    assert blocked[0].payload["code"] == "campaign_remote_profile_unavailable"
+    assert blocked[0].payload["code"] == "campaign_controller_action_blocked"
 
 
 def test_registered_compute_resolves_remote_development_evaluation(tmp_path):

@@ -72,7 +72,7 @@ def public_skill_wheel(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
     wheel_dir = proof_dir / "wheel"
     wheel_dir.mkdir()
-    subprocess.run(
+    build = subprocess.run(
         [
             sys.executable,
             "-m",
@@ -84,10 +84,15 @@ def public_skill_wheel(tmp_path_factory: pytest.TempPathFactory) -> Path:
             "--wheel-dir",
             str(wheel_dir),
         ],
-        check=True,
+        check=False,
         cwd=wheel_dir,
         capture_output=True,
         text=True,
+    )
+    assert build.returncode == 0, (
+        "failed to build isolated BashGym wheel\n"
+        f"stdout:\n{build.stdout}\n"
+        f"stderr:\n{build.stderr}"
     )
     wheels = list(wheel_dir.glob("bashgym-*.whl"))
     assert len(wheels) == 1

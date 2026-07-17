@@ -384,6 +384,33 @@ def test_operator_bundle_integrity_detects_a_skill_rewrite(tmp_path):
     assert integrity["mismatches"] == ["SKILL.md"]
 
 
+def test_operator_bundle_v2_integrity_is_stable_across_text_line_endings(tmp_path):
+    root = tmp_path / "bashgym-operator"
+    root.mkdir()
+    skill = root / "SKILL.md"
+    canonical = "first line\nsecond line\n"
+    skill.write_bytes(canonical.replace("\n", "\r\n").encode("utf-8"))
+    digest = __import__("hashlib").sha256(canonical.encode("utf-8")).hexdigest()
+    (root / "bundle.lock.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "bashgym.operator-bundle-lock.v2",
+                "files": {"SKILL.md": digest},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert operator._bundle_integrity(root)["verified"] is True
+    skill.write_text(canonical, encoding="utf-8", newline="\n")
+    assert operator._bundle_integrity(root)["verified"] is True
+
+    skill.write_text("changed\n", encoding="utf-8", newline="\n")
+    integrity = operator._bundle_integrity(root)
+    assert integrity["verified"] is False
+    assert integrity["mismatches"] == ["SKILL.md"]
+
+
 def test_public_operator_bundle_has_no_private_project_or_machine_residue():
     bundle_root = SCRIPT.parents[1]
     lock = json.loads((bundle_root / "bundle.lock.json").read_text(encoding="utf-8"))

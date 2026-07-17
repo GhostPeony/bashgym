@@ -421,7 +421,11 @@ def _bundle_integrity(root: Path | None = None) -> dict[str, Any]:
     bundle_root = root or Path(__file__).resolve().parents[1]
     lock_path = bundle_root / "bundle.lock.json"
     lock = _read_json(lock_path)
-    if not lock or lock.get("schema_version") != "bashgym.operator-bundle-lock.v1":
+    schema_version = lock.get("schema_version") if lock else None
+    if schema_version not in {
+        "bashgym.operator-bundle-lock.v1",
+        "bashgym.operator-bundle-lock.v2",
+    }:
         return {
             "verified": False,
             "lock_available": False,
@@ -438,7 +442,16 @@ def _bundle_integrity(root: Path | None = None) -> dict[str, Any]:
         if not candidate.is_file():
             mismatches.append(str(relative))
             continue
-        actual = hashlib.sha256(candidate.read_bytes()).hexdigest()
+        if schema_version == "bashgym.operator-bundle-lock.v1":
+            payload = candidate.read_bytes()
+        else:
+            try:
+                text = candidate.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                mismatches.append(str(relative))
+                continue
+            payload = text.replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
+        actual = hashlib.sha256(payload).hexdigest()
         if actual != expected:
             mismatches.append(str(relative))
     return {

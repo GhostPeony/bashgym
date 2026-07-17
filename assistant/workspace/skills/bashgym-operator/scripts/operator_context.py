@@ -519,8 +519,10 @@ def _doctor(paths: OperatorPaths) -> dict[str, Any]:
         },
         "activation_lanes": {
             "same_device": {
-                "ready": training_cli is not None or api_reachable,
-                "surface": "BashGym training CLI/API",
+                "supported": False,
+                "ready": False,
+                "surface": "registered SSH device",
+                "requires": "register localhost SSH when the training hardware is this machine",
             },
             "private_ssh": {
                 "controller_ready": training_cli is not None or api_reachable,

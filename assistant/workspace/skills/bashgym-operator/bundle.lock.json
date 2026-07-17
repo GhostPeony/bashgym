@@ -3,7 +3,7 @@
   "files": {
     "SKILL.md": "bff2406daea082f82adf0d5a973cb10e98b6a1ade499a7d074932226d66077f9",
     "references/operator-contract.md": "b8596fd80c59967225a435b663b9629b343da8e45b0ff5976ca9945ee0c3b0bd",
-    "scripts/operator_context.py": "5ea36f354b422886e188de1a5b56d4409e3b774e3dc94ea4d526cc738831b8e7",
+    "scripts/operator_context.py": "01b787d536a14b3730b5b08ca453f012c6095fcfb45aa10216eea23eb4d0b291",
     "scripts/curate_activity.py": "4c6bc70990af8ba7671c2e6da4ec2601fe0c615cef959092e69b2d4ac5d52752",
     "scripts/gbrain_bridge.py": "9356708c9c6e7a3294b539753ec8b335b5707d6d1d88bce68c5f59d45d5ca1ee",
     "../bashgym/SKILL.md": "7703909ea87767287e590080533a4cae530323e3c46efdf66e7f806cd964e7ce",

@@ -164,6 +164,20 @@ def test_doctor_reports_hf_jobs_only_when_cli_and_credentials_exist(tmp_path, mo
     assert doctor["abilities"]["launch_hf_jobs"] is True
 
 
+def test_doctor_does_not_claim_a_native_same_device_executor(tmp_path, monkeypatch):
+    paths = _paths(tmp_path)
+    monkeypatch.setattr(operator, "_training_cli", lambda _paths: "/usr/bin/bashgym")
+    monkeypatch.setattr(operator, "_api_health", lambda _base_url: True)
+
+    doctor = operator._doctor(paths)
+
+    same_device = doctor["activation_lanes"]["same_device"]
+    assert same_device["supported"] is False
+    assert same_device["ready"] is False
+    assert "localhost SSH" in same_device["requires"]
+    assert doctor["activation_lanes"]["private_ssh"]["controller_ready"] is True
+
+
 def test_selected_project_context_does_not_infer_a_task_profile(tmp_path):
     from bashgym.ledger.contracts import ProjectSpec
     from bashgym.ledger.persistence import ExperimentLedgerRepository

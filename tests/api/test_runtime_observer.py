@@ -12,7 +12,7 @@ from bashgym.api.runtime_observer import (
 
 def test_runtime_route_is_registered_in_desktop_app():
     app = create_app()
-    assert "/api/runtime/jobs" in {route.path for route in app.routes}
+    assert "/api/runtime/jobs" in app.openapi()["paths"]
 
 
 def test_classifies_workspace_data_designer_and_training_processes(tmp_path: Path):

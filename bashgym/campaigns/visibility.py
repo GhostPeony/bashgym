@@ -15,6 +15,7 @@ from .contracts import (
     PUBLIC_CAMPAIGN_BLOCKER_CODES,
     CampaignEvent,
     PublicCampaignArtifactV1,
+    PublicCampaignAttemptV1,
     PublicCampaignEventSummaryV1,
     PublicCampaignEventV1,
     StageKind,
@@ -96,12 +97,7 @@ PUBLIC_EVENT_SUMMARY_FIELD_CLASSES = MappingProxyType(
         "schema_version": "public_metadata",
         **{
             field: "workspace_safe"
-            for field in (
-                _IDENTITY_FIELDS
-                | _ENUM_FIELDS
-                | _INTEGER_FIELDS
-                | {"study_completed"}
-            )
+            for field in (_IDENTITY_FIELDS | _ENUM_FIELDS | _INTEGER_FIELDS | {"study_completed"})
         },
     }
 )
@@ -137,6 +133,47 @@ PUBLIC_CAMPAIGN_ARTIFACT_FIELD_CLASSES = MappingProxyType(
     }
 )
 
+PUBLIC_CAMPAIGN_ATTEMPT_FIELDS = frozenset(
+    {
+        "schema_version",
+        "workspace_id",
+        "campaign_id",
+        "study_id",
+        "action_id",
+        "attempt_id",
+        "attempt_number",
+        "claim_generation",
+        "status",
+        "stage",
+        "manifest_revision",
+        "input_digest",
+        "candidate_digest",
+        "executor_kind",
+        "created_at",
+        "updated_at",
+    }
+)
+PUBLIC_CAMPAIGN_ATTEMPT_FIELD_CLASSES = MappingProxyType(
+    {
+        "schema_version": "public_metadata",
+        "workspace_id": "workspace_safe",
+        "campaign_id": "workspace_safe",
+        "study_id": "workspace_safe",
+        "action_id": "workspace_safe",
+        "attempt_id": "workspace_safe",
+        "attempt_number": "workspace_safe",
+        "claim_generation": "workspace_safe",
+        "status": "workspace_safe",
+        "stage": "workspace_safe",
+        "manifest_revision": "workspace_safe",
+        "input_digest": "workspace_safe",
+        "candidate_digest": "workspace_safe",
+        "executor_kind": "workspace_safe",
+        "created_at": "workspace_safe",
+        "updated_at": "workspace_safe",
+    }
+)
+
 
 def _fields(*names: str) -> frozenset[str]:
     return frozenset(names)
@@ -158,27 +195,17 @@ PUBLIC_EVENT_TYPE_FIELDS = MappingProxyType(
         "campaign:completed": _fields(),
         "campaign:failed": _fields(),
         "campaign:exhausted": _fields(),
-        "campaign:proposal-submitted": _fields(
-            "proposal_id"
-        ),
-        "campaign:proposal-rejected": _fields(
-            "proposal_id"
-        ),
+        "campaign:proposal-submitted": _fields("proposal_id"),
+        "campaign:proposal-rejected": _fields("proposal_id"),
         "campaign:proposal-withdrawn": _fields("proposal_id"),
         "campaign:proposal-accepted": _fields("proposal_id", "study_id"),
         "campaign:advance-requested": _fields(),
         "campaign:manifest-revised": _fields("manifest_revision"),
         "campaign:source-approved": _fields(),
         "campaign:study-abandoned": _fields("study_id"),
-        "campaign:action-blocked": _fields(
-            "study_id", "stage_index", "stage", "code"
-        ),
-        "campaign:stages-skipped": _fields(
-            "study_id", "next_stage_index", "study_completed"
-        ),
-        "campaign:action-retry-scheduled": _fields(
-            "action_id", "attempt_id", "study_id", "stage"
-        ),
+        "campaign:action-blocked": _fields("study_id", "stage_index", "stage", "code"),
+        "campaign:stages-skipped": _fields("study_id", "next_stage_index", "study_completed"),
+        "campaign:action-retry-scheduled": _fields("action_id", "attempt_id", "study_id", "stage"),
         "campaign:force-stop-requested": _fields("action_id", "attempt_id"),
         "campaign:training-metrics-appended": _fields(
             "action_id",
@@ -186,34 +213,16 @@ PUBLIC_EVENT_TYPE_FIELDS = MappingProxyType(
             "cursor_end",
             "alert_count",
         ),
-        "campaign:remote-run-registered": _fields(
-            "action_id", "attempt_id", "claim_generation"
-        ),
-        "campaign:remote-run-adopted": _fields(
-            "action_id", "attempt_id", "claim_generation"
-        ),
-        "campaign:remote-capacity-blocked": _fields(
-            "action_id", "attempt_id", "claim_generation"
-        ),
-        "campaign:action-scheduled": _fields(
-            "action_id", "attempt_id", "study_id", "stage"
-        ),
-        "campaign:action-claimed": _fields(
-            "action_id", "attempt_id", "claim_generation"
-        ),
+        "campaign:remote-run-registered": _fields("action_id", "attempt_id", "claim_generation"),
+        "campaign:remote-run-adopted": _fields("action_id", "attempt_id", "claim_generation"),
+        "campaign:remote-capacity-blocked": _fields("action_id", "attempt_id", "claim_generation"),
+        "campaign:action-scheduled": _fields("action_id", "attempt_id", "study_id", "stage"),
+        "campaign:action-claimed": _fields("action_id", "attempt_id", "claim_generation"),
         "campaign:action-unknown": _fields("action_id", "attempt_id"),
-        "campaign:action-failed": _fields(
-            "action_id", "attempt_id", "study_id", "stage"
-        ),
-        "campaign:action-cancelled": _fields(
-            "action_id", "attempt_id", "study_id", "stage"
-        ),
-        "campaign:action-completed": _fields(
-            "action_id", "attempt_id", "study_id", "stage"
-        ),
-        "campaign:action-force-stopped": _fields(
-            "action_id", "attempt_id", "study_id", "stage"
-        ),
+        "campaign:action-failed": _fields("action_id", "attempt_id", "study_id", "stage"),
+        "campaign:action-cancelled": _fields("action_id", "attempt_id", "study_id", "stage"),
+        "campaign:action-completed": _fields("action_id", "attempt_id", "study_id", "stage"),
+        "campaign:action-force-stopped": _fields("action_id", "attempt_id", "study_id", "stage"),
         "campaign:budget-recorded": _fields("entry_id"),
         "campaign:budget-overrun": _fields("entry_id"),
         # Presence is visible, but protected/candidate/result identities are not.
@@ -245,7 +254,9 @@ def _safe_identifier(value: Any) -> str | None:
     return None
 
 
-def _safe_summary(event_type: str, payload: Mapping[str, Any]) -> PublicCampaignEventSummaryV1 | None:
+def _safe_summary(
+    event_type: str, payload: Mapping[str, Any]
+) -> PublicCampaignEventSummaryV1 | None:
     allowed = PUBLIC_EVENT_TYPE_FIELDS.get(event_type)
     if not allowed:
         return None
@@ -265,11 +276,7 @@ def _safe_summary(event_type: str, payload: Mapping[str, Any]) -> PublicCampaign
                 projected[field] = value
         elif field in _INTEGER_FIELDS:
             minimum = 1 if field == "manifest_revision" else 0
-            if (
-                isinstance(value, int)
-                and not isinstance(value, bool)
-                and value >= minimum
-            ):
+            if isinstance(value, int) and not isinstance(value, bool) and value >= minimum:
                 projected[field] = value
         elif field == "study_completed":
             if isinstance(value, bool):
@@ -309,14 +316,35 @@ def project_public_campaign_event(
     )
 
 
+def project_public_campaign_attempt(attempt: Any) -> PublicCampaignAttemptV1:
+    """Project raw or untrusted attempt-shaped input without executor configuration."""
+
+    raw = attempt.model_dump(mode="json") if hasattr(attempt, "model_dump") else dict(attempt)
+    executor = raw.get("executor")
+    executor_kind = executor.get("kind") if isinstance(executor, Mapping) else None
+    return PublicCampaignAttemptV1(
+        workspace_id=raw["workspace_id"],
+        campaign_id=raw["campaign_id"],
+        study_id=raw["study_id"],
+        action_id=raw["action_id"],
+        attempt_id=raw["attempt_id"],
+        attempt_number=raw["attempt_number"],
+        claim_generation=raw["claim_generation"],
+        status=raw["status"],
+        stage=raw["stage"],
+        manifest_revision=raw["manifest_revision"],
+        input_digest=raw["input_digest"],
+        candidate_digest=raw["candidate_digest"],
+        executor_kind=_safe_identifier(executor_kind),
+        created_at=raw["created_at"],
+        updated_at=raw["updated_at"],
+    )
+
+
 def project_public_campaign_artifact(artifact: Any) -> PublicCampaignArtifactV1:
     """Project raw or untrusted artifact-shaped input without URI or metadata."""
 
-    raw = (
-        artifact.model_dump(mode="json")
-        if hasattr(artifact, "model_dump")
-        else dict(artifact)
-    )
+    raw = artifact.model_dump(mode="json") if hasattr(artifact, "model_dump") else dict(artifact)
     schema_name = raw.get("schema_name")
     if schema_name not in PUBLIC_CAMPAIGN_ARTIFACT_SCHEMA_NAMES:
         schema_name = "unclassified_artifact.v1"
@@ -337,11 +365,14 @@ def project_public_campaign_artifact(artifact: Any) -> PublicCampaignArtifactV1:
 __all__ = [
     "PUBLIC_CAMPAIGN_ARTIFACT_FIELD_CLASSES",
     "PUBLIC_CAMPAIGN_ARTIFACT_FIELDS",
+    "PUBLIC_CAMPAIGN_ATTEMPT_FIELD_CLASSES",
+    "PUBLIC_CAMPAIGN_ATTEMPT_FIELDS",
     "PUBLIC_CAMPAIGN_EVENT_FIELD_CLASSES",
     "PUBLIC_CAMPAIGN_EVENT_FIELDS",
     "PUBLIC_EVENT_SUMMARY_CONTRACT_FIELDS",
     "PUBLIC_EVENT_SUMMARY_FIELD_CLASSES",
     "PUBLIC_EVENT_TYPE_FIELDS",
     "project_public_campaign_artifact",
+    "project_public_campaign_attempt",
     "project_public_campaign_event",
 ]

@@ -643,7 +643,7 @@ export interface OpaqueProcessIdentityV1 {
   schema_version: 'opaque_process_identity.v1'
   run_id: string
   compute_profile_id: string
-  state: 'launching' | 'running' | 'completed' | 'failed' | 'cancelled' | 'unknown'
+  state: 'launching' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled' | 'unknown'
 }
 
 export interface ActiveWorkSummaryV1 {

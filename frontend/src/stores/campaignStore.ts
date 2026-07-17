@@ -82,6 +82,7 @@ export interface CampaignControllerStatus {
 }
 
 export interface CampaignAttempt {
+  schema_version: 'public_campaign_attempt.v1'
   attempt_id: string
   workspace_id: string
   campaign_id: string
@@ -94,7 +95,7 @@ export interface CampaignAttempt {
   candidate_digest: string
   manifest_revision: number
   stage: string
-  executor: Record<string, unknown>
+  executor_kind: string | null
   created_at: string
   updated_at: string
 }

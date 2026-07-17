@@ -40,6 +40,7 @@ from bashgym.campaigns.runtime import (
 )
 from bashgym.campaigns.visibility import (
     project_public_campaign_artifact,
+    project_public_campaign_attempt,
     project_public_campaign_event,
 )
 
@@ -169,14 +170,18 @@ class CampaignService:
             after_cursor=after_cursor,
             limit=limit,
         )
-        return tuple(
-            project_public_campaign_artifact(artifact)
-            for artifact in artifacts
-        ), next_cursor, has_more
+        return (
+            tuple(project_public_campaign_artifact(artifact) for artifact in artifacts),
+            next_cursor,
+            has_more,
+        )
 
     def attempts(self, workspace_id: str, campaign_id: str, principal: ActorPrincipal):
         self.get(workspace_id, campaign_id, principal)
-        return self.repository.list_attempts(workspace_id, campaign_id)
+        return tuple(
+            project_public_campaign_attempt(attempt)
+            for attempt in self.repository.list_attempts(workspace_id, campaign_id)
+        )
 
     def comparisons(self, workspace_id: str, campaign_id: str, principal: ActorPrincipal):
         self.get(workspace_id, campaign_id, principal)
@@ -192,9 +197,7 @@ class CampaignService:
         self.get(workspace_id, campaign_id, principal)
         return self.repository.list_studies(workspace_id, campaign_id)
 
-    def study(
-        self, workspace_id: str, campaign_id: str, study_id: str, principal: ActorPrincipal
-    ):
+    def study(self, workspace_id: str, campaign_id: str, study_id: str, principal: ActorPrincipal):
         self.get(workspace_id, campaign_id, principal)
         return self.repository.get_study(workspace_id, campaign_id, study_id)
 
@@ -354,9 +357,9 @@ class CampaignService:
         idempotency_key: str,
     ):
         principal.require(workspace_id, Capability.COMPUTE_AMEND_BUDGET)
-        digest = hashlib.sha256(
-            f"{campaign_id}:{resource}:{idempotency_key}".encode()
-        ).hexdigest()[:24]
+        digest = hashlib.sha256(f"{campaign_id}:{resource}:{idempotency_key}".encode()).hexdigest()[
+            :24
+        ]
         entry = BudgetLedgerEntry(
             entry_id=f"budget-amend-{digest}",
             workspace_id=workspace_id,
@@ -509,7 +512,9 @@ class CampaignService:
     ):
         principal.require(workspace_id, Capability.CAMPAIGN_READ)
         campaign = self.repository.get_campaign(workspace_id, campaign_id)
-        export_id = f"export-{hashlib.sha256(f'{campaign_id}:{idempotency_key}'.encode()).hexdigest()[:24]}"
+        export_id = (
+            f"export-{hashlib.sha256(f'{campaign_id}:{idempotency_key}'.encode()).hexdigest()[:24]}"
+        )
         output_directory = self.export_root / workspace_id / campaign_id / export_id
         manifest_path = output_directory / "export_manifest.json"
         if manifest_path.is_file():
@@ -538,8 +543,7 @@ class CampaignService:
             snapshot = CampaignExportSnapshot(
                 campaign=campaign.model_dump(mode="json"),
                 attempts=tuple(
-                    item.model_dump(mode="json", exclude={"sealed_result_uri"})
-                    for item in attempts
+                    item.model_dump(mode="json", exclude={"sealed_result_uri"}) for item in attempts
                 ),
                 artifacts=tuple(
                     item.model_dump(mode="json", exclude={"uri"}) for item in artifacts

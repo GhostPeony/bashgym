@@ -14,12 +14,14 @@ from bashgym.campaigns.contracts import (
 from bashgym.campaigns.visibility import (
     PUBLIC_CAMPAIGN_ARTIFACT_FIELD_CLASSES,
     PUBLIC_CAMPAIGN_ARTIFACT_FIELDS,
+    PUBLIC_CAMPAIGN_ATTEMPT_FIELDS,
     PUBLIC_CAMPAIGN_EVENT_FIELD_CLASSES,
     PUBLIC_CAMPAIGN_EVENT_FIELDS,
     PUBLIC_EVENT_SUMMARY_CONTRACT_FIELDS,
     PUBLIC_EVENT_SUMMARY_FIELD_CLASSES,
     PUBLIC_EVENT_TYPE_FIELDS,
     project_public_campaign_artifact,
+    project_public_campaign_attempt,
     project_public_campaign_event,
 )
 
@@ -44,14 +46,8 @@ def raw_event(*, event_type: str, payload: dict) -> CampaignEvent:
 def test_public_event_contract_has_an_exact_recursive_visibility_allowlist():
     assert set(PublicCampaignEventV1.model_fields) == PUBLIC_CAMPAIGN_EVENT_FIELDS
     assert set(PUBLIC_CAMPAIGN_EVENT_FIELD_CLASSES) == PUBLIC_CAMPAIGN_EVENT_FIELDS
-    assert (
-        set(PublicCampaignEventSummaryV1.model_fields)
-        == PUBLIC_EVENT_SUMMARY_CONTRACT_FIELDS
-    )
-    assert (
-        set(PUBLIC_EVENT_SUMMARY_FIELD_CLASSES)
-        == PUBLIC_EVENT_SUMMARY_CONTRACT_FIELDS
-    )
+    assert set(PublicCampaignEventSummaryV1.model_fields) == PUBLIC_EVENT_SUMMARY_CONTRACT_FIELDS
+    assert set(PUBLIC_EVENT_SUMMARY_FIELD_CLASSES) == PUBLIC_EVENT_SUMMARY_CONTRACT_FIELDS
     assert set(PUBLIC_CAMPAIGN_EVENT_FIELD_CLASSES.values()) <= {
         "public_metadata",
         "workspace_safe",
@@ -61,9 +57,7 @@ def test_public_event_contract_has_an_exact_recursive_visibility_allowlist():
         "workspace_safe",
     }
     classified_summary_fields = set().union(*PUBLIC_EVENT_TYPE_FIELDS.values())
-    assert classified_summary_fields <= (
-        PUBLIC_EVENT_SUMMARY_CONTRACT_FIELDS - {"schema_version"}
-    )
+    assert classified_summary_fields <= (PUBLIC_EVENT_SUMMARY_CONTRACT_FIELDS - {"schema_version"})
     assert set(PUBLIC_EVENT_TYPE_FIELDS) == CANONICAL_CAMPAIGN_EVENT_TYPES
     assert "correlation_identity" not in PUBLIC_CAMPAIGN_EVENT_FIELDS
     assert "idempotency_identity" not in PUBLIC_CAMPAIGN_EVENT_FIELDS
@@ -191,6 +185,76 @@ def test_protected_event_types_never_expose_payload_shape_or_count():
 
     assert sparse.summary is dense.summary is None
     assert set(sparse.model_dump(mode="json")) == set(dense.model_dump(mode="json"))
+
+
+def test_public_attempt_projection_drops_executor_configuration_and_lease_identity():
+    projected = project_public_campaign_attempt(
+        {
+            "schema_version": "campaign_action_attempt.v1",
+            "attempt_id": "attempt-1",
+            "workspace_id": "workspace-a",
+            "campaign_id": "campaign-1",
+            "study_id": "study-1",
+            "action_id": "action-1",
+            "attempt_number": 1,
+            "claim_generation": 2,
+            "status": "running",
+            "input_digest": "a" * 64,
+            "candidate_digest": "b" * 64,
+            "manifest_revision": 3,
+            "stage": "full_training",
+            "lease_owner": "worker-owner-canary",
+            "lease_expires_at": "2026-07-17T00:00:30Z",
+            "heartbeat_at": "2026-07-17T00:00:10Z",
+            "executor": {
+                "kind": "ssh_remote",
+                "script_path": "C:/operator/restricted/train_stage.py",
+                "python_executable": "/home/operator/venv-canary/bin/python",
+                "input_files": ["C:/operator/restricted/dataset-canary.jsonl"],
+                "output_paths": ["logs"],
+            },
+            "sealed_result_uri": "file:///C:/operator/restricted/sealed-result-canary",
+            "created_at": "2026-07-17T00:00:00Z",
+            "updated_at": "2026-07-17T00:00:20Z",
+        }
+    )
+
+    assert set(projected.model_dump(mode="json")) == PUBLIC_CAMPAIGN_ATTEMPT_FIELDS
+    assert projected.executor_kind == "ssh_remote"
+    serialized = json.dumps(projected.model_dump(mode="json"), sort_keys=True)
+    assert "restricted" not in serialized
+    assert "train_stage.py" not in serialized
+    assert "venv-canary" not in serialized
+    assert "dataset-canary" not in serialized
+    assert "sealed-result-canary" not in serialized
+    assert "worker-owner-canary" not in serialized
+
+
+def test_public_attempt_projection_normalizes_untrusted_executor_kind():
+    base = {
+        "attempt_id": "attempt-1",
+        "workspace_id": "workspace-a",
+        "campaign_id": "campaign-1",
+        "study_id": "study-1",
+        "action_id": "action-1",
+        "attempt_number": 1,
+        "claim_generation": 0,
+        "status": "scheduled",
+        "input_digest": "a" * 64,
+        "candidate_digest": "b" * 64,
+        "manifest_revision": 1,
+        "stage": "full_training",
+        "created_at": "2026-07-17T00:00:00Z",
+        "updated_at": "2026-07-17T00:00:00Z",
+    }
+    unsafe = project_public_campaign_attempt(
+        {**base, "executor": {"kind": "C:/unsafe path canary"}}
+    )
+    missing = project_public_campaign_attempt(base)
+
+    assert unsafe.executor_kind is None
+    assert "canary" not in json.dumps(unsafe.model_dump(mode="json"))
+    assert missing.executor_kind is None
 
 
 def test_public_artifact_projection_drops_uri_metadata_and_runtime_extras():

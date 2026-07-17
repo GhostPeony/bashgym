@@ -457,10 +457,7 @@ def test_snapshot_decision_phase_exposes_shared_promotion_blockers(repository):
     assert "campaign_protected_gate_not_passed" in decision.primary_blocker.secondary_codes
     assert snapshot.decision_surface.attention_owner == "bashgym"
     assert snapshot.decision_surface.blocker is not None
-    assert (
-        snapshot.decision_surface.blocker.code
-        == "campaign_development_gate_not_passed"
-    )
+    assert snapshot.decision_surface.blocker.code == "campaign_development_gate_not_passed"
     assert "campaign_protected_gate_not_passed" in (
         snapshot.decision_surface.blocker.secondary_codes
     )
@@ -483,16 +480,11 @@ def test_snapshot_decision_phase_exposes_shared_promotion_blockers(repository):
         snapshot_at=now,
     )
     lifecycle_decision = next(
-        phase
-        for phase in lifecycle_snapshot.journey
-        if phase.phase_id == "decision"
+        phase for phase in lifecycle_snapshot.journey if phase.phase_id == "decision"
     )
     assert lifecycle_decision.state == "blocked"
     assert lifecycle_decision.primary_blocker is not None
-    assert (
-        lifecycle_decision.primary_blocker.code
-        == "campaign_promotion_transition_unavailable"
-    )
+    assert lifecycle_decision.primary_blocker.code == "campaign_promotion_transition_unavailable"
 
 
 def test_override_champion_reports_only_candidate_keyed_actual_evidence(repository):
@@ -587,9 +579,7 @@ def test_durable_champion_claim_is_correlated_to_its_candidate_and_decision(repo
                 "workspace-a",
                 "campaign-1",
                 "comparison-override",
-                json.dumps(
-                    {"candidate_digest": candidate_digest, "verdict": "failed"}
-                ),
+                json.dumps({"candidate_digest": candidate_digest, "verdict": "failed"}),
                 now_text,
             ),
         )
@@ -642,9 +632,7 @@ def test_durable_champion_claim_is_correlated_to_its_candidate_and_decision(repo
         comparison_verdict="failed",
         override=True,
     )
-    assert "campaign_projection_champion_ref_malformed" not in (
-        durable.projection_invariant_codes
-    )
+    assert "campaign_projection_champion_ref_malformed" not in (durable.projection_invariant_codes)
     snapshot = ready_snapshot(durable)
     assert snapshot.champion is not None
     assert snapshot.champion.comparison_verdict == "failed"
@@ -789,7 +777,7 @@ def test_valid_running_stage_plan_projects_active_work_without_invariant_failure
                 "action_id": "action-1",
                 "study_id": "study-1",
                 "status": "running",
-                "executor_json": '{"executor_kind":"fake"}',
+                "executor_json": '{"kind":"fake"}',
                 "stage_kind": "smoke_training",
                 "candidate_digest": "a" * 64,
             },
@@ -921,9 +909,7 @@ def test_candidate_gate_mismatch_never_displays_the_other_candidate_verdict(repo
             "verdict": "passed",
             "candidate_digest": "d" * 64,
         },
-        projection_invariant_codes=(
-            "campaign_projection_candidate_identity_mismatch",
-        ),
+        projection_invariant_codes=("campaign_projection_candidate_identity_mismatch",),
     )
     snapshot = build_control_room_snapshot(
         durable,
@@ -1283,9 +1269,7 @@ def test_oversized_legacy_projection_is_bounded_and_fails_closed(repository):
         "campaign_projection_champion_ref_malformed",
     ),
 )
-def test_each_projection_invariant_blocks_a_passed_promotion_gate(
-    repository, invariant_code
-):
+def test_each_projection_invariant_blocks_a_passed_promotion_gate(repository, invariant_code):
     durable = repository.read_control_room_projection("workspace-a", "campaign-1")
     now = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
     candidate_digest = "c" * 64
@@ -1514,7 +1498,7 @@ def test_unknown_remote_identity_is_opaque_and_requires_reconciliation(repositor
                 "workspace-a",
                 "action-remote",
                 "attempt-remote",
-                json.dumps({"executor_kind": "ssh_remote"}),
+                json.dumps({"kind": "ssh_remote"}),
                 now_text,
                 now_text,
             ),

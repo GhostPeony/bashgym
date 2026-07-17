@@ -39,6 +39,7 @@ from bashgym.campaigns.contracts import (
 from bashgym.campaigns.human_oversight import HumanOversightRepository
 from bashgym.campaigns.runtime import CampaignRuntimeRepository
 from bashgym.campaigns.service import CampaignService
+from bashgym.campaigns.visibility import PUBLIC_CAMPAIGN_ATTEMPT_FIELDS
 from bashgym.campaigns.worker import scheduler_lease_key
 from bashgym.campaigns.worker_service import (
     ControllerStatusProjection,
@@ -229,9 +230,7 @@ def test_create_app_registers_campaign_auth_and_campaign_routes():
 
 
 def test_human_work_api_is_desktop_only_bounded_and_replayable(tmp_path):
-    http, repository, refresh = campaign_client(
-        tmp_path, profile=AutonomyProfile.DESKTOP_USER
-    )
+    http, repository, refresh = campaign_client(tmp_path, profile=AutonomyProfile.DESKTOP_USER)
     access = exchange(http, refresh.raw_token)
     assert create_from_template(http, access).status_code == 200
     seeded = seed_human_work(repository)
@@ -416,9 +415,7 @@ def test_human_work_api_denies_agents_and_returns_safe_conflicts(tmp_path):
 
 
 def test_human_work_api_authenticates_before_lookup(tmp_path):
-    http, repository, refresh = campaign_client(
-        tmp_path, profile=AutonomyProfile.DESKTOP_USER
-    )
+    http, repository, refresh = campaign_client(tmp_path, profile=AutonomyProfile.DESKTOP_USER)
     access = exchange(http, refresh.raw_token)
     assert create_from_template(http, access).status_code == 200
     seed_human_work(repository)
@@ -674,9 +671,7 @@ def test_autoresearch_start_resolves_replay_conflict_and_version_before_readines
     assert invalid_transition.json()["detail"]["code"] == "campaign_invalid_transition"
 
 
-def test_autoresearch_start_fails_closed_for_unverified_controller_identity(
-    tmp_path, monkeypatch
-):
+def test_autoresearch_start_fails_closed_for_unverified_controller_identity(tmp_path, monkeypatch):
     http, repository, refresh = campaign_client(tmp_path)
     access = exchange(http, refresh.raw_token)
     created = http.post(
@@ -701,9 +696,7 @@ def test_autoresearch_start_fails_closed_for_unverified_controller_identity(
             observed_at=observed_at,
         ),
     )
-    before_events = repository.list_events(
-        "workspace-a", "autoresearch-unverified-controller-1"
-    )
+    before_events = repository.list_events("workspace-a", "autoresearch-unverified-controller-1")
 
     response = http.post(
         "/api/campaigns/autoresearch-unverified-controller-1/start",
@@ -715,12 +708,11 @@ def test_autoresearch_start_fails_closed_for_unverified_controller_identity(
     )
 
     assert response.status_code == 409
-    assert response.json()["detail"]["blocking_codes"] == [
-        "controller_identity_unverified"
-    ]
-    assert repository.list_events(
-        "workspace-a", "autoresearch-unverified-controller-1"
-    ) == before_events
+    assert response.json()["detail"]["blocking_codes"] == ["controller_identity_unverified"]
+    assert (
+        repository.list_events("workspace-a", "autoresearch-unverified-controller-1")
+        == before_events
+    )
 
 
 def test_autoresearch_start_rechecks_current_bindings_and_never_leaks_private_values(
@@ -738,15 +730,11 @@ def test_autoresearch_start_rechecks_current_bindings_and_never_leaks_private_va
     source_repository, _base_commit = initialized_repository(source_root)
     approved_source = source_profile(source_repository)
     http.app.state.campaign_experiment_ledger = ledger
-    http.app.state.campaign_autoresearch_templates = {
-        definition.template_id: definition
-    }
+    http.app.state.campaign_autoresearch_templates = {definition.template_id: definition}
     http.app.state.campaign_executor_profiles = {
         (profile.compute_profile_id, profile.target_contract_key): profile
     }
-    http.app.state.campaign_source_profiles = {
-        approved_source.profile_id: approved_source
-    }
+    http.app.state.campaign_source_profiles = {approved_source.profile_id: approved_source}
     observed_at = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
     monkeypatch.setattr(
         campaign_routes,
@@ -800,11 +788,10 @@ def test_autoresearch_start_rechecks_current_bindings_and_never_leaks_private_va
         "campaign_readiness_definition_ambiguous"
     ]
 
-    http.app.state.campaign_autoresearch_templates = {
-        definition.template_id: definition
-    }
+    http.app.state.campaign_autoresearch_templates = {definition.template_id: definition}
     http.app.state.campaign_experiment_ledger = None
     with monkeypatch.context() as ledger_failure:
+
         def unavailable_ledger(*_args, **_kwargs):
             raise LedgerPersistenceError("operator-ledger-path-canary")
 
@@ -852,9 +839,7 @@ def test_autoresearch_start_rechecks_current_bindings_and_never_leaks_private_va
     assert str(profile.key_path) not in rendered
     assert repository.list_events("workspace-a", "autoresearch-binding-recheck-1") == before_events
 
-    http.app.state.campaign_source_profiles = {
-        approved_source.profile_id: approved_source
-    }
+    http.app.state.campaign_source_profiles = {approved_source.profile_id: approved_source}
     started = http.post(
         "/api/campaigns/autoresearch-binding-recheck-1/start",
         headers=headers,
@@ -863,9 +848,7 @@ def test_autoresearch_start_rechecks_current_bindings_and_never_leaks_private_va
     assert started.status_code == 200
 
 
-def test_autoresearch_start_rejects_source_profile_that_is_no_longer_git(
-    tmp_path, monkeypatch
-):
+def test_autoresearch_start_rejects_source_profile_that_is_no_longer_git(tmp_path, monkeypatch):
     http, repository, refresh = campaign_client(tmp_path)
     access = exchange(http, refresh.raw_token)
     definition = readiness_definition()
@@ -878,15 +861,11 @@ def test_autoresearch_start_rejects_source_profile_that_is_no_longer_git(
     source_repository, _base_commit = initialized_repository(source_root)
     approved_source = source_profile(source_repository)
     http.app.state.campaign_experiment_ledger = ledger
-    http.app.state.campaign_autoresearch_templates = {
-        definition.template_id: definition
-    }
+    http.app.state.campaign_autoresearch_templates = {definition.template_id: definition}
     http.app.state.campaign_executor_profiles = {
         (profile.compute_profile_id, profile.target_contract_key): profile
     }
-    http.app.state.campaign_source_profiles = {
-        approved_source.profile_id: approved_source
-    }
+    http.app.state.campaign_source_profiles = {approved_source.profile_id: approved_source}
     observed_at = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
     monkeypatch.setattr(
         campaign_routes,
@@ -904,9 +883,7 @@ def test_autoresearch_start_rejects_source_profile_that_is_no_longer_git(
         },
     )
     assert created.status_code == 200
-    before_events = repository.list_events(
-        "workspace-a", "autoresearch-source-drift-1"
-    )
+    before_events = repository.list_events("workspace-a", "autoresearch-source-drift-1")
     source_repository.joinpath(".git").rename(source_repository / ".git-disabled")
 
     blocked = http.post(
@@ -923,9 +900,7 @@ def test_autoresearch_start_rejects_source_profile_that_is_no_longer_git(
         "source_repository_binding_unresolved",
         "code_lineage_execution_binding_unresolved",
     ]
-    assert repository.list_events(
-        "workspace-a", "autoresearch-source-drift-1"
-    ) == before_events
+    assert repository.list_events("workspace-a", "autoresearch-source-drift-1") == before_events
 
 
 def test_installed_real_template_fails_closed_before_campaign_creation(tmp_path):
@@ -965,9 +940,7 @@ def test_installed_real_template_fails_closed_before_campaign_creation(tmp_path)
     assert repository.list_campaigns("workspace-a") == []
 
 
-def test_autoresearch_requires_explicit_role_and_accepts_bounded_baseline(
-    tmp_path, monkeypatch
-):
+def test_autoresearch_requires_explicit_role_and_accepts_bounded_baseline(tmp_path, monkeypatch):
     http, _repository, refresh = campaign_client(tmp_path)
     access = exchange(http, refresh.raw_token)
     created = http.post(
@@ -1363,9 +1336,7 @@ def test_control_room_snapshot_loads_legacy_v1_manifest_without_rewriting_digest
     assert persisted_digest == (legacy_digest,)
 
 
-def test_fresh_control_room_process_attaches_existing_ledger_without_writes(
-    tmp_path, monkeypatch
-):
+def test_fresh_control_room_process_attaches_existing_ledger_without_writes(tmp_path, monkeypatch):
     http, repository, refresh = campaign_client(tmp_path)
     access = exchange(http, refresh.raw_token)
     assert create_from_template(http, access).status_code == 200
@@ -1383,9 +1354,7 @@ def test_fresh_control_room_process_attaches_existing_ledger_without_writes(
         },
     )
     fresh_app.state.campaign_templates = http.app.state.campaign_templates
-    fresh_app.state.campaign_autoresearch_templates = {
-        definition.template_id: definition
-    }
+    fresh_app.state.campaign_autoresearch_templates = {definition.template_id: definition}
     fresh_app.state.campaign_worker_config_path = tmp_path / "worker-config.v1.json"
     fresh_app.include_router(campaign_auth_router)
     fresh_app.include_router(campaign_router)
@@ -1514,9 +1483,7 @@ def test_campaign_create_rejects_oversized_budget_with_typed_422_and_no_mutation
     access = exchange(http, refresh.raw_token)
     error_http = TestClient(http.app, raise_server_exceptions=False)
     oversized_manifest = manifest().model_dump(mode="json")
-    oversized_manifest["budget_limits"] = {
-        f"unit_{index:03d}": 1.0 for index in range(65)
-    }
+    oversized_manifest["budget_limits"] = {f"unit_{index:03d}": 1.0 for index in range(65)}
     value = campaign(campaign_id="campaign-oversized")
 
     response = error_http.post(
@@ -1549,9 +1516,7 @@ def test_manifest_revise_rejects_oversized_budget_with_typed_422_and_no_mutation
     assert create_from_template(http, access).status_code == 200
     error_http = TestClient(http.app, raise_server_exceptions=False)
     oversized_manifest = manifest().model_dump(mode="json")
-    oversized_manifest["budget_limits"] = {
-        f"unit_{index:03d}": 1.0 for index in range(65)
-    }
+    oversized_manifest["budget_limits"] = {f"unit_{index:03d}": 1.0 for index in range(65)}
     before = repository.get_campaign("workspace-a", "campaign-1")
     before_events = repository.list_events("workspace-a", "campaign-1")
 
@@ -1972,9 +1937,7 @@ def test_transitions_use_versions_idempotency_and_cursor_events(tmp_path):
 
 
 def test_events_endpoint_projects_fail_closed_public_events(tmp_path):
-    http, repository, refresh = campaign_client(
-        tmp_path, profile=AutonomyProfile.HERMES_BOUNDED
-    )
+    http, repository, refresh = campaign_client(tmp_path, profile=AutonomyProfile.HERMES_BOUNDED)
     access = exchange(http, refresh.raw_token)
     assert create_from_template(http, access).status_code == 200
     canaries = {
@@ -2632,3 +2595,58 @@ def test_metric_projection_filters_exact_source_paginates_and_enforces_workspace
     )
     assert denied.status_code == 403
     assert denied.json()["detail"]["code"] == "campaign_scope_denied"
+
+
+def test_attempts_route_projects_bounded_public_attempts_without_executor_paths(tmp_path):
+    repository, attempt = _claimed_attempt(tmp_path)
+    with repository._connection(immediate=True) as connection:
+        connection.execute(
+            "UPDATE campaign_attempts SET executor_json = ? WHERE attempt_id = ?",
+            (
+                json.dumps(
+                    {
+                        "kind": "ssh_remote",
+                        "script_path": "C:/operator/restricted/train_stage.py",
+                        "python_executable": "/home/operator/venv-canary/bin/python",
+                        "input_files": ["C:/operator/restricted/dataset-canary.jsonl"],
+                        "output_paths": ["logs"],
+                    }
+                ),
+                attempt.attempt_id,
+            ),
+        )
+
+    auth = CampaignAuthService(repository)
+    refresh = auth.issue_refresh_credential(
+        actor_id="codex-agent",
+        autonomy_profile=AutonomyProfile.CODEX_TRUSTED,
+        workspace_ids=("workspace-a",),
+    )
+    app = FastAPI()
+    app.state.campaign_repository = repository
+    app.state.campaign_auth_service = auth
+    app.state.campaign_service = CampaignService(repository)
+    app.state.campaign_templates = {}
+    app.include_router(campaign_auth_router)
+    app.include_router(campaign_router)
+    http = TestClient(app)
+    access = exchange(http, refresh.raw_token)
+
+    response = http.get(
+        "/api/campaigns/campaign-1/attempts",
+        headers=bearer(access),
+        params={"workspace_id": "workspace-a"},
+    )
+    assert response.status_code == 200
+    body = response.json()["attempts"]
+    assert [item["attempt_id"] for item in body] == [attempt.attempt_id]
+    assert set(body[0]) == set(PUBLIC_CAMPAIGN_ATTEMPT_FIELDS)
+    assert body[0]["executor_kind"] == "ssh_remote"
+    serialized = json.dumps(response.json(), sort_keys=True)
+    assert "restricted" not in serialized
+    assert "train_stage.py" not in serialized
+    assert "venv-canary" not in serialized
+    assert "dataset-canary" not in serialized
+    assert '"executor"' not in serialized
+    assert "sealed_result_uri" not in serialized
+    assert "lease_owner" not in serialized

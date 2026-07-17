@@ -10,6 +10,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import ValidationError as PydanticValidationError
 from typing_extensions import Never
 
 from bashgym._compat import UTC
@@ -967,6 +968,14 @@ def _raise_api(exc: Exception) -> Never:
             detail={
                 "code": exc.code,
                 "message": "Campaign bounded-resource policy rejected the operation.",
+            },
+        ) from exc
+    if isinstance(exc, PydanticValidationError):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "campaign_contract_invalid",
+                "message": "Campaign state failed contract validation.",
             },
         ) from exc
     if isinstance(exc, ValueError):
@@ -2416,7 +2425,7 @@ def campaign_attempts(campaign_id: str, request: Request, workspace_id: str = Qu
         _repository, _auth, service = _services(request)
         return {
             "attempts": [
-                item.model_dump(mode="json", exclude={"sealed_result_uri"})
+                item.model_dump(mode="json")
                 for item in service.attempts(workspace_id, campaign_id, _principal(request))
             ]
         }

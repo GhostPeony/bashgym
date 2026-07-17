@@ -41,6 +41,7 @@ function realisticDetail(): CampaignDetailState {
     updated_at: '2026-07-13T21:14:34Z',
   }
   const attempt = {
+    schema_version: 'public_campaign_attempt.v1' as const,
     attempt_id: 'candidate-b-full-b128-realized17-mb4-e2-bf16-r1',
     workspace_id: campaign.workspace_id,
     campaign_id: campaign.campaign_id,
@@ -53,7 +54,7 @@ function realisticDetail(): CampaignDetailState {
     candidate_digest: 'b'.repeat(64),
     manifest_revision: 4,
     stage: 'full_training',
-    executor: { kind: 'ssh_remote', compute_profile_id: 'ssh-gpu-lab' },
+    executor_kind: 'ssh_remote',
     created_at: '2026-07-13T21:03:39Z',
     updated_at: '2026-07-13T21:14:34Z',
   }

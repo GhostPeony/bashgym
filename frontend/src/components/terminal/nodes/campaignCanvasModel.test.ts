@@ -124,6 +124,7 @@ function detail(): CampaignDetailState {
       created_at: '2026-07-14T01:00:00Z',
     },
     attempts: [{
+      schema_version: 'public_campaign_attempt.v1' as const,
       attempt_id: 'attempt-active',
       workspace_id: 'workspace-a',
       campaign_id: 'campaign-auto-1',
@@ -136,7 +137,7 @@ function detail(): CampaignDetailState {
       candidate_digest: 'e'.repeat(64),
       manifest_revision: 1,
       stage: 'full_training',
-      executor: { kind: 'local' },
+      executor_kind: 'local',
       created_at: '2026-07-14T00:50:00Z',
       updated_at: '2026-07-14T01:00:00Z',
     }],

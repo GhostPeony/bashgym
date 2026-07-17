@@ -263,9 +263,7 @@ def read_control_room_projection(
         if isinstance(gate_payload, dict):
             latest_gate = {"decision_id": gate_row["decision_id"], **gate_payload}
         else:
-            projection_invariant_codes.append(
-                "campaign_projection_gate_decision_malformed"
-            )
+            projection_invariant_codes.append("campaign_projection_gate_decision_malformed")
     champion_provenance = None
     if campaign.champion_ref and _table_exists(connection, "campaign_champions"):
         reference_body = campaign.champion_ref.removeprefix("champion:")
@@ -313,9 +311,7 @@ def read_control_room_projection(
                         )
                     else:
                         try:
-                            champion_decision = json.loads(
-                                champion_decision_row["decision_json"]
-                            )
+                            champion_decision = json.loads(champion_decision_row["decision_json"])
                         except json.JSONDecodeError:
                             champion_decision = None
                         candidate_verdict = (
@@ -325,8 +321,7 @@ def read_control_room_projection(
                         )
                         if (
                             not isinstance(champion_decision, dict)
-                            or champion_decision.get("candidate_digest")
-                            != claimed_candidate
+                            or champion_decision.get("candidate_digest") != claimed_candidate
                             or candidate_verdict
                             not in {"passed", "failed", "insufficient_evidence"}
                         ):
@@ -1042,13 +1037,11 @@ def build_control_room_snapshot(
             has_current_blocking_work=durable.has_current_blocking_human_work,
         ),
     )
-    promotion_transition_allowed = (
-        CampaignTrigger.PROMOTION_COMMITTED in allowed_triggers(campaign.status)
+    promotion_transition_allowed = CampaignTrigger.PROMOTION_COMMITTED in allowed_triggers(
+        campaign.status
     )
     promotion_eligible = bool(
-        not invariant_failed
-        and promotion_gate.eligible
-        and promotion_transition_allowed
+        not invariant_failed and promotion_gate.eligible and promotion_transition_allowed
     )
     promotion_blocking_codes = promotion_gate.blocking_codes
     if promotion_gate.eligible and not promotion_transition_allowed:
@@ -1057,9 +1050,7 @@ def build_control_room_snapshot(
             "campaign_promotion_transition_unavailable",
         )
     promotion_blocker = _promotion_blocker(promotion_blocking_codes)
-    top_level_promotion_codes = (
-        promotion_blocking_codes if durable.latest_gate is not None else ()
-    )
+    top_level_promotion_codes = promotion_blocking_codes if durable.latest_gate is not None else ()
     blocker = _blocker(
         durable,
         readiness,
@@ -1108,49 +1099,60 @@ def build_control_room_snapshot(
         baseline_state = (
             "complete"
             if baseline_complete
-            else "active"
-            if active
-            else "failed"
-            if baseline_crashed or (terminal and campaign.status != CampaignStatus.COMPLETED)
-            else "ready"
-            if setup_state == "ready"
-            else "not_started"
+            else (
+                "active"
+                if active
+                else (
+                    "failed"
+                    if baseline_crashed
+                    or (terminal and campaign.status != CampaignStatus.COMPLETED)
+                    else "ready" if setup_state == "ready" else "not_started"
+                )
+            )
         )
         experiments_state = (
             "not_started"
             if not baseline_complete
-            else "active"
-            if active
-            else "failed"
-            if campaign.status == CampaignStatus.FAILED
-            else "complete"
-            if terminal or durable.latest_gate is not None
-            else "ready"
+            else (
+                "active"
+                if active
+                else (
+                    "failed"
+                    if campaign.status == CampaignStatus.FAILED
+                    else "complete" if terminal or durable.latest_gate is not None else "ready"
+                )
+            )
         )
     decision_state = (
         "blocked"
         if invariant_failed
-        else "complete"
-        if campaign.status == CampaignStatus.COMPLETED or campaign.champion_ref is not None
-        else "failed"
-        if campaign.status == CampaignStatus.FAILED
-        else "ready"
-        if promotion_eligible
-        else "blocked"
-        if durable.latest_gate is not None
-        else "not_started"
+        else (
+            "complete"
+            if campaign.status == CampaignStatus.COMPLETED or campaign.champion_ref is not None
+            else (
+                "failed"
+                if campaign.status == CampaignStatus.FAILED
+                else (
+                    "ready"
+                    if promotion_eligible
+                    else "blocked" if durable.latest_gate is not None else "not_started"
+                )
+            )
+        )
     )
     human_statuses = {item.status for item in human_work.newest}
     human_review_state = (
         "not_started"
         if not human_work.newest
-        else "complete"
-        if human_work.open_count == 0
-        else "active"
-        if "claimed" in human_statuses
-        else "blocked"
-        if human_statuses & {"expired", "revision_requested"}
-        else "ready"
+        else (
+            "complete"
+            if human_work.open_count == 0
+            else (
+                "active"
+                if "claimed" in human_statuses
+                else "blocked" if human_statuses & {"expired", "revision_requested"} else "ready"
+            )
+        )
     )
     human_blocker = (
         _promotion_blocker(("campaign_human_work_incomplete",))
@@ -1187,9 +1189,7 @@ def build_control_room_snapshot(
                 "human" if human_review_state in {"ready", "active", "blocked"} else "none"
             ),
             blocker=human_blocker if human_review_state == "blocked" else None,
-            evidence_count=len(
-                [item for item in human_work.newest if item.status == "accepted"]
-            ),
+            evidence_count=len([item for item in human_work.newest if item.status == "accepted"]),
         ),
         _phase(
             "decision",
@@ -1198,9 +1198,7 @@ def build_control_room_snapshot(
             blocker=(
                 blocker
                 if invariant_failed
-                else promotion_blocker
-                if decision_state == "blocked"
-                else None
+                else promotion_blocker if decision_state == "blocked" else None
             ),
             evidence_count=durable.collection_counts["comparisons"],
             actions=tuple(item for item in action_ids if item == "promote"),
@@ -1215,18 +1213,17 @@ def build_control_room_snapshot(
         executor_type = None
         if attempt:
             executor = json.loads(attempt["executor_json"])
-            candidate_executor = executor.get("executor_kind")
+            candidate_executor = executor.get("kind", executor.get("executor_kind"))
             if candidate_executor in {"fake", "ssh_remote", "development_evaluation"}:
                 executor_type = candidate_executor
         process_identity = None
         if durable.remote_runs:
             remote = durable.remote_runs[0]
             identity = json.loads(remote["identity_json"])
-            remote_state = remote["state"]
             process_identity = OpaqueProcessIdentityV1(
                 run_id=identity["run_id"],
                 compute_profile_id=identity["compute_profile_id"],
-                state="running" if remote_state == "paused" else remote_state,
+                state=remote["state"],
             )
         active_work = ActiveWorkSummaryV1(
             study_id=str(study["study_id"]) if study else None,
@@ -1243,9 +1240,7 @@ def build_control_room_snapshot(
             process_identity=process_identity,
         )
 
-    candidate_digest = (
-        campaign.best_development_candidate_ref or gate.get("candidate_digest")
-    )
+    candidate_digest = campaign.best_development_candidate_ref or gate.get("candidate_digest")
     candidate_ref = _safe_reference(candidate_digest)
     candidate = None
     if candidate_ref is not None:
@@ -1261,15 +1256,13 @@ def build_control_room_snapshot(
             latest_comparable_evaluation_id=(
                 provenance.latest_comparable_evaluation_id if provenance else None
             ),
-            comparison_verdict=verdict
-            if verdict in {"passed", "failed", "insufficient_evidence"}
-            else None,
+            comparison_verdict=(
+                verdict if verdict in {"passed", "failed", "insufficient_evidence"} else None
+            ),
             gate_state=(
                 "passed"
                 if verdict == "passed"
-                else "failed"
-                if verdict == "failed"
-                else "blocked" if gate else "not_evaluated"
+                else "failed" if verdict == "failed" else "blocked" if gate else "not_evaluated"
             ),
         )
     champion = None
@@ -1409,9 +1402,7 @@ def build_control_room_snapshot(
         ),
         decision_surface=DecisionSurfaceV1(
             execution_owner=execution_owner,
-            attention_owner=(
-                "human" if human_work.blocking_count > 0 else attention_owner
-            ),
+            attention_owner=("human" if human_work.blocking_count > 0 else attention_owner),
             blocker=blocker or human_blocker,
             next_actions=actions,
             recovery_actions=tuple(dict.fromkeys(recovery)),

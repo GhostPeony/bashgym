@@ -963,7 +963,7 @@ class OpaqueProcessIdentityV1(FrozenContractModel):
     schema_version: Literal["opaque_process_identity.v1"] = "opaque_process_identity.v1"
     run_id: Identifier
     compute_profile_id: Identifier
-    state: Literal["launching", "running", "completed", "failed", "cancelled", "unknown"]
+    state: Literal["launching", "running", "paused", "completed", "failed", "cancelled", "unknown"]
 
 
 class ActiveWorkSummaryV1(FrozenContractModel):
@@ -1294,6 +1294,27 @@ class PublicCampaignArtifactV1(FrozenContractModel):
     sealed: bool
     valid: bool
     created_at: datetime
+
+
+class PublicCampaignAttemptV1(FrozenContractModel):
+    """Bounded attempt identity and progress state without executor configuration."""
+
+    schema_version: Literal["public_campaign_attempt.v1"] = "public_campaign_attempt.v1"
+    workspace_id: Identifier
+    campaign_id: Identifier
+    study_id: Identifier
+    action_id: Identifier
+    attempt_id: Identifier
+    attempt_number: int = Field(ge=1)
+    claim_generation: int = Field(ge=0)
+    status: AttemptStatus
+    stage: StageKind
+    manifest_revision: int = Field(ge=1)
+    input_digest: HexDigest
+    candidate_digest: HexDigest
+    executor_kind: Identifier | None = None
+    created_at: datetime
+    updated_at: datetime
 
 
 class ActorPrincipal(FrozenContractModel):

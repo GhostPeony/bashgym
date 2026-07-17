@@ -1,11 +1,19 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { campaignsMissingPanels, materializeCampaignPanel } from './campaignCanvasLifecycle'
-import type { CampaignRecord } from './campaignStore'
+import {
+  campaignsForCanvasAutoMaterialization,
+  campaignsMissingPanels,
+  materializeCampaignPanel,
+} from './campaignCanvasLifecycle'
+import type { CampaignRecord, CampaignStatus } from './campaignStore'
 import type { Panel } from './terminalStore'
 
-function campaign(id: string, workspaceId = 'workspace-a'): CampaignRecord {
+function campaign(
+  id: string,
+  workspaceId = 'workspace-a',
+  status: CampaignStatus = 'active',
+): CampaignRecord {
   return {
     schema_version: 'campaign.v1',
     campaign_id: id,
@@ -16,12 +24,38 @@ function campaign(id: string, workspaceId = 'workspace-a'): CampaignRecord {
     target_model: {},
     owner_actor_id: 'codex-agent',
     manifest_revision: 1,
-    status: 'active',
+    status,
     version: 1,
     created_at: '2026-07-13T00:00:00Z',
     updated_at: '2026-07-13T00:00:00Z',
   }
 }
+
+test('auto materialization includes only campaigns awaiting or doing work', () => {
+  const eligible: CampaignStatus[] = [
+    'draft',
+    'validating',
+    'ready',
+    'active',
+    'paused',
+    'awaiting_authority',
+  ]
+  const excluded: CampaignStatus[] = [
+    'cancelling',
+    'cancelled',
+    'completed',
+    'failed',
+    'exhausted',
+  ]
+
+  const campaigns = [...eligible, ...excluded].map((status) =>
+    campaign(`campaign-${status}`, 'workspace-a', status),
+  )
+  assert.deepEqual(
+    campaignsForCanvasAutoMaterialization(campaigns).map((item) => item.status),
+    eligible,
+  )
+})
 
 test('campaign reload materializes every campaign exactly once', () => {
   const panels = [{

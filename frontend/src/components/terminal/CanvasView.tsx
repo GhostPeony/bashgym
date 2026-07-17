@@ -46,7 +46,10 @@ import { createMcpWorkbenchApi, designerApi, trainingApi, workspaceApi } from '.
 import { wsService } from '../../services/websocket'
 import { useActivityStore } from '../../stores/activityStore'
 import { trainingQueuedPayloadFromResponse } from '../../stores/trainingCanvasLifecycle'
-import { materializeCampaignPanel } from '../../stores/campaignCanvasLifecycle'
+import {
+  campaignsForCanvasAutoMaterialization,
+  materializeCampaignPanel,
+} from '../../stores/campaignCanvasLifecycle'
 import type { CampaignRecord } from '../../stores/campaignStore'
 import { MasterControlPanel } from './MasterControlPanel'
 import { useCanvasHotkeys } from '../../hooks/useCanvasHotkeys'
@@ -390,7 +393,9 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
   useEffect(() => {
     if (!CAMPAIGNS_ENABLED) return
     if (useWorkspaceStore.getState().switching) return
-    for (const campaign of activeCampaigns) materializeCampaignPanel(campaign)
+    for (const campaign of campaignsForCanvasAutoMaterialization(activeCampaigns)) {
+      materializeCampaignPanel(campaign)
+    }
   }, [activeCampaigns])
 
   // Recover active runs after a renderer reload or a missed WebSocket event.

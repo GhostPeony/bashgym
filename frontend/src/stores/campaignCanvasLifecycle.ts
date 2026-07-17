@@ -10,6 +10,22 @@ type CampaignCanvasState = Pick<
 
 type CampaignCanvasCampaign = Pick<CampaignRecord, 'campaign_id' | 'title'>
 
+/**
+ * Statuses that justify automatic canvas materialization on load. Terminal and
+ * winding-down campaigns stay off the canvas unless a panel was already placed
+ * for them while they ran.
+ */
+const AUTO_MATERIALIZE_STATUSES: ReadonlySet<CampaignRecord['status']> = new Set<
+  CampaignRecord['status']
+>(['draft', 'validating', 'ready', 'active', 'paused', 'awaiting_authority'])
+
+/** Return campaigns whose current status warrants automatic canvas placement. */
+export function campaignsForCanvasAutoMaterialization(
+  campaigns: readonly CampaignRecord[],
+): CampaignRecord[] {
+  return campaigns.filter((campaign) => AUTO_MATERIALIZE_STATUSES.has(campaign.status))
+}
+
 /** Return campaigns that do not yet have a durable workspace canvas projection. */
 export function campaignsMissingPanels(
   campaigns: readonly CampaignRecord[],

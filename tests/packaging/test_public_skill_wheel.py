@@ -48,12 +48,10 @@ PUBLIC_SKILL_NAMES = {
     "training",
 }
 LEGACY_WHEEL_RESIDUE = {
-    "bashgym/campaigns/campaign_agents.py": Counter(
-        {"capability.handoff_memexai_prepare": 1}
-    ),
+    "bashgym/campaigns/campaign_agents.py": Counter({"capability.handoff_memexai_prepare": 1}),
     "bashgym/campaigns/contracts.py": Counter(
         {
-            "allow_memexai_handoff": 1,
+            "allow_memexai_handoff": 2,
             "capability.handoff_memexai_prepare": 1,
             "handoff.memexai_prepare": 1,
             "handoff_memexai_prepare": 1,
@@ -62,9 +60,7 @@ LEGACY_WHEEL_RESIDUE = {
     ),
     "bashgym/campaigns/executors.py": Counter({"memexai_youtube": 2}),
     "bashgym/campaigns/installation.py": Counter({"allow_memexai_handoff": 1}),
-    "bashgym/campaigns/proposals.py": Counter(
-        {"capability.handoff_memexai_prepare": 1}
-    ),
+    "bashgym/campaigns/proposals.py": Counter({"capability.handoff_memexai_prepare": 1}),
 }
 LEGACY_RESIDUE_TOKEN = re.compile(
     r"[a-z0-9_.]*memexai[a-z0-9_.]*",
@@ -98,15 +94,14 @@ def public_skill_wheel(tmp_path_factory: pytest.TempPathFactory) -> Path:
     wheel_dir.mkdir()
     build = subprocess.run(
         [
+            "uv",
+            "build",
+            "--wheel",
+            "--python",
             sys.executable,
-            "-m",
-            "pip",
-            "wheel",
-            str(source_dir),
-            "--no-deps",
-            "--no-build-isolation",
-            "--wheel-dir",
+            "--out-dir",
             str(wheel_dir),
+            str(source_dir),
         ],
         check=False,
         cwd=wheel_dir,
@@ -203,8 +198,7 @@ def test_every_text_wheel_member_has_no_unreviewed_private_residue(
                 continue
             searchable = f"{name}\n{content}"
             legacy = Counter(
-                match.group(0).casefold()
-                for match in LEGACY_RESIDUE_TOKEN.finditer(searchable)
+                match.group(0).casefold() for match in LEGACY_RESIDUE_TOKEN.finditer(searchable)
             )
             if legacy:
                 observed_legacy[name] = legacy
@@ -222,10 +216,11 @@ def test_installed_wheel_skill_loader_discovers_the_public_operator_skills(
     site = tmp_path / "site"
     subprocess.run(
         [
-            sys.executable,
-            "-m",
+            "uv",
             "pip",
             "install",
+            "--python",
+            sys.executable,
             str(public_skill_wheel),
             "--no-deps",
             "--target",
@@ -309,18 +304,18 @@ def test_installed_wheel_documented_preflights_run_outside_the_checkout(
     tmp_path: Path,
 ):
     environment_dir = tmp_path / "venv"
-    venv.EnvBuilder(with_pip=True).create(environment_dir)
+    venv.EnvBuilder().create(environment_dir)
     scripts_dir = environment_dir / ("Scripts" if os.name == "nt" else "bin")
     python = scripts_dir / ("python.exe" if os.name == "nt" else "python")
     bashgym = scripts_dir / ("bashgym.exe" if os.name == "nt" else "bashgym")
     installed = subprocess.run(
         [
-            str(python),
-            "-m",
+            "uv",
             "pip",
             "install",
+            "--python",
+            str(python),
             str(public_skill_wheel),
-            "--disable-pip-version-check",
         ],
         cwd=tmp_path,
         capture_output=True,

@@ -52,6 +52,21 @@ test('terminal input uses fire-and-forget IPC while retaining reload compatibili
   )
 })
 
+test('terminal removal is visible before native PTY teardown can block', () => {
+  const main = readFrontendFile('electron/main.ts')
+  const killHandler = main.match(
+    /ipcMain\.handle\('terminal:kill',[\s\S]*?\n\}\)\n\n\/\/ Enumerate/
+  )
+
+  assert.ok(killHandler, 'Expected terminal kill IPC handler')
+  const source = killHandler[0]
+  const removal = source.indexOf('ptySessions.delete(id)')
+  const nativeKill = source.indexOf('session.pty.kill()')
+
+  assert.ok(removal >= 0)
+  assert.ok(nativeKill > removal)
+})
+
 test('terminal remount lifecycle cannot activate flow control after disposal', () => {
   const pane = readFrontendFile('src/components/terminal/TerminalPane.tsx')
 

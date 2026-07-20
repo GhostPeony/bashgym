@@ -1245,7 +1245,10 @@ ipcMain.handle('terminal:resize', (_, id: string, cols: number, rows: number) =>
 ipcMain.handle('terminal:kill', async (_, id: string) => {
   const session = ptySessions.get(id)
   if (session) {
-    await revokeCampaignAgentTerminal(id, 'pty_exit').catch(() => undefined)
+    // Native Windows teardown can block while node-pty detaches from the console.
+    // Remove the session before that boundary so a killed terminal is never reported
+    // as live to the renderer or a subsequent lifecycle operation.
+    ptySessions.delete(id)
     session.outputBatcher.dispose()
     session.outputFlow.dispose()
     try {
@@ -1253,7 +1256,7 @@ ipcMain.handle('terminal:kill', async (_, id: string) => {
     } catch {
       /* already dead */
     }
-    ptySessions.delete(id)
+    await revokeCampaignAgentTerminal(id, 'pty_exit').catch(() => undefined)
     cleanupAgentBridgeArtifacts(id)
     return true
   }

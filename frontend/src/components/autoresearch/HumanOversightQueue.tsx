@@ -172,18 +172,22 @@ function ReviewItem({
 
 export function HumanOversightQueue({ model, responses, onResponseChange, onClaim, onSubmit, onPromotion }: HumanOversightQueueProps) {
   const { queue } = model
+  if (model.items.length === 0 && queue.promotion.state !== 'awaiting_human_decision') {
+    return (
+      <section aria-label="Human oversight queue">
+        <p className="text-sm text-text-secondary">Nothing needs your review. Blinded samples will appear here before any promotion.</p>
+      </section>
+    )
+  }
   const decidePromotion = (decision: HumanPromotionRequest['decision']) => {
     if (!model.mutationsEnabled || !model.promotion) return
     onPromotion({ ...model.promotion, decision })
   }
   return (
-    <section className="card p-4" aria-labelledby="human-oversight-title">
+    <section aria-label="Human oversight queue">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 id="human-oversight-title" className="font-brand text-xl text-text-primary">Human oversight queue</h2>
-          <p className="mt-1 text-sm leading-6 text-text-secondary">One authenticated desktop reviewer evaluates opaque samples against a versioned rubric.</p>
-        </div>
-        <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-wide text-text-muted">
+        <p className="min-w-0 flex-1 text-sm leading-6 text-text-secondary">One authenticated desktop reviewer evaluates opaque samples against a versioned rubric.</p>
+        <div className="flex shrink-0 items-center gap-2 font-mono text-[10px] uppercase tracking-wide text-text-muted">
           <UserRound className="h-4 w-4 text-accent" /> Campaign revision {model.scope.campaignRevision}
         </div>
       </div>

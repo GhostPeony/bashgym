@@ -479,6 +479,96 @@ test('page loaders expose retryable errors and suppress concurrent artifact requ
   assert.equal(pages?.artifactsError, null)
 })
 
+test('active attempt metrics load incrementally, share one request, and stay bounded', async () => {
+  reset()
+  installList(() => [campaign('workspace-a', 'campaign-1')])
+  campaignApi.snapshot = async () => ({ ok: true, data: controlRoomSnapshot() })
+  await useCampaignStore.getState().load('workspace-a', 'campaign-1')
+
+  const firstPage = deferred<Awaited<ReturnType<typeof campaignApi.metrics>>>()
+  const afterSteps: number[] = []
+  campaignApi.metrics = async (_workspaceId, _campaignId, _attemptId, _source, _metricName, afterStep) => {
+    afterSteps.push(afterStep ?? -1)
+    return firstPage.promise
+  }
+  const first = useCampaignStore.getState().loadAttemptMetrics('workspace-a', 'campaign-1', 'attempt-1')
+  const duplicate = useCampaignStore.getState().loadAttemptMetrics('workspace-a', 'campaign-1', 'attempt-1')
+  assert.deepEqual(afterSteps, [-1])
+  firstPage.resolve({
+    ok: true,
+    data: {
+      metric_name: 'loss',
+      source: 'training_metrics.jsonl',
+      values: [
+        { step: 1, source: 'training_metrics.jsonl', value: 1.03, observed_at: '2026-07-16T18:00:00Z' },
+        { step: 42, source: 'training_metrics.jsonl', value: 0.27, observed_at: '2026-07-16T18:01:00Z' },
+      ],
+      next_after_step: 42,
+    },
+  })
+  await Promise.all([first, duplicate])
+
+  campaignApi.metrics = async (_workspaceId, _campaignId, _attemptId, _source, _metricName, afterStep) => {
+    afterSteps.push(afterStep ?? -1)
+    return {
+      ok: true,
+      data: {
+        metric_name: 'loss',
+        source: 'training_metrics.jsonl',
+        values: [
+          { step: 42, source: 'training_metrics.jsonl', value: 0.26, observed_at: '2026-07-16T18:01:05Z' },
+          ...Array.from({ length: 520 }, (_, index) => ({
+            step: 43 + index,
+            source: 'training_metrics.jsonl',
+            value: 0.25 - index / 10_000,
+            observed_at: '2026-07-16T18:02:00Z',
+          })),
+        ],
+        next_after_step: 562,
+      },
+    }
+  }
+  await useCampaignStore.getState().loadAttemptMetrics('workspace-a', 'campaign-1', 'attempt-1')
+
+  const values = useCampaignStore.getState().workspaces['workspace-a']!.details['campaign-1']!.lossByAttempt['attempt-1']
+  assert.deepEqual(afterSteps, [-1, 42])
+  assert.equal(values.length, 500)
+  assert.equal(values.at(-1)?.step, 562)
+  assert.equal(new Set(values.map((point) => `${point.source}:${point.step}`)).size, 500)
+})
+
+test('late metric responses cannot cross an active-attempt change', async () => {
+  reset()
+  installList(() => [campaign('workspace-a', 'campaign-1')])
+  campaignApi.snapshot = async () => ({ ok: true, data: controlRoomSnapshot() })
+  await useCampaignStore.getState().load('workspace-a', 'campaign-1')
+
+  const page = deferred<Awaited<ReturnType<typeof campaignApi.metrics>>>()
+  campaignApi.metrics = async () => page.promise
+  const pending = useCampaignStore.getState().loadAttemptMetrics('workspace-a', 'campaign-1', 'attempt-1')
+  useCampaignStore.setState((state) => {
+    const workspace = state.workspaces['workspace-a']!
+    const detail = workspace.details['campaign-1']!
+    return { workspaces: { ...state.workspaces, 'workspace-a': { ...workspace, details: {
+      ...workspace.details,
+      'campaign-1': { ...detail, snapshot: { ...detail.snapshot!, active_work: { ...detail.snapshot!.active_work!, attempt_id: 'attempt-2' } } },
+    } } } }
+  })
+  page.resolve({
+    ok: true,
+    data: {
+      metric_name: 'loss', source: 'training_metrics.jsonl', next_after_step: 1,
+      values: [{ step: 1, source: 'training_metrics.jsonl', value: 1, observed_at: '2026-07-16T18:00:00Z' }],
+    },
+  })
+  await pending
+
+  assert.deepEqual(
+    useCampaignStore.getState().workspaces['workspace-a']!.details['campaign-1']!.lossByAttempt['attempt-1'],
+    undefined,
+  )
+})
+
 test('transition acknowledges then refreshes the snapshot', async () => {
   reset()
   installList(() => [campaign('workspace-a', 'campaign-1')])

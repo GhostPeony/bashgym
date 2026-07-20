@@ -2,7 +2,14 @@ import { useState, useEffect } from 'react'
 import { X, FolderGit2, Database, Sparkles, Info, Cloud, Monitor, Shield, FileText, Server, AlertCircle, Boxes, BookOpen } from 'lucide-react'
 import type { TrainingConfig as TrainingConfigType, DataSource, TrainingProfile } from '../../stores'
 import type { TrainingStrategy } from '../../stores'
-import { tracesApi, securityApi, providersApi, trainingApi, systemInfoApi, RepoInfo, SecurityDatasetInfo, OllamaModel, ModelRecommendations } from '../../services/api'
+import { trainingApi } from '../../services/api'
+import {
+  modelRecommendationsResource,
+  ollamaStatusResource,
+  securityDatasetsResource,
+  traceReposResource,
+} from '../../stores/appResources'
+import { useKeyedSessionResource, useSessionResource } from '../../stores/sessionResource'
 import { useTutorialComplete } from '../../hooks'
 import { clsx } from 'clsx'
 import { DeviceManager } from './DeviceManager'
@@ -139,7 +146,8 @@ function SectionKicker({ title, body }: { title: string; body: string }) {
 }
 
 export function TrainingConfig({ onClose, onStart, onOpenGuides }: TrainingConfigProps) {
-  const [availableRepos, setAvailableRepos] = useState<RepoInfo[]>([])
+  const { data: reposData } = useSessionResource(traceReposResource)
+  const availableRepos = reposData ?? []
   const [trainingScope, setTrainingScope] = useState<TrainingScope>('all')
   const [selectedRepos, setSelectedRepos] = useState<string[]>([])
   const [trainingBackend, setTrainingBackend] = useState<TrainingBackend>('local')
@@ -150,13 +158,14 @@ export function TrainingConfig({ onClose, onStart, onOpenGuides }: TrainingConfi
   // Quick Start vs Advanced setup (progressive disclosure). Quick shows ~3
   // inputs with hardware-aware recommendations; Advanced is the full form.
   const [setupMode, setSetupMode] = useState<'quick' | 'advanced'>('quick')
-  const [recs, setRecs] = useState<ModelRecommendations | null>(null)
   const [dataSource, setDataSource] = useState<DataSource>('traces')
-  const [securityDatasets, setSecurityDatasets] = useState<SecurityDatasetInfo[]>([])
-  const [ollamaModels, setOllamaModels] = useState<OllamaModel[]>([])
+  const { data: securityDatasetsData } = useSessionResource(securityDatasetsResource)
+  const securityDatasets = securityDatasetsData ?? []
+  const { data: ollamaStatus } = useSessionResource(ollamaStatusResource)
+  const ollamaModels = ollamaStatus?.models ?? []
   const [showCustomEmbeddingModel, setShowCustomEmbeddingModel] = useState(false)
   const { complete: completeTutorialStep } = useTutorialComplete()
-  const { defaultDeviceId, fetchDevices } = useDeviceStore()
+  const { defaultDeviceId, ensureDevices } = useDeviceStore()
 
   // Cascade RL state
   const [cascadeDomains, setCascadeDomains] = useState<string[]>([
@@ -231,25 +240,10 @@ export function TrainingConfig({ onClose, onStart, onOpenGuides }: TrainingConfi
     securityBalanceClasses: true
   })
 
-  // Fetch available repos, security datasets, Ollama models, and devices on mount
+  // Devices load once per session (guarded in the store)
   useEffect(() => {
-    tracesApi.listRepos().then((result) => {
-      if (result.ok && result.data) {
-        setAvailableRepos(result.data)
-      }
-    })
-    securityApi.listDatasets().then((result) => {
-      if (result.ok && result.data) {
-        setSecurityDatasets(result.data)
-      }
-    })
-    providersApi.getOllamaModels().then((result) => {
-      if (result.ok && result.data?.models) {
-        setOllamaModels(result.data.models)
-      }
-    })
-    fetchDevices()
-  }, [fetchDevices])
+    void ensureDevices()
+  }, [ensureDevices])
 
   // Sync deviceId when defaultDeviceId changes or backend switches to remote
   useEffect(() => {
@@ -258,17 +252,9 @@ export function TrainingConfig({ onClose, onStart, onOpenGuides }: TrainingConfi
     }
   }, [defaultDeviceId, trainingBackend])
 
-  // Fetch hardware-aware recommendations (detected GPU → model/quant/batch).
-  useEffect(() => {
-    let cancelled = false
-    const deviceId = trainingBackend === 'remote_ssh' ? config.deviceId : undefined
-    systemInfoApi.getRecommendations(deviceId).then((res) => {
-      if (!cancelled && res.ok && res.data) setRecs(res.data)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [trainingBackend, config.deviceId])
+  // Hardware-aware recommendations (detected GPU → model/quant/batch), cached per device
+  const recsDeviceKey = trainingBackend === 'remote_ssh' ? (config.deviceId || '') : ''
+  const { data: recs } = useKeyedSessionResource(modelRecommendationsResource, recsDeviceKey)
 
   // Poll a submitted managed (cloud) fine-tune for live status until it finishes.
   useEffect(() => {

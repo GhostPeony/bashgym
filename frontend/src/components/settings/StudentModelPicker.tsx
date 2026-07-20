@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
 import {
   Zap,
   Loader2,
@@ -8,6 +8,8 @@ import {
   Flame,
 } from 'lucide-react'
 import { routerApi, providersApi, OllamaModel } from '../../services/api'
+import { routerConfigResource } from '../../stores/opsResources'
+import { useSessionResource } from '../../stores/sessionResource'
 import { clsx } from 'clsx'
 
 interface StudentModelPickerProps {
@@ -21,27 +23,22 @@ export function StudentModelPicker({
   ollamaAvailable,
   onRefresh: _onRefresh,
 }: StudentModelPickerProps) {
-  const [currentStudent, setCurrentStudent] = useState<string | null>(null)
+  const { data: routerConfig } = useSessionResource(routerConfigResource)
+  const currentStudent = routerConfig?.student_model?.name ?? null
   const [isSettingModel, setIsSettingModel] = useState<string | null>(null)
   const [isWarmingUp, setIsWarmingUp] = useState<string | null>(null)
-
-  const fetchConfig = useCallback(async () => {
-    const result = await routerApi.getConfig()
-    if (result.ok && result.data?.student_model) {
-      setCurrentStudent(result.data.student_model.name)
-    }
-  }, [])
-
-  useEffect(() => {
-    fetchConfig()
-  }, [fetchConfig])
 
   const handleSetStudent = async (modelName: string) => {
     setIsSettingModel(modelName)
     try {
       const result = await routerApi.setStudentProvider('ollama', modelName)
       if (result.ok) {
-        setCurrentStudent(modelName)
+        const { data: config, setData, refresh } = routerConfigResource.getState()
+        if (config) {
+          setData({ ...config, student_model: { name: modelName, type: 'ollama' } })
+        } else {
+          void refresh()
+        }
       }
     } finally {
       setIsSettingModel(null)

@@ -34,13 +34,18 @@ import { useTutorialComplete } from '../../hooks'
 import { clsx } from 'clsx'
 import {
   factoryApi,
-  syntheticApi,
   FactoryConfig,
   ColumnConfig,
   ColumnConstraint,
-  SynthesisJob,
-  SyntheticJobStatus
+  SynthesisJob
 } from '../../services/api'
+import { useSessionResource } from '../../stores/sessionResource'
+import {
+  factoryConfigResource,
+  factoryJobsResource,
+  factoryModelsResource,
+  syntheticJobsResource,
+} from '../../stores/factoryResources'
 import { TabId, COLUMN_TYPES, RISK_LEVELS, DEFAULT_CONFIG } from './types'
 
 function HowItWorks({ isCollapsed, onToggle }: { isCollapsed: boolean; onToggle: () => void }) {
@@ -117,57 +122,41 @@ export function FactoryDashboard() {
   const [activeTab, setActiveTab] = useState<TabId>('create')
   const [howItWorksCollapsed, setHowItWorksCollapsed] = useState(false)
   const [advancedConfigOpen, setAdvancedConfigOpen] = useState(false)
-  const [config, setConfig] = useState<FactoryConfig>(DEFAULT_CONFIG)
-  const [jobs, setJobs] = useState<SynthesisJob[]>([])
-  const [syntheticJobs, setSyntheticJobs] = useState<SyntheticJobStatus[]>([])
-  const [isLoading, setIsLoading] = useState(true)
+  const { data: cachedConfig, loading: configLoading } = useSessionResource(factoryConfigResource)
+  const { data: cachedJobs, loading: jobsLoading } = useSessionResource(factoryJobsResource)
+  const { data: modelsData, loading: modelsLoading } = useSessionResource(factoryModelsResource)
+  const { data: syntheticJobsData, loading: syntheticJobsLoading } =
+    useSessionResource(syntheticJobsResource)
+  const [config, setConfig] = useState<FactoryConfig>(() => {
+    const cached = factoryConfigResource.getState().data
+    return cached ? { ...DEFAULT_CONFIG, ...cached } : DEFAULT_CONFIG
+  })
+  const [jobs, setJobs] = useState<SynthesisJob[]>(() => factoryJobsResource.getState().data ?? [])
   const [isSaving, setIsSaving] = useState(false)
   const [expandedColumn, setExpandedColumn] = useState<string | null>(null)
-  const [availableModels, setAvailableModels] = useState<{ id: string; name: string; provider: string }[]>([])
+  const availableModels = modelsData ?? []
+  const syntheticJobs = syntheticJobsData ?? []
+  const isLoading = configLoading || jobsLoading || modelsLoading || syntheticJobsLoading
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { complete: completeTutorialStep } = useTutorialComplete()
 
   // Synthetic generator state (for header button)
   const [syntheticState, setSyntheticState] = useState<SyntheticGeneratorState | null>(null)
 
-  // Fetch config on mount
+  // Sync editable local copies when the cached resources (re)load
   useEffect(() => {
-    const fetchData = async () => {
-      setIsLoading(true)
-      try {
-        const [configResult, jobsResult, modelsResult, syntheticJobsResult] = await Promise.all([
-          factoryApi.getConfig(),
-          factoryApi.listJobs(),
-          factoryApi.listModels(),
-          syntheticApi.listJobs()
-        ])
+    if (cachedConfig) setConfig({ ...DEFAULT_CONFIG, ...cachedConfig })
+  }, [cachedConfig])
 
-        if (configResult.ok && configResult.data) {
-          setConfig({ ...DEFAULT_CONFIG, ...configResult.data })
-        }
-
-        if (jobsResult.ok && jobsResult.data) {
-          setJobs(jobsResult.data)
-        }
-
-        if (modelsResult.ok && modelsResult.data) {
-          setAvailableModels(modelsResult.data)
-        }
-
-        if (syntheticJobsResult.ok && syntheticJobsResult.data) {
-          setSyntheticJobs(syntheticJobsResult.data)
-        }
-      } finally {
-        setIsLoading(false)
-      }
-    }
-    fetchData()
-  }, [])
+  useEffect(() => {
+    if (cachedJobs) setJobs(cachedJobs)
+  }, [cachedJobs])
 
   const handleSave = async () => {
     setIsSaving(true)
     try {
-      await factoryApi.updateConfig(config)
+      const result = await factoryApi.updateConfig(config)
+      if (result.ok) factoryConfigResource.getState().setData(config)
     } finally {
       setIsSaving(false)
     }
@@ -225,6 +214,7 @@ export function FactoryDashboard() {
     })
     if (result.ok && result.data) {
       setJobs([result.data, ...jobs])
+      void factoryJobsResource.getState().refresh()
       setActiveTab('jobs')
     }
   }

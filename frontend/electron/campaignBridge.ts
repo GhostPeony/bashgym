@@ -49,6 +49,7 @@ const GET_ROUTES = [
   new RegExp(`^/api/campaigns/${IDENTIFIER}/human-work$`),
   new RegExp(`^/api/campaigns/${IDENTIFIER}/agent-attachment$`),
   new RegExp(`^/api/campaigns/${IDENTIFIER}/recovery$`),
+  new RegExp(`^/api/campaigns/${IDENTIFIER}/artifacts/${IDENTIFIER}/preview$`),
   new RegExp(`^/api/campaigns/${IDENTIFIER}/(?:events|artifacts|attempts|comparisons|proposals|studies|evidence|ledger)$`),
   new RegExp(`^/api/campaigns/${IDENTIFIER}/manifest/[1-9][0-9]*$`),
   new RegExp(`^/api/campaigns/${IDENTIFIER}/studies/${IDENTIFIER}$`),
@@ -76,6 +77,7 @@ const POST_ROUTES = [
 const MAX_ROUTE_LENGTH = 512
 const MAX_BODY_BYTES = 64 * 1024
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+const CAMPAIGN_REQUEST_TIMEOUT_MS = 5_000
 const MAX_QUERY_ENTRIES = 8
 const MAX_QUERY_VALUE_LENGTH = 512
 const CAMPAIGN_AGENT_ARTIFACT_CURSOR = /^a1\.[A-Za-z0-9_-]{11}$/
@@ -397,6 +399,7 @@ export class CampaignBridgeClient {
     private readonly bootstrapToken: string,
     private readonly fetchImpl: FetchLike = fetch,
     private readonly idFactory: () => string = randomUUID,
+    private readonly requestTimeoutMs: number = CAMPAIGN_REQUEST_TIMEOUT_MS,
   ) {}
 
   private async exchange(force = false): Promise<string> {
@@ -406,6 +409,7 @@ export class CampaignBridgeClient {
       const response = await this.fetchImpl(`${this.apiOrigin}/api/campaign-auth/exchange`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${this.bootstrapToken}` },
+        signal: AbortSignal.timeout(this.requestTimeoutMs),
       })
       const payload = await responsePayload(response)
       if (
@@ -573,40 +577,50 @@ export class CampaignBridgeClient {
     authority?: CampaignRequestAuthority,
   ): Promise<CampaignResponse> {
     validateCampaignRequest(method, route, body, query, authority)
-    const url = new URL(route, this.apiOrigin)
-    Object.entries(query ?? {}).forEach(([key, value]) => {
-      url.searchParams.set(key, String(value))
-    })
-    const mutationId = method === 'POST' ? this.idFactory() : null
-    const idempotencyKey = authority?.idempotencyKey || (mutationId ? `desktop-${mutationId}` : null)
-    const execute = async (token: string) => {
-      const headers: Record<string, string> = { Authorization: `Bearer ${token}` }
-      if (method === 'POST') {
-        headers['Content-Type'] = 'application/json'
-        headers['Idempotency-Key'] = idempotencyKey!
-        headers['X-Correlation-ID'] = `desktop-${mutationId}`
-      }
-      return this.fetchImpl(url, {
-        method,
-        headers,
-        ...(method === 'POST' ? { body: JSON.stringify(body) } : {}),
+    try {
+      const url = new URL(route, this.apiOrigin)
+      Object.entries(query ?? {}).forEach(([key, value]) => {
+        url.searchParams.set(key, String(value))
       })
-    }
-
-    let response = await execute(await this.exchange())
-    if (response.status === 401) {
-      this.accessToken = null
-      response = await execute(await this.exchange(true))
-    }
-    const data = await responsePayload(response)
-    return response.ok
-      ? { ok: true, status: response.status, data }
-      : {
-          ok: false,
-          status: response.status,
-          error: safeError(response.status),
-          ...structuredErrorMetadata(data),
+      const mutationId = method === 'POST' ? this.idFactory() : null
+      const idempotencyKey = authority?.idempotencyKey || (mutationId ? `desktop-${mutationId}` : null)
+      const execute = async (token: string) => {
+        const headers: Record<string, string> = { Authorization: `Bearer ${token}` }
+        if (method === 'POST') {
+          headers['Content-Type'] = 'application/json'
+          headers['Idempotency-Key'] = idempotencyKey!
+          headers['X-Correlation-ID'] = `desktop-${mutationId}`
         }
+        return this.fetchImpl(url, {
+          method,
+          headers,
+          signal: AbortSignal.timeout(this.requestTimeoutMs),
+          ...(method === 'POST' ? { body: JSON.stringify(body) } : {}),
+        })
+      }
+
+      let response = await execute(await this.exchange())
+      if (response.status === 401) {
+        this.accessToken = null
+        response = await execute(await this.exchange(true))
+      }
+      const data = await responsePayload(response)
+      return response.ok
+        ? { ok: true, status: response.status, data }
+        : {
+            ok: false,
+            status: response.status,
+            error: safeError(response.status),
+            ...structuredErrorMetadata(data),
+          }
+    } catch {
+      return {
+        ok: false,
+        status: 503,
+        code: 'campaign_backend_unavailable',
+        error: 'The campaign service did not respond in time.',
+      }
+    }
   }
 
   dispose(): void {

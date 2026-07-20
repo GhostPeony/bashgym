@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import {
   GitBranch,
   ChevronRight,
@@ -11,7 +11,9 @@ import {
   ArrowRight,
 } from 'lucide-react'
 import { clsx } from 'clsx'
-import { modelsApi, ModelSummary } from '../../services/api'
+import { ModelSummary } from '../../services/api'
+import { modelLineageResource } from '../../stores/modelResources'
+import { useSessionResource } from '../../stores/sessionResource'
 
 interface LineageTreeProps {
   onSelectModel: (modelId: string) => void
@@ -192,28 +194,19 @@ function TreeNodeRow({ node, expanded, onToggle, onSelect, isHighlighted, isBase
 }
 
 export function LineageTree({ onSelectModel, highlightModelId }: LineageTreeProps) {
-  const [models, setModels] = useState<ModelSummary[]>([])
-  const [isLoading, setIsLoading] = useState(true)
+  const { data, loading, error } = useSessionResource(modelLineageResource)
+  const models = useMemo(() => data ?? [], [data])
+  const isLoading = loading || (data === null && error === null)
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set())
 
-  // Fetch all models
-  const fetchModels = useCallback(async () => {
-    setIsLoading(true)
-    const result = await modelsApi.list({ limit: 100, sort_by: 'created_at', sort_order: 'desc' })
-    if (result.ok && result.data) {
-      setModels(result.data.models)
-      // Expand all base model nodes by default
-      const tree = buildLineageTree(result.data.models)
-      setExpandedNodes(new Set(tree.map(n => n.model_id)))
-    }
-    setIsLoading(false)
-  }, [])
-
-  useEffect(() => {
-    fetchModels()
-  }, [fetchModels])
-
   const tree = useMemo(() => buildLineageTree(models), [models])
+
+  // Expand all base model nodes by default whenever the model list changes
+  useEffect(() => {
+    if (data) {
+      setExpandedNodes(new Set(buildLineageTree(data).map(n => n.model_id)))
+    }
+  }, [data])
 
   const toggleNode = (nodeId: string) => {
     setExpandedNodes(prev => {

@@ -66,7 +66,7 @@ test('fails closed when a parent claims mutations are enabled without live autho
     onRefreshDoctor: () => {},
   }))
 
-  assert.match(html, /Live authority is unavailable/)
+  assert.match(html, /Connection lost — setup is read-only/)
   assert.match(html, /<button[^>]*disabled=""[^>]*>Start<\/button>/)
   assert.match(html, /<button[^>]*disabled=""[^>]*aria-label="Continue: Source"/)
 })

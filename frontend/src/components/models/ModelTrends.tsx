@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
 import {
   ArrowLeft,
   TrendingUp,
@@ -9,7 +9,9 @@ import {
   Calendar
 } from 'lucide-react'
 import { clsx } from 'clsx'
-import { modelsApi, TrendDataPoint } from '../../services/api'
+import { TrendDataPoint } from '../../services/api'
+import { modelTrendsKey, modelTrendsResource } from '../../stores/modelResources'
+import { useKeyedSessionResource } from '../../stores/sessionResource'
 
 interface ModelTrendsProps {
   onBack: () => void
@@ -190,25 +192,13 @@ function SimpleLineChart({ data, metric, onSelectModel }: {
 export function ModelTrends({ onBack, onSelectModel }: ModelTrendsProps) {
   const [selectedMetric, setSelectedMetric] = useState<MetricOption>(METRIC_OPTIONS[0])
   const [timeRange, setTimeRange] = useState(30)
-  const [trendData, setTrendData] = useState<TrendDataPoint[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
 
-  const fetchTrends = useCallback(async () => {
-    setIsLoading(true)
-    setError(null)
-    const result = await modelsApi.trends(selectedMetric.value, timeRange)
-    if (result.ok && result.data) {
-      setTrendData(result.data.data)
-    } else {
-      setError('Failed to load trend data')
-    }
-    setIsLoading(false)
-  }, [selectedMetric.value, timeRange])
-
-  useEffect(() => {
-    fetchTrends()
-  }, [fetchTrends])
+  const { data, loading, refreshing, error, refresh } = useKeyedSessionResource(
+    modelTrendsResource,
+    modelTrendsKey(selectedMetric.value, timeRange)
+  )
+  const trendData = data ?? []
+  const isLoading = loading || (data === null && error === null)
 
   return (
     <div className="h-full flex flex-col">
@@ -228,11 +218,11 @@ export function ModelTrends({ onBack, onSelectModel }: ModelTrendsProps) {
           </div>
 
           <button
-            onClick={fetchTrends}
-            disabled={isLoading}
+            onClick={() => void refresh()}
+            disabled={isLoading || refreshing}
             className="btn-secondary"
           >
-            <RefreshCw className={clsx('w-4 h-4 mr-2', isLoading && 'animate-spin')} />
+            <RefreshCw className={clsx('w-4 h-4 mr-2', (isLoading || refreshing) && 'animate-spin')} />
             Refresh
           </button>
         </div>
@@ -288,7 +278,7 @@ export function ModelTrends({ onBack, onSelectModel }: ModelTrendsProps) {
           <div className="flex items-center justify-center h-64">
             <Loader2 className="w-8 h-8 text-accent animate-spin" />
           </div>
-        ) : error ? (
+        ) : error && data === null ? (
           <div className="flex flex-col items-center justify-center h-64">
             <BarChart3 className="w-12 h-12 text-text-muted mb-4" />
             <p className="text-text-muted">{error}</p>

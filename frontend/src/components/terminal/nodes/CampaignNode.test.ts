@@ -327,27 +327,11 @@ function realisticDetail(): CampaignDetailState {
 test('campaign evidence panel renders the durable API/store projection and controls', async () => {
   const { CampaignEvidencePanel } = await import('./CampaignNode')
   const detail = realisticDetail()
-  const attempt = detail.attempts.at(-1)!
   const comparison = detail.comparisons.at(-1)!
-  const chartData = detail.lossByAttempt[attempt.attempt_id].map((point) => ({
-    step: point.step,
-    loss: point.value,
-  }))
   const markup = renderToStaticMarkup(createElement(CampaignEvidencePanel, {
     campaignId: detail.campaign.campaign_id,
     campaigns: [detail.campaign],
     detail,
-    controller: {
-      schema_version: 'campaign_controller_status.v1',
-      online: false,
-      state: 'stale',
-      code: 'controller_stale',
-      observed_at: '2026-07-13T21:20:05Z',
-      heartbeat_age_seconds: 20,
-      guidance: 'Restart the resident campaign worker.',
-    },
-    chartData,
-    latestAttempt: attempt,
     latestComparison: comparison,
     mutating: false,
     onSelect: () => undefined,
@@ -369,13 +353,17 @@ test('campaign evidence panel renders the durable API/store projection and contr
   assert.match(markup, /Cancel<\/button>/)
   assert.match(markup, /Refresh<\/button>/)
   assert.match(markup, /Open in AutoResearch<\/button>/)
-  assert.match(markup, /Resident Controller/)
-  assert.match(markup, /aria-label="Campaign controller stale"/)
-  assert.match(markup, /heartbeat 20s ago/)
-  assert.match(markup, /Restart the resident campaign worker/)
+  assert.doesNotMatch(markup, /Resident Controller/)
 
-  assert.match(markup, /Loss · candidate-b-full-b128-realized17-mb4-e2-bf16-r1/)
-  assert.match(markup, /aria-label="Training loss curve, 3 points, step 1 loss 1.0309 to step 84 loss 0.1738"/)
+  assert.match(markup, /Baseline vs Candidate/)
+  assert.match(markup, /27\.1%/)
+  assert.match(markup, /30\.8%/)
+  assert.match(markup, /\+3\.7 pp/)
+  assert.match(markup, /Same fixed evaluation suite/)
+  assert.ok(markup.indexOf('Baseline vs Candidate') < markup.indexOf('Campaign research brief'))
+
+  assert.match(markup, /Training loss/)
+  assert.match(markup, /aria-label="Training loss curve, 3 points, minimum 0.1738 at step 84, final 0.1738 at step 84"/)
   assert.match(markup, /Latest Development Gate/)
   assert.match(markup, /insufficient evidence/)
   assert.match(markup, /18 queries \/ 3 videos/)
@@ -386,9 +374,11 @@ test('campaign evidence panel renders the durable API/store projection and contr
   assert.match(markup, /eval-positive-aware-dev/)
   assert.match(markup, /Decisions/)
   assert.match(markup, /Retain the current champion/)
+  assert.match(markup, /The development evidence is insufficient/)
+  assert.match(markup, /decision-retain-champion/)
   assert.match(markup, /AutoResearch Diagnostics/)
   assert.match(markup, /aria-label="AutoResearch diagnostics"/)
-  assert.match(markup, /low signal detected/)
+  assert.match(markup, /Low signal detected/)
   assert.match(markup, /checkpoint evidence missing/)
   assert.match(markup, /Checkpoint trajectory/)
   assert.match(markup, /source\.youtube\.exact mrr/)
@@ -400,11 +390,16 @@ test('campaign evidence panel renders the durable API/store projection and contr
   assert.match(markup, /memexai-heldout-dev/)
   assert.match(markup, /Recent Events \(1\)/)
   assert.match(markup, /aria-label="Recent campaign events"/)
-  assert.match(markup, /training-metrics-appended/)
+  assert.match(markup, /Training Metrics Appended/)
+  assert.match(markup, /<button[^>]+aria-label="Inspect Training Metrics Appended"/)
   assert.match(markup, /Sealed Evidence \(1\)/)
   assert.match(markup, /aria-label="Sealed campaign evidence"/)
-  assert.match(markup, /training metrics jsonl\.v1/)
-  assert.match(markup, /1\.5 MB/)
+  assert.match(markup, /Training metrics captured/)
+  assert.match(markup, /<button[^>]+aria-label="Inspect Training metrics captured"/)
+  assert.match(markup, /1\.5 MB · sealed and valid/)
+  assert.doesNotMatch(markup, /text-\[(?:7|8|9)px\]/)
+  assert.doesNotMatch(markup, />revision 4<\/span>/)
+  assert.doesNotMatch(markup, />version 8<\/span>/)
 })
 
 test('campaign control-room deep link uses exact workspace and campaign IDs', async () => {
@@ -425,16 +420,13 @@ test('campaign control-room deep link uses exact workspace and campaign IDs', as
   }
 })
 
-test('campaign node keeps legacy drill-down lazy until the evidence modal opens', async () => {
-  const { shouldLoadCampaignDrillDown } = await import('./campaignNodeActions')
-  assert.equal(shouldLoadCampaignDrillDown(false, 7), false)
-  assert.equal(shouldLoadCampaignDrillDown(true, null), false)
-  assert.equal(shouldLoadCampaignDrillDown(true, 7), true)
-
+test('campaign node eagerly loads the bounded outcome projection and renders its compact result at a glance', () => {
   const source = readFileSync(new URL('./CampaignNode.tsx', import.meta.url), 'utf8')
   assert.match(source, /const loadLegacyDetail = useCampaignStore/)
-  assert.match(source, /shouldLoadCampaignDrillDown\(configOpen, snapshotVersion\)/)
+  assert.doesNotMatch(source, /shouldLoadCampaignDrillDown\(configOpen, snapshotVersion\)/)
   assert.match(source, /void loadLegacyDetail\(workspaceId, campaignId\)/)
+  assert.match(source, /<CampaignOutcomeSummary model=\{outcome\} density="compact" \/>/)
+  assert.ok(source.indexOf('<CampaignOutcomeSummary model={outcome} density="compact" />') < source.indexOf("['studies'"))
 })
 
 test('campaign evidence panel exposes lifecycle controls for ready and paused states', async () => {
@@ -446,8 +438,6 @@ test('campaign evidence panel exposes lifecycle controls for ready and paused st
       campaignId: detail.campaign.campaign_id,
       campaigns: [detail.campaign],
       detail: { ...detail, campaign: { ...detail.campaign, status } },
-      chartData: [],
-      latestAttempt: detail.attempts.at(-1),
       latestComparison: detail.comparisons.at(-1),
       mutating: false,
       onSelect: () => undefined,
@@ -470,9 +460,6 @@ test('campaign evidence panel hides lifecycle mutations unless authority is exac
       campaignId: detail.campaign.campaign_id,
       campaigns: [detail.campaign],
       detail,
-      controller: null,
-      chartData: [],
-      latestAttempt: undefined,
       latestComparison: undefined,
       mutating: false,
       onSelect: () => undefined,

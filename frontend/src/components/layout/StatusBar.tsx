@@ -1,13 +1,11 @@
 import { useState } from 'react'
-import { Bell, Send, Terminal, Wifi, WifiOff } from 'lucide-react'
+import { Send, Terminal, Wifi, WifiOff } from 'lucide-react'
 import { useTerminalStore, useTrainingStore } from '../../stores'
-import { useActivityStore } from '../../stores/activityStore'
 import { clsx } from 'clsx'
 
 export function StatusBar() {
   const { sessions, broadcastCommand, setBroadcastCommand, executeBroadcast } = useTerminalStore()
   const { currentRun, isConnected } = useTrainingStore()
-  const { isOpen: isActivityOpen, unread, setOpen: setActivityOpen } = useActivityStore()
 
   const [isFocused, setIsFocused] = useState(false)
 
@@ -120,25 +118,8 @@ export function StatusBar() {
         </button>
       </div>
 
-      {/* Right Section - Activity Toggle + Hotkey Hints */}
+      {/* Right Section - Hotkey Hints */}
       <div className="flex items-center gap-3 font-mono text-xs text-text-muted">
-        <button
-          onClick={() => setActivityOpen(!isActivityOpen)}
-          title="Activity feed"
-          className={clsx(
-            'relative flex items-center justify-center px-1.5 py-0.5 border-brutal border-border rounded-brutal transition-colors',
-            isActivityOpen
-              ? 'text-accent border-accent'
-              : 'text-text-secondary hover:text-text-primary'
-          )}
-        >
-          <Bell className="w-4 h-4" />
-          {unread > 0 && (
-            <span className="absolute -top-1.5 -right-1.5 min-w-[1rem] h-4 px-1 rounded-full bg-accent text-white text-[10px] leading-4 text-center">
-              {unread > 99 ? '99+' : unread}
-            </span>
-          )}
-        </button>
         <kbd className="px-1.5 py-0.5 border-brutal border-accent/20 bg-accent/[0.06] rounded-brutal text-accent/70">
           Ctrl+N
         </kbd>

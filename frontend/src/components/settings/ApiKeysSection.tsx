@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
 import {
   Key,
   Eye,
@@ -12,6 +12,8 @@ import {
   ExternalLink,
 } from 'lucide-react'
 import { settingsApi, EnvKeyStatus } from '../../services/api'
+import { envKeysResource } from '../../stores/opsResources'
+import { useSessionResource } from '../../stores/sessionResource'
 import { clsx } from 'clsx'
 import { GhostPeonyIcon } from '../common/GhostPeonyIcon'
 
@@ -294,33 +296,13 @@ function ProviderCard({
 }
 
 export function ApiKeysSection() {
-  const [keys, setKeys] = useState<EnvKeyStatus[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [apiError, setApiError] = useState<string | null>(null)
+  const { data: keysData, loading: isLoading, error: fetchError, refresh } = useSessionResource(envKeysResource)
+  const keys = keysData ?? []
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [testingKey, setTestingKey] = useState<string | null>(null)
   const [testResults, setTestResults] = useState<Record<string, TestResult>>({})
   const [savingKey, setSavingKey] = useState<string | null>(null)
-
-  const fetchKeys = useCallback(async () => {
-    setIsLoading(true)
-    setApiError(null)
-    try {
-      const result = await settingsApi.getEnvKeys()
-      if (result.ok && result.data) {
-        setKeys(result.data.keys)
-      } else {
-        setApiError(result.error || 'Failed to fetch API keys')
-      }
-    } catch {
-      setApiError('API server not running')
-    } finally {
-      setIsLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    fetchKeys()
-  }, [fetchKeys])
+  const apiError = saveError || fetchError
 
   const handleSave = async (envKey: string, value: string) => {
     setSavingKey(envKey)
@@ -333,12 +315,13 @@ export function ApiKeysSection() {
     try {
       const result = await settingsApi.updateEnvKeys({ [envKey]: value })
       if (result.ok) {
-        await fetchKeys()
+        setSaveError(null)
+        await refresh()
       } else {
-        setApiError(result.error || 'Failed to save key')
+        setSaveError(result.error || 'Failed to save key')
       }
     } catch {
-      setApiError('API server not reachable')
+      setSaveError('API server not reachable')
     } finally {
       setSavingKey(null)
     }
@@ -394,7 +377,7 @@ export function ApiKeysSection() {
           </p>
         </div>
         <button
-          onClick={fetchKeys}
+          onClick={() => void refresh()}
           className="btn-icon w-8 h-8 text-text-muted"
           title="Refresh"
         >

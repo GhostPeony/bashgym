@@ -392,7 +392,7 @@ function createWindow() {
     `style-src 'self' 'unsafe-inline' https://fonts.googleapis.com`,
     `font-src 'self' https://fonts.gstatic.com`,
     `img-src 'self' data: blob: https:`,
-    `connect-src 'self' http://localhost:* ws://localhost:* https://api.vercel.com https://api.neon.tech https://fonts.googleapis.com https://fonts.gstatic.com`,
+    `connect-src 'self' http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:* https://api.vercel.com https://api.neon.tech https://fonts.googleapis.com https://fonts.gstatic.com`,
     `worker-src 'self' blob:`,
     `child-src 'self'`,
     `frame-src 'self' https:`,

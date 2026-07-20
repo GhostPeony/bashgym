@@ -1,10 +1,12 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import {
   Eye, Filter, Sparkles, GraduationCap,
   Play, ArrowRight, RefreshCw,
   CheckCircle2, XCircle, Clock, Layers
 } from 'lucide-react'
-import { pipelineApi, PipelineConfig, PipelineStatus } from '../../services/api'
+import { pipelineApi, PipelineConfig } from '../../services/api'
+import { pipelineOverviewResource } from '../../stores/opsResources'
+import { useSessionResource } from '../../stores/sessionResource'
 import { clsx } from 'clsx'
 
 interface StageCardProps {
@@ -104,40 +106,35 @@ function StageCard({ title, icon, enabled, onToggle, count, threshold, onThresho
 }
 
 export function PipelineDashboard() {
-  const [status, setStatus] = useState<PipelineStatus | null>(null)
-  const [config, setConfig] = useState<PipelineConfig | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
+  const { data, refreshing } = useSessionResource(pipelineOverviewResource)
+  const status = data?.status ?? null
+  const config = data?.config ?? null
   const [triggeringStage, setTriggeringStage] = useState<string | null>(null)
 
-  const fetchData = useCallback(async () => {
-    const [statusRes, configRes] = await Promise.all([
-      pipelineApi.getStatus(),
-      pipelineApi.getConfig(),
-    ])
-    if (statusRes.ok && statusRes.data) setStatus(statusRes.data)
-    if (configRes.ok && configRes.data) setConfig(configRes.data)
-    setIsLoading(false)
-  }, [])
-
+  // Poll every 5s while mounted; refreshes land in the shared cache
   useEffect(() => {
-    fetchData()
-    const interval = setInterval(fetchData, 5000)
+    const interval = setInterval(() => {
+      void pipelineOverviewResource.getState().refresh()
+    }, 5000)
     return () => clearInterval(interval)
-  }, [fetchData])
+  }, [])
 
   const updateConfig = async (updates: Partial<PipelineConfig>) => {
     const result = await pipelineApi.updateConfig(updates)
-    if (result.ok && result.data) setConfig(result.data)
+    const { data: current, setData } = pipelineOverviewResource.getState()
+    if (result.ok && result.data && current) {
+      setData({ ...current, config: result.data })
+    }
   }
 
   const triggerStage = async (stage: 'import' | 'classify' | 'cascade') => {
     setTriggeringStage(stage)
     await pipelineApi.triggerStage(stage)
-    await fetchData()
+    await pipelineOverviewResource.getState().refresh()
     setTriggeringStage(null)
   }
 
-  if (isLoading || !config || !status) {
+  if (!config || !status) {
     return (
       <div className="h-full flex items-center justify-center">
         <RefreshCw className="w-6 h-6 text-text-muted animate-spin" />
@@ -171,10 +168,10 @@ export function PipelineDashboard() {
               {status.watcher_running ? 'Watching' : 'Stopped'}
             </div>
             <button
-              onClick={fetchData}
+              onClick={() => void pipelineOverviewResource.getState().refresh()}
               className="p-2 border-brutal rounded-brutal hover-press transition-press shadow-brutal-sm"
             >
-              <RefreshCw className="w-4 h-4" />
+              <RefreshCw className={clsx('w-4 h-4', refreshing && 'animate-spin')} />
             </button>
           </div>
         </div>

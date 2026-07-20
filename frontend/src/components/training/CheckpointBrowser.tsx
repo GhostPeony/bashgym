@@ -1,18 +1,12 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
 import { RefreshCw, Trash2, ArrowRight, Package } from 'lucide-react'
 import { clsx } from 'clsx'
 import { trainingApi } from '../../services/api'
 import { useTrainingStore } from '../../stores'
+import { checkpointsResource, type CheckpointInfo } from '../../stores/opsResources'
+import { useSessionResource } from '../../stores/sessionResource'
 
-export interface CheckpointInfo {
-  id: string
-  run_id: string
-  kind: 'final' | 'merged' | 'intermediate' | 'gguf'
-  path: string
-  size_mb: number
-  created_at: string
-  base_model: string | null
-}
+export type { CheckpointInfo }
 
 function formatSize(mb: number): string {
   if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`
@@ -28,31 +22,25 @@ function formatDate(iso: string): string {
 }
 
 export function CheckpointBrowser() {
-  const [checkpoints, setCheckpoints] = useState<CheckpointInfo[]>([])
-  const [loading, setLoading] = useState(false)
+  const {
+    data,
+    loading,
+    refreshing,
+    error: fetchError,
+    refresh,
+  } = useSessionResource(checkpointsResource)
+  const checkpoints = data ?? []
   const [error, setError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
   const [pruningRun, setPruningRun] = useState<string | null>(null)
   const setBaseModelOverride = useTrainingStore((s) => s.setBaseModelOverride)
+  const isFetching = loading || refreshing
+  const shownError = error || fetchError
 
-  const fetchCheckpoints = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const res = await trainingApi.listCheckpoints()
-      if (res.ok && res.data) {
-        setCheckpoints(res.data)
-      } else {
-        setError(res.error || 'Failed to load checkpoints')
-      }
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    fetchCheckpoints()
-  }, [fetchCheckpoints])
+  const removeFromCache = (ids: Set<string>) => {
+    const { data: current, setData } = checkpointsResource.getState()
+    if (current) setData(current.filter((cp) => !ids.has(cp.id)))
+  }
 
   const handleUseAsBase = (cp: CheckpointInfo) => {
     setBaseModelOverride(cp.path)
@@ -70,7 +58,7 @@ export function CheckpointBrowser() {
       if (!res.ok) {
         setError(res.error || 'Delete failed')
       } else {
-        setCheckpoints((prev) => prev.filter((c) => c.id !== cp.id))
+        removeFromCache(new Set([cp.id]))
       }
     } finally {
       setDeleting(null)
@@ -99,7 +87,7 @@ export function CheckpointBrowser() {
         }
         deleted.add(cp.id)
       }
-      setCheckpoints((prev) => prev.filter((cp) => !deleted.has(cp.id)))
+      removeFromCache(deleted)
     } finally {
       setPruningRun(null)
     }
@@ -117,22 +105,22 @@ export function CheckpointBrowser() {
           </p>
         </div>
         <button
-          onClick={fetchCheckpoints}
-          disabled={loading}
+          onClick={() => void refresh()}
+          disabled={isFetching}
           className="btn-icon flex items-center justify-center"
           title="Refresh"
         >
-          <RefreshCw className={clsx('w-4 h-4', loading && 'animate-spin')} />
+          <RefreshCw className={clsx('w-4 h-4', isFetching && 'animate-spin')} />
         </button>
       </div>
 
-      {error && (
+      {shownError && (
         <div className="card p-3 border-l-4 border-l-status-error bg-status-error/10 mb-3">
-          <p className="font-mono text-xs text-status-error">{error}</p>
+          <p className="font-mono text-xs text-status-error">{shownError}</p>
         </div>
       )}
 
-      {checkpoints.length === 0 && !loading && !error && (
+      {checkpoints.length === 0 && !isFetching && !shownError && (
         <div className="text-center py-12 text-text-muted">
           <Package className="w-12 h-12 mx-auto mb-3 opacity-30" />
           <p className="font-mono text-xs uppercase tracking-widest">No checkpoints found</p>

@@ -14,15 +14,20 @@ import {
   SyntheticGenerateRequest,
   SyntheticJobStatus,
   SyntheticPreset,
-  tracesApi,
   RepoInfo
 } from '../../services/api'
+import { useSessionResource } from '../../stores/sessionResource'
+import { traceCountsResource, traceReposResource } from '../../stores/appResources'
+import { syntheticJobsResource, syntheticPresetsResource } from '../../stores/factoryResources'
 import { useTutorialComplete } from '../../hooks'
 
 type Strategy = 'trace_seeded' | 'augmented' | 'schema_driven'
 type Provider = 'nim' | 'anthropic'
 type Preset = 'quick_test' | 'balanced' | 'production' | 'custom'
 type RepoFilter = 'single' | 'all' | 'selected'
+
+const EMPTY_PRESETS: Record<string, SyntheticPreset> = {}
+const EMPTY_REPOS: RepoInfo[] = []
 
 const STRATEGY_INFO: Record<Strategy, { label: string; description: string; icon: typeof Sparkles }> = {
   trace_seeded: {
@@ -66,47 +71,19 @@ export function SyntheticGenerator({ onStateChange }: SyntheticGeneratorProps) {
   const [selectedRepos, setSelectedRepos] = useState<string[]>([])
   const [repoDropdownOpen, setRepoDropdownOpen] = useState(false)
 
-  // Data state
-  const [presets, setPresets] = useState<Record<string, SyntheticPreset>>({})
-  const [repos, setRepos] = useState<RepoInfo[]>([])
-  const [traceCount, setTraceCount] = useState<number>(0)
+  // Data state (session-cached; renders instantly on remount)
+  const { data: presetsData, loading: presetsLoading } = useSessionResource(syntheticPresetsResource)
+  const { data: repoList, loading: reposLoading } = useSessionResource(traceReposResource)
+  const { data: traceCounts, loading: countsLoading } = useSessionResource(traceCountsResource)
+  const presets = presetsData ?? EMPTY_PRESETS
+  const repos = repoList ?? EMPTY_REPOS
+  const traceCount = traceCounts?.gold ?? 0
   const [_jobs, setJobs] = useState<SyntheticJobStatus[]>([])
 
   // UI state
-  const [isLoading, setIsLoading] = useState(true)
+  const isLoading = presetsLoading || reposLoading || countsLoading
   const [isGenerating, setIsGenerating] = useState(false)
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
-
-  // Fetch presets and repos on mount
-  useEffect(() => {
-    const fetchData = async () => {
-      setIsLoading(true)
-      try {
-        const [presetsResult, reposResult, jobsResult, tracesResult] = await Promise.all([
-          syntheticApi.getPresets(),
-          tracesApi.listRepos(),
-          syntheticApi.listJobs(),
-          tracesApi.list({ status: 'gold' })
-        ])
-
-        if (presetsResult.ok && presetsResult.data) {
-          setPresets(presetsResult.data)
-        }
-        if (reposResult.ok && reposResult.data) {
-          setRepos(reposResult.data)
-        }
-        if (jobsResult.ok && jobsResult.data) {
-          setJobs(jobsResult.data)
-        }
-        if (tracesResult.ok && tracesResult.data) {
-          setTraceCount(Array.isArray(tracesResult.data) ? tracesResult.data.length : tracesResult.data.total)
-        }
-      } finally {
-        setIsLoading(false)
-      }
-    }
-    fetchData()
-  }, [])
 
   // Poll active job
   useEffect(() => {
@@ -121,6 +98,7 @@ export function SyntheticGenerator({ onStateChange }: SyntheticGeneratorProps) {
 
         if (result.data.status === 'completed' || result.data.status === 'failed') {
           setActiveJobId(null)
+          void syntheticJobsResource.getState().refresh()
         }
       }
     }, 2000)
@@ -150,6 +128,7 @@ export function SyntheticGenerator({ onStateChange }: SyntheticGeneratorProps) {
         }
         setJobs(prev => [newJob, ...prev])
         setActiveJobId(result.data.job_id)
+        void syntheticJobsResource.getState().refresh()
         completeTutorialStep('generate_examples')
       }
     } finally {

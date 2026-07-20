@@ -19,11 +19,18 @@ const AUTO_MATERIALIZE_STATUSES: ReadonlySet<CampaignRecord['status']> = new Set
   CampaignRecord['status']
 >(['draft', 'validating', 'ready', 'active', 'paused', 'awaiting_authority'])
 
-/** Return campaigns whose current status warrants automatic canvas placement. */
+/**
+ * Return campaigns whose current status warrants automatic canvas placement.
+ * Campaigns the user archived stay off the canvas regardless of status; the
+ * archive store un-archives active campaigns before this filter runs.
+ */
 export function campaignsForCanvasAutoMaterialization(
   campaigns: readonly CampaignRecord[],
+  archivedCampaignIds: ReadonlySet<string> = new Set(),
 ): CampaignRecord[] {
-  return campaigns.filter((campaign) => AUTO_MATERIALIZE_STATUSES.has(campaign.status))
+  return campaigns.filter((campaign) =>
+    AUTO_MATERIALIZE_STATUSES.has(campaign.status)
+    && !archivedCampaignIds.has(campaign.campaign_id))
 }
 
 /** Return campaigns that do not yet have a durable workspace canvas projection. */

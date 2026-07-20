@@ -20,6 +20,11 @@ import {
 import { useTrainingStore } from '../../stores'
 import { useActivityStore } from '../../stores/activityStore'
 import { useCanvasOrchestratorStore } from '../../stores/canvasOrchestratorStore'
+import { useSessionResource } from '../../stores/sessionResource'
+import { designerModelsResource, designerPipelinesResource } from '../../stores/factoryResources'
+
+const EMPTY_PIPELINES: DesignerPipelineInfo[] = []
+const EMPTY_MODELS: DesignerModel[] = []
 
 const ROLLOUT_FORMATS = [
   { value: 'claude_code', label: 'Claude Code' },
@@ -72,13 +77,20 @@ function ModelSelect({
 }
 
 export function DataDesignerTab() {
-  const [pipelines, setPipelines] = useState<DesignerPipelineInfo[]>([])
-  const [available, setAvailable] = useState(true)
-  const [loadingPipelines, setLoadingPipelines] = useState(false)
+  const { data: pipelinesData, loading: loadingPipelines } =
+    useSessionResource(designerPipelinesResource)
+  const {
+    data: modelsData,
+    loading: modelsInitialLoading,
+    refreshing: modelsRefreshing,
+    refresh: refreshModels,
+  } = useSessionResource(designerModelsResource)
+  const pipelines = pipelinesData?.pipelines ?? EMPTY_PIPELINES
+  const available = pipelinesData?.available ?? true
+  const models = modelsData?.models ?? EMPTY_MODELS
+  const modelsLoading = modelsInitialLoading || modelsRefreshing
   const [selected, setSelected] = useState<string | null>(null)
 
-  const [models, setModels] = useState<DesignerModel[]>([])
-  const [modelsLoading, setModelsLoading] = useState(false)
   const [textModel, setTextModel] = useState('')
   const [codeModel, setCodeModel] = useState('')
   const [judgeModel, setJudgeModel] = useState('')
@@ -104,27 +116,9 @@ export function DataDesignerTab() {
   const isRollout = seedType === 'agent_rollouts'
   const isToolPipeline = selected === 'mcp_tool_use'
 
-  const loadModels = useCallback(() => {
-    setModelsLoading(true)
-    designerApi.listModels().then((res) => {
-      setModelsLoading(false)
-      if (res.ok && res.data) setModels(res.data.models)
-    })
-  }, [])
-
   useEffect(() => {
-    setLoadingPipelines(true)
-    designerApi.listPipelines().then((res) => {
-      setLoadingPipelines(false)
-      if (res.ok && res.data) {
-        setPipelines(res.data.pipelines)
-        setAvailable(res.data.available)
-        if (res.data.pipelines.length > 0) setSelected((s) => s ?? res.data!.pipelines[0].name)
-      }
-    })
-    loadModels()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    if (pipelines.length > 0) setSelected((s) => s ?? pipelines[0].name)
+  }, [pipelines])
 
   const clearJobPolling = useCallback(() => {
     if (pollRef.current !== null) {
@@ -325,7 +319,7 @@ export function DataDesignerTab() {
                 Teacher Models
               </h3>
               <button
-                onClick={loadModels}
+                onClick={() => void refreshModels()}
                 className="font-mono text-[10px] uppercase tracking-[0.12em] text-text-muted hover:text-accent-dark flex items-center gap-1 transition-colors"
                 title="Refresh the live model catalog"
               >

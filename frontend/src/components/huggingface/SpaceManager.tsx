@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import {
   Plus,
   Trash2,
@@ -11,20 +11,25 @@ import {
   Layers,
   Rocket
 } from 'lucide-react'
-import { hfApi, HFSpace, HFSpaceCreateRequest } from '../../services/api'
+import { hfApi, HFSpaceCreateRequest } from '../../services/api'
 import { wsService, MessageTypes } from '../../services/websocket'
 import { clsx } from 'clsx'
+import { hfSpacesResource } from '../../stores/hfResources'
+import { useSessionResource } from '../../stores/sessionResource'
 
 interface SpaceManagerProps {
   className?: string
 }
 
 export function SpaceManager({ className }: SpaceManagerProps) {
-  const [spaces, setSpaces] = useState<HFSpace[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data, loading, refreshing, error: fetchError, refresh } = useSessionResource(hfSpacesResource)
+  const spaces = data ?? []
   const [creating, setCreating] = useState(false)
   const [showForm, setShowForm] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [createError, setCreateError] = useState<string | null>(null)
+  const error =
+    createError ||
+    (fetchError?.includes('403') ? 'HuggingFace Pro subscription required for ZeroGPU Spaces' : null)
 
   // Form state
   const [formData, setFormData] = useState<HFSpaceCreateRequest>({
@@ -34,38 +39,24 @@ export function SpaceManager({ className }: SpaceManagerProps) {
     gpu_duration: 60,
   })
 
-  const fetchSpaces = useCallback(async () => {
-    const result = await hfApi.listSpaces()
-    if (result.ok && result.data) {
-      setSpaces(result.data)
-      setError(null)
-    } else if (result.error?.includes('403')) {
-      setError('HuggingFace Pro subscription required for ZeroGPU Spaces')
-    }
-    setLoading(false)
-  }, [])
-
   useEffect(() => {
-    fetchSpaces()
-
     // Subscribe to space events
-    const unsubscribeReady = wsService.subscribe(MessageTypes.HF_SPACE_READY, () => {
-      fetchSpaces()
-    })
-    const unsubscribeError = wsService.subscribe(MessageTypes.HF_SPACE_ERROR, () => {
-      fetchSpaces()
-    })
+    const refreshSpaces = () => {
+      void hfSpacesResource.getState().refresh()
+    }
+    const unsubscribeReady = wsService.subscribe(MessageTypes.HF_SPACE_READY, refreshSpaces)
+    const unsubscribeError = wsService.subscribe(MessageTypes.HF_SPACE_ERROR, refreshSpaces)
 
     return () => {
       unsubscribeReady()
       unsubscribeError()
     }
-  }, [fetchSpaces])
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setCreating(true)
-    setError(null)
+    setCreateError(null)
 
     const result = await hfApi.createSpace(formData)
     if (result.ok) {
@@ -76,9 +67,9 @@ export function SpaceManager({ className }: SpaceManagerProps) {
         private: true,
         gpu_duration: 60,
       })
-      fetchSpaces()
+      refresh()
     } else {
-      setError(result.error || 'Failed to create Space')
+      setCreateError(result.error || 'Failed to create Space')
     }
     setCreating(false)
   }
@@ -88,7 +79,7 @@ export function SpaceManager({ className }: SpaceManagerProps) {
 
     const result = await hfApi.deleteSpace(spaceName)
     if (result.ok) {
-      fetchSpaces()
+      refresh()
     }
   }
 
@@ -144,11 +135,11 @@ export function SpaceManager({ className }: SpaceManagerProps) {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={fetchSpaces}
+            onClick={() => refresh()}
             className="btn-icon"
             title="Refresh"
           >
-            <RefreshCw className="w-4 h-4 text-text-secondary" />
+            <RefreshCw className={clsx('w-4 h-4 text-text-secondary', refreshing && 'animate-spin')} />
           </button>
           <button
             onClick={() => setShowForm(!showForm)}

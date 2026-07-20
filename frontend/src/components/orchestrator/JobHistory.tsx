@@ -26,7 +26,8 @@ export function JobHistory() {
     setActiveTab('active')
   }
 
-  if (loading) {
+  // Full spinner only on first load — cached jobs render instantly on remount
+  if (loading && jobs.length === 0) {
     return (
       <div className="flex items-center justify-center py-20">
         <Loader2 className="w-6 h-6 animate-spin text-text-muted" />

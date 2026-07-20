@@ -1,5 +1,8 @@
 import { create } from 'zustand'
 
+import { tracesApi } from '../services/api'
+import { traceCountsResource } from './appResources'
+
 export type TraceStatus = 'gold' | 'silver' | 'bronze' | 'failed' | 'pending'
 
 // Quality tier based on NVIDIA NeMo research
@@ -53,6 +56,52 @@ export interface Trace {
   promotedAt?: number
 }
 
+export interface TraceListQuery {
+  status: TraceStatus | 'all'
+  repo: string | null
+  sourceTool: string
+}
+
+export const TRACE_PAGE_SIZE = 50
+
+const queryKeyOf = (query: TraceListQuery): string =>
+  `${query.status}|${query.repo ?? ''}|${query.sourceTool}`
+
+// Maps an API trace payload to the store Trace shape.
+export function mapApiTrace(t: any): Trace {
+  return {
+    id: t.trace_id,
+    taskId: t.task_id,
+    taskDescription: t.task_description,
+    status: t.status,
+    qualityTier: t.quality_tier || undefined,
+    steps: [],
+    quality: {
+      successRate: t.quality.success_rate,
+      verificationScore: t.quality.verification_score,
+      complexityScore: t.quality.complexity_score,
+      lengthScore: t.quality.length_score,
+      toolDiversity: t.quality.tool_diversity || 0,
+      efficiencyScore: t.quality.efficiency_score || 0,
+      cognitiveQuality: t.quality.cognitive_quality || 0,
+      totalScore: t.quality.total_score,
+    },
+    repo: t.repo
+      ? {
+          name: t.repo.name,
+          path: t.repo.path,
+          is_git_repo: t.repo.is_git_repo,
+          git_branch: t.repo.git_branch,
+          git_remote: t.repo.git_remote,
+        }
+      : undefined,
+    reposCount: t.repos_count || 1,
+    toolBreakdown: t.tool_breakdown,
+    createdAt: t.created_at ? new Date(t.created_at).getTime() : Date.now(),
+    promotedAt: t.promoted_at ? new Date(t.promoted_at).getTime() : undefined,
+  }
+}
+
 interface TracesState {
   // Data
   traces: Trace[]
@@ -72,6 +121,17 @@ interface TracesState {
   failedCount: number
   pendingCount: number
 
+  // List fetch lifecycle — survives page remounts so tab switches render
+  // cached traces instantly instead of refetching behind a spinner.
+  listLoading: boolean      // fetching with nothing usable cached for this query
+  listRefreshing: boolean   // background refetch; cached traces stay visible
+  listError: string | null
+  listLoadedAt: number | null
+  lastQuery: TraceListQuery | null
+  totalTraces: number
+  hasMore: boolean
+  loadingMore: boolean
+
   // Actions
   setTraces: (traces: Trace[]) => void
   setCounts: (counts: { gold: number; silver: number; bronze: number; failed: number; pending: number }) => void
@@ -85,11 +145,61 @@ interface TracesState {
   setSearchQuery: (query: string) => void
   setAvailableRepos: (repos: RepoInfo[]) => void
 
+  /** Fetch the first page only when the query changed or nothing is cached. */
+  ensureTraces: (query: TraceListQuery) => Promise<void>
+  /** Refetch the current query in the background without blanking the list. */
+  refreshTraces: () => Promise<void>
+  loadMoreTraces: () => Promise<void>
+
   // Computed
   filteredTraces: () => Trace[]
 }
 
-export const useTracesStore = create<TracesState>((set, get) => ({
+let listGeneration = 0
+
+export const useTracesStore = create<TracesState>((set, get) => {
+  const fetchList = async (query: TraceListQuery, background: boolean): Promise<void> => {
+    const generation = ++listGeneration
+    set({
+      listLoading: !background,
+      listRefreshing: background,
+      listError: null,
+      lastQuery: query,
+    })
+    try {
+      const result = await tracesApi.list({
+        limit: TRACE_PAGE_SIZE,
+        offset: 0,
+        status: query.status !== 'all' ? query.status : undefined,
+        repo: query.repo || undefined,
+        source_tool: query.sourceTool || undefined,
+      })
+      if (generation !== listGeneration) return
+      if (result.ok && result.data) {
+        const data = result.data
+        const traceList = Array.isArray(data) ? data : data.traces
+        const total = Array.isArray(data) ? data.length : data.total
+        set({
+          traces: (traceList || []).map(mapApiTrace),
+          totalTraces: total,
+          hasMore: !Array.isArray(data) && data.offset + data.limit < total,
+          listLoadedAt: Date.now(),
+        })
+        if (!Array.isArray(data) && data.counts) {
+          get().setCounts(data.counts)
+          traceCountsResource.getState().setData(data.counts)
+        }
+      } else {
+        set({ listError: result.error || 'Failed to fetch traces' })
+      }
+    } catch (e) {
+      if (generation === listGeneration) set({ listError: String(e) })
+    } finally {
+      if (generation === listGeneration) set({ listLoading: false, listRefreshing: false })
+    }
+  }
+
+  return {
   traces: [],
   selectedTraceId: null,
   availableRepos: [],
@@ -102,6 +212,59 @@ export const useTracesStore = create<TracesState>((set, get) => ({
   bronzeCount: 0,
   failedCount: 0,
   pendingCount: 0,
+  listLoading: false,
+  listRefreshing: false,
+  listError: null,
+  listLoadedAt: null,
+  lastQuery: null,
+  totalTraces: 0,
+  hasMore: false,
+  loadingMore: false,
+
+  ensureTraces: async (query) => {
+    const { lastQuery, listLoadedAt, listLoading, listRefreshing, traces } = get()
+    const sameQuery = lastQuery !== null && queryKeyOf(lastQuery) === queryKeyOf(query)
+    if (sameQuery && (listLoadedAt !== null || listLoading || listRefreshing)) return
+    await fetchList(query, traces.length > 0)
+  },
+
+  refreshTraces: async () => {
+    const { lastQuery } = get()
+    if (!lastQuery) return
+    await fetchList(lastQuery, true)
+  },
+
+  loadMoreTraces: async () => {
+    const { lastQuery, loadingMore, hasMore, traces } = get()
+    if (!lastQuery || loadingMore || !hasMore) return
+    set({ loadingMore: true })
+    try {
+      const result = await tracesApi.list({
+        limit: TRACE_PAGE_SIZE,
+        offset: traces.length,
+        status: lastQuery.status !== 'all' ? lastQuery.status : undefined,
+        repo: lastQuery.repo || undefined,
+        source_tool: lastQuery.sourceTool || undefined,
+      })
+      if (result.ok && result.data) {
+        const data = result.data
+        const traceList = Array.isArray(data) ? data : data.traces
+        const total = Array.isArray(data) ? data.length : data.total
+        set((state) => ({
+          traces: [...state.traces, ...(traceList || []).map(mapApiTrace)],
+          totalTraces: total,
+          hasMore: !Array.isArray(data) && data.offset + data.limit < total,
+        }))
+        if (!Array.isArray(data) && data.counts) {
+          get().setCounts(data.counts)
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load more traces:', e)
+    } finally {
+      set({ loadingMore: false })
+    }
+  },
 
   setTraces: (traces) => {
     // Only recount from loaded traces if setCounts hasn't been called with server data
@@ -204,4 +367,5 @@ export const useTracesStore = create<TracesState>((set, get) => ({
       return matchesTier && matchesSearch
     })
   }
-}))
+  }
+})

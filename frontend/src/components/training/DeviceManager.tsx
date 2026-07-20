@@ -6,7 +6,7 @@ import { MaskedHost } from '../common'
 import { clsx } from 'clsx'
 
 export function DeviceManager() {
-  const { devices, defaultDeviceId, fetchDevices, addDevice, removeDevice, setDefault, runPreflight, discoverFromSSHConfig } = useDeviceStore()
+  const { devices, defaultDeviceId, ensureDevices, addDevice, removeDevice, setDefault, runPreflight, discoverFromSSHConfig } = useDeviceStore()
 
   const [showAddForm, setShowAddForm] = useState(false)
   const [showDiscovery, setShowDiscovery] = useState(false)
@@ -23,8 +23,8 @@ export function DeviceManager() {
   const [formWorkDir, setFormWorkDir] = useState('~/bashgym-training')
 
   useEffect(() => {
-    fetchDevices()
-  }, [fetchDevices])
+    void ensureDevices()
+  }, [ensureDevices])
 
   const resetForm = () => {
     setFormName('')

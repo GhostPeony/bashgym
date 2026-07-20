@@ -39,17 +39,17 @@ function freshnessNotice(freshness: RecoveryFreshness): string | null {
 function InvalidRecoveryPanel({ freshness }: { freshness: RecoveryFreshness }) {
   const notice = freshnessNotice(freshness)
   return (
-    <section className="card p-4" aria-labelledby="campaign-recovery-title">
+    <section aria-label="Campaign recovery">
       <header className="flex flex-wrap items-start justify-between gap-3">
-        <div><h2 id="campaign-recovery-title" className="font-brand text-xl text-text-primary">Campaign recovery</h2><p className="mt-1 text-sm text-text-secondary">Recovery projection unavailable. Unsafe or invalid fields are withheld.</p>{notice ? <p className="mt-2 border-l-2 border-status-warning bg-status-warning/10 px-3 py-2 text-xs text-text-secondary" role="status">{notice}</p> : null}</div>
+        <div><p className="text-sm text-text-secondary">Recovery projection unavailable. Unsafe or invalid fields are withheld.</p>{notice ? <p className="mt-2 border-l-2 border-status-warning bg-status-warning/10 px-3 py-2 text-xs text-text-secondary" role="status">{notice}</p> : null}</div>
         <div className="border-2 border-border bg-background-secondary px-3 py-2 font-mono text-[10px] font-semibold uppercase tracking-wide text-text-primary">Read-only</div>
       </header>
-      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+      <div className="mt-4 grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(14rem,1fr))]">
         <section className="border-2 border-border bg-background-secondary p-3"><h3 className="font-mono text-[10px] font-semibold uppercase tracking-wide text-text-muted">Immutable bindings unavailable</h3><p className="mt-2 text-xs text-text-secondary">No unvalidated binding identity is shown.</p></section>
         <section className="border-2 border-border bg-background-secondary p-3"><h3 className="font-mono text-[10px] font-semibold uppercase tracking-wide text-text-muted">Authoritative lineage unavailable</h3><p className="mt-2 text-xs text-text-secondary">Reconcile a valid public projection before recovery.</p></section>
       </div>
       <section className="mt-4 border-l-2 border-accent bg-background-secondary px-3 py-3"><h3 className="font-mono text-[10px] font-semibold uppercase tracking-wide text-text-muted">Doctor evidence unavailable</h3></section>
-      <section className="mt-4 border-t-2 border-border pt-4"><h3 className="font-mono text-[10px] font-semibold uppercase tracking-wide text-text-muted">Explicit recovery requests</h3><div className="mt-3 grid gap-3 lg:grid-cols-3">
+      <section className="mt-4 border-t-2 border-border pt-4"><h3 className="font-mono text-[10px] font-semibold uppercase tracking-wide text-text-muted">Explicit recovery requests</h3><div className="mt-3 grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(11rem,1fr))]">
         {actionOrder.map((action) => <article key={action} className="border-2 border-border bg-background-secondary p-3"><h4 className="font-brand text-base text-text-primary">{actionLabels[action]}</h4><label className="mt-3 flex gap-2 text-xs text-text-muted"><input type="checkbox" disabled />Confirmation unavailable</label><Button className="mt-3" type="button" size="sm" disabled>{actionLabels[action]}</Button></article>)}
       </div></section>
     </section>
@@ -80,17 +80,16 @@ export function CampaignRecoveryPanel({ snapshot: input, freshness, now, confirm
   const model = buildCampaignRecoveryModel({ snapshot, freshness, now })
   const notice = freshnessNotice(freshness)
   return (
-    <section className="card p-4" aria-labelledby="campaign-recovery-title">
+    <section aria-label="Campaign recovery">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 id="campaign-recovery-title" className="font-brand text-xl text-text-primary">Campaign recovery</h2>
-          <p className="mt-1 text-sm leading-6 text-text-secondary">Restore a durable AutoResearch campaign from a cloned or forked BashGym installation without resetting its recorded lineage.</p>
+          <p className="text-sm leading-6 text-text-secondary">Restore a durable AutoResearch campaign from a cloned or forked BashGym installation without resetting its recorded lineage.</p>
           <p className="mt-1 font-mono text-[10px] uppercase tracking-wide text-text-muted">Workspace {snapshot.workspace_id} · Campaign {snapshot.campaign_id}</p>
         </div>
         <div className="border-2 border-border bg-background-secondary px-3 py-2 font-mono text-[10px] font-semibold uppercase tracking-wide text-text-primary">{model.consumerReady ? model.decisionLabel : 'Consumer unavailable'}</div>
       </header>
 
-      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+      <div className="mt-4 grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(14rem,1fr))]">
         <section className="border-2 border-border bg-background-secondary p-3" aria-labelledby="recovery-bindings-title">
           <h3 id="recovery-bindings-title" className="font-mono text-[10px] font-semibold uppercase tracking-wide text-text-muted">Immutable bindings</h3>
           <dl className="mt-3 grid gap-2 text-sm">
@@ -140,7 +139,7 @@ export function CampaignRecoveryPanel({ snapshot: input, freshness, now, confirm
       <section className="mt-4 border-t-2 border-border pt-4" aria-labelledby="recovery-actions-title">
         <h3 id="recovery-actions-title" className="font-mono text-[10px] font-semibold uppercase tracking-wide text-text-muted">Explicit recovery requests</h3>
         {!model.consumerReady ? <p className="mt-2 border-l-2 border-status-warning bg-status-warning/10 px-3 py-2 text-xs leading-5 text-text-secondary">{model.consumerGuidance} Recovery controls remain visible but disabled.</p> : null}
-        <div className="mt-3 grid gap-3 lg:grid-cols-3">
+        <div className="mt-3 grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(11rem,1fr))]">
           {actionOrder.map((actionName) => {
             const action = model.actions[actionName]
             const confirmed = confirmations[actionName]

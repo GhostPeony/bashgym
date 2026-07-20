@@ -2,8 +2,10 @@ import type {
   CampaignControlRoomSnapshotV1,
   CandidateSummaryV1,
   DecisionSurfaceV1,
+  HumanWorkSummaryV1,
   JourneyPhaseSummaryV1,
   MetricDescriptorV1,
+  ReadinessSummaryV1,
 } from '../../services/api'
 import type { CampaignFreshness } from '../../stores/campaignFreshness'
 
@@ -43,11 +45,6 @@ export interface JourneyPhaseViewModel {
   blocker: ReturnType<typeof presentBlocker>
 }
 
-export interface OwnerViewModel {
-  execution: string
-  attention: string
-}
-
 export interface BlockerViewModel {
   code: string
   summary: string
@@ -55,13 +52,9 @@ export interface BlockerViewModel {
   secondaryCodes: string[]
 }
 
-export interface ActionViewModel {
-  id: string
-  label: string
-  kind: 'next' | 'recovery'
-  capability: string | null
-  requiresHumanWork: boolean
-  enabled: false
+export interface NeedsYouViewModel {
+  sentence: string
+  code: string | null
 }
 
 export interface MetricViewModel {
@@ -88,9 +81,7 @@ export type ControlRoomViewModel =
       controllerLabel: string
       error: string | null
       journey: JourneyPhaseViewModel[]
-      owner: OwnerViewModel
-      blocker: BlockerViewModel | null
-      actions: ActionViewModel[]
+      needsYou: NeedsYouViewModel | null
       metrics: MetricViewModel[]
     }
 
@@ -142,13 +133,6 @@ export function presentJourney(
   }))
 }
 
-export function presentOwner(surface: DecisionSurfaceV1): OwnerViewModel {
-  return {
-    execution: ownerLabel(surface.execution_owner),
-    attention: ownerLabel(surface.attention_owner),
-  }
-}
-
 export function presentBlocker(surface: DecisionSurfaceV1): BlockerViewModel | null {
   const blocker = surface.blocker
   return blocker ? {
@@ -159,28 +143,45 @@ export function presentBlocker(surface: DecisionSurfaceV1): BlockerViewModel | n
   } : null
 }
 
-export function presentActions(
-  surface: DecisionSurfaceV1,
-  _freshness: ControlRoomFreshness,
-): ActionViewModel[] {
-  return [
-    ...surface.next_actions.map((action) => ({
-      id: action.action,
-      label: readable(action.action),
-      kind: 'next' as const,
-      capability: action.capability,
-      requiresHumanWork: action.requires_human_work,
-      enabled: false as const,
-    })),
-    ...surface.recovery_actions.map((action) => ({
-      id: action,
-      label: readable(action),
-      kind: 'recovery' as const,
-      capability: null,
-      requiresHumanWork: false,
-      enabled: false as const,
-    })),
-  ]
+/**
+ * Distils the one thing (if any) that is waiting on the human into a plain
+ * sentence plus the trailing machine code. Combines the server's primary
+ * blocker, the launch-readiness block, and pending human review. Returns null
+ * when nothing needs the user, so the caller can render nothing at all.
+ */
+export function presentNeedsYou(input: {
+  surface: DecisionSurfaceV1
+  readiness: ReadinessSummaryV1
+  humanWork: HumanWorkSummaryV1
+  status: string
+}): NeedsYouViewModel | null {
+  const { surface, readiness, humanWork, status } = input
+  if (surface.blocker) {
+    return { sentence: surface.blocker.summary, code: surface.blocker.code }
+  }
+  if (humanWork.blocking_count > 0) {
+    const noun = humanWork.blocking_count === 1 ? 'review is' : 'reviews are'
+    return {
+      sentence: `${humanWork.blocking_count} blinded ${noun} waiting on your decision before this campaign can continue.`,
+      code: 'human_review_required',
+    }
+  }
+  if (status === 'ready' && !readiness.launch_ready) {
+    const code = readiness.blocking_codes[0] ?? null
+    const detail = code ? readable(code) : 'a readiness check'
+    return {
+      sentence: `Readiness is blocked by ${detail}. Fix it and readiness re-verifies automatically before Start unlocks.`,
+      code,
+    }
+  }
+  if (humanWork.open_count > 0) {
+    const noun = humanWork.open_count === 1 ? 'review is' : 'reviews are'
+    return {
+      sentence: `${humanWork.open_count} human ${noun} open for you to pick up.`,
+      code: 'human_review_open',
+    }
+  }
+  return null
 }
 
 export function presentMetrics(
@@ -237,9 +238,12 @@ export function buildControlRoomModel(input: {
     controllerLabel: readable(input.snapshot.controller.state),
     error: input.error,
     journey: presentJourney(input.snapshot.journey),
-    owner: presentOwner(input.snapshot.decision_surface),
-    blocker: presentBlocker(input.snapshot.decision_surface),
-    actions: presentActions(input.snapshot.decision_surface, input.freshness),
+    needsYou: presentNeedsYou({
+      surface: input.snapshot.decision_surface,
+      readiness: input.snapshot.readiness,
+      humanWork: input.snapshot.human_work,
+      status: input.snapshot.campaign.status,
+    }),
     metrics: presentMetrics(input.snapshot.metrics, input.snapshot.champion, input.snapshot.candidate),
   }
 }

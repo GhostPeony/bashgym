@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import {
   Shield,
   ShieldAlert,
@@ -20,6 +20,12 @@ import {
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import { observabilityApi, GuardrailEvent, GuardrailStats } from '../../services/api'
+import { useKeyedSessionResource, useSessionResource } from '../../stores/sessionResource'
+import {
+  guardrailEventsResource,
+  guardrailStatsResource,
+  observabilitySettingsResource,
+} from '../../stores/factoryResources'
 import { wsService, MessageTypes } from '../../services/websocket'
 
 interface GuardrailRule {
@@ -129,67 +135,50 @@ export function GuardrailsDashboard() {
   const [isSaving, setIsSaving] = useState(false)
   const [activeTab, setActiveTab] = useState<'rules' | 'colang' | 'logs'>('rules')
 
-  // API data
-  const [events, setEvents] = useState<GuardrailEvent[]>([])
-  const [stats, setStats] = useState<GuardrailStats | null>(null)
-  const [isLoadingEvents, setIsLoadingEvents] = useState(false)
-  const [isLoadingStats, setIsLoadingStats] = useState(false)
+  // API data (session-cached; WebSocket events prepend to local copies below)
   const [eventFilter, setEventFilter] = useState<{ action?: string; type?: string }>({})
+  const eventsKey = JSON.stringify([eventFilter.action ?? null, eventFilter.type ?? null])
+  const {
+    data: cachedEvents,
+    loading: eventsLoading,
+    refreshing: eventsRefreshing,
+    refresh: refreshEvents,
+  } = useKeyedSessionResource(guardrailEventsResource, eventsKey)
+  const {
+    data: cachedStats,
+    refreshing: statsRefreshing,
+    refresh: refreshStats,
+  } = useSessionResource(guardrailStatsResource)
+  const { data: settings } = useSessionResource(observabilitySettingsResource)
+  const [events, setEvents] = useState<GuardrailEvent[]>(() => cachedEvents ?? [])
+  const [stats, setStats] = useState<GuardrailStats | null>(
+    () => guardrailStatsResource.getState().data
+  )
 
-  // Fetch guardrail events
-  const fetchEvents = useCallback(async () => {
-    setIsLoadingEvents(true)
-    const result = await observabilityApi.listGuardrailEvents({
-      action: eventFilter.action,
-      check_type: eventFilter.type,
-      limit: 100
-    })
-    if (result.ok && result.data) {
-      setEvents(result.data.events)
-    }
-    setIsLoadingEvents(false)
-  }, [eventFilter])
-
-  // Fetch guardrail stats
-  const fetchStats = useCallback(async () => {
-    setIsLoadingStats(true)
-    const result = await observabilityApi.getGuardrailStats()
-    if (result.ok && result.data) {
-      setStats(result.data)
-    }
-    setIsLoadingStats(false)
-  }, [])
-
-  // Fetch settings on mount
   useEffect(() => {
-    const fetchSettings = async () => {
-      const result = await observabilityApi.getSettings()
-      if (result.ok && result.data) {
-        // Update rules based on server settings
-        setRules(prev => prev.map(rule => {
-          if (rule.category === 'pii' && result.data!.guardrails.pii_filtering !== undefined) {
-            return { ...rule, enabled: result.data!.guardrails.pii_filtering }
-          }
-          if (rule.category === 'injection' && result.data!.guardrails.injection_detection !== undefined) {
-            return { ...rule, enabled: result.data!.guardrails.injection_detection }
-          }
-          if (rule.category === 'custom' && result.data!.guardrails.code_safety !== undefined) {
-            return { ...rule, enabled: result.data!.guardrails.code_safety }
-          }
-          return rule
-        }))
+    if (cachedEvents) setEvents(cachedEvents)
+  }, [cachedEvents])
+
+  useEffect(() => {
+    if (cachedStats) setStats(cachedStats)
+  }, [cachedStats])
+
+  // Update rules based on server settings
+  useEffect(() => {
+    if (!settings) return
+    setRules(prev => prev.map(rule => {
+      if (rule.category === 'pii' && settings.guardrails.pii_filtering !== undefined) {
+        return { ...rule, enabled: settings.guardrails.pii_filtering }
       }
-    }
-    fetchSettings()
-    fetchStats()
-  }, [fetchStats])
-
-  // Fetch events when tab changes to logs
-  useEffect(() => {
-    if (activeTab === 'logs') {
-      fetchEvents()
-    }
-  }, [activeTab, fetchEvents])
+      if (rule.category === 'injection' && settings.guardrails.injection_detection !== undefined) {
+        return { ...rule, enabled: settings.guardrails.injection_detection }
+      }
+      if (rule.category === 'custom' && settings.guardrails.code_safety !== undefined) {
+        return { ...rule, enabled: settings.guardrails.code_safety }
+      }
+      return rule
+    }))
+  }, [settings])
 
   // Subscribe to WebSocket events
   useEffect(() => {
@@ -692,11 +681,11 @@ export function GuardrailsDashboard() {
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="font-brand text-xl text-text-primary">Statistics</h3>
                   <button
-                    onClick={fetchStats}
-                    disabled={isLoadingStats}
+                    onClick={() => void refreshStats()}
+                    disabled={statsRefreshing}
                     className="btn-icon w-8 h-8 flex items-center justify-center"
                   >
-                    <RefreshCw className={clsx('w-4 h-4 text-text-muted', isLoadingStats && 'animate-spin')} />
+                    <RefreshCw className={clsx('w-4 h-4 text-text-muted', statsRefreshing && 'animate-spin')} />
                   </button>
                 </div>
                 {stats ? (
@@ -810,11 +799,11 @@ define flow
                     <option value="content_moderation">Content</option>
                   </select>
                   <button
-                    onClick={fetchEvents}
-                    disabled={isLoadingEvents}
+                    onClick={() => void refreshEvents()}
+                    disabled={eventsLoading || eventsRefreshing}
                     className="btn-secondary text-sm flex items-center gap-1"
                   >
-                    <RefreshCw className={clsx('w-4 h-4', isLoadingEvents && 'animate-spin')} />
+                    <RefreshCw className={clsx('w-4 h-4', (eventsLoading || eventsRefreshing) && 'animate-spin')} />
                     Refresh
                   </button>
                 </div>

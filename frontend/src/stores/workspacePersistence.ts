@@ -64,7 +64,7 @@ export interface WorkspaceSnapshotV1 {
 const REGISTRY_KEY = 'bashgym_workspaces'
 export const DEFAULT_WORKSPACE_ID = 'default'
 
-type WsKeySuffix = 'panels' | 'positions' | 'edges' | 'viewport' | 'active_panel'
+type WsKeySuffix = 'panels' | 'positions' | 'edges' | 'viewport' | 'active_panel' | 'campaign_archive'
 
 export const wsKey = (id: string, suffix: WsKeySuffix) => `bashgym_ws_${id}_${suffix}`
 
@@ -254,7 +254,7 @@ export function loadWorkspaceSnapshot(id: string): WorkspaceSnapshotV1 {
 }
 
 export function deleteWorkspaceKeys(id: string): void {
-  for (const suffix of ['panels', 'positions', 'edges', 'viewport', 'active_panel'] as WsKeySuffix[]) {
+  for (const suffix of ['panels', 'positions', 'edges', 'viewport', 'active_panel', 'campaign_archive'] as WsKeySuffix[]) {
     try {
       localStorage.removeItem(wsKey(id, suffix))
     } catch {

@@ -11,9 +11,12 @@ import {
   Minus,
   Square,
   Copy,
-  LogOut
+  LogOut,
+  Bell,
 } from 'lucide-react'
 import { useThemeStore, useUIStore, useTerminalStore, useAuthStore } from '../../stores'
+import { useActivityStore } from '../../stores/activityStore'
+import { clsx } from 'clsx'
 import { isElectron, isWeb } from '../../utils/platform'
 
 export function NavigationBar() {
@@ -22,6 +25,7 @@ export function NavigationBar() {
   const { createTerminal } = useTerminalStore()
   const { user, isAuthenticated, logout } = useAuthStore()
   const [isMaximized, setIsMaximized] = useState(false)
+  const { isOpen: notificationsOpen, unread, setOpen: setNotificationsOpen } = useActivityStore()
 
   // Track maximized state
   useEffect(() => {
@@ -131,6 +135,25 @@ export function NavigationBar() {
             <X className="w-5 h-5" />
           </button>
         )}
+
+        <button
+          type="button"
+          onClick={() => setNotificationsOpen(!notificationsOpen)}
+          className={clsx(
+            'btn-icon relative text-text-secondary hover:text-accent',
+            notificationsOpen && 'bg-accent/10 text-accent',
+          )}
+          title="Notifications"
+          aria-label={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
+          aria-expanded={notificationsOpen}
+        >
+          <Bell className="h-5 w-5" />
+          {unread > 0 ? (
+            <span className="absolute -right-1 -top-1 min-w-4 border border-background-card bg-accent px-1 font-mono text-[10px] leading-4 text-white">
+              {unread > 99 ? '99+' : unread}
+            </span>
+          ) : null}
+        </button>
 
         {/* Theme Toggle */}
         <button

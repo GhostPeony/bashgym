@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
 import { RefreshCw, TrendingUp, Database, DollarSign, Zap } from 'lucide-react'
-import { tracesApi, TraceAnalytics as TraceAnalyticsData } from '../../services/api'
+import { useSessionResource } from '../../stores/sessionResource'
+import { traceAnalyticsResource } from '../../stores/factoryResources'
 import { clsx } from 'clsx'
 
 /** Format source_tool slug into human-friendly name */
@@ -29,32 +29,9 @@ const QUALITY_COLORS: Record<string, { bg: string; label: string }> = {
 }
 
 export function TraceAnalytics() {
-  const [data, setData] = useState<TraceAnalyticsData | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const { data, loading, refreshing, error, refresh } = useSessionResource(traceAnalyticsResource)
 
-  const fetchAnalytics = async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const result = await tracesApi.getAnalytics()
-      if (result.ok && result.data) {
-        setData(result.data)
-      } else {
-        setError(result.error || 'Failed to fetch analytics')
-      }
-    } catch (e) {
-      setError(String(e))
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    fetchAnalytics()
-  }, [])
-
-  // Loading state
+  // Loading state (first load only — remounts render the cached data instantly)
   if (loading) {
     return (
       <div className="p-6 space-y-4">
@@ -77,13 +54,13 @@ export function TraceAnalytics() {
     )
   }
 
-  // Error state
-  if (error) {
+  // Error state (only when there is no cached data to keep showing)
+  if (error && !data) {
     return (
       <div className="p-6">
         <div className="card p-8 text-center">
           <p className="text-sm text-[var(--status-error)] font-mono mb-3">{error}</p>
-          <button onClick={fetchAnalytics} className="btn-secondary text-sm">
+          <button onClick={() => void refresh()} className="btn-secondary text-sm">
             <RefreshCw className="w-4 h-4" /> Retry
           </button>
         </div>
@@ -127,11 +104,11 @@ export function TraceAnalytics() {
           </p>
         </div>
         <button
-          onClick={fetchAnalytics}
+          onClick={() => void refresh()}
           className="btn-icon w-8 h-8"
           title="Refresh analytics"
         >
-          <RefreshCw className="w-4 h-4 text-[var(--text-secondary)]" />
+          <RefreshCw className={clsx('w-4 h-4 text-[var(--text-secondary)]', refreshing && 'animate-spin')} />
         </button>
       </div>
 

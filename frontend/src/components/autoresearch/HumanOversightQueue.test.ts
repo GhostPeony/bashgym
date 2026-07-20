@@ -118,6 +118,20 @@ test('renders a compact blinded queue with labels, bounds, and a live status ann
   assert.doesNotMatch(html, /candidate_mapping|private_path|agent-internal/i)
 })
 
+test('renders an empty queue as a healthy live state without doctrine or blocker filler', () => {
+  const raw = rawQueue('pending')
+  raw.items = []
+  raw.promotion = {
+    state: 'not_required', version: 5, eligible_receipt_id: null,
+    idempotency_key: 'idem_promote_0123456789abcdef',
+  }
+  const view = model('pending', { raw })
+  const html = renderToStaticMarkup(createElement(HumanOversightQueue, { ...props(), model: view, responses: {} }))
+
+  assert.match(html, /Nothing needs your review\. Blinded samples will appear here before any promotion\./)
+  assert.doesNotMatch(html, /authenticated desktop reviewer|versioned rubric|No current human-review comparison block|Promotion is not blocked/)
+})
+
 test('C3 keys response state by the complete scope and revision binding', () => {
   const first = model()
   const raw = rawQueue('claimed')

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -52,6 +53,60 @@ _TRIGGER_CAPABILITIES = {
     CampaignTrigger.CONCLUDE: Capability.CAMPAIGN_COMPLETE,
     CampaignTrigger.PROMOTION_COMMITTED: Capability.PROMOTION_DECIDE,
 }
+
+_ARTIFACT_PREVIEW_MAX_BYTES = 64 * 1024
+_ARTIFACT_PREVIEW_MAX_LINES = 500
+_JSON_PREVIEW_SCHEMAS = {
+    "campaign_development_comparison.v1",
+    "campaign_fake_summary.v1",
+}
+_JSONL_PREVIEW_SCHEMAS = {"training_metrics_jsonl.v1"}
+_TEXT_PREVIEW_SCHEMAS = {
+    "campaign_remote_exit_code.v1",
+    "campaign_training_log.v1",
+}
+_PREVIEW_REDACTIONS = (
+    re.compile(r"(?i)\b(?:bearer|token|api[_-]?key|password|secret)\s*[:=]?\s*\S+"),
+    re.compile(r"\b[A-Za-z]:[\\/][^\s]+"),
+    re.compile(r"https?://[^\s]+", re.IGNORECASE),
+    re.compile(r"\b[A-Za-z0-9._-]+@(?:[A-Za-z0-9.-]+|\d{1,3}(?:\.\d{1,3}){3})\b"),
+    re.compile(r"(?<![A-Za-z0-9])/(?:[^\s/]+/)*[^\s]*"),
+    re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"),
+)
+
+
+class ArtifactPreviewIntegrityError(RuntimeError):
+    code = "campaign_artifact_preview_integrity_failed"
+
+
+def _redacted_preview(value: str) -> tuple[str, int]:
+    redactions = 0
+    result = value
+    for pattern in _PREVIEW_REDACTIONS:
+        result, count = pattern.subn("[redacted]", result)
+        redactions += count
+    return result, redactions
+
+
+def _bounded_text_preview(path: Path, *, from_tail: bool) -> tuple[str, bool]:
+    size = path.stat().st_size
+    with path.open("rb") as handle:
+        if from_tail and size > _ARTIFACT_PREVIEW_MAX_BYTES:
+            handle.seek(size - _ARTIFACT_PREVIEW_MAX_BYTES)
+            raw = handle.read(_ARTIFACT_PREVIEW_MAX_BYTES)
+            newline = raw.find(b"\n")
+            if newline >= 0:
+                raw = raw[newline + 1 :]
+        else:
+            raw = handle.read(_ARTIFACT_PREVIEW_MAX_BYTES + 1)
+    truncated = size > _ARTIFACT_PREVIEW_MAX_BYTES or len(raw) > _ARTIFACT_PREVIEW_MAX_BYTES
+    raw = raw[-_ARTIFACT_PREVIEW_MAX_BYTES:] if from_tail else raw[:_ARTIFACT_PREVIEW_MAX_BYTES]
+    text = raw.decode("utf-8", errors="replace")
+    lines = text.splitlines()
+    if len(lines) > _ARTIFACT_PREVIEW_MAX_LINES:
+        truncated = True
+        lines = lines[-_ARTIFACT_PREVIEW_MAX_LINES:] if from_tail else lines[:_ARTIFACT_PREVIEW_MAX_LINES]
+    return "\n".join(lines), truncated
 
 
 class CampaignService:
@@ -175,6 +230,79 @@ class CampaignService:
             next_cursor,
             has_more,
         )
+
+    def artifact_preview(
+        self,
+        workspace_id: str,
+        campaign_id: str,
+        artifact_id: str,
+        principal: ActorPrincipal,
+        *,
+        artifact_root: Path,
+    ) -> dict[str, Any]:
+        """Project a bounded human-readable preview without exposing storage details."""
+
+        self.get(workspace_id, campaign_id, principal)
+        artifact = self.repository.get_artifact(workspace_id, campaign_id, artifact_id)
+        if not artifact.sealed or not artifact.valid:
+            raise ArtifactPreviewIntegrityError(ArtifactPreviewIntegrityError.code)
+        root = artifact_root.expanduser().resolve(strict=True)
+        registered = Path(artifact.uri).expanduser().absolute()
+        cursor = registered
+        while cursor != cursor.parent:
+            if cursor.is_symlink():
+                raise ArtifactPreviewIntegrityError(ArtifactPreviewIntegrityError.code)
+            cursor = cursor.parent
+        try:
+            path = registered.resolve(strict=True)
+            path.relative_to(root)
+        except (OSError, ValueError) as exc:
+            raise ArtifactPreviewIntegrityError(ArtifactPreviewIntegrityError.code) from exc
+        if not path.is_file():
+            raise ArtifactPreviewIntegrityError(ArtifactPreviewIntegrityError.code)
+
+        digest = hashlib.sha256()
+        size = 0
+        with path.open("rb") as handle:
+            while block := handle.read(1024 * 1024):
+                digest.update(block)
+                size += len(block)
+        if digest.hexdigest() != artifact.sha256 or size != artifact.size_bytes:
+            raise ArtifactPreviewIntegrityError(ArtifactPreviewIntegrityError.code)
+
+        kind = (
+            "json" if artifact.schema_name in _JSON_PREVIEW_SCHEMAS
+            else "jsonl" if artifact.schema_name in _JSONL_PREVIEW_SCHEMAS
+            else "text" if artifact.schema_name in _TEXT_PREVIEW_SCHEMAS
+            else "unavailable"
+        )
+        if kind == "unavailable":
+            return {
+                "schema_version": "public_campaign_artifact_preview.v1",
+                "artifact_id": artifact.artifact_id,
+                "preview_kind": kind,
+                "content": None,
+                "truncated": False,
+                "redaction_count": 0,
+                "integrity_verified": True,
+                "unavailable_reason": "Binary or protected artifact content is not available for preview.",
+            }
+
+        content, truncated = _bounded_text_preview(
+            path,
+            from_tail=kind in {"jsonl", "text"},
+        )
+        content, redaction_count = _redacted_preview(content)
+        return {
+            "schema_version": "public_campaign_artifact_preview.v1",
+            "artifact_id": artifact.artifact_id,
+            "preview_kind": kind,
+            "content": content,
+            "truncated": truncated,
+            "redaction_count": redaction_count,
+            "integrity_verified": True,
+            "unavailable_reason": None,
+        }
 
     def attempts(self, workspace_id: str, campaign_id: str, principal: ActorPrincipal):
         self.get(workspace_id, campaign_id, principal)

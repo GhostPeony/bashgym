@@ -10,9 +10,10 @@ import {
 } from 'lucide-react'
 import {
   dataQualityApi,
-  type DataQualityDefaults,
   type DecisionDpoJob,
 } from '../../services/api'
+import { useSessionResource } from '../../stores/sessionResource'
+import { dataQualityDefaultsResource } from '../../stores/factoryResources'
 
 interface QualityForm {
   gold_dir: string
@@ -70,20 +71,18 @@ export function DecisionDpoPanel() {
   const [job, setJob] = useState<DecisionDpoJob | null>(null)
   const [error, setError] = useState('')
 
+  const { data: qualityDefaults } = useSessionResource(dataQualityDefaultsResource)
+
   useEffect(() => {
-    dataQualityApi.defaults().then((r) => {
-      if (r.ok && r.data) {
-        const d = r.data as DataQualityDefaults
-        setForm((f) => ({
-          ...f,
-          generate_decision_dpo: d.generate_decision_dpo,
-          require_successful_verification: d.require_successful_verification,
-          min_trace_steps: d.min_trace_steps,
-          max_trace_steps: d.max_trace_steps,
-        }))
-      }
-    })
-  }, [])
+    if (!qualityDefaults) return
+    setForm((f) => ({
+      ...f,
+      generate_decision_dpo: qualityDefaults.generate_decision_dpo,
+      require_successful_verification: qualityDefaults.require_successful_verification,
+      min_trace_steps: qualityDefaults.min_trace_steps,
+      max_trace_steps: qualityDefaults.max_trace_steps,
+    }))
+  }, [qualityDefaults])
 
   const pollJob = async (jobId: string) => {
     const poll = async () => {

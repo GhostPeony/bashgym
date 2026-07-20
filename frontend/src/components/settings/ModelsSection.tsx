@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import {
   CheckCircle,
   XCircle,
@@ -16,6 +16,9 @@ import {
   ChevronRight
 } from 'lucide-react'
 import { providersApi, ProviderStatus, OllamaModel } from '../../services/api'
+import { ollamaStatusResource } from '../../stores/appResources'
+import { providersResource } from '../../stores/opsResources'
+import { useSessionResource } from '../../stores/sessionResource'
 import { StudentModelPicker } from './StudentModelPicker'
 import { ModelSelect } from '../common/ModelSelect'
 import { clsx } from 'clsx'
@@ -102,14 +105,16 @@ function OllamaModelCard({
 }
 
 export function ModelsSection() {
-  const [providers, setProviders] = useState<ProviderStatus[]>([])
-  const [ollamaModels, setOllamaModels] = useState<OllamaModel[]>([])
-  const [ollamaAvailable, setOllamaAvailable] = useState(false)
-  const [isLoading, setIsLoading] = useState(true)
+  const { data: providersData, loading: providersLoading } = useSessionResource(providersResource)
+  const { data: ollamaStatus, loading: ollamaLoading, error: ollamaFetchError } = useSessionResource(ollamaStatusResource)
+  const providers = providersData?.providers ?? []
+  const ollamaModels = ollamaStatus?.models ?? []
+  const ollamaAvailable = ollamaStatus?.available ?? false
+  const isLoading = providersLoading || ollamaLoading
+  const error = ollamaStatus?.error || ollamaFetchError
   const [isPulling, setIsPulling] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState<string | null>(null)
   const [customModel, setCustomModel] = useState('')
-  const [error, setError] = useState<string | null>(null)
   // Connect cloud provider (OpenAI-compatible) form
   const [showConnect, setShowConnect] = useState(false)
   const [connectPlatform, setConnectPlatform] = useState('together')
@@ -119,36 +124,10 @@ export function ModelsSection() {
   const [connecting, setConnecting] = useState(false)
   const [connectMsg, setConnectMsg] = useState<string | null>(null)
 
-  const fetchData = useCallback(async () => {
-    setIsLoading(true)
-    setError(null)
-
-    try {
-      // Fetch providers
-      const providersResult = await providersApi.getProviders()
-      if (providersResult.ok && providersResult.data) {
-        setProviders(providersResult.data.providers)
-      }
-
-      // Fetch Ollama models
-      const ollamaResult = await providersApi.getOllamaModels()
-      if (ollamaResult.ok && ollamaResult.data) {
-        setOllamaAvailable(ollamaResult.data.available)
-        setOllamaModels(ollamaResult.data.models)
-        if (!ollamaResult.data.available && ollamaResult.data.error) {
-          setError(ollamaResult.data.error)
-        }
-      }
-    } catch (_err) {
-      setError('Failed to connect to API')
-    } finally {
-      setIsLoading(false)
-    }
+  const fetchData = useCallback(() => {
+    void providersResource.getState().refresh()
+    void ollamaStatusResource.getState().refresh()
   }, [])
-
-  useEffect(() => {
-    fetchData()
-  }, [fetchData])
 
   const handlePullModel = async (modelName: string) => {
     setIsPulling(modelName)
@@ -192,7 +171,10 @@ export function ModelsSection() {
     try {
       const result = await providersApi.deleteOllamaModel(modelName)
       if (result.ok) {
-        setOllamaModels(prev => prev.filter(m => m.name !== modelName))
+        const { data: current, setData } = ollamaStatusResource.getState()
+        if (current) {
+          setData({ ...current, models: current.models.filter(m => m.name !== modelName) })
+        }
       }
     } finally {
       setIsDeleting(null)

@@ -72,7 +72,7 @@ export function beginCampaignReconciliation(
   const generation = state.generation + 1
   return {
     ...state,
-    freshness: state.freshness === 'offline' ? 'offline' : 'reconciling',
+    freshness: state.freshness === 'offline' ? 'offline' : state.freshness === 'live' ? 'live' : 'reconciling',
     generation,
     targetCursor: Math.max(state.targetCursor, options.targetCursor ?? 0),
     targetVersion: Math.max(state.targetVersion, options.targetVersion ?? 0),

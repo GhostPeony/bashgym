@@ -49,6 +49,17 @@ export interface CampaignArtifact {
   created_at: string
 }
 
+export interface CampaignArtifactPreview {
+  schema_version: 'public_campaign_artifact_preview.v1'
+  artifact_id: string
+  preview_kind: 'json' | 'jsonl' | 'text' | 'unavailable'
+  content: string | null
+  truncated: boolean
+  redaction_count: number
+  integrity_verified: true
+  unavailable_reason: string | null
+}
+
 const EVENT_FIELDS = new Set([
   'schema_version',
   'event_id',
@@ -150,6 +161,7 @@ const ARTIFACT_SCHEMA_NAMES = new Set([
   'huggingface_model_file.v1',
   'memexai_query_format_ablation_manifest.v1',
   'nemo_gym_campaign_evidence.v1',
+  'query_format_ablation_manifest.v2',
   'training_manifest.v1',
   'training_metrics_jsonl.v1',
   'unclassified_artifact.v1',
@@ -226,6 +238,8 @@ export function toCampaignActivityFields(value: unknown): Record<string, unknown
 
   const fields: Record<string, unknown> = {
     event_id: event.event_id,
+    workspace_id: event.workspace_id,
+    campaign_id: event.campaign_id,
     aggregate_version: event.aggregate_version,
   }
   if (event.summary !== undefined && event.summary !== null) {
@@ -247,6 +261,29 @@ export function toCampaignActivityFields(value: unknown): Record<string, unknown
     if (summary.study_completed !== undefined) fields.study_completed = summary.study_completed
   }
   return fields
+}
+
+export function toCampaignArtifactPreview(value: unknown): CampaignArtifactPreview | null {
+  const preview = recordOf(value)
+  const fields = new Set([
+    'schema_version', 'artifact_id', 'preview_kind', 'content', 'truncated',
+    'redaction_count', 'integrity_verified', 'unavailable_reason',
+  ])
+  if (!preview || !hasOnlyKeys(preview, fields)) return null
+  if (preview.schema_version !== 'public_campaign_artifact_preview.v1'
+    || !identifier(preview.artifact_id)
+    || typeof preview.preview_kind !== 'string'
+    || !['json', 'jsonl', 'text', 'unavailable'].includes(preview.preview_kind)
+    || (preview.content !== null && (typeof preview.content !== 'string' || preview.content.length > 65_536))
+    || typeof preview.truncated !== 'boolean'
+    || !finiteInteger(preview.redaction_count, 0)
+    || preview.integrity_verified !== true
+    || (preview.unavailable_reason !== null
+      && (typeof preview.unavailable_reason !== 'string' || preview.unavailable_reason.length > 500))) return null
+  if (preview.preview_kind === 'unavailable') {
+    if (preview.content !== null || !preview.unavailable_reason) return null
+  } else if (typeof preview.content !== 'string' || preview.unavailable_reason !== null) return null
+  return preview as unknown as CampaignArtifactPreview
 }
 
 export function toCampaignPublicArtifact(value: unknown): CampaignArtifact | null {

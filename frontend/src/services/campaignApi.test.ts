@@ -20,6 +20,7 @@ test('campaign API sends only fully qualified allowlisted bridge routes', async 
     await campaignApi.liveTicket('workspace-a')
     await campaignApi.snapshot('workspace-a', 'campaign/one')
     await campaignApi.artifacts('workspace-a', 'campaign-1', 'artifact-4', 25)
+    await campaignApi.artifactPreview('workspace-a', 'campaign-1', 'artifact-1')
     await campaignApi.attempts('workspace-a', 'campaign-1')
     await campaignApi.studies('workspace-a', 'campaign-1')
     await campaignApi.proposals('workspace-a', 'campaign-1')
@@ -29,7 +30,13 @@ test('campaign API sends only fully qualified allowlisted bridge routes', async 
     await campaignApi.metrics(
       'workspace-a', 'campaign-1', 'attempt-1', 'training_metrics.jsonl', 'loss',
     )
-    await campaignApi.transition('workspace-a', 'campaign-1', 'pause', 4, 'operator pause')
+    await campaignApi.transition(
+      'workspace-a',
+      'campaign-1',
+      'conclude',
+      4,
+      'Operator closed the campaign after the bounded AutoResearch stop rule was reached.',
+    )
     await campaignApi.humanWork('workspace-a', 'campaign-1')
     await campaignApi.claimHumanWork({
       workspaceId: 'workspace-a', campaignId: 'campaign-1', workId: 'hw_0123456789abcdef',
@@ -68,6 +75,7 @@ test('campaign API sends only fully qualified allowlisted bridge routes', async 
     '/api/campaigns/live-ticket',
     '/api/campaigns/campaign%2Fone/control-room-snapshot',
     '/api/campaigns/campaign-1/artifacts',
+    '/api/campaigns/campaign-1/artifacts/artifact-1/preview',
     '/api/campaigns/campaign-1/attempts',
     '/api/campaigns/campaign-1/studies',
     '/api/campaigns/campaign-1/proposals',
@@ -75,7 +83,7 @@ test('campaign API sends only fully qualified allowlisted bridge routes', async 
     '/api/campaigns/campaign-1/comparisons',
     '/api/campaigns/campaign-1/ledger',
     '/api/campaigns/campaign-1/attempts/attempt-1/metrics',
-    '/api/campaigns/campaign-1/pause',
+    '/api/campaigns/campaign-1/conclude',
     '/api/campaigns/campaign-1/human-work',
     '/api/campaigns/campaign-1/human-work/hw_0123456789abcdef/claim',
     '/api/campaigns/campaign-1/human-work/hw_0123456789abcdef/submit',
@@ -93,6 +101,12 @@ test('campaign API sends only fully qualified allowlisted bridge routes', async 
     workspace_id: 'workspace-a',
     after_cursor: 'artifact-4',
     limit: 25,
+  })
+  assert.deepEqual(calls[4]?.[3], { workspace_id: 'workspace-a' })
+  assert.deepEqual(calls[12]?.[2], {
+    workspace_id: 'workspace-a',
+    expected_version: 4,
+    stop_reason: 'Operator closed the campaign after the bounded AutoResearch stop rule was reached.',
   })
   assert.deepEqual(calls.at(-5)?.[4], { idempotencyKey: 'idem_0123456789abcdef' })
   assert.deepEqual(calls.at(-4)?.[4], { idempotencyKey: 'idem_abcdef0123456789' })

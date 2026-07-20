@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback } from 'react'
 import {
   Play,
   Pause,
@@ -21,7 +21,9 @@ import {
   BookOpen
 } from 'lucide-react'
 import { useTrainingStore } from '../../stores'
-import { trainingApi, tracesApi, hfApi, RepoInfo, SystemInfo, ModelRecommendations } from '../../services/api'
+import { traceCountsResource, traceReposResource } from '../../stores/appResources'
+import { useSessionResource } from '../../stores/sessionResource'
+import { trainingApi, hfApi } from '../../services/api'
 import { LossCurve } from './LossCurve'
 import { HealthBanner } from './HealthBanner'
 import { EpochProgress } from './EpochProgress'
@@ -50,10 +52,10 @@ export function TrainingDashboard() {
   const [showConfig, setShowConfig] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [smoothLoss, setSmoothLoss] = useState(true)
-  const [availableRepos, setAvailableRepos] = useState<RepoInfo[]>([])
-  const [goldTraceCount, setGoldTraceCount] = useState(0)
-  const [_systemInfo, setSystemInfo] = useState<SystemInfo | null>(null)
-  const [_recommendations, setRecommendations] = useState<ModelRecommendations | null>(null)
+  const { data: repos } = useSessionResource(traceReposResource)
+  const { data: traceCounts } = useSessionResource(traceCountsResource)
+  const availableRepos = repos ?? []
+  const goldTraceCount = traceCounts?.gold ?? 0
 
   const [exporting, setExporting] = useState(false)
   const [exportResult, setExportResult] = useState<{ train: number; val: number; trainPath?: string } | null>(null)
@@ -65,21 +67,6 @@ export function TrainingDashboard() {
   const isRunning = currentRun?.status === 'running'
   const isPaused = currentRun?.status === 'paused'
   const metrics = currentRun?.currentMetrics
-
-  // Fetch repos and gold trace count on mount
-  useEffect(() => {
-    tracesApi.listRepos().then((result) => {
-      if (result.ok && result.data) {
-        setAvailableRepos(result.data)
-      }
-    })
-    // Get accurate gold count from the trace cache (not repos endpoint)
-    tracesApi.list({ status: 'gold', limit: 1 }).then((result) => {
-      if (result.ok && result.data && !Array.isArray(result.data) && result.data.counts) {
-        setGoldTraceCount(result.data.counts.gold)
-      }
-    })
-  }, [])
 
   const handleRefreshLossData = useCallback(async () => {
     if (!currentRun || isRefreshing) return
@@ -445,11 +432,7 @@ export function TrainingDashboard() {
               </div>
             )}
           </div>
-          <SystemInfoPanel
-            compact={!!currentRun}
-            onSystemInfo={setSystemInfo}
-            onRecommendations={setRecommendations}
-          />
+          <SystemInfoPanel compact={!!currentRun} />
         </div>
 
         {/* Getting Started Section - Show when no training */}

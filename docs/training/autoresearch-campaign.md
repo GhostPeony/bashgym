@@ -6,8 +6,9 @@ For the NVIDIA-facing capability comparison and integration roadmap, see
 [BashGym AutoResearch: Current Capability and NVIDIA NeMo Alignment](bashgym-autoresearch-nvidia-brief.md).
 
 This is BashGym's authoritative path for new AutoResearch work. The older
-`/api/autoresearch/*` endpoints remain prototype compatibility surfaces and are
-explicitly non-durable.
+`/api/autoresearch/*` endpoints are prototype compatibility surfaces, are
+explicitly non-durable, and are hidden by default; set
+`BASHGYM_ENABLE_LEGACY_AUTORESEARCH=true` to re-expose them.
 
 ## Choose this path when the experiment needs a durable record
 
@@ -552,11 +553,13 @@ to the Control Room state model.
 
 The official product surface is the durable campaign path under
 `/api/campaigns/*` and the AutoResearch sidebar destination. The older
-`/api/autoresearch/*` hyperparameter/data/trace/schema research routes remain a
-temporary, explicitly non-campaign compatibility API; they are not rendered by
-the official Control Room, and the retired prototype renderer/store no longer
-ships as a competing state surface. Compatibility events can still appear in the
-ordinary Activity feed but are never treated as campaign authority. Legacy
+`/api/autoresearch/*` hyperparameter/data/trace/schema research routes are a
+temporary, explicitly non-campaign compatibility API, hidden by default and
+only registered when `BASHGYM_ENABLE_LEGACY_AUTORESEARCH=true`; they are not
+rendered by the official Control Room, and the retired prototype
+renderer/store no longer ships as a competing state surface. Compatibility
+events can still appear in the ordinary Activity feed but are never treated as
+campaign authority. Legacy
 `?view=autoresearch` desktop links are redirect-only aliases to
 the canonical `?view=training&tab=autoresearch` destination.
 

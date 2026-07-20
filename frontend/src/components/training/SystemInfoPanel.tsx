@@ -1,71 +1,32 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useCallback } from 'react'
 import { RefreshCw, Cpu, HardDrive, AlertCircle, CheckCircle2, XCircle, Server, Wifi } from 'lucide-react'
-import { systemInfoApi, providersApi, sshApi, SystemInfo, ModelRecommendations, OllamaModel } from '../../services/api'
 import { MaskedHost } from '../common'
 import { clsx } from 'clsx'
+import {
+  modelRecommendationsResource,
+  ollamaStatusResource,
+  refreshSystemInfo,
+  sshPreflightResource,
+  systemInfoResource,
+} from '../../stores/appResources'
+import { useKeyedSessionResource, useSessionResource } from '../../stores/sessionResource'
 
 interface SystemInfoPanelProps {
-  onSystemInfo?: (info: SystemInfo) => void
-  onRecommendations?: (recs: ModelRecommendations) => void
   compact?: boolean
 }
 
-export function SystemInfoPanel({ onSystemInfo, onRecommendations, compact = false }: SystemInfoPanelProps) {
-  const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null)
-  const [recommendations, setRecommendations] = useState<ModelRecommendations | null>(null)
-  const [ollamaStatus, setOllamaStatus] = useState<{ available: boolean; models: OllamaModel[]; studentModel?: string } | null>(null)
-  const [sshStatus, setSshStatus] = useState<{ ok: boolean; python_version?: string; disk_free_gb?: number; error?: string; host?: string; username?: string } | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+export function SystemInfoPanel({ compact = false }: SystemInfoPanelProps) {
+  const { data: systemInfo, loading, refreshing, error } = useSessionResource(systemInfoResource)
+  const { data: recommendations } = useKeyedSessionResource(modelRecommendationsResource, '')
+  const { data: ollamaStatus } = useSessionResource(ollamaStatusResource)
+  const { data: sshStatus } = useSessionResource(sshPreflightResource)
 
-  const fetchSystemInfo = useCallback(async (refresh = false) => {
-    try {
-      setLoading(true)
-      setError(null)
-
-      const [infoResult, recsResult, ollamaResult] = await Promise.all([
-        systemInfoApi.getInfo(refresh),
-        systemInfoApi.getRecommendations(),
-        providersApi.getOllamaModels()
-      ])
-
-      if (infoResult.ok && infoResult.data) {
-        setSystemInfo(infoResult.data)
-        onSystemInfo?.(infoResult.data)
-      } else {
-        setError(infoResult.error || 'Failed to detect hardware')
-      }
-
-      if (recsResult.ok && recsResult.data) {
-        setRecommendations(recsResult.data)
-        onRecommendations?.(recsResult.data)
-      }
-
-      if (ollamaResult.ok && ollamaResult.data) {
-        setOllamaStatus({
-          available: ollamaResult.data.available,
-          models: ollamaResult.data.models || [],
-        })
-      }
-
-      // SSH preflight (non-blocking)
-      sshApi.preflight().then((result) => {
-        if (result.ok && result.data) {
-          setSshStatus(result.data)
-        }
-      }).catch(() => {
-        // SSH not configured or server unavailable
-      })
-    } catch (_err) {
-      setError('Failed to connect to API')
-    } finally {
-      setLoading(false)
-    }
-  }, [onSystemInfo, onRecommendations])
-
-  useEffect(() => {
-    fetchSystemInfo()
-  }, [fetchSystemInfo])
+  const handleRefresh = useCallback(() => {
+    void refreshSystemInfo()
+    void modelRecommendationsResource.getState().refresh('')
+    void ollamaStatusResource.getState().refresh()
+    void sshPreflightResource.getState().refresh()
+  }, [])
 
   if (loading) {
     return (
@@ -78,14 +39,14 @@ export function SystemInfoPanel({ onSystemInfo, onRecommendations, compact = fal
     )
   }
 
-  if (error || !systemInfo) {
+  if (!systemInfo) {
     return (
       <div className={clsx('card', compact ? 'p-3' : 'p-4')}>
         <div className="flex items-center gap-2 text-status-error">
           <AlertCircle className="w-4 h-4 flex-shrink-0" />
           <span className="font-mono text-xs flex-1">{error || 'Unknown error'}</span>
           <button
-            onClick={() => fetchSystemInfo(true)}
+            onClick={handleRefresh}
             className="btn-secondary text-xs px-2 py-1"
           >
             Retry
@@ -98,6 +59,7 @@ export function SystemInfoPanel({ onSystemInfo, onRecommendations, compact = fal
   const primaryGpu = systemInfo.gpus[0]
   const hasNvidiaGpu = systemInfo.gpus.some(g => g.vendor === 'NVIDIA')
   const maxVram = Math.max(...systemInfo.gpus.map(g => g.vram), 0)
+  const ollamaModels = ollamaStatus?.models ?? []
 
   if (compact) {
     return (
@@ -113,11 +75,11 @@ export function SystemInfoPanel({ onSystemInfo, onRecommendations, compact = fal
             </div>
           </div>
           <button
-            onClick={() => fetchSystemInfo(true)}
+            onClick={handleRefresh}
             className="btn-icon w-7 h-7 flex items-center justify-center"
             title="Refresh"
           >
-            <RefreshCw className="w-3.5 h-3.5" />
+            <RefreshCw className={clsx('w-3.5 h-3.5', refreshing && 'animate-spin')} />
           </button>
         </div>
       </div>
@@ -219,11 +181,11 @@ export function SystemInfoPanel({ onSystemInfo, onRecommendations, compact = fal
               <div className="flex items-center gap-2">
                 <Wifi className="w-3.5 h-3.5 text-status-success" />
                 <span className="text-sm font-medium text-text-primary">Ollama Connected</span>
-                <span className="tag tag-accent">{ollamaStatus.models.length} model{ollamaStatus.models.length !== 1 ? 's' : ''}</span>
+                <span className="tag tag-accent">{ollamaModels.length} model{ollamaModels.length !== 1 ? 's' : ''}</span>
               </div>
-              {ollamaStatus.models.length > 0 && (
+              {ollamaModels.length > 0 && (
                 <div className="mt-2 space-y-1">
-                  {ollamaStatus.models.slice(0, 3).map((m) => (
+                  {ollamaModels.slice(0, 3).map((m) => (
                     <div key={m.name} className="flex items-center justify-between font-mono text-xs text-text-muted">
                       <span className="flex items-center gap-1.5">
                         {m.is_code_model && <span className="text-accent">{'</>'}</span>}
@@ -232,8 +194,8 @@ export function SystemInfoPanel({ onSystemInfo, onRecommendations, compact = fal
                       <span>{m.parameter_size} · {m.size_gb.toFixed(1)}GB</span>
                     </div>
                   ))}
-                  {ollamaStatus.models.length > 3 && (
-                    <p className="font-mono text-xs text-text-muted">+{ollamaStatus.models.length - 3} more</p>
+                  {ollamaModels.length > 3 && (
+                    <p className="font-mono text-xs text-text-muted">+{ollamaModels.length - 3} more</p>
                   )}
                 </div>
               )}
@@ -299,11 +261,11 @@ export function SystemInfoPanel({ onSystemInfo, onRecommendations, compact = fal
 
       {/* Refresh Button */}
       <button
-        onClick={() => fetchSystemInfo(true)}
+        onClick={handleRefresh}
         className="btn-secondary w-full flex items-center justify-center gap-2 text-xs"
       >
-        <RefreshCw className="w-3 h-3" />
-        Refresh
+        <RefreshCw className={clsx('w-3 h-3', refreshing && 'animate-spin')} />
+        {refreshing ? 'Refreshing…' : 'Refresh'}
       </button>
     </div>
   )

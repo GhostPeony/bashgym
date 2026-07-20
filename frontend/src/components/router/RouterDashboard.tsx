@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import {
   PieChart,
   Pie,
@@ -15,49 +15,45 @@ import {
 } from 'recharts'
 import { Settings, RefreshCw, TrendingUp, Clock, CheckCircle } from 'lucide-react'
 import { useRouterStore, useThemeStore } from '../../stores'
-import { routerApi } from '../../services/api'
+import { routerStatsResource } from '../../stores/opsResources'
+import { useSessionResource } from '../../stores/sessionResource'
 import { clsx } from 'clsx'
 
 export function RouterDashboard() {
   const { strategy, studentRate, stats, setStudentRate, setStrategy: _setStrategy, updateStats } = useRouterStore()
   const { theme } = useThemeStore()
   const [showSettings, setShowSettings] = useState(false)
-  const [isRefreshing, setIsRefreshing] = useState(false)
+  const { data: routerStats, refreshing } = useSessionResource(routerStatsResource)
 
   // Latency history - one point appended per stats fetch (capped at 60)
   const [latencyHistory, setLatencyHistory] = useState<Array<{ time: string; teacher: number; student: number }>>([])
 
-  const handleRefresh = useCallback(async () => {
-    if (isRefreshing) return
-
-    setIsRefreshing(true)
-    try {
-      const result = await routerApi.getStats()
-      if (result.ok && result.data) {
-        updateStats({
-          totalRequests: result.data.total_requests,
-          teacherRequests: result.data.teacher_requests,
-          studentRequests: result.data.student_requests,
-          teacherSuccessRate: result.data.teacher_success_rate,
-          studentSuccessRate: result.data.student_success_rate,
-          avgTeacherLatency: result.data.avg_teacher_latency,
-          avgStudentLatency: result.data.avg_student_latency,
-          currentStudentRate: result.data.current_student_rate * 100
-        })
-        const stats = result.data
-        setLatencyHistory((prev) => {
-          const point = {
-            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-            teacher: stats.avg_teacher_latency ?? 0,
-            student: stats.avg_student_latency ?? 0
-          }
-          return [...prev, point].slice(-60)
-        })
+  // Push each fetched stats payload into the router store + latency history
+  useEffect(() => {
+    if (!routerStats) return
+    updateStats({
+      totalRequests: routerStats.total_requests,
+      teacherRequests: routerStats.teacher_requests,
+      studentRequests: routerStats.student_requests,
+      teacherSuccessRate: routerStats.teacher_success_rate,
+      studentSuccessRate: routerStats.student_success_rate,
+      avgTeacherLatency: routerStats.avg_teacher_latency,
+      avgStudentLatency: routerStats.avg_student_latency,
+      currentStudentRate: routerStats.current_student_rate * 100
+    })
+    setLatencyHistory((prev) => {
+      const point = {
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        teacher: routerStats.avg_teacher_latency ?? 0,
+        student: routerStats.avg_student_latency ?? 0
       }
-    } finally {
-      setIsRefreshing(false)
-    }
-  }, [isRefreshing, updateStats])
+      return [...prev, point].slice(-60)
+    })
+  }, [routerStats, updateStats])
+
+  const handleRefresh = () => {
+    void routerStatsResource.getState().refresh()
+  }
 
   const colors = {
     teacher: theme === 'dark' ? '#76B900' : '#0066CC',
@@ -79,17 +75,13 @@ export function RouterDashboard() {
     { model: 'Student', success: stats.studentSuccessRate, latency: stats.avgStudentLatency }
   ] : []
 
-  // Fetch stats on mount
-  useEffect(() => {
-    handleRefresh()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
   // Poll stats every 15s while mounted so the latency chart accumulates history
   useEffect(() => {
-    const interval = setInterval(handleRefresh, 15_000)
+    const interval = setInterval(() => {
+      void routerStatsResource.getState().refresh()
+    }, 15_000)
     return () => clearInterval(interval)
-  }, [handleRefresh])
+  }, [])
 
   return (
     <div className="h-full p-6 overflow-auto">
@@ -109,10 +101,10 @@ export function RouterDashboard() {
           <button
             className="btn-icon flex items-center justify-center"
             onClick={handleRefresh}
-            disabled={isRefreshing}
+            disabled={refreshing}
             title="Refresh stats"
           >
-            <RefreshCw className={clsx('w-4 h-4', isRefreshing && 'animate-spin')} />
+            <RefreshCw className={clsx('w-4 h-4', refreshing && 'animate-spin')} />
           </button>
           <button onClick={() => setShowSettings(!showSettings)} className="btn-secondary flex items-center gap-2">
             <Settings className="w-4 h-4" />

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { BaseModelSelect } from '../common/BaseModelSelect'
 import {
   Play,
@@ -15,9 +15,11 @@ import {
   ChevronRight,
   DollarSign,
 } from 'lucide-react'
-import { hfApi, HFJob, HFJobSubmitRequest } from '../../services/api'
+import { hfApi, HFJobSubmitRequest } from '../../services/api'
 import { wsService, MessageTypes } from '../../services/websocket'
 import { clsx } from 'clsx'
+import { hfJobsResource } from '../../stores/hfResources'
+import { useSessionResource } from '../../stores/sessionResource'
 
 const HARDWARE_OPTIONS = [
   { value: 't4-small', label: 'T4 Small', vram: '16GB', costPerHour: 0.60, description: 'Small models (<3B)' },
@@ -38,13 +40,16 @@ interface CloudTrainingProps {
 }
 
 export function CloudTraining({ className }: CloudTrainingProps) {
-  const [jobs, setJobs] = useState<HFJob[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data, loading, refreshing, error: fetchError, refresh } = useSessionResource(hfJobsResource)
+  const jobs = data ?? []
   const [submitting, setSubmitting] = useState(false)
   const [showForm, setShowForm] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [submitError, setSubmitError] = useState<string | null>(null)
   const [jobMetrics, setJobMetrics] = useState<Record<string, Record<string, number>>>({})
+  const error =
+    submitError ||
+    (fetchError?.includes('403') ? 'HuggingFace Pro subscription required for cloud training' : null)
 
   // Form state
   const [formData, setFormData] = useState<HFJobSubmitRequest>({
@@ -61,30 +66,14 @@ export function CloudTraining({ className }: CloudTrainingProps) {
     max_seq_length: 2048,
   })
 
-  const fetchJobs = useCallback(async () => {
-    const result = await hfApi.listJobs()
-    if (result.ok && result.data) {
-      setJobs(result.data)
-      setError(null)
-    } else if (result.error?.includes('403')) {
-      setError('HuggingFace Pro subscription required for cloud training')
-    }
-    setLoading(false)
-  }, [])
-
   useEffect(() => {
-    fetchJobs()
-
     // Subscribe to job events
-    const unsubscribeStarted = wsService.subscribe(MessageTypes.HF_JOB_STARTED, () => {
-      fetchJobs()
-    })
-    const unsubscribeCompleted = wsService.subscribe(MessageTypes.HF_JOB_COMPLETED, () => {
-      fetchJobs()
-    })
-    const unsubscribeFailed = wsService.subscribe(MessageTypes.HF_JOB_FAILED, () => {
-      fetchJobs()
-    })
+    const refreshJobs = () => {
+      void hfJobsResource.getState().refresh()
+    }
+    const unsubscribeStarted = wsService.subscribe(MessageTypes.HF_JOB_STARTED, refreshJobs)
+    const unsubscribeCompleted = wsService.subscribe(MessageTypes.HF_JOB_COMPLETED, refreshJobs)
+    const unsubscribeFailed = wsService.subscribe(MessageTypes.HF_JOB_FAILED, refreshJobs)
     const unsubscribeMetrics = wsService.subscribe(MessageTypes.HF_JOB_METRICS, (payload: { job_id: string; metrics: Record<string, number> }) => {
       setJobMetrics((prev) => ({
         ...prev,
@@ -98,19 +87,19 @@ export function CloudTraining({ className }: CloudTrainingProps) {
       unsubscribeFailed()
       unsubscribeMetrics()
     }
-  }, [fetchJobs])
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSubmitting(true)
-    setError(null)
+    setSubmitError(null)
 
     const result = await hfApi.submitJob(formData)
     if (result.ok) {
       setShowForm(false)
-      fetchJobs()
+      refresh()
     } else {
-      setError(result.error || 'Failed to submit job')
+      setSubmitError(result.error || 'Failed to submit job')
     }
     setSubmitting(false)
   }
@@ -118,7 +107,7 @@ export function CloudTraining({ className }: CloudTrainingProps) {
   const handleCancel = async (jobId: string) => {
     const result = await hfApi.cancelJob(jobId)
     if (result.ok) {
-      fetchJobs()
+      refresh()
     }
   }
 
@@ -166,11 +155,11 @@ export function CloudTraining({ className }: CloudTrainingProps) {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={fetchJobs}
+            onClick={() => refresh()}
             className="btn-icon"
             title="Refresh"
           >
-            <RefreshCw className="w-4 h-4 text-text-secondary" />
+            <RefreshCw className={clsx('w-4 h-4 text-text-secondary', refreshing && 'animate-spin')} />
           </button>
           <button
             onClick={() => setShowForm(!showForm)}

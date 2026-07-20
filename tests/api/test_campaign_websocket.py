@@ -347,6 +347,58 @@ async def test_ticket_expiry_revision_and_live_revocation_fail_closed(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_consumed_subscription_survives_ticket_ttl_expiry(monkeypatch) -> None:
+    local_manager = ConnectionManager()
+    now = datetime.now(UTC)
+    parent = SimpleNamespace(
+        credential_id="credential-a",
+        authorization_revision=1,
+        workspace_ids=("workspace:a",),
+        revoked_at=None,
+        expires_at=now + timedelta(hours=1),
+    )
+    source = CampaignHintSource(
+        cursor=1,
+        workspace_id="workspace:a",
+        campaign_id="campaign:a",
+        aggregate_version=1,
+        event_type="campaign:created",
+        correlation_id="correlation-a",
+    )
+    repository = SimpleNamespace(
+        get_actor_credential=lambda _credential_id: parent,
+        list_workspace_campaign_hint_sources=lambda workspace_id, after_cursor, limit: (source,),
+    )
+    principal = SimpleNamespace(
+        credential_id=parent.credential_id,
+        authorization_revision=parent.authorization_revision,
+        expires_at=parent.expires_at,
+    )
+    ticket, binding = local_manager.issue_campaign_live_ticket(
+        repository, principal, "workspace:a", after_cursor=0
+    )
+    socket = _InteractiveSocket()
+    monkeypatch.setattr(local_manager, "_ensure_campaign_poller", lambda: None)
+    assert await local_manager.subscribe_campaign(socket, ticket) is True
+    assert (await asyncio.wait_for(socket.outgoing.get(), timeout=1))["type"] == (
+        "campaign:subscribed"
+    )
+
+    object.__setattr__(binding, "expires_at", now - timedelta(seconds=1))
+    await local_manager.poll_campaign_subscriptions_once()
+
+    assert socket in local_manager.campaign_subscriptions
+    assert "workspace:a" in local_manager.campaign_subscriptions[socket]
+    hint = await asyncio.wait_for(socket.outgoing.get(), timeout=1)
+    assert hint["type"] == "campaign:hint"
+    assert hint["payload"]["event_type"] == "campaign:created"
+
+    parent.expires_at = now - timedelta(seconds=1)
+    await local_manager.poll_campaign_subscriptions_once()
+    assert socket not in local_manager.campaign_subscriptions
+
+
+@pytest.mark.asyncio
 async def test_one_socket_can_hold_independent_workspace_subscriptions(tmp_path) -> None:
     http, repository, _refresh = campaign_client(tmp_path)
     refresh = CampaignAuthService(repository).issue_refresh_credential(

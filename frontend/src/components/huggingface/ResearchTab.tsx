@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import {
   Search,
   RefreshCw,
@@ -11,6 +11,8 @@ import {
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { API_BASE } from '../../services/api'
+import { hfResearchResource } from '../../stores/hfResources'
+import { useSessionResource } from '../../stores/sessionResource'
 
 const API_URL = API_BASE
 
@@ -26,29 +28,14 @@ async function fetchJSON(path: string, opts?: RequestInit) {
 }
 
 export function ResearchTab() {
-  const [report, setReport] = useState<string | null>(null)
-  const [empirical, setEmpirical] = useState<string | null>(null)
-  const [cacheStats, setCacheStats] = useState<{ cached_datasets: number } | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { data, loading, refreshing, refresh } = useSessionResource(hfResearchResource)
+  const report = data?.report ?? null
+  const empirical = data?.empirical ?? null
+  const cacheStats = data?.cacheStats ?? null
   const [scanning, setScanning] = useState(false)
   const [runningEmpirical, setRunningEmpirical] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [view, setView] = useState<'report' | 'empirical'>('report')
-
-  const fetchAll = async () => {
-    setLoading(true)
-    const [reportRes, empiricalRes, cacheRes] = await Promise.all([
-      fetchJSON('/research/report'),
-      fetchJSON('/research/empirical'),
-      fetchJSON('/research/cache/stats'),
-    ])
-    if (reportRes.ok) setReport(reportRes.data.content)
-    if (empiricalRes.ok) setEmpirical(empiricalRes.data.content)
-    if (cacheRes.ok) setCacheStats(cacheRes.data)
-    setLoading(false)
-  }
-
-  useEffect(() => { fetchAll() }, [])
 
   const handleEmpirical = async () => {
     setRunningEmpirical(true)
@@ -59,7 +46,12 @@ export function ResearchTab() {
       body: JSON.stringify({ top_n: 5, mode: 'simulate' }),
     })
     if (result.ok && result.data) {
-      setEmpirical(result.data.content)
+      const { data: cached, setData } = hfResearchResource.getState()
+      setData({
+        report: cached?.report ?? null,
+        cacheStats: cached?.cacheStats ?? null,
+        empirical: result.data.content,
+      })
       setView('empirical')
     } else {
       setError(result.error || 'Empirical ranking failed')
@@ -76,7 +68,7 @@ export function ResearchTab() {
       body: JSON.stringify({ max_candidates: 200 }),
     })
     if (result.ok) {
-      await fetchAll()
+      await refresh()
     } else {
       setError(result.error || 'Scan failed')
     }
@@ -99,8 +91,8 @@ export function ResearchTab() {
               {cacheStats.cached_datasets} cached
             </span>
           )}
-          <button onClick={fetchAll} className="btn-icon" title="Refresh reports">
-            <RefreshCw className="w-4 h-4" />
+          <button onClick={() => refresh()} className="btn-icon" title="Refresh reports">
+            <RefreshCw className={`w-4 h-4${refreshing ? ' animate-spin' : ''}`} />
           </button>
           <button
             onClick={handleEmpirical}

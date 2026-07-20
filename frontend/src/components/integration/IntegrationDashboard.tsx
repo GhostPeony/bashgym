@@ -18,7 +18,9 @@ import {
   AlertCircle,
   RotateCcw
 } from 'lucide-react'
-import { integrationApi, IntegrationStatus, IntegrationSettings, ModelVersion, PendingTrace } from '../../services/api'
+import { integrationApi } from '../../services/api'
+import { integrationOverviewResource } from '../../stores/opsResources'
+import { useSessionResource } from '../../stores/sessionResource'
 import { clsx } from 'clsx'
 
 type Tab = 'status' | 'settings' | 'models' | 'traces'
@@ -54,40 +56,21 @@ function StatusCard({ title, value, icon, status = 'neutral' }: StatusCardProps)
 }
 
 export function IntegrationDashboard() {
-  const [status, setStatus] = useState<IntegrationStatus | null>(null)
-  const [settings, setSettings] = useState<IntegrationSettings | null>(null)
-  const [modelVersions, setModelVersions] = useState<ModelVersion[]>([])
-  const [pendingTraces, setPendingTraces] = useState<PendingTrace[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data, loading } = useSessionResource(integrationOverviewResource)
+  const status = data?.status ?? null
+  const settings = data?.settings ?? null
+  const modelVersions = data?.modelVersions ?? []
+  const pendingTraces = data?.pendingTraces ?? []
   const [activeTab, setActiveTab] = useState<Tab>('status')
   const [linking, setLinking] = useState(false)
   const [processing, setProcessing] = useState(false)
   const [watching, setWatching] = useState(false)
 
-  const fetchData = async () => {
-    setLoading(true)
-    try {
-      const [statusRes, settingsRes, modelsRes, tracesRes] = await Promise.all([
-        integrationApi.getStatus(),
-        integrationApi.getSettings(),
-        integrationApi.listModelVersions(),
-        integrationApi.listPendingTraces(),
-      ])
+  const refresh = () => integrationOverviewResource.getState().refresh()
 
-      if (statusRes.ok && statusRes.data) setStatus(statusRes.data)
-      if (settingsRes.ok && settingsRes.data) setSettings(settingsRes.data)
-      if (modelsRes.ok && modelsRes.data) setModelVersions(modelsRes.data)
-      if (tracesRes.ok && tracesRes.data) setPendingTraces(tracesRes.data)
-    } catch (error) {
-      console.error('Failed to fetch integration data:', error)
-    }
-    setLoading(false)
-  }
-
+  // Poll for updates every 30 seconds; refreshes land in the shared cache
   useEffect(() => {
-    fetchData()
-    // Poll for updates every 30 seconds
-    const interval = setInterval(fetchData, 30000)
+    const interval = setInterval(() => void refresh(), 30000)
     return () => clearInterval(interval)
   }, [])
 
@@ -95,7 +78,7 @@ export function IntegrationDashboard() {
     setLinking(true)
     const result = await integrationApi.link()
     if (result.ok) {
-      await fetchData()
+      await refresh()
     }
     setLinking(false)
   }
@@ -105,7 +88,7 @@ export function IntegrationDashboard() {
     setLinking(true)
     const result = await integrationApi.unlink()
     if (result.ok) {
-      await fetchData()
+      await refresh()
     }
     setLinking(false)
   }
@@ -114,7 +97,7 @@ export function IntegrationDashboard() {
     setProcessing(true)
     await integrationApi.processTraces()
     // Wait a moment then refresh
-    setTimeout(fetchData, 2000)
+    setTimeout(() => void refresh(), 2000)
     setProcessing(false)
   }
 
@@ -136,7 +119,8 @@ export function IntegrationDashboard() {
     const updates = { [category]: { [key]: value } }
     const result = await integrationApi.updateSettings(updates)
     if (result.ok && result.data) {
-      setSettings(result.data)
+      const { data: current, setData } = integrationOverviewResource.getState()
+      if (current) setData({ ...current, settings: result.data })
     }
   }
 
@@ -144,7 +128,7 @@ export function IntegrationDashboard() {
     if (!confirm(`Rollback to model version ${version}? This will update the sidekick model.`)) return
     const result = await integrationApi.rollbackModel(version)
     if (result.ok) {
-      await fetchData()
+      await refresh()
     }
   }
 
@@ -184,7 +168,7 @@ export function IntegrationDashboard() {
 
           <div className="flex items-center gap-3">
             <button
-              onClick={fetchData}
+              onClick={() => void refresh()}
               className="btn-icon"
               title="Refresh"
             >

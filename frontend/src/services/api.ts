@@ -25,6 +25,10 @@ import {
   type GuidedSetupStep,
   type GuidedSetupValidation,
 } from '../components/autoresearch/guidedSetupModel'
+import {
+  toCampaignArtifactPreview,
+  type CampaignArtifactPreview,
+} from '../campaignVisibility'
 
 export const API_BASE = (
   typeof window !== 'undefined' ? window.bashgym?.runtime?.apiBase : undefined
@@ -1013,6 +1017,29 @@ export const campaignApi = {
     ...(afterCursor ? { after_cursor: afterCursor } : {}),
     limit,
   }),
+  artifactPreview: async (
+    workspaceId: string,
+    campaignId: string,
+    artifactId: string,
+  ): Promise<ApiResponse<CampaignArtifactPreview>> => {
+    const response = await campaignRequest<unknown>(
+      'GET',
+      `/api/campaigns/${encodeURIComponent(campaignId)}/artifacts/${encodeURIComponent(artifactId)}/preview`,
+      undefined,
+      { workspace_id: workspaceId },
+    )
+    if (!response.ok) return response as ApiResponse<CampaignArtifactPreview>
+    const preview = toCampaignArtifactPreview(response.data)
+    if (!preview || preview.artifact_id !== artifactId) {
+      return {
+        ok: false,
+        status: 502,
+        code: 'campaign_artifact_preview_projection_invalid',
+        error: 'The campaign artifact preview returned an invalid public projection.',
+      }
+    }
+    return { ...response, data: preview }
+  },
   comparisons: (workspaceId: string, campaignId: string) => campaignRequest<{
     comparisons: import('../stores/campaignStore').CampaignComparison[]
   }>('GET', `/api/campaigns/${encodeURIComponent(campaignId)}/comparisons`, undefined, {
@@ -1064,7 +1091,7 @@ export const campaignApi = {
   transition: (
     workspaceId: string,
     campaignId: string,
-    action: 'start' | 'pause' | 'resume' | 'cancel',
+    action: 'start' | 'pause' | 'resume' | 'cancel' | 'conclude',
     expectedVersion: number,
     reason?: string,
   ) => campaignRequest<{
@@ -5818,160 +5845,6 @@ export const settingsApi = {
     }),
 }
 
-// AutoResearch API
-export interface AutoResearchStartConfig {
-  searchParams: string[]
-  maxExperiments: number
-  trainSteps: number
-  mutationRate: number
-  mutationScale: number
-  mode: 'simulate' | 'real'
-  baseModel: string
-  learningRate: number
-  loraRank: number
-  loraAlpha: number
-  loraDropout: number
-  warmupRatio: number
-  gradientAccumulationSteps: number
-  batchSize: number
-  maxSeqLength: number
-  load4Bit: boolean
-}
-
-export interface EnvironmentRecipeProposalConfig {
-  environments?: TerminalEnvironmentSpec[]
-  environmentPath?: string
-  source?: string
-  maxExperiments?: number
-  sampleSize?: number
-  passAt1Target?: number
-  mutationRate?: number
-  mutationScale?: number
-  seed?: number
-  outputPath?: string
-}
-
-export interface EnvironmentRecipeExperiment {
-  experiment_id: number
-  config_snapshot: Record<string, unknown>
-  metric_value: number
-  improved: boolean
-  duration_seconds: number
-  timestamp: string
-}
-
-export interface EnvironmentRecipeProposal {
-  schema_version: string
-  source_count: number
-  selected_count: number
-  selected_environment_ids: string[]
-  recipe: Record<string, unknown>
-  metric: number
-  mix_report: EnvironmentMixReport
-  selected_environments: Array<{
-    id: string
-    domain: string
-    skills: string[]
-    verifier_kind: string
-    fixture_kinds: string[]
-    'pass@1'?: number | null
-  }>
-}
-
-export interface EnvironmentRecipeProposalResponse {
-  status: string
-  source_count: number
-  best_metric: number | null
-  proposal: EnvironmentRecipeProposal
-  experiments: EnvironmentRecipeExperiment[]
-  validation_errors: EnvironmentImportError[]
-  output_path?: string | null
-}
-
-export interface DataRecipeProposalConfig {
-  goal?: string
-  sourceIds?: string[]
-  domain?: string
-  includeEvalOnly?: boolean
-  maxExperiments?: number
-  sampleSize?: number
-  qualityThreshold?: number
-  syntheticMultiplier?: number
-  decontamJaccardThreshold?: number
-  costBudgetUsd?: number
-  evalTarget?: string
-  mutationRate?: number
-  mutationScale?: number
-  seed?: number
-  outputPath?: string
-}
-
-export interface DataRecipeExperiment {
-  experiment_id: number
-  config_snapshot: Record<string, unknown>
-  metric_value: number
-  improved: boolean
-  duration_seconds: number
-  timestamp: string
-}
-
-export interface DataRecipeProposal {
-  schema_version: string
-  goal: string
-  genome: {
-    sample_size: number
-    seed: number
-    quality_threshold: number
-    synthetic_multiplier: number
-    decontam_jaccard_threshold: number
-    cost_budget_usd: number
-    eval_target: string
-    source_weights: Record<string, number>
-    domain_weights: Record<string, number>
-  }
-  sources: Array<{
-    id: string
-    domain: string
-    weight: number
-    adapter: string
-    artifact_types: string[]
-    training_eligible: boolean
-    eval_only: boolean
-  }>
-  guardrails: Record<string, unknown>
-  data_designer: {
-    pipeline: string
-    synthetic_multiplier: number
-    sample_size: number
-  }
-}
-
-export interface DataRecipeProposalResponse {
-  status: string
-  goal: string
-  source_count: number
-  excluded_sources: Array<{ id: string; reason: string }>
-  best_metric: number | null
-  proposal: DataRecipeProposal
-  experiments: DataRecipeExperiment[]
-  output_path?: string | null
-}
-
-export interface DataRecipeStatusResponse {
-  status: string
-  total_experiments: number
-  completed_experiments: number
-  best_metric: number | null
-  best_config: Record<string, unknown>
-  search_params: string[]
-  experiments: DataRecipeExperiment[]
-  proposal?: DataRecipeProposal | null
-  output_path?: string | null
-  goal?: string
-  source_count?: number
-  excluded_sources?: Array<{ id: string; reason: string }>
-}
-
 // Research index — Firecrawl-grounded news feed + AutoResearch advice
 export interface ResearchNewsItem {
   kind: 'github' | 'paper'
@@ -6001,141 +5874,4 @@ export const researchApi = {
       method: 'POST',
       body: JSON.stringify(body)
     })
-}
-
-export const autoresearchApi = {
-  start: (config: AutoResearchStartConfig) =>
-    request<{ status: string; message: string }>('/autoresearch/start', {
-      method: 'POST',
-      body: JSON.stringify({
-        search_params: config.searchParams,
-        max_experiments: config.maxExperiments,
-        train_steps: config.trainSteps,
-        mutation_rate: config.mutationRate,
-        mutation_scale: config.mutationScale,
-        mode: config.mode || 'simulate',
-        base_config: {
-          base_model: config.baseModel,
-          learning_rate: config.learningRate,
-          lora_r: config.loraRank,
-          lora_alpha: config.loraAlpha,
-          lora_dropout: config.loraDropout,
-          warmup_ratio: config.warmupRatio,
-          gradient_accumulation_steps: config.gradientAccumulationSteps,
-          batch_size: config.batchSize,
-          max_seq_length: config.maxSeqLength,
-          load_in_4bit: config.load4Bit,
-        }
-      })
-    }),
-
-  stop: () =>
-    request<{ status: string }>('/autoresearch/stop', { method: 'POST' }),
-
-  pause: () =>
-    request<{ status: string }>('/autoresearch/pause', { method: 'POST' }),
-
-  resume: () =>
-    request<{ status: string }>('/autoresearch/resume', { method: 'POST' }),
-
-  status: () =>
-    request<any>('/autoresearch/status'),
-
-  proposeEnvironmentRecipe: (config: EnvironmentRecipeProposalConfig) =>
-    request<EnvironmentRecipeProposalResponse>('/autoresearch/environment-recipe/propose', {
-      method: 'POST',
-      body: JSON.stringify({
-        environments: config.environments || [],
-        environment_path: config.environmentPath || null,
-        source: config.source || 'tmax',
-        max_experiments: config.maxExperiments ?? 8,
-        sample_size: config.sampleSize ?? 64,
-        pass_at_1_target: config.passAt1Target ?? 0.35,
-        mutation_rate: config.mutationRate ?? 0.35,
-        mutation_scale: config.mutationScale ?? 0.2,
-        seed: config.seed ?? 0,
-        output_path: config.outputPath || null,
-      }),
-    }),
-
-  proposeDataRecipe: (config: DataRecipeProposalConfig) =>
-    request<DataRecipeProposalResponse>('/autoresearch/data-recipe/propose', {
-      method: 'POST',
-      body: JSON.stringify({
-        goal: config.goal || 'dpo',
-        source_ids: config.sourceIds || [],
-        domain: config.domain || null,
-        include_eval_only: config.includeEvalOnly ?? false,
-        max_experiments: config.maxExperiments ?? 8,
-        sample_size: config.sampleSize ?? 1000,
-        quality_threshold: config.qualityThreshold ?? 0.7,
-        synthetic_multiplier: config.syntheticMultiplier ?? 1.0,
-        decontam_jaccard_threshold: config.decontamJaccardThreshold ?? 0.7,
-        cost_budget_usd: config.costBudgetUsd ?? 25.0,
-        eval_target: config.evalTarget || 'heldout_pass@k',
-        mutation_rate: config.mutationRate ?? 0.35,
-        mutation_scale: config.mutationScale ?? 0.2,
-        seed: config.seed ?? 0,
-        output_path: config.outputPath || null,
-      }),
-    }),
-
-  getDataRecipeStatus: () =>
-    request<DataRecipeStatusResponse>('/autoresearch/data-recipe/status'),
-
-  stopDataRecipe: () =>
-    request<{ status: string }>('/autoresearch/data-recipe/stop', { method: 'POST' }),
-
-  exportDataRecipe: (outputPath: string) =>
-    request<{ status: string; output_path: string; proposal: DataRecipeProposal }>(
-      '/autoresearch/data-recipe/export',
-      {
-        method: 'POST',
-        body: JSON.stringify({ output_path: outputPath }),
-      }
-    ),
-
-  // Trace research
-  startTraceResearch: (config: { searchParams: string[]; maxExperiments: number; mutationRate: number; mutationScale: number }) =>
-    request<{ status: string; message: string }>('/autoresearch/trace-research/start', {
-      method: 'POST',
-      body: JSON.stringify({
-        search_params: config.searchParams,
-        max_experiments: config.maxExperiments,
-        mutation_rate: config.mutationRate,
-        mutation_scale: config.mutationScale,
-      })
-    }),
-
-  stopTraceResearch: () =>
-    request<{ status: string }>('/autoresearch/trace-research/stop', { method: 'POST' }),
-
-  pauseTraceResearch: () =>
-    request<{ status: string }>('/autoresearch/trace-research/pause', { method: 'POST' }),
-
-  resumeTraceResearch: () =>
-    request<{ status: string }>('/autoresearch/trace-research/resume', { method: 'POST' }),
-
-  traceResearchStatus: () =>
-    request<any>('/autoresearch/trace-research/status'),
-
-  // Schema research
-  schemaResearch: {
-    start: (config: { baseTemplate: string; maxExperiments: number; mutationRate: number; mutationScale: number; mode: string }) =>
-      request<{ status: string; template: string }>('/autoresearch/schema-research/start', {
-        method: 'POST',
-        body: JSON.stringify({
-          base_template: config.baseTemplate,
-          max_experiments: config.maxExperiments,
-          mutation_rate: config.mutationRate,
-          mutation_scale: config.mutationScale,
-          mode: config.mode,
-        }),
-      }),
-    stop: () => request<{ status: string }>('/autoresearch/schema-research/stop', { method: 'POST' }),
-    pause: () => request<{ status: string }>('/autoresearch/schema-research/pause', { method: 'POST' }),
-    resume: () => request<{ status: string }>('/autoresearch/schema-research/resume', { method: 'POST' }),
-    getStatus: () => request<any>('/autoresearch/schema-research/status'),
-    getQuality: () => request<any>('/autoresearch/schema-research/quality'),
-  },
 }

@@ -14,7 +14,6 @@ import {
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import {
-  modelsApi,
   evalAdvancedApi,
   type ExternalBenchmarkIngestResponse,
   type HeldoutEnvironmentEvidence,
@@ -22,6 +21,8 @@ import {
   type HeldoutReport,
   type NormalizedBenchmarkResult,
 } from '../../services/api'
+import { useSessionResource } from '../../stores/sessionResource'
+import { registeredModelsResource } from '../../stores/factoryResources'
 import { ModelSelect } from '../common/ModelSelect'
 
 const METRICS = [
@@ -692,7 +693,8 @@ function BenchmarkCommands({ endpoint, modelId }: { endpoint: EndpointForm; mode
 }
 
 export function HeldoutGatePanel() {
-  const [models, setModels] = useState<string[]>([])
+  const { data: modelsData } = useSessionResource(registeredModelsResource)
+  const models = useMemo(() => modelsData?.models.map((m) => m.model_id) ?? [], [modelsData])
   const [modelId, setModelId] = useState('')
   const [datasetPath, setDatasetPath] = useState('data/gold_traces/val.jsonl')
   const [metric, setMetric] = useState('exact_match')
@@ -708,14 +710,8 @@ export function HeldoutGatePanel() {
     useState<Record<EvidenceFieldId, string>>(EMPTY_EVIDENCE_JSON)
 
   useEffect(() => {
-    modelsApi.list().then((r) => {
-      if (r.ok && r.data) {
-        const ids = r.data.models.map((m) => m.model_id)
-        setModels(ids)
-        if (ids.length > 0) setModelId((cur) => cur || ids[0])
-      }
-    })
-  }, [])
+    if (models.length > 0) setModelId((cur) => cur || models[0])
+  }, [models])
 
   const endpointSpec = (f: EndpointForm) => ({
     provider: f.provider || undefined,

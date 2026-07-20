@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import {
   ArrowLeft,
   Star,
@@ -20,7 +20,9 @@ import {
   ExternalLink
 } from 'lucide-react'
 import { clsx } from 'clsx'
-import { modelsApi, hfApi, ModelProfile as ModelProfileData } from '../../services/api'
+import { modelsApi, hfApi } from '../../services/api'
+import { modelProfileResource } from '../../stores/modelResources'
+import { useKeyedSessionResource } from '../../stores/sessionResource'
 
 interface ModelProfilePageProps {
   modelId: string
@@ -37,9 +39,11 @@ const STATUS_CLASSES: Record<string, string> = {
 }
 
 export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePageProps) {
-  const [profile, setProfile] = useState<ModelProfileData | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const { data: profile, loading, error, refresh } = useKeyedSessionResource(
+    modelProfileResource,
+    modelId
+  )
+  const isLoading = loading || (profile === null && error === null)
 
   // Expanded sections
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['training']))
@@ -59,25 +63,14 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
   const [pushGguf, setPushGguf] = useState(true)
   const [isPushing, setIsPushing] = useState(false)
 
-  // Fetch profile
-  const fetchProfile = useCallback(async () => {
-    setIsLoading(true)
-    setError(null)
-    const result = await modelsApi.get(modelId)
-    if (result.ok && result.data) {
-      setProfile(result.data)
-      setEditName(result.data.display_name)
-      setEditDescription(result.data.description)
-      setEditTags(result.data.tags.join(', '))
-    } else {
-      setError('Failed to load model profile')
-    }
-    setIsLoading(false)
-  }, [modelId])
-
+  // Sync edit fields whenever a (re)fetched profile arrives
   useEffect(() => {
-    fetchProfile()
-  }, [fetchProfile])
+    if (profile) {
+      setEditName(profile.display_name)
+      setEditDescription(profile.description)
+      setEditTags(profile.tags.join(', '))
+    }
+  }, [profile])
 
   const toggleSection = (section: string) => {
     setExpandedSections(prev => {
@@ -94,7 +87,7 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
   const handleStar = async () => {
     if (!profile) return
     await modelsApi.star(modelId, !profile.starred)
-    fetchProfile()
+    void refresh()
   }
 
   const handlePushToHub = async () => {
@@ -111,7 +104,7 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
       })
       if (response.ok && response.data) {
         // Refresh profile to get hf_repo_id
-        fetchProfile()
+        void refresh()
         setShowPushDialog(false)
       }
     } catch (err) {
@@ -130,7 +123,7 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
       tags: editTags.split(',').map(t => t.trim()).filter(Boolean)
     })
     if (result.ok) {
-      setProfile(result.data!)
+      modelProfileResource.getState().setData(modelId, result.data!)
       setIsEditing(false)
     }
     setIsSaving(false)
@@ -156,7 +149,7 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
       const result = await modelsApi.export(modelId, { format: 'gguf', quantization })
       if (result.ok && result.data) {
         setActionMessage({ type: 'success', text: result.data.message || 'Export started' })
-        fetchProfile() // Refresh to show new artifact
+        void refresh() // Refresh to show new artifact
       } else {
         setActionMessage({ type: 'error', text: 'Export failed' })
       }
@@ -178,7 +171,7 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
       const result = await modelsApi.deployToOllama(modelId, { quantization })
       if (result.ok && result.data) {
         setActionMessage({ type: 'success', text: result.data.message })
-        fetchProfile()
+        void refresh()
       } else {
         setActionMessage({ type: 'error', text: 'Deploy failed - check if Ollama is running' })
       }
@@ -207,7 +200,7 @@ export function ModelProfilePage({ modelId, onBack, onCompare }: ModelProfilePag
     )
   }
 
-  if (error || !profile) {
+  if (!profile) {
     return (
       <div className="h-full flex flex-col items-center justify-center">
         <AlertCircle className="w-12 h-12 text-status-error mb-4" />

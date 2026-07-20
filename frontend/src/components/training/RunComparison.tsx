@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   LineChart,
   Line,
@@ -10,7 +10,8 @@ import {
   ResponsiveContainer
 } from 'recharts'
 import { GitCompareArrows, RefreshCw } from 'lucide-react'
-import { trainingApi, TrainingRunSummary, RunMetricPoint } from '../../services/api'
+import { metricRunsResource, runMetricsResource } from '../../stores/opsResources'
+import { useSessionResource } from '../../stores/sessionResource'
 import { clsx } from 'clsx'
 
 // Distinct line colors per selected run (accent first, then stable contrasts)
@@ -18,26 +19,20 @@ const RUN_COLORS = ['#76B900', '#3B8EEA', '#CD3131', '#B58900', '#D33682', '#2AA
 const MAX_SELECTED = 6
 
 export function RunComparison() {
-  const [runs, setRuns] = useState<TrainingRunSummary[]>([])
+  const {
+    data: runsData,
+    loading,
+    refreshing,
+    error: runsError,
+    refresh,
+  } = useSessionResource(metricRunsResource)
+  const runs = runsData ?? []
   const [selected, setSelected] = useState<string[]>([])
-  const [series, setSeries] = useState<Record<string, RunMetricPoint[]>>({})
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
+  const metricEntries = runMetricsResource((s) => s.entries)
+  const isFetching = loading || refreshing
 
-  const loadRuns = () => {
-    setLoading(true)
-    trainingApi.listRuns().then((res) => {
-      setLoading(false)
-      if (res.ok && res.data) {
-        setRuns(res.data.runs.filter((r) => r.has_metrics))
-        setError(null)
-      } else {
-        setError(res.error || 'Failed to load runs')
-      }
-    })
-  }
-
-  useEffect(loadRuns, [])
+  const metricsError = selected.map((id) => metricEntries[id]?.error).find(Boolean) ?? null
+  const error = runsError || metricsError
 
   const toggleRun = (runId: string) => {
     setSelected((prev) => {
@@ -45,32 +40,21 @@ export function RunComparison() {
       if (prev.length >= MAX_SELECTED) return prev
       return [...prev, runId]
     })
-    if (!series[runId]) {
-      trainingApi.getRunMetrics(runId).then((res) => {
-        if (res.ok && res.data) {
-          const points = res.data.metrics.filter(
-            (m) => typeof m.loss === 'number' && typeof m.step === 'number'
-          )
-          setSeries((prev) => ({ ...prev, [runId]: points }))
-        } else {
-          setError(res.error || `Failed to load metrics for ${runId}`)
-        }
-      })
-    }
+    void runMetricsResource.getState().ensureLoaded(runId)
   }
 
   // Merge selected runs into one recharts dataset keyed by step
   const data = useMemo(() => {
     const byStep = new Map<number, Record<string, number>>()
     for (const runId of selected) {
-      for (const point of series[runId] ?? []) {
+      for (const point of metricEntries[runId]?.data ?? []) {
         const row = byStep.get(point.step) ?? { step: point.step }
         row[runId] = point.loss
         byStep.set(point.step, row)
       }
     }
     return Array.from(byStep.values()).sort((a, b) => a.step - b.step)
-  }, [selected, series])
+  }, [selected, metricEntries])
 
   return (
     <div className="card p-4">
@@ -80,11 +64,11 @@ export function RunComparison() {
           Compare Runs
         </h3>
         <button
-          onClick={loadRuns}
+          onClick={() => void refresh()}
           className="p-1 hover:bg-background-tertiary text-text-muted hover:text-text-secondary transition-press"
           title="Refresh run list"
         >
-          <RefreshCw className={clsx('w-3.5 h-3.5', loading && 'animate-spin')} />
+          <RefreshCw className={clsx('w-3.5 h-3.5', isFetching && 'animate-spin')} />
         </button>
       </div>
 

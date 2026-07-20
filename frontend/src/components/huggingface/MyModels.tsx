@@ -1,32 +1,10 @@
-import { useState, useEffect } from 'react'
 import { ExternalLink, Download, Heart, Lock, Globe, Package } from 'lucide-react'
-import { hfApi, HFMyModel } from '../../services/api'
+import { hfMyModelsResource } from '../../stores/hfResources'
+import { useSessionResource } from '../../stores/sessionResource'
 
 export function MyModels() {
-  const [models, setModels] = useState<HFMyModel[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    loadModels()
-  }, [])
-
-  const loadModels = async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const response = await hfApi.listMyModels()
-      if (response.ok && response.data) {
-        setModels(response.data)
-      } else {
-        setError('Failed to load models')
-      }
-    } catch (_err) {
-      setError('Failed to connect to HuggingFace')
-    } finally {
-      setLoading(false)
-    }
-  }
+  const { data, loading, refreshing, error, refresh } = useSessionResource(hfMyModelsResource)
+  const models = data ?? []
 
   if (loading) {
     return (
@@ -36,11 +14,11 @@ export function MyModels() {
     )
   }
 
-  if (error) {
+  if (error && data === null) {
     return (
       <div className="card p-6 text-center">
         <p className="text-text-muted">{error}</p>
-        <button onClick={loadModels} className="btn-secondary mt-3">Retry</button>
+        <button onClick={() => refresh()} className="btn-secondary mt-3">Retry</button>
       </div>
     )
   }
@@ -63,7 +41,9 @@ export function MyModels() {
         <span className="font-mono text-xs uppercase tracking-widest text-text-muted">
           {models.length} model{models.length !== 1 ? 's' : ''} on Hub
         </span>
-        <button onClick={loadModels} className="btn-secondary text-xs">Refresh</button>
+        <button onClick={() => refresh()} className="btn-secondary text-xs">
+          {refreshing ? 'Refreshing…' : 'Refresh'}
+        </button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

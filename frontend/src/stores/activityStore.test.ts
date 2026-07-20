@@ -1,6 +1,24 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { eventKeyFor, titleFor, useActivityStore } from './activityStore'
+import { destinationFor, eventKeyFor, titleFor, useActivityStore } from './activityStore'
+
+test('derives actionable destinations, including exact AutoResearch campaign scope', () => {
+  assert.deepEqual(destinationFor('campaign:action-failed', {
+    workspace_id: 'workspace-a', campaign_id: 'campaign-1', action_id: 'action-1',
+  }), {
+    label: 'Open AutoResearch',
+    view: 'autoresearch',
+    workspaceId: 'workspace-a',
+    campaignId: 'campaign-1',
+  })
+  assert.deepEqual(destinationFor('training:complete', { run_id: 'run-1' }), {
+    label: 'Open Training', view: 'training',
+  })
+  assert.deepEqual(destinationFor('trace:added', { trace_id: 'trace-1' }), {
+    label: 'Open Traces', view: 'traces',
+  })
+  assert.equal(destinationFor('unknown:message', {}), undefined)
+})
 
 test('deduplicates a REST training acknowledgement and its WebSocket echo', () => {
   const store = useActivityStore.getState()
@@ -109,4 +127,29 @@ test('dismisses an activity event by its visible id', () => {
   useActivityStore.getState().dismissEvent(eventId)
 
   assert.equal(useActivityStore.getState().events.length, 0)
+})
+
+test('stores destination metadata with an activity event', () => {
+  const store = useActivityStore.getState()
+  store.clear()
+  store.addEvent('campaign:action-failed', {
+    workspace_id: 'workspace-a', campaign_id: 'campaign-1', action_id: 'action-1',
+  })
+  assert.equal(useActivityStore.getState().events[0].destination?.label, 'Open AutoResearch')
+  assert.equal(useActivityStore.getState().events[0].destination?.campaignId, 'campaign-1')
+})
+
+test('keeps distinct durable campaign events while deduplicating the same event id', () => {
+  const store = useActivityStore.getState()
+  store.clear()
+  store.addEvent('campaign:started', {
+    event_id: 'event-1', workspace_id: 'workspace-a', campaign_id: 'campaign-1',
+  })
+  store.addEvent('campaign:started', {
+    event_id: 'event-2', workspace_id: 'workspace-a', campaign_id: 'campaign-1',
+  })
+  store.addEvent('campaign:started', {
+    event_id: 'event-2', workspace_id: 'workspace-a', campaign_id: 'campaign-1',
+  })
+  assert.equal(useActivityStore.getState().events.length, 2)
 })

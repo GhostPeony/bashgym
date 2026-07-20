@@ -19,6 +19,13 @@ interface FileState {
 
 const fileStates = new Map<string, FileState>()
 
+// The session_meta first line embeds base_instructions, dynamic_tools, and
+// other unbounded fields — recent Codex CLI versions push it well past 16KB
+// (40KB+ observed). Read up to the IPC hard cap so the whole first line is
+// captured; a truncated line fails JSON.parse and the session loses its cwd,
+// which drops it from the rail's project history entirely.
+const META_HEAD_BYTES = 262_144
+
 export function resetCodexFile(filePath: string): void {
   fileStates.delete(filePath)
 }
@@ -47,13 +54,16 @@ function readUsage(usage: Record<string, unknown> | undefined): TokenTotals | nu
   }
 }
 
+function applyCwd(snap: AgentSessionSnapshot, cwd: unknown): void {
+  if (snap.cwd !== undefined || typeof cwd !== 'string' || !cwd) return
+  snap.cwd = cwd
+  const base = cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop()
+  if (base) snap.title = base
+}
+
 function applyMeta(snap: AgentSessionSnapshot, payload: Record<string, unknown>): void {
   if (typeof payload.session_id === 'string') snap.sessionId = payload.session_id
-  if (typeof payload.cwd === 'string') {
-    snap.cwd = payload.cwd
-    const base = payload.cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop()
-    if (base) snap.title = base
-  }
+  applyCwd(snap, payload.cwd)
   const git = payload.git as Record<string, unknown> | undefined
   if (git && typeof git.branch === 'string') snap.gitBranch = git.branch
   if (typeof payload.model_provider === 'string' && !snap.model) snap.model = payload.model_provider
@@ -80,6 +90,11 @@ function applyLine(snap: AgentSessionSnapshot, line: string): void {
     applyMeta(snap, payload)
     return
   }
+
+  // turn_context / world_state events also carry cwd and recur through the
+  // session, so a session whose meta line outgrew even the head read still
+  // recovers its cwd (and thus its place in the project history) from the tail.
+  applyCwd(snap, payload.cwd)
 
   if (payload.type === 'user_message' && snap.topic === undefined) {
     const text = typeof payload.message === 'string' ? payload.message.trim() : undefined
@@ -129,12 +144,14 @@ export async function ingestCodexFile(
   }
 
   if (!state.metaLoaded) {
-    const head = await api.readHead(fileInfo.path, 16_384)
+    const head = await api.readHead(fileInfo.path, META_HEAD_BYTES)
     if (head.success && head.data) {
       const firstLine = head.data.split('\n')[0]
       if (firstLine) applyLine(state.snapshot, firstLine)
     }
-    state.metaLoaded = true
+    // Only latch once the meta line actually parsed; otherwise retry next poll
+    // rather than permanently stranding the session without a cwd.
+    if (state.snapshot.cwd !== undefined) state.metaLoaded = true
   }
 
   for (let guard = 0; guard < 100; guard++) {

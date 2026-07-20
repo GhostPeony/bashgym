@@ -1311,6 +1311,37 @@ class CampaignRuntimeRepository(CampaignRepository):
             for row in rows
         )
 
+    def get_artifact(
+        self, workspace_id: str, campaign_id: str, artifact_id: str
+    ) -> CampaignArtifactRecord:
+        """Return one artifact scoped to its workspace and campaign."""
+
+        self._require_initialized()
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM campaign_artifacts
+                WHERE workspace_id = ? AND campaign_id = ? AND artifact_id = ?
+                """,
+                (workspace_id, campaign_id, artifact_id),
+            ).fetchone()
+        if row is None:
+            raise RecordNotFoundError("campaign artifact not found")
+        return CampaignArtifactRecord(
+            workspace_id=row["workspace_id"],
+            campaign_id=row["campaign_id"],
+            artifact_id=row["artifact_id"],
+            producer_action_id=row["producer_action_id"],
+            uri=row["uri"],
+            sha256=row["sha256"],
+            size_bytes=row["size_bytes"],
+            schema_name=row["schema_name"],
+            sealed=bool(row["sealed"]),
+            valid=bool(row["valid"]),
+            metadata=json.loads(row["metadata_json"]),
+            created_at=row["created_at"],
+        )
+
     def list_artifact_page(
         self,
         workspace_id: str,

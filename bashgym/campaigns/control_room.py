@@ -41,6 +41,7 @@ from bashgym.campaigns.contracts import (
     OpaqueProcessIdentityV1,
     ReadinessSummaryV1,
     SafeBindingIdentityV1,
+    StudyProposal,
     canonical_hash,
     utc_now,
 )
@@ -204,11 +205,17 @@ def read_control_room_projection(
     ).fetchall()
     active_studies = connection.execute(
         """
-        SELECT study_id, proposal_id, status, current_stage_index, stage_plan_json
-        FROM campaign_studies WHERE workspace_id = ? AND campaign_id = ?
-          AND status NOT IN ('completed','rejected','promoted','final_rejected',
-                             'execution_failed','abandoned','cancelled')
-        ORDER BY updated_at DESC, study_id LIMIT 2
+        SELECT s.study_id, s.proposal_id, s.status, s.current_stage_index,
+               s.stage_plan_json, p.proposal_json
+        FROM campaign_studies s
+        JOIN campaign_proposals p
+          ON p.workspace_id = s.workspace_id
+         AND p.campaign_id = s.campaign_id
+         AND p.proposal_id = s.proposal_id
+        WHERE s.workspace_id = ? AND s.campaign_id = ?
+          AND s.status NOT IN ('completed','rejected','promoted','final_rejected',
+                              'execution_failed','abandoned','cancelled')
+        ORDER BY s.updated_at DESC, s.study_id LIMIT 2
         """,
         (workspace_id, campaign_id),
     ).fetchall()
@@ -1208,6 +1215,12 @@ def build_control_room_snapshot(
     active_work = None
     if active:
         study = durable.active_studies[0] if durable.active_studies else None
+        proposal = None
+        if study and study.get("proposal_json"):
+            try:
+                proposal = StudyProposal.model_validate_json(study["proposal_json"])
+            except (TypeError, ValueError):
+                proposal = None
         action = durable.active_actions[0] if durable.active_actions else None
         attempt = durable.active_attempts[0] if durable.active_attempts else None
         executor_type = None
@@ -1231,9 +1244,9 @@ def build_control_room_snapshot(
             action_id=str(action["action_id"]) if action else None,
             attempt_id=str(attempt["attempt_id"]) if attempt else None,
             stage=(action["stage_kind"] if action else attempt["stage_kind"] if attempt else None),
-            hypothesis_summary=None,
-            primary_variable_summary=None,
-            controlled_variable_summary=(),
+            hypothesis_summary=proposal.hypothesis if proposal else None,
+            primary_variable_summary=proposal.primary_variable if proposal else None,
+            controlled_variable_summary=proposal.controlled_variables[:64] if proposal else (),
             progress_fraction=None,
             eta_seconds=None,
             executor_type=executor_type,

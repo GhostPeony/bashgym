@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import {
   BarChart3,
   Play,
@@ -21,7 +21,9 @@ import {
   GitCompare
 } from 'lucide-react'
 import { clsx } from 'clsx'
-import { modelsApi, evaluatorApi } from '../../services/api'
+import { evaluatorApi, type EvaluationResponse } from '../../services/api'
+import { useSessionResource } from '../../stores/sessionResource'
+import { evaluationsResource, registeredModelsResource } from '../../stores/factoryResources'
 import { HeldoutGatePanel } from './HeldoutGatePanel'
 
 // Benchmark categories and their benchmarks
@@ -202,62 +204,43 @@ const DEFAULT_CONFIG: EvalConfig = {
   temperature: 0.0
 }
 
+const mapEvaluation = (e: EvaluationResponse): EvalJob => ({
+  id: e.job_id,
+  model: e.model_id,
+  benchmarks: e.benchmarks,
+  status: e.status,
+  created_at: e.created_at || new Date().toISOString(),
+  results: e.results,
+  error: e.error
+})
+
 export function EvaluatorDashboard() {
   const [config, setConfig] = useState<EvalConfig>(DEFAULT_CONFIG)
-  const [jobs, setJobs] = useState<EvalJob[]>([])
+  const { data: modelsData } = useSessionResource(registeredModelsResource)
+  const { data: evaluations } = useSessionResource(evaluationsResource)
+  const [jobs, setJobs] = useState<EvalJob[]>(() =>
+    (evaluationsResource.getState().data ?? []).map(mapEvaluation)
+  )
   const [expandedCategory, setExpandedCategory] = useState<string | null>('code')
   const [isRunning, setIsRunning] = useState(false)
   const [selectedJob, setSelectedJob] = useState<EvalJob | null>(null)
-  const [availableModels, setAvailableModels] = useState<string[]>([])
+  const availableModels = useMemo(
+    () => modelsData?.models.map(m => m.model_id) ?? [],
+    [modelsData]
+  )
   const [mode, setMode] = useState<'benchmarks' | 'heldout'>('benchmarks')
 
+  // Sync the local job list (which absorbs optimistic/polled updates) from the cache
   useEffect(() => {
-    // Load available models from API
-    const loadModels = async () => {
-      console.log('[Evaluator] Loading models...')
-      try {
-        const result = await modelsApi.list()
-        console.log('[Evaluator] Models result:', result)
-        if (result.ok && result.data) {
-          // Extract model IDs from the response (API returns { models, total })
-          const models = result.data.models
-          setAvailableModels(models.map(m => m.model_id))
-          // Auto-select first model if none selected
-          if (models.length > 0 && !config.model) {
-            setConfig(prev => ({ ...prev, model: models[0].model_id }))
-          }
-        }
-      } catch (error) {
-        console.error('[Evaluator] Failed to load models:', error)
-      }
-    }
+    if (evaluations) setJobs(evaluations.map(mapEvaluation))
+  }, [evaluations])
 
-    // Load existing evaluation jobs from API
-    const loadEvaluations = async () => {
-      console.log('[Evaluator] Loading evaluations...')
-      try {
-        const result = await evaluatorApi.list()
-        console.log('[Evaluator] Evaluations result:', result)
-        if (result.ok && result.data) {
-          setJobs(result.data.map(e => ({
-            id: e.job_id,
-            model: e.model_id,
-            benchmarks: e.benchmarks,
-            status: e.status,
-            created_at: e.created_at || new Date().toISOString(),
-            results: e.results,
-            error: e.error
-          })))
-        }
-      } catch (error) {
-        console.error('[Evaluator] Failed to load evaluations:', error)
-      }
+  // Auto-select first model if none selected
+  useEffect(() => {
+    if (availableModels.length > 0) {
+      setConfig(prev => (prev.model ? prev : { ...prev, model: availableModels[0] }))
     }
-
-    loadModels()
-    loadEvaluations()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [availableModels])
 
   const toggleBenchmark = (benchmarkId: string) => {
     setConfig(prev => ({
@@ -296,6 +279,8 @@ export function EvaluatorDashboard() {
         ))
         if (status === 'running') {
           setTimeout(poll, 2000) // Poll every 2 seconds
+        } else {
+          void evaluationsResource.getState().refresh()
         }
       }
     }

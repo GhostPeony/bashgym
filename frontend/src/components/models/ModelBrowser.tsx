@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useMemo } from 'react'
 import {
   Search,
   Grid3X3,
@@ -14,10 +14,11 @@ import {
   TrendingUp
 } from 'lucide-react'
 import { clsx } from 'clsx'
-import { modelsApi, ModelSummary, LeaderboardEntry } from '../../services/api'
 import { useTutorialComplete } from '../../hooks'
 import { ModelCard } from './ModelCard'
 import { HFStatus } from '../huggingface/HFStatus'
+import { modelLeaderboardResource, modelListKey, modelListResource } from '../../stores/modelResources'
+import { useKeyedSessionResource, useSessionResource } from '../../stores/sessionResource'
 
 interface ModelBrowserProps {
   onSelectModel: (modelId: string) => void
@@ -55,10 +56,6 @@ const STATUS_OPTIONS = [
 export function ModelBrowser({ onSelectModel, onTrainNew, onCompare, onViewTrends }: ModelBrowserProps) {
   const { complete: completeTutorialStep } = useTutorialComplete()
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
-  const [models, setModels] = useState<ModelSummary[]>([])
-  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([])
-  const [total, setTotal] = useState(0)
-  const [isLoading, setIsLoading] = useState(false)
 
   // Filters
   const [search, setSearch] = useState('')
@@ -72,50 +69,30 @@ export function ModelBrowser({ onSelectModel, onTrainNew, onCompare, onViewTrend
   const [compareMode, setCompareMode] = useState(false)
   const [selectedForCompare, setSelectedForCompare] = useState<string[]>([])
 
-  // Fetch models
-  const fetchModels = useCallback(async () => {
-    setIsLoading(true)
-    const result = await modelsApi.list({
-      strategy: strategy || undefined,
-      status: status || undefined,
-      starred: starredOnly || undefined,
-      sort_by: sortBy,
-      sort_order: sortOrder,
-      limit: 50,
-    })
-    if (result.ok && result.data) {
-      let filtered = result.data.models || []
-      // Client-side search filter
-      if (search && filtered.length > 0) {
-        const searchLower = search.toLowerCase()
-        filtered = filtered.filter(m =>
-          m.display_name?.toLowerCase().includes(searchLower) ||
-          m.base_model?.toLowerCase().includes(searchLower) ||
-          m.tags?.some(t => t.toLowerCase().includes(searchLower))
-        )
-      }
-      setModels(filtered)
-      setTotal(result.data.total || 0)
-    } else {
-      setModels([])
-      setTotal(0)
-    }
-    setIsLoading(false)
-  }, [strategy, status, starredOnly, sortBy, sortOrder, search])
+  const listKey = modelListKey({ strategy, status, starred: starredOnly, sortBy, sortOrder })
+  const {
+    data: listData,
+    loading,
+    refreshing,
+    refresh: refreshModels,
+  } = useKeyedSessionResource(modelListResource, listKey)
+  const { data: leaderboardData, refresh: refreshLeaderboard } =
+    useSessionResource(modelLeaderboardResource)
 
-  // Fetch leaderboard
-  const fetchLeaderboard = useCallback(async () => {
-    const result = await modelsApi.leaderboard('custom_eval_pass_rate', 20)
-    if (result.ok && result.data) {
-      setLeaderboard(result.data.entries)
-    }
-  }, [])
+  const total = listData?.total ?? 0
+  const leaderboard = leaderboardData ?? []
 
-  // Initial fetch
-  useEffect(() => {
-    fetchModels()
-    fetchLeaderboard()
-  }, [fetchModels, fetchLeaderboard])
+  // Client-side search filter
+  const models = useMemo(() => {
+    const all = listData?.models ?? []
+    if (!search || all.length === 0) return all
+    const searchLower = search.toLowerCase()
+    return all.filter(m =>
+      m.display_name?.toLowerCase().includes(searchLower) ||
+      m.base_model?.toLowerCase().includes(searchLower) ||
+      m.tags?.some(t => t.toLowerCase().includes(searchLower))
+    )
+  }, [listData, search])
 
   const handleSelectModel = (modelId: string) => {
     onSelectModel(modelId)
@@ -294,18 +271,18 @@ export function ModelBrowser({ onSelectModel, onTrainNew, onCompare, onViewTrend
 
           {/* Refresh */}
           <button
-            onClick={() => { fetchModels(); fetchLeaderboard() }}
-            disabled={isLoading}
+            onClick={() => { void refreshModels(); void refreshLeaderboard() }}
+            disabled={loading || refreshing}
             className="btn-icon"
           >
-            <RefreshCw className={clsx('w-4 h-4', isLoading && 'animate-spin')} />
+            <RefreshCw className={clsx('w-4 h-4', (loading || refreshing) && 'animate-spin')} />
           </button>
         </div>
       </div>
 
       {/* Content */}
       <div className="flex-1 overflow-auto p-6">
-        {isLoading && models.length === 0 ? (
+        {loading && models.length === 0 ? (
           <div className="flex items-center justify-center h-64">
             <Loader2 className="w-8 h-8 text-accent animate-spin" />
           </div>
@@ -351,7 +328,7 @@ export function ModelBrowser({ onSelectModel, onTrainNew, onCompare, onViewTrend
                   model={model}
                   onSelect={handleSelectModel}
                   onCompare={handleCompare}
-                  onRefresh={fetchModels}
+                  onRefresh={refreshModels}
                 />
               </div>
             ))}

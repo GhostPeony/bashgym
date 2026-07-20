@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
 import { ChevronLeft, ChevronRight, FileSearch, RefreshCw, TriangleAlert } from 'lucide-react'
-import { trainingApi, DatasetInspectReport } from '../../services/api'
+import { datasetInspectKey, datasetInspectResource } from '../../stores/opsResources'
+import { useKeyedSessionResource } from '../../stores/sessionResource'
 import { clsx } from 'clsx'
 
 const PAGE_SIZE = 5
@@ -13,29 +14,16 @@ const ROLE_COLORS: Record<string, string> = {
 }
 
 export function DatasetInspector() {
-  const [report, setReport] = useState<DatasetInspectReport | null>(null)
   const [offset, setOffset] = useState(0)
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null)
-
-  const load = useCallback((newOffset: number) => {
-    setLoading(true)
-    trainingApi.inspectDataset(newOffset, PAGE_SIZE).then((res) => {
-      setLoading(false)
-      if (res.ok && res.data) {
-        setReport(res.data)
-        setOffset(newOffset)
-        setError(null)
-      } else {
-        setError(res.error || 'Failed to inspect dataset')
-      }
-    })
-  }, [])
-
-  useEffect(() => {
-    load(0)
-  }, [load])
+  const {
+    data: report,
+    loading,
+    refreshing,
+    error,
+    refresh,
+  } = useKeyedSessionResource(datasetInspectResource, datasetInspectKey(offset, PAGE_SIZE))
+  const isFetching = loading || refreshing
 
   const total = report?.total ?? 0
   const canPrev = offset > 0
@@ -60,11 +48,11 @@ export function DatasetInspector() {
             </span>
           )}
           <button
-            onClick={() => load(offset)}
+            onClick={() => void refresh()}
             className="p-1 hover:bg-background-tertiary text-text-muted hover:text-text-secondary transition-press"
             title="Refresh"
           >
-            <RefreshCw className={clsx('w-3.5 h-3.5', loading && 'animate-spin')} />
+            <RefreshCw className={clsx('w-3.5 h-3.5', isFetching && 'animate-spin')} />
           </button>
         </div>
       </div>
@@ -143,7 +131,7 @@ export function DatasetInspector() {
           <button
             onClick={(e) => {
               e.stopPropagation()
-              if (canPrev) load(Math.max(0, offset - PAGE_SIZE))
+              if (canPrev) setOffset(Math.max(0, offset - PAGE_SIZE))
             }}
             disabled={!canPrev}
             className="flex items-center gap-1 text-xs font-mono text-text-muted hover:text-text-primary disabled:opacity-40 transition-press"
@@ -157,7 +145,7 @@ export function DatasetInspector() {
           <button
             onClick={(e) => {
               e.stopPropagation()
-              if (canNext) load(offset + PAGE_SIZE)
+              if (canNext) setOffset(offset + PAGE_SIZE)
             }}
             disabled={!canNext}
             className="flex items-center gap-1 text-xs font-mono text-text-muted hover:text-text-primary disabled:opacity-40 transition-press"

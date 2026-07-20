@@ -85,7 +85,7 @@ export function GuidedAutoResearchSetup({
       <header className="border-b border-border-subtle pb-3">
         <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-accent-dark">Campaign intake</p>
         <h2 id="guided-setup-title" className="mt-1 font-brand text-xl text-text-primary">Guided setup</h2>
-        <p className="mt-1 max-w-2xl text-sm leading-6 text-text-secondary">Choose only resources already registered to this BashGym installation. Private compute is primary. Model identity &amp; revision come from the registered logical model binding, never a fallback.</p>
+        <p className="mt-1 max-w-2xl text-sm leading-6 text-text-secondary">Choose from what's registered to this installation — your hardware, your model at its pinned revision. Need something that isn't listed? Register it first, or ask your agent to set it up.</p>
       </header>
 
       {!live ? (
@@ -94,7 +94,7 @@ export function GuidedAutoResearchSetup({
             <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-status-warning" aria-hidden="true" />
             <div>
               <p className="text-sm font-semibold text-text-primary">Live authority is offline</p>
-              <p className="mt-0.5 text-xs leading-5 text-text-secondary">{error ? `${error} Registered choices will appear here after reconnection; write actions stay disabled.` : 'The setup remains visible. Registered choices will appear here after reconnection; write actions stay disabled.'}</p>
+              <p className="mt-0.5 text-xs leading-5 text-text-secondary">{error ? `${error} Your registered choices reappear and unlock when the connection returns.` : 'You can browse the steps; choices reappear and unlock when the connection returns.'}</p>
             </div>
           </div>
           <Button type="button" variant="secondary" size="sm" disabled={pending} onClick={onRetry}>

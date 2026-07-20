@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
 import {
   ArrowLeft,
   Plus,
@@ -13,7 +13,9 @@ import {
   Activity
 } from 'lucide-react'
 import { clsx } from 'clsx'
-import { modelsApi, ModelProfile as ModelProfileData } from '../../services/api'
+import { ModelProfile as ModelProfileData } from '../../services/api'
+import { modelComparisonKey, modelComparisonResource } from '../../stores/modelResources'
+import { useKeyedSessionResource } from '../../stores/sessionResource'
 
 interface ModelComparisonProps {
   modelIds: string[]
@@ -122,40 +124,14 @@ function ComparisonIndicator({ value, bestValue, metric }: {
 }
 
 export function ModelComparison({ modelIds, onBack, onAddModel, onRemoveModel }: ModelComparisonProps) {
-  const [profiles, setProfiles] = useState<Record<string, ModelProfileData>>({})
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
   const [activeCategory, setActiveCategory] = useState<'all' | 'performance' | 'training' | 'operational'>('all')
 
-  // Fetch all profiles
-  const fetchProfiles = useCallback(async () => {
-    setIsLoading(true)
-    setError(null)
-    const newProfiles: Record<string, ModelProfileData> = {}
-
-    for (const modelId of modelIds) {
-      const result = await modelsApi.get(modelId)
-      if (result.ok && result.data) {
-        newProfiles[modelId] = result.data
-      }
-    }
-
-    if (Object.keys(newProfiles).length === 0 && modelIds.length > 0) {
-      setError('Failed to load any models')
-    }
-
-    setProfiles(newProfiles)
-    setIsLoading(false)
-  }, [modelIds])
-
-  useEffect(() => {
-    if (modelIds.length > 0) {
-      fetchProfiles()
-    } else {
-      setProfiles({})
-      setIsLoading(false)
-    }
-  }, [modelIds, fetchProfiles])
+  const { data, loading, error } = useKeyedSessionResource(
+    modelComparisonResource,
+    modelComparisonKey(modelIds)
+  )
+  const profiles = data ?? {}
+  const isLoading = loading || (data === null && error === null)
 
   // Calculate best values for each metric
   const bestValues = COMPARISON_METRICS.reduce((acc, metric) => {
@@ -245,7 +221,7 @@ export function ModelComparison({ modelIds, onBack, onAddModel, onRemoveModel }:
           <div className="flex items-center justify-center h-64">
             <Loader2 className="w-8 h-8 text-accent animate-spin" />
           </div>
-        ) : error ? (
+        ) : error && data === null ? (
           <div className="flex flex-col items-center justify-center h-64">
             <AlertCircle className="w-12 h-12 text-status-error mb-4" />
             <p className="text-text-muted">{error}</p>

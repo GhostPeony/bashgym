@@ -9,6 +9,13 @@ import { create } from 'zustand'
 
 export type ActivitySeverity = 'info' | 'success' | 'warning' | 'error'
 
+export interface ActivityDestination {
+  label: string
+  view: 'autoresearch' | 'training' | 'traces' | 'guardrails' | 'router' | 'huggingface' | 'factory' | 'pipeline' | 'orchestrator' | 'integration'
+  workspaceId?: string
+  campaignId?: string
+}
+
 export interface ActivityEvent {
   id: number
   /** Stable identity for mutation acknowledgements that may also arrive by WebSocket. */
@@ -20,6 +27,7 @@ export interface ActivityEvent {
   severity: ActivitySeverity
   title: string
   detail?: string
+  destination?: ActivityDestination
   timestamp: number
 }
 
@@ -140,6 +148,9 @@ export function titleFor(type: string, payload: Record<string, unknown>): string
 }
 
 export function eventKeyFor(type: string, payload: Record<string, unknown>): string | undefined {
+  if (type.startsWith('campaign:')
+    && typeof payload.event_id === 'string'
+    && payload.event_id) return `${type}:${payload.event_id}`
   const entityId = payload.run_id ?? payload.job_id ?? payload.task_id ?? payload.stage_id
     ?? payload.attempt_id ?? payload.action_id ?? payload.campaign_id
   if (COMPACTED_EVENT_TYPES.has(type)) {
@@ -160,6 +171,38 @@ export function eventKeyFor(type: string, payload: Record<string, unknown>): str
     return `${type}:${entityId}`
   }
   return undefined
+}
+
+const PUBLIC_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/
+
+export function destinationFor(
+  type: string,
+  payload: Record<string, unknown>,
+): ActivityDestination | undefined {
+  const category = type.startsWith('hf-context:') ? 'hf' : type.split(':')[0]
+  if (category === 'campaign' || category === 'autoresearch') {
+    const workspaceId = typeof payload.workspace_id === 'string' && PUBLIC_ID.test(payload.workspace_id)
+      ? payload.workspace_id : undefined
+    const campaignId = typeof payload.campaign_id === 'string' && PUBLIC_ID.test(payload.campaign_id)
+      ? payload.campaign_id : undefined
+    return { label: 'Open AutoResearch', view: 'autoresearch', workspaceId, campaignId }
+  }
+  const mapping: Record<string, ActivityDestination> = {
+    training: { label: 'Open Training', view: 'training' },
+    'skill-eval': { label: 'Open Training', view: 'training' },
+    trace: { label: 'Open Traces', view: 'traces' },
+    guardrail: { label: 'Open Guardrails', view: 'guardrails' },
+    router: { label: 'Open Router', view: 'router' },
+    cascade: { label: 'Open Router', view: 'router' },
+    hf: { label: 'Open Hugging Face', view: 'huggingface' },
+    designer: { label: 'Open Data Factory', view: 'factory' },
+    'schema-research': { label: 'Open Data Factory', view: 'factory' },
+    pipeline: { label: 'Open Pipeline', view: 'pipeline' },
+    orchestration: { label: 'Open Orchestrator', view: 'orchestrator' },
+    verification: { label: 'Open Orchestrator', view: 'orchestrator' },
+    integration: { label: 'Open Integrations', view: 'integration' },
+  }
+  return mapping[category]
 }
 
 interface ActivityState {
@@ -214,6 +257,7 @@ export const useActivityStore = create<ActivityState>((set) => ({
         severity: severityFor(type),
         title: titleFor(type, payload),
         detail: typeof payload === 'object' ? JSON.stringify(payload).slice(0, 500) : undefined,
+        destination: destinationFor(type, payload),
         timestamp: now
       }
       let events = state.events

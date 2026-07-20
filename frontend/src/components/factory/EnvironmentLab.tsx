@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from 'react'
+import { useCallback, useMemo, useState, type ChangeEvent } from 'react'
 import {
   AlertCircle,
   Bot,
@@ -34,11 +34,12 @@ import {
   type EnvironmentMixReport,
   type EnvironmentNormalizeResponse,
   type EnvironmentPassKResponse,
-  type EnvironmentPipelinesResponse,
   type EnvironmentRolloutPassKResponse,
   type EnvironmentSpuriousRewardControlResponse,
   type TerminalEnvironmentSpec,
 } from '../../services/api'
+import { useSessionResource } from '../../stores/sessionResource'
+import { environmentPipelinesResource } from '../../stores/factoryResources'
 import { BaseModelSelect } from '../common/BaseModelSelect'
 import { ModelSelect } from '../common/ModelSelect'
 
@@ -2380,7 +2381,7 @@ function DppoSmokePanel({
 }
 
 export function EnvironmentLab() {
-  const [pipelines, setPipelines] = useState<EnvironmentPipelinesResponse | null>(null)
+  const { data: pipelines } = useSessionResource(environmentPipelinesResource)
   const [result, setResult] = useState<EnvironmentNormalizeResponse | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [sourcePath, setSourcePath] = useState('tests/fixtures/tmax_envs/tmax_demo_001.jsonl')
@@ -2458,12 +2459,6 @@ export function EnvironmentLab() {
     kind: 'idle',
     message: 'Ready',
   })
-
-  useEffect(() => {
-    environmentApi.pipelines().then((response) => {
-      if (response.ok && response.data) setPipelines(response.data)
-    })
-  }, [])
 
   const environments = result?.environments ?? EMPTY_ENVIRONMENTS
   const selectedEnvironment = useMemo(

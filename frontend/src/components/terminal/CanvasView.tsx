@@ -50,6 +50,7 @@ import {
   campaignsForCanvasAutoMaterialization,
   materializeCampaignPanel,
 } from '../../stores/campaignCanvasLifecycle'
+import { selectArchivedIds, useCampaignArchiveStore } from '../../stores/campaignArchive'
 import type { CampaignRecord } from '../../stores/campaignStore'
 import { MasterControlPanel } from './MasterControlPanel'
 import { useCanvasHotkeys } from '../../hooks/useCanvasHotkeys'
@@ -362,8 +363,17 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
   }, [setActivePanel, onFocusPanel])
 
   const handleClosePanel = useCallback((id: string) => {
-    // Close the popup overlay if open, then remove the panel from the canvas
+    // Close the popup overlay if open, then remove the panel from the canvas.
+    // Closing a campaign node archives its campaign so auto-materialization
+    // does not resurrect it on the next reload.
     onClosePopup?.()
+    const closing = useTerminalStore.getState().panels.find((panel) => panel.id === id)
+    const campaignId = closing?.type === 'campaign'
+      ? closing.adapterConfig?.campaignId
+      : undefined
+    if (typeof campaignId === 'string') {
+      useCampaignArchiveStore.getState().archive(getActiveWorkspaceId(), campaignId)
+    }
     useTerminalStore.getState().removePanel(id)
   }, [onClosePopup])
 
@@ -390,13 +400,21 @@ function CanvasViewInner({ onFocusPanel, onClosePopup }: CanvasViewProps) {
     return releaseLiveWorkspace
   }, [])
 
+  const archivedCampaignIds = useCampaignArchiveStore((state) =>
+    selectArchivedIds(state, wsIdRef.current)
+  )
+
   useEffect(() => {
     if (!CAMPAIGNS_ENABLED) return
     if (useWorkspaceStore.getState().switching) return
-    for (const campaign of campaignsForCanvasAutoMaterialization(activeCampaigns)) {
+    const archiveStore = useCampaignArchiveStore.getState()
+    archiveStore.ensureLoaded(wsIdRef.current)
+    archiveStore.reconcile(wsIdRef.current, activeCampaigns)
+    const archived = new Set(selectArchivedIds(useCampaignArchiveStore.getState(), wsIdRef.current))
+    for (const campaign of campaignsForCanvasAutoMaterialization(activeCampaigns, archived)) {
       materializeCampaignPanel(campaign)
     }
-  }, [activeCampaigns])
+  }, [activeCampaigns, archivedCampaignIds])
 
   // Recover active runs after a renderer reload or a missed WebSocket event.
   // Completed history stays out of the active canvas unless it was already

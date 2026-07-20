@@ -9,7 +9,7 @@ import {
 } from '../../stores'
 import type { WorkspaceSessionRecord } from '../../stores'
 import { useAgentSessionsStore } from '../../stores/agentSessionsStore'
-import { WorkspaceStrip } from './WorkspaceStrip'
+import { WorkspaceSwitcher } from './WorkspaceSwitcher'
 import { candidatesForTerminal, normPath } from '../../services/agentSessions/matching'
 import type { AgentSessionSnapshot, AgentSessionKind } from '../../services/agentSessions/types'
 import { SessionCard } from './SessionCard'
@@ -258,15 +258,17 @@ export function AgentSessionsRail() {
 
   return (
     <div className="p-3 space-y-4 min-h-full">
-      <WorkspaceStrip groups={workspaceGroups} />
+      {/* Sticky top bar — MENU stays reachable and is never buried under the
+          workspace list, no matter how far the feed is scrolled. */}
+      <div className="sticky top-0 z-30 -mx-3 -mt-3 px-3 pt-3 pb-2 bg-background-card border-b border-border-subtle flex min-w-0 items-center gap-1.5">
+        <button type="button" onClick={() => setSidebarMode('nav')} className="node-btn node-btn-wide flex-shrink-0" title="Back to menu" aria-label="Back to menu">
+          <span className="flex items-center gap-1"><ArrowLeft className="w-3 h-3" /> MENU</span>
+        </button>
+        <h1 className="min-w-0 flex-1 truncate font-mono text-[11px] font-bold uppercase tracking-wider text-text-primary">Agent Sessions</h1>
+      </div>
 
-      <header className="space-y-2.5 pt-2 border-t border-border-subtle">
-        <div className="flex min-w-0 items-center gap-1.5">
-          <button type="button" onClick={() => setSidebarMode('nav')} className="node-btn node-btn-wide flex-shrink-0" title="Back to menu" aria-label="Back to menu">
-            <span className="flex items-center gap-1"><ArrowLeft className="w-3 h-3" /> MENU</span>
-          </button>
-          <h1 className="min-w-0 flex-1 truncate font-mono text-[11px] font-bold uppercase tracking-wider text-text-primary">Agent Sessions</h1>
-        </div>
+      <header className="space-y-2">
+        <WorkspaceSwitcher groups={workspaceGroups} />
         <div className="flex min-w-0 items-center gap-1">
           <div className="flex min-w-0 flex-1 items-center gap-1">
             {(['all', 'claude', 'codex'] as const).map((filter) => (
@@ -367,7 +369,7 @@ export function AgentSessionsRail() {
             : journals.slice(0, JOURNALS_COLLAPSED_COUNT)
           return (
             <div key={project.key} className="border-t border-border-subtle pt-1.5 space-y-1.5">
-              <div className="flex items-center gap-1 min-w-0">
+              <div className="group flex items-center gap-1 min-w-0">
                 <button
                   type="button"
                   onClick={() => toggleSet(collapsedProjects, project.key, setCollapsedProjects)}
@@ -388,7 +390,10 @@ export function AgentSessionsRail() {
                 <button
                   type="button"
                   onClick={() => setLauncherFor(launcherFor === project.key ? null : project.key)}
-                  className={clsx('node-btn', launcherFor === project.key ? 'node-btn-accent' : null)}
+                  className={clsx(
+                    'node-btn transition-opacity focus:opacity-100',
+                    launcherFor === project.key ? 'node-btn-accent opacity-100' : 'opacity-0 group-hover:opacity-100'
+                  )}
                   title={`Start a session in ${project.name}`}
                   aria-expanded={launcherFor === project.key}
                 >

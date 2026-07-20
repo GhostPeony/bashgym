@@ -38,6 +38,8 @@ import {
 } from 'recharts'
 import { useTracesStore, useThemeStore } from '../../stores'
 import type { Trace, TraceStatus } from '../../stores'
+import { traceReposResource, traceStatsResource } from '../../stores/appResources'
+import { useKeyedSessionResource, useSessionResource } from '../../stores/sessionResource'
 import { tracesApi, TraceDetailInfo } from '../../services/api'
 import { clsx } from 'clsx'
 import { TraceAnalytics } from './TraceAnalytics'
@@ -114,16 +116,16 @@ type DetailTab = 'overview' | 'examples'
 
 export function TraceBrowser() {
   const {
-    traces, setTraces, setCounts, statusFilter, setStatusFilter, searchQuery, setSearchQuery,
+    traces, statusFilter, setStatusFilter, searchQuery, setSearchQuery,
     filteredTraces, promoteTrace, demoteTrace,
     goldCount, silverCount, bronzeCount, failedCount, pendingCount,
-    selectTrace, selectedTraceId, repoFilter, setRepoFilter, availableRepos, setAvailableRepos
+    selectTrace, selectedTraceId, repoFilter, setRepoFilter,
+    listLoading, listError, totalTraces, hasMore, loadingMore,
+    ensureTraces, refreshTraces, loadMoreTraces
   } = useTracesStore()
   const { theme } = useThemeStore()
   const [view, setView] = useState<'list' | 'analytics'>('list')
   const [repoDropdownOpen, setRepoDropdownOpen] = useState(false)
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
   const [detailTab, setDetailTab] = useState<DetailTab>('overview')
   const [trainingExamples, setTrainingExamples] = useState<TrainingExample[]>([])
   const [examplesLoading, setExamplesLoading] = useState(false)
@@ -131,13 +133,11 @@ export function TraceBrowser() {
   const [expandedExamples, setExpandedExamples] = useState<Set<string>>(new Set())
   const [examplesFlash, setExamplesFlash] = useState<string | null>(null)
   const [traceDetail, setTraceDetail] = useState<TraceDetailInfo | null>(null)
-  const [timelineData, setTimelineData] = useState<{ time: string; gold: number; failed: number; pending: number }[]>([])
-  const [_statsLoading, setStatsLoading] = useState(false)
   const [timeRange, setTimeRange] = useState<'24h' | '7d' | '30d' | 'all'>('7d')
-  const [totalTraces, setTotalTraces] = useState(0)
-  const [hasMore, setHasMore] = useState(false)
-  const [loadingMore, setLoadingMore] = useState(false)
-  const PAGE_SIZE = 50
+  const { data: repoListData } = useSessionResource(traceReposResource)
+  const availableRepos = repoListData ?? []
+  const { data: statsData } = useKeyedSessionResource(traceStatsResource, timeRange)
+  const timelineData = statsData?.timeline ?? []
 
   // Import notification banner state
   const [importedSinceLastVisit, setImportedSinceLastVisit] = useState(0)
@@ -159,123 +159,8 @@ export function TraceBrowser() {
   } | null>(null)
   const [showClassifyModal, setShowClassifyModal] = useState(false)
 
-  // Map API trace to store Trace format
-  const mapTrace = useCallback((t: any): Trace => ({
-    id: t.trace_id,
-    taskId: t.task_id,
-    taskDescription: t.task_description,
-    status: t.status,
-    qualityTier: t.quality_tier || undefined,
-    steps: [],
-    quality: {
-      successRate: t.quality.success_rate,
-      verificationScore: t.quality.verification_score,
-      complexityScore: t.quality.complexity_score,
-      lengthScore: t.quality.length_score,
-      toolDiversity: t.quality.tool_diversity || 0,
-      efficiencyScore: t.quality.efficiency_score || 0,
-      cognitiveQuality: t.quality.cognitive_quality || 0,
-      totalScore: t.quality.total_score
-    },
-    repo: t.repo ? {
-      name: t.repo.name,
-      path: t.repo.path,
-      is_git_repo: t.repo.is_git_repo,
-      git_branch: t.repo.git_branch,
-      git_remote: t.repo.git_remote
-    } : undefined,
-    reposCount: t.repos_count || 1,
-    toolBreakdown: t.tool_breakdown,
-    createdAt: t.created_at ? new Date(t.created_at).getTime() : Date.now(),
-    promotedAt: t.promoted_at ? new Date(t.promoted_at).getTime() : undefined
-  }), [])
-
-  // Fetch first page of traces from API (respects current filters)
-  const fetchTraces = useCallback(async () => {
-    setIsLoading(true)
-    setError(null)
-    try {
-      const result = await tracesApi.list({
-        limit: PAGE_SIZE,
-        offset: 0,
-        status: statusFilter !== 'all' ? statusFilter : undefined,
-        repo: repoFilter || undefined,
-        source_tool: selectedSource || undefined,
-      })
-      if (result.ok && result.data) {
-        // Handle both paginated { traces, total, counts } and legacy array responses
-        const traceList = Array.isArray(result.data) ? result.data : result.data.traces
-        const total = Array.isArray(result.data) ? result.data.length : result.data.total
-        const mappedTraces = (traceList || []).map(mapTrace)
-        setTraces(mappedTraces)
-        setTotalTraces(total)
-        setHasMore(!Array.isArray(result.data) && result.data.offset + result.data.limit < total)
-        // Use server-side counts for accurate totals across all traces
-        if (!Array.isArray(result.data) && result.data.counts) {
-          setCounts(result.data.counts)
-        }
-      } else {
-        setError(result.error || 'Failed to fetch traces')
-      }
-    } catch (e) {
-      setError(String(e))
-    } finally {
-      setIsLoading(false)
-    }
-  }, [setTraces, setCounts, mapTrace, statusFilter, repoFilter, selectedSource])
-
-  // Load next page of traces
-  const loadMore = useCallback(async () => {
-    setLoadingMore(true)
-    try {
-      const result = await tracesApi.list({
-        limit: PAGE_SIZE,
-        offset: traces.length,
-        status: statusFilter !== 'all' ? statusFilter : undefined,
-        repo: repoFilter || undefined,
-        source_tool: selectedSource || undefined,
-      })
-      if (result.ok && result.data) {
-        const traceList = Array.isArray(result.data) ? result.data : result.data.traces
-        const total = Array.isArray(result.data) ? result.data.length : result.data.total
-        const mappedTraces = (traceList || []).map(mapTrace)
-        setTraces([...traces, ...mappedTraces])
-        setTotalTraces(total)
-        setHasMore(!Array.isArray(result.data) && result.data.offset + result.data.limit < total)
-        if (!Array.isArray(result.data) && result.data.counts) {
-          setCounts(result.data.counts)
-        }
-      }
-    } catch (e) {
-      console.error('Failed to load more traces:', e)
-    } finally {
-      setLoadingMore(false)
-    }
-  }, [traces, setTraces, setCounts, mapTrace, statusFilter, repoFilter, selectedSource])
-
-  // Fetch trace stats for the timeline chart
-  const fetchStats = useCallback(async () => {
-    setStatsLoading(true)
-    try {
-      const result = await tracesApi.stats({ range: timeRange })
-      if (result.ok && result.data) {
-        setTimelineData(result.data.timeline)
-      }
-    } catch (e) {
-      console.error('Failed to fetch trace stats:', e)
-    } finally {
-      setStatsLoading(false)
-    }
-  }, [timeRange])
-
-  // Mount-only: repos, import check
+  // Mount-only: check for traces imported since the last visit
   useEffect(() => {
-    tracesApi.listRepos().then((result) => {
-      if (result.ok && result.data) {
-        setAvailableRepos(result.data)
-      }
-    })
-
     const lastVisit = localStorage.getItem(TRACES_VISIT_KEY)
     if (lastVisit) {
       tracesApi.importSince(lastVisit).then((result) => {
@@ -285,17 +170,12 @@ export function TraceBrowser() {
       }).catch(() => {})
     }
     localStorage.setItem(TRACES_VISIT_KEY, new Date().toISOString())
-  }, [setAvailableRepos])
+  }, [])
 
-  // Fetch stats when timeRange changes
+  // Serve cached traces instantly; fetch only when the query changes
   useEffect(() => {
-    fetchStats()
-  }, [fetchStats])
-
-  // Re-fetch traces when filters change (statusFilter, repoFilter are in fetchTraces deps)
-  useEffect(() => {
-    fetchTraces()
-  }, [fetchTraces])
+    void ensureTraces({ status: statusFilter, repo: repoFilter, sourceTool: selectedSource })
+  }, [ensureTraces, statusFilter, repoFilter, selectedSource])
 
   // Generate training examples for selected trace
   const generateExamples = useCallback(async () => {
@@ -387,7 +267,7 @@ export function TraceBrowser() {
         })
         if (!dryRun) {
           // Refresh traces after classification
-          fetchTraces()
+          void refreshTraces()
           setShowClassifyModal(false)
         } else {
           setShowClassifyModal(true)
@@ -398,7 +278,7 @@ export function TraceBrowser() {
     } finally {
       setClassifyLoading(false)
     }
-  }, [fetchTraces])
+  }, [refreshTraces])
 
   // Import traces from a specific source or all sources
   const handleImport = useCallback(async (source: string | 'all') => {
@@ -422,22 +302,22 @@ export function TraceBrowser() {
         }
       }
       // Refresh trace list after import
-      fetchTraces()
+      void refreshTraces()
     } finally {
       setImportingSource(null)
     }
-  }, [fetchTraces])
+  }, [refreshTraces])
 
   // Sync traces
   const handleSync = useCallback(async () => {
     setImportingSource('sync')
     try {
       await tracesApi.sync()
-      fetchTraces()
+      void refreshTraces()
     } finally {
       setImportingSource(null)
     }
-  }, [fetchTraces])
+  }, [refreshTraces])
 
   // Compute import summary for status line
   const importSummary = (() => {
@@ -630,7 +510,7 @@ export function TraceBrowser() {
             )}
 
             {/* File upload for ChatGPT / MCP imports */}
-            <TraceUpload onImportComplete={() => fetchTraces()} />
+            <TraceUpload onImportComplete={() => void refreshTraces()} />
           </div>
         )}
       </div>
@@ -802,15 +682,15 @@ export function TraceBrowser() {
 
         {/* Trace List */}
         <div className="flex-1 overflow-y-auto">
-          {isLoading ? (
+          {listLoading ? (
             <div className="flex items-center justify-center h-32">
               <RefreshCw className="w-5 h-5 animate-spin text-text-muted" />
               <span className="ml-2 text-sm font-mono text-text-muted">Loading traces...</span>
             </div>
-          ) : error ? (
+          ) : listError && displayTraces.length === 0 ? (
             <div className="p-4 text-center">
-              <p className="text-sm text-status-error font-mono mb-2">{error}</p>
-              <button onClick={fetchTraces} className="btn-secondary text-sm">
+              <p className="text-sm text-status-error font-mono mb-2">{listError}</p>
+              <button onClick={() => void refreshTraces()} className="btn-secondary text-sm">
                 <RefreshCw className="w-4 h-4" /> Retry
               </button>
             </div>
@@ -875,7 +755,7 @@ export function TraceBrowser() {
           ))}
           {hasMore && (
             <button
-              onClick={loadMore}
+              onClick={() => void loadMoreTraces()}
               disabled={loadingMore}
               className="w-full py-2 text-xs font-mono font-semibold text-accent-dark hover:bg-accent-light transition-colors border-b border-brutal border-border"
             >

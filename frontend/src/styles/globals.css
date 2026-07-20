@@ -27,8 +27,8 @@
 
   /* Text */
   --text-primary: #1e1e24;
-  --text-secondary: #6b6a68;
-  --text-muted: #9b9a97;
+  --text-secondary: #575654;
+  --text-muted: #767471;
 
   /* Brutalist structure */
   --border-color: var(--text-primary);

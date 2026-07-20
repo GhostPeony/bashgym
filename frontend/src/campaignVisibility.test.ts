@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   toCampaignActivityFields,
+  toCampaignArtifactPreview,
   toCampaignPublicArtifact,
 } from './campaignVisibility'
 
@@ -48,6 +49,8 @@ test('Activity projector explicitly picks approved public primitives', () => {
 
   assert.deepEqual(fields, {
     event_id: 'event-1',
+    workspace_id: 'workspace-a',
+    campaign_id: 'campaign-1',
     aggregate_version: 3,
     action_id: 'action-1',
     stage: 'full_training',
@@ -100,4 +103,28 @@ test('artifact projector accepts only the exact frozen public shape', () => {
     ...artifact(),
     schema_name: 'candidate-map-canary',
   }), null)
+})
+
+test('artifact projector accepts the public query-format ablation manifest', () => {
+  assert.notEqual(toCampaignPublicArtifact({
+    ...artifact(),
+    schema_name: 'query_format_ablation_manifest.v2',
+  }), null)
+})
+
+test('artifact preview projector rejects extra private fields and oversized content', () => {
+  const preview = {
+    schema_version: 'public_campaign_artifact_preview.v1',
+    artifact_id: 'artifact-1',
+    preview_kind: 'text',
+    content: 'step=40 loss=0.3',
+    truncated: false,
+    redaction_count: 0,
+    integrity_verified: true,
+    unavailable_reason: null,
+  }
+  assert.deepEqual(toCampaignArtifactPreview(preview), preview)
+  assert.equal(toCampaignArtifactPreview({ ...preview, uri: 'C:/private/log' }), null)
+  assert.equal(toCampaignArtifactPreview({ ...preview, content: 'x'.repeat(65_537) }), null)
+  assert.equal(toCampaignArtifactPreview({ ...preview, integrity_verified: false }), null)
 })

@@ -175,7 +175,7 @@ export function AutoResearchSetupFlow({
       {!isLive ? (
         <div className="flex items-start gap-2 border-l-4 border-status-warning bg-status-warning/10 px-3 py-2 text-sm text-text-primary" role="status" aria-live="polite">
           <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-status-warning" aria-hidden="true" />
-          <p>Live authority is unavailable. Existing receipts and remediation remain available; durable actions stay disabled.</p>
+          <p>Connection lost — setup is read-only. Receipts and remediation stay visible; actions unlock on reconnect.</p>
         </div>
       ) : null}
 
@@ -244,7 +244,7 @@ export function AutoResearchSetupFlow({
           ) : null}
 
           <section className="border-l-2 border-accent/60 pl-3 text-xs leading-5 text-text-secondary" aria-label="Compute policy">
-            <strong className="font-semibold text-text-primary">Private compute is primary.</strong> Optional integrations require an explicit operator choice and never replace a registered private SSH target.
+            <strong className="font-semibold text-text-primary">Runs on hardware you choose.</strong> This machine or any SSH target you've registered — hosted integrations join only when you explicitly connect them.
             {model.optionalIntegrations.length > 0 ? (
               <ul className="mt-2 space-y-1 font-mono text-[10px] text-text-muted">
                 {model.optionalIntegrations.map((integration) => <li key={integration.id}>{integration.label} · optional · {integration.status}</li>)}

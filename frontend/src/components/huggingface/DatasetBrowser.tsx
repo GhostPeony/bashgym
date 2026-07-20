@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
 import {
   Upload,
   Trash2,
@@ -11,41 +11,32 @@ import {
 } from 'lucide-react'
 import { hfApi } from '../../services/api'
 import { clsx } from 'clsx'
+import { hfDatasetsResource } from '../../stores/hfResources'
+import { useKeyedSessionResource } from '../../stores/sessionResource'
 
 interface DatasetBrowserProps {
   className?: string
 }
 
 export function DatasetBrowser({ className }: DatasetBrowserProps) {
-  const [datasets, setDatasets] = useState<string[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
   const [prefix, setPrefix] = useState('bashgym')
-
-  const fetchDatasets = useCallback(async () => {
-    setLoading(true)
-    const result = await hfApi.listDatasets(prefix)
-    if (result.ok && result.data) {
-      setDatasets(result.data)
-      setError(null)
-    } else {
-      setError(result.error || 'Failed to fetch datasets')
-    }
-    setLoading(false)
-  }, [prefix])
-
-  useEffect(() => {
-    fetchDatasets()
-  }, [fetchDatasets])
+  const { data, loading, refreshing, error: fetchError, refresh } = useKeyedSessionResource(
+    hfDatasetsResource,
+    prefix
+  )
+  const datasets = data ?? []
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const error = deleteError || fetchError
 
   const handleDelete = async (repoName: string) => {
     if (!confirm(`Delete dataset "${repoName}"? This cannot be undone.`)) return
 
     const result = await hfApi.deleteDataset(repoName)
     if (result.ok) {
-      fetchDatasets()
+      setDeleteError(null)
+      refresh()
     } else {
-      setError(result.error || 'Failed to delete dataset')
+      setDeleteError(result.error || 'Failed to delete dataset')
     }
   }
 
@@ -85,11 +76,11 @@ export function DatasetBrowser({ className }: DatasetBrowserProps) {
             />
           </div>
           <button
-            onClick={fetchDatasets}
+            onClick={() => refresh()}
             className="btn-icon"
             title="Refresh"
           >
-            <RefreshCw className="w-4 h-4 text-text-secondary" />
+            <RefreshCw className={clsx('w-4 h-4 text-text-secondary', refreshing && 'animate-spin')} />
           </button>
         </div>
       </div>

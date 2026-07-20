@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useEffect } from 'react'
 import { Sparkles, Loader2 } from 'lucide-react'
-import { hfApi, HFStatus as HFStatusType } from '../../services/api'
 import { clsx } from 'clsx'
 import { GhostPeonyIcon } from '../common/GhostPeonyIcon'
+import { hfStatusResource } from '../../stores/hfResources'
+import { useSessionResource } from '../../stores/sessionResource'
 
 interface HFStatusProps {
   compact?: boolean
@@ -10,26 +11,13 @@ interface HFStatusProps {
 }
 
 export function HFStatus({ compact = false, onClick }: HFStatusProps) {
-  const [status, setStatus] = useState<HFStatusType | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const { data: status, loading, error } = useSessionResource(hfStatusResource)
 
   useEffect(() => {
-    const fetchStatus = async () => {
-      setLoading(true)
-      const result = await hfApi.getStatus()
-      if (result.ok && result.data) {
-        setStatus(result.data)
-        setError(null)
-      } else {
-        setError(result.error || 'Failed to fetch HuggingFace status')
-      }
-      setLoading(false)
-    }
-
-    fetchStatus()
-    // Refresh every 60 seconds
-    const interval = setInterval(fetchStatus, 60000)
+    // Refresh every 60 seconds while mounted
+    const interval = setInterval(() => {
+      void hfStatusResource.getState().refresh()
+    }, 60000)
     return () => clearInterval(interval)
   }, [])
 

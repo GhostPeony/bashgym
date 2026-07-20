@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import {
   Activity,
   Clock,
@@ -18,7 +18,13 @@ import {
   X,
 } from 'lucide-react'
 import { clsx } from 'clsx'
-import { observabilityApi, TraceSummary, TraceDetail, ToolStat, ObservabilityMetrics } from '../../services/api'
+import { observabilityApi, TraceSummary, TraceDetail } from '../../services/api'
+import {
+  profilerMetricsResource,
+  profilerToolStatsResource,
+  profilerTracesResource,
+} from '../../stores/opsResources'
+import { useSessionResource } from '../../stores/sessionResource'
 import { SpanTimeline } from './SpanTimeline'
 
 interface ProfileMetric {
@@ -44,80 +50,70 @@ export function ProfilerDashboard() {
   const [selectedTrace, setSelectedTrace] = useState<TraceDetail | null>(null)
   const [isLoadingDetail, setIsLoadingDetail] = useState(false)
 
-  // API data
-  const [metrics, setMetrics] = useState<ObservabilityMetrics | null>(null)
-  const [traces, setTraces] = useState<TraceSummary[]>([])
-  const [toolStats, setToolStats] = useState<ToolStat[]>([])
-  const [isLoadingMetrics, setIsLoadingMetrics] = useState(false)
-  const [isLoadingTraces, setIsLoadingTraces] = useState(false)
+  // API data (session-cached; pages render instantly on remount)
+  const {
+    data: metrics,
+    loading: metricsLoading,
+    refreshing: metricsRefreshing,
+    error: metricsError,
+  } = useSessionResource(profilerMetricsResource)
+  const {
+    data: tracesData,
+    loading: tracesLoading,
+    refreshing: tracesRefreshing,
+    error: tracesError,
+  } = useSessionResource(profilerTracesResource)
+  const { data: toolStatsData } = useSessionResource(profilerToolStatsResource)
+  const traces = tracesData ?? []
+  const toolStats = toolStatsData ?? []
+  const isFetching = metricsLoading || metricsRefreshing || tracesLoading || tracesRefreshing
   const [error, setError] = useState<string | null>(null)
 
+  // Surface fetch errors in the dismissible banner
+  useEffect(() => {
+    setError(metricsError || tracesError || null)
+  }, [metricsError, tracesError])
+
+  const refreshAll = useCallback(() => {
+    void profilerMetricsResource.getState().refresh()
+    void profilerTracesResource.getState().refresh()
+    void profilerToolStatsResource.getState().refresh()
+  }, [])
+
   // Computed metrics for display
-  const [displayMetrics, setDisplayMetrics] = useState<ProfileMetric[]>([])
+  const displayMetrics = useMemo<ProfileMetric[]>(() => {
+    if (!metrics) return []
+    const profilerData = metrics.profiler
+    const newMetrics: ProfileMetric[] = []
+    const accents = ['--chart-1', '--chart-2', '--chart-3', '--chart-4']
 
-  // Fetch metrics
-  const fetchMetrics = useCallback(async () => {
-    setIsLoadingMetrics(true)
-    setError(null)
-    const result = await observabilityApi.getMetrics()
-    if (result.ok && result.data) {
-      setMetrics(result.data)
-
-      const profilerData = result.data.profiler
-      const newMetrics: ProfileMetric[] = []
-      const accents = ['--chart-1', '--chart-2', '--chart-3', '--chart-4']
-
-      if (profilerData.total_traces !== undefined) {
-        newMetrics.push({
-          name: 'Total Traces', value: profilerData.total_traces,
-          unit: '', trend: 'stable', change: 0, accentVar: accents[0],
-        })
-      }
-      if (profilerData.avg_duration_ms !== undefined) {
-        newMetrics.push({
-          name: 'Avg Duration', value: Math.round(profilerData.avg_duration_ms),
-          unit: 'ms', trend: 'stable', change: 0, accentVar: accents[1],
-        })
-      }
-      if (profilerData.total_tokens !== undefined) {
-        newMetrics.push({
-          name: 'Total Tokens', value: profilerData.total_tokens,
-          unit: '', trend: 'stable', change: 0, accentVar: accents[2],
-        })
-      }
-      if (profilerData.avg_tokens_per_trace !== undefined) {
-        newMetrics.push({
-          name: 'Avg Tokens/Trace', value: Math.round(profilerData.avg_tokens_per_trace),
-          unit: '', trend: 'stable', change: 0, accentVar: accents[3],
-        })
-      }
-
-      setDisplayMetrics(newMetrics)
-    } else if (!result.ok) {
-      setError(result.error || 'Failed to fetch metrics')
+    if (profilerData.total_traces !== undefined) {
+      newMetrics.push({
+        name: 'Total Traces', value: profilerData.total_traces,
+        unit: '', trend: 'stable', change: 0, accentVar: accents[0],
+      })
     }
-    setIsLoadingMetrics(false)
-  }, [])
-
-  // Fetch traces
-  const fetchTraces = useCallback(async () => {
-    setIsLoadingTraces(true)
-    const result = await observabilityApi.listTraces(50, 0)
-    if (result.ok && result.data) {
-      setTraces(result.data.traces)
-    } else if (!result.ok) {
-      setError(prev => prev || (result.error || 'Failed to fetch traces'))
+    if (profilerData.avg_duration_ms !== undefined) {
+      newMetrics.push({
+        name: 'Avg Duration', value: Math.round(profilerData.avg_duration_ms),
+        unit: 'ms', trend: 'stable', change: 0, accentVar: accents[1],
+      })
     }
-    setIsLoadingTraces(false)
-  }, [])
-
-  // Fetch tool stats
-  const fetchToolStats = useCallback(async () => {
-    const result = await observabilityApi.getToolStats()
-    if (result.ok && result.data) {
-      setToolStats(result.data)
+    if (profilerData.total_tokens !== undefined) {
+      newMetrics.push({
+        name: 'Total Tokens', value: profilerData.total_tokens,
+        unit: '', trend: 'stable', change: 0, accentVar: accents[2],
+      })
     }
-  }, [])
+    if (profilerData.avg_tokens_per_trace !== undefined) {
+      newMetrics.push({
+        name: 'Avg Tokens/Trace', value: Math.round(profilerData.avg_tokens_per_trace),
+        unit: '', trend: 'stable', change: 0, accentVar: accents[3],
+      })
+    }
+
+    return newMetrics
+  }, [metrics])
 
   // Fetch full trace detail
   const selectTrace = useCallback(async (trace: TraceSummary) => {
@@ -132,23 +128,12 @@ export function ProfilerDashboard() {
     setIsLoadingDetail(false)
   }, [])
 
-  // Initial fetch
-  useEffect(() => {
-    fetchMetrics()
-    fetchTraces()
-    fetchToolStats()
-  }, [fetchMetrics, fetchTraces, fetchToolStats])
-
-  // Live polling
+  // Live polling; refreshes land in the shared cache
   useEffect(() => {
     if (!isLive) return
-    const interval = setInterval(() => {
-      fetchMetrics()
-      fetchTraces()
-      fetchToolStats()
-    }, 5000)
+    const interval = setInterval(refreshAll, 5000)
     return () => clearInterval(interval)
-  }, [isLive, fetchMetrics, fetchTraces, fetchToolStats])
+  }, [isLive, refreshAll])
 
   const getToolIcon = (tool: string) => {
     switch (tool) {
@@ -233,11 +218,11 @@ export function ProfilerDashboard() {
               )}
             </button>
             <button
-              onClick={() => { fetchMetrics(); fetchTraces(); fetchToolStats(); }}
-              disabled={isLoadingMetrics || isLoadingTraces}
+              onClick={refreshAll}
+              disabled={isFetching}
               className="btn-secondary flex items-center gap-2"
             >
-              <RefreshCw className={clsx('w-4 h-4', (isLoadingMetrics || isLoadingTraces) && 'animate-spin')} />
+              <RefreshCw className={clsx('w-4 h-4', isFetching && 'animate-spin')} />
               Refresh
             </button>
             <button onClick={handleExport} className="btn-secondary flex items-center gap-2">
@@ -325,10 +310,10 @@ export function ProfilerDashboard() {
               <div className="card p-8 text-center">
                 <Activity className="w-12 h-12 text-text-muted mx-auto mb-3" />
                 <h3 className="font-brand text-xl text-text-primary mb-2">
-                  {isLoadingMetrics ? 'Loading metrics...' : 'No profiler data yet'}
+                  {metricsLoading ? 'Loading metrics...' : 'No profiler data yet'}
                 </h3>
                 <p className="text-sm text-text-muted">
-                  {isLoadingMetrics ? 'Please wait' : 'Run tasks to collect profiler metrics'}
+                  {metricsLoading ? 'Please wait' : 'Run tasks to collect profiler metrics'}
                 </p>
               </div>
             )}

@@ -106,6 +106,18 @@ test('campaign bridge allowlists exact REST routes and rejects renderer escape h
     undefined,
     { workspace_id: 'workspace-a', after_cursor: 'artifact-4', limit: 25 },
   )
+  validateCampaignRequest(
+    'GET',
+    '/api/campaigns/campaign-1/artifacts/artifact-1/preview',
+    undefined,
+    { workspace_id: 'workspace-a' },
+  )
+  assert.throws(() => validateCampaignRequest(
+    'GET',
+    '/api/campaigns/campaign-1/artifacts/artifact-1/preview',
+    undefined,
+    { workspace_id: 'workspace-a', path: 'C:/private' },
+  ), /query field is not allowlisted/i)
   validateCampaignRequest('POST', '/api/campaigns/campaign-1/budget/amend', {
     workspace_id: 'workspace-a',
     expected_version: 4,
@@ -537,6 +549,59 @@ test('main-only client attaches access token and retries one 401 with stable mut
   assert.equal(firstHeaders['X-Correlation-ID'], 'desktop-fixed-request-id')
   assert.equal(JSON.stringify(result).includes('bgca.'), false)
   assert.equal(JSON.stringify(result).includes('bgcb.'), false)
+})
+
+test('campaign bridge bounds auth exchange and campaign REST transport', async () => {
+  const waitForAbort = (signal: AbortSignal | null | undefined): Promise<Response> => {
+    assert.ok(signal, 'campaign bridge fetches must carry a timeout signal')
+    return new Promise((_resolve, reject) => {
+      if (signal.aborted) {
+        reject(signal.reason)
+        return
+      }
+      const guard = setTimeout(() => reject(new Error('timeout signal did not abort')), 100)
+      signal.addEventListener('abort', () => {
+        clearTimeout(guard)
+        reject(signal.reason)
+      }, { once: true })
+    })
+  }
+  const bootstrap = `bgcb.launch.${'s'.repeat(48)}`
+  const authClient = new CampaignBridgeClient(
+    'http://127.0.0.1:8003',
+    bootstrap,
+    async (_input, init) => waitForAbort(init?.signal),
+    () => 'bounded-auth-request',
+    5,
+  )
+
+  await assert.rejects(
+    () => authClient.initialize(),
+    (error: Error) => error.name === 'TimeoutError',
+  )
+
+  const requestClient = new CampaignBridgeClient(
+    'http://127.0.0.1:8003',
+    bootstrap,
+    async (input, init) => String(input).endsWith('/api/campaign-auth/exchange')
+      ? new Response(JSON.stringify({ raw_token: `bgca.access-1.${'a'.repeat(48)}` }), { status: 200 })
+      : waitForAbort(init?.signal),
+    () => 'bounded-rest-request',
+    5,
+  )
+
+  const response = await requestClient.request(
+    'GET',
+    '/api/campaigns',
+    undefined,
+    { workspace_id: 'workspace-a' },
+  )
+  assert.deepEqual(response, {
+    ok: false,
+    status: 503,
+    code: 'campaign_backend_unavailable',
+    error: 'The campaign service did not respond in time.',
+  })
 })
 
 test('main-only client forwards an exact server-issued human-work idempotency key', async () => {

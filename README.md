@@ -515,9 +515,10 @@ as an executed resume.
 
 Three earlier prototype loops remain behind the temporary
 `/api/autoresearch/*` compatibility API for hyperparameter, trace-curation, and
-schema exploration. They are not part of the official Control Room, have no
-renderer-owned state surface, and must not be presented as durable campaign
-evidence:
+schema exploration. These routes are hidden by default; set
+`BASHGYM_ENABLE_LEGACY_AUTORESEARCH=true` to re-expose them. They are not part
+of the official Control Room, have no renderer-owned state surface, and must
+not be presented as durable campaign evidence:
 
 | Mode | What It Evolves | What It Searches | How It Evaluates |
 |------|----------------|-----------------|-----------------|

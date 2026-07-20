@@ -555,6 +555,16 @@ nvidia-smi -l 1
 - Empty `selected_repos` array means train on all gold traces
 - Training Dashboard shows which repos are being used
 
+### Frontend Data Loading (Session Cache)
+
+Pages unmount on navigation (`MainLayout` renders overlays conditionally), so page data must NEVER live in component `useState` fetched by a mount effect — that pattern re-fetches and blanks the page on every tab switch. Instead:
+
+- **Data, error, and load lifecycle live in a store or session resource** (`frontend/src/stores/sessionResource.ts`): `createSessionResource` / `createKeyedSessionResource` + `useSessionResource` / `useKeyedSessionResource`. Shared app-wide resources are in `frontend/src/stores/appResources.ts` (hardware info, Ollama status, trace repos/counts/stats, SSH preflight); domain resources in `modelResources.ts`, `hfResources.ts`, `factoryResources.ts`, `opsResources.ts`.
+- **Fetch once per app session**: `ensureLoaded()` serves the cache on remount; hardware detection runs once until the app restarts.
+- **Spinner only when there is no cached data.** Refresh via `refresh()` is background-only and never blanks the UI; failed refreshes keep stale data and surface `error`.
+- **Polling `setInterval`s stay in components** (mount-scoped) so hidden pages never poll; ticks call `refresh()`.
+- Complex pages keep their zustand store but move the fetch lifecycle into it with ensure semantics (`tracesStore.ensureTraces`, `campaignStore.load` guard, `controlRoomSnapshotCache` for Control Room panels).
+
 ### Frontend Configuration
 
 Frontend environment variables in `frontend/.env.local`:

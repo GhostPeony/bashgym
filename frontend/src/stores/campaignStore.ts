@@ -416,13 +416,14 @@ interface CampaignState {
   refresh: (workspaceId: string, campaignId: string) => Promise<void>
   loadEventsPage: (workspaceId: string, campaignId: string) => Promise<void>
   loadArtifactsPage: (workspaceId: string, campaignId: string) => Promise<void>
+  loadAttemptMetrics: (workspaceId: string, campaignId: string, attemptId: string) => Promise<void>
   loadLegacyDetail: (workspaceId: string, campaignId: string) => Promise<void>
   refreshController: (workspaceId: string) => Promise<void>
   select: (workspaceId: string, campaignId: string) => Promise<void>
   transition: (
     workspaceId: string,
     campaignId: string,
-    action: 'start' | 'pause' | 'resume' | 'cancel',
+    action: 'start' | 'pause' | 'resume' | 'cancel' | 'conclude',
     expectedVersion: number,
     reason?: string,
   ) => Promise<boolean>
@@ -458,6 +459,7 @@ const controllerRefreshInFlight = new Map<string, Promise<void>>()
 const controllerRefreshAt = new Map<string, number>()
 const eventPageInFlight = new Map<string, Promise<void>>()
 const artifactPageInFlight = new Map<string, Promise<void>>()
+const attemptMetricsInFlight = new Map<string, Promise<void>>()
 const snapshotInFlight = new Map<string, Promise<void>>()
 const hintReconciliationInFlight = new Map<string, {
   controller: AbortController
@@ -1108,6 +1110,72 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
       })
     })().finally(() => artifactPageInFlight.delete(requestKey))
     artifactPageInFlight.set(requestKey, request)
+    return request
+  },
+
+  loadAttemptMetrics: (workspaceId, campaignId, attemptId) => {
+    const requestKey = `${workspaceId}\u0000${campaignId}\u0000${attemptId}`
+    const existing = attemptMetricsInFlight.get(requestKey)
+    if (existing) return existing
+    const detail = get().workspaces[workspaceId]?.details[campaignId]
+    if (!detail || detail.snapshot?.active_work?.attempt_id !== attemptId) return Promise.resolve()
+    const requestGeneration = detail.reconciliation.generation
+    const currentValues = detail.lossByAttempt[attemptId] || []
+    const afterStep = currentValues.reduce((latest, point) => Math.max(latest, point.step), -1)
+    const request = (async () => {
+      const response = await campaignApi.metrics(
+        workspaceId,
+        campaignId,
+        attemptId,
+        'training_metrics.jsonl',
+        'loss',
+        afterStep,
+        2000,
+      )
+      if (!response.ok || !response.data) return
+      const incoming = response.data.values.filter((point) => (
+        Number.isSafeInteger(point.step)
+        && point.step >= 0
+        && point.source === 'training_metrics.jsonl'
+        && Number.isFinite(point.value)
+        && typeof point.observed_at === 'string'
+      ))
+      set((state) => {
+        const workspace = state.workspaces[workspaceId]
+        const current = workspace?.details[campaignId]
+        if (
+          !workspace
+          || !current
+          || current.reconciliation.generation !== requestGeneration
+          || current.snapshot?.active_work?.attempt_id !== attemptId
+        ) return state
+        const byPoint = new Map(
+          (current.lossByAttempt[attemptId] || []).map((point) => [`${point.source}:${point.step}`, point])
+        )
+        for (const point of incoming) byPoint.set(`${point.source}:${point.step}`, point)
+        const values = Array.from(byPoint.values())
+          .sort((left, right) => left.step - right.step || left.source.localeCompare(right.source))
+          .slice(-500)
+        return {
+          workspaces: {
+            ...state.workspaces,
+            [workspaceId]: {
+              ...workspace,
+              details: {
+                ...workspace.details,
+                [campaignId]: {
+                  ...current,
+                  lossByAttempt: { ...current.lossByAttempt, [attemptId]: values },
+                },
+              },
+            },
+          },
+        }
+      })
+    })().finally(() => {
+      if (attemptMetricsInFlight.get(requestKey) === request) attemptMetricsInFlight.delete(requestKey)
+    })
+    attemptMetricsInFlight.set(requestKey, request)
     return request
   },
 

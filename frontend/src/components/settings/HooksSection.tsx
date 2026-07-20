@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useMemo } from 'react'
 import {
   CheckCircle,
   XCircle,
@@ -17,6 +17,8 @@ import {
   Settings
 } from 'lucide-react'
 import { hooksApi, ToolStatus } from '../../services/api'
+import { hooksStatusResource } from '../../stores/opsResources'
+import { useSessionResource } from '../../stores/sessionResource'
 import { useTutorialComplete } from '../../hooks'
 import { clsx } from 'clsx'
 import { isWeb } from '../../utils/platform'
@@ -262,18 +264,13 @@ function OpenCodeLocalModelGuide() {
 }
 
 export function HooksSection() {
-  const [tools, setTools] = useState<ToolStatus[]>([])
-  const [isLoading, setIsLoading] = useState(true)
+  const { data: hooksStatus, loading: isLoading, error: apiError, refresh } = useSessionResource(hooksStatusResource)
   const [installingTool, setInstallingTool] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [installResult, setInstallResult] = useState<{ success: boolean; message: string } | null>(null)
-  const [apiError, setApiError] = useState<string | null>(null)
   const { complete: completeTutorialStep } = useTutorialComplete()
 
-  const fetchStatus = useCallback(async () => {
-    setIsLoading(true)
-    setApiError(null)
-
+  const tools = useMemo<ToolStatus[]>(() => {
     // Default tools that should always be shown
     const defaultTools: ToolStatus[] = [
       { name: 'Claude Code', installed: false, hooks_installed: false, hooks_path: null, adapter_type: 'claude_code' },
@@ -283,60 +280,43 @@ export function HooksSection() {
       { name: 'Copilot CLI', installed: false, hooks_installed: false, hooks_path: null, adapter_type: 'copilot_cli' },
     ]
 
-    try {
-      const result = await hooksApi.getStatus()
-      if (result.ok && result.data) {
-        if (result.data.tools && Array.isArray(result.data.tools)) {
-          // Merge API tools with defaults to ensure all supported tools always appear
-          const apiToolsMap = new Map(result.data.tools.map((t: ToolStatus) => [t.name, t]))
-          const defaultNames = new Set(defaultTools.map(dt => dt.name))
-          const mergedTools = defaultTools.map(dt => {
-            const apiTool = apiToolsMap.get(dt.name)
-            return apiTool ? { ...dt, ...apiTool } : dt
-          })
-          // Append any API tools not already in defaults
-          for (const [name, tool] of apiToolsMap) {
-            if (!defaultNames.has(name)) {
-              mergedTools.push(tool)
-            }
-          }
-          setTools(mergedTools)
-        } else if (result.data.all_installed !== undefined) {
-          // Legacy format - Claude Code only
-          setTools([
-            {
-              name: 'Claude Code',
-              installed: true,
-              hooks_installed: result.data.all_installed || false,
-              hooks_path: result.data.hooks_dir || null,
-              adapter_type: 'claude_code'
-            },
-            {
-              name: 'OpenCode',
-              installed: false,
-              hooks_installed: false,
-              hooks_path: null,
-              adapter_type: 'opencode'
-            }
-          ])
-        } else {
-          setTools(defaultTools)
+    if (hooksStatus?.tools && Array.isArray(hooksStatus.tools)) {
+      // Merge API tools with defaults to ensure all supported tools always appear
+      const apiToolsMap = new Map(hooksStatus.tools.map((t: ToolStatus) => [t.name, t]))
+      const defaultNames = new Set(defaultTools.map(dt => dt.name))
+      const mergedTools = defaultTools.map(dt => {
+        const apiTool = apiToolsMap.get(dt.name)
+        return apiTool ? { ...dt, ...apiTool } : dt
+      })
+      // Append any API tools not already in defaults
+      for (const [name, tool] of apiToolsMap) {
+        if (!defaultNames.has(name)) {
+          mergedTools.push(tool)
         }
-      } else {
-        setApiError(result.error || 'Failed to connect to API')
-        setTools(defaultTools)
       }
-    } catch (_err) {
-      setApiError('API server not running')
-      setTools(defaultTools)
-    } finally {
-      setIsLoading(false)
+      return mergedTools
     }
-  }, [])
-
-  useEffect(() => {
-    fetchStatus()
-  }, [fetchStatus])
+    if (hooksStatus?.all_installed !== undefined) {
+      // Legacy format - Claude Code only
+      return [
+        {
+          name: 'Claude Code',
+          installed: true,
+          hooks_installed: hooksStatus.all_installed || false,
+          hooks_path: hooksStatus.hooks_dir || null,
+          adapter_type: 'claude_code'
+        },
+        {
+          name: 'OpenCode',
+          installed: false,
+          hooks_installed: false,
+          hooks_path: null,
+          adapter_type: 'opencode'
+        }
+      ]
+    }
+    return defaultTools
+  }, [hooksStatus])
 
   const handleInstall = async (toolType: string) => {
     if (installingTool) return
@@ -360,7 +340,7 @@ export function HooksSection() {
         } else {
           setInstallResult({ success: false, message: result.data.errors?.join('; ') || 'Installation failed' })
         }
-        await fetchStatus()
+        await refresh()
       } else {
         setInstallResult({ success: false, message: result.error || 'Installation failed' })
       }
@@ -400,7 +380,7 @@ export function HooksSection() {
           </p>
         </div>
         <button
-          onClick={fetchStatus}
+          onClick={() => void refresh()}
           className="btn-icon w-8 h-8 text-text-muted"
           title="Refresh"
         >

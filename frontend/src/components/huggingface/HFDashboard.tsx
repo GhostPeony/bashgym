@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import {
   Server,
   Layers,
@@ -18,7 +18,7 @@ import {
   Search,
   FileText
 } from 'lucide-react'
-import { hfApi, HFStatus } from '../../services/api'
+import { hfApi } from '../../services/api'
 import { CloudTraining } from './CloudTraining'
 import { SpaceManager } from './SpaceManager'
 import { DatasetBrowser } from './DatasetBrowser'
@@ -28,12 +28,13 @@ import { ResearchTab } from './ResearchTab'
 import { TracesTab } from './TracesTab'
 import { clsx } from 'clsx'
 import { GhostPeonyIcon } from '../common/GhostPeonyIcon'
+import { hfStatusResource } from '../../stores/hfResources'
+import { useSessionResource } from '../../stores/sessionResource'
 
 type Tab = 'training' | 'spaces' | 'datasets' | 'models' | 'buckets' | 'research' | 'traces'
 
 export function HFDashboard() {
-  const [status, setStatus] = useState<HFStatus | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { data: status, loading, refresh: fetchStatus } = useSessionResource(hfStatusResource)
   const [activeTab, setActiveTab] = useState<Tab>('training')
 
   // Token configuration state
@@ -42,18 +43,6 @@ export function HFDashboard() {
   const [configuring, setConfiguring] = useState(false)
   const [configError, setConfigError] = useState<string | null>(null)
   const [configSuccess, setConfigSuccess] = useState(false)
-
-  const fetchStatus = async () => {
-    const result = await hfApi.getStatus()
-    if (result.ok && result.data) {
-      setStatus(result.data)
-    }
-    setLoading(false)
-  }
-
-  useEffect(() => {
-    fetchStatus()
-  }, [])
 
   const handleConfigureToken = async (e: React.FormEvent) => {
     e.preventDefault()

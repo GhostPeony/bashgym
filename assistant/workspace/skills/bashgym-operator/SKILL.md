@@ -63,8 +63,9 @@ Use the existing campaign ledger as the durable training-session record. Use `ge
 ## Run a durable AutoResearch campaign
 
 Use the campaign control plane for any new multi-iteration research loop. The
-legacy `/api/autoresearch/*` surface is prototype compatibility only and must not
-be used as the authoritative campaign record.
+legacy `/api/autoresearch/*` surface is prototype compatibility only, is hidden
+unless `BASHGYM_ENABLE_LEGACY_AUTORESEARCH=true`, and must not be used as the
+authoritative campaign record.
 
 An initial natural-language request to start AutoResearch authorizes discovery and preparation only. It does not authorize compute launch. Do not require the user to fill a configuration form or repeat decisions already present in the registered BashGym context.
 

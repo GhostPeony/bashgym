@@ -5857,8 +5857,11 @@ def create_app() -> FastAPI:
     # Include curated public source library routes
     app.include_router(source_router)
 
-    # Include AutoResearch routes (hyperparameter search)
-    app.include_router(autoresearch_router)
+    # Legacy prototype AutoResearch routes (in-process hyperparameter/trace/
+    # data-recipe/schema search). Superseded by the durable campaign surface
+    # under /api/campaigns/*; hidden unless explicitly re-enabled.
+    if os.environ.get("BASHGYM_ENABLE_LEGACY_AUTORESEARCH", "").lower() in {"1", "true", "yes"}:
+        app.include_router(autoresearch_router)
 
     # Include Cascade RL routes (domain-by-domain sequential training)
     app.include_router(cascade_router)

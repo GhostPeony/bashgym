@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import {
   FileText,
   Upload,
@@ -7,13 +7,8 @@ import {
   RefreshCw,
 } from 'lucide-react'
 import { hfApi } from '../../services/api'
-
-interface TraceDataset {
-  id: string
-  private: boolean | null
-  downloads: number
-  last_modified: string
-}
+import { hfTraceDatasetsResource } from '../../stores/hfResources'
+import { useSessionResource } from '../../stores/sessionResource'
 
 const DEFAULT_TRACE_DIRS = [
   '~/.bashgym/gold_traces_local',
@@ -22,8 +17,8 @@ const DEFAULT_TRACE_DIRS = [
 ]
 
 export function TracesTab() {
-  const [datasets, setDatasets] = useState<TraceDataset[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data, loading, refreshing, refresh } = useSessionResource(hfTraceDatasetsResource)
+  const datasets = data ?? []
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
@@ -32,17 +27,6 @@ export function TracesTab() {
   const [traceDir, setTraceDir] = useState(DEFAULT_TRACE_DIRS[0])
   const [repoId, setRepoId] = useState('')
   const [isPrivate, setIsPrivate] = useState(true)
-
-  const fetchDatasets = async () => {
-    setLoading(true)
-    const result = await hfApi.listTraceDatasets()
-    if (result.ok && result.data) {
-      setDatasets(result.data)
-    }
-    setLoading(false)
-  }
-
-  useEffect(() => { fetchDatasets() }, [])
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -60,7 +44,7 @@ export function TracesTab() {
 
     if (result.ok && result.data) {
       setSuccess(`Uploaded ${result.data.num_traces} traces to ${result.data.url}`)
-      await fetchDatasets()
+      await refresh()
     } else {
       setError(result.error || 'Upload failed')
     }
@@ -76,8 +60,8 @@ export function TracesTab() {
             Upload bashgym traces to HuggingFace Hub. HF auto-detects agent trace formats and provides a specialized viewer.
           </p>
         </div>
-        <button onClick={fetchDatasets} className="btn-icon" title="Refresh">
-          <RefreshCw className="w-4 h-4" />
+        <button onClick={() => refresh()} className="btn-icon" title="Refresh">
+          <RefreshCw className={`w-4 h-4${refreshing ? ' animate-spin' : ''}`} />
         </button>
       </div>
 

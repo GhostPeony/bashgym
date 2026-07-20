@@ -87,7 +87,7 @@ from bashgym.campaigns.runtime import (
     ActionIdentityMismatchError,
     CampaignRuntimeRepository,
 )
-from bashgym.campaigns.service import CampaignService
+from bashgym.campaigns.service import ArtifactPreviewIntegrityError, CampaignService
 from bashgym.campaigns.transitions import InvalidCampaignTransitionError
 from bashgym.campaigns.worker_service import (
     CONTROLLER_OFFLINE_GUIDANCE,
@@ -889,6 +889,14 @@ def _raise_api(exc: Exception) -> Never:
         raise HTTPException(
             status_code=404,
             detail={"code": "campaign_not_found", "message": "Campaign record not found."},
+        ) from exc
+    if isinstance(exc, ArtifactPreviewIntegrityError):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": exc.code,
+                "message": "Campaign artifact integrity could not be verified.",
+            },
         ) from exc
     if isinstance(exc, RecordAlreadyExistsError):
         raise HTTPException(
@@ -2415,6 +2423,39 @@ def campaign_artifacts(
             "next_cursor": next_cursor,
             "has_more": has_more,
         }
+    except Exception as exc:
+        _raise_api(exc)
+
+
+@campaign_router.get("/{campaign_id}/artifacts/{artifact_id}/preview")
+def campaign_artifact_preview(
+    campaign_id: str,
+    artifact_id: str,
+    request: Request,
+    workspace_id: str = Query(...),
+):
+    try:
+        _repository, _auth, service = _services(request)
+        config_path = Path(
+            getattr(
+                request.app.state,
+                "campaign_worker_config_path",
+                get_bashgym_dir() / "campaigns" / "worker-config.v1.json",
+            )
+        )
+        try:
+            worker_config = read_worker_config(config_path)
+        except (OSError, WorkerServiceError) as exc:
+            raise ArtifactPreviewIntegrityError(
+                ArtifactPreviewIntegrityError.code
+            ) from exc
+        return service.artifact_preview(
+            workspace_id,
+            campaign_id,
+            artifact_id,
+            _principal(request),
+            artifact_root=worker_config.artifact_root,
+        )
     except Exception as exc:
         _raise_api(exc)
 

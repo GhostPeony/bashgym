@@ -520,7 +520,7 @@ Agent 读取 HEARTBEAT.md
 | 提供商               | 用途                         | 获取 API Key                                           |
 | -------------------- | ---------------------------- | ------------------------------------------------------ |
 | `gemini`             | LLM (Gemini 直连)            | [aistudio.google.com](https://aistudio.google.com)     |
-| `zhipu`              | LLM (智谱直连)               | [bigmodel.cn](bigmodel.cn)                             |
+| `zhipu`              | LLM (智谱直连)               | [bigmodel.cn](https://bigmodel.cn)                     |
 | `openrouter(待测试)` | LLM (推荐，可访问所有模型)   | [openrouter.ai](https://openrouter.ai)                 |
 | `anthropic(待测试)`  | LLM (Claude 直连)            | [console.anthropic.com](https://console.anthropic.com) |
 | `openai(待测试)`     | LLM (GPT 直连)               | [platform.openai.com](https://platform.openai.com)     |

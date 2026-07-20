@@ -20,11 +20,13 @@ const session: TerminalSession = {
 }
 
 test('SessionCard is frameless, bounded, and shows folder-only project identity', () => {
-  const markup = renderToStaticMarkup(createElement(SessionCard, {
-    session,
-    runtimeState: 'live',
-    onOpenDetail: () => undefined
-  }))
+  const markup = renderToStaticMarkup(
+    createElement(SessionCard, {
+      session,
+      runtimeState: 'live',
+      onOpenDetail: () => undefined
+    })
+  )
 
   assert.match(markup, /w-full min-w-0 overflow-hidden/)
   assert.doesNotMatch(markup, /class="card(?:\s|")/)
@@ -34,21 +36,23 @@ test('SessionCard is frameless, bounded, and shows folder-only project identity'
 })
 
 test('JournalSessionRow owns the available width and clips long content', () => {
-  const markup = renderToStaticMarkup(createElement(JournalSessionRow, {
-    snapshot: {
-      filePath: 'F:/sessions/one.jsonl',
-      fileMtime: Date.now(),
-      kind: 'codex',
-      topic: 'A very long historical session topic that should stay inside its rail',
-      contextWindowApprox: true,
-      totals: { input: 0, output: 0, cacheRead: 0, cacheCreate: 0 },
-      perModel: {},
-      recentFiles: [],
-      totalsApprox: false,
-      fileSize: 0
-    },
-    onOpenDetail: () => undefined
-  }))
+  const markup = renderToStaticMarkup(
+    createElement(JournalSessionRow, {
+      snapshot: {
+        filePath: 'F:/sessions/one.jsonl',
+        fileMtime: Date.now(),
+        kind: 'codex',
+        topic: 'A very long historical session topic that should stay inside its rail',
+        contextWindowApprox: true,
+        totals: { input: 0, output: 0, cacheRead: 0, cacheCreate: 0 },
+        perModel: {},
+        recentFiles: [],
+        totalsApprox: false,
+        fileSize: 0
+      },
+      onOpenDetail: () => undefined
+    })
+  )
 
   assert.match(markup, /w-full min-w-0/)
   assert.match(markup, /overflow-hidden/)

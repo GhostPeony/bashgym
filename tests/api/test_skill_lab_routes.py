@@ -49,9 +49,12 @@ def test_contract_persists_by_workspace_and_run_returns_kpis(monkeypatch, tmp_pa
     )
     assert contract.status_code == 200
     assert contract.json()["skill_id"] == skill_id
-    assert _client().get(
-        f"/api/skill-lab/contracts/{skill_id}", params={"workspace_id": "workspace-b"}
-    ).status_code == 404
+    assert (
+        _client()
+        .get(f"/api/skill-lab/contracts/{skill_id}", params={"workspace_id": "workspace-b"})
+        .status_code
+        == 404
+    )
 
     async def fake_chat(endpoint_id, request):
         arm = re.search(r"Skill Lab arm: (\w+)", request.message).group(1)
@@ -134,8 +137,18 @@ def test_run_kpi_uplift_and_fail_closed_marker(monkeypatch, tmp_path):
             "skill_id": skill_id,
             "endpoint_id": "hermes",
             "cases": [
-                {"case_id": "positive", "prompt": "one", "expected_patterns": ["DONE"], "should_invoke": True},
-                {"case_id": "negative", "prompt": "two", "expected_patterns": ["DONE"], "should_invoke": False},
+                {
+                    "case_id": "positive",
+                    "prompt": "one",
+                    "expected_patterns": ["DONE"],
+                    "should_invoke": True,
+                },
+                {
+                    "case_id": "negative",
+                    "prompt": "two",
+                    "expected_patterns": ["DONE"],
+                    "should_invoke": False,
+                },
             ],
         },
     )
@@ -243,9 +256,7 @@ def test_skill_file_changes_require_confirmation_and_revision_match(monkeypatch,
     }
     assert _client().post("/api/skill-lab/skills", json=draft).status_code == 409
 
-    created = _client().post(
-        "/api/skill-lab/skills", json={**draft, "confirmed": True}
-    )
+    created = _client().post("/api/skill-lab/skills", json={**draft, "confirmed": True})
     assert created.status_code == 201
     skill = created.json()
     assert skill["source"] == "workspace"
@@ -289,7 +300,9 @@ def test_source_managed_bashgym_skills_cannot_be_self_modified(monkeypatch, tmp_
         "_toolkit_skill_root_candidates",
         lambda: [("workspace", skills_root)],
     )
-    skill = next(item for item in skill_lab_routes._skill_inventory() if item.name == "bashgym-operator")
+    skill = next(
+        item for item in skill_lab_routes._skill_inventory() if item.name == "bashgym-operator"
+    )
 
     response = _client().put(
         f"/api/skill-lab/skills/{skill.skill_id}",
@@ -444,7 +457,10 @@ def test_inventory_prunes_host_mirrors_and_classifies_catalog_entries(monkeypatc
     assert canonical.path == str(direct / "SKILL.md")
     assert alternate_skill.canonical_skill_id == canonical.skill_id
     assert alternate_skill.path in canonical.shadowed_paths
-    assert next(skill for skill in skills if skill.name == "deprecated-skill").catalog_status == "deprecated"
+    assert (
+        next(skill for skill in skills if skill.name == "deprecated-skill").catalog_status
+        == "deprecated"
+    )
     invalid_skill = next(skill for skill in skills if skill.name == "Invalid skill")
     assert invalid_skill.catalog_status == "invalid"
     assert invalid_skill.quality_issues == ["missing_frontmatter", "missing_description"]

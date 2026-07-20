@@ -1,27 +1,16 @@
-import {
-  Sparkles,
-  Hash,
-  FileJson,
-  User,
-  Calendar,
-  Code,
-  Sliders,
-  CheckCircle,
-} from 'lucide-react'
+import { Sparkles, Hash, FileJson, User, Calendar, Code, Sliders, CheckCircle } from 'lucide-react'
 import type { FactoryConfig } from '../../services/api'
 
 export type TabId =
-  | 'create'
-  | 'seeds'
-  | 'settings'
-  | 'jobs'
-  | 'designer'
-  | 'sources'
-  | 'quality'
-  | 'environments'
+  'create' | 'seeds' | 'settings' | 'jobs' | 'designer' | 'sources' | 'quality' | 'environments'
 
 export const COLUMN_TYPES = [
-  { id: 'llm', label: 'LLM Column', icon: Sparkles, description: 'AI-generated content from prompts' },
+  {
+    id: 'llm',
+    label: 'LLM Column',
+    icon: Sparkles,
+    description: 'AI-generated content from prompts'
+  },
   { id: 'sampler', label: 'Sampler', icon: Hash, description: 'Random values from distribution' },
   { id: 'category', label: 'Category', icon: FileJson, description: 'Pick from predefined list' },
   { id: 'person', label: 'Person', icon: User, description: 'Synthetic person names' },
@@ -29,18 +18,26 @@ export const COLUMN_TYPES = [
   { id: 'expression', label: 'Expression', icon: Code, description: 'Jinja2 template' },
   { id: 'uuid', label: 'UUID', icon: Hash, description: 'Unique identifiers' },
   { id: 'gaussian', label: 'Gaussian', icon: Sliders, description: 'Normal distribution values' },
-  { id: 'validator', label: 'Validator', icon: CheckCircle, description: 'Python validation code' },
+  { id: 'validator', label: 'Validator', icon: CheckCircle, description: 'Python validation code' }
 ] as const
 
 export const PII_TYPES = [
-  'person', 'email', 'phone', 'ssn', 'address', 'credit_card',
-  'ip_address', 'medical_record', 'passport', 'drivers_license'
+  'person',
+  'email',
+  'phone',
+  'ssn',
+  'address',
+  'credit_card',
+  'ip_address',
+  'medical_record',
+  'passport',
+  'drivers_license'
 ]
 
 export const RISK_LEVELS = [
   { id: 'normal', label: 'Normal', color: 'text-text-secondary' },
   { id: 'elevated', label: 'Elevated', color: 'text-status-warning' },
-  { id: 'high', label: 'High', color: 'text-status-error' },
+  { id: 'high', label: 'High', color: 'text-status-error' }
 ] as const
 
 export const DEFAULT_CONFIG: FactoryConfig = {
@@ -83,8 +80,18 @@ export const DEFAULT_CONFIG: FactoryConfig = {
 }
 
 export const SEED_CATEGORY_TAGS = [
-  'git', 'docker', 'python', 'bash', 'javascript', 'typescript',
-  'testing', 'refactor', 'debug', 'config', 'deployment', 'api'
+  'git',
+  'docker',
+  'python',
+  'bash',
+  'javascript',
+  'typescript',
+  'testing',
+  'refactor',
+  'debug',
+  'config',
+  'deployment',
+  'api'
 ] as const
 
 export type SeedSourceFilter = 'all' | 'gold_trace' | 'imported' | 'manual'

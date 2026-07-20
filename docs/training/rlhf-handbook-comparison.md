@@ -156,13 +156,13 @@ attempts per prompt/environment are natural for shell tasks.
 
 Important comparison:
 
-| Method | RLHF Book role | BashGym implication |
-|---|---|---|
-| REINFORCE | Simple policy gradient baseline. | Good future backend baseline for terminal rollouts. |
-| RLOO | Multi-sample per-prompt baseline. | Natural for terminal tasks; useful before full PPO complexity. |
-| PPO | Mature RLHF method with value function and KL. | Backend candidate through TRL/verl/OpenRLHF, not BashGym's first native path. |
-| GRPO | Group-relative advantage without value model. | Correct BashGym first-class RLVR path when reward groups have contrast. |
-| DAPO/Dr. GRPO | Stability/length/difficulty-bias variants. | Keep as backend/profile options for terminal RL. |
+| Method        | RLHF Book role                                 | BashGym implication                                                           |
+| ------------- | ---------------------------------------------- | ----------------------------------------------------------------------------- |
+| REINFORCE     | Simple policy gradient baseline.               | Good future backend baseline for terminal rollouts.                           |
+| RLOO          | Multi-sample per-prompt baseline.              | Natural for terminal tasks; useful before full PPO complexity.                |
+| PPO           | Mature RLHF method with value function and KL. | Backend candidate through TRL/verl/OpenRLHF, not BashGym's first native path. |
+| GRPO          | Group-relative advantage without value model.  | Correct BashGym first-class RLVR path when reward groups have contrast.       |
+| DAPO/Dr. GRPO | Stability/length/difficulty-bias variants.     | Keep as backend/profile options for terminal RL.                              |
 
 Current BashGym strength: `reward_std`, `frac_reward_zero_std`, active sampling,
 zero-std filtering, pass@k, holdout, and tamper controls already match the core
@@ -368,30 +368,30 @@ trainer.
 
 ### Answered at recommendation level
 
-| Question | Answer |
-|---|---|
-| Is the method sequence correct? | Yes. Use SFT or distillation before RL unless executable attempts already have reward contrast. |
-| Are GRPO/RLVR the right first RL methods for terminal-agent tasks? | Yes, when verifiers exist and sampled attempts sometimes pass and sometimes fail. |
-| What operational metrics are mandatory before scaling? | Tokens/sec, peak GPU memory, OOMs, backend import status, timeout rate, verifier error rate, tamper rate, reward variance, behavior/train logprob readiness. |
-| How should terminal environments be split? | Use grouped non-overlap by repo, task family, source, fixture/seed, and solution-pattern proxies; preserve hash contamination manifests. |
-| What reward-hacking canaries should be mandatory? | Verifier tamper, test tamper, private fixture tamper, environment manifest tamper, plus heldout/private tests and shortcut probes. |
-| How should external benchmarks be attached? | As release evidence with harness manifest, thresholds, failures, leakage/decontamination notes, and claim tier. |
-| What statistical comparison should be standard? | Unbiased pass@k plus paired clustered bootstrap for base-vs-candidate comparisons; require intervals to clear zero for improvement claims. |
-| What is "good enough to route narrowly"? | The candidate passes behavior and safety gates for a defined task region, with fallback outside that region. |
-| Strongest part of BashGym? | Executable terminal trajectories plus conservative evidence gates. |
-| Weakest assumption? | That DPPO/ECHO/RWML contracts will translate into backend training gains. |
-| What should be de-scoped? | Broad SOTA claims, global teacher replacement, and world-model release gating before correlation evidence. |
-| Most important missing artifact? | The run card / canonical release bundle. |
+| Question                                                           | Answer                                                                                                                                                       |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Is the method sequence correct?                                    | Yes. Use SFT or distillation before RL unless executable attempts already have reward contrast.                                                              |
+| Are GRPO/RLVR the right first RL methods for terminal-agent tasks? | Yes, when verifiers exist and sampled attempts sometimes pass and sometimes fail.                                                                            |
+| What operational metrics are mandatory before scaling?             | Tokens/sec, peak GPU memory, OOMs, backend import status, timeout rate, verifier error rate, tamper rate, reward variance, behavior/train logprob readiness. |
+| How should terminal environments be split?                         | Use grouped non-overlap by repo, task family, source, fixture/seed, and solution-pattern proxies; preserve hash contamination manifests.                     |
+| What reward-hacking canaries should be mandatory?                  | Verifier tamper, test tamper, private fixture tamper, environment manifest tamper, plus heldout/private tests and shortcut probes.                           |
+| How should external benchmarks be attached?                        | As release evidence with harness manifest, thresholds, failures, leakage/decontamination notes, and claim tier.                                              |
+| What statistical comparison should be standard?                    | Unbiased pass@k plus paired clustered bootstrap for base-vs-candidate comparisons; require intervals to clear zero for improvement claims.                   |
+| What is "good enough to route narrowly"?                           | The candidate passes behavior and safety gates for a defined task region, with fallback outside that region.                                                 |
+| Strongest part of BashGym?                                         | Executable terminal trajectories plus conservative evidence gates.                                                                                           |
+| Weakest assumption?                                                | That DPPO/ECHO/RWML contracts will translate into backend training gains.                                                                                    |
+| What should be de-scoped?                                          | Broad SOTA claims, global teacher replacement, and world-model release gating before correlation evidence.                                                   |
+| Most important missing artifact?                                   | The run card / canonical release bundle.                                                                                                                     |
 
 ### Partially answered, empirical proof required
 
-| Question | Current recommendation | Remaining proof |
-|---|---|---|
-| Is DPPO replay the right abstraction? | Yes as a handoff for multi-step rollouts with behavior/train logprobs and trust-region telemetry. | One installed backend must consume it and improve or preserve pass@k. |
-| Are ECHO/RWML useful? | Coherent as JEPA-style auxiliary diagnostics and curriculum signals. | Prove correlation with heldout pass@k, command count, timeout, and safety. |
-| Are current gates enough for first release? | Enough for narrow routing if mandatory. | Broad claims need external benchmarks, decontamination, and calibrated thresholds. |
-| Which backend should be canonical? | SkyRL first for terminal-agent integration; verl for scale-out smoke; TRL for reference semantics. | Finalize after one successful installed-backend smoke. |
-| What metrics are missing? | Metric families exist. | Need claim-tier thresholds, mandatory safety thresholds, run cards, and dataset cards. |
+| Question                                    | Current recommendation                                                                             | Remaining proof                                                                        |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Is DPPO replay the right abstraction?       | Yes as a handoff for multi-step rollouts with behavior/train logprobs and trust-region telemetry.  | One installed backend must consume it and improve or preserve pass@k.                  |
+| Are ECHO/RWML useful?                       | Coherent as JEPA-style auxiliary diagnostics and curriculum signals.                               | Prove correlation with heldout pass@k, command count, timeout, and safety.             |
+| Are current gates enough for first release? | Enough for narrow routing if mandatory.                                                            | Broad claims need external benchmarks, decontamination, and calibrated thresholds.     |
+| Which backend should be canonical?          | SkyRL first for terminal-agent integration; verl for scale-out smoke; TRL for reference semantics. | Finalize after one successful installed-backend smoke.                                 |
+| What metrics are missing?                   | Metric families exist.                                                                             | Need claim-tier thresholds, mandatory safety thresholds, run cards, and dataset cards. |
 
 ### Still open
 

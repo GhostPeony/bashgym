@@ -22,9 +22,15 @@ function navigationHarness(search = ''): NavigationHarness {
   globals.window = {
     location,
     history: {
-      pushState: (_state: unknown, _title: string, target: string) => { pushes.push(target); apply(target) },
-      replaceState: (_state: unknown, _title: string, target: string) => { replacements.push(target); apply(target) },
-    },
+      pushState: (_state: unknown, _title: string, target: string) => {
+        pushes.push(target)
+        apply(target)
+      },
+      replaceState: (_state: unknown, _title: string, target: string) => {
+        replacements.push(target)
+        apply(target)
+      }
+    }
   }
   return {
     pushes,
@@ -32,7 +38,7 @@ function navigationHarness(search = ''): NavigationHarness {
     restore: () => {
       if (priorWindow === undefined) delete globals.window
       else globals.window = priorWindow
-    },
+    }
   }
 }
 
@@ -40,7 +46,7 @@ function reset() {
   useUIStore.setState({
     overlayView: 'home',
     trainingSubview: 'runs',
-    trainingSelection: { workspaceId: null, campaignId: null },
+    trainingSelection: { workspaceId: null, campaignId: null }
   })
 }
 
@@ -50,7 +56,7 @@ test('serializes canonical Runs and AutoResearch URLs with one user push', () =>
   try {
     useUIStore.getState().openTraining('autoresearch', {
       workspaceId: 'workspace a',
-      campaignId: 'campaign/1',
+      campaignId: 'campaign/1'
     })
     assert.equal(nav.pushes.length, 1)
     assert.match(nav.pushes[0] || '', /view=training/)
@@ -68,14 +74,16 @@ test('serializes canonical Runs and AutoResearch URLs with one user push', () =>
 
 test('hydrates canonical selection without writing history', () => {
   reset()
-  const nav = navigationHarness('?view=training&tab=autoresearch&workspace_id=workspace-a&campaign_id=campaign-1')
+  const nav = navigationHarness(
+    '?view=training&tab=autoresearch&workspace_id=workspace-a&campaign_id=campaign-1'
+  )
   try {
     useUIStore.getState().hydrateNavigationFromUrl()
     assert.equal(useUIStore.getState().overlayView, 'training')
     assert.equal(useUIStore.getState().trainingSubview, 'autoresearch')
     assert.deepEqual(useUIStore.getState().trainingSelection, {
       workspaceId: 'workspace-a',
-      campaignId: 'campaign-1',
+      campaignId: 'campaign-1'
     })
     assert.deepEqual(nav.pushes, [])
     assert.deepEqual(nav.replacements, [])
@@ -86,7 +94,9 @@ test('hydrates canonical selection without writing history', () => {
 
 test('normalizes the legacy overlay with exactly one replacement', () => {
   reset()
-  const nav = navigationHarness('?view=autoresearch&workspace_id=workspace-a&campaign_id=campaign-1')
+  const nav = navigationHarness(
+    '?view=autoresearch&workspace_id=workspace-a&campaign_id=campaign-1'
+  )
   try {
     useUIStore.getState().hydrateNavigationFromUrl()
     assert.equal(useUIStore.getState().overlayView, 'training')
@@ -103,9 +113,14 @@ test('invalid tabs and empty IDs recover to Runs with null selection', () => {
   reset()
   const nav = navigationHarness()
   try {
-    useUIStore.getState().hydrateNavigationFromUrl('?view=training&tab=unknown&workspace_id=&campaign_id=%20')
+    useUIStore
+      .getState()
+      .hydrateNavigationFromUrl('?view=training&tab=unknown&workspace_id=&campaign_id=%20')
     assert.equal(useUIStore.getState().trainingSubview, 'runs')
-    assert.deepEqual(useUIStore.getState().trainingSelection, { workspaceId: null, campaignId: null })
+    assert.deepEqual(useUIStore.getState().trainingSelection, {
+      workspaceId: null,
+      campaignId: null
+    })
   } finally {
     nav.restore()
   }

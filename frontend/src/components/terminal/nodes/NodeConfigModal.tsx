@@ -66,11 +66,7 @@ export function ConfigSection({
 }
 
 export function ConfigRows({ children }: { children: ReactNode }) {
-  return (
-    <div className="node-config-rows">
-      {children}
-    </div>
-  )
+  return <div className="node-config-rows">{children}</div>
 }
 
 export function ConfigRow({

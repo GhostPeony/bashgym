@@ -126,7 +126,9 @@ class HFContextToolError(RuntimeError):
 
 
 class HFContextToolClient:
-    def __init__(self, *, api_base: str = DEFAULT_API_BASE, transport: httpx.AsyncBaseTransport | None = None):
+    def __init__(
+        self, *, api_base: str = DEFAULT_API_BASE, transport: httpx.AsyncBaseTransport | None = None
+    ):
         self.api_base = api_base.rstrip("/")
         self.transport = transport
 

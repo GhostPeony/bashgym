@@ -6,7 +6,10 @@ interface DeviceStore {
   defaultDeviceId: string | null
   loading: boolean
   error: string | null
+  loadedAt: number | null
 
+  /** Fetch devices only if they have not been loaded this session. */
+  ensureDevices: () => Promise<void>
   fetchDevices: () => Promise<void>
   addDevice: (device: NewDevice) => Promise<Device | null>
   updateDevice: (id: string, updates: Partial<NewDevice>) => Promise<void>
@@ -21,14 +24,26 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
   defaultDeviceId: null,
   loading: false,
   error: null,
+  loadedAt: null,
+
+  ensureDevices: async () => {
+    const { loadedAt, loading } = get()
+    if (loadedAt !== null || loading) return
+    await get().fetchDevices()
+  },
 
   fetchDevices: async () => {
     set({ loading: true, error: null })
     const result = await deviceApi.list()
     if (result.ok && result.data) {
       const devices = result.data
-      const defaultDevice = devices.find(d => d.is_default)
-      set({ devices, defaultDeviceId: defaultDevice?.id || null, loading: false })
+      const defaultDevice = devices.find((d) => d.is_default)
+      set({
+        devices,
+        defaultDeviceId: defaultDevice?.id || null,
+        loading: false,
+        loadedAt: Date.now()
+      })
     } else {
       set({ error: result.error || 'Failed to fetch devices', loading: false })
     }
@@ -88,5 +103,5 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
     }
     set({ error: result.error || 'Discovery failed' })
     return []
-  },
+  }
 }))

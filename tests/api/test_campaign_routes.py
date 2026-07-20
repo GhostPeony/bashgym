@@ -1,5 +1,6 @@
 """Fail-closed campaign REST authentication, authority, and projection tests."""
 
+import hashlib
 import json
 import sqlite3
 from datetime import datetime, timedelta
@@ -44,6 +45,8 @@ from bashgym.campaigns.worker import scheduler_lease_key
 from bashgym.campaigns.worker_service import (
     ControllerStatusProjection,
     DesktopWorkerStatusProjection,
+    WorkerRunConfig,
+    write_worker_config,
 )
 from bashgym.ledger.contracts import (
     ArtifactSpec,
@@ -2056,6 +2059,182 @@ def test_artifact_projection_redacts_absolute_uri(tmp_path):
     assert "metadata" not in serialized
     assert "candidate-map-canary" not in serialized
     assert "protected-epoch-canary" not in serialized
+
+
+def test_artifact_preview_is_scoped_verified_bounded_and_redacted(tmp_path):
+    http, repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    assert create_from_template(http, access).status_code == 200
+    config = WorkerRunConfig.for_data_directory(tmp_path / "data")
+    write_worker_config(tmp_path / "worker-config.v1.json", config)
+    config.artifact_root.mkdir(parents=True, exist_ok=True)
+    content = (
+        "step=0 loss=1.0000\n"
+        + "".join(f"step={step} loss={1 / (step + 1):.4f}\n" for step in range(1, 601))
+        + "step=601 loss=0.0017 host=user@10.42.0.7 "
+        "path=C:\\private\\campaign\\training.log "
+        "token=Bearer private-token-canary output=/srv/private/run/model.bin\n"
+    ).encode()
+    artifact_path = config.artifact_root / "workspace-a" / "campaign-1" / "training.log"
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_bytes(content)
+    digest = hashlib.sha256(content).hexdigest()
+    with repository._connection(immediate=True) as connection:
+        connection.execute(
+            """
+            INSERT INTO campaign_artifacts(
+                workspace_id, campaign_id, artifact_id, producer_action_id, uri,
+                sha256, size_bytes, schema_name, sealed, valid, metadata_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?)
+            """,
+            (
+                "workspace-a",
+                "campaign-1",
+                "artifact-training-log",
+                "action-1",
+                str(artifact_path),
+                digest,
+                len(content),
+                "campaign_training_log.v1",
+                json.dumps({"private_path": "C:/must-not-cross", "host": "private-host-canary"}),
+                campaign().created_at.isoformat(),
+            ),
+        )
+
+    response = http.get(
+        "/api/campaigns/campaign-1/artifacts/artifact-training-log/preview",
+        headers=bearer(access),
+        params={"workspace_id": "workspace-a"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert set(payload) == {
+        "schema_version",
+        "artifact_id",
+        "preview_kind",
+        "content",
+        "truncated",
+        "redaction_count",
+        "integrity_verified",
+        "unavailable_reason",
+    }
+    assert payload["schema_version"] == "public_campaign_artifact_preview.v1"
+    assert payload["artifact_id"] == "artifact-training-log"
+    assert payload["preview_kind"] == "text"
+    assert payload["integrity_verified"] is True
+    assert payload["truncated"] is True
+    assert "step=601 loss=0.0017" in payload["content"]
+    assert "step=0 loss=1.0000" not in payload["content"]
+    assert len(payload["content"].splitlines()) <= 500
+    serialized = json.dumps(payload)
+    for canary in (
+        str(config.artifact_root),
+        "C:\\private",
+        "/srv/private",
+        "user@10.42.0.7",
+        "10.42.0.7",
+        "private-token-canary",
+        "private-host-canary",
+        "uri",
+        "metadata",
+    ):
+        assert canary not in serialized
+    assert payload["redaction_count"] >= 4
+
+
+def test_artifact_preview_fails_closed_for_tampering_and_binary_content(tmp_path):
+    http, repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    assert create_from_template(http, access).status_code == 200
+    config = WorkerRunConfig.for_data_directory(tmp_path / "data")
+    write_worker_config(tmp_path / "worker-config.v1.json", config)
+    config.artifact_root.mkdir(parents=True, exist_ok=True)
+    artifact_path = config.artifact_root / "workspace-a" / "campaign-1" / "model.bin"
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    content = b"model-bytes"
+    artifact_path.write_bytes(content)
+    digest = hashlib.sha256(content).hexdigest()
+    with repository._connection(immediate=True) as connection:
+        connection.execute(
+            """
+            INSERT INTO campaign_artifacts(
+                workspace_id, campaign_id, artifact_id, producer_action_id, uri,
+                sha256, size_bytes, schema_name, sealed, valid, metadata_json, created_at
+            ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, 1, 1, '{}', ?)
+            """,
+            (
+                "workspace-a",
+                "campaign-1",
+                "artifact-model",
+                str(artifact_path),
+                digest,
+                len(content),
+                "huggingface_model_file.v1",
+                campaign().created_at.isoformat(),
+            ),
+        )
+
+    unavailable = http.get(
+        "/api/campaigns/campaign-1/artifacts/artifact-model/preview",
+        headers=bearer(access),
+        params={"workspace_id": "workspace-a"},
+    )
+    assert unavailable.status_code == 200
+    assert unavailable.json()["preview_kind"] == "unavailable"
+    assert unavailable.json()["content"] is None
+    assert unavailable.json()["integrity_verified"] is True
+    assert "binary" in unavailable.json()["unavailable_reason"].lower()
+
+    artifact_path.write_bytes(b"tampered")
+    tampered = http.get(
+        "/api/campaigns/campaign-1/artifacts/artifact-model/preview",
+        headers=bearer(access),
+        params={"workspace_id": "workspace-a"},
+    )
+    assert tampered.status_code == 409
+    assert str(config.artifact_root) not in tampered.text
+
+
+def test_artifact_preview_rejects_registered_files_outside_the_worker_root(tmp_path):
+    http, repository, refresh = campaign_client(tmp_path)
+    access = exchange(http, refresh.raw_token)
+    assert create_from_template(http, access).status_code == 200
+    config = WorkerRunConfig.for_data_directory(tmp_path / "data")
+    write_worker_config(tmp_path / "worker-config.v1.json", config)
+    config.artifact_root.mkdir(parents=True, exist_ok=True)
+    outside = tmp_path / "operator-private" / "training.log"
+    outside.parent.mkdir(parents=True, exist_ok=True)
+    content = b"step=1 loss=0.8\n"
+    outside.write_bytes(content)
+    with repository._connection(immediate=True) as connection:
+        connection.execute(
+            """
+            INSERT INTO campaign_artifacts(
+                workspace_id, campaign_id, artifact_id, producer_action_id, uri,
+                sha256, size_bytes, schema_name, sealed, valid, metadata_json, created_at
+            ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, 1, 1, '{}', ?)
+            """,
+            (
+                "workspace-a",
+                "campaign-1",
+                "artifact-outside",
+                str(outside),
+                hashlib.sha256(content).hexdigest(),
+                len(content),
+                "campaign_training_log.v1",
+                campaign().created_at.isoformat(),
+            ),
+        )
+
+    response = http.get(
+        "/api/campaigns/campaign-1/artifacts/artifact-outside/preview",
+        headers=bearer(access),
+        params={"workspace_id": "workspace-a"},
+    )
+    assert response.status_code == 409
+    assert str(outside) not in response.text
+    assert "operator-private" not in response.text
 
 
 def test_artifact_projection_is_cursor_paginated_and_bounded(tmp_path):

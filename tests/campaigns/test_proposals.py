@@ -214,9 +214,7 @@ def test_external_handoff_uses_generic_opt_in_and_keeps_legacy_capability_read_o
     assert allowed.valid is True
 
     legacy_actor = actor.model_copy(
-        update={
-            "capabilities": actor.capabilities | {Capability.HANDOFF_MEMEXAI_PREPARE}
-        }
+        update={"capabilities": actor.capabilities | {Capability.HANDOFF_MEMEXAI_PREPARE}}
     )
     legacy = generic.model_copy(
         update={

@@ -162,7 +162,9 @@ def test_all_approved_state_fixtures_materialize_exact_complete_snapshots():
         rendered = json.loads(snapshot.model_dump_json())
         assert rendered == payload
         assert all(key in rendered for key in ("active_work", "champion", "candidate"))
-        assert all(key in rendered["controller"] for key in ("heartbeat_age_seconds", "lease_expires_at"))
+        assert all(
+            key in rendered["controller"] for key in ("heartbeat_age_seconds", "lease_expires_at")
+        )
 
     assert names == {
         "empty_draft",

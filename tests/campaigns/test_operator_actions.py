@@ -60,7 +60,10 @@ def test_manifest_budget_and_source_actions_are_versioned_and_replay_exact(tmp_p
     )
     assert revised.details["revision"] == 2
     assert replay.replayed is True
-    assert repository.get_manifest_revision("workspace-a", "campaign-1", 2).manifest == revised_manifest
+    assert (
+        repository.get_manifest_revision("workspace-a", "campaign-1", 2).manifest
+        == revised_manifest
+    )
 
     budget = service.amend_budget(
         "workspace-a",
@@ -74,9 +77,7 @@ def test_manifest_budget_and_source_actions_are_versioned_and_replay_exact(tmp_p
         idempotency_key="budget",
     )
     assert budget.entry.limit_delta == 2.0
-    assert repository.budget_totals("workspace-a", "campaign-1", "gpu_hours")[
-        "limit_delta"
-    ] == 2.0
+    assert repository.budget_totals("workspace-a", "campaign-1", "gpu_hours")["limit_delta"] == 2.0
 
     evidence = {
         "provenance": "Hugging Face dataset card and pinned artifact",
@@ -174,9 +175,7 @@ def test_abandon_retry_and_exact_identity_force_stop_requests(tmp_path):
     )
     assert requested.details["state"] == "pending"
     assert (
-        remote_repository.pending_force_stop_request(
-            "workspace-a", attempt.action_id, identity
-        )
+        remote_repository.pending_force_stop_request("workspace-a", attempt.action_id, identity)
         == requested.details["request_id"]
     )
 

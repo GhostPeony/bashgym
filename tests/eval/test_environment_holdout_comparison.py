@@ -107,7 +107,9 @@ def test_environment_holdout_comparison_blocks_when_ci_does_not_clear_zero():
 def test_environment_holdout_comparison_blocks_candidate_tamper():
     environments = [_env("env_a", "a"), _env("env_b", "b")]
     base_attempts = _attempts(environments, passed_by_env={})
-    candidate_attempts = _attempts(environments, passed_by_env={env.id: True for env in environments})
+    candidate_attempts = _attempts(
+        environments, passed_by_env={env.id: True for env in environments}
+    )
     for attempt in candidate_attempts:
         attempt.verifier_status = "tampered"
 

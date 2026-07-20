@@ -17,7 +17,7 @@ interface V0File {
  */
 function formatV0Files(files: V0File[]): string {
   return files
-    .map(f => {
+    .map((f) => {
       const ext = f.name.split('.').pop() ?? ''
       return `### ${f.name}\n\`\`\`${ext}\n${f.content}\n\`\`\``
     })
@@ -133,9 +133,9 @@ function createVercelAdapter(
                 payload?: { text?: string }
               }>
               const logLines = events
-                .filter(e => e.type === 'stdout' || e.type === 'stderr')
+                .filter((e) => e.type === 'stdout' || e.type === 'stderr')
                 .slice(-50)
-                .map(e => e.text ?? e.payload?.text ?? '')
+                .map((e) => e.text ?? e.payload?.text ?? '')
                 .join('\n')
 
               onChange('buildLogs', logLines)
@@ -185,7 +185,7 @@ function createVercelAdapter(
                   files?: Array<{ name: string; content: string }>
                 }
               }
-              const files: V0File[] = (detail.latestVersion?.files ?? []).map(f => ({
+              const files: V0File[] = (detail.latestVersion?.files ?? []).map((f) => ({
                 name: f.name,
                 content: f.content
               }))
@@ -212,14 +212,12 @@ function createVercelAdapter(
           const { canvasEdges, panels, setPanelUrl } = useTerminalStore.getState()
 
           const connectedEdges = canvasEdges.filter(
-            e => e.source === panelId || e.target === panelId
+            (e) => e.source === panelId || e.target === panelId
           )
 
           for (const edge of connectedEdges) {
             const targetPanelId = edge.source === panelId ? edge.target : edge.source
-            const targetPanel = panels.find(
-              p => p.id === targetPanelId && p.type === 'browser'
-            )
+            const targetPanel = panels.find((p) => p.id === targetPanelId && p.type === 'browser')
             if (targetPanel) {
               setPanelUrl(targetPanel.id, v0PreviewUrl)
             }

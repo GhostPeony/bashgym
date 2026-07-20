@@ -61,8 +61,10 @@ function applyLine(snap: AgentSessionSnapshot, line: string): void {
   if (snap.gitBranch === undefined && typeof event.gitBranch === 'string' && event.gitBranch) {
     snap.gitBranch = event.gitBranch
   }
-  if (snap.title === undefined && typeof event.slug === 'string' && event.slug) snap.title = event.slug
-  if (snap.sessionId === undefined && typeof event.sessionId === 'string') snap.sessionId = event.sessionId
+  if (snap.title === undefined && typeof event.slug === 'string' && event.slug)
+    snap.title = event.slug
+  if (snap.sessionId === undefined && typeof event.sessionId === 'string')
+    snap.sessionId = event.sessionId
 
   if (typeof event.timestamp === 'string') {
     const ts = Date.parse(event.timestamp)
@@ -170,7 +172,10 @@ export async function ingestClaudeFile(
 
   let state = fileStates.get(fileInfo.path)
   if (!state) {
-    state = { tail: { offset: 0, carry: '', bootstrapped: false }, snapshot: newSnapshot(fileInfo.path) }
+    state = {
+      tail: { offset: 0, carry: '', bootstrapped: false },
+      snapshot: newSnapshot(fileInfo.path)
+    }
     const cheapTailStart = Math.max(0, fileInfo.size - 262_144)
     const fullScanCap = exact ? BOOTSTRAP_FULL_SCAN_MAX : 262_144
     if (fileInfo.size > fullScanCap) {
@@ -182,7 +187,11 @@ export async function ingestClaudeFile(
       state.snapshot.totalsApprox = true
     }
     fileStates.set(fileInfo.path, state)
-  } else if (exact && state.snapshot.totalsApprox && state.snapshot.fileSize <= BOOTSTRAP_FULL_SCAN_MAX) {
+  } else if (
+    exact &&
+    state.snapshot.totalsApprox &&
+    state.snapshot.fileSize <= BOOTSTRAP_FULL_SCAN_MAX
+  ) {
     // Upgraded from cheap to exact (journal became live-bound): re-bootstrap
     fileStates.delete(fileInfo.path)
     return ingestClaudeFile(fileInfo, true)

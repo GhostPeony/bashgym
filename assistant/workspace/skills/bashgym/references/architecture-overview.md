@@ -4,12 +4,12 @@ BashGym is a task-general ML workspace with specialized data, training, evaluati
 
 ## Responsibility split
 
-| Layer | Owns |
-| --- | --- |
+| Layer                     | Owns                                                                                                                 |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | BashGym operational state | Dataset/model revisions, exact configs, jobs, metrics, evals, artifacts, budgets, reports, and live runtime evidence |
-| Agent operator | Context reconciliation, questions/gates, approved actions, monitoring, comparisons, reports, and bounded iteration |
-| GBrain | Durable project context, decisions, conclusions, follow-ups, and resolvable artifact references |
-| Interaction surface | Discord, canvas agent node, terminal, Codex, or Claude Code access to the same underlying work |
+| Agent operator            | Context reconciliation, questions/gates, approved actions, monitoring, comparisons, reports, and bounded iteration   |
+| GBrain                    | Durable project context, decisions, conclusions, follow-ups, and resolvable artifact references                      |
+| Interaction surface       | Discord, canvas agent node, terminal, Codex, or Claude Code access to the same underlying work                       |
 
 ## Training lanes
 

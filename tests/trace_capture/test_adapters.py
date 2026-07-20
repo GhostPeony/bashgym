@@ -9,25 +9,17 @@ Tests cover:
 """
 
 import json
-import os
-import platform
-from pathlib import Path
-from unittest.mock import patch
-
-import pytest
 
 from bashgym.trace_capture.detector import (
-    ToolInfo,
-    detect_gemini_cli,
     detect_codex,
     detect_copilot_cli,
-    _get_home_dir,
+    detect_gemini_cli,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _patch_home(tmp_path, monkeypatch):
     """Patch _get_home_dir and environment to use tmp_path as home."""
@@ -42,6 +34,7 @@ def _patch_home(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 # 1. detect_gemini_cli()
 # ---------------------------------------------------------------------------
+
 
 class TestDetectGeminiCli:
     """Detection of Gemini CLI installation and hooks."""
@@ -86,9 +79,7 @@ class TestDetectGeminiCli:
         gemini_dir.mkdir()
         settings = {
             "hooks": {
-                "AfterTool": [
-                    {"name": "bashgym", "matcher": "", "hooks": [], "timeout": 5000}
-                ]
+                "AfterTool": [{"name": "bashgym", "matcher": "", "hooks": [], "timeout": 5000}]
             }
         }
         (gemini_dir / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
@@ -119,9 +110,7 @@ class TestDetectGeminiCli:
         gemini_dir.mkdir()
         settings = {
             "hooks": {
-                "AfterTool": [
-                    {"name": "other-tool", "matcher": "", "hooks": [], "timeout": 5000}
-                ]
+                "AfterTool": [{"name": "other-tool", "matcher": "", "hooks": [], "timeout": 5000}]
             }
         }
         (gemini_dir / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
@@ -133,6 +122,7 @@ class TestDetectGeminiCli:
 # ---------------------------------------------------------------------------
 # 2. detect_codex()
 # ---------------------------------------------------------------------------
+
 
 class TestDetectCodex:
     """Detection of Codex installation."""
@@ -184,6 +174,7 @@ class TestDetectCodex:
 # ---------------------------------------------------------------------------
 # 3. detect_copilot_cli()
 # ---------------------------------------------------------------------------
+
 
 class TestDetectCopilotCli:
     """Detection of GitHub Copilot CLI installation and hooks."""
@@ -262,16 +253,15 @@ class TestDetectCopilotCli:
 # 4. Gemini CLI install/uninstall
 # ---------------------------------------------------------------------------
 
+
 class TestGeminiCliInstallUninstall:
     """Test install and uninstall of Gemini CLI hooks via adapter."""
 
     def test_install_creates_settings_json(self, tmp_path, monkeypatch):
         """install_gemini_cli_hooks creates settings.json with correct structure."""
         from bashgym.trace_capture.adapters.gemini_cli import (
-            install_gemini_cli_hooks,
-            _get_gemini_dir,
-            _get_settings_path,
             HOOK_CONFIG,
+            install_gemini_cli_hooks,
         )
 
         # Patch home dir functions
@@ -320,8 +310,8 @@ class TestGeminiCliInstallUninstall:
     def test_uninstall_removes_bashgym_preserves_others(self, tmp_path, monkeypatch):
         """uninstall_gemini_cli_hooks removes bashgym entries but preserves others."""
         from bashgym.trace_capture.adapters.gemini_cli import (
-            uninstall_gemini_cli_hooks,
             HOOK_CONFIG,
+            uninstall_gemini_cli_hooks,
         )
 
         monkeypatch.setattr(

@@ -19,23 +19,32 @@ const AUTO_MATERIALIZE_STATUSES: ReadonlySet<CampaignRecord['status']> = new Set
   CampaignRecord['status']
 >(['draft', 'validating', 'ready', 'active', 'paused', 'awaiting_authority'])
 
-/** Return campaigns whose current status warrants automatic canvas placement. */
+/**
+ * Return campaigns whose current status warrants automatic canvas placement.
+ * Campaigns the user archived stay off the canvas regardless of status; the
+ * archive store un-archives active campaigns before this filter runs.
+ */
 export function campaignsForCanvasAutoMaterialization(
   campaigns: readonly CampaignRecord[],
+  archivedCampaignIds: ReadonlySet<string> = new Set()
 ): CampaignRecord[] {
-  return campaigns.filter((campaign) => AUTO_MATERIALIZE_STATUSES.has(campaign.status))
+  return campaigns.filter(
+    (campaign) =>
+      AUTO_MATERIALIZE_STATUSES.has(campaign.status) &&
+      !archivedCampaignIds.has(campaign.campaign_id)
+  )
 }
 
 /** Return campaigns that do not yet have a durable workspace canvas projection. */
 export function campaignsMissingPanels(
   campaigns: readonly CampaignRecord[],
-  panels: readonly Panel[],
+  panels: readonly Panel[]
 ): CampaignRecord[] {
   const materialized = new Set(
     panels
       .filter((panel) => panel.type === 'campaign')
       .map((panel) => panel.adapterConfig?.campaignId)
-      .filter((campaignId): campaignId is string => typeof campaignId === 'string'),
+      .filter((campaignId): campaignId is string => typeof campaignId === 'string')
   )
   return campaigns.filter((campaign) => !materialized.has(campaign.campaign_id))
 }
@@ -43,18 +52,18 @@ export function campaignsMissingPanels(
 /** Materialize from durable campaign data, re-reading the store before insert. */
 export function materializeCampaignPanel(
   campaign: CampaignCanvasCampaign,
-  getState: () => CampaignCanvasState = useTerminalStore.getState,
+  getState: () => CampaignCanvasState = useTerminalStore.getState
 ): string | null {
   const current = getState()
-  const exists = current.panels.some((panel) => (
-    panel.type === 'campaign' && panel.adapterConfig?.campaignId === campaign.campaign_id
-  ))
+  const exists = current.panels.some(
+    (panel) => panel.type === 'campaign' && panel.adapterConfig?.campaignId === campaign.campaign_id
+  )
   if (exists) return null
 
   const panelId = current.addPanel({
     type: 'campaign',
     title: campaign.title || 'Experiment Campaign',
-    adapterConfig: { campaignId: campaign.campaign_id },
+    adapterConfig: { campaignId: campaign.campaign_id }
   })
   const latest = getState()
   const anchor = latest.activePanelId
@@ -67,8 +76,8 @@ export function materializeCampaignPanel(
       anchor,
       Array.from(latest.canvasNodes.values())
         .filter((node) => node.panelId !== panelId)
-        .map((node) => node.position),
-    ),
+        .map((node) => node.position)
+    )
   )
   return panelId
 }

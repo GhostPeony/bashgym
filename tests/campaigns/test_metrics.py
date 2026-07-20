@@ -85,9 +85,7 @@ def test_metric_persistence_is_idempotent_ordered_and_conflict_safe(tmp_path):
     series = repository.get_metric_series("workspace-a", attempt.attempt_id, "loss")
     assert [(point.step, point.value) for point in series] == [(1, 0.5), (2, 0.25)]
     events = repository.list_events("workspace-a", "campaign-1")
-    assert sum(
-        event.event_type == "campaign:training-metrics-appended" for _, event in events
-    ) == 1
+    assert sum(event.event_type == "campaign:training-metrics-appended" for _, event in events) == 1
 
     with pytest.raises(CampaignPersistenceError, match="metric_value_conflict"):
         repository.append_remote_metrics(

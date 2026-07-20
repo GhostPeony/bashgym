@@ -20,16 +20,18 @@ export function FileDropZone({
   className,
   disabled = false
 }: FileDropZoneProps) {
+  const handleDropPath = useCallback(
+    (path: string) => {
+      if (disabled) return
 
-  const handleDropPath = useCallback((path: string) => {
-    if (disabled) return
+      // Format the path for terminal (handle spaces, etc.)
+      const formattedPath = formatPathForTerminal(path)
 
-    // Format the path for terminal (handle spaces, etc.)
-    const formattedPath = formatPathForTerminal(path)
-
-    // Send the path to the terminal
-    window.bashgym?.terminal.write(terminalId, formattedPath)
-  }, [terminalId, disabled])
+      // Send the path to the terminal
+      window.bashgym?.terminal.write(terminalId, formattedPath)
+    },
+    [terminalId, disabled]
+  )
 
   const { isDragOver, isValidDrag, dropProps } = useFileDrop({
     onDropPath: handleDropPath,
@@ -41,10 +43,7 @@ export function FileDropZone({
   }
 
   return (
-    <div
-      className={clsx('relative', className)}
-      {...dropProps}
-    >
+    <div className={clsx('relative', className)} {...dropProps}>
       {children}
 
       {/* Drop overlay — brutalist dashed border with solid bg */}
@@ -53,9 +52,7 @@ export function FileDropZone({
           className={clsx(
             'absolute inset-0 z-50 flex items-center justify-center',
             'bg-background-primary border-3 border-dashed rounded-brutal',
-            isValidDrag
-              ? 'border-accent bg-accent-light'
-              : 'border-status-error'
+            isValidDrag ? 'border-accent bg-accent-light' : 'border-status-error'
           )}
         >
           <div className="text-center">
@@ -68,11 +65,7 @@ export function FileDropZone({
                   : 'border-status-error bg-background-secondary text-status-error'
               )}
             >
-              {isValidDrag ? (
-                <FolderInput className="w-8 h-8" />
-              ) : (
-                <FileDown className="w-8 h-8" />
-              )}
+              {isValidDrag ? <FolderInput className="w-8 h-8" /> : <FileDown className="w-8 h-8" />}
             </div>
             <p
               className={clsx(
@@ -110,12 +103,14 @@ export function GenericDropZone({
   className,
   hint = 'Drop files here'
 }: GenericDropZoneProps) {
-
-  const handleDrop = useCallback(({ paths }: { paths: string[] }) => {
-    if (paths.length > 0) {
-      onDrop(paths)
-    }
-  }, [onDrop])
+  const handleDrop = useCallback(
+    ({ paths }: { paths: string[] }) => {
+      if (paths.length > 0) {
+        onDrop(paths)
+      }
+    },
+    [onDrop]
+  )
 
   const { isDragOver, isValidDrag, dropProps } = useFileDrop({
     onDrop: handleDrop,
@@ -123,10 +118,7 @@ export function GenericDropZone({
   })
 
   return (
-    <div
-      className={clsx('relative', className)}
-      {...dropProps}
-    >
+    <div className={clsx('relative', className)} {...dropProps}>
       {children}
 
       {isDragOver && (

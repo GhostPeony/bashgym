@@ -225,10 +225,9 @@ def build_grouped_examples(
         positive_set = set(positive_ids)
         eval_id = str(query_row.get("eval_id") or "")
         labeled = [str(value) for value in query_row.get("hard_negative_chunk_ids") or []]
-        dense = (
-            (dense_rankings or {}).get(eval_id)
-            or [str(value) for value in query_row.get("top_retrieved_chunk_ids") or []]
-        )
+        dense = (dense_rankings or {}).get(eval_id) or [
+            str(value) for value in query_row.get("top_retrieved_chunk_ids") or []
+        ]
         bm25 = [
             chunk_id
             for chunk_id, _score in lexical_rank(

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import {
   GitBranch,
   ChevronRight,
@@ -8,10 +8,12 @@ import {
   Database,
   Cpu,
   GraduationCap,
-  ArrowRight,
+  ArrowRight
 } from 'lucide-react'
 import { clsx } from 'clsx'
-import { modelsApi, ModelSummary } from '../../services/api'
+import { ModelSummary } from '../../services/api'
+import { modelLineageResource } from '../../stores/modelResources'
+import { useSessionResource } from '../../stores/sessionResource'
 
 interface LineageTreeProps {
   onSelectModel: (modelId: string) => void
@@ -37,7 +39,7 @@ function buildLineageTree(models: ModelSummary[]): TreeNode[] {
   const nodeMap = new Map<string, TreeNode>()
 
   // First pass: create all nodes
-  models.forEach(model => {
+  models.forEach((model) => {
     nodeMap.set(model.model_id, {
       model_id: model.model_id,
       display_name: model.display_name,
@@ -55,7 +57,7 @@ function buildLineageTree(models: ModelSummary[]): TreeNode[] {
 
   // Group by base model
   const baseModelGroups = new Map<string, TreeNode[]>()
-  nodeMap.forEach(node => {
+  nodeMap.forEach((node) => {
     const base = node.base_model
     if (!baseModelGroups.has(base)) {
       baseModelGroups.set(base, [])
@@ -105,7 +107,14 @@ interface TreeNodeRowProps {
   isBase: boolean
 }
 
-function TreeNodeRow({ node, expanded, onToggle, onSelect, isHighlighted, isBase }: TreeNodeRowProps) {
+function TreeNodeRow({
+  node,
+  expanded,
+  onToggle,
+  onSelect,
+  isHighlighted,
+  isBase
+}: TreeNodeRowProps) {
   const hasChildren = node.children.length > 0
   const indent = node.depth * 24
 
@@ -113,7 +122,9 @@ function TreeNodeRow({ node, expanded, onToggle, onSelect, isHighlighted, isBase
     <div
       className={clsx(
         'flex items-center gap-2 px-3 py-2 rounded-brutal transition-colors border-brutal',
-        isHighlighted ? 'border-accent bg-accent-light shadow-brutal-sm' : 'border-transparent hover:bg-background-secondary hover:border-border-subtle',
+        isHighlighted
+          ? 'border-accent bg-accent-light shadow-brutal-sm'
+          : 'border-transparent hover:bg-background-secondary hover:border-border-subtle',
         !isBase && 'cursor-pointer'
       )}
       style={{ marginLeft: indent }}
@@ -130,7 +141,8 @@ function TreeNodeRow({ node, expanded, onToggle, onSelect, isHighlighted, isBase
           hasChildren ? 'hover:bg-background-secondary' : 'invisible'
         )}
       >
-        {hasChildren && (expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />)}
+        {hasChildren &&
+          (expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />)}
       </button>
 
       {/* Icon */}
@@ -143,10 +155,12 @@ function TreeNodeRow({ node, expanded, onToggle, onSelect, isHighlighted, isBase
       {/* Name */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <span className={clsx(
-            'truncate',
-            isBase ? 'font-mono text-sm text-text-muted' : 'font-brand text-lg text-text-primary'
-          )}>
+          <span
+            className={clsx(
+              'truncate',
+              isBase ? 'font-mono text-sm text-text-muted' : 'font-brand text-lg text-text-primary'
+            )}
+          >
             {node.display_name}
           </span>
           {node.starred && <Star className="w-3.5 h-3.5 text-status-warning fill-current" />}
@@ -168,14 +182,22 @@ function TreeNodeRow({ node, expanded, onToggle, onSelect, isHighlighted, isBase
         <div className="flex items-center gap-4">
           {node.custom_eval_pass_rate !== null && (
             <div className="text-right">
-              <div className="font-brand text-text-primary">{node.custom_eval_pass_rate.toFixed(1)}%</div>
-              <div className="font-mono text-xs uppercase tracking-widest text-text-muted">Custom</div>
+              <div className="font-brand text-text-primary">
+                {node.custom_eval_pass_rate.toFixed(1)}%
+              </div>
+              <div className="font-mono text-xs uppercase tracking-widest text-text-muted">
+                Custom
+              </div>
             </div>
           )}
           {node.benchmark_avg_score !== null && (
             <div className="text-right">
-              <div className="font-brand text-text-primary">{node.benchmark_avg_score.toFixed(1)}%</div>
-              <div className="font-mono text-xs uppercase tracking-widest text-text-muted">Bench</div>
+              <div className="font-brand text-text-primary">
+                {node.benchmark_avg_score.toFixed(1)}%
+              </div>
+              <div className="font-mono text-xs uppercase tracking-widest text-text-muted">
+                Bench
+              </div>
             </div>
           )}
         </div>
@@ -192,31 +214,22 @@ function TreeNodeRow({ node, expanded, onToggle, onSelect, isHighlighted, isBase
 }
 
 export function LineageTree({ onSelectModel, highlightModelId }: LineageTreeProps) {
-  const [models, setModels] = useState<ModelSummary[]>([])
-  const [isLoading, setIsLoading] = useState(true)
+  const { data, loading, error } = useSessionResource(modelLineageResource)
+  const models = useMemo(() => data ?? [], [data])
+  const isLoading = loading || (data === null && error === null)
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set())
-
-  // Fetch all models
-  const fetchModels = useCallback(async () => {
-    setIsLoading(true)
-    const result = await modelsApi.list({ limit: 100, sort_by: 'created_at', sort_order: 'desc' })
-    if (result.ok && result.data) {
-      setModels(result.data.models)
-      // Expand all base model nodes by default
-      const tree = buildLineageTree(result.data.models)
-      setExpandedNodes(new Set(tree.map(n => n.model_id)))
-    }
-    setIsLoading(false)
-  }, [])
-
-  useEffect(() => {
-    fetchModels()
-  }, [fetchModels])
 
   const tree = useMemo(() => buildLineageTree(models), [models])
 
+  // Expand all base model nodes by default whenever the model list changes
+  useEffect(() => {
+    if (data) {
+      setExpandedNodes(new Set(buildLineageTree(data).map((n) => n.model_id)))
+    }
+  }, [data])
+
   const toggleNode = (nodeId: string) => {
-    setExpandedNodes(prev => {
+    setExpandedNodes((prev) => {
       const next = new Set(prev)
       if (next.has(nodeId)) {
         next.delete(nodeId)
@@ -241,7 +254,7 @@ export function LineageTree({ onSelectModel, highlightModelId }: LineageTreeProp
           isHighlighted={isHighlighted}
           isBase={isBase}
         />
-        {isExpanded && node.children.map(child => renderNode(child, false))}
+        {isExpanded && node.children.map((child) => renderNode(child, false))}
       </div>
     )
   }
@@ -259,9 +272,7 @@ export function LineageTree({ onSelectModel, highlightModelId }: LineageTreeProp
       <div className="flex flex-col items-center justify-center h-64 text-center">
         <GitBranch className="w-16 h-16 text-text-muted mb-4" />
         <h3 className="font-brand text-xl text-text-primary mb-2">No Model Lineage</h3>
-        <p className="text-text-muted">
-          Train models to see their lineage tree here
-        </p>
+        <p className="text-text-muted">Train models to see their lineage tree here</p>
       </div>
     )
   }
@@ -285,9 +296,7 @@ export function LineageTree({ onSelectModel, highlightModelId }: LineageTreeProp
       </div>
 
       {/* Tree */}
-      <div className="space-y-1">
-        {tree.map(root => renderNode(root, true))}
-      </div>
+      <div className="space-y-1">{tree.map((root) => renderNode(root, true))}</div>
 
       {/* Summary */}
       <div className="section-divider mt-6" />
@@ -295,17 +304,23 @@ export function LineageTree({ onSelectModel, highlightModelId }: LineageTreeProp
         <div className="grid grid-cols-3 gap-4 text-center">
           <div className="p-3 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
             <div className="font-brand text-3xl text-text-primary">{models.length}</div>
-            <div className="font-mono text-xs uppercase tracking-widest text-text-muted">Total Models</div>
+            <div className="font-mono text-xs uppercase tracking-widest text-text-muted">
+              Total Models
+            </div>
           </div>
           <div className="p-3 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
             <div className="font-brand text-3xl text-text-primary">{tree.length}</div>
-            <div className="font-mono text-xs uppercase tracking-widest text-text-muted">Base Models</div>
+            <div className="font-mono text-xs uppercase tracking-widest text-text-muted">
+              Base Models
+            </div>
           </div>
           <div className="p-3 border-brutal border-border-subtle rounded-brutal bg-background-secondary">
             <div className="font-brand text-3xl text-text-primary">
-              {models.filter(m => m.starred).length}
+              {models.filter((m) => m.starred).length}
             </div>
-            <div className="font-mono text-xs uppercase tracking-widest text-text-muted">Starred</div>
+            <div className="font-mono text-xs uppercase tracking-widest text-text-muted">
+              Starred
+            </div>
           </div>
         </div>
       </div>
@@ -314,7 +329,13 @@ export function LineageTree({ onSelectModel, highlightModelId }: LineageTreeProp
 }
 
 // Compact version for embedding in other components
-export function LineageTreeCompact({ modelId: _modelId, onSelectModel: _onSelectModel }: { modelId: string; onSelectModel: (id: string) => void }) {
+export function LineageTreeCompact({
+  modelId: _modelId,
+  onSelectModel: _onSelectModel
+}: {
+  modelId: string
+  onSelectModel: (id: string) => void
+}) {
   const [_ancestors, _setAncestors] = useState<string[]>([])
 
   // For now, just show base model chain
@@ -323,9 +344,7 @@ export function LineageTreeCompact({ modelId: _modelId, onSelectModel: _onSelect
     <div className="flex items-center gap-2 font-mono text-xs">
       <span className="text-text-muted uppercase tracking-widest">Lineage:</span>
       <div className="flex items-center gap-1">
-        <button
-          className="tag"
-        >
+        <button className="tag">
           <span>Base Model</span>
         </button>
         <ArrowRight className="w-3 h-3 text-text-muted" />

@@ -68,9 +68,14 @@ function rateLimitTags(rl?: Record<string, unknown>): string[] {
     const pct = Number(entry?.used_percent)
     if (!entry || !Number.isFinite(pct)) continue
     const mins = Number(entry.window_minutes)
-    const label = Number.isFinite(mins) && mins > 0
-      ? mins >= 10_080 ? `${Math.round(mins / 1_440)}d` : mins >= 60 ? `${Math.round(mins / 60)}h` : `${mins}m`
-      : key
+    const label =
+      Number.isFinite(mins) && mins > 0
+        ? mins >= 10_080
+          ? `${Math.round(mins / 1_440)}d`
+          : mins >= 60
+            ? `${Math.round(mins / 60)}h`
+            : `${mins}m`
+        : key
     tags.push(`${label} ${Math.round(pct)}%`)
   }
   return tags
@@ -134,7 +139,8 @@ export function SessionDetailPopover({
   const snapshot = target.snapshot
   const session = target.type === 'live' ? target.session : undefined
   const kind = session?.agentKind ?? snapshot?.kind
-  const topic = snapshot?.topic ?? session?.taskSummary ?? snapshot?.title ?? session?.title ?? 'Session'
+  const topic =
+    snapshot?.topic ?? session?.taskSummary ?? snapshot?.title ?? session?.title ?? 'Session'
   const cwd = snapshot?.cwd ?? session?.cwd
   const projectName = folderNameFromPath(cwd, topic)
   const limits = rateLimitTags(snapshot?.rateLimits)
@@ -152,7 +158,10 @@ export function SessionDetailPopover({
       {/* Title strip */}
       <div className="flex items-center gap-2 px-3 py-2 bg-background-secondary border-b border-brutal border-border min-w-0">
         <AgentBadge kind={kind} size="md" />
-        <span className="font-mono text-[11px] font-semibold text-text-primary truncate flex-1" title={topic}>
+        <span
+          className="font-mono text-[11px] font-semibold text-text-primary truncate flex-1"
+          title={topic}
+        >
           {topic}
         </span>
         <button onClick={onClose} className="node-btn flex-shrink-0" title="Close">
@@ -161,17 +170,19 @@ export function SessionDetailPopover({
       </div>
 
       <div className="p-3 space-y-2 max-h-[50vh] overflow-y-auto">
-        {session && (
-          <Row label="Status">{session.status.replace('_', ' ')}</Row>
-        )}
+        {session && <Row label="Status">{session.status.replace('_', ' ')}</Row>}
         {snapshot?.model && <Row label="Model">{snapshot.model}</Row>}
 
         {cwd && (
           <Row label="Project">
             <span className="flex items-center gap-1.5 min-w-0">
               <FolderGit2 className="w-3 h-3 text-accent flex-shrink-0" />
-              <span className="truncate" title={projectName}>{projectName}</span>
-              {snapshot?.gitBranch && <span className="text-accent flex-shrink-0">⎇ {snapshot.gitBranch}</span>}
+              <span className="truncate" title={projectName}>
+                {projectName}
+              </span>
+              {snapshot?.gitBranch && (
+                <span className="text-accent flex-shrink-0">⎇ {snapshot.gitBranch}</span>
+              )}
             </span>
           </Row>
         )}
@@ -203,8 +214,10 @@ export function SessionDetailPopover({
           <Row label="Usage">
             <span className="flex items-center gap-1.5 flex-wrap">
               <span>
-                {snapshot.totalsApprox ? '≈' : ''}in {formatTokens(snapshot.totals.input)} · out {formatTokens(snapshot.totals.output)}
-                {snapshot.totals.cacheRead > 0 && ` · cache ${formatTokens(snapshot.totals.cacheRead)}`}
+                {snapshot.totalsApprox ? '≈' : ''}in {formatTokens(snapshot.totals.input)} · out{' '}
+                {formatTokens(snapshot.totals.output)}
+                {snapshot.totals.cacheRead > 0 &&
+                  ` · cache ${formatTokens(snapshot.totals.cacheRead)}`}
               </span>
               {snapshot.estCostUsd !== undefined && snapshot.estCostUsd > 0 && (
                 <span className="text-text-primary font-bold" title="Estimated API-equivalent cost">
@@ -212,7 +225,11 @@ export function SessionDetailPopover({
                 </span>
               )}
               {limits.map((tag) => (
-                <span key={tag} className="px-1 border-brutal border-border-subtle rounded-brutal text-[10px]" title="Provider rate limit usage">
+                <span
+                  key={tag}
+                  className="px-1 border-brutal border-border-subtle rounded-brutal text-[10px]"
+                  title="Provider rate limit usage"
+                >
                   {tag}
                 </span>
               ))}
@@ -250,7 +267,9 @@ export function SessionDetailPopover({
                 </button>
               </Row>
             )}
-            {(canvasEdges.some((e) => e.source === target.panel.id || e.target === target.panel.id) ||
+            {(canvasEdges.some(
+              (e) => e.source === target.panel.id || e.target === target.panel.id
+            ) ||
               (snapshot?.recentFiles.length ?? 0) > 0) && (
               <Row label="Links">
                 <ConnectionsTree
@@ -271,11 +290,16 @@ export function SessionDetailPopover({
         {target.type === 'live' ? (
           <>
             <button
-              onClick={() => { onFocus(target.panel.id, target.workspaceId); onClose() }}
+              onClick={() => {
+                onFocus(target.panel.id, target.workspaceId)
+                onClose()
+              }}
               className="node-btn node-btn-wide node-btn-accent"
               title="Open this terminal in the Workspace"
             >
-              <span className="flex items-center gap-1"><Maximize2 className="w-2.5 h-2.5" /> OPEN TERMINAL</span>
+              <span className="flex items-center gap-1">
+                <Maximize2 className="w-2.5 h-2.5" /> OPEN TERMINAL
+              </span>
             </button>
             {onMoveToWorkspace && canMoveLivePanel && moveTargets.length > 0 ? (
               <div className="flex items-center gap-1 w-full">
@@ -286,7 +310,9 @@ export function SessionDetailPopover({
                   aria-label="Move terminal to workspace"
                 >
                   {moveTargets.map((workspace) => (
-                    <option key={workspace.id} value={workspace.id}>{workspace.name}</option>
+                    <option key={workspace.id} value={workspace.id}>
+                      {workspace.name}
+                    </option>
                   ))}
                 </select>
                 <button
@@ -305,11 +331,16 @@ export function SessionDetailPopover({
             ) : null}
             {onMoveToNewWorkspace && canMoveLivePanel ? (
               <button
-                onClick={() => { onMoveToNewWorkspace(target.panel.id); onClose() }}
+                onClick={() => {
+                  onMoveToNewWorkspace(target.panel.id)
+                  onClose()
+                }}
                 className="node-btn node-btn-wide"
                 title="Create a new workspace canvas and move this terminal into it (the process keeps running)"
               >
-                <span className="flex items-center gap-1"><LayoutGrid className="w-2.5 h-2.5" /> MOVE TO NEW WORKSPACE</span>
+                <span className="flex items-center gap-1">
+                  <LayoutGrid className="w-2.5 h-2.5" /> MOVE TO NEW WORKSPACE
+                </span>
               </button>
             ) : null}
           </>
@@ -317,19 +348,30 @@ export function SessionDetailPopover({
           target.snapshot.sessionId && (
             <>
               <button
-                onClick={() => { onResume(target.snapshot); onClose() }}
+                onClick={() => {
+                  onResume(target.snapshot)
+                  onClose()
+                }}
                 className="node-btn node-btn-wide node-btn-accent"
                 title={`Opens a new terminal in this project folder and resumes this conversation (${target.snapshot.kind === 'claude' ? 'claude --resume' : 'codex resume'})`}
               >
-                <span className="flex items-center gap-1"><Play className="w-2.5 h-2.5" /> RESUME IN {activeWorkspaceName ?? 'CURRENT WORKSPACE'}</span>
+                <span className="flex items-center gap-1">
+                  <Play className="w-2.5 h-2.5" /> RESUME IN{' '}
+                  {activeWorkspaceName ?? 'CURRENT WORKSPACE'}
+                </span>
               </button>
               {onOpenInNewWorkspace && (
                 <button
-                  onClick={() => { onOpenInNewWorkspace(target.snapshot); onClose() }}
+                  onClick={() => {
+                    onOpenInNewWorkspace(target.snapshot)
+                    onClose()
+                  }}
                   className="node-btn node-btn-wide"
                   title="Create a new workspace canvas and resume this session inside it"
                 >
-                  <span className="flex items-center gap-1"><LayoutGrid className="w-2.5 h-2.5" /> OPEN IN NEW WORKSPACE</span>
+                  <span className="flex items-center gap-1">
+                    <LayoutGrid className="w-2.5 h-2.5" /> OPEN IN NEW WORKSPACE
+                  </span>
                 </button>
               )}
             </>

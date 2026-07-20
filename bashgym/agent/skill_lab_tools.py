@@ -87,7 +87,10 @@ SKILL_LAB_TOOLS: list[dict[str, Any]] = [
             "properties": {
                 **_common_properties(),
                 "skill": {"type": "string", "description": "Skill id or exact skill name."},
-                "source": {"type": "string", "description": "Disambiguating source when using a name."},
+                "source": {
+                    "type": "string",
+                    "description": "Disambiguating source when using a name.",
+                },
             },
             "required": ["skill"],
         },
@@ -104,7 +107,10 @@ SKILL_LAB_TOOLS: list[dict[str, Any]] = [
                 **_common_properties(),
                 "skill": {"type": "string", "description": "Skill id or exact skill name."},
                 "source": {"type": "string"},
-                "endpoint_id": {"type": "string", "description": "Agent endpoint used by paired runs."},
+                "endpoint_id": {
+                    "type": "string",
+                    "description": "Agent endpoint used by paired runs.",
+                },
                 "cases": {"type": "array", "items": _CASE_SCHEMA},
                 "thresholds": {"type": "object", "additionalProperties": {"type": "number"}},
             },
@@ -215,7 +221,9 @@ class SkillLabToolClient:
                 raise SkillLabToolError(f"http_{response.status_code}", detail[:500])
             return response.json()
         except httpx.HTTPError as exc:
-            raise SkillLabToolError("api_unavailable", "The local BashGym API is unavailable.") from exc
+            raise SkillLabToolError(
+                "api_unavailable", "The local BashGym API is unavailable."
+            ) from exc
         finally:
             if owns_client:
                 await client.aclose()
@@ -289,9 +297,7 @@ class SkillLabToolClient:
                 "run_id": (run or {}).get("run_id"),
                 "status": (run or {}).get("status"),
             },
-            "suggested_nodes": [
-                {"recipe": "skill_lab", "title": "Skill Lab", "config": config}
-            ],
+            "suggested_nodes": [{"recipe": "skill_lab", "title": "Skill Lab", "config": config}],
             "relationships": [],
             "payload": {"tool": event_type},
         }
@@ -350,9 +356,7 @@ class SkillLabToolClient:
             skill = None
 
         if name == "skill_lab_inspect_skill":
-            detail = await self._request(
-                "GET", f"/api/skill-lab/skills/{skill['skill_id']}"
-            )
+            detail = await self._request("GET", f"/api/skill-lab/skills/{skill['skill_id']}")
             try:
                 contract = await self._request(
                     "GET",

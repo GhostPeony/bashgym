@@ -309,9 +309,7 @@ class HFContextRepository:
             if row is None:
                 raise BundleNotFoundError(bundle.bundle_id)
             if row["lifecycle"] != Lifecycle.COLLECTING.value:
-                raise ImmutableBundleError(
-                    f"bundle {bundle.bundle_id} v{bundle.version} is ready"
-                )
+                raise ImmutableBundleError(f"bundle {bundle.bundle_id} v{bundle.version} is ready")
             connection.execute(
                 """
                 UPDATE hf_context_versions SET bundle_json = ?, content_hash = ?
@@ -327,9 +325,7 @@ class HFContextRepository:
             )
         return bundle
 
-    def cancel_version(
-        self, workspace_id: str, bundle_id: str, version: int
-    ) -> HFContextBundle:
+    def cancel_version(self, workspace_id: str, bundle_id: str, version: int) -> HFContextBundle:
         """Atomically finalize a collecting version as cancelled."""
 
         self._require_initialized()
@@ -352,9 +348,7 @@ class HFContextRepository:
             if current.lifecycle is Lifecycle.READY:
                 if current.completion_outcome is CompletionOutcome.CANCELLED:
                     return current
-                raise ImmutableBundleError(
-                    f"bundle {bundle_id} v{version} already completed"
-                )
+                raise ImmutableBundleError(f"bundle {bundle_id} v{version} already completed")
             ready_at = utc_now()
             cancelled = HFContextBundle.model_validate(
                 {
@@ -432,13 +426,15 @@ class HFContextRepository:
     def _enforce_retention(
         connection: sqlite3.Connection,
         workspace_id: str,
-        *, keep: int = READY_VERSION_RETENTION,
+        *,
+        keep: int = READY_VERSION_RETENTION,
     ) -> None:
         """Keep the newest ready versions while protecting active and collecting rows."""
 
-        excess = int(
-            connection.execute(
-                """
+        excess = (
+            int(
+                connection.execute(
+                    """
                 SELECT COUNT(*) FROM hf_context_versions AS versions
                 JOIN hf_context_lineages AS lineages
                   ON lineages.workspace_id = versions.workspace_id
@@ -446,9 +442,11 @@ class HFContextRepository:
                 WHERE versions.workspace_id = ? AND versions.lifecycle = 'ready'
                   AND lineages.deleted_at IS NULL
                 """,
-                (workspace_id,),
-            ).fetchone()[0]
-        ) - keep
+                    (workspace_id,),
+                ).fetchone()[0]
+            )
+            - keep
+        )
         if excess <= 0:
             return
         candidates = connection.execute(
@@ -564,7 +562,9 @@ class HFContextRepository:
     def deactivate(self, workspace_id: str) -> None:
         self._require_initialized()
         with self._transaction() as connection:
-            connection.execute("DELETE FROM hf_context_active WHERE workspace_id = ?", (workspace_id,))
+            connection.execute(
+                "DELETE FROM hf_context_active WHERE workspace_id = ?", (workspace_id,)
+            )
 
     def delete_lineage(self, workspace_id: str, bundle_id: str) -> None:
         self._require_initialized()
@@ -614,7 +614,9 @@ class HFContextRepository:
     def schema_version(self) -> int:
         self._require_initialized()
         with self._connection() as connection:
-            row = connection.execute("SELECT MAX(version) AS version FROM hf_context_schema_migrations").fetchone()
+            row = connection.execute(
+                "SELECT MAX(version) AS version FROM hf_context_schema_migrations"
+            ).fetchone()
         return int(row["version"] or 0)
 
     def journal_mode(self) -> str:

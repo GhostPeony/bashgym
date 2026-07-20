@@ -6,7 +6,7 @@ import {
   diffieHellman,
   generateKeyPairSync,
   hkdfSync,
-  randomBytes,
+  randomBytes
 } from 'node:crypto'
 import test from 'node:test'
 import {
@@ -19,7 +19,7 @@ import {
   type CampaignAgentHostAuthorizeRequest,
   type CampaignAgentHostRegistrationBody,
   type CampaignAgentHostTransport,
-  type MainOwnedCampaignAgentIdentity,
+  type MainOwnedCampaignAgentIdentity
 } from '../electron/campaignAgentHost'
 
 const NOW = Date.parse('2026-07-17T12:00:00Z')
@@ -29,7 +29,10 @@ class ManualScheduler implements CampaignAgentHostScheduler {
   private nextId = 1
   private readonly tasks = new Map<number, { dueAt: number; action: () => void | Promise<void> }>()
 
-  constructor(private readonly now: () => number, private readonly setNow: (value: number) => void) {}
+  constructor(
+    private readonly now: () => number,
+    private readonly setNow: (value: number) => void
+  ) {}
 
   set(delayMs: number, action: () => void | Promise<void>): number {
     const id = this.nextId++
@@ -71,7 +74,9 @@ function b64(value: Uint8Array): string {
   return Buffer.from(value).toString('base64url')
 }
 
-function liveIdentity(overrides: Partial<MainOwnedCampaignAgentIdentity> = {}): MainOwnedCampaignAgentIdentity {
+function liveIdentity(
+  overrides: Partial<MainOwnedCampaignAgentIdentity> = {}
+): MainOwnedCampaignAgentIdentity {
   return {
     terminalId: 'terminal-1',
     generation: 'generation-1',
@@ -80,7 +85,7 @@ function liveIdentity(overrides: Partial<MainOwnedCampaignAgentIdentity> = {}): 
     principalId: 'codex_pty_1',
     sessionId: 'pty_session_1',
     live: true,
-    ...overrides,
+    ...overrides
   }
 }
 
@@ -97,11 +102,15 @@ function receipt(body: CampaignAgentHostRegistrationBody, overrides: Record<stri
     registeredAt: '2026-07-17T12:00:00Z',
     expiresAt: '2026-07-17T12:05:00Z',
     status: 'live',
-    ...overrides,
+    ...overrides
   }
 }
 
-function envelope(body: CampaignAgentHostRegistrationBody, registrationId: string, rawToken = TOKEN) {
+function envelope(
+  body: CampaignAgentHostRegistrationBody,
+  registrationId: string,
+  rawToken = TOKEN
+) {
   const credentialId = 'credential-1'
   const envelopeId = 'cage_envelope_1'
   const publicKeyDigest = `sha256:${createHash('sha256').update(Buffer.from(body.ephemeralPublicKey, 'base64url')).digest('hex')}`
@@ -119,19 +128,19 @@ function envelope(body: CampaignAgentHostRegistrationBody, registrationId: strin
     agent_principal_id: body.agentPrincipalId,
     public_key_digest: publicKeyDigest,
     issued_at: '2026-07-17T12:00:01Z',
-    expires_at: '2026-07-17T13:00:01Z',
+    expires_at: '2026-07-17T13:00:01Z'
   }
   const aadJson = canonical(aad)
   const plaintext = canonical({
     schema_version: 'campaign_agent_credential_delivery.v1',
     registration_id: registrationId,
     credential_id: credentialId,
-    raw_token: rawToken,
+    raw_token: rawToken
   })
   const serverKeys = generateKeyPairSync('x25519')
   const recipient = createPublicKey({
     key: { kty: 'OKP', crv: 'X25519', x: body.ephemeralPublicKey },
-    format: 'jwk',
+    format: 'jwk'
   })
   const shared = diffieHellman({ privateKey: serverKeys.privateKey, publicKey: recipient })
   const salt = randomBytes(16)
@@ -155,7 +164,7 @@ function envelope(body: CampaignAgentHostRegistrationBody, registrationId: strin
     nonce: b64(nonce),
     ciphertext: b64(ciphertext),
     aadJson,
-    createdAt: '2026-07-17T12:00:01Z',
+    createdAt: '2026-07-17T12:00:01Z'
   }
 }
 
@@ -199,30 +208,37 @@ function harness(identity = liveIdentity(), options: HarnessOptions = {}) {
     },
     heartbeat: options.heartbeat ?? (async () => ({})),
     observe: options.observe ?? (async () => ({})),
-    artifacts: options.artifacts ?? (async () => ({})),
+    artifacts: options.artifacts ?? (async () => ({}))
   }
   const controller = new CampaignAgentHostController({
     transport,
-    resolveIdentity: options.resolveIdentity
-      ?? ((terminalId) => terminalId === identity.terminalId ? identity : null),
+    resolveIdentity:
+      options.resolveIdentity ??
+      ((terminalId) => (terminalId === identity.terminalId ? identity : null)),
     clock: options.clock ?? (() => NOW),
     scheduler: options.scheduler,
     onLifecycle: options.onLifecycle,
-    idFactory: () => '0123456789abcdef0123456789abcdef',
+    idFactory: () => '0123456789abcdef0123456789abcdef'
   })
   return {
     controller,
     revoked,
     attachmentRevoked,
-    setClaimOverride(value: unknown) { claimOverride = value },
+    setClaimOverride(value: unknown) {
+      claimOverride = value
+    },
     registeredBody: () => registeredBody,
-    registeredBodies,
+    registeredBodies
   }
 }
 
-function fnvDigest(principalId: string, requested: readonly string[], granted: readonly string[]): string {
+function fnvDigest(
+  principalId: string,
+  requested: readonly string[],
+  granted: readonly string[]
+): string {
   const payload = `principal=${principalId};requested=${[...requested].sort().join(',')};granted=${[...granted].sort().join(',')}`
-  let digest = 0x811C9DC5
+  let digest = 0x811c9dc5
   for (const value of Buffer.from(payload, 'ascii')) {
     digest ^= value
     digest = Math.imul(digest, 0x01000193) >>> 0
@@ -234,102 +250,149 @@ function grantReceipt(body: Record<string, unknown>) {
   const requested = body.requestedCapabilities as string[]
   const granted = body.grantedCapabilities as string[]
   return {
-    schemaVersion: 'campaign_agent_grant_confirmation.v1', issuer: 'campaign_authority',
-    receiptId: 'cagr_receipt_1', receiptDigest: `sha256:${'a'.repeat(64)}`,
+    schemaVersion: 'campaign_agent_grant_confirmation.v1',
+    issuer: 'campaign_authority',
+    receiptId: 'cagr_receipt_1',
+    receiptDigest: `sha256:${'a'.repeat(64)}`,
     humanPrincipal: { principalId: 'desktop-human-1', principalType: 'human' },
-    scope: body.scope, agentFamily: body.agentFamily, agentOrigin: body.agentOrigin,
-    agentPrincipalId: body.agentPrincipalId, sessionId: body.sessionId,
-    requestedCapabilities: requested, grantedCapabilities: granted,
+    scope: body.scope,
+    agentFamily: body.agentFamily,
+    agentOrigin: body.agentOrigin,
+    agentPrincipalId: body.agentPrincipalId,
+    sessionId: body.sessionId,
+    requestedCapabilities: requested,
+    grantedCapabilities: granted,
     capabilityDigest: fnvDigest(body.agentPrincipalId as string, requested, granted),
-    grantRevision: 1, issuedAt: '2026-07-17T12:00:01Z', expiresAt: '2026-07-17T12:10:01Z',
+    grantRevision: 1,
+    issuedAt: '2026-07-17T12:00:01Z',
+    expiresAt: '2026-07-17T12:10:01Z'
   }
 }
 
 function attachmentView(body: Record<string, unknown>) {
   const receiptValue = body.confirmationReceipt as Record<string, unknown>
   return {
-    schema_version: 'campaign_agent_public_view.v1', observed_at: '2026-07-17T12:00:02Z',
+    schema_version: 'campaign_agent_public_view.v1',
+    observed_at: '2026-07-17T12:00:02Z',
     scope: { workspace_id: 'workspace-1', campaign_id: 'campaign-1' },
     attachment: {
-      attachment_id: 'caa_attachment_1', attachment_version: 1, status: 'attached',
+      attachment_id: 'caa_attachment_1',
+      attachment_version: 1,
+      status: 'attached',
       requested_capabilities: body.requestedCapabilities,
       granted_capabilities: body.grantedCapabilities,
       receipt_window: { from_version: 1, through_version: 1, has_earlier: false },
       provenance: {
-        agent_family: body.agentFamily, agent_origin: body.agentOrigin,
-        session_id: body.sessionId, agent_principal_id: body.agentPrincipalId,
+        agent_family: body.agentFamily,
+        agent_origin: body.agentOrigin,
+        session_id: body.sessionId,
+        agent_principal_id: body.agentPrincipalId,
         grant_receipt_id: receiptValue.receiptId,
         grant_receipt_digest: receiptValue.receiptDigest,
-        credential_expires_at: '2026-07-17T13:00:02Z',
+        credential_expires_at: '2026-07-17T13:00:02Z'
       },
-      receipts: [],
+      receipts: []
     },
-    audit_events: [],
+    audit_events: []
   }
 }
 
 function revokedAttachmentView(body: Record<string, unknown>) {
   return {
-    schema_version: 'campaign_agent_public_view.v1', observed_at: '2026-07-17T12:00:03Z',
+    schema_version: 'campaign_agent_public_view.v1',
+    observed_at: '2026-07-17T12:00:03Z',
     scope: { workspace_id: 'workspace-1', campaign_id: 'campaign-1' },
     attachment: {
-      attachment_id: body.attachmentId, attachment_version: 2, status: 'revoked',
-      provenance: { revoked_by: body.actorId },
+      attachment_id: body.attachmentId,
+      attachment_version: 2,
+      status: 'revoked',
+      provenance: { revoked_by: body.actorId }
     },
-    audit_events: [],
+    audit_events: []
   }
 }
 
 async function authorizeDefault(controller: CampaignAgentHostController) {
   return controller.authorize({
-    terminalId: 'terminal-1', workspaceId: 'workspace-1', campaignId: 'campaign-1',
-    requestedCapabilities: ['campaign_observe'], grantedCapabilities: ['campaign_observe'],
-    idempotencyKey: 'authorize-visible-choice-1',
+    terminalId: 'terminal-1',
+    workspaceId: 'workspace-1',
+    campaignId: 'campaign-1',
+    requestedCapabilities: ['campaign_observe'],
+    grantedCapabilities: ['campaign_observe'],
+    idempotencyKey: 'authorize-visible-choice-1'
   })
 }
 
 test('host derives the exact agent tuple from a live main-owned PTY and exposes no key material', async () => {
   const { controller, registeredBody } = harness()
   const status = await controller.attach({
-    terminalId: 'terminal-1', workspaceId: 'workspace-1', campaignId: 'campaign-1',
+    terminalId: 'terminal-1',
+    workspaceId: 'workspace-1',
+    campaignId: 'campaign-1'
   })
 
   assert.deepEqual(status, {
-    terminalId: 'terminal-1', workspaceId: 'workspace-1', campaignId: 'campaign-1',
-    family: 'codex', registrationId: 'cahs_registration_1', state: 'registered',
-    expiresAt: '2026-07-17T12:05:00.000Z', credentialReady: false,
+    terminalId: 'terminal-1',
+    workspaceId: 'workspace-1',
+    campaignId: 'campaign-1',
+    family: 'codex',
+    registrationId: 'cahs_registration_1',
+    state: 'registered',
+    expiresAt: '2026-07-17T12:05:00.000Z',
+    credentialReady: false
   })
   const registered = registeredBody()
   assert.ok(registered)
   assert.match(registered.ephemeralPublicKey, /^[A-Za-z0-9_-]{43}$/)
-  assert.deepEqual({ ...registered, ephemeralPublicKey: '<public-key>' }, {
-    scope: { workspaceId: 'workspace-1', campaignId: 'campaign-1' },
-    agentFamily: 'codex', agentOrigin: 'desktop_origin_1', agentPrincipalId: 'codex_pty_1',
-    sessionId: 'pty_session_1', ephemeralPublicKey: '<public-key>',
-    ttlSeconds: 300, idempotencyKey: 'hostreg_0123456789abcdef0123456789abcdef',
-  })
+  assert.deepEqual(
+    { ...registered, ephemeralPublicKey: '<public-key>' },
+    {
+      scope: { workspaceId: 'workspace-1', campaignId: 'campaign-1' },
+      agentFamily: 'codex',
+      agentOrigin: 'desktop_origin_1',
+      agentPrincipalId: 'codex_pty_1',
+      sessionId: 'pty_session_1',
+      ephemeralPublicKey: '<public-key>',
+      ttlSeconds: 300,
+      idempotencyKey: 'hostreg_0123456789abcdef0123456789abcdef'
+    }
+  )
   assert.equal(JSON.stringify(status).includes('ephemeral'), false)
   assert.equal(JSON.stringify(status).includes('agentOrigin'), false)
 })
 
 test('main-owned PTY identity is stable per generation and contains no renderer provenance', () => {
   const first = createMainOwnedCampaignAgentIdentity({
-    terminalId: 'terminal-1', generation: 'generation-1', family: 'codex', hostInstanceId: 'host-instance-1',
+    terminalId: 'terminal-1',
+    generation: 'generation-1',
+    family: 'codex',
+    hostInstanceId: 'host-instance-1'
   })
   const repeated = createMainOwnedCampaignAgentIdentity({
-    terminalId: 'terminal-1', generation: 'generation-1', family: 'codex', hostInstanceId: 'host-instance-1',
+    terminalId: 'terminal-1',
+    generation: 'generation-1',
+    family: 'codex',
+    hostInstanceId: 'host-instance-1'
   })
   const replacement = createMainOwnedCampaignAgentIdentity({
-    terminalId: 'terminal-1', generation: 'generation-2', family: 'codex', hostInstanceId: 'host-instance-1',
+    terminalId: 'terminal-1',
+    generation: 'generation-2',
+    family: 'codex',
+    hostInstanceId: 'host-instance-1'
   })
   assert.deepEqual(first, repeated)
   assert.notEqual(first.sessionId, replacement.sessionId)
   assert.deepEqual(
     { ...first, origin: '<opaque>', principalId: '<opaque>', sessionId: '<opaque>' },
     {
-      terminalId: 'terminal-1', generation: 'generation-1', family: 'codex', live: true,
-      origin: '<opaque>', principalId: '<opaque>', sessionId: '<opaque>',
-    },
+      terminalId: 'terminal-1',
+      generation: 'generation-1',
+      family: 'codex',
+      live: true,
+      origin: '<opaque>',
+      principalId: '<opaque>',
+      sessionId: '<opaque>'
+    }
   )
   assert.match(first.origin, /^desktop_[0-9a-f]{32}$/)
   assert.match(first.principalId, /^codex_pty_[0-9a-f]{32}$/)
@@ -339,31 +402,62 @@ test('main-owned PTY identity is stable per generation and contains no renderer 
 
 test('host rejects absent, exited, unsupported, and renderer-selected family identities', async () => {
   await assert.rejects(
-    () => harness(liveIdentity({ live: false })).controller.attach({ terminalId: 'terminal-1', workspaceId: 'w', campaignId: 'c' }),
-    /live PTY/i,
+    () =>
+      harness(liveIdentity({ live: false })).controller.attach({
+        terminalId: 'terminal-1',
+        workspaceId: 'w',
+        campaignId: 'c'
+      }),
+    /live PTY/i
   )
   await assert.rejects(
-    () => harness(liveIdentity({ family: 'claude' as 'codex' })).controller.attach({ terminalId: 'terminal-1', workspaceId: 'w', campaignId: 'c' }),
-    /unsupported/i,
+    () =>
+      harness(liveIdentity({ family: 'claude' as 'codex' })).controller.attach({
+        terminalId: 'terminal-1',
+        workspaceId: 'w',
+        campaignId: 'c'
+      }),
+    /unsupported/i
   )
   await assert.rejects(
-    () => harness().controller.attach({ terminalId: 'terminal-1', workspaceId: 'w', campaignId: 'c', agentFamily: 'hermes' } as never),
-    /request contract/i,
+    () =>
+      harness().controller.attach({
+        terminalId: 'terminal-1',
+        workspaceId: 'w',
+        campaignId: 'c',
+        agentFamily: 'hermes'
+      } as never),
+    /request contract/i
   )
 })
 
 test('eligible-session projection exposes only opaque live terminal descriptors', async () => {
   const { controller } = harness()
-  await controller.attach({ terminalId: 'terminal-1', workspaceId: 'workspace-1', campaignId: 'campaign-1' })
+  await controller.attach({
+    terminalId: 'terminal-1',
+    workspaceId: 'workspace-1',
+    campaignId: 'campaign-1'
+  })
   const descriptors = controller.eligibleSessions([
     liveIdentity(),
-    liveIdentity({ terminalId: 'terminal-2', generation: 'generation-2', family: 'hermes', origin: 'private-origin', principalId: 'private-principal', sessionId: 'private-session' }),
+    liveIdentity({
+      terminalId: 'terminal-2',
+      generation: 'generation-2',
+      family: 'hermes',
+      origin: 'private-origin',
+      principalId: 'private-principal',
+      sessionId: 'private-session'
+    }),
     liveIdentity({ terminalId: 'terminal-dead', generation: 'generation-3', live: false }),
-    liveIdentity({ terminalId: 'terminal-claude', generation: 'generation-4', family: 'claude' as 'codex' }),
+    liveIdentity({
+      terminalId: 'terminal-claude',
+      generation: 'generation-4',
+      family: 'claude' as 'codex'
+    })
   ])
   assert.deepEqual(descriptors, [
     { terminalId: 'terminal-1', family: 'codex', state: 'registered' },
-    { terminalId: 'terminal-2', family: 'hermes', state: 'eligible' },
+    { terminalId: 'terminal-2', family: 'hermes', state: 'eligible' }
   ])
   assert.equal(JSON.stringify(descriptors).includes('private-origin'), false)
   assert.equal(JSON.stringify(descriptors).includes('private-principal'), false)
@@ -388,14 +482,20 @@ test('claim keeps the credential controller-owned and activate gates fixed actio
       credentials.push(credential)
       artifactQueries.push(query)
       return { artifacts: ['bounded-artifact'] }
-    },
+    }
   })
-  await controller.attach({ terminalId: 'terminal-1', workspaceId: 'workspace-1', campaignId: 'campaign-1' })
+  await controller.attach({
+    terminalId: 'terminal-1',
+    workspaceId: 'workspace-1',
+    campaignId: 'campaign-1'
+  })
   await controller.authorize({
-    terminalId: 'terminal-1', workspaceId: 'workspace-1', campaignId: 'campaign-1',
+    terminalId: 'terminal-1',
+    workspaceId: 'workspace-1',
+    campaignId: 'campaign-1',
     requestedCapabilities: ['campaign_observe', 'artifact_read'],
     grantedCapabilities: ['campaign_observe', 'artifact_read'],
-    idempotencyKey: 'authorize-visible-choice-1',
+    idempotencyKey: 'authorize-visible-choice-1'
   })
   const publicStatus = await controller.claim('terminal-1')
   assert.equal(publicStatus.credentialReady, true)
@@ -408,32 +508,48 @@ test('claim keeps the credential controller-owned and activate gates fixed actio
   assert.equal(active.actionsEnabled, true)
   assert.equal(active.state, 'active')
   assert.deepEqual(await controller.observe('terminal-1'), { campaign: 'bounded-observation' })
-  assert.deepEqual(await controller.artifacts('terminal-1', {
-    afterCursor: 'a1.ABCDEFGHIJK', limit: 10,
-  }), { artifacts: ['bounded-artifact'] })
+  assert.deepEqual(
+    await controller.artifacts('terminal-1', {
+      afterCursor: 'a1.ABCDEFGHIJK',
+      limit: 10
+    }),
+    { artifacts: ['bounded-artifact'] }
+  )
   assert.equal(credentials.length, 3)
   assert.strictEqual(credentials[0], credentials[1])
   assert.strictEqual(credentials[0], credentials[2])
   assert.equal(credentials[0].toString('utf8'), TOKEN)
-  assert.deepEqual(heartbeatBodies, [{
-    scope: { workspaceId: 'workspace-1', campaignId: 'campaign-1' },
-    agentFamily: 'codex',
-    agentOrigin: 'desktop_origin_1',
-    agentPrincipalId: 'codex_pty_1',
-    sessionId: 'pty_session_1',
-  }])
+  assert.deepEqual(heartbeatBodies, [
+    {
+      scope: { workspaceId: 'workspace-1', campaignId: 'campaign-1' },
+      agentFamily: 'codex',
+      agentOrigin: 'desktop_origin_1',
+      agentPrincipalId: 'codex_pty_1',
+      sessionId: 'pty_session_1'
+    }
+  ])
   assert.deepEqual(artifactQueries, [{ afterCursor: 'a1.ABCDEFGHIJK', limit: 10 }])
   const serialized = JSON.stringify(active)
   for (const privateValue of [
-    TOKEN, 'desktop_origin_1', 'codex_pty_1', 'pty_session_1',
-    'header', 'endpoint', 'private error',
-  ]) assert.equal(serialized.includes(privateValue), false)
+    TOKEN,
+    'desktop_origin_1',
+    'codex_pty_1',
+    'pty_session_1',
+    'header',
+    'endpoint',
+    'private error'
+  ])
+    assert.equal(serialized.includes(privateValue), false)
   await assert.rejects(() => controller.claim('terminal-1'), /already claimed/i)
 })
 
 test('claim fails closed until the main-owned human authorization flow is complete', async () => {
   const { controller } = harness()
-  await controller.attach({ terminalId: 'terminal-1', workspaceId: 'workspace-1', campaignId: 'campaign-1' })
+  await controller.attach({
+    terminalId: 'terminal-1',
+    workspaceId: 'workspace-1',
+    campaignId: 'campaign-1'
+  })
   await assert.rejects(() => controller.claim('terminal-1'), /authorization/i)
   assert.equal(controller.status('terminal-1')?.state, 'registered')
 })
@@ -444,13 +560,20 @@ test('artifact queries reject extra, hostile, and unbounded values before creden
     artifacts: async () => {
       artifactCalls += 1
       return { artifacts: [] }
-    },
+    }
   })
-  await controller.attach({ terminalId: 'terminal-1', workspaceId: 'workspace-1', campaignId: 'campaign-1' })
+  await controller.attach({
+    terminalId: 'terminal-1',
+    workspaceId: 'workspace-1',
+    campaignId: 'campaign-1'
+  })
   await controller.authorize({
-    terminalId: 'terminal-1', workspaceId: 'workspace-1', campaignId: 'campaign-1',
-    requestedCapabilities: ['artifact_read'], grantedCapabilities: ['artifact_read'],
-    idempotencyKey: 'authorize-artifact-read-1',
+    terminalId: 'terminal-1',
+    workspaceId: 'workspace-1',
+    campaignId: 'campaign-1',
+    requestedCapabilities: ['artifact_read'],
+    grantedCapabilities: ['artifact_read'],
+    idempotencyKey: 'authorize-artifact-read-1'
   })
   await controller.claim('terminal-1')
   await controller.activate('terminal-1')
@@ -458,7 +581,9 @@ test('artifact queries reject extra, hostile, and unbounded values before creden
   const hostileCursor = `a1.${TOKEN}`
   const accessorQuery = Object.defineProperty({}, 'limit', {
     enumerable: true,
-    get: () => { throw new Error('private accessor must not run') },
+    get: () => {
+      throw new Error('private accessor must not run')
+    }
   })
   const symbolQuery = { [Symbol('private')]: 10 }
   const invalidQueries: unknown[] = [
@@ -472,14 +597,15 @@ test('artifact queries reject extra, hostile, and unbounded values before creden
     { limit: 0 },
     { limit: 51 },
     { limit: 1.5 },
-    { limit: '10' },
+    { limit: '10' }
   ]
   for (const query of invalidQueries) {
     await assert.rejects(
       () => controller.artifacts('terminal-1', query as CampaignAgentHostArtifactQuery),
-      (error: unknown) => error instanceof Error
-        && /artifact query is invalid/i.test(error.message)
-        && !error.message.includes(TOKEN),
+      (error: unknown) =>
+        error instanceof Error &&
+        /artifact query is invalid/i.test(error.message) &&
+        !error.message.includes(TOKEN)
     )
   }
   assert.equal(artifactCalls, 0)
@@ -489,7 +615,12 @@ test('artifact queries reject extra, hostile, and unbounded values before creden
 
 test('active credentials heartbeat every 30 seconds, retry one transient failure, and lock at 90 seconds stale', async () => {
   let now = NOW
-  const scheduler = new ManualScheduler(() => now, (value) => { now = value })
+  const scheduler = new ManualScheduler(
+    () => now,
+    (value) => {
+      now = value
+    }
+  )
   const lifecycle: CampaignAgentHostLifecycleEvent[] = []
   let heartbeatCount = 0
   const { controller } = harness(liveIdentity(), {
@@ -500,9 +631,13 @@ test('active credentials heartbeat every 30 seconds, retry one transient failure
       heartbeatCount += 1
       if (heartbeatCount === 1 || heartbeatCount === 3) return { ok: true }
       throw new Error('temporary network failure')
-    },
+    }
   })
-  await controller.attach({ terminalId: 'terminal-1', workspaceId: 'workspace-1', campaignId: 'campaign-1' })
+  await controller.attach({
+    terminalId: 'terminal-1',
+    workspaceId: 'workspace-1',
+    campaignId: 'campaign-1'
+  })
   await authorizeDefault(controller)
   await controller.claim('terminal-1')
   await controller.activate('terminal-1')
@@ -524,7 +659,7 @@ test('active credentials heartbeat every 30 seconds, retry one transient failure
   assert.equal(controller.status('terminal-1')?.state, 'credential_ready')
   assert.deepEqual(lifecycle, [
     { terminalId: 'terminal-1', kind: 'activated' },
-    { terminalId: 'terminal-1', kind: 'actions_locked', reason: 'heartbeat_timeout' },
+    { terminalId: 'terminal-1', kind: 'actions_locked', reason: 'heartbeat_timeout' }
   ])
   await assert.rejects(() => controller.observe('terminal-1'), /not active/i)
 })
@@ -541,24 +676,34 @@ test('401 and 403 fixed-action failures fail closed, erase the credential, and e
       },
       observe: async () => {
         throw Object.assign(new Error(`private backend ${status} detail`), { status })
-      },
+      }
     })
-    await controller.attach({ terminalId: 'terminal-1', workspaceId: 'workspace-1', campaignId: 'campaign-1' })
+    await controller.attach({
+      terminalId: 'terminal-1',
+      workspaceId: 'workspace-1',
+      campaignId: 'campaign-1'
+    })
     await authorizeDefault(controller)
     await controller.claim('terminal-1')
     await controller.activate('terminal-1')
     await assert.rejects(
       () => controller.observe('terminal-1'),
-      (error: unknown) => error instanceof Error
-        && /authority rejected/i.test(error.message)
-        && !error.message.includes('private backend'),
+      (error: unknown) =>
+        error instanceof Error &&
+        /authority rejected/i.test(error.message) &&
+        !error.message.includes('private backend')
     )
     assert.equal(controller.status('terminal-1'), null)
     assert.deepEqual(revoked, ['cahs_registration_1'])
     assert.equal(credentials.length, 1)
-    assert.equal(credentials[0].every((value) => value === 0), true)
+    assert.equal(
+      credentials[0].every((value) => value === 0),
+      true
+    )
     assert.deepEqual(lifecycle.at(-1), {
-      terminalId: 'terminal-1', kind: 'torn_down', reason: 'authority_rejected',
+      terminalId: 'terminal-1',
+      kind: 'torn_down',
+      reason: 'authority_rejected'
     })
   }
 })
@@ -567,7 +712,12 @@ test('credential expiry and main-owned identity changes fail closed before fixed
   for (const failure of ['credential_expired', 'identity_changed'] as const) {
     let now = NOW
     let identity = liveIdentity()
-    const scheduler = new ManualScheduler(() => now, (value) => { now = value })
+    const scheduler = new ManualScheduler(
+      () => now,
+      (value) => {
+        now = value
+      }
+    )
     const lifecycle: CampaignAgentHostLifecycleEvent[] = []
     let observed = false
     const { controller } = harness(identity, {
@@ -578,9 +728,13 @@ test('credential expiry and main-owned identity changes fail closed before fixed
       observe: async () => {
         observed = true
         return { campaign: 'must-not-run' }
-      },
+      }
     })
-    await controller.attach({ terminalId: 'terminal-1', workspaceId: 'workspace-1', campaignId: 'campaign-1' })
+    await controller.attach({
+      terminalId: 'terminal-1',
+      workspaceId: 'workspace-1',
+      campaignId: 'campaign-1'
+    })
     await authorizeDefault(controller)
     await controller.claim('terminal-1')
     await controller.activate('terminal-1')
@@ -591,7 +745,9 @@ test('credential expiry and main-owned identity changes fail closed before fixed
     assert.equal(observed, false)
     assert.equal(controller.status('terminal-1'), null)
     assert.deepEqual(lifecycle.at(-1), {
-      terminalId: 'terminal-1', kind: 'torn_down', reason: failure,
+      terminalId: 'terminal-1',
+      kind: 'torn_down',
+      reason: failure
     })
   }
 })
@@ -605,22 +761,30 @@ test('identity replacement during the activation heartbeat cannot activate stale
     heartbeat: async () => {
       identity = liveIdentity({ generation: 'generation-2' })
       return { ok: true }
-    },
+    }
   })
-  await controller.attach({ terminalId: 'terminal-1', workspaceId: 'workspace-1', campaignId: 'campaign-1' })
+  await controller.attach({
+    terminalId: 'terminal-1',
+    workspaceId: 'workspace-1',
+    campaignId: 'campaign-1'
+  })
   await authorizeDefault(controller)
   await controller.claim('terminal-1')
 
   await assert.rejects(() => controller.activate('terminal-1'), /no longer authorized/i)
   assert.equal(controller.status('terminal-1'), null)
   assert.deepEqual(lifecycle, [
-    { terminalId: 'terminal-1', kind: 'torn_down', reason: 'identity_changed' },
+    { terminalId: 'terminal-1', kind: 'torn_down', reason: 'identity_changed' }
   ])
 })
 
 test('claimed sessions renew with a fresh X25519 key without exposing or redelivering credentials', async () => {
   const { controller, registeredBodies } = harness()
-  await controller.attach({ terminalId: 'terminal-1', workspaceId: 'workspace-1', campaignId: 'campaign-1' })
+  await controller.attach({
+    terminalId: 'terminal-1',
+    workspaceId: 'workspace-1',
+    campaignId: 'campaign-1'
+  })
   await authorizeDefault(controller)
   await controller.claim('terminal-1')
   const before = controller.status('terminal-1')
@@ -635,54 +799,106 @@ test('claimed sessions renew with a fresh X25519 key without exposing or redeliv
 
 test('authorize owns grant confirmation and attachment tuple fields and returns only a stripped summary', async () => {
   const { controller } = harness()
-  await controller.attach({ terminalId: 'terminal-1', workspaceId: 'workspace-1', campaignId: 'campaign-1' })
+  await controller.attach({
+    terminalId: 'terminal-1',
+    workspaceId: 'workspace-1',
+    campaignId: 'campaign-1'
+  })
   const status = await controller.authorize({
-    terminalId: 'terminal-1', workspaceId: 'workspace-1', campaignId: 'campaign-1',
+    terminalId: 'terminal-1',
+    workspaceId: 'workspace-1',
+    campaignId: 'campaign-1',
     requestedCapabilities: ['training_launch', 'campaign_observe'],
     grantedCapabilities: ['campaign_observe'],
-    idempotencyKey: 'authorize-visible-choice-1',
+    idempotencyKey: 'authorize-visible-choice-1'
   })
   assert.deepEqual(status.authorization, {
-    receiptId: 'cagr_receipt_1', attachmentId: 'caa_attachment_1', attachmentVersion: 1,
-    grantedCapabilities: ['campaign_observe'], credentialExpiresAt: '2026-07-17T13:00:02.000Z',
+    receiptId: 'cagr_receipt_1',
+    attachmentId: 'caa_attachment_1',
+    attachmentVersion: 1,
+    grantedCapabilities: ['campaign_observe'],
+    credentialExpiresAt: '2026-07-17T13:00:02.000Z'
   })
   const serialized = JSON.stringify(status)
-  for (const privateField of ['agentOrigin', 'agentPrincipalId', 'sessionId', 'desktop_origin_1', 'codex_pty_1', 'pty_session_1']) {
+  for (const privateField of [
+    'agentOrigin',
+    'agentPrincipalId',
+    'sessionId',
+    'desktop_origin_1',
+    'codex_pty_1',
+    'pty_session_1'
+  ]) {
     assert.equal(serialized.includes(privateField), false)
   }
 })
 
 test('authorize rejects renderer identity fields, unknown capabilities, and scope changes', async () => {
   const { controller } = harness()
-  await controller.attach({ terminalId: 'terminal-1', workspaceId: 'workspace-1', campaignId: 'campaign-1' })
+  await controller.attach({
+    terminalId: 'terminal-1',
+    workspaceId: 'workspace-1',
+    campaignId: 'campaign-1'
+  })
   const valid: CampaignAgentHostAuthorizeRequest = {
-    terminalId: 'terminal-1', workspaceId: 'workspace-1', campaignId: 'campaign-1',
-    requestedCapabilities: ['campaign_observe'], grantedCapabilities: ['campaign_observe'],
-    idempotencyKey: 'authorize-visible-choice-1',
+    terminalId: 'terminal-1',
+    workspaceId: 'workspace-1',
+    campaignId: 'campaign-1',
+    requestedCapabilities: ['campaign_observe'],
+    grantedCapabilities: ['campaign_observe'],
+    idempotencyKey: 'authorize-visible-choice-1'
   }
-  await assert.rejects(() => controller.authorize({ ...valid, agentOrigin: 'renderer-spoof' } as never), /contract/i)
-  await assert.rejects(() => controller.authorize({ ...valid, requestedCapabilities: ['campaign_write'] } as never), /capabilit/i)
-  await assert.rejects(() => controller.authorize({ ...valid, campaignId: 'campaign-other' }), /scope/i)
+  await assert.rejects(
+    () => controller.authorize({ ...valid, agentOrigin: 'renderer-spoof' } as never),
+    /contract/i
+  )
+  await assert.rejects(
+    () => controller.authorize({ ...valid, requestedCapabilities: ['campaign_write'] } as never),
+    /capabilit/i
+  )
+  await assert.rejects(
+    () => controller.authorize({ ...valid, campaignId: 'campaign-other' }),
+    /scope/i
+  )
 })
 
 test('claim fails closed on cross-scope, replayed registration, public-key, and credential mismatches', async () => {
   const cases: Array<[string, (value: ReturnType<typeof envelope>) => void]> = [
-    ['registration', (value) => { value.registrationId = 'cahs_other' }],
-    ['scope', (value) => {
-      const aad = JSON.parse(value.aadJson)
-      aad.workspace_id = 'workspace-other'
-      value.aadJson = canonical(aad)
-    }],
-    ['key', (value) => {
-      const aad = JSON.parse(value.aadJson)
-      aad.public_key_digest = `sha256:${'0'.repeat(64)}`
-      value.aadJson = canonical(aad)
-    }],
-    ['credential', (value) => { value.credentialId = 'credential-other' }],
+    [
+      'registration',
+      (value) => {
+        value.registrationId = 'cahs_other'
+      }
+    ],
+    [
+      'scope',
+      (value) => {
+        const aad = JSON.parse(value.aadJson)
+        aad.workspace_id = 'workspace-other'
+        value.aadJson = canonical(aad)
+      }
+    ],
+    [
+      'key',
+      (value) => {
+        const aad = JSON.parse(value.aadJson)
+        aad.public_key_digest = `sha256:${'0'.repeat(64)}`
+        value.aadJson = canonical(aad)
+      }
+    ],
+    [
+      'credential',
+      (value) => {
+        value.credentialId = 'credential-other'
+      }
+    ]
   ]
   for (const [label, mutate] of cases) {
     const current = harness()
-    await current.controller.attach({ terminalId: 'terminal-1', workspaceId: 'workspace-1', campaignId: 'campaign-1' })
+    await current.controller.attach({
+      terminalId: 'terminal-1',
+      workspaceId: 'workspace-1',
+      campaignId: 'campaign-1'
+    })
     await authorizeDefault(current.controller)
     const body = current.registeredBody()
     assert.ok(body)
@@ -706,26 +922,44 @@ test('teardown stays locally revoked when the backend revoke receipt is cross-sc
         body = value
         return receipt(value)
       },
-      claim: async () => { throw new Error('not used') },
+      claim: async () => {
+        throw new Error('not used')
+      },
       revoke: async (registrationId) => {
         if (!body) throw new Error('missing body')
         return receipt(body, {
           registrationId,
           status: 'revoked',
-          scope: { workspaceId: 'workspace-other', campaignId: body.scope.campaignId },
+          scope: { workspaceId: 'workspace-other', campaignId: body.scope.campaignId }
         })
-      },
-    },
+      }
+    }
   })
-  await controller.attach({ terminalId: 'terminal-1', workspaceId: 'workspace-1', campaignId: 'campaign-1' })
-  await assert.rejects(() => controller.teardownTerminal('terminal-1', 'pty_exit'), /revoke receipt/i)
+  await controller.attach({
+    terminalId: 'terminal-1',
+    workspaceId: 'workspace-1',
+    campaignId: 'campaign-1'
+  })
+  await assert.rejects(
+    () => controller.teardownTerminal('terminal-1', 'pty_exit'),
+    /revoke receipt/i
+  )
   assert.equal(controller.status('terminal-1'), null)
 })
 
 test('PTY exit, replacement, renderer reload, and shutdown revoke remotely and drop local authority', async () => {
-  for (const reason of ['pty_exit', 'pty_replacement', 'renderer_reload', 'app_shutdown'] as const) {
+  for (const reason of [
+    'pty_exit',
+    'pty_replacement',
+    'renderer_reload',
+    'app_shutdown'
+  ] as const) {
     const { controller, revoked, attachmentRevoked } = harness()
-    await controller.attach({ terminalId: 'terminal-1', workspaceId: 'workspace-1', campaignId: 'campaign-1' })
+    await controller.attach({
+      terminalId: 'terminal-1',
+      workspaceId: 'workspace-1',
+      campaignId: 'campaign-1'
+    })
     await authorizeDefault(controller)
     await controller.claim('terminal-1')
     await controller.teardownTerminal('terminal-1', reason)

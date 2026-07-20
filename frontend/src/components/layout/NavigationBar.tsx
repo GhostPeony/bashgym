@@ -11,9 +11,12 @@ import {
   Minus,
   Square,
   Copy,
-  LogOut
+  LogOut,
+  Bell
 } from 'lucide-react'
 import { useThemeStore, useUIStore, useTerminalStore, useAuthStore } from '../../stores'
+import { useActivityStore } from '../../stores/activityStore'
+import { clsx } from 'clsx'
 import { isElectron, isWeb } from '../../utils/platform'
 
 export function NavigationBar() {
@@ -22,6 +25,7 @@ export function NavigationBar() {
   const { createTerminal } = useTerminalStore()
   const { user, isAuthenticated, logout } = useAuthStore()
   const [isMaximized, setIsMaximized] = useState(false)
+  const { isOpen: notificationsOpen, unread, setOpen: setNotificationsOpen } = useActivityStore()
 
   // Track maximized state
   useEffect(() => {
@@ -64,7 +68,8 @@ export function NavigationBar() {
   const getBreadcrumbText = () => {
     if (!overlayView) return 'Workspace'
     if (overlayView === 'home') return null
-    if (overlayView === 'training') return trainingSubview === 'autoresearch' ? 'AutoResearch' : 'Training'
+    if (overlayView === 'training')
+      return trainingSubview === 'autoresearch' ? 'AutoResearch' : 'Training'
     if (overlayView === 'factory') return 'Data Factory'
     if (overlayView === 'huggingface') return 'HuggingFace'
     return overlayView.charAt(0).toUpperCase() + overlayView.slice(1)
@@ -77,11 +82,7 @@ export function NavigationBar() {
       {/* Left Section */}
       <div className="flex items-center gap-3 titlebar-no-drag">
         {/* Menu Toggle */}
-        <button
-          onClick={toggleSidebar}
-          className="btn-icon group"
-          title="Toggle menu"
-        >
+        <button onClick={toggleSidebar} className="btn-icon group" title="Toggle menu">
           <Menu className="w-5 h-5 text-text-secondary group-hover:text-accent" />
         </button>
 
@@ -89,9 +90,7 @@ export function NavigationBar() {
         <button
           onClick={handleGoHome}
           className={`btn-icon ${
-            overlayView === 'home'
-              ? 'bg-accent/10 text-accent'
-              : 'text-text-secondary'
+            overlayView === 'home' ? 'bg-accent/10 text-accent' : 'text-text-secondary'
           }`}
           title="Home"
         >
@@ -99,10 +98,7 @@ export function NavigationBar() {
         </button>
 
         {/* Logo / Title - Clickable to go home */}
-        <button
-          onClick={handleGoHome}
-          className="flex items-center gap-3"
-        >
+        <button onClick={handleGoHome} className="flex items-center gap-3">
           <img src="./bashgym-peony.png" alt="BashGym" className="w-9 h-9 -my-1 object-contain" />
           <span className="font-brand text-xl font-semibold leading-none">
             <span className="text-accent">/</span>
@@ -132,17 +128,32 @@ export function NavigationBar() {
           </button>
         )}
 
+        <button
+          type="button"
+          onClick={() => setNotificationsOpen(!notificationsOpen)}
+          className={clsx(
+            'btn-icon relative text-text-secondary hover:text-accent',
+            notificationsOpen && 'bg-accent/10 text-accent'
+          )}
+          title="Notifications"
+          aria-label={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
+          aria-expanded={notificationsOpen}
+        >
+          <Bell className="h-5 w-5" />
+          {unread > 0 ? (
+            <span className="absolute -right-1 -top-1 min-w-4 border border-background-card bg-accent px-1 font-mono text-[10px] leading-4 text-white">
+              {unread > 99 ? '99+' : unread}
+            </span>
+          ) : null}
+        </button>
+
         {/* Theme Toggle */}
         <button
           onClick={toggleTheme}
           className="btn-icon text-text-secondary hover:text-accent"
           title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode (Ctrl+D)`}
         >
-          {theme === 'dark' ? (
-            <Sun className="w-5 h-5" />
-          ) : (
-            <Moon className="w-5 h-5" />
-          )}
+          {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
         </button>
 
         {/* Add Terminal — Electron only */}
@@ -213,17 +224,13 @@ export function NavigationBar() {
             </button>
             <button
               onClick={() => {
-                (window as any).bashgym.window.maximize()
+                ;(window as any).bashgym.window.maximize()
                 // State will update via resize listener
               }}
               className="btn-icon text-text-secondary hover:text-accent"
               title={isMaximized ? 'Restore' : 'Maximize'}
             >
-              {isMaximized ? (
-                <Copy className="w-3.5 h-3.5" />
-              ) : (
-                <Square className="w-3.5 h-3.5" />
-              )}
+              {isMaximized ? <Copy className="w-3.5 h-3.5" /> : <Square className="w-3.5 h-3.5" />}
             </button>
             <button
               onClick={() => (window as any).bashgym.window.close()}

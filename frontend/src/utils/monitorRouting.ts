@@ -161,7 +161,10 @@ export function maybeAutoSnapshot(watchedTerminalId: string): void {
       const watcherSession = watcherPanel?.terminalId
         ? sessions.get(watcherPanel.terminalId)
         : undefined
-      if (watcherSession && (watcherSession.status === 'running' || watcherSession.status === 'tool_calling')) {
+      if (
+        watcherSession &&
+        (watcherSession.status === 'running' || watcherSession.status === 'tool_calling')
+      ) {
         continue
       }
     }

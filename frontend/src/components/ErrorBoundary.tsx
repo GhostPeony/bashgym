@@ -37,7 +37,7 @@ export class ErrorBoundary extends Component<Props, State> {
             background: '#0a0a0a',
             color: '#e5e5e5',
             fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-            padding: '2rem',
+            padding: '2rem'
           }}
         >
           <div style={{ maxWidth: 640 }}>
@@ -45,8 +45,8 @@ export class ErrorBoundary extends Component<Props, State> {
               Something broke while rendering the app.
             </h1>
             <p style={{ color: '#a3a3a3', marginBottom: '1rem', lineHeight: 1.5 }}>
-              The error below was caught by the top-level boundary so the whole screen
-              didn&apos;t go blank. Check the console for the full stack.
+              The error below was caught by the top-level boundary so the whole screen didn&apos;t
+              go blank. Check the console for the full stack.
             </p>
             <pre
               style={{
@@ -56,7 +56,7 @@ export class ErrorBoundary extends Component<Props, State> {
                 padding: '1rem',
                 borderRadius: 8,
                 fontSize: '0.8rem',
-                color: '#fca5a5',
+                color: '#fca5a5'
               }}
             >
               {this.state.error.message}
@@ -71,7 +71,7 @@ export class ErrorBoundary extends Component<Props, State> {
                 color: '#e5e5e5',
                 border: '1px solid #404040',
                 borderRadius: 6,
-                cursor: 'pointer',
+                cursor: 'pointer'
               }}
             >
               Reload

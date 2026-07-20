@@ -4,8 +4,20 @@ import type { PanelType } from '../../../stores'
 import { CUSTOM_NODE_TYPES, isCustomNodeType } from './customNodeTypes'
 
 const expected: PanelType[] = [
-  'context', 'neon', 'vercel', 'activity', 'training', 'campaign', 'evals',
-  'designer', 'huggingface', 'agent', 'toolkit', 'skilllab', 'mcp', 'knowledge',
+  'context',
+  'neon',
+  'vercel',
+  'activity',
+  'training',
+  'campaign',
+  'evals',
+  'designer',
+  'huggingface',
+  'agent',
+  'toolkit',
+  'skilllab',
+  'mcp',
+  'knowledge'
 ]
 
 test('registers every persisted custom panel type for Canvas and Grid', () => {

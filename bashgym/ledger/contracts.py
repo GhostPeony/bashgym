@@ -99,9 +99,7 @@ def ensure_safe_payload(value: Any, *, field_name: str = "metadata") -> Any:
 
 def payload_digest(value: Any) -> str:
     return hashlib.sha256(
-        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
-            "utf-8"
-        )
+        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     ).hexdigest()
 
 
@@ -121,6 +119,7 @@ class ProjectSpec(SafeContract):
     owner_actor_id: Identifier
     tags: tuple[Identifier, ...] = ()
     created_at: datetime = Field(default_factory=utc_now)
+
 
 class ExperimentSpec(SafeContract):
     workspace_id: Identifier

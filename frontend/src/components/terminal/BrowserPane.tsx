@@ -65,7 +65,7 @@ async function copyDataUrlToClipboard(dataUrl: string): Promise<void> {
     if (result.success) return
   }
   // Web fallback (dev server / browser context)
-  const blob = await fetch(dataUrl).then(r => r.blob())
+  const blob = await fetch(dataUrl).then((r) => r.blob())
   await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
 }
 
@@ -86,17 +86,27 @@ export function BrowserPane({ id, title: _title, url: initialUrl, isActive }: Br
   const pickerPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Screenshot via IPC — uses main process webContents.capturePage() which is reliable
-  const captureScreenshot = useCallback(async (rect?: { x: number; y: number; width: number; height: number; vpW: number; vpH: number }) => {
-    const webview = webviewRef.current
-    if (!webview) return null
-    try {
-      const webContentsId = webview.getWebContentsId()
-      const result = await window.bashgym?.browser?.screenshot(webContentsId, rect)
-      return result?.success ? result.dataUrl ?? null : null
-    } catch {
-      return null
-    }
-  }, [])
+  const captureScreenshot = useCallback(
+    async (rect?: {
+      x: number
+      y: number
+      width: number
+      height: number
+      vpW: number
+      vpH: number
+    }) => {
+      const webview = webviewRef.current
+      if (!webview) return null
+      try {
+        const webContentsId = webview.getWebContentsId()
+        const result = await window.bashgym?.browser?.screenshot(webContentsId, rect)
+        return result?.success ? (result.dataUrl ?? null) : null
+      } catch {
+        return null
+      }
+    },
+    []
+  )
 
   // Store thumbnail after every page load (covers initial load + URL navigation)
   const updateThumbnail = useCallback(async () => {
@@ -105,9 +115,12 @@ export function BrowserPane({ id, title: _title, url: initialUrl, isActive }: Br
   }, [id, captureScreenshot, setPanelThumbnail])
 
   // Route a screenshot to all terminals connected to this browser node via canvas edges
-  const routeToConnectedTerminals = useCallback(async (dataUrl: string) => {
-    await routeBinaryToLinkedTerminals(id, dataUrl, 'png')
-  }, [id])
+  const routeToConnectedTerminals = useCallback(
+    async (dataUrl: string) => {
+      await routeBinaryToLinkedTerminals(id, dataUrl, 'png')
+    },
+    [id]
+  )
 
   useEffect(() => {
     const webview = webviewRef.current
@@ -135,19 +148,32 @@ export function BrowserPane({ id, title: _title, url: initialUrl, isActive }: Br
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pickerMode])
 
   // Clean up poll on unmount
-  useEffect(() => () => { if (pickerPollRef.current) clearInterval(pickerPollRef.current) }, [])
+  useEffect(
+    () => () => {
+      if (pickerPollRef.current) clearInterval(pickerPollRef.current)
+    },
+    []
+  )
 
   const cancelPicker = useCallback(() => {
-    if (pickerPollRef.current) { clearInterval(pickerPollRef.current); pickerPollRef.current = null }
+    if (pickerPollRef.current) {
+      clearInterval(pickerPollRef.current)
+      pickerPollRef.current = null
+    }
     setPickerMode(false)
-    webviewRef.current?.executeJavaScript('window.__bgymPickerActive && (window.__bgymPickerActive = false);').catch(() => {})
+    webviewRef.current
+      ?.executeJavaScript('window.__bgymPickerActive && (window.__bgymPickerActive = false);')
+      .catch(() => {})
   }, [])
 
-  const handleClose = (e: React.MouseEvent) => { e.stopPropagation(); removePanel(id) }
+  const handleClose = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    removePanel(id)
+  }
 
   const handleNavigate = () => {
     let newUrl = inputUrl
@@ -157,7 +183,9 @@ export function BrowserPane({ id, title: _title, url: initialUrl, isActive }: Br
     // did-finish-load fires after navigation → thumbnail auto-updates
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent) => { if (e.key === 'Enter') handleNavigate() }
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') handleNavigate()
+  }
 
   // Camera: full screenshot → clipboard + canvas thumbnail + route to connected terminals
   const handleScreenshot = useCallback(async () => {
@@ -192,7 +220,8 @@ export function BrowserPane({ id, title: _title, url: initialUrl, isActive }: Br
         try {
           const bounds = await webview.executeJavaScript('window.__bgymSelectedBounds')
           if (!bounds) return
-          clearInterval(pickerPollRef.current!); pickerPollRef.current = null
+          clearInterval(pickerPollRef.current!)
+          pickerPollRef.current = null
           setPickerMode(false)
 
           const dataUrl = await captureScreenshot(bounds)
@@ -202,11 +231,15 @@ export function BrowserPane({ id, title: _title, url: initialUrl, isActive }: Br
               routeToConnectedTerminals(dataUrl)
             ])
           }
-        } catch { /* ignore poll errors */ }
+        } catch {
+          /* ignore poll errors */
+        }
       }, 200)
 
       // Auto-cancel after 30s
-      setTimeout(() => { if (pickerPollRef.current) cancelPicker() }, 30000)
+      setTimeout(() => {
+        if (pickerPollRef.current) cancelPicker()
+      }, 30000)
     } catch {
       setPickerMode(false)
     }
@@ -216,13 +249,22 @@ export function BrowserPane({ id, title: _title, url: initialUrl, isActive }: Br
     <div className="terminal-chrome h-full flex flex-col">
       <div className="terminal-header">
         <div className="flex items-center gap-1">
-          <button onClick={() => webviewRef.current?.goBack()} className="btn-icon !w-6 !h-6 !border-0 !shadow-none hover:bg-background-tertiary">
+          <button
+            onClick={() => webviewRef.current?.goBack()}
+            className="btn-icon !w-6 !h-6 !border-0 !shadow-none hover:bg-background-tertiary"
+          >
             <ArrowLeft className="w-3.5 h-3.5 text-text-muted" />
           </button>
-          <button onClick={() => webviewRef.current?.goForward()} className="btn-icon !w-6 !h-6 !border-0 !shadow-none hover:bg-background-tertiary">
+          <button
+            onClick={() => webviewRef.current?.goForward()}
+            className="btn-icon !w-6 !h-6 !border-0 !shadow-none hover:bg-background-tertiary"
+          >
             <ArrowRight className="w-3.5 h-3.5 text-text-muted" />
           </button>
-          <button onClick={() => webviewRef.current?.reload()} className="btn-icon !w-6 !h-6 !border-0 !shadow-none hover:bg-background-tertiary">
+          <button
+            onClick={() => webviewRef.current?.reload()}
+            className="btn-icon !w-6 !h-6 !border-0 !shadow-none hover:bg-background-tertiary"
+          >
             <RefreshCw className="w-3.5 h-3.5 text-text-muted" />
           </button>
         </div>
@@ -247,7 +289,9 @@ export function BrowserPane({ id, title: _title, url: initialUrl, isActive }: Br
             className={`btn-icon !w-6 !h-6 !border-0 !shadow-none ${pickerMode ? 'bg-accent/20' : 'hover:bg-accent/20'}`}
             title={pickerMode ? 'Click an element to capture it' : 'Pick element → clipboard'}
           >
-            <Crosshair className={`w-3.5 h-3.5 ${pickerMode ? 'text-accent animate-pulse' : 'text-accent'}`} />
+            <Crosshair
+              className={`w-3.5 h-3.5 ${pickerMode ? 'text-accent animate-pulse' : 'text-accent'}`}
+            />
           </button>
           <button
             onClick={handleScreenshot}
@@ -255,12 +299,21 @@ export function BrowserPane({ id, title: _title, url: initialUrl, isActive }: Br
             className="btn-icon !w-6 !h-6 !border-0 !shadow-none hover:bg-accent/20"
             title="Screenshot → clipboard + Claude"
           >
-            <Camera className={`w-3.5 h-3.5 ${
-              actionStatus === 'working' ? 'text-text-muted animate-pulse' :
-              actionStatus === 'done' ? 'text-status-success' : 'text-accent'
-            }`} />
+            <Camera
+              className={`w-3.5 h-3.5 ${
+                actionStatus === 'working'
+                  ? 'text-text-muted animate-pulse'
+                  : actionStatus === 'done'
+                    ? 'text-status-success'
+                    : 'text-accent'
+              }`}
+            />
           </button>
-          <button onClick={handleClose} className="btn-icon !w-6 !h-6 !border-0 !shadow-none hover:bg-status-error/20" title="Close">
+          <button
+            onClick={handleClose}
+            className="btn-icon !w-6 !h-6 !border-0 !shadow-none hover:bg-status-error/20"
+            title="Close"
+          >
             <X className="w-3.5 h-3.5 text-text-muted hover:text-status-error" />
           </button>
         </div>

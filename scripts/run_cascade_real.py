@@ -24,7 +24,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Use our fine-tuned merged model as the base
-FT_MODEL_PATH = "/home/user/.unsloth/studio/exports/unsloth_gemma-4-E4B-it_1775455644/checkpoint-153"
+FT_MODEL_PATH = (
+    "/home/user/.unsloth/studio/exports/unsloth_gemma-4-E4B-it_1775455644/checkpoint-153"
+)
 
 # Test with Qwen to isolate Gemma 4 multimodal issues from bashgym pipeline issues
 QWEN_TEST_MODEL = "Qwen/Qwen2.5-Coder-1.5B-Instruct"
@@ -77,7 +79,9 @@ async def main():
 
     async def callback(event_type: str, stage_or_data):
         if hasattr(stage_or_data, "domain"):
-            logger.info(f"[{event_type}] {stage_or_data.domain.name} (stage {stage_or_data.stage_number})")
+            logger.info(
+                f"[{event_type}] {stage_or_data.domain.name} (stage {stage_or_data.stage_number})"
+            )
             if stage_or_data.metrics:
                 logger.info(f"  metrics: {stage_or_data.metrics}")
         else:

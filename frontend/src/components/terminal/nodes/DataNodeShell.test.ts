@@ -10,10 +10,10 @@ test('renders a full-size grid summary without React Flow handles or close contr
     panelId: 'training-1',
     title: 'Training Run',
     selected: true,
-    children: createElement('div', null, 'loss 0.4992'),
+    children: createElement('div', null, 'loss 0.4992')
   })
   const html = renderToStaticMarkup(
-    createElement(NodeSurfaceProvider, { surface: 'grid', children: summary }),
+    createElement(NodeSurfaceProvider, { surface: 'grid', children: summary })
   )
 
   assert.match(html, /data-node-surface="grid"/)

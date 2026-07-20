@@ -16,11 +16,7 @@ interface UseTerminalReturn {
   resize: () => void
 }
 
-export function useTerminal({
-  id,
-  onData,
-  onExit
-}: UseTerminalOptions): UseTerminalReturn {
+export function useTerminal({ id, onData, onExit }: UseTerminalOptions): UseTerminalReturn {
   const terminalRef = useRef<HTMLDivElement>(null)
   const [terminal, setTerminal] = useState<Terminal | null>(null)
   const [fitAddon, setFitAddon] = useState<FitAddon | null>(null)
@@ -87,7 +83,7 @@ export function useTerminal({
       removeExitListener?.()
       term.dispose()
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
   // Handle resize

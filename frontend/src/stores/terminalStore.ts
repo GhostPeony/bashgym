@@ -13,7 +13,25 @@ import {
   toPersistedPanel
 } from './workspacePersistence'
 
-export type PanelType = 'terminal' | 'preview' | 'browser' | 'files' | 'context' | 'neon' | 'vercel' | 'activity' | 'training' | 'campaign' | 'evals' | 'designer' | 'huggingface' | 'agent' | 'toolkit' | 'skilllab' | 'mcp' | 'knowledge'
+export type PanelType =
+  | 'terminal'
+  | 'preview'
+  | 'browser'
+  | 'files'
+  | 'context'
+  | 'neon'
+  | 'vercel'
+  | 'activity'
+  | 'training'
+  | 'campaign'
+  | 'evals'
+  | 'designer'
+  | 'huggingface'
+  | 'agent'
+  | 'toolkit'
+  | 'skilllab'
+  | 'mcp'
+  | 'knowledge'
 export type AttentionState = 'none' | 'waiting' | 'success' | 'error'
 export type ViewMode = 'grid' | 'single' | 'canvas'
 export type AgentStatus = 'running' | 'idle' | 'waiting_input' | 'tool_calling'
@@ -41,7 +59,7 @@ export interface TerminalSession {
   attention: AttentionState
   gitBranch?: string
   model?: string
-  showBanner: boolean  // Only first terminal shows the Bash Gym banner
+  showBanner: boolean // Only first terminal shows the Bash Gym banner
   // Enhanced status fields (OpenUI-inspired)
   status: AgentStatus
   lastActivity: number
@@ -82,8 +100,8 @@ export type MonitorAutoMode = 'off' | 'prefill' | 'send'
 // Terminal→terminal edges are monitor edges: source = watched, target = watcher.
 export interface CanvasEdge {
   id: string
-  source: string  // panelId of source node
-  target: string  // panelId of target node
+  source: string // panelId of source node
+  target: string // panelId of target node
   type?: 'monitor'
   data?: { auto?: MonitorAutoMode }
 }
@@ -100,7 +118,7 @@ export interface Panel {
   url?: string
   // In-memory screenshot (lives only for panel lifetime, never persisted)
   thumbnail?: string
-  adapterConfig?: Record<string, unknown>  // Integration node config
+  adapterConfig?: Record<string, unknown> // Integration node config
 }
 
 interface TerminalState {
@@ -294,7 +312,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       cwd: cwd || '~',
       isActive: true,
       attention: 'none',
-      showBanner,  // Only first terminal shows the banner
+      showBanner, // Only first terminal shows the banner
       status: 'idle',
       lastActivity: Date.now(),
       launchCommand
@@ -330,9 +348,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       newSessions.delete(id)
 
       const newPanels = state.panels.filter((p) => p.terminalId !== id)
-      const newActiveSession = newSessions.size > 0
-        ? Array.from(newSessions.keys())[0]
-        : null
+      const newActiveSession = newSessions.size > 0 ? Array.from(newSessions.keys())[0] : null
 
       return {
         sessions: newSessions,
@@ -384,10 +400,13 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         // Dead PTYs keep their panel: TerminalPane respawns a fresh shell in
         // the stub's cwd (layout restore after full app quit)
         const info = live.get(stub.terminalId)
-        sessions.set(stub.terminalId, terminalSessionFromPersistedPanel(stub, {
-          title: meta.get(stub.terminalId)?.title || stub.title,
-          cwd: info?.cwd ?? stub.cwd ?? '~'
-        }))
+        sessions.set(
+          stub.terminalId,
+          terminalSessionFromPersistedPanel(stub, {
+            title: meta.get(stub.terminalId)?.title || stub.title,
+            cwd: info?.cwd ?? stub.cwd ?? '~'
+          })
+        )
       }
     }
 
@@ -459,19 +478,33 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
       // Check which fields actually changed (significant updates that canvas should reflect)
       const statusChanged = updates.status !== undefined && updates.status !== session.status
-      const toolChanged = updates.currentTool !== undefined && updates.currentTool !== session.currentTool
+      const toolChanged =
+        updates.currentTool !== undefined && updates.currentTool !== session.currentTool
       const outputChanged = false // lastOutput no longer displayed in canvas nodes
-      const attentionChanged = updates.attention !== undefined && updates.attention !== session.attention
-      const taskSummaryChanged = updates.taskSummary !== undefined && updates.taskSummary !== session.taskSummary
+      const attentionChanged =
+        updates.attention !== undefined && updates.attention !== session.attention
+      const taskSummaryChanged =
+        updates.taskSummary !== undefined && updates.taskSummary !== session.taskSummary
       const agentKindChanged = 'agentKind' in updates && updates.agentKind !== session.agentKind
       const pausedChanged = 'isPaused' in updates && updates.isPaused !== session.isPaused
       const cwdChanged = updates.cwd !== undefined && updates.cwd !== session.cwd
-      const errorChanged = 'errorMessage' in updates && updates.errorMessage !== session.errorMessage
+      const errorChanged =
+        'errorMessage' in updates && updates.errorMessage !== session.errorMessage
 
       newSessions.set(id, { ...session, ...updates })
 
       // Increment version for any significant change to force canvas re-renders
-      if (statusChanged || toolChanged || outputChanged || attentionChanged || taskSummaryChanged || agentKindChanged || pausedChanged || cwdChanged || errorChanged) {
+      if (
+        statusChanged ||
+        toolChanged ||
+        outputChanged ||
+        attentionChanged ||
+        taskSummaryChanged ||
+        agentKindChanged ||
+        pausedChanged ||
+        cwdChanged ||
+        errorChanged
+      ) {
         shouldPersist = true
         return { sessions: newSessions, sessionsVersion: state.sessionsVersion + 1 }
       }
@@ -518,9 +551,12 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       return {
         panels: newPanels,
         canvasNodes: newCanvasNodes,
-        activePanelId: state.activePanelId === id
-          ? (newPanels.length > 0 ? newPanels[newPanels.length - 1].id : null)
-          : state.activePanelId
+        activePanelId:
+          state.activePanelId === id
+            ? newPanels.length > 0
+              ? newPanels[newPanels.length - 1].id
+              : null
+            : state.activePanelId
       }
     })
 
@@ -549,10 +585,14 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         canvasEdges: newEdges,
         activePanelId:
           state.activePanelId === panelId
-            ? (newPanels.length > 0 ? newPanels[newPanels.length - 1].id : null)
+            ? newPanels.length > 0
+              ? newPanels[newPanels.length - 1].id
+              : null
             : state.activePanelId,
         activeSessionId:
-          panel.terminalId && state.activeSessionId === panel.terminalId ? null : state.activeSessionId,
+          panel.terminalId && state.activeSessionId === panel.terminalId
+            ? null
+            : state.activeSessionId,
         sessionsVersion: state.sessionsVersion + 1
       }
     })
@@ -574,9 +614,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
   renamePanel: (id: string, title: string) => {
     set((state) => {
-      const newPanels = state.panels.map((p) =>
-        p.id === id ? { ...p, title } : p
-      )
+      const newPanels = state.panels.map((p) => (p.id === id ? { ...p, title } : p))
 
       // Also update the session title if it's a terminal
       const panel = state.panels.find((p) => p.id === id)
@@ -623,8 +661,8 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     if (sourceId === targetId) return
 
     set((state) => {
-      const sourceIndex = state.panels.findIndex(p => p.id === sourceId)
-      const targetIndex = state.panels.findIndex(p => p.id === targetId)
+      const sourceIndex = state.panels.findIndex((p) => p.id === sourceId)
+      const targetIndex = state.panels.findIndex((p) => p.id === targetId)
 
       if (sourceIndex === -1 || targetIndex === -1) return state
 
@@ -639,7 +677,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
   updateCanvasNode: (panelId: string, position: { x: number; y: number }) => {
     set((state) => {
-      const panel = state.panels.find(p => p.id === panelId)
+      const panel = state.panels.find((p) => p.id === panelId)
       if (!panel) return state
 
       const session = panel.terminalId ? state.sessions.get(panel.terminalId) : undefined
@@ -688,13 +726,13 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
   setPanelUrl: (id: string, url: string) => {
     set((state) => ({
-      panels: state.panels.map(p => p.id === id ? { ...p, url } : p)
+      panels: state.panels.map((p) => (p.id === id ? { ...p, url } : p))
     }))
   },
 
   setPanelThumbnail: (id: string, thumbnail: string) => {
     set((state) => ({
-      panels: state.panels.map(p => p.id === id ? { ...p, thumbnail } : p)
+      panels: state.panels.map((p) => (p.id === id ? { ...p, thumbnail } : p))
     }))
   },
 

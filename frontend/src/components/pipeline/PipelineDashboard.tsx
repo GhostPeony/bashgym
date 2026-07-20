@@ -1,10 +1,20 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import {
-  Eye, Filter, Sparkles, GraduationCap,
-  Play, ArrowRight, RefreshCw,
-  CheckCircle2, XCircle, Clock, Layers
+  Eye,
+  Filter,
+  Sparkles,
+  GraduationCap,
+  Play,
+  ArrowRight,
+  RefreshCw,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  Layers
 } from 'lucide-react'
-import { pipelineApi, PipelineConfig, PipelineStatus } from '../../services/api'
+import { pipelineApi, PipelineConfig } from '../../services/api'
+import { pipelineOverviewResource } from '../../stores/opsResources'
+import { useSessionResource } from '../../stores/sessionResource'
 import { clsx } from 'clsx'
 
 interface StageCardProps {
@@ -23,12 +33,28 @@ interface StageCardProps {
   isTriggering?: boolean
 }
 
-function StageCard({ title, icon, enabled, onToggle, count, threshold, onThresholdChange, description, color, showThreshold, triggerable, onTrigger, isTriggering }: StageCardProps) {
+function StageCard({
+  title,
+  icon,
+  enabled,
+  onToggle,
+  count,
+  threshold,
+  onThresholdChange,
+  description,
+  color,
+  showThreshold,
+  triggerable,
+  onTrigger,
+  isTriggering
+}: StageCardProps) {
   return (
-    <div className={clsx(
-      'flex-1 border-brutal rounded-brutal p-4 transition-all',
-      enabled ? 'bg-background-card shadow-brutal' : 'bg-background-primary opacity-60'
-    )}>
+    <div
+      className={clsx(
+        'flex-1 border-brutal rounded-brutal p-4 transition-all',
+        enabled ? 'bg-background-card shadow-brutal' : 'bg-background-primary opacity-60'
+      )}
+    >
       {/* Header with toggle */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
@@ -42,10 +68,12 @@ function StageCard({ title, icon, enabled, onToggle, count, threshold, onThresho
             enabled ? 'bg-accent' : 'bg-background-primary'
           )}
         >
-          <span className={clsx(
-            'absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white border border-border transition-all',
-            enabled ? 'left-5' : 'left-0.5'
-          )} />
+          <span
+            className={clsx(
+              'absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white border border-border transition-all',
+              enabled ? 'left-5' : 'left-0.5'
+            )}
+          />
         </button>
       </div>
 
@@ -104,40 +132,35 @@ function StageCard({ title, icon, enabled, onToggle, count, threshold, onThresho
 }
 
 export function PipelineDashboard() {
-  const [status, setStatus] = useState<PipelineStatus | null>(null)
-  const [config, setConfig] = useState<PipelineConfig | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
+  const { data, refreshing } = useSessionResource(pipelineOverviewResource)
+  const status = data?.status ?? null
+  const config = data?.config ?? null
   const [triggeringStage, setTriggeringStage] = useState<string | null>(null)
 
-  const fetchData = useCallback(async () => {
-    const [statusRes, configRes] = await Promise.all([
-      pipelineApi.getStatus(),
-      pipelineApi.getConfig(),
-    ])
-    if (statusRes.ok && statusRes.data) setStatus(statusRes.data)
-    if (configRes.ok && configRes.data) setConfig(configRes.data)
-    setIsLoading(false)
-  }, [])
-
+  // Poll every 5s while mounted; refreshes land in the shared cache
   useEffect(() => {
-    fetchData()
-    const interval = setInterval(fetchData, 5000)
+    const interval = setInterval(() => {
+      void pipelineOverviewResource.getState().refresh()
+    }, 5000)
     return () => clearInterval(interval)
-  }, [fetchData])
+  }, [])
 
   const updateConfig = async (updates: Partial<PipelineConfig>) => {
     const result = await pipelineApi.updateConfig(updates)
-    if (result.ok && result.data) setConfig(result.data)
+    const { data: current, setData } = pipelineOverviewResource.getState()
+    if (result.ok && result.data && current) {
+      setData({ ...current, config: result.data })
+    }
   }
 
   const triggerStage = async (stage: 'import' | 'classify' | 'cascade') => {
     setTriggeringStage(stage)
     await pipelineApi.triggerStage(stage)
-    await fetchData()
+    await pipelineOverviewResource.getState().refresh()
     setTriggeringStage(null)
   }
 
-  if (isLoading || !config || !status) {
+  if (!config || !status) {
     return (
       <div className="h-full flex items-center justify-center">
         <RefreshCw className="w-6 h-6 text-text-muted animate-spin" />
@@ -151,30 +174,34 @@ export function PipelineDashboard() {
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h1 className="text-2xl font-brand font-semibold text-text-primary">Auto-Import Pipeline</h1>
-            <p className="text-sm text-text-secondary mt-1">
-              Watch → Classify → Generate → Train
-            </p>
+            <h1 className="text-2xl font-brand font-semibold text-text-primary">
+              Auto-Import Pipeline
+            </h1>
+            <p className="text-sm text-text-secondary mt-1">Watch → Classify → Generate → Train</p>
           </div>
           <div className="flex items-center gap-3">
             {/* Watcher status indicator */}
-            <div className={clsx(
-              'flex items-center gap-2 px-3 py-1.5 border-brutal rounded-brutal font-mono text-xs uppercase tracking-wider',
-              status.watcher_running
-                ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
-                : 'bg-background-primary text-text-muted'
-            )}>
-              <span className={clsx(
-                'w-2 h-2 rounded-full',
-                status.watcher_running ? 'bg-emerald-500 animate-pulse' : 'bg-text-muted'
-              )} />
+            <div
+              className={clsx(
+                'flex items-center gap-2 px-3 py-1.5 border-brutal rounded-brutal font-mono text-xs uppercase tracking-wider',
+                status.watcher_running
+                  ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
+                  : 'bg-background-primary text-text-muted'
+              )}
+            >
+              <span
+                className={clsx(
+                  'w-2 h-2 rounded-full',
+                  status.watcher_running ? 'bg-emerald-500 animate-pulse' : 'bg-text-muted'
+                )}
+              />
               {status.watcher_running ? 'Watching' : 'Stopped'}
             </div>
             <button
-              onClick={fetchData}
+              onClick={() => void pipelineOverviewResource.getState().refresh()}
               className="p-2 border-brutal rounded-brutal hover-press transition-press shadow-brutal-sm"
             >
-              <RefreshCw className="w-4 h-4" />
+              <RefreshCw className={clsx('w-4 h-4', refreshing && 'animate-spin')} />
             </button>
           </div>
         </div>
@@ -362,23 +389,35 @@ export function PipelineDashboard() {
           <div className="border-brutal rounded-brutal p-4 bg-background-card shadow-brutal-sm">
             <div className="flex items-center gap-2 mb-1">
               <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-              <span className="font-mono text-xs uppercase tracking-wider text-text-muted">Gold Traces</span>
+              <span className="font-mono text-xs uppercase tracking-wider text-text-muted">
+                Gold Traces
+              </span>
             </div>
-            <span className="font-mono text-3xl font-bold text-text-primary">{status.gold_count}</span>
+            <span className="font-mono text-3xl font-bold text-text-primary">
+              {status.gold_count}
+            </span>
           </div>
           <div className="border-brutal rounded-brutal p-4 bg-background-card shadow-brutal-sm">
             <div className="flex items-center gap-2 mb-1">
               <Clock className="w-4 h-4 text-amber-500" />
-              <span className="font-mono text-xs uppercase tracking-wider text-text-muted">Pending Review</span>
+              <span className="font-mono text-xs uppercase tracking-wider text-text-muted">
+                Pending Review
+              </span>
             </div>
-            <span className="font-mono text-3xl font-bold text-text-primary">{status.pending_count}</span>
+            <span className="font-mono text-3xl font-bold text-text-primary">
+              {status.pending_count}
+            </span>
           </div>
           <div className="border-brutal rounded-brutal p-4 bg-background-card shadow-brutal-sm">
             <div className="flex items-center gap-2 mb-1">
               <XCircle className="w-4 h-4 text-red-500" />
-              <span className="font-mono text-xs uppercase tracking-wider text-text-muted">Failed</span>
+              <span className="font-mono text-xs uppercase tracking-wider text-text-muted">
+                Failed
+              </span>
             </div>
-            <span className="font-mono text-3xl font-bold text-text-primary">{status.failed_count}</span>
+            <span className="font-mono text-3xl font-bold text-text-primary">
+              {status.failed_count}
+            </span>
           </div>
         </div>
       </div>

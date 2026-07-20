@@ -59,23 +59,19 @@ class DevelopmentDatasetContract(FrozenContractModel):
 
     def validate_file(self, path: Path) -> ValidatedDevelopmentDataset:
         normalized_path = str(path.resolve()).casefold()
-        if any(fragment.casefold() in normalized_path for fragment in self.protected_path_fragments):
-            raise DevelopmentDataContractError(
-                f"{DEVELOPMENT_DATA_CONTRACT_ERROR}: protected path"
-            )
+        if any(
+            fragment.casefold() in normalized_path for fragment in self.protected_path_fragments
+        ):
+            raise DevelopmentDataContractError(f"{DEVELOPMENT_DATA_CONTRACT_ERROR}: protected path")
         if not path.is_file():
             raise DevelopmentDataContractError(
                 f"{DEVELOPMENT_DATA_CONTRACT_ERROR}: dev file unavailable"
             )
         actual_hash = sha256_file(path)
         if actual_hash in self.protected_hashes:
-            raise DevelopmentDataContractError(
-                f"{DEVELOPMENT_DATA_CONTRACT_ERROR}: protected hash"
-            )
+            raise DevelopmentDataContractError(f"{DEVELOPMENT_DATA_CONTRACT_ERROR}: protected hash")
         if actual_hash != self.expected_sha256:
-            raise DevelopmentDataContractError(
-                f"{DEVELOPMENT_DATA_CONTRACT_ERROR}: hash mismatch"
-            )
+            raise DevelopmentDataContractError(f"{DEVELOPMENT_DATA_CONTRACT_ERROR}: hash mismatch")
         rows: list[dict[str, Any]] = []
         with path.open(encoding="utf-8") as handle:
             for line_number, line in enumerate(handle, start=1):
@@ -93,17 +89,13 @@ class DevelopmentDatasetContract(FrozenContractModel):
                     )
                 rows.append(row)
         if not rows:
-            raise DevelopmentDataContractError(
-                f"{DEVELOPMENT_DATA_CONTRACT_ERROR}: empty dev set"
-            )
+            raise DevelopmentDataContractError(f"{DEVELOPMENT_DATA_CONTRACT_ERROR}: empty dev set")
         eval_ids = tuple(str(row.get("eval_id") or row.get("query_id") or "") for row in rows)
         if any(not value for value in eval_ids) or len(set(eval_ids)) != len(eval_ids):
             raise DevelopmentDataContractError(
                 f"{DEVELOPMENT_DATA_CONTRACT_ERROR}: eval IDs missing or duplicated"
             )
-        video_ids = {
-            str(row.get("positive_video_id") or row.get("video_id") or "") for row in rows
-        }
+        video_ids = {str(row.get("positive_video_id") or row.get("video_id") or "") for row in rows}
         video_ids.discard("")
         if not video_ids:
             raise DevelopmentDataContractError(
@@ -224,8 +216,7 @@ def _paired_ci_low(differences: list[float], *, samples: int, seed: int) -> floa
     rng = random.Random(seed)
     count = len(differences)
     bootstrapped = [
-        sum(differences[rng.randrange(count)] for _ in range(count)) / count
-        for _ in range(samples)
+        sum(differences[rng.randrange(count)] for _ in range(count)) / count for _ in range(samples)
     ]
     bootstrapped.sort()
     return bootstrapped[max(0, int(samples * 0.025) - 1)]
@@ -252,18 +243,22 @@ def compare_development_evaluations(
     eval_ids = sorted(champion_by_id)
     champion_rows = [champion_by_id[value] for value in eval_ids]
     candidate_rows = [candidate_by_id[value] for value in eval_ids]
-    if any(
-        champion_by_id[value].video_id != candidate_by_id[value].video_id for value in eval_ids
-    ):
+    if any(champion_by_id[value].video_id != candidate_by_id[value].video_id for value in eval_ids):
         raise ValueError("campaign_evaluation_video_mismatch")
     champion_metrics = _metrics(champion_rows)
     candidate_metrics = _metrics(candidate_rows)
-    deltas = {
-        key: candidate_metrics[key] - champion_metrics[key] for key in champion_metrics
-    }
+    deltas = {key: candidate_metrics[key] - champion_metrics[key] for key in champion_metrics}
     ndcg_differences = [
-        (1.0 / math.log2(candidate_by_id[value].local_rank + 1) if candidate_by_id[value].local_rank <= 10 else 0.0)
-        - (1.0 / math.log2(champion_by_id[value].local_rank + 1) if champion_by_id[value].local_rank <= 10 else 0.0)
+        (
+            1.0 / math.log2(candidate_by_id[value].local_rank + 1)
+            if candidate_by_id[value].local_rank <= 10
+            else 0.0
+        )
+        - (
+            1.0 / math.log2(champion_by_id[value].local_rank + 1)
+            if champion_by_id[value].local_rank <= 10
+            else 0.0
+        )
         for value in eval_ids
     ]
     ndcg_ci_low = _paired_ci_low(
@@ -314,12 +309,11 @@ def compare_development_evaluations(
         "local_ndcg_at_10_ci_low": ndcg_ci_low > 0,
         "local_mrr_delta": deltas["local_mrr"] >= gate.local_mrr_delta_min,
         "exact_mrr_delta": deltas["exact_mrr"] >= gate.exact_mrr_delta_min,
-        "exact_recall_at_1_delta": deltas["exact_recall_at_1"]
-        >= gate.exact_recall_at_1_delta_min,
-        "wrong_top_video_delta": deltas["wrong_top_video_rate"]
-        <= gate.wrong_top_video_delta_max,
+        "exact_recall_at_1_delta": deltas["exact_recall_at_1"] >= gate.exact_recall_at_1_delta_min,
+        "wrong_top_video_delta": deltas["wrong_top_video_rate"] <= gate.wrong_top_video_delta_max,
         "latency_ratio": latency_ratio is not None and latency_ratio <= gate.latency_ratio_max,
-        "footprint_ratio": footprint_ratio is not None and footprint_ratio <= gate.footprint_ratio_max,
+        "footprint_ratio": footprint_ratio is not None
+        and footprint_ratio <= gate.footprint_ratio_max,
     }
     if not insufficient:
         blocking.extend(name for name, passed in clauses.items() if not passed)
@@ -330,9 +324,7 @@ def compare_development_evaluations(
     verdict = (
         ComparisonVerdict.INSUFFICIENT_EVIDENCE
         if insufficient
-        else ComparisonVerdict.FAILED
-        if blocking
-        else ComparisonVerdict.PASSED
+        else ComparisonVerdict.FAILED if blocking else ComparisonVerdict.PASSED
     )
     metrics: dict[str, float | int | None] = {
         **{f"champion_{key}": value for key, value in champion_metrics.items()},

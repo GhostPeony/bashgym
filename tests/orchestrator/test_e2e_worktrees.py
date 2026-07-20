@@ -13,7 +13,6 @@ import pytest
 
 from bashgym.orchestrator.worktree import WorktreeManager
 
-
 # =============================================================================
 # Helpers
 # =============================================================================
@@ -22,7 +21,8 @@ from bashgym.orchestrator.worktree import WorktreeManager
 async def git(*args, cwd):
     """Run a git command, raise on failure."""
     proc = await asyncio.create_subprocess_exec(
-        "git", *args,
+        "git",
+        *args,
         cwd=str(cwd),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -195,7 +195,8 @@ class TestWorktreeMerge:
 
         # Modify in worktree
         await commit_file(
-            wt_path, "src/main.py",
+            wt_path,
+            "src/main.py",
             'def main():\n    print("from worktree")\n',
             "Worktree change",
         )
@@ -203,7 +204,8 @@ class TestWorktreeMerge:
         # Modify same file on main (different content)
         await git("checkout", "main", cwd=repo)
         await commit_file(
-            repo, "src/main.py",
+            repo,
+            "src/main.py",
             'def main():\n    print("from main")\n',
             "Main change",
         )

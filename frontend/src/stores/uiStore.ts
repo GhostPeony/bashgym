@@ -1,6 +1,23 @@
 import { create } from 'zustand'
 
-export type ViewMode = 'home' | 'workspace' | 'training' | 'autoresearch' | 'router' | 'traces' | 'factory' | 'evaluator' | 'guardrails' | 'profiler' | 'models' | 'huggingface' | 'integration' | 'achievements' | 'orchestrator' | 'pipeline' | 'download'
+export type ViewMode =
+  | 'home'
+  | 'workspace'
+  | 'training'
+  | 'autoresearch'
+  | 'router'
+  | 'traces'
+  | 'factory'
+  | 'evaluator'
+  | 'guardrails'
+  | 'profiler'
+  | 'models'
+  | 'huggingface'
+  | 'integration'
+  | 'achievements'
+  | 'orchestrator'
+  | 'pipeline'
+  | 'download'
 export type TrainingSubview = 'runs' | 'autoresearch'
 
 export interface TrainingSelection {
@@ -42,7 +59,7 @@ interface UIState {
   openTraining: (
     subview?: TrainingSubview,
     selection?: Partial<TrainingSelection>,
-    historyMode?: 'push' | 'replace',
+    historyMode?: 'push' | 'replace'
   ) => void
   hydrateNavigationFromUrl: (search?: string) => void
   closeOverlay: () => void
@@ -67,7 +84,7 @@ interface UIState {
 
 function canonicalTrainingUrl(
   subview: TrainingSubview,
-  selection: TrainingSelection,
+  selection: TrainingSelection
 ): string | null {
   if (typeof window === 'undefined') return null
   const params = new URLSearchParams()
@@ -101,7 +118,7 @@ const CANONICAL_OVERLAY_VIEWS = new Set<ViewMode>([
   'achievements',
   'orchestrator',
   'pipeline',
-  'download',
+  'download'
 ])
 
 function normalizedId(value: string | null): string | null {
@@ -148,16 +165,17 @@ export const useUIStore = create<UIState>((set, get) => ({
 
   openTraining: (subview = 'runs', selection, historyMode = 'push') => {
     const prior = get().trainingSelection
-    const nextSelection = subview === 'runs'
-      ? { workspaceId: null, campaignId: null }
-      : {
-          workspaceId: selection?.workspaceId ?? prior.workspaceId,
-          campaignId: selection?.campaignId ?? prior.campaignId,
-        }
+    const nextSelection =
+      subview === 'runs'
+        ? { workspaceId: null, campaignId: null }
+        : {
+            workspaceId: selection?.workspaceId ?? prior.workspaceId,
+            campaignId: selection?.campaignId ?? prior.campaignId
+          }
     set({
       overlayView: 'training',
       trainingSubview: subview,
-      trainingSelection: nextSelection,
+      trainingSelection: nextSelection
     })
     const target = canonicalTrainingUrl(subview, nextSelection)
     if (target && typeof window !== 'undefined') {
@@ -180,19 +198,19 @@ export const useUIStore = create<UIState>((set, get) => ({
       return
     }
     const legacy = view === 'autoresearch'
-    const subview: TrainingSubview = legacy || params.get('tab') === 'autoresearch'
-      ? 'autoresearch'
-      : 'runs'
-    const selection: TrainingSelection = subview === 'autoresearch'
-      ? {
-          workspaceId: normalizedId(params.get('workspace_id')),
-          campaignId: normalizedId(params.get('campaign_id')),
-        }
-      : { workspaceId: null, campaignId: null }
+    const subview: TrainingSubview =
+      legacy || params.get('tab') === 'autoresearch' ? 'autoresearch' : 'runs'
+    const selection: TrainingSelection =
+      subview === 'autoresearch'
+        ? {
+            workspaceId: normalizedId(params.get('workspace_id')),
+            campaignId: normalizedId(params.get('campaign_id'))
+          }
+        : { workspaceId: null, campaignId: null }
     set({
       overlayView: 'training',
       trainingSubview: subview,
-      trainingSelection: selection,
+      trainingSelection: selection
     })
     if (legacy && typeof window !== 'undefined') {
       const target = canonicalTrainingUrl(subview, selection)
@@ -230,13 +248,15 @@ export const useUIStore = create<UIState>((set, get) => ({
 
   toggleAgentStream: () => set((state) => ({ isAgentStreamOpen: !state.isAgentStreamOpen })),
 
-  presentWorkspacePanel: (workspaceId, panelId, presentation = 'focus') => set({
-    panelPresentationRequest: { workspaceId, panelId, presentation, requestedAt: Date.now() }
-  }),
+  presentWorkspacePanel: (workspaceId, panelId, presentation = 'focus') =>
+    set({
+      panelPresentationRequest: { workspaceId, panelId, presentation, requestedAt: Date.now() }
+    }),
 
-  clearPanelPresentationRequest: (requestedAt) => set((state) => (
-    state.panelPresentationRequest?.requestedAt === requestedAt
-      ? { panelPresentationRequest: null }
-      : state
-  )),
+  clearPanelPresentationRequest: (requestedAt) =>
+    set((state) =>
+      state.panelPresentationRequest?.requestedAt === requestedAt
+        ? { panelPresentationRequest: null }
+        : state
+    )
 }))

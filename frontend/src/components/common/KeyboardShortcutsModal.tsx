@@ -111,10 +111,14 @@ export function KeyboardShortcutsModal() {
       <div className="section-divider mt-6 mb-4" />
       <p className="text-xs text-text-muted text-center font-mono">
         Press{' '}
-        <kbd className="tag text-[10px] py-0.5 px-1.5"><span>Ctrl</span></kbd>
+        <kbd className="tag text-[10px] py-0.5 px-1.5">
+          <span>Ctrl</span>
+        </kbd>
         <span className="mx-1 font-mono">+</span>
-        <kbd className="tag text-[10px] py-0.5 px-1.5"><span>?</span></kbd>
-        {' '}anytime to show this dialog
+        <kbd className="tag text-[10px] py-0.5 px-1.5">
+          <span>?</span>
+        </kbd>{' '}
+        anytime to show this dialog
       </p>
     </Modal>
   )

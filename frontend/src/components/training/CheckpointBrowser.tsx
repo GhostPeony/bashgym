@@ -1,18 +1,12 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
 import { RefreshCw, Trash2, ArrowRight, Package } from 'lucide-react'
 import { clsx } from 'clsx'
 import { trainingApi } from '../../services/api'
 import { useTrainingStore } from '../../stores'
+import { checkpointsResource, type CheckpointInfo } from '../../stores/opsResources'
+import { useSessionResource } from '../../stores/sessionResource'
 
-export interface CheckpointInfo {
-  id: string
-  run_id: string
-  kind: 'final' | 'merged' | 'intermediate' | 'gguf'
-  path: string
-  size_mb: number
-  created_at: string
-  base_model: string | null
-}
+export type { CheckpointInfo }
 
 function formatSize(mb: number): string {
   if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`
@@ -28,31 +22,25 @@ function formatDate(iso: string): string {
 }
 
 export function CheckpointBrowser() {
-  const [checkpoints, setCheckpoints] = useState<CheckpointInfo[]>([])
-  const [loading, setLoading] = useState(false)
+  const {
+    data,
+    loading,
+    refreshing,
+    error: fetchError,
+    refresh
+  } = useSessionResource(checkpointsResource)
+  const checkpoints = data ?? []
   const [error, setError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
   const [pruningRun, setPruningRun] = useState<string | null>(null)
   const setBaseModelOverride = useTrainingStore((s) => s.setBaseModelOverride)
+  const isFetching = loading || refreshing
+  const shownError = error || fetchError
 
-  const fetchCheckpoints = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const res = await trainingApi.listCheckpoints()
-      if (res.ok && res.data) {
-        setCheckpoints(res.data)
-      } else {
-        setError(res.error || 'Failed to load checkpoints')
-      }
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    fetchCheckpoints()
-  }, [fetchCheckpoints])
+  const removeFromCache = (ids: Set<string>) => {
+    const { data: current, setData } = checkpointsResource.getState()
+    if (current) setData(current.filter((cp) => !ids.has(cp.id)))
+  }
 
   const handleUseAsBase = (cp: CheckpointInfo) => {
     setBaseModelOverride(cp.path)
@@ -70,7 +58,7 @@ export function CheckpointBrowser() {
       if (!res.ok) {
         setError(res.error || 'Delete failed')
       } else {
-        setCheckpoints((prev) => prev.filter((c) => c.id !== cp.id))
+        removeFromCache(new Set([cp.id]))
       }
     } finally {
       setDeleting(null)
@@ -83,8 +71,8 @@ export function CheckpointBrowser() {
     const removableMb = removable.reduce((sum, cp) => sum + cp.size_mb, 0)
     const confirmed = window.confirm(
       `Keep only the final adapter for ${runId}?\n\n` +
-      `This permanently deletes ${removable.length} merged/checkpoint/GGUF artifact(s) ` +
-      `and frees about ${formatSize(removableMb)}.`,
+        `This permanently deletes ${removable.length} merged/checkpoint/GGUF artifact(s) ` +
+        `and frees about ${formatSize(removableMb)}.`
     )
     if (!confirmed) return
     setPruningRun(runId)
@@ -99,7 +87,7 @@ export function CheckpointBrowser() {
         }
         deleted.add(cp.id)
       }
-      setCheckpoints((prev) => prev.filter((cp) => !deleted.has(cp.id)))
+      removeFromCache(deleted)
     } finally {
       setPruningRun(null)
     }
@@ -117,22 +105,22 @@ export function CheckpointBrowser() {
           </p>
         </div>
         <button
-          onClick={fetchCheckpoints}
-          disabled={loading}
+          onClick={() => void refresh()}
+          disabled={isFetching}
           className="btn-icon flex items-center justify-center"
           title="Refresh"
         >
-          <RefreshCw className={clsx('w-4 h-4', loading && 'animate-spin')} />
+          <RefreshCw className={clsx('w-4 h-4', isFetching && 'animate-spin')} />
         </button>
       </div>
 
-      {error && (
+      {shownError && (
         <div className="card p-3 border-l-4 border-l-status-error bg-status-error/10 mb-3">
-          <p className="font-mono text-xs text-status-error">{error}</p>
+          <p className="font-mono text-xs text-status-error">{shownError}</p>
         </div>
       )}
 
-      {checkpoints.length === 0 && !loading && !error && (
+      {checkpoints.length === 0 && !isFetching && !shownError && (
         <div className="text-center py-12 text-text-muted">
           <Package className="w-12 h-12 mx-auto mb-3 opacity-30" />
           <p className="font-mono text-xs uppercase tracking-widest">No checkpoints found</p>
@@ -166,7 +154,10 @@ export function CheckpointBrowser() {
             </thead>
             <tbody>
               {checkpoints.map((cp) => (
-                <tr key={cp.id} className="border-b border-border-subtle hover:bg-background-secondary">
+                <tr
+                  key={cp.id}
+                  className="border-b border-border-subtle hover:bg-background-secondary"
+                >
                   <td className="py-2 px-2 text-text-primary">{cp.run_id}</td>
                   <td className="py-2 px-2">
                     <span className="tag text-[10px] py-0 px-1.5">
@@ -190,17 +181,25 @@ export function CheckpointBrowser() {
                         <ArrowRight className="w-3 h-3" />
                         Use as base
                       </button>
-                      {cp.kind === 'final' && checkpoints.some((candidate) => candidate.run_id === cp.run_id && candidate.kind !== 'final') && (
-                        <button
-                          onClick={() => handleKeepAdapterOnly(cp.run_id)}
-                          disabled={pruningRun === cp.run_id}
-                          className="btn-secondary flex items-center gap-1 py-1 px-2 text-[10px]"
-                          title="Delete merged weights, GGUF exports, and intermediate checkpoints for this run"
-                        >
-                          {pruningRun === cp.run_id ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Package className="w-3 h-3" />}
-                          Keep adapter only
-                        </button>
-                      )}
+                      {cp.kind === 'final' &&
+                        checkpoints.some(
+                          (candidate) =>
+                            candidate.run_id === cp.run_id && candidate.kind !== 'final'
+                        ) && (
+                          <button
+                            onClick={() => handleKeepAdapterOnly(cp.run_id)}
+                            disabled={pruningRun === cp.run_id}
+                            className="btn-secondary flex items-center gap-1 py-1 px-2 text-[10px]"
+                            title="Delete merged weights, GGUF exports, and intermediate checkpoints for this run"
+                          >
+                            {pruningRun === cp.run_id ? (
+                              <RefreshCw className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <Package className="w-3 h-3" />
+                            )}
+                            Keep adapter only
+                          </button>
+                        )}
                       <button
                         onClick={() => handleDelete(cp)}
                         disabled={deleting === cp.id}

@@ -63,8 +63,9 @@ Use the existing campaign ledger as the durable training-session record. Use `ge
 ## Run a durable AutoResearch campaign
 
 Use the campaign control plane for any new multi-iteration research loop. The
-legacy `/api/autoresearch/*` surface is prototype compatibility only and must not
-be used as the authoritative campaign record.
+legacy `/api/autoresearch/*` surface is prototype compatibility only, is hidden
+unless `BASHGYM_ENABLE_LEGACY_AUTORESEARCH=true`, and must not be used as the
+authoritative campaign record.
 
 An initial natural-language request to start AutoResearch authorizes discovery and preparation only. It does not authorize compute launch. Do not require the user to fill a configuration form or repeat decisions already present in the registered BashGym context.
 
@@ -133,8 +134,8 @@ An initial natural-language request to start AutoResearch authorizes discovery a
 9. Re-read AutoResearch state after every result. Simulated/fake results prove
    orchestration only and cannot establish the baseline or become the incumbent.
 10. Stop only when the durable state reports a stop rule, or when the user invokes
-   an authorized pause/cancel. Preserve the campaign, ledger, branches, and sealed
-   evidence for restart and review.
+    an authorized pause/cancel. Preserve the campaign, ledger, branches, and sealed
+    evidence for restart and review.
 
 Use `bashgym campaign doctor`, the authenticated campaign API, and the durable
 ledger projection as the executable AutoResearch contract. Do not rely on local

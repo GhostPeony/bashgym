@@ -5,22 +5,23 @@ Test Suite for Quality Calculator Module
 Tests the centralized quality calculation functions.
 """
 
-import pytest
 import sys
 from pathlib import Path
+
+import pytest
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from bashgym.factory.quality_calculator import (
-    calculate_quality_breakdown,
-    calculate_complexity,
-    calculate_length_score,
-    calculate_tool_diversity,
-    calculate_efficiency,
-    calculate_success_rate,
-    calculate_verification_score,
     QualityBreakdown,
+    calculate_complexity,
+    calculate_efficiency,
+    calculate_length_score,
+    calculate_quality_breakdown,
+    calculate_success_rate,
+    calculate_tool_diversity,
+    calculate_verification_score,
 )
 
 
@@ -348,7 +349,9 @@ class TestQualityBreakdown:
             {"tool": f"tool{i}", "command": f"cmd{i}", "success": True, "output": f"out{i}"}
             for i in range(15)
         ]
-        good_breakdown = calculate_quality_breakdown(good_steps, metadata={"verification_passed": True})
+        good_breakdown = calculate_quality_breakdown(
+            good_steps, metadata={"verification_passed": True}
+        )
         assert 0.0 <= good_breakdown.total_score <= 1.0
 
     def test_to_dict(self):

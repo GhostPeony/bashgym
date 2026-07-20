@@ -8,16 +8,16 @@ has the data and reward signal it needs.
 
 ## Start here
 
-| Situation | Use | Starting recipe | Watch |
-|---|---|---|---|
-| First model from gold traces | SFT | QLoRA, LoRA rank 16 or 32, 1-3 epochs, max length 2048+. | Eval loss, truncation, heldout pass@k. |
-| You have good/bad answers for the same prompt | DPO after SFT | `beta=0.1`, 1-2 epochs, adapter LR around `5e-6` to `1e-5`. | Chosen/rejected margin and preference accuracy. |
-| You need a learned scorer for selection or audits | Reward model / ORM / PRM | Validate `reward_examples.jsonl`, train a small scorer, evaluate heldout accuracy and calibration. | Heldout pair accuracy, calibration error, length bias. |
-| You have executable verifiers and sampled attempts differ | GRPO/RLVR | Terminal RL profile, group size 8-32, DAPO, active sampling. | Reward, reward_std, `frac_reward_zero_std`, pass@k. |
-| Model cannot pass any terminal tasks yet | SFT or distillation before RL | Teacher distillation or easier curriculum, then re-evaluate. | pass@k moves above zero. |
-| Failed traces contain local recovery pivots | Session Distillation | Build `session_distillation_records.jsonl`, use target-span masking, start alpha at `0.7`. | Masked KL/CE, reader confidence, heldout recovery decisions. |
-| You need domain specialists | Cascade RL | Short staged runs by domain, then MOPD distillation. | Per-domain pass@k and final holdout. |
-| You have DPPO backend + rollout replay | DPPO smoke/replay path | Export scored replay JSONL, pick backend, run tiny smoke first. | Behavior/train logprobs, mask telemetry, pass@k. |
+| Situation                                                 | Use                           | Starting recipe                                                                                    | Watch                                                        |
+| --------------------------------------------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| First model from gold traces                              | SFT                           | QLoRA, LoRA rank 16 or 32, 1-3 epochs, max length 2048+.                                           | Eval loss, truncation, heldout pass@k.                       |
+| You have good/bad answers for the same prompt             | DPO after SFT                 | `beta=0.1`, 1-2 epochs, adapter LR around `5e-6` to `1e-5`.                                        | Chosen/rejected margin and preference accuracy.              |
+| You need a learned scorer for selection or audits         | Reward model / ORM / PRM      | Validate `reward_examples.jsonl`, train a small scorer, evaluate heldout accuracy and calibration. | Heldout pair accuracy, calibration error, length bias.       |
+| You have executable verifiers and sampled attempts differ | GRPO/RLVR                     | Terminal RL profile, group size 8-32, DAPO, active sampling.                                       | Reward, reward_std, `frac_reward_zero_std`, pass@k.          |
+| Model cannot pass any terminal tasks yet                  | SFT or distillation before RL | Teacher distillation or easier curriculum, then re-evaluate.                                       | pass@k moves above zero.                                     |
+| Failed traces contain local recovery pivots               | Session Distillation          | Build `session_distillation_records.jsonl`, use target-span masking, start alpha at `0.7`.         | Masked KL/CE, reader confidence, heldout recovery decisions. |
+| You need domain specialists                               | Cascade RL                    | Short staged runs by domain, then MOPD distillation.                                               | Per-domain pass@k and final holdout.                         |
+| You have DPPO backend + rollout replay                    | DPPO smoke/replay path        | Export scored replay JSONL, pick backend, run tiny smoke first.                                    | Behavior/train logprobs, mask telemetry, pass@k.             |
 
 Default to SFT when in doubt. RL needs contrast. If every sampled attempt gets
 the same reward, group-relative RL has little policy-gradient signal.
@@ -34,13 +34,13 @@ smoke, and release evidence.
 Every strategy moves through the same idea: prove the cheap contract first, then
 spend more compute only when the evidence justifies it.
 
-| Stage | What it proves | Move forward when |
-|---|---|---|
-| Data contract | The examples, pairs, or environments are shaped correctly. | Inspection finds no mislabeled gold data, broken pairs, or invalid environment specs. |
-| Local smoke | The run can start and write metrics without backend/runtime surprises. | Loss/reward telemetry appears and no loader, template, verifier, or replay-schema error blocks the run. |
-| Behavior gate | The candidate changes actual task behavior, not only training loss. | Heldout traces and executable pass@k are stable or better than the baseline. |
-| Backend smoke | External RL/backend integration can consume BashGym artifacts. | `backend_smoke_readiness.json` has `contract_ready=true`; DPPO optimizer work also needs `optimizer_ready=true`. |
-| Release gate | The trained model is safe to route into real workflows. | Holdout, comparison, spurious-reward, tamper, and relevant external benchmark evidence all pass. |
+| Stage         | What it proves                                                         | Move forward when                                                                                                |
+| ------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Data contract | The examples, pairs, or environments are shaped correctly.             | Inspection finds no mislabeled gold data, broken pairs, or invalid environment specs.                            |
+| Local smoke   | The run can start and write metrics without backend/runtime surprises. | Loss/reward telemetry appears and no loader, template, verifier, or replay-schema error blocks the run.          |
+| Behavior gate | The candidate changes actual task behavior, not only training loss.    | Heldout traces and executable pass@k are stable or better than the baseline.                                     |
+| Backend smoke | External RL/backend integration can consume BashGym artifacts.         | `backend_smoke_readiness.json` has `contract_ready=true`; DPPO optimizer work also needs `optimizer_ready=true`. |
+| Release gate  | The trained model is safe to route into real workflows.                | Holdout, comparison, spurious-reward, tamper, and relevant external benchmark evidence all pass.                 |
 
 Use `bashgym training plan --strategy <strategy> --json` to get the
 strategy-specific `readiness_ladder` and `adjustment_rules` fields.
@@ -63,11 +63,11 @@ batch_size=1, gradient_accumulation_steps=8 -> effective batch 8 on one GPU
 
 For GRPO and terminal RL, there are two different "batch" ideas:
 
-| Knob | Meaning |
-|---|---|
+| Knob                                                 | Meaning                                                                 |
+| ---------------------------------------------------- | ----------------------------------------------------------------------- |
 | `batch_size * gradient_accumulation_steps * devices` | Optimizer batch size. This controls gradient update cadence and memory. |
-| `grpo_group_size` or `grpo_num_generations` | Attempts sampled for the same prompt and compared against each other. |
-| `prompts_per_rollout_batch` | Number of prompt groups targeted in one terminal rollout batch. |
+| `grpo_group_size` or `grpo_num_generations`          | Attempts sampled for the same prompt and compared against each other.   |
+| `prompts_per_rollout_batch`                          | Number of prompt groups targeted in one terminal rollout batch.         |
 
 Terminal rollout sample volume is roughly:
 
@@ -86,12 +86,12 @@ thinking.
 
 Use the shortest length that preserves the useful trace.
 
-| Length | Use when |
-|---|---|
-| 2048 | Minimum starter for compact tool-call traces. |
-| 4096 | Normal coding traces with several commands or file snippets. |
-| 8192+ | Long terminal sessions, multi-file work, or larger context windows on remote hardware. |
-| 512-1024 | Emergency memory reduction only. Expect truncation to hurt agent behavior. |
+| Length   | Use when                                                                               |
+| -------- | -------------------------------------------------------------------------------------- |
+| 2048     | Minimum starter for compact tool-call traces.                                          |
+| 4096     | Normal coding traces with several commands or file snippets.                           |
+| 8192+    | Long terminal sessions, multi-file work, or larger context windows on remote hardware. |
+| 512-1024 | Emergency memory reduction only. Expect truncation to hurt agent behavior.             |
 
 Truncation is not a cosmetic problem. If the model sees the task but loses the
 verifier output, final edit, or recovery step, it learns the wrong shape of work.
@@ -103,22 +103,22 @@ verifier output, final edit, or recovery step, it learns the wrong shape of work
 LoRA trains a small adapter instead of the full model. QLoRA loads the base model
 in 4-bit precision so the adapter can fit on smaller GPUs.
 
-| Knob | Starter | Adjustment |
-|---|---|---|
-| LoRA rank | 16 or 32 | Raise to 64 for complex tasks or large datasets; lower to 8 for tiny/local smoke runs. |
-| LoRA alpha | rank or 2 * rank | BashGym's conservative default is rank 16, alpha 32. |
-| LoRA dropout | 0.05 | Raise to 0.1 for small datasets that overfit; set 0.0 for large clean datasets. |
-| QLoRA | Enabled on <=24 GB VRAM | Disable only when memory is abundant or quantization hurts the target model. |
+| Knob         | Starter                 | Adjustment                                                                             |
+| ------------ | ----------------------- | -------------------------------------------------------------------------------------- |
+| LoRA rank    | 16 or 32                | Raise to 64 for complex tasks or large datasets; lower to 8 for tiny/local smoke runs. |
+| LoRA alpha   | rank or 2 * rank        | BashGym's conservative default is rank 16, alpha 32.                                   |
+| LoRA dropout | 0.05                    | Raise to 0.1 for small datasets that overfit; set 0.0 for large clean datasets.        |
+| QLoRA        | Enabled on <=24 GB VRAM | Disable only when memory is abundant or quantization hurts the target model.           |
 
 Learning-rate starters:
 
-| Run type | Starter |
-|---|---|
-| QLoRA adapter SFT | `2e-4` when you have enough clean data and want the setup-guide starter. |
-| Conservative LoRA or small SFT | `2e-5` when data is small, fragile, or overfitting quickly. |
-| Full fine-tune | `2e-5` or lower. |
-| DPO adapter refinement | `5e-6` to `1e-5`. |
-| GRPO/DPPO | Start near `1e-6` to `2e-5`, depending on backend and model stability. |
+| Run type                       | Starter                                                                  |
+| ------------------------------ | ------------------------------------------------------------------------ |
+| QLoRA adapter SFT              | `2e-4` when you have enough clean data and want the setup-guide starter. |
+| Conservative LoRA or small SFT | `2e-5` when data is small, fragile, or overfitting quickly.              |
+| Full fine-tune                 | `2e-5` or lower.                                                         |
+| DPO adapter refinement         | `5e-6` to `1e-5`.                                                        |
+| GRPO/DPPO                      | Start near `1e-6` to `2e-5`, depending on backend and model stability.   |
 
 ---
 

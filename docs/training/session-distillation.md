@@ -33,14 +33,14 @@ for repairing local decisions inside otherwise useful traces.
 
 ## Method Comparison
 
-| Method | Learns from | Best fit | BashGym artifact |
-|---|---|---|---|
-| SFT | Clean successful examples | Teach format, tool use, and project style | `messages` JSONL |
-| DPO | Chosen/rejected pairs for the same prompt | Teach preferences between alternate answers | `dpo_pairs.jsonl` |
-| Teacher distillation | A stronger model's outputs or logits | Compress teacher behavior into a smaller model | teacher/student training data |
+| Method               | Learns from                                          | Best fit                                               | BashGym artifact                     |
+| -------------------- | ---------------------------------------------------- | ------------------------------------------------------ | ------------------------------------ |
+| SFT                  | Clean successful examples                            | Teach format, tool use, and project style              | `messages` JSONL                     |
+| DPO                  | Chosen/rejected pairs for the same prompt            | Teach preferences between alternate answers            | `dpo_pairs.jsonl`                    |
+| Teacher distillation | A stronger model's outputs or logits                 | Compress teacher behavior into a smaller model         | teacher/student training data        |
 | Session Distillation | The student's own action with an inserted local hint | Repair failed actions without replacing the trajectory | `session_distillation_records.jsonl` |
-| GRPO/RLVR | Multiple sampled attempts scored by a verifier | Improve outcomes when reward groups have contrast | terminal environment rollouts |
-| ECHO/RWML | Terminal transition prediction and embedding rewards | Diagnostics and auxiliary world-model learning | DPPO/world-model replay payloads |
+| GRPO/RLVR            | Multiple sampled attempts scored by a verifier       | Improve outcomes when reward groups have contrast      | terminal environment rollouts        |
+| ECHO/RWML            | Terminal transition prediction and embedding rewards | Diagnostics and auxiliary world-model learning         | DPPO/world-model replay payloads     |
 
 TRL remains the stable external reference for SFT, DPO, reward modeling, PPO,
 and GRPO trainers. Unsloth is useful when local or private GPU training needs
@@ -52,32 +52,32 @@ only after BashGym has produced the record contract and verified the mask.
 The first-class artifact is `session_distillation_records.jsonl`. Each row must
 include:
 
-| Field | Meaning |
-|---|---|
-| `original_context` | Context before the target action, without the hint. |
-| `hinted_context` | Same context with `[Session Distillation Hint]` inserted. |
-| `hint_text` | The short local correction. |
-| `target_text` | The exact action tokens to train. |
-| `target_span` | Character span of the target inside `target_text`. |
-| `loss_mask` | Currently `target_span_only`. |
-| `reader_model` | `heuristic-session-distillation-reader-v1` or a model reader id. |
-| `reader_confidence` | Confidence used to filter weak hints. |
-| `verifier_outcome` | Failed verifier/trace signal that justified the record. |
-| `source_metadata` | Trace, split, mistake type, and provenance details. |
+| Field               | Meaning                                                          |
+| ------------------- | ---------------------------------------------------------------- |
+| `original_context`  | Context before the target action, without the hint.              |
+| `hinted_context`    | Same context with `[Session Distillation Hint]` inserted.        |
+| `hint_text`         | The short local correction.                                      |
+| `target_text`       | The exact action tokens to train.                                |
+| `target_span`       | Character span of the target inside `target_text`.               |
+| `loss_mask`         | Currently `target_span_only`.                                    |
+| `reader_model`      | `heuristic-session-distillation-reader-v1` or a model reader id. |
+| `reader_confidence` | Confidence used to filter weak hints.                            |
+| `verifier_outcome`  | Failed verifier/trace signal that justified the record.          |
+| `source_metadata`   | Trace, split, mistake type, and provenance details.              |
 
 The original context must not contain the hint tag. The hinted context must
 contain it. The target text stays identical between both contexts.
 
 ## Default Settings
 
-| Setting | Start here | Why |
-|---|---:|---|
-| `session_distillation_alpha` | `0.7` | Put more weight on hinted-context KL while preserving hard-label CE. |
-| `session_distillation_temperature` | `1.0` | Avoid over-softening until we have run-level calibration evidence. |
-| `session_distillation_min_confidence` | `0.6` | Keep obvious failed-action hints and drop weak reader guesses. |
-| `session_distillation_mask_policy` | `target_span_only` | Prevent the loss from updating unrelated transcript tokens. |
-| `session_distillation_context_mode` | `hint_injected` | Matches the one-rollout mechanism. |
-| `session_distillation_reader` | `heuristic` | Deterministic, cheap, and auditable for the first implementation. |
+| Setting                               |         Start here | Why                                                                  |
+| ------------------------------------- | -----------------: | -------------------------------------------------------------------- |
+| `session_distillation_alpha`          |              `0.7` | Put more weight on hinted-context KL while preserving hard-label CE. |
+| `session_distillation_temperature`    |              `1.0` | Avoid over-softening until we have run-level calibration evidence.   |
+| `session_distillation_min_confidence` |              `0.6` | Keep obvious failed-action hints and drop weak reader guesses.       |
+| `session_distillation_mask_policy`    | `target_span_only` | Prevent the loss from updating unrelated transcript tokens.          |
+| `session_distillation_context_mode`   |    `hint_injected` | Matches the one-rollout mechanism.                                   |
+| `session_distillation_reader`         |        `heuristic` | Deterministic, cheap, and auditable for the first implementation.    |
 
 Raise the confidence threshold if hints are noisy. Lower alpha if the model
 overfits to hints and loses ordinary action quality. Increase data only after
@@ -113,13 +113,13 @@ are useful for fixtures, stress tests, and schema mapping, not as blind defaults
 
 Candidate external sources:
 
-| Source | Useful for | Guardrail |
-|---|---|---|
-| SWE-agent trajectories | Failure/recovery trajectories and command traces | Re-map into BashGym records and hold out by repo/session. |
-| OpenHands/SWE-rebench trajectories | Multi-turn agent traces with observations | Treat as source-library input with provenance and split manifests. |
-| SWE-smith trajectories | Fine-tuning examples from agent issue solving | Use for SFT/DPO comparisons, not as proof of Session Distillation by itself. |
-| SWE-Zero/OpenHands trajectories | Large-scale execution-style traces | Cap pulls, inspect schema, and decontaminate before training. |
-| SWE-bench | Evaluation and issue/PR grounding | Prefer eval/holdout use unless converted records pass source policy. |
+| Source                             | Useful for                                       | Guardrail                                                                    |
+| ---------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------- |
+| SWE-agent trajectories             | Failure/recovery trajectories and command traces | Re-map into BashGym records and hold out by repo/session.                    |
+| OpenHands/SWE-rebench trajectories | Multi-turn agent traces with observations        | Treat as source-library input with provenance and split manifests.           |
+| SWE-smith trajectories             | Fine-tuning examples from agent issue solving    | Use for SFT/DPO comparisons, not as proof of Session Distillation by itself. |
+| SWE-Zero/OpenHands trajectories    | Large-scale execution-style traces               | Cap pulls, inspect schema, and decontaminate before training.                |
+| SWE-bench                          | Evaluation and issue/PR grounding                | Prefer eval/holdout use unless converted records pass source policy.         |
 
 ## Running The Loop
 

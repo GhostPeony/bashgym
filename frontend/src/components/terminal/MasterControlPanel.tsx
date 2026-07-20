@@ -65,15 +65,15 @@ export const MasterControlPanel = memo(function MasterControlPanel({
 }: MasterControlPanelProps) {
   const [customPresets, setCustomPresets] = useState<CanvasPreset[]>(() => loadCustomPresets())
   const [selectedPresetId, setSelectedPresetId] = useState<string>(BUILTIN_PRESETS[0].id)
-  const { workspaces, activeWorkspaceId, switchWorkspace, createWorkspace, renameWorkspace } = useWorkspaceStore()
+  const { workspaces, activeWorkspaceId, switchWorkspace, createWorkspace, renameWorkspace } =
+    useWorkspaceStore()
 
-  const allPresets = useMemo(
-    () => [...BUILTIN_PRESETS, ...customPresets],
-    [customPresets]
-  )
+  const allPresets = useMemo(() => [...BUILTIN_PRESETS, ...customPresets], [customPresets])
 
   const handleOpenPreset = useCallback(() => {
-    const preset = [...BUILTIN_PRESETS, ...loadCustomPresets()].find((p) => p.id === selectedPresetId)
+    const preset = [...BUILTIN_PRESETS, ...loadCustomPresets()].find(
+      (p) => p.id === selectedPresetId
+    )
     if (preset && onApplyPreset) onApplyPreset(preset)
   }, [selectedPresetId, onApplyPreset])
 
@@ -102,19 +102,20 @@ export const MasterControlPanel = memo(function MasterControlPanel({
 
   // Count active and waiting sessions
   const sessionStats = useMemo(
-    () => Array.from(sessions.values()).reduce(
-      (acc, session) => {
-        if (session.status === 'running' || session.status === 'tool_calling') {
-          acc.active++
-        } else if (session.status === 'waiting_input') {
-          acc.waiting++
-        } else {
-          acc.idle++
-        }
-        return acc
-      },
-      { active: 0, waiting: 0, idle: 0 }
-    ),
+    () =>
+      Array.from(sessions.values()).reduce(
+        (acc, session) => {
+          if (session.status === 'running' || session.status === 'tool_calling') {
+            acc.active++
+          } else if (session.status === 'waiting_input') {
+            acc.waiting++
+          } else {
+            acc.idle++
+          }
+          return acc
+        },
+        { active: 0, waiting: 0, idle: 0 }
+      ),
     [sessions]
   )
 
@@ -149,11 +150,7 @@ export const MasterControlPanel = memo(function MasterControlPanel({
         <span className="text-[10px] font-mono font-semibold text-text-primary uppercase tracking-wider flex-1">
           Master Control
         </span>
-        <button
-          onClick={togglePanelCollapsed}
-          className="node-btn"
-          title="Collapse"
-        >
+        <button onClick={togglePanelCollapsed} className="node-btn" title="Collapse">
           <ChevronUp className="w-3 h-3" />
         </button>
       </div>
@@ -195,7 +192,8 @@ export const MasterControlPanel = memo(function MasterControlPanel({
             <span className="text-status-success font-semibold">{sessionStats.active}</span> active
           </span>
           <span>
-            <span className="text-status-warning font-semibold">{sessionStats.waiting}</span> waiting
+            <span className="text-status-warning font-semibold">{sessionStats.waiting}</span>{' '}
+            waiting
           </span>
           <span>
             <span className="text-text-secondary font-semibold">{sessionStats.idle}</span> idle
@@ -206,31 +204,21 @@ export const MasterControlPanel = memo(function MasterControlPanel({
       {/* Canvas settings */}
       <div className="px-3 py-1.5 border-b border-brutal border-border">
         <div className="flex items-center justify-between gap-2 mb-1.5">
-          <div className="text-[10px] text-text-muted uppercase tracking-wider font-mono font-semibold">Canvas</div>
+          <div className="text-[10px] text-text-muted uppercase tracking-wider font-mono font-semibold">
+            Canvas
+          </div>
           <div className="flex items-center gap-1">
             <span className="text-[10px] text-text-muted font-mono">Zoom:</span>
-            <button
-              onClick={onZoomOut}
-              className="node-btn"
-              title="Zoom out"
-            >
+            <button onClick={onZoomOut} className="node-btn" title="Zoom out">
               <Minus className="w-3 h-3" />
             </button>
             <span className="text-[10px] font-mono text-text-secondary min-w-[34px] text-center">
               {Math.round(currentZoom * 100)}%
             </span>
-            <button
-              onClick={onZoomIn}
-              className="node-btn"
-              title="Zoom in"
-            >
+            <button onClick={onZoomIn} className="node-btn" title="Zoom in">
               <Plus className="w-3 h-3" />
             </button>
-            <button
-              onClick={onFitView}
-              className="node-btn node-btn-accent"
-              title="Fit view"
-            >
+            <button onClick={onFitView} className="node-btn node-btn-accent" title="Fit view">
               <Maximize className="w-3 h-3" />
             </button>
           </div>
@@ -243,7 +231,9 @@ export const MasterControlPanel = memo(function MasterControlPanel({
               onChange={(e) => setGridEnabled(e.target.checked)}
               className="w-3.5 h-3.5 border-brutal border-border bg-background-card accent-accent"
             />
-            <span className="text-[10px] font-mono text-text-secondary group-hover:text-text-primary">Grid</span>
+            <span className="text-[10px] font-mono text-text-secondary group-hover:text-text-primary">
+              Grid
+            </span>
           </label>
           <label className="flex min-w-0 items-center justify-center gap-1 cursor-pointer group">
             <input
@@ -252,7 +242,9 @@ export const MasterControlPanel = memo(function MasterControlPanel({
               onChange={(e) => setSnapToGrid(e.target.checked)}
               className="w-3.5 h-3.5 border-brutal border-border bg-background-card accent-accent"
             />
-            <span className="text-[10px] font-mono text-text-secondary group-hover:text-text-primary">Snap</span>
+            <span className="text-[10px] font-mono text-text-secondary group-hover:text-text-primary">
+              Snap
+            </span>
           </label>
           <label className="flex min-w-0 items-center justify-center gap-1 cursor-pointer group">
             <input
@@ -261,7 +253,9 @@ export const MasterControlPanel = memo(function MasterControlPanel({
               onChange={(e) => setShowMiniMap(e.target.checked)}
               className="w-3.5 h-3.5 border-brutal border-border bg-background-card accent-accent"
             />
-            <span className="text-[10px] font-mono text-text-secondary group-hover:text-text-primary">Minimap</span>
+            <span className="text-[10px] font-mono text-text-secondary group-hover:text-text-primary">
+              Minimap
+            </span>
           </label>
         </div>
       </div>
@@ -270,19 +264,13 @@ export const MasterControlPanel = memo(function MasterControlPanel({
       <div className="px-3 py-2 border-b border-brutal border-border">
         <div className="flex items-center gap-2">
           {onNewSession && (
-            <button
-              onClick={onNewSession}
-              className="btn-primary btn-compact flex-1"
-            >
+            <button onClick={onNewSession} className="btn-primary btn-compact flex-1">
               <Plus className="w-3 h-3" />
               New Session
             </button>
           )}
           {onAutoArrange && (
-            <button
-              onClick={onAutoArrange}
-              className="btn-secondary btn-compact flex-1"
-            >
+            <button onClick={onAutoArrange} className="btn-secondary btn-compact flex-1">
               <LayoutGrid className="w-3 h-3" />
               Arrange
             </button>
@@ -307,28 +295,19 @@ export const MasterControlPanel = memo(function MasterControlPanel({
         {(onAddContext || onAddNeon || onAddVercel) && (
           <div className="flex items-center gap-2 mt-2">
             {onAddContext && (
-              <button
-                onClick={onAddContext}
-                className="btn-secondary btn-compact flex-1"
-              >
+              <button onClick={onAddContext} className="btn-secondary btn-compact flex-1">
                 <StickyNote className="w-3 h-3" />
                 Context
               </button>
             )}
             {onAddNeon && (
-              <button
-                onClick={onAddNeon}
-                className="btn-secondary btn-compact flex-1"
-              >
+              <button onClick={onAddNeon} className="btn-secondary btn-compact flex-1">
                 <Database className="w-3 h-3" />
                 Neon
               </button>
             )}
             {onAddVercel && (
-              <button
-                onClick={onAddVercel}
-                className="btn-secondary btn-compact flex-1"
-              >
+              <button onClick={onAddVercel} className="btn-secondary btn-compact flex-1">
                 <Triangle className="w-3 h-3" />
                 Vercel
               </button>
@@ -362,7 +341,9 @@ export const MasterControlPanel = memo(function MasterControlPanel({
 
       {/* Workspace instances */}
       <div className="px-3 py-2 border-b border-brutal border-border">
-        <div className="text-[10px] text-text-muted uppercase tracking-wider mb-2 font-mono font-semibold">Workspace</div>
+        <div className="text-[10px] text-text-muted uppercase tracking-wider mb-2 font-mono font-semibold">
+          Workspace
+        </div>
         <div className="flex items-center gap-1.5">
           <select
             value={activeWorkspaceId}
@@ -371,7 +352,9 @@ export const MasterControlPanel = memo(function MasterControlPanel({
             title="Switch workspace — background workspaces keep their terminals running"
           >
             {workspaces.map((ws) => (
-              <option key={ws.id} value={ws.id}>{ws.name}</option>
+              <option key={ws.id} value={ws.id}>
+                {ws.name}
+              </option>
             ))}
           </select>
           <button
@@ -401,7 +384,9 @@ export const MasterControlPanel = memo(function MasterControlPanel({
       {/* Workspace layouts */}
       {onApplyPreset && (
         <div className="px-3 py-2 border-b border-brutal border-border">
-          <div className="text-[10px] text-text-muted uppercase tracking-wider mb-2 font-mono font-semibold">Layouts</div>
+          <div className="text-[10px] text-text-muted uppercase tracking-wider mb-2 font-mono font-semibold">
+            Layouts
+          </div>
           <div className="flex items-center gap-1.5">
             <select
               value={selectedPresetId}
@@ -409,7 +394,9 @@ export const MasterControlPanel = memo(function MasterControlPanel({
               className="flex-1 min-w-0 text-xs font-mono bg-background-card border-brutal border-border rounded-brutal px-1.5 py-1 focus:border-accent focus:outline-none"
             >
               {allPresets.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
               ))}
             </select>
             <button
@@ -435,15 +422,21 @@ export const MasterControlPanel = memo(function MasterControlPanel({
         <div className="flex items-center gap-1.5 text-[10px] text-text-muted font-mono">
           <Keyboard className="w-3 h-3" />
           <span>
-            <kbd className="px-1 py-0.5 border-brutal border-border rounded-brutal bg-background-card text-[9px] font-mono">1-9</kbd>
+            <kbd className="px-1 py-0.5 border-brutal border-border rounded-brutal bg-background-card text-[9px] font-mono">
+              1-9
+            </kbd>
             =focus
           </span>
           <span>
-            <kbd className="px-1 py-0.5 border-brutal border-border rounded-brutal bg-background-card text-[9px] font-mono">Tab</kbd>
+            <kbd className="px-1 py-0.5 border-brutal border-border rounded-brutal bg-background-card text-[9px] font-mono">
+              Tab
+            </kbd>
             =cycle
           </span>
           <span>
-            <kbd className="px-1 py-0.5 border-brutal border-border rounded-brutal bg-background-card text-[9px] font-mono">F</kbd>
+            <kbd className="px-1 py-0.5 border-brutal border-border rounded-brutal bg-background-card text-[9px] font-mono">
+              F
+            </kbd>
             =fit
           </span>
         </div>

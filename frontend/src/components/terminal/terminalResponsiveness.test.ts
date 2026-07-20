@@ -9,7 +9,7 @@ import {
   TerminalOutputFlowOwnership,
   TerminalSizeTracker,
   TerminalScrollbackBuffer,
-  type TerminalTimerApi,
+  type TerminalTimerApi
 } from '../../../electron/terminalTransport'
 
 const frontendRoot = fileURLToPath(new URL('../../../', import.meta.url))
@@ -29,7 +29,7 @@ test('terminal status surfaces do not run full-area paint animations', () => {
     '.terminal-attention-waiting',
     '.terminal-status-running',
     '.terminal-status-tool-calling',
-    '.terminal-status-waiting-input',
+    '.terminal-status-waiting-input'
   ]) {
     assert.doesNotMatch(cssRuleBody(css, selector), /\banimation\s*:/)
   }
@@ -40,7 +40,7 @@ test('terminal input uses fire-and-forget IPC while retaining reload compatibili
   const main = readFrontendFile('electron/main.ts')
 
   assert.match(preload, /write:[\s\S]*?ipcRenderer\.send\('terminal:write'/)
-  assert.match(preload, /resize:.*ipcRenderer\.invoke\('terminal:resize'/)
+  assert.match(preload, /resize:[\s\S]*?ipcRenderer\.invoke\('terminal:resize'/)
   assert.match(main, /ipcMain\.on\('terminal:write'/)
   assert.match(main, /ipcMain\.handle\('terminal:write'/)
   assert.match(main, /ipcMain\.handle\('terminal:resize'/)
@@ -48,21 +48,39 @@ test('terminal input uses fire-and-forget IPC while retaining reload compatibili
   assert.match(preload, /ackOutput:[\s\S]*?ipcRenderer\.send\('terminal:output-ack'/)
   assert.match(
     readFrontendFile('src/components/terminal/TerminalPane.tsx'),
-    /terminal\.write\(data, frameId === undefined \? undefined : \(\) => \([\s\S]*?terminal\.ackOutput\?\.\(id, outputFlowOwner, frameId\)/,
+    /terminal\.write\(\s*data,\s*frameId === undefined\s*\? undefined\s*:\s*\(\) =>\s*window\.bashgym\?\.terminal\.ackOutput\?\.\(id, outputFlowOwner, frameId\)/
   )
+})
+
+test('terminal removal is visible before native PTY teardown can block', () => {
+  const main = readFrontendFile('electron/main.ts')
+  const killHandler = main.match(
+    /ipcMain\.handle\('terminal:kill',[\s\S]*?\n\}\)\n\n\/\/ Enumerate/
+  )
+
+  assert.ok(killHandler, 'Expected terminal kill IPC handler')
+  const source = killHandler[0]
+  const removal = source.indexOf('ptySessions.delete(id)')
+  const nativeKill = source.indexOf('session.pty.kill()')
+
+  assert.ok(removal >= 0)
+  assert.ok(nativeKill > removal)
 })
 
 test('terminal remount lifecycle cannot activate flow control after disposal', () => {
   const pane = readFrontendFile('src/components/terminal/TerminalPane.tsx')
 
-  assert.match(pane, /let disposed = false[\s\S]*?\.then\(async \(result\) => \{\s*if \(disposed\) return/)
   assert.match(
     pane,
-    /if \(!removeDataListener\) removeDataListener =[\s\S]*?setOutputFlowControl\?\.\(id, outputFlowOwner, true\)/,
+    /let disposed = false[\s\S]*?\.then\(async \(result\) => \{\s*if \(disposed\) return/
   )
   assert.match(
     pane,
-    /return \(\) => \{\s*disposed = true\s*window\.bashgym\?\.terminal\.setOutputFlowControl\?\.\(id, outputFlowOwner, false\)/,
+    /if \(!removeDataListener\)[\s\S]*?setOutputFlowControl\?\.\(id, outputFlowOwner, true\)/
+  )
+  assert.match(
+    pane,
+    /return \(\) => \{\s*disposed = true\s*window\.bashgym\?\.terminal\.setOutputFlowControl\?\.\(id, outputFlowOwner, false\)/
   )
 })
 
@@ -98,14 +116,14 @@ test('embedded PowerShell defaults to the low-latency line editor path', () => {
     '-NoProfile',
     '-NoExit',
     '-Command',
-    'Remove-Module PSReadLine -ErrorAction SilentlyContinue',
+    'Remove-Module PSReadLine -ErrorAction SilentlyContinue'
   ])
   assert.deepEqual(buildPowerShellArgs(true), ['-NoLogo'])
 })
 
 test('a fresh PTY receives its visible size before a coding agent launches', () => {
   const pane = readFrontendFile('src/components/terminal/TerminalPane.tsx')
-  const createSuccess = pane.indexOf("if (!result.success)")
+  const createSuccess = pane.indexOf('if (!result.success)')
   const sizeSync = pane.indexOf('await syncPtySize()', createSuccess)
   const pendingLaunch = pane.indexOf('const pending =', createSuccess)
 
@@ -145,7 +163,7 @@ test('PTY redraws are sent as one ordered short-frame batch', () => {
     },
     clear: () => {
       scheduled = undefined
-    },
+    }
   }
   const flushed: string[] = []
   const batcher = new TerminalIpcBatcher((data) => flushed.push(data), 8, timerApi)
@@ -174,7 +192,7 @@ test('Claude redraws wait for xterm parser acknowledgement and apply bounded PTY
   const flow = new TerminalOutputFlowController(
     (data) => delivered.push(data),
     (paused) => pauseStates.push(paused),
-    { highWatermarkChars: 12, lowWatermarkChars: 4 },
+    { highWatermarkChars: 12, lowWatermarkChars: 4 }
   )
 
   flow.enable()
@@ -207,7 +225,7 @@ test('large redraws are chunked and disabling a paused flow releases the PTY', (
   const flow = new TerminalOutputFlowController(
     (data) => delivered.push(data),
     (paused) => pauseStates.push(paused),
-    { highWatermarkChars: 12, lowWatermarkChars: 4 },
+    { highWatermarkChars: 12, lowWatermarkChars: 4 }
   )
 
   flow.enable()
@@ -233,7 +251,7 @@ test('stale terminal owners cannot acknowledge or release replacement panes', ()
   const flow = new TerminalOutputFlowController(
     (data) => delivered.push(data),
     (paused) => pauseStates.push(paused),
-    { highWatermarkChars: 4, lowWatermarkChars: 0 },
+    { highWatermarkChars: 4, lowWatermarkChars: 0 }
   )
   const ownership = new TerminalOutputFlowOwnership(flow)
 
@@ -262,7 +280,7 @@ test('a passthrough callback cannot acknowledge a different controlled frame', (
   const flow = new TerminalOutputFlowController(
     (data, frameId) => delivered.push({ data, frameId }),
     () => {},
-    { highWatermarkChars: 4, lowWatermarkChars: 0 },
+    { highWatermarkChars: 4, lowWatermarkChars: 0 }
   )
 
   flow.push('old')
@@ -272,8 +290,14 @@ test('a passthrough callback cannot acknowledge a different controlled frame', (
 
   flow.acknowledge(undefined)
   flow.acknowledge((delivered[1].frameId ?? 0) + 1)
-  assert.deepEqual(delivered.map(({ data }) => data), ['old', 'aaaa'])
+  assert.deepEqual(
+    delivered.map(({ data }) => data),
+    ['old', 'aaaa']
+  )
 
   flow.acknowledge(delivered[1].frameId)
-  assert.deepEqual(delivered.map(({ data }) => data), ['old', 'aaaa', 'bbbb'])
+  assert.deepEqual(
+    delivered.map(({ data }) => data),
+    ['old', 'aaaa', 'bbbb']
+  )
 })

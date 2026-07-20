@@ -31,9 +31,11 @@ export function TrainingLogs({ maxHeight = 300, defaultExpanded = true }: Traini
   }
 
   const handleDownload = () => {
-    const content = logs.map(l =>
-      `[${new Date(l.timestamp).toISOString()}] [${l.level.toUpperCase()}] ${l.message}`
-    ).join('\n')
+    const content = logs
+      .map(
+        (l) => `[${new Date(l.timestamp).toISOString()}] [${l.level.toUpperCase()}] ${l.message}`
+      )
+      .join('\n')
 
     const blob = new Blob([content], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
@@ -59,22 +61,35 @@ export function TrainingLogs({ maxHeight = 300, defaultExpanded = true }: Traini
     <div className="terminal-chrome relative">
       {/* Terminal Header */}
       <div className="terminal-header">
-        <div className="flex items-center gap-2 flex-1 cursor-pointer" onClick={() => setExpanded(!expanded)}>
-          <span className="font-mono text-xs uppercase tracking-widest text-text-muted">Training Logs</span>
-          <span className="tag ml-2"><span>{logs.length}</span></span>
+        <div
+          className="flex items-center gap-2 flex-1 cursor-pointer"
+          onClick={() => setExpanded(!expanded)}
+        >
+          <span className="font-mono text-xs uppercase tracking-widest text-text-muted">
+            Training Logs
+          </span>
+          <span className="tag ml-2">
+            <span>{logs.length}</span>
+          </span>
         </div>
         <div className="flex items-center gap-1">
           {expanded && logs.length > 0 && (
             <>
               <button
-                onClick={(e) => { e.stopPropagation(); handleDownload() }}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handleDownload()
+                }}
                 className="btn-ghost p-1.5"
                 title="Download logs"
               >
                 <Download className="w-4 h-4 text-text-muted" />
               </button>
               <button
-                onClick={(e) => { e.stopPropagation(); clearLogs() }}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  clearLogs()
+                }}
                 className="btn-ghost p-1.5"
                 title="Clear logs"
               >
@@ -102,18 +117,13 @@ export function TrainingLogs({ maxHeight = 300, defaultExpanded = true }: Traini
         >
           {logs.length === 0 ? (
             <div className="p-4 text-center text-text-muted">
-              <span className="terminal-prompt">$</span> No training logs yet. Logs will appear here when training starts.
+              <span className="terminal-prompt">$</span> No training logs yet. Logs will appear here
+              when training starts.
             </div>
           ) : (
             <div className="p-2 space-y-0.5">
               {logs.map((log, index) => (
-                <div
-                  key={index}
-                  className={clsx(
-                    'py-0.5 px-2',
-                    getLevelColor(log.level)
-                  )}
-                >
+                <div key={index} className={clsx('py-0.5 px-2', getLevelColor(log.level))}>
                   <span className="text-text-muted mr-2">
                     {new Date(log.timestamp).toLocaleTimeString()}
                   </span>
@@ -132,7 +142,10 @@ export function TrainingLogs({ maxHeight = 300, defaultExpanded = true }: Traini
           className="absolute bottom-2 right-4 tag cursor-pointer"
           onClick={() => {
             setAutoScroll(true)
-            containerRef.current?.scrollTo({ top: containerRef.current.scrollHeight, behavior: 'smooth' })
+            containerRef.current?.scrollTo({
+              top: containerRef.current.scrollHeight,
+              behavior: 'smooth'
+            })
           }}
         >
           <span>Scroll to bottom</span>

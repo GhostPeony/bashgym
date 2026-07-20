@@ -54,38 +54,42 @@ export const DataNodeShell = memo(function DataNodeShell({
 
   const handleFocus = useCallback(() => onFocus?.(panelId), [panelId, onFocus])
 
-  const handleClose = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation()
-    onClose?.(panelId)
-  }, [panelId, onClose])
+  const handleClose = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      onClose?.(panelId)
+    },
+    [panelId, onClose]
+  )
 
-  const handleSend = useCallback(async (e: React.MouseEvent) => {
-    e.stopPropagation()
-    if (!buildContext || sending) return
-    setSending(true)
-    try {
-      const content = await buildContext()
-      const result = await routeToLinkedTerminals(
-        panelId,
-        content,
-        'md',
-        contextBasename || 'bashgym_context',
-      )
-      await onContextRouted?.(result)
-    } catch (error) {
-      await onContextRouteError?.(error)
-    } finally {
-      setSending(false)
-    }
-  }, [panelId, buildContext, contextBasename, onContextRouted, onContextRouteError, sending])
+  const handleSend = useCallback(
+    async (e: React.MouseEvent) => {
+      e.stopPropagation()
+      if (!buildContext || sending) return
+      setSending(true)
+      try {
+        const content = await buildContext()
+        const result = await routeToLinkedTerminals(
+          panelId,
+          content,
+          'md',
+          contextBasename || 'bashgym_context'
+        )
+        await onContextRouted?.(result)
+      } catch (error) {
+        await onContextRouteError?.(error)
+      } finally {
+        setSending(false)
+      }
+    },
+    [panelId, buildContext, contextBasename, onContextRouted, onContextRouteError, sending]
+  )
 
   return (
     <div
       className={clsx(
         'card !rounded-brutal border-brutal cursor-pointer',
-        isGrid
-          ? 'flex h-full w-full min-w-0 flex-col overflow-hidden'
-          : 'w-[360px]',
+        isGrid ? 'flex h-full w-full min-w-0 flex-col overflow-hidden' : 'w-[360px]',
         selected ? 'border-accent shadow-brutal' : 'border-border hover:border-border',
         visualPhase === 'planned' && 'canvas-node-ghost'
       )}
@@ -95,21 +99,28 @@ export const DataNodeShell = memo(function DataNodeShell({
     >
       {!isGrid && (
         <>
-          <Handle type="target" position={Position.Left} className="!bg-accent !w-2 !h-2 !border-brutal !border-border" />
-          <Handle type="source" position={Position.Right} className="!bg-accent !w-2 !h-2 !border-brutal !border-border" />
+          <Handle
+            type="target"
+            position={Position.Left}
+            className="!bg-accent !w-2 !h-2 !border-brutal !border-border"
+          />
+          <Handle
+            type="source"
+            position={Position.Right}
+            className="!bg-accent !w-2 !h-2 !border-brutal !border-border"
+          />
         </>
       )}
 
       {hue != null && (
-        <div
-          className="h-1 rounded-t-brutal"
-          style={{ background: `hsl(${hue}, 45%, 65%)` }}
-        />
+        <div className="h-1 rounded-t-brutal" style={{ background: `hsl(${hue}, 45%, 65%)` }} />
       )}
-      <div className={clsx(
-        'flex items-center gap-2 px-3 py-2 bg-background-secondary border-b border-brutal border-border',
-        hue == null && 'rounded-t-brutal'
-      )}>
+      <div
+        className={clsx(
+          'flex items-center gap-2 px-3 py-2 bg-background-secondary border-b border-brutal border-border',
+          hue == null && 'rounded-t-brutal'
+        )}
+      >
         <NodeFlowerMark
           variant={flowerVariant}
           hue={hue}
@@ -139,7 +150,11 @@ export const DataNodeShell = memo(function DataNodeShell({
               className="node-btn node-btn-accent"
               title="Send context to linked terminals"
             >
-              {sending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+              {sending ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : (
+                <Send className="w-3 h-3" />
+              )}
             </button>
           )}
           {!isGrid && (
@@ -155,9 +170,7 @@ export const DataNodeShell = memo(function DataNodeShell({
         </div>
       </div>
 
-      <div className={clsx('px-3 py-2', isGrid && 'min-h-0 flex-1 overflow-auto')}>
-        {children}
-      </div>
+      <div className={clsx('px-3 py-2', isGrid && 'min-h-0 flex-1 overflow-auto')}>{children}</div>
 
       <div
         className={clsx(

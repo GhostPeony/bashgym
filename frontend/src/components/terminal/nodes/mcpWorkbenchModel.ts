@@ -1,21 +1,9 @@
 export type McpTransport = 'streamable_http' | 'stdio'
 
-export type McpConnectionState =
-  | 'empty'
-  | 'idle'
-  | 'loading'
-  | 'connected'
-  | 'stale'
-  | 'error'
+export type McpConnectionState = 'empty' | 'idle' | 'loading' | 'connected' | 'stale' | 'error'
 
 export type McpOperationStatus =
-  | 'queued'
-  | 'running'
-  | 'awaiting_approval'
-  | 'succeeded'
-  | 'failed'
-  | 'cancelled'
-  | 'interrupted'
+  'queued' | 'running' | 'awaiting_approval' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted'
 
 export interface McpProfile {
   profile_id: string
@@ -171,7 +159,10 @@ export interface McpWorkbenchApi {
     input: McpProfileInput,
     expectedRevision: number
   ): Promise<ApiResult<McpProfile>>
-  previewStdio(profileId: string, profileRevision: number): Promise<ApiResult<McpStdioLaunchPreview>>
+  previewStdio(
+    profileId: string,
+    profileRevision: number
+  ): Promise<ApiResult<McpStdioLaunchPreview>>
   approveStdio(
     profileId: string,
     profileRevision: number,
@@ -334,10 +325,11 @@ export function profileInputFromDraft(draft: McpProfileDraft): McpProfileInput {
       }
     }
   }
-  const callbackPort = draft.oauthCallbackPort.trim()
-    ? Number(draft.oauthCallbackPort)
-    : undefined
-  if (callbackPort !== undefined && (!Number.isInteger(callbackPort) || callbackPort < 1024 || callbackPort > 65535)) {
+  const callbackPort = draft.oauthCallbackPort.trim() ? Number(draft.oauthCallbackPort) : undefined
+  if (
+    callbackPort !== undefined &&
+    (!Number.isInteger(callbackPort) || callbackPort < 1024 || callbackPort > 65535)
+  ) {
     throw new Error('OAuth callback port must be an integer from 1024 to 65535.')
   }
   const clientSecretRef = draft.oauthClientSecretRef.trim()
@@ -351,7 +343,10 @@ export function profileInputFromDraft(draft: McpProfileDraft): McpProfileInput {
       header_secret_refs: parseReferenceMap(draft.headerSecretRefs),
       allow_private_network: draft.allowPrivateNetwork,
       auth_mode: draft.authMode,
-      oauth_scopes: draft.oauthScopes.split(/[\s,]+/).map((scope) => scope.trim()).filter(Boolean),
+      oauth_scopes: draft.oauthScopes
+        .split(/[\s,]+/)
+        .map((scope) => scope.trim())
+        .filter(Boolean),
       ...(callbackPort !== undefined ? { oauth_callback_port: callbackPort } : {}),
       ...(draft.oauthClientId.trim() ? { oauth_client_id: draft.oauthClientId.trim() } : {}),
       ...(clientSecretRef ? { oauth_client_secret_ref: clientSecretRef } : {})
@@ -361,9 +356,10 @@ export function profileInputFromDraft(draft: McpProfileDraft): McpProfileInput {
 
 export function draftFromProfile(profile?: McpProfile | null): McpProfileDraft {
   if (!profile) return { ...EMPTY_MCP_PROFILE_DRAFT }
-  const mapToLines = (value?: Record<string, string>) => Object.entries(value ?? {})
-    .map(([name, reference]) => `${name}=${reference}`)
-    .join('\n')
+  const mapToLines = (value?: Record<string, string>) =>
+    Object.entries(value ?? {})
+      .map(([name, reference]) => `${name}=${reference}`)
+      .join('\n')
   return {
     label: profile.label,
     transport: profile.transport,
@@ -372,7 +368,8 @@ export function draftFromProfile(profile?: McpProfile | null): McpProfileDraft {
     allowPrivateNetwork: profile.remote?.allow_private_network ?? false,
     authMode: profile.remote?.auth_mode ?? 'auto',
     oauthScopes: profile.remote?.oauth_scopes?.join(' ') ?? '',
-    oauthCallbackPort: profile.remote?.oauth_callback_port == null ? '' : String(profile.remote.oauth_callback_port),
+    oauthCallbackPort:
+      profile.remote?.oauth_callback_port == null ? '' : String(profile.remote.oauth_callback_port),
     oauthClientId: profile.remote?.oauth_client_id ?? '',
     oauthClientSecretRef: profile.remote?.oauth_client_secret_ref ?? '',
     command: profile.stdio?.command ?? '',
@@ -403,8 +400,9 @@ export function isMcpProfileDraftDirty(
 ): boolean {
   if (!profile) return true
   try {
-    return JSON.stringify(profileInputFromDraft(draft)) !== JSON.stringify(
-      profileInputFromDraft(draftFromProfile(profile))
+    return (
+      JSON.stringify(profileInputFromDraft(draft)) !==
+      JSON.stringify(profileInputFromDraft(draftFromProfile(profile)))
     )
   } catch {
     return true
@@ -421,9 +419,11 @@ export function filterMcpTools(tools: McpTool[], query: string): McpTool[] {
     return true
   })
   if (!normalized) return uniqueTools
-  return uniqueTools.filter((tool) => [tool.name, tool.title, tool.description]
-    .filter((part): part is string => typeof part === 'string')
-    .some((part) => part.toLocaleLowerCase().includes(normalized)))
+  return uniqueTools.filter((tool) =>
+    [tool.name, tool.title, tool.description]
+      .filter((part): part is string => typeof part === 'string')
+      .some((part) => part.toLocaleLowerCase().includes(normalized))
+  )
 }
 
 export function operationToConnectionState(
@@ -438,7 +438,8 @@ export function operationToConnectionState(
     operation?.status === 'queued' ||
     operation?.status === 'running' ||
     operation?.status === 'awaiting_approval'
-  ) return 'loading'
+  )
+    return 'loading'
   if (hasSession) return snapshotStale ? 'stale' : 'connected'
   if (snapshotStale) return 'stale'
   return 'idle'
@@ -473,9 +474,15 @@ export function mcpTroubleshootingSteps(
       'Confirm every configured header or environment reference exists in the credential store.',
       'For a hosted server, choose Automatic or Hosted OAuth, reconnect, and complete the provider sign-in in your browser.'
     ],
-    oauth_timeout: ['Start the connection again and complete the provider login before the five-minute callback window closes.'],
-    oauth_declined: ['Connect again and approve the requested access on the hosted provider sign-in page.'],
-    oauth_browser_unavailable: ['Check that the operating system has a default browser, then retry the hosted MCP connection.'],
+    oauth_timeout: [
+      'Start the connection again and complete the provider login before the five-minute callback window closes.'
+    ],
+    oauth_declined: [
+      'Connect again and approve the requested access on the hosted provider sign-in page.'
+    ],
+    oauth_browser_unavailable: [
+      'Check that the operating system has a default browser, then retry the hosted MCP connection.'
+    ],
     oauth_failed: [
       'Verify the hosted MCP publishes protected-resource and authorization-server metadata.',
       'If dynamic client registration is unavailable, configure the provider client ID, callback port, and client secret reference.'
@@ -484,12 +491,20 @@ export function mcpTroubleshootingSteps(
       'Review the target host and enable private-network access only when this is a trusted LAN or loopback server.',
       'Confirm the endpoint uses HTTP or HTTPS and does not redirect to another host.'
     ],
-    approval_required: ['Reconnect and review the exact executable, arguments, working directory, environment names, and sandbox fingerprint.'],
-    launch_changed: ['Preview and approve the changed local-process fingerprint before reconnecting.'],
-    sandbox_unavailable: ['Use Preferred only when degraded local-process isolation is acceptable; otherwise keep Required and install a supported sandbox.'],
+    approval_required: [
+      'Reconnect and review the exact executable, arguments, working directory, environment names, and sandbox fingerprint.'
+    ],
+    launch_changed: [
+      'Preview and approve the changed local-process fingerprint before reconnecting.'
+    ],
+    sandbox_unavailable: [
+      'Use Preferred only when degraded local-process isolation is acceptable; otherwise keep Required and install a supported sandbox.'
+    ],
     session_not_found: ['Reconnect the server; the previous live session is no longer available.'],
     session_closed: ['Reconnect, then verify the connection before running another tool call.'],
-    tool_timeout: ['Increase the tool budget only after confirming the server reports progress and is not stuck.'],
+    tool_timeout: [
+      'Increase the tool budget only after confirming the server reports progress and is not stuck.'
+    ],
     result_too_large: ['Lower the requested result size or use a narrower MCP tool query.']
   }
   const steps = tailored[errorCode ?? ''] ?? [
@@ -498,7 +513,10 @@ export function mcpTroubleshootingSteps(
       : 'Verify the MCP URL, credential references, and whether the host requires private-network access.',
     'Reconnect and verify to capture a fresh capability handshake.'
   ]
-  return [...steps, 'Run the reference self-test to separate a BashGym runtime problem from a server-specific problem.']
+  return [
+    ...steps,
+    'Run the reference self-test to separate a BashGym runtime problem from a server-specific problem.'
+  ]
 }
 
 export function buildMcpDiagnosticSummary(
@@ -540,18 +558,22 @@ export function buildMcpDiagnosticSummary(
 }
 
 export function formatMcpVerificationResult(value: unknown): string {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return 'Server verification passed.'
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return 'Server verification passed.'
   const result = value as Record<string, unknown>
-  const count = (key: string) => typeof result[key] === 'number' ? result[key] as number : 0
+  const count = (key: string) => (typeof result[key] === 'number' ? (result[key] as number) : 0)
   const warnings = count('schema_warning_count')
   return [
     'Server verification passed.',
     `${count('tool_count')} tools · ${count('resource_count')} resources · ${count('prompt_count')} prompts`,
-    warnings ? `${warnings} compatibility warning${warnings === 1 ? '' : 's'} to review` : 'No compatibility warnings reported'
+    warnings
+      ? `${warnings} compatibility warning${warnings === 1 ? '' : 's'} to review`
+      : 'No compatibility warnings reported'
   ].join('\n')
 }
 
-const SENSITIVE_VALUE_RE = /(bearer\s+[a-z0-9._-]+|sk-[a-z0-9_-]+|ghp_[a-z0-9]+|xox[bp]-[a-z0-9-]+)/gi
+const SENSITIVE_VALUE_RE =
+  /(bearer\s+[a-z0-9._-]+|sk-[a-z0-9_-]+|ghp_[a-z0-9]+|xox[bp]-[a-z0-9-]+)/gi
 
 function redactText(value: string): string {
   return value.replace(SENSITIVE_VALUE_RE, '[redacted]')
@@ -594,7 +616,10 @@ export function buildMcpTerminalContext(
     lines.push(`- ${redactText(tool.name)}${description}`)
   }
   if (snapshot.tools.length > 30) lines.push(`- ...and ${snapshot.tools.length - 30} more`)
-  lines.push('', 'Use the MCP Workbench UI for calls. Secret values and raw payloads are intentionally excluded.')
+  lines.push(
+    '',
+    'Use the MCP Workbench UI for calls. Secret values and raw payloads are intentionally excluded.'
+  )
   return lines.join('\n')
 }
 
@@ -680,7 +705,11 @@ export function parseMcpToolTestLimits(
     throw new Error('Tool timeout must be between 1 and 300 seconds.')
   }
   const maxResultKilobytes = Number(maxResultKilobytesValue)
-  if (!Number.isInteger(maxResultKilobytes) || maxResultKilobytes < 1 || maxResultKilobytes > 8192) {
+  if (
+    !Number.isInteger(maxResultKilobytes) ||
+    maxResultKilobytes < 1 ||
+    maxResultKilobytes > 8192
+  ) {
     throw new Error('Result limit must be a whole number from 1 to 8192 KB.')
   }
   return {

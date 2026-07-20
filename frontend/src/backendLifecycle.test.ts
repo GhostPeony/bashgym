@@ -5,40 +5,21 @@ import test from 'node:test'
 import {
   createRetryableInitializer,
   managedBackendStartAction,
-  resolveBackendRoot,
+  resolveBackendRoot
 } from '../electron/backendLifecycle'
 
 test('finds an unpacked clone backend from the executable when cwd belongs to another app', () => {
   const cloneRoot = path.resolve('C:/Users/example/Projects/bashgym-clone')
-  const executablePath = path.join(
-    cloneRoot,
-    'frontend',
-    'release',
-    'win-unpacked',
-    'Bash Gym.exe',
-  )
+  const executablePath = path.join(cloneRoot, 'frontend', 'release', 'win-unpacked', 'Bash Gym.exe')
   const backendMarker = path.join(cloneRoot, 'bashgym', 'api', 'routes.py')
 
   const resolved = resolveBackendRoot({
     configuredRoot: undefined,
     cwd: path.resolve('C:/Program Files/Unrelated Launcher/app'),
-    appPath: path.join(
-      cloneRoot,
-      'frontend',
-      'release',
-      'win-unpacked',
-      'resources',
-      'app.asar',
-    ),
-    resourcesPath: path.join(
-      cloneRoot,
-      'frontend',
-      'release',
-      'win-unpacked',
-      'resources',
-    ),
+    appPath: path.join(cloneRoot, 'frontend', 'release', 'win-unpacked', 'resources', 'app.asar'),
+    resourcesPath: path.join(cloneRoot, 'frontend', 'release', 'win-unpacked', 'resources'),
     executablePath,
-    markerExists: (candidate) => path.normalize(candidate) === path.normalize(backendMarker),
+    markerExists: (candidate) => path.normalize(candidate) === path.normalize(backendMarker)
   })
 
   assert.ok(resolved)
@@ -53,7 +34,8 @@ test('uses an explicit configured backend root before inferred locations', () =>
     appPath: path.resolve('C:/package/resources/app.asar'),
     resourcesPath: path.resolve('C:/package/resources'),
     executablePath: path.resolve('C:/package/Bash Gym.exe'),
-    markerExists: (candidate) => candidate === path.join(configuredRoot, 'bashgym', 'api', 'routes.py'),
+    markerExists: (candidate) =>
+      candidate === path.join(configuredRoot, 'bashgym', 'api', 'routes.py')
   })
 
   assert.ok(resolved)
@@ -67,7 +49,7 @@ test('uses the installed Python package when a packaged desktop has no source ch
     appPath: path.resolve('C:/Program Files/Bash Gym/resources/app.asar'),
     resourcesPath: path.resolve('C:/Program Files/Bash Gym/resources'),
     executablePath: path.resolve('C:/Program Files/Bash Gym/Bash Gym.exe'),
-    markerExists: () => false,
+    markerExists: () => false
   })
 
   assert.equal(resolved, undefined)
@@ -75,15 +57,16 @@ test('uses the installed Python package when a packaged desktop has no source ch
 
 test('rejects an explicitly configured backend root that is not a BashGym checkout', () => {
   assert.throws(
-    () => resolveBackendRoot({
-      configuredRoot: path.resolve('D:/not-bashgym'),
-      cwd: path.resolve('C:/somewhere/else'),
-      appPath: path.resolve('C:/package/resources/app.asar'),
-      resourcesPath: path.resolve('C:/package/resources'),
-      executablePath: path.resolve('C:/package/Bash Gym.exe'),
-      markerExists: () => false,
-    }),
-    /configured BashGym backend root is invalid/,
+    () =>
+      resolveBackendRoot({
+        configuredRoot: path.resolve('D:/not-bashgym'),
+        cwd: path.resolve('C:/somewhere/else'),
+        appPath: path.resolve('C:/package/resources/app.asar'),
+        resourcesPath: path.resolve('C:/package/resources'),
+        executablePath: path.resolve('C:/package/Bash Gym.exe'),
+        markerExists: () => false
+      }),
+    /configured BashGym backend root is invalid/
   )
 })
 
@@ -119,8 +102,5 @@ test('reuses its own reachable child when retrying desktop authentication', () =
 })
 
 test('rejects a reachable backend the desktop process does not own', () => {
-  assert.throws(
-    () => managedBackendStartAction(true, false),
-    /port is already in use/,
-  )
+  assert.throws(() => managedBackendStartAction(true, false), /port is already in use/)
 })

@@ -11,10 +11,14 @@ import {
   Search,
   SlidersHorizontal,
   Trash2,
-  X,
+  X
 } from 'lucide-react'
 import { clsx } from 'clsx'
-import { useActivityStore, type ActivityEvent, type ActivitySeverity } from '../../../stores/activityStore'
+import {
+  useActivityStore,
+  type ActivityEvent,
+  type ActivitySeverity
+} from '../../../stores/activityStore'
 import { DataNodeShell } from './DataNodeShell'
 import { hueFor } from './dataPanels'
 import { ConfigPill, NodeConfigModal } from './NodeConfigModal'
@@ -26,14 +30,14 @@ const SEVERITY_DOT: Record<ActivitySeverity, string> = {
   info: 'bg-text-muted',
   success: 'bg-status-success',
   warning: 'bg-status-warning',
-  error: 'bg-status-error',
+  error: 'bg-status-error'
 }
 
 const SEVERITY_ICON = {
   info: Info,
   success: CheckCircle2,
   warning: AlertTriangle,
-  error: AlertTriangle,
+  error: AlertTriangle
 } satisfies Record<ActivitySeverity, typeof Info>
 
 const COMPACT_FILTERS = ['training', 'orchestration', 'designer', 'guardrail', 'hf']
@@ -52,7 +56,7 @@ const CATEGORY_LABEL: Record<string, string> = {
   'skill-eval': 'Skill Lab',
   trace: 'Traces',
   training: 'Training',
-  verification: 'Verification',
+  verification: 'Verification'
 }
 
 function relTime(ts: number): string {
@@ -74,7 +78,10 @@ function formattedDetail(detail?: string): string {
   }
 }
 
-export const ActivityFeedNode = memo(function ActivityFeedNode({ data, selected }: NodeProps<ActivityFeedNodeType>) {
+export const ActivityFeedNode = memo(function ActivityFeedNode({
+  data,
+  selected
+}: NodeProps<ActivityFeedNodeType>) {
   const events = useActivityStore((state) => state.events)
   const clearEvents = useActivityStore((state) => state.clear)
   const dismissEvent = useActivityStore((state) => state.dismissEvent)
@@ -99,16 +106,18 @@ export const ActivityFeedNode = memo(function ActivityFeedNode({ data, selected 
       if (filter && event.category !== filter) return false
       if (severity !== 'all' && event.severity !== severity) return false
       if (!normalizedQuery) return true
-      return `${event.title} ${event.type} ${event.detail ?? ''}`.toLowerCase().includes(normalizedQuery)
+      return `${event.title} ${event.type} ${event.detail ?? ''}`
+        .toLowerCase()
+        .includes(normalizedQuery)
     })
   }, [source, filter, severity, query])
   const visible = filtered.slice(0, 8)
-  const selectedEvent = selectedEventId == null
-    ? null
-    : source.find((event) => event.id === selectedEventId) ?? null
+  const selectedEvent =
+    selectedEventId == null ? null : (source.find((event) => event.id === selectedEventId) ?? null)
   const warningCount = useMemo(
-    () => source.filter((event) => event.severity === 'warning' || event.severity === 'error').length,
-    [source],
+    () =>
+      source.filter((event) => event.severity === 'warning' || event.severity === 'error').length,
+    [source]
   )
 
   const openCenter = (eventId?: number) => {
@@ -121,7 +130,7 @@ export const ActivityFeedNode = memo(function ActivityFeedNode({ data, selected 
     setConfigOpen(false)
     setFeedOpen(false)
   }
-  const toggleFrozen = () => setFrozen((current) => current ? null : [...events])
+  const toggleFrozen = () => setFrozen((current) => (current ? null : [...events]))
   const copySelected = async () => {
     if (!selectedEvent) return
     const text = [
@@ -130,23 +139,27 @@ export const ActivityFeedNode = memo(function ActivityFeedNode({ data, selected 
       `Severity: ${selectedEvent.severity}`,
       `Time: ${new Date(selectedEvent.timestamp).toLocaleString()}`,
       '',
-      formattedDetail(selectedEvent.detail),
+      formattedDetail(selectedEvent.detail)
     ].join('\n')
     await navigator.clipboard.writeText(text)
     setCopied(true)
   }
 
-  const buildContext = () => [
-    '## Recent BashGym activity',
-    ...filtered.slice(0, 10).map((event) => `- [${event.severity}] ${event.title} (${event.type})`),
-  ].join('\n')
+  const buildContext = () =>
+    [
+      '## Recent BashGym activity',
+      ...filtered
+        .slice(0, 10)
+        .map((event) => `- [${event.severity}] ${event.title} (${event.type})`)
+    ].join('\n')
 
-  const chipClass = (active: boolean) => clsx(
-    'nodrag px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-wider border-brutal rounded-brutal transition-press',
-    active
-      ? 'border-accent bg-accent/10 text-accent shadow-brutal-sm'
-      : 'border-border bg-background-card text-text-muted hover:text-text-secondary hover:border-border',
-  )
+  const chipClass = (active: boolean) =>
+    clsx(
+      'nodrag px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-wider border-brutal rounded-brutal transition-press',
+      active
+        ? 'border-accent bg-accent/10 text-accent shadow-brutal-sm'
+        : 'border-border bg-background-card text-text-muted hover:text-text-secondary hover:border-border'
+    )
 
   return (
     <>
@@ -157,7 +170,11 @@ export const ActivityFeedNode = memo(function ActivityFeedNode({ data, selected 
         selected={selected}
         hasConnections={data.hasConnections}
         buildContext={data.hasTerminalConnections ? buildContext : undefined}
-        statusBarClass={visible.some((event) => event.severity === 'error') ? 'bg-status-error' : 'bg-background-tertiary'}
+        statusBarClass={
+          visible.some((event) => event.severity === 'error')
+            ? 'bg-status-error'
+            : 'bg-background-tertiary'
+        }
         hue={hueFor('activity')}
         headerRight={
           <>
@@ -227,7 +244,9 @@ export const ActivityFeedNode = memo(function ActivityFeedNode({ data, selected 
               openCenter()
             }}
           >
-            {source.length === 0 ? 'No activity yet — open Activity Center' : 'No events match these filters'}
+            {source.length === 0
+              ? 'No activity yet — open Activity Center'
+              : 'No events match these filters'}
           </button>
         ) : (
           <div className="space-y-1">
@@ -242,7 +261,12 @@ export const ActivityFeedNode = memo(function ActivityFeedNode({ data, selected 
                 }}
                 title={`Inspect ${event.title}`}
               >
-                <span className={clsx('w-1.5 h-1.5 rounded-full flex-shrink-0', SEVERITY_DOT[event.severity])} />
+                <span
+                  className={clsx(
+                    'w-1.5 h-1.5 rounded-full flex-shrink-0',
+                    SEVERITY_DOT[event.severity]
+                  )}
+                />
                 <span className="flex-1 truncate text-text-secondary">{event.title}</span>
                 <span className="text-text-muted flex-shrink-0">{relTime(event.timestamp)}</span>
               </button>
@@ -262,7 +286,10 @@ export const ActivityFeedNode = memo(function ActivityFeedNode({ data, selected 
           <>
             <button
               type="button"
-              className={clsx('btn-secondary mr-auto', frozen && 'text-status-warning border-status-warning')}
+              className={clsx(
+                'btn-secondary mr-auto',
+                frozen && 'text-status-warning border-status-warning'
+              )}
               onClick={toggleFrozen}
             >
               {frozen ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
@@ -273,7 +300,10 @@ export const ActivityFeedNode = memo(function ActivityFeedNode({ data, selected 
               className="btn-secondary text-status-error border-status-error"
               disabled={events.length === 0}
               onClick={() => {
-                if (events.length > 0 && window.confirm(`Clear all ${events.length} activity events?`)) {
+                if (
+                  events.length > 0 &&
+                  window.confirm(`Clear all ${events.length} activity events?`)
+                ) {
                   clearEvents()
                   setSelectedEventId(null)
                 }
@@ -282,14 +312,21 @@ export const ActivityFeedNode = memo(function ActivityFeedNode({ data, selected 
               <Trash2 className="w-3.5 h-3.5" />
               Clear all
             </button>
-            <button type="button" className="btn-primary" onClick={closeCenter}>Done</button>
+            <button type="button" className="btn-primary" onClick={closeCenter}>
+              Done
+            </button>
           </>
         }
       >
         <div className="activity-center">
           <div className="activity-center-summary" aria-label="Feed summary">
             <div>
-              <span className={clsx('activity-center-live-dot', frozen && 'activity-center-live-dot-paused')} />
+              <span
+                className={clsx(
+                  'activity-center-live-dot',
+                  frozen && 'activity-center-live-dot-paused'
+                )}
+              />
               <strong>{frozen ? 'Paused snapshot' : 'Live workspace feed'}</strong>
             </div>
             <span>{source.length} events</span>
@@ -321,7 +358,10 @@ export const ActivityFeedNode = memo(function ActivityFeedNode({ data, selected 
                     <button
                       type="button"
                       key={value}
-                      className={clsx('activity-center-filter', severity === value && 'activity-center-filter-active')}
+                      className={clsx(
+                        'activity-center-filter',
+                        severity === value && 'activity-center-filter-active'
+                      )}
                       onClick={() => setSeverity(value)}
                       aria-pressed={severity === value}
                     >
@@ -333,7 +373,10 @@ export const ActivityFeedNode = memo(function ActivityFeedNode({ data, selected 
                 <div className="activity-center-filter-row" aria-label="Filter by category">
                   <button
                     type="button"
-                    className={clsx('activity-center-filter', filter == null && 'activity-center-filter-active')}
+                    className={clsx(
+                      'activity-center-filter',
+                      filter == null && 'activity-center-filter-active'
+                    )}
                     onClick={() => setFilter(null)}
                     aria-pressed={filter == null}
                   >
@@ -343,7 +386,10 @@ export const ActivityFeedNode = memo(function ActivityFeedNode({ data, selected 
                     <button
                       type="button"
                       key={category}
-                      className={clsx('activity-center-filter', filter === category && 'activity-center-filter-active')}
+                      className={clsx(
+                        'activity-center-filter',
+                        filter === category && 'activity-center-filter-active'
+                      )}
                       onClick={() => setFilter(filter === category ? null : category)}
                       aria-pressed={filter === category}
                     >
@@ -357,31 +403,48 @@ export const ActivityFeedNode = memo(function ActivityFeedNode({ data, selected 
                 {filtered.length === 0 ? (
                   <div className="activity-center-empty">
                     <Activity className="w-7 h-7" aria-hidden="true" />
-                    <strong>{source.length === 0 ? 'No activity recorded yet' : 'No matching events'}</strong>
-                    <span>{source.length === 0 ? 'Task, training, and service updates will appear here.' : 'Try clearing a filter or using a broader search.'}</span>
+                    <strong>
+                      {source.length === 0 ? 'No activity recorded yet' : 'No matching events'}
+                    </strong>
+                    <span>
+                      {source.length === 0
+                        ? 'Task, training, and service updates will appear here.'
+                        : 'Try clearing a filter or using a broader search.'}
+                    </span>
                   </div>
-                ) : filtered.map((event) => {
-                  const SeverityIcon = SEVERITY_ICON[event.severity]
-                  return (
-                    <button
-                      type="button"
-                      role="listitem"
-                      key={event.id}
-                      className={clsx('activity-center-event', selectedEventId === event.id && 'activity-center-event-selected')}
-                      onClick={() => {
-                        setSelectedEventId(event.id)
-                        setCopied(false)
-                      }}
-                      aria-current={selectedEventId === event.id ? 'true' : undefined}
-                    >
-                      <SeverityIcon className={clsx('w-4 h-4', `activity-severity-${event.severity}`)} aria-hidden="true" />
-                      <span className="activity-center-event-copy">
-                        <strong>{event.title}</strong>
-                        <span>{CATEGORY_LABEL[event.category] ?? event.category} · {relTime(event.timestamp)}</span>
-                      </span>
-                    </button>
-                  )
-                })}
+                ) : (
+                  filtered.map((event) => {
+                    const SeverityIcon = SEVERITY_ICON[event.severity]
+                    return (
+                      <button
+                        type="button"
+                        role="listitem"
+                        key={event.id}
+                        className={clsx(
+                          'activity-center-event',
+                          selectedEventId === event.id && 'activity-center-event-selected'
+                        )}
+                        onClick={() => {
+                          setSelectedEventId(event.id)
+                          setCopied(false)
+                        }}
+                        aria-current={selectedEventId === event.id ? 'true' : undefined}
+                      >
+                        <SeverityIcon
+                          className={clsx('w-4 h-4', `activity-severity-${event.severity}`)}
+                          aria-hidden="true"
+                        />
+                        <span className="activity-center-event-copy">
+                          <strong>{event.title}</strong>
+                          <span>
+                            {CATEGORY_LABEL[event.category] ?? event.category} ·{' '}
+                            {relTime(event.timestamp)}
+                          </span>
+                        </span>
+                      </button>
+                    )
+                  })
+                )}
               </div>
             </section>
 
@@ -394,7 +457,11 @@ export const ActivityFeedNode = memo(function ActivityFeedNode({ data, selected 
                       <h3>{selectedEvent.title}</h3>
                     </div>
                     <div className="flex gap-1.5">
-                      <button type="button" className="node-btn node-btn-wide" onClick={() => void copySelected()}>
+                      <button
+                        type="button"
+                        className="node-btn node-btn-wide"
+                        onClick={() => void copySelected()}
+                      >
                         <Copy className="w-3.5 h-3.5" />
                         {copied ? 'Copied' : 'Copy'}
                       </button>
@@ -413,7 +480,17 @@ export const ActivityFeedNode = memo(function ActivityFeedNode({ data, selected 
                     </div>
                   </div>
                   <div className="activity-center-detail-meta">
-                    <ConfigPill tone={selectedEvent.severity === 'error' ? 'error' : selectedEvent.severity === 'warning' ? 'warning' : selectedEvent.severity === 'success' ? 'success' : 'neutral'}>
+                    <ConfigPill
+                      tone={
+                        selectedEvent.severity === 'error'
+                          ? 'error'
+                          : selectedEvent.severity === 'warning'
+                            ? 'warning'
+                            : selectedEvent.severity === 'success'
+                              ? 'success'
+                              : 'neutral'
+                      }
+                    >
                       {selectedEvent.severity}
                     </ConfigPill>
                     <span>{CATEGORY_LABEL[selectedEvent.category] ?? selectedEvent.category}</span>
@@ -425,7 +502,9 @@ export const ActivityFeedNode = memo(function ActivityFeedNode({ data, selected 
                     <span>Event type</span>
                     <code>{selectedEvent.type}</code>
                   </div>
-                  <pre className="activity-center-payload">{formattedDetail(selectedEvent.detail)}</pre>
+                  <pre className="activity-center-payload">
+                    {formattedDetail(selectedEvent.detail)}
+                  </pre>
                 </>
               ) : (
                 <div className="activity-center-empty">

@@ -1,29 +1,18 @@
-import { useState, useEffect } from 'react'
-import {
-  FileText,
-  Upload,
-  Loader2,
-  ExternalLink,
-  RefreshCw,
-} from 'lucide-react'
+import { useState } from 'react'
+import { FileText, Upload, Loader2, ExternalLink, RefreshCw } from 'lucide-react'
 import { hfApi } from '../../services/api'
-
-interface TraceDataset {
-  id: string
-  private: boolean | null
-  downloads: number
-  last_modified: string
-}
+import { hfTraceDatasetsResource } from '../../stores/hfResources'
+import { useSessionResource } from '../../stores/sessionResource'
 
 const DEFAULT_TRACE_DIRS = [
   '~/.bashgym/gold_traces_local',
   '~/.bashgym/failed_traces_local',
-  '~/.bashgym/traces',
+  '~/.bashgym/traces'
 ]
 
 export function TracesTab() {
-  const [datasets, setDatasets] = useState<TraceDataset[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data, loading, refreshing, refresh } = useSessionResource(hfTraceDatasetsResource)
+  const datasets = data ?? []
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
@@ -32,17 +21,6 @@ export function TracesTab() {
   const [traceDir, setTraceDir] = useState(DEFAULT_TRACE_DIRS[0])
   const [repoId, setRepoId] = useState('')
   const [isPrivate, setIsPrivate] = useState(true)
-
-  const fetchDatasets = async () => {
-    setLoading(true)
-    const result = await hfApi.listTraceDatasets()
-    if (result.ok && result.data) {
-      setDatasets(result.data)
-    }
-    setLoading(false)
-  }
-
-  useEffect(() => { fetchDatasets() }, [])
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -55,12 +33,12 @@ export function TracesTab() {
     const result = await hfApi.uploadTraces({
       trace_dir: traceDir.trim(),
       repo_id: repoId.trim(),
-      private: isPrivate,
+      private: isPrivate
     })
 
     if (result.ok && result.data) {
       setSuccess(`Uploaded ${result.data.num_traces} traces to ${result.data.url}`)
-      await fetchDatasets()
+      await refresh()
     } else {
       setError(result.error || 'Upload failed')
     }
@@ -73,11 +51,12 @@ export function TracesTab() {
         <div>
           <h2 className="text-lg font-brand text-text-primary">Agent Traces</h2>
           <p className="text-sm text-text-secondary mt-1">
-            Upload bashgym traces to HuggingFace Hub. HF auto-detects agent trace formats and provides a specialized viewer.
+            Upload bashgym traces to HuggingFace Hub. HF auto-detects agent trace formats and
+            provides a specialized viewer.
           </p>
         </div>
-        <button onClick={fetchDatasets} className="btn-icon" title="Refresh">
-          <RefreshCw className="w-4 h-4" />
+        <button onClick={() => refresh()} className="btn-icon" title="Refresh">
+          <RefreshCw className={`w-4 h-4${refreshing ? ' animate-spin' : ''}`} />
         </button>
       </div>
 
@@ -185,14 +164,19 @@ export function TracesTab() {
         ) : (
           <div className="space-y-2">
             {datasets.map((ds) => (
-              <div key={ds.id} className="border-2 border-border rounded-brutal p-3 flex items-center justify-between">
+              <div
+                key={ds.id}
+                className="border-2 border-border rounded-brutal p-3 flex items-center justify-between"
+              >
                 <div className="flex items-center gap-3">
                   <FileText className="w-5 h-5 text-text-secondary" />
                   <div>
                     <span className="font-mono text-sm text-text-primary">{ds.id}</span>
                     <div className="flex items-center gap-3 mt-0.5">
                       {ds.private && (
-                        <span className="text-xs text-text-muted border border-border-subtle rounded px-1">private</span>
+                        <span className="text-xs text-text-muted border border-border-subtle rounded px-1">
+                          private
+                        </span>
                       )}
                       <span className="text-xs text-text-muted">{ds.downloads} downloads</span>
                     </div>

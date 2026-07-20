@@ -3,7 +3,7 @@ import type { CampaignControlRoomSnapshotV1 } from '../../services/api'
 const digest = 'a'.repeat(64)
 
 export function controlRoomSnapshot(
-  overrides: Partial<CampaignControlRoomSnapshotV1> = {},
+  overrides: Partial<CampaignControlRoomSnapshotV1> = {}
 ): CampaignControlRoomSnapshotV1 {
   const snapshot: CampaignControlRoomSnapshotV1 = {
     schema_version: 'control_room_snapshot.v1',
@@ -26,7 +26,7 @@ export function controlRoomSnapshot(
       active_study_id: 'study-1',
       active_action_id: 'action-1',
       champion_ref: 'champion-v1',
-      stop_reason: null,
+      stop_reason: null
     },
     controller: {
       schema_version: 'controller_observation.v1',
@@ -36,7 +36,7 @@ export function controlRoomSnapshot(
       heartbeat_age_seconds: 2,
       lease_expires_at: '2026-07-16T18:01:00Z',
       controller_instance_id: 'controller-1',
-      safe_guidance: null,
+      safe_guidance: null
     },
     readiness: {
       schema_version: 'readiness_summary.v1',
@@ -45,26 +45,58 @@ export function controlRoomSnapshot(
       checked_at: '2026-07-16T17:59:00Z',
       activation_receipt_digest: digest,
       doctor_receipt_digest: digest,
-      blocking_codes: [],
+      blocking_codes: []
     },
     bindings: {
       schema_version: 'binding_summary.v1',
-      model: { schema_version: 'safe_binding_identity.v1', binding_id: 'model-1', immutable_digest: digest, display_label: 'Embedding model' },
-      data: { schema_version: 'safe_binding_identity.v1', binding_id: 'data-1', immutable_digest: digest, display_label: 'Approved retrieval data' },
-      evaluator: { schema_version: 'safe_binding_identity.v1', binding_id: 'eval-1', immutable_digest: digest, display_label: 'Retrieval evaluator' },
-      source: { schema_version: 'safe_binding_identity.v1', binding_id: 'source-1', immutable_digest: digest, display_label: 'Source revision' },
-      compute: { schema_version: 'safe_binding_identity.v1', binding_id: 'compute-1', immutable_digest: digest, display_label: 'Registered private compute' },
+      model: {
+        schema_version: 'safe_binding_identity.v1',
+        binding_id: 'model-1',
+        immutable_digest: digest,
+        display_label: 'Embedding model'
+      },
+      data: {
+        schema_version: 'safe_binding_identity.v1',
+        binding_id: 'data-1',
+        immutable_digest: digest,
+        display_label: 'Approved retrieval data'
+      },
+      evaluator: {
+        schema_version: 'safe_binding_identity.v1',
+        binding_id: 'eval-1',
+        immutable_digest: digest,
+        display_label: 'Retrieval evaluator'
+      },
+      source: {
+        schema_version: 'safe_binding_identity.v1',
+        binding_id: 'source-1',
+        immutable_digest: digest,
+        display_label: 'Source revision'
+      },
+      compute: {
+        schema_version: 'safe_binding_identity.v1',
+        binding_id: 'compute-1',
+        immutable_digest: digest,
+        display_label: 'Registered private compute'
+      }
     },
-    journey: ['setup', 'baseline', 'experiments', 'human_review', 'decision'].map((phaseId, index) => ({
-      schema_version: 'journey_phase_summary.v1' as const,
-      phase_id: phaseId as 'setup' | 'baseline' | 'experiments' | 'human_review' | 'decision',
-      state: index < 2 ? 'complete' as const : index === 2 ? 'active' as const : 'not_started' as const,
-      execution_owner: index === 2 ? 'bashgym' as const : 'none' as const,
-      attention_owner: index === 2 ? 'bashgym' as const : 'none' as const,
-      primary_blocker: null,
-      evidence_count: index + 1,
-      next_action_ids: index === 2 ? ['inspect-active-work'] : [],
-    })),
+    journey: ['setup', 'baseline', 'experiments', 'human_review', 'decision'].map(
+      (phaseId, index) => ({
+        schema_version: 'journey_phase_summary.v1' as const,
+        phase_id: phaseId as 'setup' | 'baseline' | 'experiments' | 'human_review' | 'decision',
+        state:
+          index < 2
+            ? ('complete' as const)
+            : index === 2
+              ? ('active' as const)
+              : ('not_started' as const),
+        execution_owner: index === 2 ? ('bashgym' as const) : ('none' as const),
+        attention_owner: index === 2 ? ('bashgym' as const) : ('none' as const),
+        primary_blocker: null,
+        evidence_count: index + 1,
+        next_action_ids: index === 2 ? ['inspect-active-work'] : []
+      })
+    ),
     active_work: {
       schema_version: 'active_work_summary.v1',
       study_id: 'study-1',
@@ -78,7 +110,12 @@ export function controlRoomSnapshot(
       progress_fraction: 0.6,
       eta_seconds: 900,
       executor_type: 'ssh_remote',
-      process_identity: { schema_version: 'opaque_process_identity.v1', run_id: 'run-1', compute_profile_id: 'compute-1', state: 'running' },
+      process_identity: {
+        schema_version: 'opaque_process_identity.v1',
+        run_id: 'run-1',
+        compute_profile_id: 'compute-1',
+        state: 'running'
+      }
     },
     champion: {
       schema_version: 'candidate_summary.v1',
@@ -87,7 +124,7 @@ export function controlRoomSnapshot(
       source_artifact_ids: ['artifact-0'],
       latest_comparable_evaluation_id: 'evaluation-0',
       comparison_verdict: 'passed',
-      gate_state: 'passed',
+      gate_state: 'passed'
     },
     candidate: {
       schema_version: 'candidate_summary.v1',
@@ -96,47 +133,108 @@ export function controlRoomSnapshot(
       source_artifact_ids: ['artifact-1'],
       latest_comparable_evaluation_id: 'evaluation-1',
       comparison_verdict: null,
-      gate_state: 'not_evaluated',
+      gate_state: 'not_evaluated'
     },
-    metrics: [{
-      schema_version: 'metric_descriptor.v1',
-      metric_id: 'recall-at-10',
-      display_name: 'Recall at 10',
-      unit: '%',
-      direction: 'maximize',
-      target: 0.9,
-      tolerance: 0.01,
-      evaluator_revision: 'eval-r1',
-      sample_count: 200,
-      uncertainty_method: 'bootstrap',
-      comparability_key: digest,
-    }],
+    metrics: [
+      {
+        schema_version: 'metric_descriptor.v1',
+        metric_id: 'recall-at-10',
+        display_name: 'Recall at 10',
+        unit: '%',
+        direction: 'maximize',
+        target: 0.9,
+        tolerance: 0.01,
+        evaluator_revision: 'eval-r1',
+        sample_count: 200,
+        uncertainty_method: 'bootstrap',
+        comparability_key: digest
+      }
+    ],
     budget: {
       schema_version: 'budget_summary.v1',
       blocked: false,
-      resources: [{ schema_version: 'budget_resource_summary.v1', unit: 'gpu_hours', limit: 10, reserved: 2, settled: 3, remaining: 5, blocked: false, blocker_code: null }],
+      resources: [
+        {
+          schema_version: 'budget_resource_summary.v1',
+          unit: 'gpu_hours',
+          limit: 10,
+          reserved: 2,
+          settled: 3,
+          remaining: 5,
+          blocked: false,
+          blocker_code: null
+        }
+      ]
     },
-    human_work: { schema_version: 'human_work_summary.v1', blocking_count: 0, open_count: 0, newest: [] },
+    human_work: {
+      schema_version: 'human_work_summary.v1',
+      blocking_count: 0,
+      open_count: 0,
+      newest: []
+    },
     agents: [],
     collections: {
       schema_version: 'collection_summary.v1',
-      events: { schema_version: 'collection_cursor.v1', count: 42, next_cursor: '42', has_more: true },
-      proposals: { schema_version: 'collection_cursor.v1', count: 4, next_cursor: null, has_more: false },
-      studies: { schema_version: 'collection_cursor.v1', count: 3, next_cursor: null, has_more: false },
-      attempts: { schema_version: 'collection_cursor.v1', count: 6, next_cursor: null, has_more: false },
-      artifacts: { schema_version: 'collection_cursor.v1', count: 8, next_cursor: 'artifact-4', has_more: true },
-      comparisons: { schema_version: 'collection_cursor.v1', count: 2, next_cursor: null, has_more: false },
-      human_work: { schema_version: 'collection_cursor.v1', count: 0, next_cursor: null, has_more: false },
+      events: {
+        schema_version: 'collection_cursor.v1',
+        count: 42,
+        next_cursor: '42',
+        has_more: true
+      },
+      proposals: {
+        schema_version: 'collection_cursor.v1',
+        count: 4,
+        next_cursor: null,
+        has_more: false
+      },
+      studies: {
+        schema_version: 'collection_cursor.v1',
+        count: 3,
+        next_cursor: null,
+        has_more: false
+      },
+      attempts: {
+        schema_version: 'collection_cursor.v1',
+        count: 6,
+        next_cursor: null,
+        has_more: false
+      },
+      artifacts: {
+        schema_version: 'collection_cursor.v1',
+        count: 8,
+        next_cursor: 'artifact-4',
+        has_more: true
+      },
+      comparisons: {
+        schema_version: 'collection_cursor.v1',
+        count: 2,
+        next_cursor: null,
+        has_more: false
+      },
+      human_work: {
+        schema_version: 'collection_cursor.v1',
+        count: 0,
+        next_cursor: null,
+        has_more: false
+      }
     },
     decision_surface: {
       schema_version: 'decision_surface.v1',
       execution_owner: 'bashgym',
       attention_owner: 'agent',
       blocker: null,
-      next_actions: [{ schema_version: 'decision_action.v1', action: 'inspect-active-work', capability: 'campaign.read', freshness_class: 'read', requires_human_work: false }],
+      next_actions: [
+        {
+          schema_version: 'decision_action.v1',
+          action: 'inspect-active-work',
+          capability: 'campaign.read',
+          freshness_class: 'read',
+          requires_human_work: false
+        }
+      ],
       recovery_actions: ['reconcile-controller'],
-      promotion_eligible: false,
-    },
+      promotion_eligible: false
+    }
   }
   return { ...snapshot, ...overrides }
 }

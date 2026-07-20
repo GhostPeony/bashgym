@@ -119,9 +119,7 @@ def test_combine_release_gate_blocks_on_external_benchmark_failure():
 
     assert report["ship"] is False
     assert report["release_gate"]["external_benchmark_ship"] is False
-    assert report["release_gate"]["blocking_external_benchmark_sections"] == [
-        "external_benchmarks"
-    ]
+    assert report["release_gate"]["blocking_external_benchmark_sections"] == ["external_benchmarks"]
     assert report["reasons"] == [
         "external benchmark swebench_verified_lite: failed or missing score"
     ]
@@ -227,9 +225,7 @@ def test_combine_release_gate_carries_learned_reward_evidence_diagnostics():
     assert report["ship"] is True
     assert report["reasons"] == []
     assert report["release_gate"]["learned_reward_evidence_present"] is True
-    assert report["release_gate"]["learned_reward_evidence_sections"] == [
-        "learned_reward_evidence"
-    ]
+    assert report["release_gate"]["learned_reward_evidence_sections"] == ["learned_reward_evidence"]
     assert reward["diagnostic_only"] is True
     assert reward["signal"] == "healthy"
     assert reward["metrics"]["heldout_pair_accuracy"] == 0.82
@@ -263,6 +259,6 @@ def test_combine_release_gate_learned_reward_warning_is_not_a_ship_blocker():
     assert reward["signal"] == "needs_attention"
     assert "learned reward evidence reports ok=false" in reward["findings"]
     assert "learned reward evidence reports eval-only leakage" in reward["findings"]
-    assert "learned reward heldout pair accuracy is below the starter threshold" in reward[
-        "findings"
-    ]
+    assert (
+        "learned reward heldout pair accuracy is below the starter threshold" in reward["findings"]
+    )

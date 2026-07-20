@@ -121,7 +121,9 @@ def test_session_distillation_script_uses_relative_paths_when_remote():
         base_model="tiny-local-model",
         strategy=TrainingStrategy.SESSION_DISTILLATION,
     )
-    run = _sd_run(config, dataset=r"C:\Users\Developer\records.jsonl", out=r"C:\Users\Developer\out")
+    run = _sd_run(
+        config, dataset=r"C:\Users\Developer\records.jsonl", out=r"C:\Users\Developer\out"
+    )
     script = Trainer(config)._generate_session_distillation_script(run, remote=True)
     ast.parse(script)
     assert 'DATASET_PATH = "records.jsonl"' in script
@@ -140,7 +142,9 @@ def test_remote_launch_spec_runs_session_distillation_script_without_unsloth():
     config = TrainerConfig(
         base_model="tiny-local-model", strategy=TrainingStrategy.SESSION_DISTILLATION
     )
-    run = _sd_run(config, dataset=r"C:\Users\Developer\records.jsonl", out=r"C:\Users\Developer\out")
+    run = _sd_run(
+        config, dataset=r"C:\Users\Developer\records.jsonl", out=r"C:\Users\Developer\out"
+    )
     content, script_name, require_unsloth = Trainer(config)._remote_launch_spec(run)
     assert script_name == "train_session_distillation.py"
     assert require_unsloth is False

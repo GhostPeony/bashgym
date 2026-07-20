@@ -1,15 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { RefreshCw, Download, Search } from 'lucide-react'
 import { clsx } from 'clsx'
-import { API_BASE, trainingApi } from '../../services/api'
-
-interface LogResponse {
-  run_id: string
-  path: string
-  total_lines: number
-  truncated: boolean
-  lines: string[]
-}
+import { API_BASE } from '../../services/api'
+import {
+  trainingLogKey,
+  trainingLogResource,
+  trainingRunOptionsResource
+} from '../../stores/opsResources'
+import { useSessionResource } from '../../stores/sessionResource'
 
 function classifyLine(line: string): 'error' | 'warning' | 'info' {
   const head = line.slice(0, 40).toUpperCase()
@@ -19,11 +17,9 @@ function classifyLine(line: string): 'error' | 'warning' | 'info' {
 }
 
 export function TrainingLogViewer() {
-  const [runs, setRuns] = useState<Array<{ id: string; status?: string; strategy?: string }>>([])
+  const { data: runsData } = useSessionResource(trainingRunOptionsResource)
+  const runs = useMemo(() => runsData ?? [], [runsData])
   const [selectedRun, setSelectedRun] = useState<string>('')
-  const [log, setLog] = useState<LogResponse | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [tail, setTail] = useState(500)
@@ -34,46 +30,24 @@ export function TrainingLogViewer() {
     return () => clearTimeout(t)
   }, [search])
 
-  // Fetch runs on mount
+  // Default to the most recent run once the run list is available
   useEffect(() => {
-    trainingApi.list(undefined, 50).then((res) => {
-      if (res.ok && Array.isArray(res.data)) {
-        const list = (res.data as unknown as Array<Record<string, unknown>>)
-          .map((r) => ({
-            id: String(r.run_id ?? r.id ?? ''),
-            status: r.status as string | undefined,
-            strategy: r.strategy as string | undefined,
-          }))
-          .filter((r) => r.id)
-        setRuns(list)
-        if (list.length > 0 && !selectedRun) setSelectedRun(list[0].id)
-      }
-    })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    if (!selectedRun && runs.length > 0) setSelectedRun(runs[0].id)
+  }, [runs, selectedRun])
 
-  const fetchLog = useCallback(async () => {
-    if (!selectedRun) return
-    setLoading(true)
-    setError(null)
-    try {
-      const res = await trainingApi.getLog(selectedRun, { tail })
-      if (res.ok && res.data) {
-        setLog(res.data)
-      } else {
-        setLog(null)
-        setError(res.error || 'Failed to load log')
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load log')
-    } finally {
-      setLoading(false)
-    }
-  }, [selectedRun, tail])
-
+  const logKey = selectedRun ? trainingLogKey(selectedRun, tail) : null
+  const entry = trainingLogResource((s) => (logKey ? s.entries[logKey] : undefined))
   useEffect(() => {
-    fetchLog()
-  }, [fetchLog])
+    if (logKey) void trainingLogResource.getState().ensureLoaded(logKey)
+  }, [logKey])
+
+  const log = entry?.data ?? null
+  const loading = (entry?.loading ?? false) || (entry?.refreshing ?? false)
+  const error = entry?.error ?? null
+
+  const fetchLog = () => {
+    if (logKey) void trainingLogResource.getState().refresh(logKey)
+  }
 
   const filtered = useMemo(() => {
     if (!log) return []

@@ -5,11 +5,11 @@
 
 import {
   parseCampaignRecovery,
-  type CampaignRecoveryPublicV1,
+  type CampaignRecoveryPublicV1
 } from '../components/autoresearch/campaignRecoveryModel'
 import {
   parseCampaignAgentPublicView,
-  type CampaignAgentPublicView,
+  type CampaignAgentPublicView
 } from '../components/autoresearch/campaignAgentModel'
 import {
   parseGuidedSetupContext,
@@ -23,12 +23,14 @@ import {
   type GuidedSetupDoctor,
   type GuidedSetupMutation,
   type GuidedSetupStep,
-  type GuidedSetupValidation,
+  type GuidedSetupValidation
 } from '../components/autoresearch/guidedSetupModel'
+import { toCampaignArtifactPreview, type CampaignArtifactPreview } from '../campaignVisibility'
 
-export const API_BASE = (
-  typeof window !== 'undefined' ? window.bashgym?.runtime?.apiBase : undefined
-) || import.meta.env?.VITE_API_URL || 'http://127.0.0.1:8003/api'
+export const API_BASE =
+  (typeof window !== 'undefined' ? window.bashgym?.runtime?.apiBase : undefined) ||
+  import.meta.env?.VITE_API_URL ||
+  'http://127.0.0.1:8003/api'
 
 function backendStartCommand(apiBase: string): string {
   try {
@@ -62,7 +64,7 @@ function normalizeApiError(error: unknown): string {
     `Backend API is not reachable at ${API_BASE}.`,
     `Start it with: ${BACKEND_START_COMMAND}`,
     'If the backend is already running on another port, set BASHGYM_API_BASE to that /api URL.',
-    `Original error: ${raw}`,
+    `Original error: ${raw}`
   ].join(' ')
 }
 
@@ -318,7 +320,7 @@ export interface RepoInfo {
   git_remote?: string
   git_branch?: string
   is_git_repo: boolean
-  trace_count?: number  // Used in repo list response
+  trace_count?: number // Used in repo list response
 }
 
 // Quality tier based on NVIDIA NeMo recommendations
@@ -512,10 +514,7 @@ export interface ApiResponse<T> {
   details?: unknown
 }
 
-async function request<T>(
-  endpoint: string,
-  options?: RequestInit
-): Promise<ApiResponse<T>> {
+async function request<T>(endpoint: string, options?: RequestInit): Promise<ApiResponse<T>> {
   try {
     // Use Electron IPC proxy if available (avoids CORS in dev)
     if (window.bashgym?.api) {
@@ -549,7 +548,7 @@ async function request<T>(
         data,
         error: response.ok ? undefined : detailMessage || text,
         code: response.ok ? undefined : detail?.code,
-        details: response.ok ? undefined : detail,
+        details: response.ok ? undefined : detail
       }
     } catch {
       if (response.ok) return { ok: true, data: text as T }
@@ -565,7 +564,7 @@ type CampaignBridgeRequest = (
   route: string,
   body?: Record<string, unknown>,
   query?: Record<string, string | number | boolean>,
-  authority?: { idempotencyKey?: string },
+  authority?: { idempotencyKey?: string }
 ) => Promise<ApiResponse<unknown>>
 
 export interface CampaignSummaryV1 {
@@ -652,7 +651,17 @@ export interface ActiveWorkSummaryV1 {
   proposal_id: string | null
   action_id: string | null
   attempt_id: string | null
-  stage: 'data_build' | 'contract_evaluation' | 'smoke_training' | 'full_training' | 'development_evaluation' | 'comparison' | 'recipe_lock' | 'protected_evaluation' | 'promotion' | null
+  stage:
+    | 'data_build'
+    | 'contract_evaluation'
+    | 'smoke_training'
+    | 'full_training'
+    | 'development_evaluation'
+    | 'comparison'
+    | 'recipe_lock'
+    | 'protected_evaluation'
+    | 'promotion'
+    | null
   hypothesis_summary: string | null
   primary_variable_summary: string | null
   controlled_variable_summary: string[]
@@ -707,7 +716,15 @@ export interface HumanWorkItemSummaryV1 {
   schema_version: 'human_work_item_summary.v1'
   work_item_id: string
   kind: 'blinded_sample_evaluation' | 'promotion_decision'
-  status: 'open' | 'claimed' | 'accepted' | 'rejected' | 'revision_requested' | 'abstained' | 'cancelled' | 'expired'
+  status:
+    | 'open'
+    | 'claimed'
+    | 'accepted'
+    | 'rejected'
+    | 'revision_requested'
+    | 'abstained'
+    | 'cancelled'
+    | 'expired'
   blocking_scope: string
   assigned_actor_id: string | null
   required_count: number
@@ -833,7 +850,7 @@ function invalidGuidedSetupProjection<T>(): ApiResponse<T> {
     ok: false,
     status: 502,
     code: 'campaign_guided_setup_projection_invalid',
-    error: 'Guided setup returned an invalid public projection. Durable actions remain disabled.',
+    error: 'Guided setup returned an invalid public projection. Durable actions remain disabled.'
   }
 }
 
@@ -843,7 +860,7 @@ function failedGuidedSetupResponse<T>(response: ApiResponse<unknown>): ApiRespon
     status: response.status,
     error: response.error,
     code: response.code,
-    details: response.details,
+    details: response.details
   }
 }
 
@@ -852,32 +869,37 @@ async function campaignRequest<T>(
   route: string,
   body?: Record<string, unknown>,
   query?: Record<string, string | number | boolean>,
-  authority?: { idempotencyKey?: string },
+  authority?: { idempotencyKey?: string }
 ): Promise<ApiResponse<T>> {
-  const bridge = (window.bashgym as typeof window.bashgym & {
-    campaignRequest?: CampaignBridgeRequest
-  })?.campaignRequest
+  const bridge = (
+    window.bashgym as typeof window.bashgym & {
+      campaignRequest?: CampaignBridgeRequest
+    }
+  )?.campaignRequest
   if (!bridge) {
     return {
       ok: false,
       code: 'campaign_desktop_bridge_required',
-      error: 'Campaign controls require the authenticated BashGym desktop bridge.',
+      error: 'Campaign controls require the authenticated BashGym desktop bridge.'
     }
   }
   try {
-    return await bridge(method, route, body, query, authority) as ApiResponse<T>
+    return (await bridge(method, route, body, query, authority)) as ApiResponse<T>
   } catch (error) {
     return { ok: false, error: normalizeApiError(error) }
   }
 }
 
 export const campaignApi = {
-  campaignAgentView: async (workspaceId: string, campaignId: string): Promise<ApiResponse<CampaignAgentPublicView>> => {
+  campaignAgentView: async (
+    workspaceId: string,
+    campaignId: string
+  ): Promise<ApiResponse<CampaignAgentPublicView>> => {
     const response = await campaignRequest<unknown>(
       'GET',
       `/api/campaigns/${encodeURIComponent(campaignId)}/agent-attachment`,
       undefined,
-      { workspace_id: workspaceId, after_sequence: 0, limit: 20 },
+      { workspace_id: workspaceId, after_sequence: 0, limit: 20 }
     )
     if (!response.ok) {
       return {
@@ -885,157 +907,237 @@ export const campaignApi = {
         status: response.status,
         error: response.error,
         code: response.code,
-        details: response.details,
+        details: response.details
       }
     }
     try {
       const parsed = parseCampaignAgentPublicView(response.data)
-      if (parsed.scope.workspaceId !== workspaceId || parsed.scope.campaignId !== campaignId) throw new Error('scope mismatch')
+      if (parsed.scope.workspaceId !== workspaceId || parsed.scope.campaignId !== campaignId)
+        throw new Error('scope mismatch')
       return { ...response, data: parsed }
     } catch {
       return {
         ok: false,
         status: 502,
         code: 'campaign_agent_projection_invalid',
-        error: 'The campaign-agent service returned an invalid public projection. Session actions remain disabled.',
+        error:
+          'The campaign-agent service returned an invalid public projection. Session actions remain disabled.'
       }
     }
   },
-  guidedSetupContext: async (workspaceId: string, sessionId?: string): Promise<ApiResponse<GuidedSetupContext>> => {
+  guidedSetupContext: async (
+    workspaceId: string,
+    sessionId?: string
+  ): Promise<ApiResponse<GuidedSetupContext>> => {
     const response = await campaignRequest<unknown>(
-      'GET', '/api/campaigns/setup/context', undefined,
-      { workspace_id: workspaceId, ...(sessionId ? { session_id: sessionId } : {}) },
+      'GET',
+      '/api/campaigns/setup/context',
+      undefined,
+      { workspace_id: workspaceId, ...(sessionId ? { session_id: sessionId } : {}) }
     )
     if (!response.ok) return failedGuidedSetupResponse(response)
     const parsed = parseGuidedSetupContext(response.data)
-    return parsed && parsed.workspace_id === workspaceId ? { ...response, data: parsed } : invalidGuidedSetupProjection()
+    return parsed && parsed.workspace_id === workspaceId
+      ? { ...response, data: parsed }
+      : invalidGuidedSetupProjection()
   },
-  advanceGuidedSetupSession: async (request: GuidedSetupSessionRequest): Promise<ApiResponse<GuidedSetupMutation>> => {
+  advanceGuidedSetupSession: async (
+    request: GuidedSetupSessionRequest
+  ): Promise<ApiResponse<GuidedSetupMutation>> => {
     const response = await campaignRequest<unknown>(
-      'POST', '/api/campaigns/setup/session', {
+      'POST',
+      '/api/campaigns/setup/session',
+      {
         workspace_id: request.workspaceId,
         session_id: request.sessionId,
         expected_version: request.expectedVersion,
         step: request.step,
-        selection_id: request.selectionId,
-      }, undefined, { idempotencyKey: request.idempotencyKey },
+        selection_id: request.selectionId
+      },
+      undefined,
+      { idempotencyKey: request.idempotencyKey }
     )
     if (!response.ok) return failedGuidedSetupResponse(response)
     const parsed = parseGuidedSetupMutation(response.data)
-    return parsed && parsed.session.workspace_id === request.workspaceId && parsed.session.session_id === request.sessionId
-      ? { ...response, data: parsed } : invalidGuidedSetupProjection()
+    return parsed &&
+      parsed.session.workspace_id === request.workspaceId &&
+      parsed.session.session_id === request.sessionId
+      ? { ...response, data: parsed }
+      : invalidGuidedSetupProjection()
   },
-  doctorGuidedSetup: async (draft: GuidedSetupDraftRequest): Promise<ApiResponse<GuidedSetupDoctor>> => {
+  doctorGuidedSetup: async (
+    draft: GuidedSetupDraftRequest
+  ): Promise<ApiResponse<GuidedSetupDoctor>> => {
     const response = await campaignRequest<unknown>('POST', '/api/campaigns/setup/doctor', {
-      workspace_id: draft.workspaceId, template_id: draft.templateId,
-      installation_id: draft.installationId, bindings: draft.bindings,
+      workspace_id: draft.workspaceId,
+      template_id: draft.templateId,
+      installation_id: draft.installationId,
+      bindings: draft.bindings
     })
     if (!response.ok) return failedGuidedSetupResponse(response)
     const parsed = parseGuidedSetupDoctor(response.data)
-    return parsed && parsed.workspace_id === draft.workspaceId && parsed.template_id === draft.templateId
-      ? { ...response, data: parsed } : invalidGuidedSetupProjection()
+    return parsed &&
+      parsed.workspace_id === draft.workspaceId &&
+      parsed.template_id === draft.templateId
+      ? { ...response, data: parsed }
+      : invalidGuidedSetupProjection()
   },
-  validateGuidedSetup: async (draft: GuidedSetupDraftRequest, idempotencyKey: string): Promise<ApiResponse<GuidedSetupValidation>> => {
-    const response = await campaignRequest<unknown>('POST', '/api/campaigns/setup/validate', {
-      workspace_id: draft.workspaceId, template_id: draft.templateId,
-      installation_id: draft.installationId, bindings: draft.bindings,
-    }, undefined, { idempotencyKey })
+  validateGuidedSetup: async (
+    draft: GuidedSetupDraftRequest,
+    idempotencyKey: string
+  ): Promise<ApiResponse<GuidedSetupValidation>> => {
+    const response = await campaignRequest<unknown>(
+      'POST',
+      '/api/campaigns/setup/validate',
+      {
+        workspace_id: draft.workspaceId,
+        template_id: draft.templateId,
+        installation_id: draft.installationId,
+        bindings: draft.bindings
+      },
+      undefined,
+      { idempotencyKey }
+    )
     if (!response.ok) return failedGuidedSetupResponse(response)
     const parsed = parseGuidedSetupValidation(response.data)
-    return parsed && parsed.workspace_id === draft.workspaceId && parsed.template_id === draft.templateId
-      ? { ...response, data: parsed } : invalidGuidedSetupProjection()
+    return parsed &&
+      parsed.workspace_id === draft.workspaceId &&
+      parsed.template_id === draft.templateId
+      ? { ...response, data: parsed }
+      : invalidGuidedSetupProjection()
   },
-  createGuidedSetup: async (request: GuidedSetupCreateRequest): Promise<ApiResponse<GuidedSetupCreation>> => {
-    const response = await campaignRequest<unknown>('POST', '/api/campaigns/setup/create', {
-      workspace_id: request.workspaceId,
-      campaign_id: request.campaignId,
-      title: request.title,
-      validation_receipt_id: request.validationReceiptId,
-    }, undefined, { idempotencyKey: request.idempotencyKey })
+  createGuidedSetup: async (
+    request: GuidedSetupCreateRequest
+  ): Promise<ApiResponse<GuidedSetupCreation>> => {
+    const response = await campaignRequest<unknown>(
+      'POST',
+      '/api/campaigns/setup/create',
+      {
+        workspace_id: request.workspaceId,
+        campaign_id: request.campaignId,
+        title: request.title,
+        validation_receipt_id: request.validationReceiptId
+      },
+      undefined,
+      { idempotencyKey: request.idempotencyKey }
+    )
     if (!response.ok) return failedGuidedSetupResponse(response)
     const parsed = parseGuidedSetupCreation(response.data)
-    return parsed && parsed.workspace_id === request.workspaceId && parsed.campaign_id === request.campaignId
-      && parsed.validation_receipt_id === request.validationReceiptId
-      ? { ...response, data: parsed } : invalidGuidedSetupProjection()
+    return parsed &&
+      parsed.workspace_id === request.workspaceId &&
+      parsed.campaign_id === request.campaignId &&
+      parsed.validation_receipt_id === request.validationReceiptId
+      ? { ...response, data: parsed }
+      : invalidGuidedSetupProjection()
   },
-  list: (workspaceId: string) => campaignRequest<{
-    campaigns: import('../stores/campaignStore').CampaignRecord[]
-    controller: import('../stores/campaignStore').CampaignControllerStatus
-  }>('GET', '/api/campaigns', undefined, { workspace_id: workspaceId }),
-  liveTicket: (workspaceId: string) => campaignRequest<CampaignLiveTicketV1>(
-    'POST',
-    '/api/campaigns/live-ticket',
-    { workspace_id: workspaceId },
-  ),
+  list: (workspaceId: string) =>
+    campaignRequest<{
+      campaigns: import('../stores/campaignStore').CampaignRecord[]
+      controller: import('../stores/campaignStore').CampaignControllerStatus
+    }>('GET', '/api/campaigns', undefined, { workspace_id: workspaceId }),
+  liveTicket: (workspaceId: string) =>
+    campaignRequest<CampaignLiveTicketV1>('POST', '/api/campaigns/live-ticket', {
+      workspace_id: workspaceId
+    }),
   snapshot: (workspaceId: string, campaignId: string) =>
     campaignRequest<CampaignControlRoomSnapshotV1>(
       'GET',
       `/api/campaigns/${encodeURIComponent(campaignId)}/control-room-snapshot`,
       undefined,
-      { workspace_id: workspaceId },
+      { workspace_id: workspaceId }
     ),
   get: (workspaceId: string, campaignId: string) =>
     campaignRequest<import('../stores/campaignStore').CampaignRecord>(
-      'GET', `/api/campaigns/${encodeURIComponent(campaignId)}`, undefined,
-      { workspace_id: workspaceId },
+      'GET',
+      `/api/campaigns/${encodeURIComponent(campaignId)}`,
+      undefined,
+      { workspace_id: workspaceId }
     ),
-  attempts: (workspaceId: string, campaignId: string) => campaignRequest<{
-    attempts: import('../stores/campaignStore').CampaignAttempt[]
-  }>('GET', `/api/campaigns/${encodeURIComponent(campaignId)}/attempts`, undefined, {
-    workspace_id: workspaceId,
-  }),
-  studies: (workspaceId: string, campaignId: string) => campaignRequest<{
-    studies: import('../stores/campaignStore').CampaignStudy[]
-  }>('GET', `/api/campaigns/${encodeURIComponent(campaignId)}/studies`, undefined, {
-    workspace_id: workspaceId,
-  }),
-  proposals: (workspaceId: string, campaignId: string) => campaignRequest<{
-    proposals: import('../stores/campaignStore').CampaignProposalRecord[]
-  }>('GET', `/api/campaigns/${encodeURIComponent(campaignId)}/proposals`, undefined, {
-    workspace_id: workspaceId,
-  }),
+  attempts: (workspaceId: string, campaignId: string) =>
+    campaignRequest<{
+      attempts: import('../stores/campaignStore').CampaignAttempt[]
+    }>('GET', `/api/campaigns/${encodeURIComponent(campaignId)}/attempts`, undefined, {
+      workspace_id: workspaceId
+    }),
+  studies: (workspaceId: string, campaignId: string) =>
+    campaignRequest<{
+      studies: import('../stores/campaignStore').CampaignStudy[]
+    }>('GET', `/api/campaigns/${encodeURIComponent(campaignId)}/studies`, undefined, {
+      workspace_id: workspaceId
+    }),
+  proposals: (workspaceId: string, campaignId: string) =>
+    campaignRequest<{
+      proposals: import('../stores/campaignStore').CampaignProposalRecord[]
+    }>('GET', `/api/campaigns/${encodeURIComponent(campaignId)}/proposals`, undefined, {
+      workspace_id: workspaceId
+    }),
   evidence: (workspaceId: string, campaignId: string) =>
     campaignRequest<import('../stores/campaignStore').CampaignEvidence>(
-      'GET', `/api/campaigns/${encodeURIComponent(campaignId)}/evidence`, undefined,
-      { workspace_id: workspaceId },
+      'GET',
+      `/api/campaigns/${encodeURIComponent(campaignId)}/evidence`,
+      undefined,
+      { workspace_id: workspaceId }
     ),
   artifacts: (
     workspaceId: string,
     campaignId: string,
     afterCursor: string | null = null,
-    limit = 50,
-  ) => campaignRequest<{
-    artifacts: import('../stores/campaignStore').CampaignArtifact[]
-    next_cursor: string | null
-    has_more: boolean
-  }>('GET', `/api/campaigns/${encodeURIComponent(campaignId)}/artifacts`, undefined, {
-    workspace_id: workspaceId,
-    ...(afterCursor ? { after_cursor: afterCursor } : {}),
-    limit,
-  }),
-  comparisons: (workspaceId: string, campaignId: string) => campaignRequest<{
-    comparisons: import('../stores/campaignStore').CampaignComparison[]
-  }>('GET', `/api/campaigns/${encodeURIComponent(campaignId)}/comparisons`, undefined, {
-    workspace_id: workspaceId,
-  }),
-  ledger: (workspaceId: string, campaignId: string) =>
-    campaignRequest<import('../stores/campaignStore').CampaignLedgerProjection>(
-      'GET', `/api/campaigns/${encodeURIComponent(campaignId)}/ledger`, undefined,
-      { workspace_id: workspaceId },
-    ),
-  events: (
+    limit = 50
+  ) =>
+    campaignRequest<{
+      artifacts: import('../stores/campaignStore').CampaignArtifact[]
+      next_cursor: string | null
+      has_more: boolean
+    }>('GET', `/api/campaigns/${encodeURIComponent(campaignId)}/artifacts`, undefined, {
+      workspace_id: workspaceId,
+      ...(afterCursor ? { after_cursor: afterCursor } : {}),
+      limit
+    }),
+  artifactPreview: async (
     workspaceId: string,
     campaignId: string,
-    afterCursor = 0,
-    limit = 200,
-  ) => campaignRequest<{
-    items: import('../stores/campaignStore').CampaignEventItem[]
-    next_cursor: number
-  }>('GET', `/api/campaigns/${encodeURIComponent(campaignId)}/events`, undefined, {
-    workspace_id: workspaceId,
-    after_cursor: afterCursor,
-    limit,
-  }),
+    artifactId: string
+  ): Promise<ApiResponse<CampaignArtifactPreview>> => {
+    const response = await campaignRequest<unknown>(
+      'GET',
+      `/api/campaigns/${encodeURIComponent(campaignId)}/artifacts/${encodeURIComponent(artifactId)}/preview`,
+      undefined,
+      { workspace_id: workspaceId }
+    )
+    if (!response.ok) return response as ApiResponse<CampaignArtifactPreview>
+    const preview = toCampaignArtifactPreview(response.data)
+    if (!preview || preview.artifact_id !== artifactId) {
+      return {
+        ok: false,
+        status: 502,
+        code: 'campaign_artifact_preview_projection_invalid',
+        error: 'The campaign artifact preview returned an invalid public projection.'
+      }
+    }
+    return { ...response, data: preview }
+  },
+  comparisons: (workspaceId: string, campaignId: string) =>
+    campaignRequest<{
+      comparisons: import('../stores/campaignStore').CampaignComparison[]
+    }>('GET', `/api/campaigns/${encodeURIComponent(campaignId)}/comparisons`, undefined, {
+      workspace_id: workspaceId
+    }),
+  ledger: (workspaceId: string, campaignId: string) =>
+    campaignRequest<import('../stores/campaignStore').CampaignLedgerProjection>(
+      'GET',
+      `/api/campaigns/${encodeURIComponent(campaignId)}/ledger`,
+      undefined,
+      { workspace_id: workspaceId }
+    ),
+  events: (workspaceId: string, campaignId: string, afterCursor = 0, limit = 200) =>
+    campaignRequest<{
+      items: import('../stores/campaignStore').CampaignEventItem[]
+      next_cursor: number
+    }>('GET', `/api/campaigns/${encodeURIComponent(campaignId)}/events`, undefined, {
+      workspace_id: workspaceId,
+      after_cursor: afterCursor,
+      limit
+    }),
   metrics: (
     workspaceId: string,
     campaignId: string,
@@ -1043,51 +1145,51 @@ export const campaignApi = {
     source: string,
     metricName: string,
     afterStep = -1,
-    limit = 2000,
-  ) => campaignRequest<{
-    metric_name: string
-    source: string
-    values: import('../stores/campaignStore').CampaignMetricValue[]
-    next_after_step: number
-  }>(
-    'GET',
-    `/api/campaigns/${encodeURIComponent(campaignId)}/attempts/${encodeURIComponent(attemptId)}/metrics`,
-    undefined,
-    {
-      workspace_id: workspaceId,
-      source,
-      metric_name: metricName,
-      after_step: afterStep,
-      limit,
-    },
-  ),
+    limit = 2000
+  ) =>
+    campaignRequest<{
+      metric_name: string
+      source: string
+      values: import('../stores/campaignStore').CampaignMetricValue[]
+      next_after_step: number
+    }>(
+      'GET',
+      `/api/campaigns/${encodeURIComponent(campaignId)}/attempts/${encodeURIComponent(attemptId)}/metrics`,
+      undefined,
+      {
+        workspace_id: workspaceId,
+        source,
+        metric_name: metricName,
+        after_step: afterStep,
+        limit
+      }
+    ),
   transition: (
     workspaceId: string,
     campaignId: string,
-    action: 'start' | 'pause' | 'resume' | 'cancel',
+    action: 'start' | 'pause' | 'resume' | 'cancel' | 'conclude',
     expectedVersion: number,
-    reason?: string,
-  ) => campaignRequest<{
-    campaign: import('../stores/campaignStore').CampaignRecord
-    event: Record<string, unknown>
-    replayed: boolean
-  }>(
-    'POST',
-    `/api/campaigns/${encodeURIComponent(campaignId)}/${action}`,
-    {
+    reason?: string
+  ) =>
+    campaignRequest<{
+      campaign: import('../stores/campaignStore').CampaignRecord
+      event: Record<string, unknown>
+      replayed: boolean
+    }>('POST', `/api/campaigns/${encodeURIComponent(campaignId)}/${action}`, {
       workspace_id: workspaceId,
       expected_version: expectedVersion,
-      ...(reason ? { stop_reason: reason } : {}),
-    },
-  ),
+      ...(reason ? { stop_reason: reason } : {})
+    }),
   humanWork: (workspaceId: string, campaignId: string) =>
     campaignRequest<import('../components/autoresearch/humanWorkModel').HumanWorkQueuePublicV1>(
       'GET',
       `/api/campaigns/${encodeURIComponent(campaignId)}/human-work`,
       undefined,
-      { workspace_id: workspaceId, limit: 50 },
+      { workspace_id: workspaceId, limit: 50 }
     ),
-  claimHumanWork: (request: import('../components/autoresearch/humanWorkModel').HumanWorkClaimRequest) =>
+  claimHumanWork: (
+    request: import('../components/autoresearch/humanWorkModel').HumanWorkClaimRequest
+  ) =>
     campaignRequest<{
       queue: import('../components/autoresearch/humanWorkModel').HumanWorkQueuePublicV1
       event: Record<string, unknown>
@@ -1099,63 +1201,68 @@ export const campaignApi = {
         workspace_id: request.workspaceId,
         expected_campaign_revision: request.expectedCampaignRevision,
         expected_version: request.expectedVersion,
-        expected_state: request.expectedState,
+        expected_state: request.expectedState
       },
       undefined,
-      { idempotencyKey: request.idempotencyKey },
+      { idempotencyKey: request.idempotencyKey }
     ),
   submitHumanWork: (
     request: import('../components/autoresearch/humanWorkModel').HumanWorkSubmitRequest,
     decision: import('../components/autoresearch/humanWorkModel').HumanReviewDecision,
-    rationale: string,
-  ) => campaignRequest<{
-    queue: import('../components/autoresearch/humanWorkModel').HumanWorkQueuePublicV1
-    event: Record<string, unknown>
-    replayed: boolean
-  }>(
-    'POST',
-    `/api/campaigns/${encodeURIComponent(request.campaignId)}/human-work/${encodeURIComponent(request.workId)}/submit`,
-    {
-      workspace_id: request.workspaceId,
-      expected_campaign_revision: request.expectedCampaignRevision,
-      expected_version: request.expectedVersion,
-      expected_rubric_version: request.expectedRubricVersion,
-      decision,
-      rationale,
-    },
-    undefined,
-    { idempotencyKey: request.idempotencyKey },
-  ),
+    rationale: string
+  ) =>
+    campaignRequest<{
+      queue: import('../components/autoresearch/humanWorkModel').HumanWorkQueuePublicV1
+      event: Record<string, unknown>
+      replayed: boolean
+    }>(
+      'POST',
+      `/api/campaigns/${encodeURIComponent(request.campaignId)}/human-work/${encodeURIComponent(request.workId)}/submit`,
+      {
+        workspace_id: request.workspaceId,
+        expected_campaign_revision: request.expectedCampaignRevision,
+        expected_version: request.expectedVersion,
+        expected_rubric_version: request.expectedRubricVersion,
+        decision,
+        rationale
+      },
+      undefined,
+      { idempotencyKey: request.idempotencyKey }
+    ),
   decideHumanPromotion: (
     request: import('../components/autoresearch/humanWorkModel').HumanPromotionRequestBinding,
-    decision: 'promote' | 'hold',
-  ) => campaignRequest<{
-    queue: import('../components/autoresearch/humanWorkModel').HumanWorkQueuePublicV1
-    event: Record<string, unknown>
-    replayed: boolean
-  }>(
-    'POST',
-    `/api/campaigns/${encodeURIComponent(request.campaignId)}/human-promotion`,
-    {
-      workspace_id: request.workspaceId,
-      receipt_id: request.receiptId,
-      work_id: request.workId,
-      expected_campaign_revision: request.expectedCampaignRevision,
-      expected_item_version: request.expectedItemVersion,
-      expected_rubric_version: request.expectedRubricVersion,
-      expected_promotion_version: request.expectedPromotionVersion,
-      expected_promotion_state: request.expectedPromotionState,
-      decision,
-    },
-    undefined,
-    { idempotencyKey: request.idempotencyKey },
-  ),
-  recovery: async (workspaceId: string, campaignId: string): Promise<ApiResponse<CampaignRecoveryPublicV1>> => {
+    decision: 'promote' | 'hold'
+  ) =>
+    campaignRequest<{
+      queue: import('../components/autoresearch/humanWorkModel').HumanWorkQueuePublicV1
+      event: Record<string, unknown>
+      replayed: boolean
+    }>(
+      'POST',
+      `/api/campaigns/${encodeURIComponent(request.campaignId)}/human-promotion`,
+      {
+        workspace_id: request.workspaceId,
+        receipt_id: request.receiptId,
+        work_id: request.workId,
+        expected_campaign_revision: request.expectedCampaignRevision,
+        expected_item_version: request.expectedItemVersion,
+        expected_rubric_version: request.expectedRubricVersion,
+        expected_promotion_version: request.expectedPromotionVersion,
+        expected_promotion_state: request.expectedPromotionState,
+        decision
+      },
+      undefined,
+      { idempotencyKey: request.idempotencyKey }
+    ),
+  recovery: async (
+    workspaceId: string,
+    campaignId: string
+  ): Promise<ApiResponse<CampaignRecoveryPublicV1>> => {
     const response = await campaignRequest<unknown>(
       'GET',
       `/api/campaigns/${encodeURIComponent(campaignId)}/recovery`,
       undefined,
-      { workspaceId },
+      { workspaceId }
     )
     if (!response.ok) {
       return {
@@ -1163,52 +1270,56 @@ export const campaignApi = {
         status: response.status,
         error: response.error,
         code: response.code,
-        details: response.details,
+        details: response.details
       }
     }
     const projection = parseCampaignRecovery(response.data)
-    if (!projection || projection.workspace_id !== workspaceId || projection.campaign_id !== campaignId) {
+    if (
+      !projection ||
+      projection.workspace_id !== workspaceId ||
+      projection.campaign_id !== campaignId
+    ) {
       return {
         ok: false,
         status: 502,
         code: 'campaign_recovery_projection_invalid',
-        error: 'The recovery service returned an invalid public projection. Controls remain disabled.',
+        error:
+          'The recovery service returned an invalid public projection. Controls remain disabled.'
       }
     }
     return { ...response, data: projection }
   },
   requestRecovery: (
-    request: import('../components/autoresearch/campaignRecoveryModel').RecoveryRequest,
-  ) => campaignRequest<Record<string, unknown>>(
-    'POST',
-    `/api/campaigns/${encodeURIComponent(request.campaignId)}/recovery/${request.action}`,
-    {
-      action: request.action,
-      idempotency_key: request.idempotencyKey,
-      workspace_id: request.workspaceId,
-      campaign_id: request.campaignId,
-      eligibility_receipt_id: request.eligibilityReceiptId,
-      doctor_evidence_id: request.doctorEvidenceId,
-      expected_campaign_revision: request.expectedCampaignRevision,
-      expected_event_cursor: request.expectedEventCursor,
-      expected_aggregate_version: request.expectedAggregateVersion,
-      expected_controller_lease_id: request.expectedControllerLeaseId,
-      checkpoint_id: request.checkpointId,
-      artifact_id: request.artifactId,
-      human_confirmed: request.humanConfirmed,
-    },
-    undefined,
-    { idempotencyKey: request.idempotencyKey },
-  ),
+    request: import('../components/autoresearch/campaignRecoveryModel').RecoveryRequest
+  ) =>
+    campaignRequest<Record<string, unknown>>(
+      'POST',
+      `/api/campaigns/${encodeURIComponent(request.campaignId)}/recovery/${request.action}`,
+      {
+        action: request.action,
+        idempotency_key: request.idempotencyKey,
+        workspace_id: request.workspaceId,
+        campaign_id: request.campaignId,
+        eligibility_receipt_id: request.eligibilityReceiptId,
+        doctor_evidence_id: request.doctorEvidenceId,
+        expected_campaign_revision: request.expectedCampaignRevision,
+        expected_event_cursor: request.expectedEventCursor,
+        expected_aggregate_version: request.expectedAggregateVersion,
+        expected_controller_lease_id: request.expectedControllerLeaseId,
+        checkpoint_id: request.checkpointId,
+        artifact_id: request.artifactId,
+        human_confirmed: request.humanConfirmed
+      },
+      undefined,
+      { idempotencyKey: request.idempotencyKey }
+    )
 }
 
 // System API
 export const systemApi = {
-  health: () =>
-    request<HealthCheck>('/health'),
+  health: () => request<HealthCheck>('/health'),
 
-  stats: () =>
-    request<SystemStats>('/stats')
+  stats: () => request<SystemStats>('/stats')
 }
 
 // Task API
@@ -1219,11 +1330,12 @@ export const taskApi = {
       body: JSON.stringify(task)
     }),
 
-  getStatus: (taskId: string) =>
-    request<TaskResponse>(`/tasks/${taskId}`),
+  getStatus: (taskId: string) => request<TaskResponse>(`/tasks/${taskId}`),
 
   list: (status?: string, limit?: number) =>
-    request<TaskResponse[]>(`/tasks${status ? `?status=${status}` : ''}${limit ? `${status ? '&' : '?'}limit=${limit}` : ''}`)
+    request<TaskResponse[]>(
+      `/tasks${status ? `?status=${status}` : ''}${limit ? `${status ? '&' : '?'}limit=${limit}` : ''}`
+    )
 }
 
 // Training API
@@ -1347,17 +1459,37 @@ export const trainingApi = {
       body: JSON.stringify(config)
     }),
 
-  managedSubmit: (body: { platform: string; base_model: string; dataset_path: string; n_epochs?: number; learning_rate?: number; suffix?: string; api_key?: string; account_id?: string }) =>
-    request<{ job_id: string; backend: string; status: string; output_model?: string; error?: string }>('/training/managed/submit', {
+  managedSubmit: (body: {
+    platform: string
+    base_model: string
+    dataset_path: string
+    n_epochs?: number
+    learning_rate?: number
+    suffix?: string
+    api_key?: string
+    account_id?: string
+  }) =>
+    request<{
+      job_id: string
+      backend: string
+      status: string
+      output_model?: string
+      error?: string
+    }>('/training/managed/submit', {
       method: 'POST',
-      body: JSON.stringify(body),
+      body: JSON.stringify(body)
     }),
 
   managedPoll: (platform: string, jobId: string) =>
-    request<{ job_id: string; backend: string; status: string; output_model?: string; error?: string }>(`/training/managed/${platform}/${jobId}`),
+    request<{
+      job_id: string
+      backend: string
+      status: string
+      output_model?: string
+      error?: string
+    }>(`/training/managed/${platform}/${jobId}`),
 
-  getStatus: (runId: string) =>
-    request<TrainingResponse>(`/training/${runId}`),
+  getStatus: (runId: string) => request<TrainingResponse>(`/training/${runId}`),
 
   // Health analysis (verdict + findings) for a run, computed from its metrics.jsonl.
   getRunAnalysis: (runId: string) =>
@@ -1373,10 +1505,16 @@ export const trainingApi = {
     request<{ success: boolean; message: string }>(`/training/${runId}/stop`, { method: 'POST' }),
 
   list: (status?: string, limit?: number) =>
-    request<TrainingResponse[]>(`/training${status ? `?status=${status}` : ''}${limit ? `${status ? '&' : '?'}limit=${limit}` : ''}`),
+    request<TrainingResponse[]>(
+      `/training${status ? `?status=${status}` : ''}${limit ? `${status ? '&' : '?'}limit=${limit}` : ''}`
+    ),
 
   // Export training examples to JSONL on the server
-  exportExamples: (options?: { trace_ids?: string[]; include_gold_only?: boolean; train_split?: number }) =>
+  exportExamples: (options?: {
+    trace_ids?: string[]
+    include_gold_only?: boolean
+    train_split?: number
+  }) =>
     request<{
       success: boolean
       train_path?: string
@@ -1386,12 +1524,11 @@ export const trainingApi = {
       message?: string
     }>('/training/export', {
       method: 'POST',
-      body: JSON.stringify(options || {}),
+      body: JSON.stringify(options || {})
     }),
 
   // Persisted run history (metrics.jsonl written next to checkpoints)
-  listRuns: () =>
-    request<{ runs: TrainingRunSummary[] }>('/training/runs'),
+  listRuns: () => request<{ runs: TrainingRunSummary[] }>('/training/runs'),
 
   listRunCards: (limit = 20) =>
     request<{ schema_version: string; run_cards: RunCardSummary[] }>(
@@ -1418,7 +1555,7 @@ export const trainingApi = {
   downloadExport: async (split: 'train' | 'val' = 'train') => {
     try {
       const response = await fetch(`${API_BASE}/training/export/download?split=${split}`, {
-        credentials: 'include',
+        credentials: 'include'
       })
       if (!response.ok) {
         const text = await response.text()
@@ -1456,22 +1593,23 @@ export const trainingApi = {
 
   // List saved checkpoints on disk
   listCheckpoints: () =>
-    request<Array<{
-      id: string
-      run_id: string
-      kind: 'final' | 'merged' | 'intermediate' | 'gguf'
-      path: string
-      size_mb: number
-      created_at: string
-      base_model: string | null
-    }>>('/training/checkpoints'),
+    request<
+      Array<{
+        id: string
+        run_id: string
+        kind: 'final' | 'merged' | 'intermediate' | 'gguf'
+        path: string
+        size_mb: number
+        created_at: string
+        base_model: string | null
+      }>
+    >('/training/checkpoints'),
 
   // Delete a checkpoint directory
   deleteCheckpoint: (id: string) =>
-    request<{ deleted: boolean; id: string }>(
-      `/training/checkpoints/${encodeURIComponent(id)}`,
-      { method: 'DELETE' }
-    ),
+    request<{ deleted: boolean; id: string }>(`/training/checkpoints/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    })
 }
 
 // =============================================================================
@@ -1554,26 +1692,25 @@ export const designerApi = {
       '/factory/designer/preview',
       {
         method: 'POST',
-        body: JSON.stringify({ num_records: 5, provider: 'nvidia', ...req }),
+        body: JSON.stringify({ num_records: 5, provider: 'nvidia', ...req })
       }
     ),
 
   create: (req: DesignerCreateRequest) =>
     request<DesignerJobStatus>('/factory/designer/create', {
       method: 'POST',
-      body: JSON.stringify({ num_records: 100, provider: 'nvidia', ...req }),
+      body: JSON.stringify({ num_records: 100, provider: 'nvidia', ...req })
     }),
 
   getJob: (jobId: string) =>
     request<DesignerJobStatus>(`/factory/designer/jobs/${encodeURIComponent(jobId)}`),
 
-  listJobs: (limit = 10) =>
-    request<DesignerJobStatus[]>(`/factory/designer/jobs?limit=${limit}`),
+  listJobs: (limit = 10) => request<DesignerJobStatus[]>(`/factory/designer/jobs?limit=${limit}`),
 
   listModels: (codeOnly = false) =>
     request<{ models: DesignerModel[]; provider_models: string[]; available: boolean }>(
       `/factory/designer/models?code_only=${codeOnly}`
-    ),
+    )
 }
 
 // =============================================================================
@@ -1581,13 +1718,7 @@ export const designerApi = {
 // =============================================================================
 
 export type SourceUse =
-  | 'sft'
-  | 'dpo'
-  | 'reward_model'
-  | 'process_reward'
-  | 'terminal_rl'
-  | 'evaluation'
-  | 'raw_reference'
+  'sft' | 'dpo' | 'reward_model' | 'process_reward' | 'terminal_rl' | 'evaluation' | 'raw_reference'
 
 export type SourceArtifactType =
   | 'sft_examples'
@@ -1755,7 +1886,7 @@ export const workspaceApi = {
   putCanvasSnapshot: (snapshot: WorkspaceCanvasSnapshot) =>
     request<{ ok: boolean; updated_at: string }>('/workspace/canvas/snapshot', {
       method: 'PUT',
-      body: JSON.stringify(snapshot),
+      body: JSON.stringify(snapshot)
     }),
 
   getContext: (format: 'json' | 'markdown' = 'json', workspaceId?: string) =>
@@ -1768,9 +1899,9 @@ export const workspaceApi = {
       '/workspace/events',
       {
         method: 'POST',
-        body: JSON.stringify(event),
+        body: JSON.stringify(event)
       }
-    ),
+    )
 }
 
 export interface RuntimeArtifact {
@@ -1806,7 +1937,7 @@ export interface RuntimeJob {
 }
 
 export const runtimeApi = {
-  listJobs: () => request<{ jobs: RuntimeJob[]; polled_at: string }>('/runtime/jobs'),
+  listJobs: () => request<{ jobs: RuntimeJob[]; polled_at: string }>('/runtime/jobs')
 }
 
 export interface SourcePrepareResponse {
@@ -1833,8 +1964,7 @@ export interface SourcePrepareResponse {
 }
 
 export const sourcesApi = {
-  list: () =>
-    request<SourceCatalogResponse>('/sources'),
+  list: () => request<SourceCatalogResponse>('/sources'),
 
   inspect: (sourceId: string) =>
     request<SourceInspectResponse>(`/sources/${encodeURIComponent(sourceId)}`),
@@ -1842,20 +1972,20 @@ export const sourcesApi = {
   recommend: (req: SourceRecommendRequest) =>
     request<SourceRecommendResponse>('/sources/recommend', {
       method: 'POST',
-      body: JSON.stringify(req),
+      body: JSON.stringify(req)
     }),
 
   prepare: (sourceId: string, req: SourcePrepareRequest) =>
     request<SourcePrepareResponse>(`/sources/${encodeURIComponent(sourceId)}/prepare`, {
       method: 'POST',
-      body: JSON.stringify(req),
+      body: JSON.stringify(req)
     }),
 
   fetch: (sourceId: string, req: SourceFetchRequest) =>
     request<SourceFetchReport>(`/sources/${encodeURIComponent(sourceId)}/fetch`, {
       method: 'POST',
-      body: JSON.stringify(req),
-    }),
+      body: JSON.stringify(req)
+    })
 }
 
 // =============================================================================
@@ -1970,8 +2100,7 @@ export interface EnvironmentMaterializeResponse {
 }
 
 export const environmentApi = {
-  pipelines: () =>
-    request<EnvironmentPipelinesResponse>('/environments/pipelines'),
+  pipelines: () => request<EnvironmentPipelinesResponse>('/environments/pipelines'),
 
   normalize: (req: {
     records: Record<string, unknown>[]
@@ -1981,13 +2110,13 @@ export const environmentApi = {
   }) =>
     request<EnvironmentNormalizeResponse>('/environments/normalize', {
       method: 'POST',
-      body: JSON.stringify({ source: 'external', preserve_raw: true, ...req }),
+      body: JSON.stringify({ source: 'external', preserve_raw: true, ...req })
     }),
 
   importJsonl: (req: { path: string; source?: string; preserve_raw?: boolean }) =>
     request<EnvironmentNormalizeResponse>('/environments/import-jsonl', {
       method: 'POST',
-      body: JSON.stringify({ source: 'tmax', preserve_raw: true, ...req }),
+      body: JSON.stringify({ source: 'tmax', preserve_raw: true, ...req })
     }),
 
   decontaminate: (req: {
@@ -1999,7 +2128,7 @@ export const environmentApi = {
   }) =>
     request<EnvironmentDecontaminateResponse>('/environments/decontaminate', {
       method: 'POST',
-      body: JSON.stringify(req),
+      body: JSON.stringify(req)
     }),
 
   materialize: (req: {
@@ -2009,8 +2138,8 @@ export const environmentApi = {
   }) =>
     request<EnvironmentMaterializeResponse>('/environments/materialize', {
       method: 'POST',
-      body: JSON.stringify({ overwrite: false, ...req }),
-    }),
+      body: JSON.stringify({ overwrite: false, ...req })
+    })
 }
 
 // Legacy Models API (see modelsApi below for full implementation)
@@ -2047,11 +2176,9 @@ export const evaluatorApi = {
       body: JSON.stringify(req)
     }),
 
-  getStatus: (jobId: string) =>
-    request<EvaluationResponse>(`/evaluation/${jobId}`),
+  getStatus: (jobId: string) => request<EvaluationResponse>(`/evaluation/${jobId}`),
 
-  list: () =>
-    request<EvaluationResponse[]>('/evaluation')
+  list: () => request<EvaluationResponse[]>('/evaluation')
 }
 
 // Advanced eval: held-out trace gate + benchmark wiring (bashgym/eval modules)
@@ -2080,7 +2207,8 @@ export interface HeldoutEvalRequest {
 
 export interface HeldoutEnvironmentEvidence {
   passk?: EnvironmentPassKReport | Record<string, unknown> | null
-  holdout_gate?: EnvironmentHoldoutGateResult | EnvironmentHoldoutGateResponse | Record<string, unknown> | null
+  holdout_gate?:
+    EnvironmentHoldoutGateResult | EnvironmentHoldoutGateResponse | Record<string, unknown> | null
   holdout_comparison?:
     | EnvironmentHoldoutComparisonResult
     | EnvironmentHoldoutComparisonResponse
@@ -2091,7 +2219,8 @@ export interface HeldoutEnvironmentEvidence {
     | EnvironmentSpuriousRewardControlResponse
     | Record<string, unknown>
     | null
-  external_benchmarks?: ExternalBenchmarkIngestResponse | ExternalBenchmarkReport | Record<string, unknown> | null
+  external_benchmarks?:
+    ExternalBenchmarkIngestResponse | ExternalBenchmarkReport | Record<string, unknown> | null
   world_model_quality?: Record<string, unknown> | null
   learned_reward_evidence?: Record<string, unknown> | null
   external_benchmark_min_scores?: Record<string, number> | null
@@ -2361,12 +2490,15 @@ export interface EnvironmentHoldoutComparisonResult {
   contamination: string[]
   base_report: EnvironmentPassKReport
   candidate_report: EnvironmentPassKReport
-  per_environment: Record<string, {
-    cluster: string
-    base: number
-    candidate: number
-    delta: number
-  }>
+  per_environment: Record<
+    string,
+    {
+      cluster: string
+      base: number
+      candidate: number
+      delta: number
+    }
+  >
   bootstrap: {
     mean: number
     ci_low: number
@@ -2428,14 +2560,17 @@ export interface EnvironmentSpuriousRewardControlResult {
     n_trials: number
     random_pass_probability?: number | null
     report?: EnvironmentPassKReport | null
-    pass_at_k_summary: Record<string, {
-      mean: number
-      p05: number
-      p50: number
-      p95: number
-      min: number
-      max: number
-    }>
+    pass_at_k_summary: Record<
+      string,
+      {
+        mean: number
+        p05: number
+        p50: number
+        p95: number
+        min: number
+        max: number
+      }
+    >
   }
   gate: {
     ship: boolean
@@ -2715,26 +2850,35 @@ export const evalAdvancedApi = {
       body: JSON.stringify(req)
     }),
 
-  heldoutStatus: (jobId: string) =>
-    request<HeldoutJobResponse>(`/eval/heldout/${jobId}`),
+  heldoutStatus: (jobId: string) => request<HeldoutJobResponse>(`/eval/heldout/${jobId}`),
 
-  heldoutList: (limit = 20) =>
-    request<HeldoutJobResponse[]>(`/eval/heldout?limit=${limit}`),
+  heldoutList: (limit = 20) => request<HeldoutJobResponse[]>(`/eval/heldout?limit=${limit}`),
 
   verdict: (modelId: string) =>
     request<VerdictResponse>(`/eval/verdict/${encodeURIComponent(modelId)}`),
 
-  benchmarkCommands: (params: { base_url: string; model: string; tasks?: string; include?: string }) => {
+  benchmarkCommands: (params: {
+    base_url: string
+    model: string
+    tasks?: string
+    include?: string
+  }) => {
     const qs = new URLSearchParams({ base_url: params.base_url, model: params.model })
     if (params.tasks) qs.set('tasks', params.tasks)
     if (params.include) qs.set('include', params.include)
-    return request<{ commands: Record<string, string[]> }>(`/eval/benchmark-commands?${qs.toString()}`)
+    return request<{ commands: Record<string, string[]> }>(
+      `/eval/benchmark-commands?${qs.toString()}`
+    )
   },
 
   ingestBenchmarks: (req: BenchmarkIngestRequest) =>
     request<{
       model_id: string
-      forgetting: { drops: Record<string, number>; regressed: Record<string, number>; worst: [string, number] | null }
+      forgetting: {
+        drops: Record<string, number>
+        regressed: Record<string, number>
+        worst: [string, number] | null
+      }
       recorded: string[]
       max_forgetting_drop: number
       forgetting_ok: boolean
@@ -2769,10 +2913,13 @@ export const evalAdvancedApi = {
     }),
 
   environmentSpuriousRewardControl: (req: EnvironmentSpuriousRewardControlRequest) =>
-    request<EnvironmentSpuriousRewardControlResponse>('/eval/environments/spurious-reward-control', {
-      method: 'POST',
-      body: JSON.stringify(req)
-    }),
+    request<EnvironmentSpuriousRewardControlResponse>(
+      '/eval/environments/spurious-reward-control',
+      {
+        method: 'POST',
+        body: JSON.stringify(req)
+      }
+    ),
 
   environmentLocalRolloutPassk: (req: EnvironmentRolloutPassKRequest) =>
     request<EnvironmentRolloutPassKResponse>('/eval/environments/local-rollout-passk', {
@@ -2793,10 +2940,13 @@ export const evalAdvancedApi = {
     }),
 
   enrichDppoReplay: (req: DPPOReplayEnrichRequest) =>
-    request<{ dppo_replay: EnvironmentDppoReplaySummary }>('/eval/environments/dppo-replay/enrich', {
-      method: 'POST',
-      body: JSON.stringify(req)
-    }),
+    request<{ dppo_replay: EnvironmentDppoReplaySummary }>(
+      '/eval/environments/dppo-replay/enrich',
+      {
+        method: 'POST',
+        body: JSON.stringify(req)
+      }
+    ),
 
   planDppoSmoke: (req: DPPOSmokeLaunchPlanRequest) =>
     request<{ plan: DPPOSmokeLaunchPlan }>('/eval/environments/dppo-replay/smoke-plan', {
@@ -2807,7 +2957,13 @@ export const evalAdvancedApi = {
 
 // Traces API
 export const tracesApi = {
-  list: (options?: { status?: 'gold' | 'silver' | 'bronze' | 'failed' | 'pending', repo?: string, source_tool?: string, limit?: number, offset?: number }) => {
+  list: (options?: {
+    status?: 'gold' | 'silver' | 'bronze' | 'failed' | 'pending'
+    repo?: string
+    source_tool?: string
+    limit?: number
+    offset?: number
+  }) => {
     const params = new URLSearchParams()
     if (options?.status) params.set('status', options.status)
     if (options?.repo) params.set('repo', options.repo)
@@ -2815,11 +2971,16 @@ export const tracesApi = {
     if (options?.limit) params.set('limit', String(options.limit))
     if (options?.offset) params.set('offset', String(options.offset))
     const queryString = params.toString()
-    return request<{ traces: TraceInfo[]; total: number; offset: number; limit: number; counts: { gold: number; silver: number; bronze: number; failed: number; pending: number } }>(`/traces${queryString ? `?${queryString}` : ''}`)
+    return request<{
+      traces: TraceInfo[]
+      total: number
+      offset: number
+      limit: number
+      counts: { gold: number; silver: number; bronze: number; failed: number; pending: number }
+    }>(`/traces${queryString ? `?${queryString}` : ''}`)
   },
 
-  listRepos: () =>
-    request<RepoInfo[]>('/traces/repos'),
+  listRepos: () => request<RepoInfo[]>('/traces/repos'),
 
   stats: (options?: { range?: string }) => {
     const params = new URLSearchParams()
@@ -2834,94 +2995,108 @@ export const tracesApi = {
   getGold: (limit?: number) =>
     request<TraceInfo[]>(`/traces/gold${limit ? `?limit=${limit}` : ''}`),
 
-  get: (traceId: string) =>
-    request<TraceDetailInfo>(`/traces/${traceId}`),
+  get: (traceId: string) => request<TraceDetailInfo>(`/traces/${traceId}`),
 
   promote: (traceId: string) =>
-    request<{ success: boolean; message: string }>(`/traces/${traceId}/promote`, { method: 'POST' }),
+    request<{ success: boolean; message: string }>(`/traces/${traceId}/promote`, {
+      method: 'POST'
+    }),
 
   demote: (traceId: string) =>
     request<{ success: boolean; message: string }>(`/traces/${traceId}/demote`, { method: 'POST' }),
 
   // Sync traces from ~/.bashgym/ to project data/ directory
   sync: () =>
-    request<{ synced: { pending: number; gold: number; silver: number; bronze: number; failed: number }; project_dir: string }>('/traces/sync', { method: 'POST' }),
+    request<{
+      synced: { pending: number; gold: number; silver: number; bronze: number; failed: number }
+      project_dir: string
+    }>('/traces/sync', { method: 'POST' }),
 
   // Auto-classify pending traces into quality tiers based on NVIDIA NeMo thresholds
   autoClassify: (options?: {
-    gold_success_rate?: number;
-    gold_quality_score?: number;
-    silver_success_rate?: number;
-    silver_quality_score?: number;
-    bronze_success_rate?: number;
-    bronze_quality_score?: number;
-    dry_run?: boolean;
-    auto_promote?: boolean;
+    gold_success_rate?: number
+    gold_quality_score?: number
+    silver_success_rate?: number
+    silver_quality_score?: number
+    bronze_success_rate?: number
+    bronze_quality_score?: number
+    dry_run?: boolean
+    auto_promote?: boolean
   }) => {
     const params = new URLSearchParams()
-    if (options?.gold_success_rate !== undefined) params.set('gold_success_rate', String(options.gold_success_rate))
-    if (options?.gold_quality_score !== undefined) params.set('gold_quality_score', String(options.gold_quality_score))
-    if (options?.silver_success_rate !== undefined) params.set('silver_success_rate', String(options.silver_success_rate))
-    if (options?.silver_quality_score !== undefined) params.set('silver_quality_score', String(options.silver_quality_score))
-    if (options?.bronze_success_rate !== undefined) params.set('bronze_success_rate', String(options.bronze_success_rate))
-    if (options?.bronze_quality_score !== undefined) params.set('bronze_quality_score', String(options.bronze_quality_score))
+    if (options?.gold_success_rate !== undefined)
+      params.set('gold_success_rate', String(options.gold_success_rate))
+    if (options?.gold_quality_score !== undefined)
+      params.set('gold_quality_score', String(options.gold_quality_score))
+    if (options?.silver_success_rate !== undefined)
+      params.set('silver_success_rate', String(options.silver_success_rate))
+    if (options?.silver_quality_score !== undefined)
+      params.set('silver_quality_score', String(options.silver_quality_score))
+    if (options?.bronze_success_rate !== undefined)
+      params.set('bronze_success_rate', String(options.bronze_success_rate))
+    if (options?.bronze_quality_score !== undefined)
+      params.set('bronze_quality_score', String(options.bronze_quality_score))
     if (options?.dry_run !== undefined) params.set('dry_run', String(options.dry_run))
-    if (options?.auto_promote !== undefined) params.set('auto_promote', String(options.auto_promote))
+    if (options?.auto_promote !== undefined)
+      params.set('auto_promote', String(options.auto_promote))
     const queryString = params.toString()
     return request<{
       classifications: {
-        gold: string[];
-        silver: string[];
-        bronze: string[];
-        rejected: string[];
-        failed: string[];
-        pending: string[];
-      };
+        gold: string[]
+        silver: string[]
+        bronze: string[]
+        rejected: string[]
+        failed: string[]
+        pending: string[]
+      }
       detailed: {
-        gold: Array<{ id: string; success_rate: number; quality_score: number; steps: number }>;
-        silver: Array<{ id: string; success_rate: number; quality_score: number; steps: number }>;
-        bronze: Array<{ id: string; success_rate: number; quality_score: number; steps: number }>;
-        rejected: Array<{ id: string; success_rate: number; quality_score: number; steps: number }>;
-      };
+        gold: Array<{ id: string; success_rate: number; quality_score: number; steps: number }>
+        silver: Array<{ id: string; success_rate: number; quality_score: number; steps: number }>
+        bronze: Array<{ id: string; success_rate: number; quality_score: number; steps: number }>
+        rejected: Array<{ id: string; success_rate: number; quality_score: number; steps: number }>
+      }
       thresholds: {
-        gold: { success_rate: number; quality_score: number };
-        silver: { success_rate: number; quality_score: number };
-        bronze: { success_rate: number; quality_score: number };
-      };
-      dry_run: boolean;
-      auto_promote: boolean;
+        gold: { success_rate: number; quality_score: number }
+        silver: { success_rate: number; quality_score: number }
+        bronze: { success_rate: number; quality_score: number }
+      }
+      dry_run: boolean
+      auto_promote: boolean
       summary: {
-        gold: number;
-        silver: number;
-        bronze: number;
-        rejected: number;
-        failed: number;
-        pending: number;
-        total_processed: number;
-      };
+        gold: number
+        silver: number
+        bronze: number
+        rejected: number
+        failed: number
+        pending: number
+        total_processed: number
+      }
       dpo_pairs: Array<{
-        chosen: string;
-        chosen_success_rate: number;
-        rejected: string;
-        rejected_success_rate: number;
-        quality_gap: number;
-      }>;
-      dpo_pairs_count: number;
+        chosen: string
+        chosen_success_rate: number
+        rejected: string
+        rejected_success_rate: number
+        quality_gap: number
+      }>
+      dpo_pairs_count: number
       training_recommendations: {
-        sft_eligible: number;
-        dpo_chosen_pool: number;
-        dpo_rejected_pool: number;
-        note: string;
-      };
+        sft_eligible: number
+        dpo_chosen_pool: number
+        dpo_rejected_pool: number
+        note: string
+      }
     }>(`/traces/auto-classify${queryString ? `?${queryString}` : ''}`, { method: 'POST' })
   },
 
   // Trigger import of new Claude Code sessions from ~/.claude/projects/
   triggerImport: () =>
-    request<{ imported: number; total: number; skipped: number; errors: number; new_trace_ids: string[] }>(
-      '/traces/import',
-      { method: 'POST' }
-    ),
+    request<{
+      imported: number
+      total: number
+      skipped: number
+      errors: number
+      new_trace_ids: string[]
+    }>('/traces/import', { method: 'POST' }),
 
   // Import traces from a specific source tool
   importBySource: (source: string, options?: { days?: number; limit?: number; force?: boolean }) =>
@@ -2934,18 +3109,24 @@ export const tracesApi = {
       new_trace_ids: string[]
     }>(`/traces/import/${source}`, {
       method: 'POST',
-      body: JSON.stringify(options || {}),
+      body: JSON.stringify(options || {})
     }),
 
   // Upload and import trace files from external AI tools (ChatGPT, MCP)
-  uploadAndImport: async (file: File, source: 'chatgpt' | 'mcp', force = false): Promise<ApiResponse<{
-    source: string
-    imported_count: number
-    skipped_count: number
-    failed_count: number
-    total_steps: number
-    errors: string[]
-  }>> => {
+  uploadAndImport: async (
+    file: File,
+    source: 'chatgpt' | 'mcp',
+    force = false
+  ): Promise<
+    ApiResponse<{
+      source: string
+      imported_count: number
+      skipped_count: number
+      failed_count: number
+      total_steps: number
+      errors: string[]
+    }>
+  > => {
     const formData = new FormData()
     formData.append('file', file)
     formData.append('source', source)
@@ -2955,7 +3136,7 @@ export const tracesApi = {
       const response = await fetch(`${API_BASE}/traces/upload/import`, {
         method: 'POST',
         body: formData,
-        credentials: 'include',
+        credentials: 'include'
       })
       const text = await response.text()
       try {
@@ -2982,7 +3163,7 @@ export const tracesApi = {
       total_imported: number
     }>('/traces/import/all', {
       method: 'POST',
-      body: JSON.stringify(options || {}),
+      body: JSON.stringify(options || {})
     }),
 
   // Get count of traces created since a given ISO timestamp
@@ -2994,24 +3175,23 @@ export const tracesApi = {
   // Generate training examples from a trace session
   generateExamples: (traceId: string, options?: { min_success_rate?: number }) =>
     request<{
-      trace_id: string;
+      trace_id: string
       examples: Array<{
-        example_id: string;
-        user_prompt: string;
-        assistant_response: string;
-        step_count: number;
-        success_rate: number;
-        confidence: number;
-      }>;
-      total_steps: number;
-      examples_generated: number;
+        example_id: string
+        user_prompt: string
+        assistant_response: string
+        step_count: number
+        success_rate: number
+        confidence: number
+      }>
+      total_steps: number
+      examples_generated: number
     }>(`/traces/${traceId}/generate-examples`, {
       method: 'POST',
       body: JSON.stringify(options || {})
     }),
 
-  getAnalytics: () =>
-    request<TraceAnalytics>('/traces/analytics')
+  getAnalytics: () => request<TraceAnalytics>('/traces/analytics')
 }
 
 // Router API
@@ -3024,8 +3204,7 @@ export type RoutingStrategy =
   | 'random_sample'
 
 export const routerApi = {
-  getStats: () =>
-    request<RouterStats>('/router/stats'),
+  getStats: () => request<RouterStats>('/router/stats'),
 
   setStrategy: (strategy: RoutingStrategy) =>
     request<{ success: boolean; strategy: string }>(`/router/strategy?strategy=${strategy}`, {
@@ -3037,14 +3216,13 @@ export const routerApi = {
       method: 'POST'
     }),
 
-  getConfig: () =>
-    request<RouterConfigResponse>('/router/config'),
+  getConfig: () => request<RouterConfigResponse>('/router/config'),
 
   setStudentProvider: (providerType: string, modelName: string) =>
     request<{ success: boolean; provider: string; model: string; is_local: boolean }>(
       `/router/student-provider?provider_type=${encodeURIComponent(providerType)}&model_name=${encodeURIComponent(modelName)}`,
       { method: 'POST' }
-    ),
+    )
 }
 
 // Verification API
@@ -3056,8 +3234,7 @@ export interface VerificationResult {
 }
 
 export const verifyApi = {
-  run: (taskId: string) =>
-    request<VerificationResult>(`/verify/${taskId}`, { method: 'POST' })
+  run: (taskId: string) => request<VerificationResult>(`/verify/${taskId}`, { method: 'POST' })
 }
 
 // Synthesis API
@@ -3069,8 +3246,7 @@ export interface SynthesisResult {
 }
 
 export const synthesisApi = {
-  run: () =>
-    request<SynthesisResult>('/synthesize', { method: 'POST' })
+  run: () => request<SynthesisResult>('/synthesize', { method: 'POST' })
 }
 
 // Hooks API - Multi-tool support
@@ -3114,8 +3290,7 @@ export interface HooksInstallRequest {
 }
 
 export const hooksApi = {
-  getStatus: () =>
-    request<HooksStatus>('/hooks/status'),
+  getStatus: () => request<HooksStatus>('/hooks/status'),
 
   install: (params?: HooksInstallRequest) =>
     request<HooksInstallResult>('/hooks/install', {
@@ -3188,8 +3363,7 @@ export const systemInfoApi = {
   getInfo: (refresh?: boolean) =>
     request<SystemInfo>(`/system/info${refresh ? '?refresh=true' : ''}`),
 
-  getGpus: () =>
-    request<GpuInfo[]>('/system/gpus'),
+  getGpus: () => request<GpuInfo[]>('/system/gpus'),
 
   // Pass a registered private compute target to use that machine's discovered
   // budget instead of the local GPU.
@@ -3207,17 +3381,35 @@ export const systemInfoApi = {
 
 export const sshApi = {
   preflight: () =>
-    request<{ ok: boolean; python_version?: string; disk_free_gb?: number; error?: string; host?: string; username?: string }>('/ssh/preflight'),
+    request<{
+      ok: boolean
+      python_version?: string
+      disk_free_gb?: number
+      error?: string
+      host?: string
+      username?: string
+    }>('/ssh/preflight')
 }
 
 export const deviceApi = {
   list: () => request<Device[]>('/devices'),
-  add: (device: NewDevice) => request<Device>('/devices', { method: 'POST', body: JSON.stringify(device), headers: { 'Content-Type': 'application/json' } }),
-  update: (id: string, device: Partial<NewDevice>) => request<Device>(`/devices/${id}`, { method: 'PUT', body: JSON.stringify(device), headers: { 'Content-Type': 'application/json' } }),
+  add: (device: NewDevice) =>
+    request<Device>('/devices', {
+      method: 'POST',
+      body: JSON.stringify(device),
+      headers: { 'Content-Type': 'application/json' }
+    }),
+  update: (id: string, device: Partial<NewDevice>) =>
+    request<Device>(`/devices/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(device),
+      headers: { 'Content-Type': 'application/json' }
+    }),
   remove: (id: string) => request<{ ok: boolean }>(`/devices/${id}`, { method: 'DELETE' }),
-  preflight: (id: string) => request<PreflightResult>(`/devices/${id}/preflight`, { method: 'POST' }),
+  preflight: (id: string) =>
+    request<PreflightResult>(`/devices/${id}/preflight`, { method: 'POST' }),
   setDefault: (id: string) => request<Device>(`/devices/${id}/set-default`, { method: 'POST' }),
-  discover: () => request<DiscoverResult>('/devices/discover', { method: 'POST' }),
+  discover: () => request<DiscoverResult>('/devices/discover', { method: 'POST' })
 }
 
 // Model Providers API
@@ -3278,26 +3470,42 @@ export interface OllamaModelsResponse {
 }
 
 export const providersApi = {
-  getProviders: () =>
-    request<ProvidersResponse>('/providers'),
+  getProviders: () => request<ProvidersResponse>('/providers'),
 
-  connect: (body: { platform?: string; base_url?: string; api_key?: string; default_model?: string; name?: string }) =>
-    request<{ ok: boolean; provider_type?: string; available?: boolean; models?: string[]; error?: string }>('/providers/connect', {
+  connect: (body: {
+    platform?: string
+    base_url?: string
+    api_key?: string
+    default_model?: string
+    name?: string
+  }) =>
+    request<{
+      ok: boolean
+      provider_type?: string
+      available?: boolean
+      models?: string[]
+      error?: string
+    }>('/providers/connect', {
       method: 'POST',
-      body: JSON.stringify(body),
+      body: JSON.stringify(body)
     }),
 
-  getModels: (params?: { include_local?: boolean; include_cloud?: boolean; code_only?: boolean }) => {
+  getModels: (params?: {
+    include_local?: boolean
+    include_cloud?: boolean
+    code_only?: boolean
+  }) => {
     const searchParams = new URLSearchParams()
-    if (params?.include_local !== undefined) searchParams.set('include_local', String(params.include_local))
-    if (params?.include_cloud !== undefined) searchParams.set('include_cloud', String(params.include_cloud))
+    if (params?.include_local !== undefined)
+      searchParams.set('include_local', String(params.include_local))
+    if (params?.include_cloud !== undefined)
+      searchParams.set('include_cloud', String(params.include_cloud))
     if (params?.code_only !== undefined) searchParams.set('code_only', String(params.code_only))
     const query = searchParams.toString()
     return request<ModelsResponse>(`/providers/models${query ? `?${query}` : ''}`)
   },
 
-  getOllamaModels: () =>
-    request<OllamaModelsResponse>('/providers/ollama/models'),
+  getOllamaModels: () => request<OllamaModelsResponse>('/providers/ollama/models'),
 
   pullOllamaModel: (modelName: string) =>
     request<{ status: string; model: string; message: string }>('/providers/ollama/pull', {
@@ -3306,18 +3514,20 @@ export const providersApi = {
     }),
 
   deleteOllamaModel: (modelName: string) =>
-    request<{ status: string; model: string }>(`/providers/ollama/models/${encodeURIComponent(modelName)}`, {
-      method: 'DELETE'
-    }),
+    request<{ status: string; model: string }>(
+      `/providers/ollama/models/${encodeURIComponent(modelName)}`,
+      {
+        method: 'DELETE'
+      }
+    ),
 
-  getHealth: () =>
-    request<ProvidersHealthResponse>('/providers/health'),
+  getHealth: () => request<ProvidersHealthResponse>('/providers/health'),
 
   warmupOllamaModel: (modelName: string) =>
     request<{ success: boolean; model: string }>(
       `/providers/ollama/warmup?model_name=${encodeURIComponent(modelName)}`,
       { method: 'POST' }
-    ),
+    )
 }
 
 // Factory API - Data Designer, Privacy, Prompt Optimization
@@ -3325,10 +3535,10 @@ export const providersApi = {
 // Seed example for training data generation
 export interface SeedExample {
   id: string
-  data: Record<string, string>  // Column name -> value mapping
+  data: Record<string, string> // Column name -> value mapping
   source: 'manual' | 'imported' | 'gold_trace'
   created_at?: string
-  trace_id?: string  // If from gold trace
+  trace_id?: string // If from gold trace
   tags?: string[]
   quality?: number
 }
@@ -3343,7 +3553,7 @@ export interface ModelConfig {
 
 // Column dependency rule
 export interface ColumnDependency {
-  depends_on: string  // Column ID
+  depends_on: string // Column ID
   condition: 'equals' | 'not_equals' | 'contains' | 'exists'
   value?: string
   required_when_true: boolean
@@ -3360,17 +3570,26 @@ export interface ColumnConstraint {
 export interface ColumnConfig {
   id: string
   name: string
-  type: 'llm' | 'sampler' | 'category' | 'person' | 'datetime' | 'expression' | 'uuid' | 'gaussian' | 'validator'
+  type:
+    | 'llm'
+    | 'sampler'
+    | 'category'
+    | 'person'
+    | 'datetime'
+    | 'expression'
+    | 'uuid'
+    | 'gaussian'
+    | 'validator'
   description?: string
   required: boolean
-  risk_level: 'normal' | 'elevated' | 'high'  // Safety marking
+  risk_level: 'normal' | 'elevated' | 'high' // Safety marking
   config: {
     // LLM column
     prompt?: string
     model?: ModelConfig
     // Category/Sampler
     values?: string[]
-    weights?: number[]  // For weighted sampling
+    weights?: number[] // For weighted sampling
     // Sampler distributions
     distribution?: 'uniform' | 'gaussian' | 'poisson' | 'bernoulli'
     mean?: number
@@ -3382,7 +3601,7 @@ export interface ColumnConfig {
     // Expression (Jinja2)
     template?: string
     // Validator
-    validation_code?: string  // Python validation code
+    validation_code?: string // Python validation code
   }
   dependencies?: ColumnDependency[]
   constraints?: ColumnConstraint[]
@@ -3399,7 +3618,7 @@ export interface PromptOptConfig {
   enabled: boolean
   intensity: 'light' | 'medium' | 'heavy'
   max_demos: number
-  metric_threshold: number  // 0-1, stop when reached
+  metric_threshold: number // 0-1, stop when reached
   target_metric: 'accuracy' | 'f1' | 'custom'
 }
 
@@ -3407,11 +3626,11 @@ export interface PromptOptConfig {
 export interface OutputConfig {
   row_count: number
   format: 'jsonl' | 'csv' | 'parquet'
-  task_name: string  // For GRPO integration
+  task_name: string // For GRPO integration
   include_task_name: boolean
-  train_val_split: number  // 0-1, portion for training
+  train_val_split: number // 0-1, portion for training
   include_negative_examples: boolean
-  negative_example_ratio: number  // 0-1
+  negative_example_ratio: number // 0-1
 }
 
 // Safety configuration
@@ -3420,7 +3639,7 @@ export interface SafetyConfig {
   block_dangerous_commands: boolean
   require_confirmation_for_high_risk: boolean
   max_risk_level: 'normal' | 'elevated' | 'high'
-  blocked_patterns: string[]  // Regex patterns to block
+  blocked_patterns: string[] // Regex patterns to block
 }
 
 export interface FactoryConfig {
@@ -3446,8 +3665,8 @@ export interface PreviewResult {
   total_generated: number
   valid_count: number
   invalid_count: number
-  validation_summary: Record<string, number>  // Error type -> count
-  column_coverage: Record<string, number>  // Column -> non-empty percentage
+  validation_summary: Record<string, number> // Error type -> count
+  column_coverage: Record<string, number> // Column -> non-empty percentage
 }
 
 export interface SynthesisJob {
@@ -3464,8 +3683,7 @@ export interface SynthesisJob {
 }
 
 export const factoryApi = {
-  getConfig: () =>
-    request<FactoryConfig>('/factory/config'),
+  getConfig: () => request<FactoryConfig>('/factory/config'),
 
   updateConfig: (config: FactoryConfig) =>
     request<{ success: boolean; message: string }>('/factory/config', {
@@ -3474,8 +3692,7 @@ export const factoryApi = {
     }),
 
   // Seeds management
-  getSeeds: () =>
-    request<SeedExample[]>('/factory/seeds'),
+  getSeeds: () => request<SeedExample[]>('/factory/seeds'),
 
   addSeed: (seed: Omit<SeedExample, 'id' | 'created_at'>) =>
     request<SeedExample>('/factory/seeds', {
@@ -3492,7 +3709,7 @@ export const factoryApi = {
     return request<{ imported: number; seeds: SeedExample[] }>('/factory/seeds/import', {
       method: 'POST',
       body: formData,
-      headers: {}  // Let browser set Content-Type for FormData
+      headers: {} // Let browser set Content-Type for FormData
     })
   },
 
@@ -3510,8 +3727,7 @@ export const factoryApi = {
     }),
 
   // Synthesis jobs
-  listJobs: () =>
-    request<SynthesisJob[]>('/factory/jobs'),
+  listJobs: () => request<SynthesisJob[]>('/factory/jobs'),
 
   runSynthesis: (options?: { preview?: boolean; row_count?: number }) =>
     request<SynthesisJob>('/factory/synthesize', {
@@ -3519,8 +3735,7 @@ export const factoryApi = {
       body: JSON.stringify(options || {})
     }),
 
-  getJob: (jobId: string) =>
-    request<SynthesisJob>(`/factory/jobs/${jobId}`),
+  getJob: (jobId: string) => request<SynthesisJob>(`/factory/jobs/${jobId}`),
 
   cancelJob: (jobId: string) =>
     request<{ success: boolean }>(`/factory/jobs/${jobId}/cancel`, { method: 'POST' }),
@@ -3533,8 +3748,7 @@ export const factoryApi = {
     ),
 
   // Available models
-  listModels: () =>
-    request<{ id: string; name: string; provider: string }[]>('/factory/models')
+  listModels: () => request<{ id: string; name: string; provider: string }[]>('/factory/models')
 }
 
 // Observability API - Guardrails & Profiler
@@ -3626,11 +3840,9 @@ export const observabilityApi = {
       `/observability/traces?limit=${limit}&offset=${offset}`
     ),
 
-  getTrace: (traceId: string) =>
-    request<TraceDetail>(`/observability/traces/${traceId}`),
+  getTrace: (traceId: string) => request<TraceDetail>(`/observability/traces/${traceId}`),
 
-  getToolStats: () =>
-    request<ToolStat[]>('/observability/tool-stats'),
+  getToolStats: () => request<ToolStat[]>('/observability/tool-stats'),
 
   // Guardrail events
   listGuardrailEvents: (options?: {
@@ -3650,8 +3862,7 @@ export const observabilityApi = {
     )
   },
 
-  getGuardrailStats: () =>
-    request<GuardrailStats>('/observability/guardrails/stats'),
+  getGuardrailStats: () => request<GuardrailStats>('/observability/guardrails/stats'),
 
   getDpoNegatives: (limit = 100) =>
     request<{ negatives: Array<Record<string, any>>; total: number }>(
@@ -3659,29 +3870,29 @@ export const observabilityApi = {
     ),
 
   // Aggregated metrics
-  getMetrics: () =>
-    request<ObservabilityMetrics>('/observability/metrics'),
+  getMetrics: () => request<ObservabilityMetrics>('/observability/metrics'),
 
   // Settings
-  getSettings: () =>
-    request<ObservabilitySettings>('/observability/settings'),
+  getSettings: () => request<ObservabilitySettings>('/observability/settings'),
 
-  updateGuardrailSettings: (settings: Partial<{
-    enabled: boolean
-    pii_filtering: boolean
-    injection_detection: boolean
-    code_safety: boolean
-  }>) =>
+  updateGuardrailSettings: (
+    settings: Partial<{
+      enabled: boolean
+      pii_filtering: boolean
+      injection_detection: boolean
+      code_safety: boolean
+    }>
+  ) =>
     request<{ status: string; updated: Record<string, any> }>(
       '/observability/settings/guardrails',
       { method: 'POST', body: JSON.stringify(settings) }
     ),
 
   updateProfilerSettings: (settings: Partial<{ enabled: boolean }>) =>
-    request<{ status: string; updated: Record<string, any> }>(
-      '/observability/settings/profiler',
-      { method: 'POST', body: JSON.stringify(settings) }
-    )
+    request<{ status: string; updated: Record<string, any> }>('/observability/settings/profiler', {
+      method: 'POST',
+      body: JSON.stringify(settings)
+    })
 }
 
 // ============================================================================
@@ -3729,7 +3940,12 @@ export interface ModelArtifacts {
   checkpoints: Array<{ path: string; step: number; epoch?: number; loss?: number }>
   final_adapter_path: string | null
   merged_path: string | null
-  gguf_exports: Array<{ path: string; quantization: string; size_bytes: number; created_at: string }>
+  gguf_exports: Array<{
+    path: string
+    quantization: string
+    size_bytes: number
+    created_at: string
+  }>
 }
 
 export interface EvaluationRecord {
@@ -3763,7 +3979,13 @@ export interface ModelProfile {
   completed_at: string | null
   duration_seconds: number
   training_duration_display: string
-  loss_curve: Array<{ step: number; loss: number; val_loss?: number; learning_rate?: number; epoch?: number }>
+  loss_curve: Array<{
+    step: number
+    loss: number
+    val_loss?: number
+    learning_rate?: number
+    epoch?: number
+  }>
   final_metrics: Record<string, number>
 
   // Artifacts
@@ -3829,22 +4051,22 @@ export const modelsApi = {
     if (options?.limit) params.set('limit', String(options.limit))
     if (options?.offset) params.set('offset', String(options.offset))
     const query = params.toString()
-    return request<{ models: ModelSummary[]; total: number }>(
-      `/models${query ? `?${query}` : ''}`
-    )
+    return request<{ models: ModelSummary[]; total: number }>(`/models${query ? `?${query}` : ''}`)
   },
 
   // Get full model profile
-  get: (modelId: string) =>
-    request<ModelProfile>(`/models/${encodeURIComponent(modelId)}`),
+  get: (modelId: string) => request<ModelProfile>(`/models/${encodeURIComponent(modelId)}`),
 
   // Update model metadata
-  update: (modelId: string, updates: {
-    display_name?: string
-    description?: string
-    tags?: string[]
-    starred?: boolean
-  }) =>
+  update: (
+    modelId: string,
+    updates: {
+      display_name?: string
+      description?: string
+      tags?: string[]
+      starred?: boolean
+    }
+  ) =>
     request<ModelProfile>(`/models/${encodeURIComponent(modelId)}`, {
       method: 'POST',
       body: JSON.stringify(updates)
@@ -3879,20 +4101,14 @@ export const modelsApi = {
 
   // Rescan model directory
   rescan: (modelId: string) =>
-    request<ModelProfile>(
-      `/models/${encodeURIComponent(modelId)}/rescan`,
-      { method: 'POST' }
-    ),
+    request<ModelProfile>(`/models/${encodeURIComponent(modelId)}/rescan`, { method: 'POST' }),
 
   // Compare models
   compare: (modelIds: string[], metrics?: string[]) =>
-    request<{ models: Record<string, Record<string, any>> }>(
-      '/models/compare',
-      {
-        method: 'POST',
-        body: JSON.stringify({ model_ids: modelIds, metrics })
-      }
-    ),
+    request<{ models: Record<string, Record<string, any>> }>('/models/compare', {
+      method: 'POST',
+      body: JSON.stringify({ model_ids: modelIds, metrics })
+    }),
 
   // Get leaderboard
   leaderboard: (metric = 'custom_eval_pass_rate', limit = 10) =>
@@ -3907,7 +4123,11 @@ export const modelsApi = {
     ),
 
   // Run eval set on model
-  runEval: (modelId: string, evalSetId: string, options?: { maxTokens?: number; temperature?: number }) =>
+  runEval: (
+    modelId: string,
+    evalSetId: string,
+    options?: { maxTokens?: number; temperature?: number }
+  ) =>
     request<{
       model_id: string
       eval_set_id: string
@@ -3933,7 +4153,10 @@ export const modelsApi = {
     }),
 
   // Export model to GGUF or other formats
-  export: (modelId: string, options?: { format?: 'gguf' | 'safetensors' | 'lora'; quantization?: string }) =>
+  export: (
+    modelId: string,
+    options?: { format?: 'gguf' | 'safetensors' | 'lora'; quantization?: string }
+  ) =>
     request<ExportResponse>(`/models/${encodeURIComponent(modelId)}/export`, {
       method: 'POST',
       body: JSON.stringify({
@@ -3959,7 +4182,7 @@ export const modelsApi = {
   downloadArtifact: (modelId: string, artifactPath: string) =>
     request<{ download_url: string; filename: string }>(
       `/models/${encodeURIComponent(modelId)}/download?path=${encodeURIComponent(artifactPath)}`
-    ),
+    )
 }
 
 // Custom Eval Set types
@@ -4003,8 +4226,7 @@ export interface EvalSetFull {
 // Custom Eval Sets API
 export const evalSetsApi = {
   // List all eval sets
-  list: () =>
-    request<EvalSetSummary[]>('/models/eval-sets'),
+  list: () => request<EvalSetSummary[]>('/models/eval-sets'),
 
   // Get specific eval set
   get: (evalSetId: string) =>
@@ -4342,8 +4564,7 @@ function hfInventoryQuery(options?: HFInventoryOptions): string {
 // HuggingFace API
 export const hfApi = {
   // Status
-  getStatus: () =>
-    request<HFStatus>('/hf/status'),
+  getStatus: () => request<HFStatus>('/hf/status'),
 
   inventory: (options?: HFInventoryOptions) =>
     request<HFInventoryResponse>(`/hf/inventory${hfInventoryQuery(options)}`),
@@ -4359,10 +4580,11 @@ export const hfApi = {
     task?: string
     target?: Record<string, unknown>
     origin?: Record<string, string>
-  }) => request<HFContextBundle>('/hf/context/discover', {
-    method: 'POST',
-    body: JSON.stringify(body),
-  }),
+  }) =>
+    request<HFContextBundle>('/hf/context/discover', {
+      method: 'POST',
+      body: JSON.stringify(body)
+    }),
 
   contextVersion: (workspaceId: string, bundleId: string, version: number) =>
     request<HFContextBundle>(
@@ -4373,17 +4595,18 @@ export const hfApi = {
     bundleId: string,
     version: number,
     body: { workspace_id: string; expected_version: number; selected_evidence_ids: string[] }
-  ) => request<HFContextBundle>(
-    `/hf/context/bundles/${encodeURIComponent(bundleId)}/versions/${version}/pin`,
-    { method: 'POST', body: JSON.stringify(body) }
-  ),
+  ) =>
+    request<HFContextBundle>(
+      `/hf/context/bundles/${encodeURIComponent(bundleId)}/versions/${version}/pin`,
+      { method: 'POST', body: JSON.stringify(body) }
+    ),
 
   refreshContext: (workspaceId: string, bundleId: string, version: number) =>
     request<HFContextBundle>(
       `/hf/context/bundles/${encodeURIComponent(bundleId)}/versions/${version}/refresh`,
       {
         method: 'POST',
-        body: JSON.stringify({ workspace_id: workspaceId, expected_version: version }),
+        body: JSON.stringify({ workspace_id: workspaceId, expected_version: version })
       }
     ),
 
@@ -4402,7 +4625,7 @@ export const hfApi = {
   deactivateContext: (workspaceId: string) =>
     request<{ status: string; workspace_id: string }>('/hf/context/active', {
       method: 'DELETE',
-      body: JSON.stringify({ workspace_id: workspaceId }),
+      body: JSON.stringify({ workspace_id: workspaceId })
     }),
 
   contextMarkdown: (workspaceId: string, bundleId: string, version: number) =>
@@ -4429,11 +4652,9 @@ export const hfApi = {
     }),
 
   // Jobs
-  listJobs: () =>
-    request<HFJob[]>('/hf/jobs'),
+  listJobs: () => request<HFJob[]>('/hf/jobs'),
 
-  getHardware: () =>
-    request<HFHardwareTier[]>('/hf/jobs/hardware'),
+  getHardware: () => request<HFHardwareTier[]>('/hf/jobs/hardware'),
 
   submitJob: (req: HFJobSubmitRequest) =>
     request<HFJob>('/hf/jobs', {
@@ -4441,21 +4662,18 @@ export const hfApi = {
       body: JSON.stringify(req)
     }),
 
-  getJob: (jobId: string) =>
-    request<HFJob>(`/hf/jobs/${encodeURIComponent(jobId)}`),
+  getJob: (jobId: string) => request<HFJob>(`/hf/jobs/${encodeURIComponent(jobId)}`),
 
   getJobLogs: (jobId: string) =>
     request<{ logs: string }>(`/hf/jobs/${encodeURIComponent(jobId)}/logs`),
 
   cancelJob: (jobId: string) =>
-    request<{ status: string; job_id: string }>(
-      `/hf/jobs/${encodeURIComponent(jobId)}`,
-      { method: 'DELETE' }
-    ),
+    request<{ status: string; job_id: string }>(`/hf/jobs/${encodeURIComponent(jobId)}`, {
+      method: 'DELETE'
+    }),
 
   // Spaces
-  listSpaces: () =>
-    request<HFSpace[]>('/hf/spaces'),
+  listSpaces: () => request<HFSpace[]>('/hf/spaces'),
 
   createSpace: (req: HFSpaceCreateRequest) =>
     request<HFSpace>('/hf/spaces', {
@@ -4467,10 +4685,9 @@ export const hfApi = {
     request<HFSpace>(`/hf/spaces/${encodeURIComponent(spaceName)}/status`),
 
   deleteSpace: (spaceName: string) =>
-    request<{ status: string; space_name: string }>(
-      `/hf/spaces/${encodeURIComponent(spaceName)}`,
-      { method: 'DELETE' }
-    ),
+    request<{ status: string; space_name: string }>(`/hf/spaces/${encodeURIComponent(spaceName)}`, {
+      method: 'DELETE'
+    }),
 
   // Datasets
   listDatasets: (prefix?: string) =>
@@ -4483,10 +4700,9 @@ export const hfApi = {
     }),
 
   deleteDataset: (repoName: string) =>
-    request<{ status: string; repo_name: string }>(
-      `/hf/datasets/${encodeURIComponent(repoName)}`,
-      { method: 'DELETE' }
-    ),
+    request<{ status: string; repo_name: string }>(`/hf/datasets/${encodeURIComponent(repoName)}`, {
+      method: 'DELETE'
+    }),
 
   // Inference
   generate: (req: HFInferenceGenerateRequest) =>
@@ -4504,11 +4720,10 @@ export const hfApi = {
   pushModel: (req: HFModelPushRequest) =>
     request<HFModelPushResponse>('/hf/models/push', {
       method: 'POST',
-      body: JSON.stringify(req),
+      body: JSON.stringify(req)
     }),
 
-  listMyModels: () =>
-    request<HFMyModel[]>('/hf/models/mine'),
+  listMyModels: () => request<HFMyModel[]>('/hf/models/mine'),
 
   deleteHFModel: (repoId: string) =>
     request<{ status: string }>(`/hf/models/${encodeURIComponent(repoId)}`, { method: 'DELETE' }),
@@ -4520,36 +4735,43 @@ export const hfApi = {
     request<{ bucket_id: string; url: string }>('/hf/buckets', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify(body)
     }),
   listBucketTree: (bucketId: string, prefix?: string) =>
-    request<any[]>(`/hf/buckets/${encodeURIComponent(bucketId)}/tree${prefix ? `?prefix=${encodeURIComponent(prefix)}` : ''}`),
+    request<any[]>(
+      `/hf/buckets/${encodeURIComponent(bucketId)}/tree${prefix ? `?prefix=${encodeURIComponent(prefix)}` : ''}`
+    ),
   getBucketInfo: (bucketId: string) =>
     request<any>(`/hf/buckets/${encodeURIComponent(bucketId)}/info`),
   syncBucket: (body: { source: string; dest: string; delete?: boolean; dry_run?: boolean }) =>
     request<any>('/hf/buckets/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify(body)
     }),
   deleteBucket: (bucketId: string) =>
-    request<{ status: string }>(`/hf/buckets/${encodeURIComponent(bucketId)}`, { method: 'DELETE' }),
+    request<{ status: string }>(`/hf/buckets/${encodeURIComponent(bucketId)}`, {
+      method: 'DELETE'
+    }),
   copyFiles: (body: { source: string; destination: string }) =>
     request<{ source: string; destination: string; status: string }>('/hf/copy', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify(body)
     }),
 
   // Agent Traces
   uploadTraces: (body: { trace_dir: string; repo_id: string; private?: boolean }) =>
-    request<{ repo_id: string; url: string; num_traces: number; total_size_bytes: number }>('/hf/traces/upload', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    }),
+    request<{ repo_id: string; url: string; num_traces: number; total_size_bytes: number }>(
+      '/hf/traces/upload',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      }
+    ),
   listTraceDatasets: (prefix?: string) =>
-    request<any[]>(`/hf/traces/datasets${prefix ? `?prefix=${encodeURIComponent(prefix)}` : ''}`),
+    request<any[]>(`/hf/traces/datasets${prefix ? `?prefix=${encodeURIComponent(prefix)}` : ''}`)
 }
 
 // =============================================================================
@@ -4591,16 +4813,13 @@ export const syntheticApi = {
     }),
 
   // Get job status
-  getJobStatus: (jobId: string) =>
-    request<SyntheticJobStatus>(`/factory/synthetic/jobs/${jobId}`),
+  getJobStatus: (jobId: string) => request<SyntheticJobStatus>(`/factory/synthetic/jobs/${jobId}`),
 
   // List all jobs
-  listJobs: () =>
-    request<SyntheticJobStatus[]>('/factory/synthetic/jobs'),
+  listJobs: () => request<SyntheticJobStatus[]>('/factory/synthetic/jobs'),
 
   // Get available presets
-  getPresets: () =>
-    request<Record<string, SyntheticPreset>>('/factory/synthetic/presets')
+  getPresets: () => request<Record<string, SyntheticPreset>>('/factory/synthetic/presets')
 }
 
 // Decision-DPO mining (trace data quality)
@@ -4630,8 +4849,7 @@ export interface DecisionDpoJob {
 }
 
 export const dataQualityApi = {
-  defaults: () =>
-    request<DataQualityDefaults>('/factory/data-quality/defaults'),
+  defaults: () => request<DataQualityDefaults>('/factory/data-quality/defaults'),
 
   mineDecisionDpo: (req: DecisionDpoRequest) =>
     request<DecisionDpoJob>('/factory/decision-dpo/generate', {
@@ -4676,8 +4894,8 @@ export const cascadeApi = {
         lora_alpha: config.loraAlpha,
         load_in_4bit: config.load4Bit,
         use_remote_ssh: config.useRemoteSsh,
-        mode: config.mode,
-      }),
+        mode: config.mode
+      })
     }),
   stop: () => request<{ status: string }>('/cascade/stop', { method: 'POST' }),
   getStatus: () => request<Record<string, unknown>>('/cascade/status'),
@@ -4693,10 +4911,10 @@ export const cascadeApi = {
         student_model: config.studentModel || '',
         distillation_alpha: config.distillationAlpha || 0.5,
         temperature: config.temperature || 2.0,
-        train_steps: config.trainSteps || 500,
-      }),
+        train_steps: config.trainSteps || 500
+      })
     }),
-  getDistillStatus: () => request<Record<string, unknown>>('/cascade/distill/status'),
+  getDistillStatus: () => request<Record<string, unknown>>('/cascade/distill/status')
 }
 
 // =============================================================================
@@ -4767,12 +4985,10 @@ export interface ExportModelResponse {
 
 export const integrationApi = {
   // Get integration status
-  getStatus: () =>
-    request<IntegrationStatus>('/integration/status'),
+  getStatus: () => request<IntegrationStatus>('/integration/status'),
 
   // Get integration settings
-  getSettings: () =>
-    request<IntegrationSettings>('/integration/settings'),
+  getSettings: () => request<IntegrationSettings>('/integration/settings'),
 
   // Update integration settings
   updateSettings: (updates: Record<string, Record<string, any>>) =>
@@ -4794,8 +5010,7 @@ export const integrationApi = {
     }),
 
   // List pending traces
-  listPendingTraces: () =>
-    request<PendingTrace[]>('/integration/traces/pending'),
+  listPendingTraces: () => request<PendingTrace[]>('/integration/traces/pending'),
 
   // Process pending traces
   processTraces: () =>
@@ -4804,8 +5019,7 @@ export const integrationApi = {
     }),
 
   // List model versions
-  listModelVersions: () =>
-    request<ModelVersion[]>('/integration/models/versions'),
+  listModelVersions: () => request<ModelVersion[]>('/integration/models/versions'),
 
   // Export model to GGUF
   exportModel: (req: ExportModelRequest) =>
@@ -4835,9 +5049,12 @@ export const integrationApi = {
 
   // Get security policy
   getSecurityPolicy: () =>
-    request<{ available: boolean; path: string | null; content: string | null; bashbros_primary: boolean }>(
-      '/integration/security/policy'
-    ),
+    request<{
+      available: boolean
+      path: string | null
+      content: string | null
+      bashbros_primary: boolean
+    }>('/integration/security/policy'),
 
   // Get integration directory info
   getDirectory: () =>
@@ -4895,8 +5112,7 @@ export interface SecurityJobStatus {
 }
 
 export const securityApi = {
-  listDatasets: () =>
-    request<SecurityDatasetInfo[]>('/security/datasets'),
+  listDatasets: () => request<SecurityDatasetInfo[]>('/security/datasets'),
 
   startIngestion: (req: SecurityIngestRequest) =>
     request<SecurityIngestResponse>('/security/ingest', {
@@ -4904,11 +5120,9 @@ export const securityApi = {
       body: JSON.stringify(req)
     }),
 
-  getJobStatus: (jobId: string) =>
-    request<SecurityJobStatus>(`/security/jobs/${jobId}`),
+  getJobStatus: (jobId: string) => request<SecurityJobStatus>(`/security/jobs/${jobId}`),
 
-  listJobs: () =>
-    request<SecurityJobStatus[]>('/security/jobs')
+  listJobs: () => request<SecurityJobStatus[]>('/security/jobs')
 }
 
 // Achievements API
@@ -4984,17 +5198,13 @@ export interface RefreshAchievementsResponse {
 }
 
 export const achievementsApi = {
-  getStats: () =>
-    request<LifetimeStatsResponse>('/achievements/stats'),
+  getStats: () => request<LifetimeStatsResponse>('/achievements/stats'),
 
-  getAll: () =>
-    request<AchievementsListResponse>('/achievements'),
+  getAll: () => request<AchievementsListResponse>('/achievements'),
 
-  getRecent: () =>
-    request<RecentAchievementsResponse>('/achievements/recent'),
+  getRecent: () => request<RecentAchievementsResponse>('/achievements/recent'),
 
-  refresh: () =>
-    request<RefreshAchievementsResponse>('/achievements/refresh', { method: 'POST' })
+  refresh: () => request<RefreshAchievementsResponse>('/achievements/refresh', { method: 'POST' })
 }
 
 // Agent Chat API — Session types
@@ -5015,7 +5225,7 @@ export interface AgentSessionMessage {
 }
 
 export interface PendingAction {
-  type: string  // "shell_command"
+  type: string // "shell_command"
   command: string
   reason: string
   token: string
@@ -5040,8 +5250,7 @@ export const agentApi = {
       body: JSON.stringify({ token, approved, session_id: sessionId ?? null })
     }),
 
-  listSessions: () =>
-    request<AgentSessionMeta[]>('/agent/sessions'),
+  listSessions: () => request<AgentSessionMeta[]>('/agent/sessions'),
 
   loadSession: (sessionId: string) =>
     request<AgentSessionMessage[]>(`/agent/sessions/${sessionId}`),
@@ -5053,7 +5262,7 @@ export const agentApi = {
     }),
 
   deleteSession: (sessionId: string) =>
-    request(`/agent/sessions/${sessionId}`, { method: 'DELETE' }),
+    request(`/agent/sessions/${sessionId}`, { method: 'DELETE' })
 }
 
 // Generic agent endpoint API — currently optimized for Hermes API Server
@@ -5089,12 +5298,15 @@ export interface AgentEndpointDiscovery {
   ok: boolean
   profile: AgentEndpointProfile
   auth_configured: boolean
-  probes: Record<string, {
-    ok?: boolean
-    status_code?: number
-    data?: unknown
-    error?: string
-  }>
+  probes: Record<
+    string,
+    {
+      ok?: boolean
+      status_code?: number
+      data?: unknown
+      error?: string
+    }
+  >
   summary: {
     models: number
     skills: number
@@ -5216,8 +5428,7 @@ export interface HermesTunnelStatus {
 }
 
 export const agentEndpointApi = {
-  list: () =>
-    request<AgentEndpointListResponse>('/agent/endpoints'),
+  list: () => request<AgentEndpointListResponse>('/agent/endpoints'),
 
   save: (endpointId: string, payload: AgentEndpointUpdate) =>
     request<AgentEndpointProfile>(`/agent/endpoints/${encodeURIComponent(endpointId)}`, {
@@ -5232,19 +5443,23 @@ export const agentEndpointApi = {
     ),
 
   discover: (endpointId: string) =>
-    request<AgentEndpointDiscovery>(
-      `/agent/endpoints/${encodeURIComponent(endpointId)}/discover`,
-      { method: 'POST' }
-    ),
+    request<AgentEndpointDiscovery>(`/agent/endpoints/${encodeURIComponent(endpointId)}/discover`, {
+      method: 'POST'
+    }),
 
   chat: (
     endpointId: string,
-    payload: { message: string; context?: string; conversation?: string; session_key?: string | null }
+    payload: {
+      message: string
+      context?: string
+      conversation?: string
+      session_key?: string | null
+    }
   ) =>
     request<AgentEndpointChatResponse>(`/agent/endpoints/${encodeURIComponent(endpointId)}/chat`, {
       method: 'POST',
       body: JSON.stringify(payload)
-    }),
+    })
 }
 
 export const hermesSetupApi = {
@@ -5301,7 +5516,7 @@ export const hermesSetupApi = {
     request<HermesTunnelStatus>('/agent/hermes/tunnel/disconnect', {
       method: 'POST',
       body: JSON.stringify({ endpoint_id: endpointId })
-    }),
+    })
 }
 
 export const toolkitApi = {
@@ -5424,14 +5639,19 @@ export const skillLabApi = {
     }),
   contract: (workspaceId: string, skillId: string) => {
     const params = new URLSearchParams({ workspace_id: workspaceId })
-    return request<SkillLabContract>(`/skill-lab/contracts/${encodeURIComponent(skillId)}?${params}`)
+    return request<SkillLabContract>(
+      `/skill-lab/contracts/${encodeURIComponent(skillId)}?${params}`
+    )
   },
   saveContract: (contract: SkillLabContract) => {
     const params = new URLSearchParams({ workspace_id: contract.workspace_id })
-    return request<SkillLabContract>(`/skill-lab/contracts/${encodeURIComponent(contract.skill_id)}?${params}`, {
-      method: 'PUT',
-      body: JSON.stringify(contract)
-    })
+    return request<SkillLabContract>(
+      `/skill-lab/contracts/${encodeURIComponent(contract.skill_id)}?${params}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(contract)
+      }
+    )
   },
   launch: (payload: SkillLabRunRequest) =>
     request<SkillLabRun>('/skill-lab/runs', {
@@ -5442,8 +5662,7 @@ export const skillLabApi = {
     const params = new URLSearchParams({ workspace_id: workspaceId, limit: String(limit) })
     return request<SkillLabRun[]>(`/skill-lab/runs?${params}`)
   },
-  run: (runId: string) =>
-    request<SkillLabRun>(`/skill-lab/runs/${encodeURIComponent(runId)}`)
+  run: (runId: string) => request<SkillLabRun>(`/skill-lab/runs/${encodeURIComponent(runId)}`)
 }
 
 /** Build the workspace-aware adapter consumed by MCP Server canvas nodes. */
@@ -5455,22 +5674,36 @@ export function createMcpWorkbenchApi(getWorkspaceId: () => string) {
     return params.toString()
   }
   return {
-    listProfiles: () => request<import('../components/terminal/nodes/mcpWorkbenchModel').McpProfile[]>(
-      `/mcp/profiles?${query()}`
-    ),
-    createProfile: (input: import('../components/terminal/nodes/mcpWorkbenchModel').McpProfileInput) =>
-      request<import('../components/terminal/nodes/mcpWorkbenchModel').McpProfile>('/mcp/profiles', {
-        method: 'POST',
-        body: JSON.stringify({ ...input, workspace_id: workspace() })
-      }),
+    listProfiles: () =>
+      request<import('../components/terminal/nodes/mcpWorkbenchModel').McpProfile[]>(
+        `/mcp/profiles?${query()}`
+      ),
+    createProfile: (
+      input: import('../components/terminal/nodes/mcpWorkbenchModel').McpProfileInput
+    ) =>
+      request<import('../components/terminal/nodes/mcpWorkbenchModel').McpProfile>(
+        '/mcp/profiles',
+        {
+          method: 'POST',
+          body: JSON.stringify({ ...input, workspace_id: workspace() })
+        }
+      ),
     updateProfile: (
       profileId: string,
       input: import('../components/terminal/nodes/mcpWorkbenchModel').McpProfileInput,
       expectedRevision: number
-    ) => request<import('../components/terminal/nodes/mcpWorkbenchModel').McpProfile>(`/mcp/profiles/${encodeURIComponent(profileId)}`, {
-      method: 'PUT',
-      body: JSON.stringify({ ...input, workspace_id: workspace(), expected_revision: expectedRevision })
-    }),
+    ) =>
+      request<import('../components/terminal/nodes/mcpWorkbenchModel').McpProfile>(
+        `/mcp/profiles/${encodeURIComponent(profileId)}`,
+        {
+          method: 'PUT',
+          body: JSON.stringify({
+            ...input,
+            workspace_id: workspace(),
+            expected_revision: expectedRevision
+          })
+        }
+      ),
     previewStdio: (profileId: string, profileRevision: number) =>
       request<import('../components/terminal/nodes/mcpWorkbenchModel').McpStdioLaunchPreview>(
         `/mcp/profiles/${encodeURIComponent(profileId)}/stdio/preview?${query({ profile_revision: profileRevision })}`
@@ -5480,55 +5713,71 @@ export function createMcpWorkbenchApi(getWorkspaceId: () => string) {
       profileRevision: number,
       executableSha256: string,
       launchFingerprint: string
-    ) => request<Record<string, unknown>>(`/mcp/profiles/${encodeURIComponent(profileId)}/stdio/approve`, {
-      method: 'POST',
-      body: JSON.stringify({
-        workspace_id: workspace(),
-        profile_revision: profileRevision,
-        executable_sha256: executableSha256,
-        launch_fingerprint: launchFingerprint
-      })
-    }),
-    connect: (profileId: string, profileRevision: number) => request<import('../components/terminal/nodes/mcpWorkbenchModel').McpOperationAccepted>(
-      `/mcp/profiles/${encodeURIComponent(profileId)}/connect`,
-      { method: 'POST', body: JSON.stringify({ workspace_id: workspace(), profile_revision: profileRevision }) }
-    ),
-    refresh: (profileId: string) => request<import('../components/terminal/nodes/mcpWorkbenchModel').McpOperationAccepted>(
-      `/mcp/profiles/${encodeURIComponent(profileId)}/refresh`,
-      { method: 'POST', body: JSON.stringify({ workspace_id: workspace() }) }
-    ),
-    quickTest: (profileId: string) => request<import('../components/terminal/nodes/mcpWorkbenchModel').McpOperationAccepted>(
-      `/mcp/profiles/${encodeURIComponent(profileId)}/quick-test`,
-      { method: 'POST', body: JSON.stringify({ workspace_id: workspace() }) }
-    ),
-    selfTest: () => request<import('../components/terminal/nodes/mcpWorkbenchModel').McpOperationAccepted>(
-      '/mcp/self-test',
-      { method: 'POST', body: JSON.stringify({ workspace_id: workspace() }) }
-    ),
+    ) =>
+      request<Record<string, unknown>>(
+        `/mcp/profiles/${encodeURIComponent(profileId)}/stdio/approve`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            workspace_id: workspace(),
+            profile_revision: profileRevision,
+            executable_sha256: executableSha256,
+            launch_fingerprint: launchFingerprint
+          })
+        }
+      ),
+    connect: (profileId: string, profileRevision: number) =>
+      request<import('../components/terminal/nodes/mcpWorkbenchModel').McpOperationAccepted>(
+        `/mcp/profiles/${encodeURIComponent(profileId)}/connect`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ workspace_id: workspace(), profile_revision: profileRevision })
+        }
+      ),
+    refresh: (profileId: string) =>
+      request<import('../components/terminal/nodes/mcpWorkbenchModel').McpOperationAccepted>(
+        `/mcp/profiles/${encodeURIComponent(profileId)}/refresh`,
+        { method: 'POST', body: JSON.stringify({ workspace_id: workspace() }) }
+      ),
+    quickTest: (profileId: string) =>
+      request<import('../components/terminal/nodes/mcpWorkbenchModel').McpOperationAccepted>(
+        `/mcp/profiles/${encodeURIComponent(profileId)}/quick-test`,
+        { method: 'POST', body: JSON.stringify({ workspace_id: workspace() }) }
+      ),
+    selfTest: () =>
+      request<import('../components/terminal/nodes/mcpWorkbenchModel').McpOperationAccepted>(
+        '/mcp/self-test',
+        { method: 'POST', body: JSON.stringify({ workspace_id: workspace() }) }
+      ),
     previewClaudeConfig: (
       config: Record<string, unknown>,
       sourceScope: 'local' | 'project' | 'user'
-    ) => request<import('../components/terminal/nodes/mcpWorkbenchModel').McpClaudeImportCandidate[]>(
-      '/mcp/imports/claude/preview',
-      {
-        method: 'POST',
-        body: JSON.stringify({ workspace_id: workspace(), config, source_scope: sourceScope })
-      }
-    ),
-    oauthStatus: (profileId: string) => request<import('../components/terminal/nodes/mcpWorkbenchModel').McpOAuthStatus>(
-      `/mcp/profiles/${encodeURIComponent(profileId)}/oauth/status?${query()}`
-    ),
-    logoutOAuth: (profileId: string) => request<Record<string, unknown>>(
-      `/mcp/profiles/${encodeURIComponent(profileId)}/oauth/logout`,
-      { method: 'POST', body: JSON.stringify({ workspace_id: workspace() }) }
-    ),
-    snapshot: (profileId: string) => request<import('../components/terminal/nodes/mcpWorkbenchModel').McpCapabilitySnapshot>(
-      `/mcp/profiles/${encodeURIComponent(profileId)}/snapshot?${query()}`
-    ),
-    disconnect: (sessionId: string) => request<import('../components/terminal/nodes/mcpWorkbenchModel').McpOperationAccepted>(
-      `/mcp/sessions/${encodeURIComponent(sessionId)}/disconnect`,
-      { method: 'POST', body: JSON.stringify({ workspace_id: workspace() }) }
-    ),
+    ) =>
+      request<import('../components/terminal/nodes/mcpWorkbenchModel').McpClaudeImportCandidate[]>(
+        '/mcp/imports/claude/preview',
+        {
+          method: 'POST',
+          body: JSON.stringify({ workspace_id: workspace(), config, source_scope: sourceScope })
+        }
+      ),
+    oauthStatus: (profileId: string) =>
+      request<import('../components/terminal/nodes/mcpWorkbenchModel').McpOAuthStatus>(
+        `/mcp/profiles/${encodeURIComponent(profileId)}/oauth/status?${query()}`
+      ),
+    logoutOAuth: (profileId: string) =>
+      request<Record<string, unknown>>(
+        `/mcp/profiles/${encodeURIComponent(profileId)}/oauth/logout`,
+        { method: 'POST', body: JSON.stringify({ workspace_id: workspace() }) }
+      ),
+    snapshot: (profileId: string) =>
+      request<import('../components/terminal/nodes/mcpWorkbenchModel').McpCapabilitySnapshot>(
+        `/mcp/profiles/${encodeURIComponent(profileId)}/snapshot?${query()}`
+      ),
+    disconnect: (sessionId: string) =>
+      request<import('../components/terminal/nodes/mcpWorkbenchModel').McpOperationAccepted>(
+        `/mcp/sessions/${encodeURIComponent(sessionId)}/disconnect`,
+        { method: 'POST', body: JSON.stringify({ workspace_id: workspace() }) }
+      ),
     callTool: (
       sessionId: string,
       toolName: string,
@@ -5539,28 +5788,37 @@ export function createMcpWorkbenchApi(getWorkspaceId: () => string) {
         timeout_seconds?: number
         max_result_bytes?: number
       }
-    ) => request<import('../components/terminal/nodes/mcpWorkbenchModel').McpOperationAccepted>(
-      `/mcp/sessions/${encodeURIComponent(sessionId)}/tools/${encodeURIComponent(toolName)}/call`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ workspace_id: workspace(), arguments: argumentsValue, ...options })
-      }
-    ),
-    getOperation: (operationId: string) => request<import('../components/terminal/nodes/mcpWorkbenchModel').McpOperation>(
-      `/mcp/operations/${encodeURIComponent(operationId)}?${query()}`
-    ),
-    cancelOperation: (operationId: string) => request<import('../components/terminal/nodes/mcpWorkbenchModel').McpOperation>(
-      `/mcp/operations/${encodeURIComponent(operationId)}/cancel`,
-      { method: 'POST', body: JSON.stringify({ workspace_id: workspace() }) }
-    )
+    ) =>
+      request<import('../components/terminal/nodes/mcpWorkbenchModel').McpOperationAccepted>(
+        `/mcp/sessions/${encodeURIComponent(sessionId)}/tools/${encodeURIComponent(toolName)}/call`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ workspace_id: workspace(), arguments: argumentsValue, ...options })
+        }
+      ),
+    getOperation: (operationId: string) =>
+      request<import('../components/terminal/nodes/mcpWorkbenchModel').McpOperation>(
+        `/mcp/operations/${encodeURIComponent(operationId)}?${query()}`
+      ),
+    cancelOperation: (operationId: string) =>
+      request<import('../components/terminal/nodes/mcpWorkbenchModel').McpOperation>(
+        `/mcp/operations/${encodeURIComponent(operationId)}/cancel`,
+        { method: 'POST', body: JSON.stringify({ workspace_id: workspace() }) }
+      )
   }
 }
 
-async function knowledgeRequest<T>(endpoint: string, options?: RequestInit): Promise<ApiResponse<T>> {
+async function knowledgeRequest<T>(
+  endpoint: string,
+  options?: RequestInit
+): Promise<ApiResponse<T>> {
   if (!window.bashgym?.api) return request<T>(endpoint, options)
   try {
     const ipv4Base = API_BASE.replace('://localhost:', '://127.0.0.1:')
-    const result = await window.bashgym.api.fetch(`${ipv4Base}${endpoint}`, options) as ApiResponse<T>
+    const result = (await window.bashgym.api.fetch(
+      `${ipv4Base}${endpoint}`,
+      options
+    )) as ApiResponse<T>
     return !result.ok && result.error
       ? { ...result, error: normalizeApiError(result.error) }
       : result
@@ -5570,35 +5828,50 @@ async function knowledgeRequest<T>(endpoint: string, options?: RequestInit): Pro
 }
 
 export const knowledgeApi = {
-  status: (workspaceId: string) => knowledgeRequest<import('../components/terminal/nodes/knowledgeBaseModel').KnowledgeStatus>(
-    `/knowledge/status?${new URLSearchParams({ workspace_id: workspaceId })}`
-  ),
+  status: (workspaceId: string) =>
+    knowledgeRequest<import('../components/terminal/nodes/knowledgeBaseModel').KnowledgeStatus>(
+      `/knowledge/status?${new URLSearchParams({ workspace_id: workspaceId })}`
+    ),
   inspect: (input: {
     workspace_id: string
     provider: import('../components/terminal/nodes/knowledgeBaseModel').KnowledgeProvider
     root?: string
     max_depth?: number
     max_entries?: number
-  }) => knowledgeRequest<import('../components/terminal/nodes/knowledgeBaseModel').KnowledgeSnapshot>('/knowledge/inspect', {
-    method: 'POST', body: JSON.stringify(input)
-  }),
+  }) =>
+    knowledgeRequest<import('../components/terminal/nodes/knowledgeBaseModel').KnowledgeSnapshot>(
+      '/knowledge/inspect',
+      {
+        method: 'POST',
+        body: JSON.stringify(input)
+      }
+    ),
   preview: (input: {
     workspace_id: string
     provider: import('../components/terminal/nodes/knowledgeBaseModel').KnowledgeProvider
     root?: string
     path: string
-  }) => knowledgeRequest<import('../components/terminal/nodes/knowledgeBaseModel').KnowledgePreview>('/knowledge/preview', {
-    method: 'POST', body: JSON.stringify(input)
-  }),
+  }) =>
+    knowledgeRequest<import('../components/terminal/nodes/knowledgeBaseModel').KnowledgePreview>(
+      '/knowledge/preview',
+      {
+        method: 'POST',
+        body: JSON.stringify(input)
+      }
+    ),
   search: (input: {
     workspace_id: string
     provider: import('../components/terminal/nodes/knowledgeBaseModel').KnowledgeProvider
     root?: string
     query: string
     limit?: number
-  }) => knowledgeRequest<import('../components/terminal/nodes/knowledgeBaseModel').KnowledgeSearchResponse>('/knowledge/search', {
-    method: 'POST', body: JSON.stringify(input)
-  })
+  }) =>
+    knowledgeRequest<
+      import('../components/terminal/nodes/knowledgeBaseModel').KnowledgeSearchResponse
+    >('/knowledge/search', {
+      method: 'POST',
+      body: JSON.stringify(input)
+    })
 }
 
 // Orchestrator API
@@ -5705,13 +5978,12 @@ export const orchestratorApi = {
     ),
 
   approveJob: (jobId: string) =>
-    request<{ job_id: string; status: OrchestratorJobStatus }>(
-      `/orchestrate/${jobId}/approve`,
-      { method: 'POST', body: '{}' }
-    ),
+    request<{ job_id: string; status: OrchestratorJobStatus }>(`/orchestrate/${jobId}/approve`, {
+      method: 'POST',
+      body: '{}'
+    }),
 
-  getStatus: (jobId: string) =>
-    request<OrchestratorStatusResponse>(`/orchestrate/${jobId}/status`),
+  getStatus: (jobId: string) => request<OrchestratorStatusResponse>(`/orchestrate/${jobId}/status`),
 
   retryTask: (jobId: string, taskId: string, modifiedPrompt?: string) =>
     request<{ job_id: string; task_id: string; status: string }>(
@@ -5727,7 +5999,7 @@ export const orchestratorApi = {
 
   listProviders: () => request<{ providers: OrchestratorProvider[] }>('/orchestrate/providers'),
 
-  listJobs: () => request<{ jobs: OrchestratorJobSummary[] }>('/orchestrate/jobs'),
+  listJobs: () => request<{ jobs: OrchestratorJobSummary[] }>('/orchestrate/jobs')
 }
 
 // Pipeline API
@@ -5762,23 +6034,21 @@ export interface PipelineStatus {
 }
 
 export const pipelineApi = {
-  getConfig: () =>
-    request<PipelineConfig>('/pipeline/config'),
+  getConfig: () => request<PipelineConfig>('/pipeline/config'),
 
   updateConfig: (updates: Partial<PipelineConfig>) =>
     request<PipelineConfig>('/pipeline/config', {
       method: 'PUT',
-      body: JSON.stringify(updates),
+      body: JSON.stringify(updates)
     }),
 
-  getStatus: () =>
-    request<PipelineStatus>('/pipeline/status'),
+  getStatus: () => request<PipelineStatus>('/pipeline/status'),
 
   triggerStage: (stage: 'import' | 'classify' | 'cascade') =>
     request<{ imported?: number; classified?: number; total?: number }>(
       `/pipeline/trigger/${stage}`,
       { method: 'POST' }
-    ),
+    )
 }
 
 // Settings API types
@@ -5802,174 +6072,19 @@ export interface EnvTestResponse {
 }
 
 export const settingsApi = {
-  getEnvKeys: () =>
-    request<EnvKeysResponse>('/settings/env'),
+  getEnvKeys: () => request<EnvKeysResponse>('/settings/env'),
 
   updateEnvKeys: (values: Record<string, string>) =>
     request<{ success: boolean; updated: string[] }>('/settings/env', {
       method: 'PUT',
-      body: JSON.stringify({ values }),
+      body: JSON.stringify({ values })
     }),
 
   testEnvKey: (key: string, value?: string) =>
     request<EnvTestResponse>('/settings/env/test', {
       method: 'POST',
-      body: JSON.stringify({ key, value }),
-    }),
-}
-
-// AutoResearch API
-export interface AutoResearchStartConfig {
-  searchParams: string[]
-  maxExperiments: number
-  trainSteps: number
-  mutationRate: number
-  mutationScale: number
-  mode: 'simulate' | 'real'
-  baseModel: string
-  learningRate: number
-  loraRank: number
-  loraAlpha: number
-  loraDropout: number
-  warmupRatio: number
-  gradientAccumulationSteps: number
-  batchSize: number
-  maxSeqLength: number
-  load4Bit: boolean
-}
-
-export interface EnvironmentRecipeProposalConfig {
-  environments?: TerminalEnvironmentSpec[]
-  environmentPath?: string
-  source?: string
-  maxExperiments?: number
-  sampleSize?: number
-  passAt1Target?: number
-  mutationRate?: number
-  mutationScale?: number
-  seed?: number
-  outputPath?: string
-}
-
-export interface EnvironmentRecipeExperiment {
-  experiment_id: number
-  config_snapshot: Record<string, unknown>
-  metric_value: number
-  improved: boolean
-  duration_seconds: number
-  timestamp: string
-}
-
-export interface EnvironmentRecipeProposal {
-  schema_version: string
-  source_count: number
-  selected_count: number
-  selected_environment_ids: string[]
-  recipe: Record<string, unknown>
-  metric: number
-  mix_report: EnvironmentMixReport
-  selected_environments: Array<{
-    id: string
-    domain: string
-    skills: string[]
-    verifier_kind: string
-    fixture_kinds: string[]
-    'pass@1'?: number | null
-  }>
-}
-
-export interface EnvironmentRecipeProposalResponse {
-  status: string
-  source_count: number
-  best_metric: number | null
-  proposal: EnvironmentRecipeProposal
-  experiments: EnvironmentRecipeExperiment[]
-  validation_errors: EnvironmentImportError[]
-  output_path?: string | null
-}
-
-export interface DataRecipeProposalConfig {
-  goal?: string
-  sourceIds?: string[]
-  domain?: string
-  includeEvalOnly?: boolean
-  maxExperiments?: number
-  sampleSize?: number
-  qualityThreshold?: number
-  syntheticMultiplier?: number
-  decontamJaccardThreshold?: number
-  costBudgetUsd?: number
-  evalTarget?: string
-  mutationRate?: number
-  mutationScale?: number
-  seed?: number
-  outputPath?: string
-}
-
-export interface DataRecipeExperiment {
-  experiment_id: number
-  config_snapshot: Record<string, unknown>
-  metric_value: number
-  improved: boolean
-  duration_seconds: number
-  timestamp: string
-}
-
-export interface DataRecipeProposal {
-  schema_version: string
-  goal: string
-  genome: {
-    sample_size: number
-    seed: number
-    quality_threshold: number
-    synthetic_multiplier: number
-    decontam_jaccard_threshold: number
-    cost_budget_usd: number
-    eval_target: string
-    source_weights: Record<string, number>
-    domain_weights: Record<string, number>
-  }
-  sources: Array<{
-    id: string
-    domain: string
-    weight: number
-    adapter: string
-    artifact_types: string[]
-    training_eligible: boolean
-    eval_only: boolean
-  }>
-  guardrails: Record<string, unknown>
-  data_designer: {
-    pipeline: string
-    synthetic_multiplier: number
-    sample_size: number
-  }
-}
-
-export interface DataRecipeProposalResponse {
-  status: string
-  goal: string
-  source_count: number
-  excluded_sources: Array<{ id: string; reason: string }>
-  best_metric: number | null
-  proposal: DataRecipeProposal
-  experiments: DataRecipeExperiment[]
-  output_path?: string | null
-}
-
-export interface DataRecipeStatusResponse {
-  status: string
-  total_experiments: number
-  completed_experiments: number
-  best_metric: number | null
-  best_config: Record<string, unknown>
-  search_params: string[]
-  experiments: DataRecipeExperiment[]
-  proposal?: DataRecipeProposal | null
-  output_path?: string | null
-  goal?: string
-  source_count?: number
-  excluded_sources?: Array<{ id: string; reason: string }>
+      body: JSON.stringify({ key, value })
+    })
 }
 
 // Research index — Firecrawl-grounded news feed + AutoResearch advice
@@ -6001,141 +6116,4 @@ export const researchApi = {
       method: 'POST',
       body: JSON.stringify(body)
     })
-}
-
-export const autoresearchApi = {
-  start: (config: AutoResearchStartConfig) =>
-    request<{ status: string; message: string }>('/autoresearch/start', {
-      method: 'POST',
-      body: JSON.stringify({
-        search_params: config.searchParams,
-        max_experiments: config.maxExperiments,
-        train_steps: config.trainSteps,
-        mutation_rate: config.mutationRate,
-        mutation_scale: config.mutationScale,
-        mode: config.mode || 'simulate',
-        base_config: {
-          base_model: config.baseModel,
-          learning_rate: config.learningRate,
-          lora_r: config.loraRank,
-          lora_alpha: config.loraAlpha,
-          lora_dropout: config.loraDropout,
-          warmup_ratio: config.warmupRatio,
-          gradient_accumulation_steps: config.gradientAccumulationSteps,
-          batch_size: config.batchSize,
-          max_seq_length: config.maxSeqLength,
-          load_in_4bit: config.load4Bit,
-        }
-      })
-    }),
-
-  stop: () =>
-    request<{ status: string }>('/autoresearch/stop', { method: 'POST' }),
-
-  pause: () =>
-    request<{ status: string }>('/autoresearch/pause', { method: 'POST' }),
-
-  resume: () =>
-    request<{ status: string }>('/autoresearch/resume', { method: 'POST' }),
-
-  status: () =>
-    request<any>('/autoresearch/status'),
-
-  proposeEnvironmentRecipe: (config: EnvironmentRecipeProposalConfig) =>
-    request<EnvironmentRecipeProposalResponse>('/autoresearch/environment-recipe/propose', {
-      method: 'POST',
-      body: JSON.stringify({
-        environments: config.environments || [],
-        environment_path: config.environmentPath || null,
-        source: config.source || 'tmax',
-        max_experiments: config.maxExperiments ?? 8,
-        sample_size: config.sampleSize ?? 64,
-        pass_at_1_target: config.passAt1Target ?? 0.35,
-        mutation_rate: config.mutationRate ?? 0.35,
-        mutation_scale: config.mutationScale ?? 0.2,
-        seed: config.seed ?? 0,
-        output_path: config.outputPath || null,
-      }),
-    }),
-
-  proposeDataRecipe: (config: DataRecipeProposalConfig) =>
-    request<DataRecipeProposalResponse>('/autoresearch/data-recipe/propose', {
-      method: 'POST',
-      body: JSON.stringify({
-        goal: config.goal || 'dpo',
-        source_ids: config.sourceIds || [],
-        domain: config.domain || null,
-        include_eval_only: config.includeEvalOnly ?? false,
-        max_experiments: config.maxExperiments ?? 8,
-        sample_size: config.sampleSize ?? 1000,
-        quality_threshold: config.qualityThreshold ?? 0.7,
-        synthetic_multiplier: config.syntheticMultiplier ?? 1.0,
-        decontam_jaccard_threshold: config.decontamJaccardThreshold ?? 0.7,
-        cost_budget_usd: config.costBudgetUsd ?? 25.0,
-        eval_target: config.evalTarget || 'heldout_pass@k',
-        mutation_rate: config.mutationRate ?? 0.35,
-        mutation_scale: config.mutationScale ?? 0.2,
-        seed: config.seed ?? 0,
-        output_path: config.outputPath || null,
-      }),
-    }),
-
-  getDataRecipeStatus: () =>
-    request<DataRecipeStatusResponse>('/autoresearch/data-recipe/status'),
-
-  stopDataRecipe: () =>
-    request<{ status: string }>('/autoresearch/data-recipe/stop', { method: 'POST' }),
-
-  exportDataRecipe: (outputPath: string) =>
-    request<{ status: string; output_path: string; proposal: DataRecipeProposal }>(
-      '/autoresearch/data-recipe/export',
-      {
-        method: 'POST',
-        body: JSON.stringify({ output_path: outputPath }),
-      }
-    ),
-
-  // Trace research
-  startTraceResearch: (config: { searchParams: string[]; maxExperiments: number; mutationRate: number; mutationScale: number }) =>
-    request<{ status: string; message: string }>('/autoresearch/trace-research/start', {
-      method: 'POST',
-      body: JSON.stringify({
-        search_params: config.searchParams,
-        max_experiments: config.maxExperiments,
-        mutation_rate: config.mutationRate,
-        mutation_scale: config.mutationScale,
-      })
-    }),
-
-  stopTraceResearch: () =>
-    request<{ status: string }>('/autoresearch/trace-research/stop', { method: 'POST' }),
-
-  pauseTraceResearch: () =>
-    request<{ status: string }>('/autoresearch/trace-research/pause', { method: 'POST' }),
-
-  resumeTraceResearch: () =>
-    request<{ status: string }>('/autoresearch/trace-research/resume', { method: 'POST' }),
-
-  traceResearchStatus: () =>
-    request<any>('/autoresearch/trace-research/status'),
-
-  // Schema research
-  schemaResearch: {
-    start: (config: { baseTemplate: string; maxExperiments: number; mutationRate: number; mutationScale: number; mode: string }) =>
-      request<{ status: string; template: string }>('/autoresearch/schema-research/start', {
-        method: 'POST',
-        body: JSON.stringify({
-          base_template: config.baseTemplate,
-          max_experiments: config.maxExperiments,
-          mutation_rate: config.mutationRate,
-          mutation_scale: config.mutationScale,
-          mode: config.mode,
-        }),
-      }),
-    stop: () => request<{ status: string }>('/autoresearch/schema-research/stop', { method: 'POST' }),
-    pause: () => request<{ status: string }>('/autoresearch/schema-research/pause', { method: 'POST' }),
-    resume: () => request<{ status: string }>('/autoresearch/schema-research/resume', { method: 'POST' }),
-    getStatus: () => request<any>('/autoresearch/schema-research/status'),
-    getQuality: () => request<any>('/autoresearch/schema-research/quality'),
-  },
 }

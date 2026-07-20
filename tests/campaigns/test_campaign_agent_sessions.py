@@ -162,15 +162,11 @@ def test_same_desktop_can_rotate_live_exact_session_and_revokes_pending_delivery
     _old_private, old_key = _keypair()
     old_request = _request(old_key)
     old_receipt = service.register(_principal(), old_request, now=NOW)
-    EncryptedCampaignAgentCredentialBroker(repository, clock=lambda: NOW)(
-        _credential(old_request)
-    )
+    EncryptedCampaignAgentCredentialBroker(repository, clock=lambda: NOW)(_credential(old_request))
     _new_private, new_key = _keypair()
     renewal = _request(new_key, idempotency_key="renew-session-1")
 
-    new_receipt = service.register(
-        _principal(), renewal, now=NOW + timedelta(minutes=2)
-    )
+    new_receipt = service.register(_principal(), renewal, now=NOW + timedelta(minutes=2))
 
     assert new_receipt.registration_id != old_receipt.registration_id
     assert repository.get_registration(old_receipt.registration_id)["status"] == "revoked"
@@ -212,9 +208,7 @@ def test_expired_exact_tuple_can_reregister_and_resolves_only_new_live_row(sessi
     _new_private, new_key = _keypair()
     new_request = _request(new_key, idempotency_key="register-2", ttl_seconds=60)
 
-    new_receipt = service.register(
-        _principal(), new_request, now=NOW + timedelta(seconds=31)
-    )
+    new_receipt = service.register(_principal(), new_request, now=NOW + timedelta(seconds=31))
     resolved = repository.find_live_exact(
         new_request.scope,
         new_request.agent_family,
@@ -278,7 +272,9 @@ def test_origin_verification_is_exact_expiring_revocable_and_tamper_evident(sess
 
     _private2, key2 = _keypair()
     receipt2 = service.register(
-        _principal(), _request(key2, session_id="pty-session-2", idempotency_key="register-2"), now=NOW
+        _principal(),
+        _request(key2, session_id="pty-session-2", idempotency_key="register-2"),
+        now=NOW,
     )
     with sqlite3.connect(repository.db_path) as connection:
         connection.execute(
@@ -321,7 +317,9 @@ def test_broker_persists_only_ciphertext_and_same_desktop_claims_once(sessions):
     envelope = service.claim(_principal(), receipt.registration_id, now=NOW)
     from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PublicKey
 
-    shared = private.exchange(X25519PublicKey.from_public_bytes(_decode(envelope.ephemeral_public_key)))
+    shared = private.exchange(
+        X25519PublicKey.from_public_bytes(_decode(envelope.ephemeral_public_key))
+    )
     key = HKDF(
         algorithm=hashes.SHA256(),
         length=32,
@@ -378,7 +376,9 @@ def test_ciphertext_tampering_and_concurrent_double_claim_fail_closed(sessions):
 
     _private2, key2 = _keypair()
     receipt2 = service.register(
-        _principal(), _request(key2, session_id="pty-session-2", idempotency_key="register-2"), now=NOW
+        _principal(),
+        _request(key2, session_id="pty-session-2", idempotency_key="register-2"),
+        now=NOW,
     )
     request2 = _request(key2, session_id="pty-session-2", idempotency_key="register-2")
     broker2 = EncryptedCampaignAgentCredentialBroker(repository, clock=lambda: NOW)

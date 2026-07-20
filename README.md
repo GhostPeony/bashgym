@@ -1,16 +1,53 @@
 # BashGym
 
-**Turn your AI coding sessions into fine-tuned models.**
-
+**A durable AutoResearch platform for controlled model-improvement campaigns.**
 
 <img width="1745" height="906" alt="autobashgym" src="https://github.com/user-attachments/assets/3ba9430e-e910-4d74-8860-d9e4c88161d3" />
 
+---
+
+AutoResearch gives training and evaluation experiments a durable, reviewable
+record. It preserves the exact bindings,
+evidence, budgets, decisions, and human gates needed to improve a model safely
+over time. Trace capture and the training gym supply useful data and execution
+capabilities to that workflow; they are not the product's control plane.
 
 ---
 
-Every AI coding session is a chain-of-thought reasoning trace — step-by-step problem solving with verifiable outcomes. Every session from Claude Code, Gemini CLI, OpenCode, Codex, or Copilot CLI — tool calls, file edits, bash commands, multi-step reasoning — is a structured trace of expert coding behavior. BashGym captures these traces and uses them to train a reasoning language model with the same techniques behind frontier RLMs: GRPO for reinforcement learning, RLVR for verifiable reward signals from test results, and distillation to transfer reasoning from a large teacher into a small local model. The result is a personal RLM trained on how you actually think through code — your conventions, your repos, your patterns.
+## Platform at a glance
 
----
+- **AutoResearch** — the primary product: durable campaigns bind registered
+  model, data, evaluator, and local/private-compute profiles; establish a real
+  baseline before proposing one-variable candidates; enforce bounded budgets;
+  retain evaluation and artifact lineage; and require human oversight where it
+  applies. The restart-safe **Control Room** keeps the authoritative campaign
+  projection available across worker or backend interruptions. Creating a
+  `READY` campaign never launches work: **Start** is a separate, explicit,
+  server-revalidated approval.
+- **Trace capture and data factory** — capture supported AI coding sessions as
+  structured traces, curate them, scrub PII, and turn approved material into
+  training examples.
+- **Direct training and evaluation** — run a selected training job, evaluate it
+  against supported suites, and export the resulting model artifacts.
+- **Workspace** — inspect work in a desktop dashboard with terminal, browser,
+  and integration surfaces when those tools are useful to your workflow.
+
+## Start with AutoResearch
+
+1. Complete the local install in [Setup](#setup), then prove the control plane
+   without a GPU:
+
+   ```bash
+   bashgym campaign control-smoke --json
+   ```
+
+2. Follow the [durable AutoResearch campaign guide](docs/training/autoresearch-campaign.md)
+   to register the exact model, data, evaluator, and compute bindings; run
+   readiness checks; create a reviewable `READY` campaign; and make the later,
+   explicit **Start** decision.
+
+For a first model-training walkthrough rather than a durable campaign, use
+[Getting Started](docs/GETTING_STARTED.md).
 
 ## Documentation
 
@@ -28,85 +65,16 @@ Every AI coding session is a chain-of-thought reasoning trace — step-by-step p
 - **[docs/API.md](docs/API.md)** — REST API reference.
 - **[docs/FRONTEND_DESIGN_GUIDELINES.md](docs/FRONTEND_DESIGN_GUIDELINES.md)** — design tokens, components, and layout patterns.
 
----
-
-## How It Works
-
-```
-Use any AI coding tool (Claude Code, Gemini CLI, OpenCode, Codex, Copilot CLI)
-        ↓
-Adapters capture every session as structured traces
-        ↓
-Pipeline scores, classifies, and segments traces into training examples
-        ↓
-Fine-tune with SFT, DPO, GRPO, RLVR, Distillation, or Session Distillation (Unsloth + QLoRA)
-        ↓
-Export to LoRA adapter, merged weights, or GGUF → run via Ollama
-```
-
-| Stage | What Happens |
-|-------|--------------|
-| **Capture** | Adapters record every tool call, file edit, and command from your AI coding sessions (Claude Code, Gemini CLI, OpenCode, Codex, Copilot CLI) as structured JSON. Historical sessions can be bulk-imported. |
-| **Curate** | Traces are scored on 6 quality metrics. Good sessions become gold training data, bad ones become negative examples for DPO. PII is scrubbed. |
-| **Synthesize** | Gold traces are segmented into task-response pairs. Gaps are filled with synthetic augmentation via NVIDIA NeMo Data Designer or LLM-based generation. |
-| **Train** | SFT, DPO, GRPO, RLVR, Distillation, or Session Distillation fine-tunes a model using Unsloth (2–5x faster, 50–80% less VRAM). Train locally, on a private compute target, or via HuggingFace cloud. |
-| **Evaluate** | 11 benchmarks (HumanEval, MBPP, BigCodeBench, SWE-bench, GSM8K, and more) score the result. |
-| **Route** | Confidence-based routing shifts simple tasks from Claude to your trained model over time. |
-
-The pipeline can run automatically — file watchers monitor session directories across all configured tools and trigger import → classify → train when thresholds are met.
-
----
-
-## Supported AI Coding Tools
-
-| Tool | Live Capture | Historical Import | Hook Location |
-|------|-------------|-------------------|---------------|
-| **Claude Code** | Yes | Yes | `~/.claude/hooks/` |
-| **Gemini CLI** | Yes | Yes | `~/.gemini/settings.json` |
-| **OpenCode** | Yes | Yes | `~/.config/opencode/plugins/` |
-| **Codex** | Import only | Yes | `~/.codex/` |
-| **Copilot CLI** | Yes | Yes | `~/.copilot/hooks/` |
-
-Live capture hooks run silently alongside your coding tool and record sessions in real time. Historical import harvests existing session data already on disk — no hooks needed.
-
-The dashboard **Settings > Agents** tab provides one-click installation for all detected tools.
-
----
-
-## Terminal Canvas
-
-The workspace is an infinite canvas where terminals, browsers, and integration nodes live side by side and connect with edges to share context.
-
-<img width="1744" height="915" alt="bgcanvas" src="https://github.com/user-attachments/assets/d30355b8-b64e-4122-902e-6f496b7be33a" />
-
-**Terminals** are real PTY sessions (xterm.js + WebGL rendering, 10k line scrollback). Agent status is detected live from output — idle, running, tool calling, waiting for input — with CWD extraction from shell prompts. Drag files from the built-in file browser or your OS directly into a terminal to insert the path.
-
-**Browsers** render live pages in a Chromium webview. Take full-page or element-level screenshots (crosshair picker to select a specific element) and route them to connected terminals — feed page screenshots directly to Claude as context.
-
-**Integration nodes** plug external services into the canvas:
-
-| Node | What It Does |
-|------|--------------|
-| **Context** | Freeform notes, file contents, URLs, or snippets. Reload files and fetch URLs on demand. |
-| **Neon** | Connect to a Postgres database. Introspect schema, run queries, send results to terminals as markdown. |
-| **Vercel** | Monitor deployments, pull build logs, generate code with v0, push previews to browser nodes. |
-
-**Edges are context channels.** Connect any two nodes and content flows between them — schema from Neon, build logs from Vercel, screenshots from browsers, notes from context nodes — all prefilled into linked terminal inputs for review before sending.
-
-**Shift+drag** to box-select nodes and auto-connect them in a full mesh. Three view modes: grid (all panels visible), single (one at a time), or canvas (click to open floating popups). Viewport, node positions, and all settings persist across sessions.
-
----
-
 ## Setup
 
 ### Prerequisites
 
-| Requirement | Version | Notes |
-|-------------|---------|-------|
-| **Python** | 3.10+ | Backend API and control plane; use a backend-supported Python/CUDA combination for training |
-| **Node.js** | 22+ LTS | Frontend dashboard and native Electron packaging |
-| **Provider API key** | Optional | Add Anthropic, NVIDIA, OpenAI, or Hugging Face credentials only for features that use them |
-| **CUDA GPU** | 8GB+ VRAM | Only needed for local training. Not required for trace capture or the dashboard. |
+| Requirement          | Version   | Notes                                                                                       |
+| -------------------- | --------- | ------------------------------------------------------------------------------------------- |
+| **Python**           | 3.10+     | Backend API and control plane; use a backend-supported Python/CUDA combination for training |
+| **Node.js**          | 22+ LTS   | Frontend dashboard and native Electron packaging                                            |
+| **Provider API key** | Optional  | Add Anthropic, NVIDIA, OpenAI, or Hugging Face credentials only for features that use them  |
+| **CUDA GPU**         | 8GB+ VRAM | Only needed for local training. Not required for trace capture or the dashboard.            |
 
 On Windows, `npm install` requires Visual Studio Build Tools with "Desktop development with C++" (for `node-pty` native compilation).
 
@@ -252,6 +220,92 @@ Once you have 20–30 gold traces, you're ready to train. See **[docs/GETTING_ST
 
 ---
 
+## Trace capture and training workflow
+
+```
+Use any AI coding tool (Claude Code, Gemini CLI, OpenCode, Codex, Copilot CLI)
+        ↓
+Adapters capture every session as structured traces
+        ↓
+Pipeline scores, classifies, and segments traces into training examples
+        ↓
+Fine-tune with SFT, DPO, GRPO, RLVR, Distillation, or Session Distillation (Unsloth + QLoRA)
+        ↓
+Export to LoRA adapter, merged weights, or GGUF → run via Ollama
+```
+
+| Stage          | What Happens                                                                                                                                                                                               |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Capture**    | Adapters record every tool call, file edit, and command from your AI coding sessions (Claude Code, Gemini CLI, OpenCode, Codex, Copilot CLI) as structured JSON. Historical sessions can be bulk-imported. |
+| **Curate**     | Traces are scored on 6 quality metrics. Good sessions become gold training data, bad ones become negative examples for DPO. PII is scrubbed.                                                               |
+| **Synthesize** | Gold traces are segmented into task-response pairs. Gaps are filled with synthetic augmentation via NVIDIA NeMo Data Designer or LLM-based generation.                                                     |
+| **Train**      | SFT, DPO, GRPO, RLVR, Distillation, or Session Distillation fine-tunes a model using Unsloth (2–5x faster, 50–80% less VRAM). Train locally, on a private compute target, or via HuggingFace cloud.        |
+| **Evaluate**   | 11 benchmarks (HumanEval, MBPP, BigCodeBench, SWE-bench, GSM8K, and more) score the result.                                                                                                                |
+| **Route**      | Confidence-based routing shifts simple tasks from Claude to your trained model over time.                                                                                                                  |
+
+The pipeline can run automatically — file watchers monitor session directories
+across all configured tools and trigger import → classify → train when
+thresholds are met.
+
+---
+
+## Supported AI Coding Tools
+
+| Tool            | Live Capture | Historical Import | Hook Location                 |
+| --------------- | ------------ | ----------------- | ----------------------------- |
+| **Claude Code** | Yes          | Yes               | `~/.claude/hooks/`            |
+| **Gemini CLI**  | Yes          | Yes               | `~/.gemini/settings.json`     |
+| **OpenCode**    | Yes          | Yes               | `~/.config/opencode/plugins/` |
+| **Codex**       | Import only  | Yes               | `~/.codex/`                   |
+| **Copilot CLI** | Yes          | Yes               | `~/.copilot/hooks/`           |
+
+Live capture hooks run silently alongside your coding tool and record sessions
+in real time. Historical import harvests existing session data already on disk—no
+hooks needed.
+
+The dashboard **Settings > Agents** tab provides one-click installation for all
+detected tools.
+
+---
+
+## Terminal Canvas
+
+The workspace is an infinite canvas where terminals, browsers, and integration
+nodes live side by side and connect with edges to share context.
+
+<img width="1744" height="915" alt="bgcanvas" src="https://github.com/user-attachments/assets/d30355b8-b64e-4122-902e-6f496b7be33a" />
+
+**Terminals** are real PTY sessions (xterm.js + WebGL rendering, 10k line
+scrollback). Agent status is detected live from output—idle, running, tool
+calling, waiting for input—with CWD extraction from shell prompts. Drag files
+from the built-in file browser or your OS directly into a terminal to insert the
+path.
+
+**Browsers** render live pages in a Chromium webview. Take full-page or
+element-level screenshots (crosshair picker to select a specific element) and
+route them to connected terminals—feed page screenshots directly to Claude as
+context.
+
+**Integration nodes** plug external services into the canvas:
+
+| Node        | What It Does                                                                                           |
+| ----------- | ------------------------------------------------------------------------------------------------------ |
+| **Context** | Freeform notes, file contents, URLs, or snippets. Reload files and fetch URLs on demand.               |
+| **Neon**    | Connect to a Postgres database. Introspect schema, run queries, send results to terminals as markdown. |
+| **Vercel**  | Monitor deployments, pull build logs, generate code with v0, push previews to browser nodes.           |
+
+**Edges are context channels.** Connect any two nodes and content flows between
+them—schema from Neon, build logs from Vercel, screenshots from browsers, notes
+from context nodes—all prefilled into linked terminal inputs for review before
+sending.
+
+**Shift+drag** to box-select nodes and auto-connect them in a full mesh. Three
+view modes: grid (all panels visible), single (one at a time), or canvas (click
+to open floating popups). Viewport, node positions, and all settings persist
+across sessions.
+
+---
+
 ## Platform Overview
 
 ### Workspace
@@ -299,10 +353,10 @@ See [Training](#training) for details.
 
 Two feedback loops that improve agent behavior at different speeds:
 
-| Loop | Mechanism | Latency | Effect |
-|------|-----------|---------|--------|
+| Loop          | Mechanism                                                                                         | Latency | Effect                      |
+| ------------- | ------------------------------------------------------------------------------------------------- | ------- | --------------------------- |
 | **Fast loop** | Prompt evolution — analyze failure patterns, mutate worker prompts, evaluate, deploy best variant | Minutes | Immediate behavioral change |
-| **Slow loop** | Weight training — accumulate traces, generate examples, fine-tune model | Hours | Deep, permanent learning |
+| **Slow loop** | Weight training — accumulate traces, generate examples, fine-tune model                           | Hours   | Deep, permanent learning    |
 
 The fast loop extracts recurring failure patterns from decision logs (wrong tool choices, missing context, anti-patterns) and uses an LLM to generate targeted prompt patches. Variants are scored against held-out traces and retained only when they improve quality.
 
@@ -316,19 +370,19 @@ Typed event bus with 44 event types covering pipeline, training, orchestration, 
 
 11 benchmarks for scoring trained models:
 
-| Benchmark | Focus |
-|-----------|-------|
-| HumanEval | Function-level code generation (164 problems) |
-| MBPP | Mostly basic programming problems (974 problems) |
-| BigCodeBench | Complex, multi-library coding tasks |
-| SWE-bench | Real GitHub issue resolution |
-| DS-1000 | Data science problems |
-| BFCL | Function calling accuracy |
-| GSM8K | Math reasoning |
-| ARC | Abstract reasoning |
-| HellaSwag | Commonsense inference |
-| ToxiGen | Toxicity detection |
-| BBQ | Bias measurement |
+| Benchmark    | Focus                                            |
+| ------------ | ------------------------------------------------ |
+| HumanEval    | Function-level code generation (164 problems)    |
+| MBPP         | Mostly basic programming problems (974 problems) |
+| BigCodeBench | Complex, multi-library coding tasks              |
+| SWE-bench    | Real GitHub issue resolution                     |
+| DS-1000      | Data science problems                            |
+| BFCL         | Function calling accuracy                        |
+| GSM8K        | Math reasoning                                   |
+| ARC          | Abstract reasoning                               |
+| HellaSwag    | Commonsense inference                            |
+| ToxiGen      | Toxicity detection                               |
+| BBQ          | Bias measurement                                 |
 
 Plus LLM-as-Judge scoring (correctness, helpfulness, safety) and RAG metrics (faithfulness, answer relevancy, context precision) via NeMo Evaluator integration.
 
@@ -353,13 +407,13 @@ Built-in assistant with tool use and system context. Available in-app and as a s
 
 Guardrails pipeline with 5 check types applied to inputs and outputs:
 
-| Check | Description |
-|-------|-------------|
-| **Injection detection** | Regex patterns for prompt injection attempts |
-| **Content moderation** | Blocks harmful or inappropriate content |
-| **Topic control** | Constrains responses to allowed domains |
-| **Code safety** | Blocks dangerous commands (`rm -rf /`, fork bombs, `curl \| sh`, privilege escalation) |
-| **PII filter** | Opt-in detection and redaction of personal information |
+| Check                   | Description                                                                            |
+| ----------------------- | -------------------------------------------------------------------------------------- |
+| **Injection detection** | Regex patterns for prompt injection attempts                                           |
+| **Content moderation**  | Blocks harmful or inappropriate content                                                |
+| **Topic control**       | Constrains responses to allowed domains                                                |
+| **Code safety**         | Blocks dangerous commands (`rm -rf /`, fork bombs, `curl \| sh`, privilege escalation) |
+| **PII filter**          | Opt-in detection and redaction of personal information                                 |
 
 ### Observability
 
@@ -375,15 +429,15 @@ Gamified progress tracking across trace collection, quality, training, and maste
 
 ### Strategies
 
-| Strategy | What It Does | When To Use |
-|----------|--------------|-------------|
-| **SFT** | Supervised fine-tuning — trains the model to reproduce successful traces | Start here. Works with 20–30 gold traces. |
-| **DPO** | Direct Preference Optimization — learns from pairs of good and bad responses | When you have both gold and failed traces. |
-| **GRPO** | Group Relative Policy Optimization via `trl.GRPOTrainer`. Three tiered reward functions: syntax (`ast.parse`), execution (`subprocess`), and verification (`pytest`). Model generates multiple completions per prompt and learns from the reward signal. | When you want RL-based training. Needs test cases for verification mode. |
-| **RLVR** | RL with Verifiable Rewards — GRPO with verification-locked rewards. Test results from `pytest` are the reward signal: pass rate becomes the score. | When your traces include test code. The strongest signal for code correctness. |
-| **Distillation** | Knowledge distillation from a large teacher (e.g. Claude) into a small student. Combines soft labels (KL divergence) and hard labels (cross-entropy) weighted by alpha. Supports offline and on-policy modes. | When you want a compact model that reasons like a larger one. |
-| **Session Distillation** | Targeted self-distillation from failed trace spans: insert a short local hint, score the same target tokens under original and hinted context, and train with masked KL/CE. | When traces contain local mistakes, retries, or recovery pivots that are too narrow for DPO and not yet ready for GRPO/RLVR. |
-| **Cascade RL** | Sequential domain-by-domain GRPO training inspired by Nemotron Cascade 2. Trains each coding domain independently with tailored reward functions, then merges domain experts via MOPD distillation. | When you want domain-specialized training. Best results with diverse traces across file editing, bash, search, and multi-step tasks. |
+| Strategy                 | What It Does                                                                                                                                                                                                                                             | When To Use                                                                                                                          |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| **SFT**                  | Supervised fine-tuning — trains the model to reproduce successful traces                                                                                                                                                                                 | Start here. Works with 20–30 gold traces.                                                                                            |
+| **DPO**                  | Direct Preference Optimization — learns from pairs of good and bad responses                                                                                                                                                                             | When you have both gold and failed traces.                                                                                           |
+| **GRPO**                 | Group Relative Policy Optimization via `trl.GRPOTrainer`. Three tiered reward functions: syntax (`ast.parse`), execution (`subprocess`), and verification (`pytest`). Model generates multiple completions per prompt and learns from the reward signal. | When you want RL-based training. Needs test cases for verification mode.                                                             |
+| **RLVR**                 | RL with Verifiable Rewards — GRPO with verification-locked rewards. Test results from `pytest` are the reward signal: pass rate becomes the score.                                                                                                       | When your traces include test code. The strongest signal for code correctness.                                                       |
+| **Distillation**         | Knowledge distillation from a large teacher (e.g. Claude) into a small student. Combines soft labels (KL divergence) and hard labels (cross-entropy) weighted by alpha. Supports offline and on-policy modes.                                            | When you want a compact model that reasons like a larger one.                                                                        |
+| **Session Distillation** | Targeted self-distillation from failed trace spans: insert a short local hint, score the same target tokens under original and hinted context, and train with masked KL/CE.                                                                              | When traces contain local mistakes, retries, or recovery pivots that are too narrow for DPO and not yet ready for GRPO/RLVR.         |
+| **Cascade RL**           | Sequential domain-by-domain GRPO training inspired by Nemotron Cascade 2. Trains each coding domain independently with tailored reward functions, then merges domain experts via MOPD distillation.                                                      | When you want domain-specialized training. Best results with diverse traces across file editing, bash, search, and multi-step tasks. |
 
 ### Base Models
 
@@ -401,11 +455,11 @@ backend and model support it, but is not silently forced for every run.
 
 ### Output Formats
 
-| Format | Location | Use Case |
-|--------|----------|----------|
-| **LoRA adapter** | `lora_adapters/` | ~50MB, composable, hot-swappable |
-| **Merged weights** | `merged/` | Full 16-bit model, ready for inference |
-| **GGUF** | `exported_gguf/` | Quantized (default `q4_k_m`), for Ollama / llama.cpp / LM Studio / GPT4All |
+| Format             | Location         | Use Case                                                                   |
+| ------------------ | ---------------- | -------------------------------------------------------------------------- |
+| **LoRA adapter**   | `lora_adapters/` | ~50MB, composable, hot-swappable                                           |
+| **Merged weights** | `merged/`        | Full 16-bit model, ready for inference                                     |
+| **GGUF**           | `exported_gguf/` | Quantized (default `q4_k_m`), for Ollama / llama.cpp / LM Studio / GPT4All |
 
 ### Private Compute Training
 
@@ -513,24 +567,12 @@ mutation only when the authenticated projection proves that the registered
 consumer has a live controller lease; an acceptance receipt is never presented
 as an executed resume.
 
-Three earlier prototype loops remain behind the temporary
-`/api/autoresearch/*` compatibility API for hyperparameter, trace-curation, and
-schema exploration. They are not part of the official Control Room, have no
-renderer-owned state surface, and must not be presented as durable campaign
-evidence:
-
-| Mode | What It Evolves | What It Searches | How It Evaluates |
-|------|----------------|-----------------|-----------------|
-| **Hyperparameter search** | Training configuration | Learning rate, LoRA rank/alpha/dropout, batch size, sequence length, quantization, warmup ratio | Short training runs (50-100 steps) measuring validation loss |
-| **Trace research** | Data curation strategy | Quality thresholds, segmentation boundaries, cognitive tag inclusion, silver trace ratio, dedup threshold, per-repo caps | End-to-end: filter traces → generate examples → micro-train → measure loss |
-| **Schema evolution** | Data Designer pipeline configs | Temperatures, column toggles, judge rubrics, provider assignments, code validation, embedding dedup | Two-stage: judge scores filter bad candidates fast (25 examples), then micro-train validates top 5 |
-
-**Schema evolution** is the newest mode — the AutoCurriculum Compiler. Instead of tuning hyperparameters or data curation rules, it evolves the entire data generation pipeline. A `SchemaSearchSpace` mutates Data Designer configs (which models generate code vs judge quality, what temperature, how many judge dimensions, whether to include code validation), evaluates each mutant by generating real training data and measuring downstream training loss, and keeps winners. The template library maps failure patterns from your traces to starting templates — if your model keeps picking the wrong tool, the schema evolves toward tool-use-focused training data.
-
-The prototype hyperparameter loop uses the older `SearchSpace` ABC →
-`AutoResearcher` engine. Compatibility events may still enter the general
-Activity feed, but they never update durable campaign authority. New product
-work belongs under `/api/campaigns/*` and the AutoResearch sidebar destination.
+> **Legacy compatibility only:** the hidden `/api/autoresearch/*` endpoints
+> retain earlier hyperparameter, trace-curation, and schema-search experiments
+> for unsupported compatibility. They are disabled by default and can be
+> re-exposed only with `BASHGYM_ENABLE_LEGACY_AUTORESEARCH=true`. They are not
+> part of the Control Room or durable campaign authority; new work belongs under
+> `/api/campaigns/*`.
 
 **Embedding-based dedup** runs across all modes via NIM API: computes semantic similarity between training examples and removes near-duplicates (configurable threshold, default 0.95). Diversity scores are tracked in the quality dashboard.
 
@@ -546,21 +588,21 @@ local/private target during campaign resolution.
 
 Copy `.env.example` to `.env`:
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `ANTHROPIC_API_KEY` | No | — | Claude teacher/provider features only |
-| `OPENAI_API_KEY` | No | — | OpenAI provider features only |
-| `GOOGLE_API_KEY` | No | — | Google/Gemini provider features only |
-| `BASE_MODEL` | No | — | Explicit compatible trainable-base ID; durable campaigns also pin an immutable revision |
-| `HF_TOKEN` | No | — | HuggingFace token (for cloud training and model push) |
-| `NVIDIA_API_KEY` | No | — | NVIDIA NIM API key (for synthetic data augmentation) |
-| `ROUTING_STRATEGY` | No | `confidence_based` | Model routing strategy |
-| `AUGMENTATION_PROVIDER` | No | `anthropic` | Synthetic data provider: `anthropic` or `nim` |
-| `OLLAMA_ENABLED` | No | `true` | Enable Ollama local inference provider |
-| `OLLAMA_BASE_URL` | No | `http://localhost:11434` | Ollama server URL |
-| `SSH_REMOTE_HOST` | No | — | Private compute target host |
-| `SSH_REMOTE_USER` | No | — | SSH username for remote training |
-| `SSH_REMOTE_KEY_PATH` | No | `~/.ssh/id_rsa` | Path to SSH private key |
+| Variable                | Required | Default                  | Description                                                                             |
+| ----------------------- | -------- | ------------------------ | --------------------------------------------------------------------------------------- |
+| `ANTHROPIC_API_KEY`     | No       | —                        | Claude teacher/provider features only                                                   |
+| `OPENAI_API_KEY`        | No       | —                        | OpenAI provider features only                                                           |
+| `GOOGLE_API_KEY`        | No       | —                        | Google/Gemini provider features only                                                    |
+| `BASE_MODEL`            | No       | —                        | Explicit compatible trainable-base ID; durable campaigns also pin an immutable revision |
+| `HF_TOKEN`              | No       | —                        | HuggingFace token (for cloud training and model push)                                   |
+| `NVIDIA_API_KEY`        | No       | —                        | NVIDIA NIM API key (for synthetic data augmentation)                                    |
+| `ROUTING_STRATEGY`      | No       | `confidence_based`       | Model routing strategy                                                                  |
+| `AUGMENTATION_PROVIDER` | No       | `anthropic`              | Synthetic data provider: `anthropic` or `nim`                                           |
+| `OLLAMA_ENABLED`        | No       | `true`                   | Enable Ollama local inference provider                                                  |
+| `OLLAMA_BASE_URL`       | No       | `http://localhost:11434` | Ollama server URL                                                                       |
+| `SSH_REMOTE_HOST`       | No       | —                        | Private compute target host                                                             |
+| `SSH_REMOTE_USER`       | No       | —                        | SSH username for remote training                                                        |
+| `SSH_REMOTE_KEY_PATH`   | No       | `~/.ssh/id_rsa`          | Path to SSH private key                                                                 |
 
 API keys can also be managed through the dashboard at **Settings > API Keys**, which provides secure storage via the Electron keychain.
 
@@ -579,7 +621,7 @@ bashgym/
 │   ├── factory/              # Data synthesis (trace processor, example generator, decision extractor)
 │   ├── gym/                  # Training (trainer, autoresearch, cascade, training goals)
 │   │   ├── trainer.py        # SFT, DPO, GRPO, RLVR, Distillation
-│   │   ├── autoresearch.py   # SearchSpace ABC + evolutionary hyperparameter search
+│   │   ├── autoresearch.py   # Unsupported legacy compatibility implementation
 │   │   ├── schema_search_space.py # Schema evolution for Data Designer configs
 │   │   ├── cascade_scheduler.py # Cascade RL + MOPD distillation
 │   │   ├── trace_researcher.py # Data curation optimization
@@ -627,10 +669,12 @@ bashgym/
 See [TODOS.md](TODOS.md) for the full roadmap with details.
 
 **Recently shipped:**
+
 - **AutoCurriculum Compiler** — Data Designer schemas evolve via evolutionary search (SchemaResearcher). Two-stage evaluation: judge scores filter bad candidates fast, micro-training validates winners. Template library auto-selects pipelines from failure analysis.
 - **Cascade RL** — Sequential domain-by-domain GRPO training inspired by Nemotron Cascade 2. Four coding domains (file ops, bash, search, multi-step reasoning) each get tailored reward functions. MOPD distillation merges domain experts into one model.
 
 **Up next:**
+
 - **Black-Box On-Policy Distillation** — Real-time teacher inference (Claude/NIM) during training, targeting the student's actual weaknesses instead of using stale pre-generated outputs
 - **Schema Sharing** — Export/import evolved schemas with provenance so others can skip the search
 

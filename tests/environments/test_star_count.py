@@ -30,16 +30,12 @@ def test_star_count_verifier_separates_count_accuracy_from_formatting():
     assert exact.count_accuracy == 1.0
     assert exact.format_accuracy == 1.0
 
-    flexible = score_star_count_prediction(
-        "blue: 1; yellow: 3; red: 2; green: 0", expected
-    )
+    flexible = score_star_count_prediction("blue: 1; yellow: 3; red: 2; green: 0", expected)
     assert flexible.exact is True
     assert flexible.count_accuracy == 1.0
     assert flexible.format_accuracy == 0.0
 
-    near_miss = score_star_count_prediction(
-        "red=2, blue=1, green=1, yellow=3", expected
-    )
+    near_miss = score_star_count_prediction("red=2, blue=1, green=1, yellow=3", expected)
     assert near_miss.exact is False
     assert near_miss.count_accuracy == 0.75
     assert near_miss.format_accuracy == 1.0
@@ -77,9 +73,7 @@ def test_star_count_dataset_is_reproducible_and_secret_free(tmp_path):
             with Image.open(first / record["image"]) as image:
                 assert image.mode == "RGB"
                 assert image.width != 0 and image.height != 0
-            assert (first / record["image"]).read_bytes() == (
-                second / record["image"]
-            ).read_bytes()
+            assert (first / record["image"]).read_bytes() == (second / record["image"]).read_bytes()
 
     assert len({record["example_id"] for record in all_records}) == 9
     serialized = json.dumps(manifest_a, sort_keys=True)
@@ -101,6 +95,9 @@ def test_star_count_environment_declares_exact_and_partial_rewards():
         "count_accuracy",
         "format_accuracy",
     ]
-    assert environment.verifier.combine_reward_components(
-        {"count_accuracy": 1.0, "format_accuracy": 1.0}
-    ) == 1.0
+    assert (
+        environment.verifier.combine_reward_components(
+            {"count_accuracy": 1.0, "format_accuracy": 1.0}
+        )
+        == 1.0
+    )

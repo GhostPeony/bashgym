@@ -1,16 +1,16 @@
 """Tests for InferenceProvider ABC and supporting data structures."""
 
 import asyncio
-import pytest
 from abc import ABC
 
-from bashgym.providers.base import (
-    ProviderResponse,
-    HealthStatus,
-    ProviderModel,
-    InferenceProvider,
-)
+import pytest
 
+from bashgym.providers.base import (
+    HealthStatus,
+    InferenceProvider,
+    ProviderModel,
+    ProviderResponse,
+)
 
 # ── ProviderResponse tests ──────────────────────────────────────────
 
@@ -74,12 +74,20 @@ class TestProviderResponse:
     def test_metadata_default_is_independent(self):
         """Each instance should get its own metadata dict."""
         a = ProviderResponse(
-            content="", model_name="", provider_type="", latency_ms=0,
-            tokens_used=0, success=True,
+            content="",
+            model_name="",
+            provider_type="",
+            latency_ms=0,
+            tokens_used=0,
+            success=True,
         )
         b = ProviderResponse(
-            content="", model_name="", provider_type="", latency_ms=0,
-            tokens_used=0, success=True,
+            content="",
+            model_name="",
+            provider_type="",
+            latency_ms=0,
+            tokens_used=0,
+            success=True,
         )
         a.metadata["x"] = 1
         assert "x" not in b.metadata
@@ -289,8 +297,12 @@ class TestInferenceProvider:
 
             async def generate(self, messages, model=None, **kwargs):
                 return ProviderResponse(
-                    content="", model_name="", provider_type="fake",
-                    latency_ms=0, tokens_used=0, success=True,
+                    content="",
+                    model_name="",
+                    provider_type="fake",
+                    latency_ms=0,
+                    tokens_used=0,
+                    success=True,
                 )
 
             async def health_check(self):
@@ -321,8 +333,12 @@ class TestInferenceProvider:
 
             async def generate(self, messages, model=None, **kwargs):
                 return ProviderResponse(
-                    content="", model_name="", provider_type="fake",
-                    latency_ms=0, tokens_used=0, success=True,
+                    content="",
+                    model_name="",
+                    provider_type="fake",
+                    latency_ms=0,
+                    tokens_used=0,
+                    success=True,
                 )
 
             async def health_check(self):

@@ -1165,16 +1165,14 @@ class CampaignRepository:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with self._connection() as connection:
             connection.execute("PRAGMA journal_mode=WAL")
-            connection.execute(
-                """
+            connection.execute("""
                 CREATE TABLE IF NOT EXISTS campaign_schema_migrations (
                     version INTEGER PRIMARY KEY,
                     name TEXT NOT NULL,
                     checksum TEXT NOT NULL,
                     applied_at TEXT NOT NULL
                 )
-                """
-            )
+                """)
         for version, name, statements in MIGRATIONS:
             checksum = hashlib.sha256("\n".join(statements).encode("utf-8")).hexdigest()
             with self._connection(immediate=True) as connection:
@@ -1228,9 +1226,7 @@ class CampaignRepository:
             raise CampaignPersistenceError("campaign_code_lineage_record_corrupt")
         return record
 
-    def register_code_lineage_requirement(
-        self, value: CodeLineageRecord
-    ) -> CodeLineageRecord:
+    def register_code_lineage_requirement(self, value: CodeLineageRecord) -> CodeLineageRecord:
         """Persist one required lineage record with exact replay semantics."""
 
         self._require_initialized()
@@ -1315,15 +1311,11 @@ class CampaignRepository:
                 "created_at",
             )
             immutable_changed = any(
-                getattr(current, field) != getattr(record, field)
-                for field in immutable_fields
+                getattr(current, field) != getattr(record, field) for field in immutable_fields
             )
-            evidence_rewritten = (
-                current.state != CodeLineageState.REQUIRED
-                and (
-                    current.base_commit != record.base_commit
-                    or current.branch_name != record.branch_name
-                )
+            evidence_rewritten = current.state != CodeLineageState.REQUIRED and (
+                current.base_commit != record.base_commit
+                or current.branch_name != record.branch_name
             )
             if (
                 immutable_changed
@@ -1855,10 +1847,13 @@ class CampaignRepository:
     def list_studies(self, workspace_id: str, campaign_id: str) -> tuple[Study, ...]:
         self._require_initialized()
         with self._connection() as connection:
-            if connection.execute(
-                "SELECT 1 FROM campaigns WHERE workspace_id = ? AND campaign_id = ?",
-                (workspace_id, campaign_id),
-            ).fetchone() is None:
+            if (
+                connection.execute(
+                    "SELECT 1 FROM campaigns WHERE workspace_id = ? AND campaign_id = ?",
+                    (workspace_id, campaign_id),
+                ).fetchone()
+                is None
+            ):
                 raise RecordNotFoundError("campaign not found")
             rows = connection.execute(
                 """
@@ -2621,18 +2616,14 @@ class CampaignRepository:
                 if raw_reference is None:
                     continue
                 if row["schema_name"] != NEMO_GYM_CAMPAIGN_EVIDENCE_SCHEMA:
-                    raise CampaignPersistenceError(
-                        "campaign_nemo_gym_evidence_schema_mismatch"
-                    )
+                    raise CampaignPersistenceError("campaign_nemo_gym_evidence_schema_mismatch")
                 reference = NemoGymEvidenceReference.model_validate(raw_reference)
                 if (
                     reference.artifact_id != row["artifact_id"]
                     or reference.artifact_sha256 != row["sha256"]
                     or not bool(row["valid"])
                 ):
-                    raise CampaignPersistenceError(
-                        "campaign_nemo_gym_evidence_reference_mismatch"
-                    )
+                    raise CampaignPersistenceError("campaign_nemo_gym_evidence_reference_mismatch")
                 nemo_gym_references.append(reference)
         return CampaignEvidenceSnapshot(
             workspace_id=workspace_id,
@@ -2838,13 +2829,16 @@ class CampaignRepository:
             current = self._campaign_from_row(row)
             if current.version != expected_version:
                 raise RevisionConflictError(expected_version, current.version)
-            if connection.execute(
-                """
+            if (
+                connection.execute(
+                    """
                 SELECT 1 FROM campaign_source_approvals
                 WHERE workspace_id = ? AND campaign_id = ? AND source_id = ?
                 """,
-                (workspace_id, campaign_id, source_id),
-            ).fetchone() is not None:
+                    (workspace_id, campaign_id, source_id),
+                ).fetchone()
+                is not None
+            ):
                 raise RecordAlreadyExistsError("campaign source approval already exists")
             created_at = utc_now()
             connection.execute(
@@ -2988,9 +2982,9 @@ class CampaignRepository:
             )
             updated = current.model_copy(
                 update={
-                    "active_study_id": None
-                    if current.active_study_id == study_id
-                    else current.active_study_id,
+                    "active_study_id": (
+                        None if current.active_study_id == study_id else current.active_study_id
+                    ),
                     "version": current.version + 1,
                     "updated_at": changed_at,
                 }
@@ -3464,9 +3458,7 @@ class CampaignRepository:
                     if human_authority_row["promotion_state"] is not None
                     else None
                 ),
-                has_current_blocking_work=bool(
-                    human_authority_row["has_current_blocking_work"]
-                ),
+                has_current_blocking_work=bool(human_authority_row["has_current_blocking_work"]),
             )
             promotion_gate = evaluate_promotion_gate(
                 active_action_id=current.active_action_id,
@@ -3496,9 +3488,9 @@ class CampaignRepository:
                 "schema_version": "campaign_champion.v1",
                 "campaign_id": campaign_id,
                 "candidate_digest": candidate_digest,
-                "development_decision_id": str(decision_row["decision_id"])
-                if decision_row
-                else None,
+                "development_decision_id": (
+                    str(decision_row["decision_id"]) if decision_row else None
+                ),
                 "protected_gate_passed": protected_passed,
                 "override": bool(override_reason),
                 "override_reason": override_reason,
@@ -3767,9 +3759,11 @@ class CampaignRepository:
                 """,
                 (
                     updated.status.value,
-                    updated.prior_scheduling_status.value
-                    if updated.prior_scheduling_status is not None
-                    else None,
+                    (
+                        updated.prior_scheduling_status.value
+                        if updated.prior_scheduling_status is not None
+                        else None
+                    ),
                     updated.stop_reason,
                     updated.version,
                     _iso(updated.updated_at),
@@ -4107,9 +4101,11 @@ class CampaignRepository:
                 """,
                 (
                     updated.status.value,
-                    updated.prior_scheduling_status.value
-                    if updated.prior_scheduling_status
-                    else None,
+                    (
+                        updated.prior_scheduling_status.value
+                        if updated.prior_scheduling_status
+                        else None
+                    ),
                     updated.version,
                     _iso(updated.updated_at),
                     entry.workspace_id,

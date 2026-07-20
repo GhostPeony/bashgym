@@ -31,16 +31,22 @@ function sessionStorageKey(workspaceId: string): string {
 }
 
 function mutationStorageKey(scope: GuidedSetupMutationScope): string {
-  if (!publicId.test(scope.workspaceId) || !sessionId.test(scope.sessionId)
-    || !Number.isInteger(scope.version) || scope.version < 0 || scope.version > 6
-    || !publicId.test(scope.selectionId)) throw new Error('Guided setup mutation scope is invalid')
+  if (
+    !publicId.test(scope.workspaceId) ||
+    !sessionId.test(scope.sessionId) ||
+    !Number.isInteger(scope.version) ||
+    scope.version < 0 ||
+    scope.version > 6 ||
+    !publicId.test(scope.selectionId)
+  )
+    throw new Error('Guided setup mutation scope is invalid')
   return `bashgym.autoresearch.setup-idempotency.v1:${scope.workspaceId}:${scope.sessionId}:${scope.version}:${scope.step}:${scope.selectionId}`
 }
 
 export function getOrCreateGuidedSetupSessionId(
   storage: GuidedSetupStorage,
   workspaceId: string,
-  randomHex: () => string,
+  randomHex: () => string
 ): string {
   const key = sessionStorageKey(workspaceId)
   const existing = storage.getItem(key)
@@ -52,7 +58,7 @@ export function getOrCreateGuidedSetupSessionId(
 
 export function readGuidedSetupSessionId(
   storage: GuidedSetupStorage,
-  workspaceId: string,
+  workspaceId: string
 ): string | null {
   const existing = storage.getItem(sessionStorageKey(workspaceId))
   return existing && sessionId.test(existing) ? existing : null
@@ -61,7 +67,7 @@ export function readGuidedSetupSessionId(
 export function getOrCreateGuidedSetupIdempotencyKey(
   storage: GuidedSetupStorage,
   scope: GuidedSetupMutationScope,
-  randomHex: () => string,
+  randomHex: () => string
 ): string {
   const key = mutationStorageKey(scope)
   const existing = storage.getItem(key)
@@ -73,7 +79,7 @@ export function getOrCreateGuidedSetupIdempotencyKey(
 
 export function clearGuidedSetupIdempotencyKey(
   storage: GuidedSetupStorage,
-  scope: GuidedSetupMutationScope,
+  scope: GuidedSetupMutationScope
 ): void {
   storage.removeItem(mutationStorageKey(scope))
 }

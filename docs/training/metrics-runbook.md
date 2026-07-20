@@ -42,15 +42,15 @@ It also summarizes non-gating diagnostic signals when present:
 Not every number has the same authority. Use this hierarchy before changing run
 settings or promoting a model.
 
-| Role | Metrics | What to do with them |
-|---|---|---|
-| Setup checks | Dataset size, truncation count, replay schema, smoke-bundle `contract_ready`. | Fix before training. These are cheap contract failures. |
-| Training health | Train/eval loss, grad norm, reward, KL, entropy, ECHO loss. | Tune learning rate, epochs, sequence length, and objective weights. |
-| Signal quality | `reward_std`, `frac_reward_zero_std`, verifier status, timeout rate, RWML transition count. | Decide whether RL has a usable learning signal. |
-| Behavior evidence | pass@1/pass@k, heldout trace score, holdout comparison, external benchmark scores. | Decide whether the candidate is better. |
-| Safety/release gates | Tamper status, spurious-reward controls, reward-hacking canaries, verifier-error patterns. | Block routing until cleared. |
-| Diagnostic context | ECHO/RWML quality, embedding-distance distribution, command-count change. | Explain behavior and mine curriculum; do not ship from these alone. |
-| Operational health | Tokens/sec, peak GPU memory, OOM count, backend import status. | Right-size batch, sequence length, backend, and compute-target readiness. |
+| Role                 | Metrics                                                                                     | What to do with them                                                      |
+| -------------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Setup checks         | Dataset size, truncation count, replay schema, smoke-bundle `contract_ready`.               | Fix before training. These are cheap contract failures.                   |
+| Training health      | Train/eval loss, grad norm, reward, KL, entropy, ECHO loss.                                 | Tune learning rate, epochs, sequence length, and objective weights.       |
+| Signal quality       | `reward_std`, `frac_reward_zero_std`, verifier status, timeout rate, RWML transition count. | Decide whether RL has a usable learning signal.                           |
+| Behavior evidence    | pass@1/pass@k, heldout trace score, holdout comparison, external benchmark scores.          | Decide whether the candidate is better.                                   |
+| Safety/release gates | Tamper status, spurious-reward controls, reward-hacking canaries, verifier-error patterns.  | Block routing until cleared.                                              |
+| Diagnostic context   | ECHO/RWML quality, embedding-distance distribution, command-count change.                   | Explain behavior and mine curriculum; do not ship from these alone.       |
+| Operational health   | Tokens/sec, peak GPU memory, OOM count, backend import status.                              | Right-size batch, sequence length, backend, and compute-target readiness. |
 
 Good training review starts at the bottom of the compute stack: setup checks,
 then training health, then signal quality, then behavior and safety. Do not spend
@@ -63,18 +63,18 @@ private/cloud compute time on a run with failed setup checks.
 These are first-pass operating thresholds. Treat them as prompts to inspect, not
 as universal pass/fail laws.
 
-| Area | Starter value | If it misses |
-|---|---|---|
-| SFT eval loss | Flat or decreasing after the warmup window. | Lower LR or epochs, add dropout, or remove weak examples. |
-| GRPO reward contrast | `reward_std > 0` for enough prompt groups to fill a batch. | Use active sampling, easier tasks, graded rewards, or SFT warm start. |
-| Zero-std groups | `frac_reward_zero_std < 0.5` for serious RL batches. | Increase group size, filter zero-std groups, or rebalance task difficulty. |
-| Timeout rate | Under 10 percent for promotion candidates. | Lower max tool calls, inspect loops, and add concise recovery traces. |
-| Verifier errors | Rare and explainable, ideally under 2 percent. | Fix environment setup before training on the reward. |
-| Tamper attempts | Zero for release candidates. | Treat as a release blocker and inspect protected-file coverage. |
-| OOM count | Zero for serious smoke or train runs. | Lower batch, sequence length, or full-finetune memory pressure. |
-| KL/entropy | Stable relative to the chosen algorithm; no universal threshold. | Use backend-specific ranges; do not promote or block from these alone. |
-| DPPO smoke bundle | `contract_ready=true`; `optimizer_ready=true` for optimizer updates. | Fix replay/logprob/world-model coverage locally before private/cloud compute. |
-| ECHO/RWML quality | Improves on heldout transitions and does not hurt pass@k. | Keep diagnostic, mine outliers, and avoid release-gating on it. |
+| Area                 | Starter value                                                        | If it misses                                                                  |
+| -------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| SFT eval loss        | Flat or decreasing after the warmup window.                          | Lower LR or epochs, add dropout, or remove weak examples.                     |
+| GRPO reward contrast | `reward_std > 0` for enough prompt groups to fill a batch.           | Use active sampling, easier tasks, graded rewards, or SFT warm start.         |
+| Zero-std groups      | `frac_reward_zero_std < 0.5` for serious RL batches.                 | Increase group size, filter zero-std groups, or rebalance task difficulty.    |
+| Timeout rate         | Under 10 percent for promotion candidates.                           | Lower max tool calls, inspect loops, and add concise recovery traces.         |
+| Verifier errors      | Rare and explainable, ideally under 2 percent.                       | Fix environment setup before training on the reward.                          |
+| Tamper attempts      | Zero for release candidates.                                         | Treat as a release blocker and inspect protected-file coverage.               |
+| OOM count            | Zero for serious smoke or train runs.                                | Lower batch, sequence length, or full-finetune memory pressure.               |
+| KL/entropy           | Stable relative to the chosen algorithm; no universal threshold.     | Use backend-specific ranges; do not promote or block from these alone.        |
+| DPPO smoke bundle    | `contract_ready=true`; `optimizer_ready=true` for optimizer updates. | Fix replay/logprob/world-model coverage locally before private/cloud compute. |
+| ECHO/RWML quality    | Improves on heldout transitions and does not hurt pass@k.            | Keep diagnostic, mine outliers, and avoid release-gating on it.               |
 
 ---
 
@@ -107,16 +107,16 @@ environment, safety, and external benchmark gates.
 
 ## What to monitor by strategy
 
-| Strategy | Primary metrics | Release evidence |
-|---|---|---|
-| SFT | Train loss, eval loss, grad norm, token count, truncation warnings. | Heldout trace eval, executable environment pass@k. |
-| DPO | Chosen/rejected rewards, reward margin, preference accuracy, chosen/rejected logprobs. | Heldout trace eval and task behavior against the SFT baseline. |
-| Reward model / ORM / PRM | Heldout pair accuracy, calibration error, reward margin, length bias, task-family breakdown, reward variance. | Reward-model evidence plus selected-vs-random controls before using the scorer for training claims. |
-| GRPO/RLVR | Reward, `reward_std`, `frac_reward_zero_std`, KL, entropy, verifier status, timeouts. | pass@1/pass@k, holdout gate, spurious-reward control, tamper canaries. |
-| Session Distillation | `session_distillation_loss`, `session_distillation_kl`, `session_distillation_ce`, masked token count, reader confidence. | Heldout recovery-decision accuracy, tool-call validity, executable pass@k where environments exist. |
-| DPPO | Behavior logprobs ready, train logprobs ready, replay-required records, trust-region mask telemetry. | Backend smoke artifacts plus pass@k before/after. |
-| ECHO/RWML | Replay coverage, ECHO loss, RWML pass rate, embedding-distance distribution, exit-code/test-result prediction accuracy. | Diagnostic release evidence only until correlated with heldout pass@k and safety. |
-| Cascade | Per-stage loss/reward, per-domain pass@k, stage-to-stage forgetting. | Domain holdouts and final generalist holdout. |
+| Strategy                 | Primary metrics                                                                                                           | Release evidence                                                                                    |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| SFT                      | Train loss, eval loss, grad norm, token count, truncation warnings.                                                       | Heldout trace eval, executable environment pass@k.                                                  |
+| DPO                      | Chosen/rejected rewards, reward margin, preference accuracy, chosen/rejected logprobs.                                    | Heldout trace eval and task behavior against the SFT baseline.                                      |
+| Reward model / ORM / PRM | Heldout pair accuracy, calibration error, reward margin, length bias, task-family breakdown, reward variance.             | Reward-model evidence plus selected-vs-random controls before using the scorer for training claims. |
+| GRPO/RLVR                | Reward, `reward_std`, `frac_reward_zero_std`, KL, entropy, verifier status, timeouts.                                     | pass@1/pass@k, holdout gate, spurious-reward control, tamper canaries.                              |
+| Session Distillation     | `session_distillation_loss`, `session_distillation_kl`, `session_distillation_ce`, masked token count, reader confidence. | Heldout recovery-decision accuracy, tool-call validity, executable pass@k where environments exist. |
+| DPPO                     | Behavior logprobs ready, train logprobs ready, replay-required records, trust-region mask telemetry.                      | Backend smoke artifacts plus pass@k before/after.                                                   |
+| ECHO/RWML                | Replay coverage, ECHO loss, RWML pass rate, embedding-distance distribution, exit-code/test-result prediction accuracy.   | Diagnostic release evidence only until correlated with heldout pass@k and safety.                   |
+| Cascade                  | Per-stage loss/reward, per-domain pass@k, stage-to-stage forgetting.                                                      | Domain holdouts and final generalist holdout.                                                       |
 
 ---
 

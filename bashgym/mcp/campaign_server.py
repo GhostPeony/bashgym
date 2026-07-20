@@ -369,9 +369,7 @@ def build_server(
         if not result["ok"]:
             return result
         try:
-            _payload, values, truncated = _bounded_collection(
-                result["data"], key=key, limit=limit
-            )
+            _payload, values, truncated = _bounded_collection(result["data"], key=key, limit=limit)
         except ValueError:
             return _invalid_response()
         return {"ok": True, key: values, "count": len(values), "truncated": truncated}
@@ -782,9 +780,7 @@ def build_server(
     ) -> dict[str, Any]:
         """Request terminal campaign cancellation with an auditable reason."""
 
-        return await transition(
-            "cancel", campaign_id, expected_version, reason=reason.strip()
-        )
+        return await transition("cancel", campaign_id, expected_version, reason=reason.strip())
 
     @server.tool(structured_output=True, annotations=state_change)
     async def campaign_conclude(
@@ -794,9 +790,7 @@ def build_server(
     ) -> dict[str, Any]:
         """Conclude without promotion after server-side running-action and evidence checks."""
 
-        return await transition(
-            "conclude", campaign_id, expected_version, reason=reason.strip()
-        )
+        return await transition("conclude", campaign_id, expected_version, reason=reason.strip())
 
     @server.tool(structured_output=True, annotations=state_change)
     async def campaign_retry(

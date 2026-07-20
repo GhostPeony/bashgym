@@ -52,9 +52,7 @@ def test_builder_requires_an_explicit_immutable_trainable_base():
         "smoke_training",
         "full_training",
     ]
-    assert built.manifest.evaluation_plan["source_repository_binding_id"] == (
-        "bashgym-source-1"
-    )
+    assert built.manifest.evaluation_plan["source_repository_binding_id"] == ("bashgym-source-1")
 
 
 def test_install_is_atomic_idempotent_and_emits_exact_binding_plan(tmp_path):

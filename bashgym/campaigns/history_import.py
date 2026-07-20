@@ -160,7 +160,10 @@ class HistoricalImportAttestor:
             manifest = envelope["manifest"]
             if manifest["schema_version"] != "import_attestation.v1":
                 raise ValueError("wrong manifest")
-            if manifest.get("read_only") is not True or manifest.get("live_action_result") is not False:
+            if (
+                manifest.get("read_only") is not True
+                or manifest.get("live_action_result") is not False
+            ):
                 raise ValueError("wrong import semantics")
             if not hmac.compare_digest(envelope["signature"], self._signature(manifest)):
                 raise ValueError("signature mismatch")
@@ -174,9 +177,7 @@ class HistoricalImportAttestor:
         self.verify(envelope)
         destination.parent.mkdir(parents=True, exist_ok=True)
         if destination.exists() or destination.is_symlink():
-            raise HistoricalImportError(
-                f"{HistoricalImportError.code}: destination already exists"
-            )
+            raise HistoricalImportError(f"{HistoricalImportError.code}: destination already exists")
         destination.write_bytes(_canonical_bytes(envelope) + b"\n")
         return destination
 

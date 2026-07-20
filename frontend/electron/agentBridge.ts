@@ -26,7 +26,7 @@ function serverArgs(request: AgentBridgeLaunchRequest): string[] {
     '--origin-terminal-id',
     request.terminalId,
     '--agent',
-    request.kind,
+    request.kind
   ]
   if (request.panelId) args.push('--origin-panel-id', request.panelId)
   if (request.apiBase) args.push('--api-base', request.apiBase)
@@ -36,7 +36,7 @@ function serverArgs(request: AgentBridgeLaunchRequest): string[] {
 /** Build a launch-only MCP attachment without modifying global Claude/Codex config. */
 export function buildAgentBridgeLaunchCommand(
   request: AgentBridgeLaunchRequest,
-  platform: NodeJS.Platform = process.platform,
+  platform: NodeJS.Platform = process.platform
 ): string {
   const pythonCommand = request.pythonCommand || 'python'
   const command = request.serverCommand || pythonCommand
@@ -50,9 +50,9 @@ export function buildAgentBridgeLaunchCommand(
       mcpServers: {
         bashgym: {
           command,
-          args,
-        },
-      },
+          args
+        }
+      }
     })
     return `claude --mcp-config ${shellQuote(config, platform)}`
   }
@@ -64,6 +64,6 @@ export function buildAgentBridgeLaunchCommand(
     '-c',
     shellQuote(commandOverride, platform),
     '-c',
-    shellQuote(argsOverride, platform),
+    shellQuote(argsOverride, platform)
   ].join(' ')
 }

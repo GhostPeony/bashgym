@@ -5,7 +5,7 @@ import {
   detectTerminalAgentKind,
   TerminalOutputBatcher,
   type TerminalOutputTimerApi,
-  terminalRuntimeLabel,
+  terminalRuntimeLabel
 } from './terminalAgentRuntime'
 
 test('detects Claude and Codex from their dedicated startup banner lines', () => {
@@ -22,20 +22,20 @@ test('does not infer an agent from ordinary shell output', () => {
 test('classifies current Claude and Codex activity from the newest terminal line', () => {
   assert.deepEqual(detectTerminalActivity('✻ Thinking (12s · esc to interrupt)'), {
     status: 'running',
-    summary: 'Thinking',
+    summary: 'Thinking'
   })
   assert.deepEqual(detectTerminalActivity('• Ran Get-Content src/app.ts'), {
     status: 'tool_calling',
     currentTool: 'Bash',
     summary: 'Ran Get-Content src/app.ts',
-    target: 'Get-Content src/app.ts',
+    target: 'Get-Content src/app.ts'
   })
   assert.deepEqual(detectTerminalActivity('⏺ Read(src/app.ts)\n❯'), {
-    status: 'waiting_input',
+    status: 'waiting_input'
   })
   assert.deepEqual(detectTerminalActivity('PS C:\\work>'), {
     status: 'idle',
-    shellCwd: 'C:\\work',
+    shellCwd: 'C:\\work'
   })
 })
 
@@ -50,7 +50,7 @@ test('flushes sustained terminal output at the maximum wait boundary', () => {
       scheduled.set(id, { at: now + delayMs, callback })
       return id
     },
-    clear: (handle) => scheduled.delete(handle as number),
+    clear: (handle) => scheduled.delete(handle as number)
   }
   const advance = (ms: number) => {
     const target = now + ms
@@ -70,7 +70,7 @@ test('flushes sustained terminal output at the maximum wait boundary', () => {
   const batcher = new TerminalOutputBatcher((output) => flushed.push(output), {
     quietMs: 80,
     maxWaitMs: 250,
-    timerApi,
+    timerApi
   })
 
   batcher.push('a')

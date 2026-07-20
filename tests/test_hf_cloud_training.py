@@ -5,21 +5,18 @@ Tests script adapter, cloud script generation, and hardware specs.
 """
 
 import pytest
-from unittest.mock import patch, MagicMock
-from pathlib import Path
 
+from bashgym.integrations.huggingface.jobs import HARDWARE_SPECS
 from bashgym.integrations.huggingface.script_adapter import (
     CloudScriptConfig,
-    generate_cloud_script,
     _adapt_for_cloud,
-    PEP_723_HEADER,
+    generate_cloud_script,
 )
-from bashgym.integrations.huggingface.jobs import HARDWARE_SPECS
-
 
 # =============================================================================
 # CloudScriptConfig Tests
 # =============================================================================
+
 
 class TestCloudScriptConfig:
     """Tests for CloudScriptConfig validation."""
@@ -105,6 +102,7 @@ class TestCloudScriptConfig:
 # generate_cloud_script Tests
 # =============================================================================
 
+
 class TestGenerateCloudScript:
     """Tests for generate_cloud_script function."""
 
@@ -154,7 +152,7 @@ class TestGenerateCloudScript:
         script = generate_cloud_script(sft_config)
         assert f'load_dataset("{sft_config.dataset_repo}"' in script
         # Should NOT contain local file loading
-        assert 'data_files=' not in script
+        assert "data_files=" not in script
 
     def test_sft_script_has_hub_push(self, sft_config):
         script = generate_cloud_script(sft_config)
@@ -229,6 +227,7 @@ class TestGenerateCloudScript:
 # _adapt_for_cloud Tests
 # =============================================================================
 
+
 class TestAdaptForCloud:
     """Tests for the _adapt_for_cloud transformation function."""
 
@@ -247,7 +246,9 @@ class TestAdaptForCloud:
             dataset_repo="user/data",
             output_repo="user/model",
         )
-        script = 'dataset = load_dataset("json", data_files="/local/path/train.jsonl", split="train")'
+        script = (
+            'dataset = load_dataset("json", data_files="/local/path/train.jsonl", split="train")'
+        )
         result = _adapt_for_cloud(script, config)
         assert 'load_dataset("user/data", split="train")' in result
         assert "/local/path" not in result
@@ -276,6 +277,7 @@ class TestAdaptForCloud:
 # =============================================================================
 # Hardware Specs Tests
 # =============================================================================
+
 
 class TestHardwareSpecs:
     """Tests for HARDWARE_SPECS pricing data."""

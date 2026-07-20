@@ -1,8 +1,5 @@
 """Tests for ThresholdMonitor watermark logic."""
 
-import pytest
-from pathlib import Path
-
 from bashgym.pipeline.config import PipelineConfig
 from bashgym.pipeline.threshold_monitor import ThresholdMonitor
 
@@ -15,7 +12,9 @@ class TestThresholdMonitor:
         for i in range(3):
             (gold_dir / f"trace_{i}.json").write_text("{}")
 
-        monitor = ThresholdMonitor(PipelineConfig(generate_enabled=True, generate_gold_threshold=10))
+        monitor = ThresholdMonitor(
+            PipelineConfig(generate_enabled=True, generate_gold_threshold=10)
+        )
         assert monitor.should_generate(gold_dir) is False
 
     def test_generate_threshold_reached(self, tmp_path):
@@ -24,7 +23,9 @@ class TestThresholdMonitor:
         for i in range(10):
             (gold_dir / f"trace_{i}.json").write_text("{}")
 
-        monitor = ThresholdMonitor(PipelineConfig(generate_enabled=True, generate_gold_threshold=10))
+        monitor = ThresholdMonitor(
+            PipelineConfig(generate_enabled=True, generate_gold_threshold=10)
+        )
         assert monitor.should_generate(gold_dir) is True
 
     def test_generate_disabled(self, tmp_path):
@@ -42,7 +43,9 @@ class TestThresholdMonitor:
         for i in range(10):
             (gold_dir / f"trace_{i}.json").write_text("{}")
 
-        monitor = ThresholdMonitor(PipelineConfig(generate_enabled=True, generate_gold_threshold=10))
+        monitor = ThresholdMonitor(
+            PipelineConfig(generate_enabled=True, generate_gold_threshold=10)
+        )
         assert monitor.should_generate(gold_dir) is True
 
         monitor.mark_generate_triggered(gold_dir)

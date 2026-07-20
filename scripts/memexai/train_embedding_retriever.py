@@ -155,7 +155,9 @@ def build_grouped_pairs(
             continue
         positive_id = str(row.get("primary_positive_chunk_id") or "")
         negative_ids = [str(value) for value in row.get("hard_negative_chunk_ids") or []]
-        missing = [chunk_id for chunk_id in [positive_id, *negative_ids] if chunk_id not in corpus_by_id]
+        missing = [
+            chunk_id for chunk_id in [positive_id, *negative_ids] if chunk_id not in corpus_by_id
+        ]
         if missing:
             raise ValueError(
                 f"grouped row {row.get('eval_id')} references missing chunks: {missing[:5]}"
@@ -272,9 +274,7 @@ class UniquePositiveBatchSampler:
         self.batch_size = batch_size
         self.seed = seed
         self.epoch = 0
-        self._length = len(
-            build_unique_positive_batches(pairs, batch_size=batch_size, seed=seed)
-        )
+        self._length = len(build_unique_positive_batches(pairs, batch_size=batch_size, seed=seed))
 
     def __iter__(self):
         batches = build_unique_positive_batches(
@@ -289,9 +289,7 @@ class UniquePositiveBatchSampler:
         return self._length
 
 
-def expanded_sequences_per_batch_upper_bound(
-    pairs: list[dict[str, Any]], batch_size: int
-) -> int:
+def expanded_sequences_per_batch_upper_bound(pairs: list[dict[str, Any]], batch_size: int) -> int:
     """Return a conservative forward-pass sequence count for an MNRL batch.
 
     Each example contributes one query, one positive, and every explicit hard
@@ -318,9 +316,7 @@ def collision_safe_batch_profile(
         str(pair.get("positive_collision_group") or pair.get("positive_chunk_id") or "")
         for pair in pairs
     }
-    max_negative_count = max(
-        (len(pair.get("negative_texts") or []) for pair in pairs), default=0
-    )
+    max_negative_count = max((len(pair.get("negative_texts") or []) for pair in pairs), default=0)
     return {
         "batch_size_requested": batch_size,
         "batch_size_realized_min": min(sizes),
@@ -328,8 +324,7 @@ def collision_safe_batch_profile(
         "batch_size_realized_mean": round(sum(sizes) / len(sizes), 6),
         "batches_per_epoch": len(batches),
         "distinct_positive_collision_groups": len(collision_groups),
-        "expanded_sequences_per_batch_realized_max": max(sizes)
-        * (2 + max_negative_count),
+        "expanded_sequences_per_batch_realized_max": max(sizes) * (2 + max_negative_count),
     }
 
 
@@ -372,8 +367,7 @@ def select_explicit_negative_cardinality(
         ids = list(pair.get("negative_chunk_ids") or [])
         if len(texts) < negatives_per_query:
             raise ValueError(
-                f"train pair {index} has {len(texts)} negatives; "
-                f"need {negatives_per_query}"
+                f"train pair {index} has {len(texts)} negatives; " f"need {negatives_per_query}"
             )
         row = dict(pair)
         row["available_negative_count"] = len(texts)
@@ -564,22 +558,20 @@ def main() -> int:
             ),
             "available_negative_count_distribution": dict(
                 sorted(
-                    Counter(
-                        str(pair.get("available_negative_count", 0)) for pair in pairs
-                    ).items()
+                    Counter(str(pair.get("available_negative_count", 0)) for pair in pairs).items()
                 )
             ),
             "explicit_negative_count_distribution": dict(
-                sorted(Counter(str(len(pair.get("negative_texts") or [])) for pair in pairs).items())
+                sorted(
+                    Counter(str(len(pair.get("negative_texts") or [])) for pair in pairs).items()
+                )
             ),
             "positive_collision_group": (
                 "positive_video_id" if args.grouped_jsonl else "positive_chunk_id"
             ),
         }
     )
-    batch_profile = collision_safe_batch_profile(
-        pairs, batch_size=args.batch_size, seed=args.seed
-    )
+    batch_profile = collision_safe_batch_profile(pairs, batch_size=args.batch_size, seed=args.seed)
     expanded_upper_bound = expanded_sequences_per_batch_upper_bound(pairs, args.batch_size)
     manifest["training"].update(
         {
@@ -640,9 +632,7 @@ def main() -> int:
     manifest["training"]["collision_safe_batches_per_epoch"] = len(batch_sampler)
     manifest["training"]["optimizer_steps"] = total_steps
     checkpoint_steps = (
-        args.checkpoint_save_steps
-        if args.checkpoint_save_steps > 0
-        else max(1, total_steps // 4)
+        args.checkpoint_save_steps if args.checkpoint_save_steps > 0 else max(1, total_steps // 4)
     )
     manifest["training"]["checkpoint_save_steps"] = (
         checkpoint_steps if args.checkpoint_save_steps >= 0 else None
@@ -719,9 +709,7 @@ def main() -> int:
         raise RuntimeError(
             "SentenceTransformerTrainer did not install the collision-safe batch sampler"
         )
-    manifest["training"]["runtime_batch_sampler_class"] = type(
-        runtime_batch_sampler
-    ).__name__
+    manifest["training"]["runtime_batch_sampler_class"] = type(runtime_batch_sampler).__name__
     write_json(manifest_path, manifest)
     result = trainer.train(
         resume_from_checkpoint=(

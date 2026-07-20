@@ -3,8 +3,24 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { WebLinksAddon } from '@xterm/addon-web-links'
-import { Square, X, MoreHorizontal, Copy, ClipboardPaste, Loader2, MessageSquare, Wrench, Coffee } from 'lucide-react'
-import { useTerminalStore, useThemeStore, useAccentStore, useWorkspaceStore, getTerminalFgColor } from '../../stores'
+import {
+  Square,
+  X,
+  MoreHorizontal,
+  Copy,
+  ClipboardPaste,
+  Loader2,
+  MessageSquare,
+  Wrench,
+  Coffee
+} from 'lucide-react'
+import {
+  useTerminalStore,
+  useThemeStore,
+  useAccentStore,
+  useWorkspaceStore,
+  getTerminalFgColor
+} from '../../stores'
 import { FileDropZone } from './FileDropZone'
 import { clsx } from 'clsx'
 import { stripAnsi } from '../../utils/ansi'
@@ -13,7 +29,7 @@ import {
   detectTerminalActivity,
   detectTerminalAgentKind,
   TerminalOutputBatcher,
-  terminalOutputLines,
+  terminalOutputLines
 } from './terminalAgentRuntime'
 import '@xterm/xterm/css/xterm.css'
 
@@ -44,7 +60,9 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
   const viewMode = useTerminalStore((state) => state.viewMode)
   const renamePanel = useTerminalStore((state) => state.renamePanel)
   const panelCount = useTerminalStore((state) => state.panels.length)
-  const panel = useTerminalStore((state) => state.panels.find((candidate) => candidate.terminalId === id))
+  const panel = useTerminalStore((state) =>
+    state.panels.find((candidate) => candidate.terminalId === id)
+  )
   const session = useTerminalStore((state) => state.sessions.get(id))
 
   // When the PTY exits we keep the pane alive and offer a restart instead of a dead view
@@ -57,16 +75,19 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
     return style.display !== 'none' && style.visibility !== 'hidden'
   }, [])
 
-  const syncTerminalSize = useCallback(async (force = false): Promise<boolean> => {
-    const terminal = terminalRef.current
-    if (!terminal) return false
-    const next = { cols: terminal.cols, rows: terminal.rows }
-    const previous = lastSyncedSizeRef.current
-    if (!force && previous?.cols === next.cols && previous.rows === next.rows) return true
-    const resized = (await window.bashgym?.terminal.resize(id, next.cols, next.rows)) ?? false
-    if (resized) lastSyncedSizeRef.current = next
-    return resized
-  }, [id])
+  const syncTerminalSize = useCallback(
+    async (force = false): Promise<boolean> => {
+      const terminal = terminalRef.current
+      if (!terminal) return false
+      const next = { cols: terminal.cols, rows: terminal.rows }
+      const previous = lastSyncedSizeRef.current
+      if (!force && previous?.cols === next.cols && previous.rows === next.rows) return true
+      const resized = (await window.bashgym?.terminal.resize(id, next.cols, next.rows)) ?? false
+      if (resized) lastSyncedSizeRef.current = next
+      return resized
+    },
+    [id]
+  )
 
   // Helper to fit terminal while preserving scroll position
   const fitWithScrollPreservation = useCallback(() => {
@@ -153,17 +174,24 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
     const f = (n: number) => {
       const k = (n + h / 30) % 12
       const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1)
-      return Math.round(255 * color).toString(16).padStart(2, '0')
+      return Math.round(255 * color)
+        .toString(16)
+        .padStart(2, '0')
     }
     return `#${f(0)}${f(8)}${f(4)}`
   }, [])
 
   // HSL to rgba hex string (xterm needs #RRGGBBAA for selection)
-  const hslToHexAlpha = useCallback((h: number, s: number, l: number, alpha: number): string => {
-    const hex = hslToHex(h, s, l)
-    const a = Math.round(alpha * 255).toString(16).padStart(2, '0')
-    return `${hex}${a}`
-  }, [hslToHex])
+  const hslToHexAlpha = useCallback(
+    (h: number, s: number, l: number, alpha: number): string => {
+      const hex = hslToHex(h, s, l)
+      const a = Math.round(alpha * 255)
+        .toString(16)
+        .padStart(2, '0')
+      return `${hex}${a}`
+    },
+    [hslToHex]
+  )
 
   // Accent-influenced terminal theme colors
   const getThemeColors = useCallback(() => {
@@ -331,27 +359,41 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
     fitAddonRef.current = fitAddon
 
     // Banner colors
-    const green = '\x1b[38;2;118;185;0m'  // NVIDIA green
+    const green = '\x1b[38;2;118;185;0m' // NVIDIA green
     const dim = '\x1b[2m'
     const reset = '\x1b[0m'
 
     // Function to write the Bash Gym banner
     const writeBanner = () => {
-      const line = '\x1b[38;2;60;60;60m'       // Dark gray for separator
+      const line = '\x1b[38;2;60;60;60m' // Dark gray for separator
 
       // Reset terminal state and clear
       terminal.reset()
       terminal.writeln('')
-      terminal.writeln(`${green}  ██████╗  █████╗ ███████╗██╗  ██╗     ██████╗ ██╗   ██╗███╗   ███╗${reset}`)
-      terminal.writeln(`${green}  ██╔══██╗██╔══██╗██╔════╝██║  ██║    ██╔════╝ ╚██╗ ██╔╝████╗ ████║${reset}`)
-      terminal.writeln(`${green}  ██████╔╝███████║███████╗███████║    ██║  ███╗ ╚████╔╝ ██╔████╔██║${reset}`)
-      terminal.writeln(`${green}  ██╔══██╗██╔══██║╚════██║██╔══██║    ██║   ██║  ╚██╔╝  ██║╚██╔╝██║${reset}`)
-      terminal.writeln(`${green}  ██████╔╝██║  ██║███████║██║  ██║    ╚██████╔╝   ██║   ██║ ╚═╝ ██║${reset}`)
-      terminal.writeln(`${green}  ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝     ╚═════╝    ╚═╝   ╚═╝     ╚═╝${reset}`)
+      terminal.writeln(
+        `${green}  ██████╗  █████╗ ███████╗██╗  ██╗     ██████╗ ██╗   ██╗███╗   ███╗${reset}`
+      )
+      terminal.writeln(
+        `${green}  ██╔══██╗██╔══██╗██╔════╝██║  ██║    ██╔════╝ ╚██╗ ██╔╝████╗ ████║${reset}`
+      )
+      terminal.writeln(
+        `${green}  ██████╔╝███████║███████╗███████║    ██║  ███╗ ╚████╔╝ ██╔████╔██║${reset}`
+      )
+      terminal.writeln(
+        `${green}  ██╔══██╗██╔══██║╚════██║██╔══██║    ██║   ██║  ╚██╔╝  ██║╚██╔╝██║${reset}`
+      )
+      terminal.writeln(
+        `${green}  ██████╔╝██║  ██║███████║██║  ██║    ╚██████╔╝   ██║   ██║ ╚═╝ ██║${reset}`
+      )
+      terminal.writeln(
+        `${green}  ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝     ╚═════╝    ╚═╝   ╚═╝     ╚═╝${reset}`
+      )
       terminal.writeln('')
       terminal.writeln(`${dim}                         Self-Improving Training Workspace${reset}`)
       terminal.writeln('')
-      terminal.writeln(`${line}  ═══════════════════════════════════════════════════════════════════════════${reset}`)
+      terminal.writeln(
+        `${line}  ═══════════════════════════════════════════════════════════════════════════${reset}`
+      )
       terminal.writeln('')
 
       // Force resize sync after banner to update PTY cursor position
@@ -398,27 +440,31 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
     let disposed = false
     let removeDataListener: (() => void) | undefined
     const ensureDataListener = () => {
-      if (!removeDataListener) removeDataListener = window.bashgym?.terminal.onData(id, (output) => {
-        const data = typeof output === 'string' ? output : output.data
-        const frameId = typeof output === 'string' ? undefined : output.frameId
-        // Show banner after first output (shell is ready) - only for first terminal
-        if (shouldShowBanner && !bannerShown) {
-          bannerShown = true
-          // Small delay to let shell fully initialize
-          setTimeout(() => {
-            if (!disposed) writeBanner()
-          }, 100)
-        }
+      if (!removeDataListener)
+        removeDataListener = window.bashgym?.terminal.onData(id, (output) => {
+          const data = typeof output === 'string' ? output : output.data
+          const frameId = typeof output === 'string' ? undefined : output.frameId
+          // Show banner after first output (shell is ready) - only for first terminal
+          if (shouldShowBanner && !bannerShown) {
+            bannerShown = true
+            // Small delay to let shell fully initialize
+            setTimeout(() => {
+              if (!disposed) writeBanner()
+            }, 100)
+          }
 
-        // ACK only after xterm's parser finishes this frame. Main keeps one
-        // frame in flight and coalesces Claude's later redraws behind it.
-        terminal.write(data, frameId === undefined ? undefined : () => (
-          window.bashgym?.terminal.ackOutput?.(id, outputFlowOwner, frameId)
-        ))
+          // ACK only after xterm's parser finishes this frame. Main keeps one
+          // frame in flight and coalesces Claude's later redraws behind it.
+          terminal.write(
+            data,
+            frameId === undefined
+              ? undefined
+              : () => window.bashgym?.terminal.ackOutput?.(id, outputFlowOwner, frameId)
+          )
 
-        // Parse output for session state detection
-        parseTerminalOutput(data)
-      })
+          // Parse output for session state detection
+          parseTerminalOutput(data)
+        })
       // Re-acquire on every successful create. A restarted PTY is a new
       // main-process session even when this pane's data listener is unchanged.
       window.bashgym?.terminal.setOutputFlowControl?.(id, outputFlowOwner, true)
@@ -437,59 +483,63 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
     // Create or re-attach the PTY process (main process keeps PTYs alive across remounts)
     const startPty = () => {
       const requestedCwd = useTerminalStore.getState().sessions.get(id)?.cwd
-      window.bashgym?.terminal.create(id, requestedCwd !== '~' ? requestedCwd : undefined).then(async (result) => {
-        if (disposed) return
-        if (!result.success) {
-          terminal.writeln(`\x1b[31mFailed to create terminal: ${result.error}\x1b[0m`)
-          return
-        }
-        setExitedCode(null)
-        if (result.cwd) {
-          updateSession(id, { cwd: result.cwd })
-        }
-        // PowerShell startup is slow enough that initial xterm fit events often
-        // arrive before the PTY exists. Synchronize once after create succeeds,
-        // before a full-screen Claude/Codex TUI is launched into the default 80x24 PTY.
-        await syncPtySize()
-        if (disposed) return
-        // Auto-type the launch command into a fresh PTY (not on re-attach)
-        if (!result.attached) {
-          const pending = useTerminalStore.getState().sessions.get(id)?.launchCommand
-          if (pending) {
-            updateSession(id, { launchCommand: undefined })
-            let command = pending
-            if ((pending === 'claude' || pending === 'codex') && window.bashgym?.agentBridge) {
-              const panelId = useTerminalStore.getState().panels.find(
-                (candidate) => candidate.terminalId === id
-              )?.id
-              const bridge = await window.bashgym.agentBridge.prepareLaunch({
-                kind: pending,
-                workspaceId: useWorkspaceStore.getState().activeWorkspaceId,
-                terminalId: id,
-                panelId,
-              })
-              if (disposed) return
-              if (bridge.success && bridge.command) {
-                command = bridge.command
-              } else {
-                terminal.writeln(`\x1b[33mSkill Lab bridge unavailable: ${bridge.error || 'unknown error'}\x1b[0m`)
-              }
-            }
-            setTimeout(() => {
-              if (!disposed) window.bashgym?.terminal.write(id, command + '\r')
-            }, 500)
-          }
-        }
-        // Re-attached to a live PTY: replay retained scrollback
-        if (result.attached && result.buffer) {
+      window.bashgym?.terminal
+        .create(id, requestedCwd !== '~' ? requestedCwd : undefined)
+        .then(async (result) => {
           if (disposed) return
-          terminal.write(result.buffer)
-          parseTerminalOutput(result.buffer)
-          // Sync PTY size to this (possibly new) viewport
-          scheduleFitWithScrollPreservation()
-        }
-        ensureDataListener()
-      })
+          if (!result.success) {
+            terminal.writeln(`\x1b[31mFailed to create terminal: ${result.error}\x1b[0m`)
+            return
+          }
+          setExitedCode(null)
+          if (result.cwd) {
+            updateSession(id, { cwd: result.cwd })
+          }
+          // PowerShell startup is slow enough that initial xterm fit events often
+          // arrive before the PTY exists. Synchronize once after create succeeds,
+          // before a full-screen Claude/Codex TUI is launched into the default 80x24 PTY.
+          await syncPtySize()
+          if (disposed) return
+          // Auto-type the launch command into a fresh PTY (not on re-attach)
+          if (!result.attached) {
+            const pending = useTerminalStore.getState().sessions.get(id)?.launchCommand
+            if (pending) {
+              updateSession(id, { launchCommand: undefined })
+              let command = pending
+              if ((pending === 'claude' || pending === 'codex') && window.bashgym?.agentBridge) {
+                const panelId = useTerminalStore
+                  .getState()
+                  .panels.find((candidate) => candidate.terminalId === id)?.id
+                const bridge = await window.bashgym.agentBridge.prepareLaunch({
+                  kind: pending,
+                  workspaceId: useWorkspaceStore.getState().activeWorkspaceId,
+                  terminalId: id,
+                  panelId
+                })
+                if (disposed) return
+                if (bridge.success && bridge.command) {
+                  command = bridge.command
+                } else {
+                  terminal.writeln(
+                    `\x1b[33mSkill Lab bridge unavailable: ${bridge.error || 'unknown error'}\x1b[0m`
+                  )
+                }
+              }
+              setTimeout(() => {
+                if (!disposed) window.bashgym?.terminal.write(id, command + '\r')
+              }, 500)
+            }
+          }
+          // Re-attached to a live PTY: replay retained scrollback
+          if (result.attached && result.buffer) {
+            if (disposed) return
+            terminal.write(result.buffer)
+            parseTerminalOutput(result.buffer)
+            // Sync PTY size to this (possibly new) viewport
+            scheduleFitWithScrollPreservation()
+          }
+          ensureDataListener()
+        })
     }
 
     startPty()
@@ -503,7 +553,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
         status: 'idle',
         attention: exitCode === 0 ? 'none' : 'error',
         currentTool: undefined,
-        taskSummary: undefined,
+        taskSummary: undefined
       })
     })
 
@@ -587,9 +637,12 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
             // Don't yank focus away from an input the user just clicked into
             const active = document.activeElement as HTMLElement | null
             const typingElsewhere =
-              active && active !== document.body &&
+              active &&
+              active !== document.body &&
               !active.closest('.xterm') &&
-              (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)
+              (active.tagName === 'INPUT' ||
+                active.tagName === 'TEXTAREA' ||
+                active.isContentEditable)
             if (isActive && !typingElsewhere) terminalRef.current?.focus()
           }
         })
@@ -620,7 +673,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
     const updates: Partial<typeof current> = {}
     const commitUpdates = () => {
       const changed = Object.entries(updates).some(
-        ([key, value]) => current[key as keyof typeof current] !== value,
+        ([key, value]) => current[key as keyof typeof current] !== value
       )
       if (changed) updateSession(id, updates)
     }
@@ -659,7 +712,7 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
         if (lastHistory?.tool !== activity.currentTool || lastHistory?.target !== activity.target) {
           updates.toolHistory = [
             ...(current.toolHistory || []),
-            { tool: activity.currentTool, target: activity.target, timestamp: now },
+            { tool: activity.currentTool, target: activity.target, timestamp: now }
           ].slice(-12)
         }
       }
@@ -970,18 +1023,12 @@ export function TerminalPane({ id, title, isActive, onPopupClose }: TerminalPane
               className="fixed z-50 card !rounded-brutal py-1 min-w-[160px]"
               style={{ left: contextMenu.x, top: contextMenu.y }}
             >
-              <button
-                onClick={handleCopy}
-                className="menu-item w-full !px-3 !py-1.5 !text-sm"
-              >
+              <button onClick={handleCopy} className="menu-item w-full !px-3 !py-1.5 !text-sm">
                 <Copy className="w-3.5 h-3.5" />
                 Copy
                 <span className="ml-auto text-xs text-text-muted font-mono">Ctrl+C</span>
               </button>
-              <button
-                onClick={handlePaste}
-                className="menu-item w-full !px-3 !py-1.5 !text-sm"
-              >
+              <button onClick={handlePaste} className="menu-item w-full !px-3 !py-1.5 !text-sm">
                 <ClipboardPaste className="w-3.5 h-3.5" />
                 Paste
                 <span className="ml-auto text-xs text-text-muted font-mono">Ctrl+V</span>

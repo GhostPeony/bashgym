@@ -8,25 +8,30 @@ import {
   ArrowRight,
   Cpu,
   GitBranch,
-  ShieldCheck,
+  ShieldCheck
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import {
   designerApi,
   type DesignerModel,
   type DesignerPipelineInfo,
-  type DesignerJobStatus,
+  type DesignerJobStatus
 } from '../../services/api'
 import { useTrainingStore } from '../../stores'
 import { useActivityStore } from '../../stores/activityStore'
 import { useCanvasOrchestratorStore } from '../../stores/canvasOrchestratorStore'
+import { useSessionResource } from '../../stores/sessionResource'
+import { designerModelsResource, designerPipelinesResource } from '../../stores/factoryResources'
+
+const EMPTY_PIPELINES: DesignerPipelineInfo[] = []
+const EMPTY_MODELS: DesignerModel[] = []
 
 const ROLLOUT_FORMATS = [
   { value: 'claude_code', label: 'Claude Code' },
   { value: 'codex', label: 'Codex' },
   { value: 'hermes_agent', label: 'Hermes' },
   { value: 'pi_coding_agent', label: 'Pi' },
-  { value: 'atif', label: 'ATIF' },
+  { value: 'atif', label: 'ATIF' }
 ]
 
 /** A model picker grouped by provider, drawn from the live catalog. */
@@ -35,7 +40,7 @@ function ModelSelect({
   value,
   onChange,
   models,
-  codeOnly,
+  codeOnly
 }: {
   label: string
   value: string
@@ -72,13 +77,20 @@ function ModelSelect({
 }
 
 export function DataDesignerTab() {
-  const [pipelines, setPipelines] = useState<DesignerPipelineInfo[]>([])
-  const [available, setAvailable] = useState(true)
-  const [loadingPipelines, setLoadingPipelines] = useState(false)
+  const { data: pipelinesData, loading: loadingPipelines } =
+    useSessionResource(designerPipelinesResource)
+  const {
+    data: modelsData,
+    loading: modelsInitialLoading,
+    refreshing: modelsRefreshing,
+    refresh: refreshModels
+  } = useSessionResource(designerModelsResource)
+  const pipelines = pipelinesData?.pipelines ?? EMPTY_PIPELINES
+  const available = pipelinesData?.available ?? true
+  const models = modelsData?.models ?? EMPTY_MODELS
+  const modelsLoading = modelsInitialLoading || modelsRefreshing
   const [selected, setSelected] = useState<string | null>(null)
 
-  const [models, setModels] = useState<DesignerModel[]>([])
-  const [modelsLoading, setModelsLoading] = useState(false)
   const [textModel, setTextModel] = useState('')
   const [codeModel, setCodeModel] = useState('')
   const [judgeModel, setJudgeModel] = useState('')
@@ -104,27 +116,9 @@ export function DataDesignerTab() {
   const isRollout = seedType === 'agent_rollouts'
   const isToolPipeline = selected === 'mcp_tool_use'
 
-  const loadModels = useCallback(() => {
-    setModelsLoading(true)
-    designerApi.listModels().then((res) => {
-      setModelsLoading(false)
-      if (res.ok && res.data) setModels(res.data.models)
-    })
-  }, [])
-
   useEffect(() => {
-    setLoadingPipelines(true)
-    designerApi.listPipelines().then((res) => {
-      setLoadingPipelines(false)
-      if (res.ok && res.data) {
-        setPipelines(res.data.pipelines)
-        setAvailable(res.data.available)
-        if (res.data.pipelines.length > 0) setSelected((s) => s ?? res.data!.pipelines[0].name)
-      }
-    })
-    loadModels()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    if (pipelines.length > 0) setSelected((s) => s ?? pipelines[0].name)
+  }, [pipelines])
 
   const clearJobPolling = useCallback(() => {
     if (pollRef.current !== null) {
@@ -144,7 +138,7 @@ export function DataDesignerTab() {
       num_records: Math.min(numRecords, 5),
       text_model: textModel || undefined,
       code_model: codeModel || undefined,
-      judge_model: judgeModel || undefined,
+      judge_model: judgeModel || undefined
     })
     setPreviewLoading(false)
     if (res.ok && res.data) setPreviewRecords(res.data.records)
@@ -162,7 +156,7 @@ export function DataDesignerTab() {
             job_id: res.data.job_id,
             pipeline: res.data.pipeline,
             output_dir: res.data.output_dir,
-            error: res.data.error,
+            error: res.data.error
           })
           clearJobPolling()
           if (res.data.status === 'failed') setJobError(res.data.error || 'Job failed')
@@ -189,7 +183,7 @@ export function DataDesignerTab() {
       code_model: codeModel || undefined,
       judge_model: judgeModel || undefined,
       mcp_backend: isToolPipeline ? mcpBackend : undefined,
-      keep_only_passing: keepOnlyPassing,
+      keep_only_passing: keepOnlyPassing
     })
     if (res.ok && res.data) {
       setJob(res.data)
@@ -197,7 +191,7 @@ export function DataDesignerTab() {
       useActivityStore.getState().addEvent('designer:queued', {
         job_id: res.data.job_id,
         pipeline: res.data.pipeline,
-        num_records: res.data.num_records,
+        num_records: res.data.num_records
       })
       pollRef.current = window.setTimeout(() => pollJob(res.data!.job_id), 2000)
     } else {
@@ -217,7 +211,7 @@ export function DataDesignerTab() {
     mcpBackend,
     keepOnlyPassing,
     pollJob,
-    clearJobPolling,
+    clearJobPolling
   ])
 
   const handleUseDataset = useCallback(() => {
@@ -325,7 +319,7 @@ export function DataDesignerTab() {
                 Teacher Models
               </h3>
               <button
-                onClick={loadModels}
+                onClick={() => void refreshModels()}
                 className="font-mono text-[10px] uppercase tracking-[0.12em] text-text-muted hover:text-accent-dark flex items-center gap-1 transition-colors"
                 title="Refresh the live model catalog"
               >
@@ -558,10 +552,8 @@ export function DataDesignerTab() {
                   className="h-full bg-accent transition-all"
                   style={{
                     width: `${
-                      job.progress.total > 0
-                        ? (job.progress.current / job.progress.total) * 100
-                        : 0
-                    }%`,
+                      job.progress.total > 0 ? (job.progress.current / job.progress.total) * 100 : 0
+                    }%`
                   }}
                 />
               </div>

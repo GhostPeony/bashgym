@@ -1,8 +1,6 @@
 """Tests for ImportWatcher filesystem watcher."""
 
 import time
-import pytest
-from pathlib import Path
 from unittest.mock import MagicMock
 
 from bashgym.pipeline.config import PipelineConfig

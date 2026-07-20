@@ -71,7 +71,9 @@ export function matchSessions(
 
     // Prefer journals matching the detected CLI; agentKind clears at the shell
     // prompt, so an idle terminal falls back to all cwd matches
-    let candidates = term.agentKind ? cwdMatches.filter((s) => s.kind === term.agentKind) : cwdMatches
+    let candidates = term.agentKind
+      ? cwdMatches.filter((s) => s.kind === term.agentKind)
+      : cwdMatches
     if (candidates.length === 0) candidates = cwdMatches
 
     let capped: MatchConfidence | null = null

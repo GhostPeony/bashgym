@@ -36,14 +36,14 @@ export const customNodeTypes = {
   toolkit: ToolKitNode,
   skilllab: SkillLabNode,
   mcp: McpWorkbenchNode,
-  knowledge: KnowledgeBaseNode,
+  knowledge: KnowledgeBaseNode
 } satisfies Record<CustomNodeType, unknown>
 
 export function buildCustomNodeData(
   panel: Panel,
   graph: CanvasGraphIndex,
   onFocus: (panelId: string) => void,
-  onClose: (panelId: string) => void,
+  onClose: (panelId: string) => void
 ): IntegrationNodeData | DataNodeData {
   const hasConnections = graph.connectedPanelIds.has(panel.id)
 
@@ -55,7 +55,7 @@ export function buildCustomNodeData(
       adapterConfig: { ...panel.adapterConfig, _panelId: panel.id },
       hasConnections,
       onFocus,
-      onClose,
+      onClose
     }
   }
 
@@ -72,19 +72,19 @@ export function buildCustomNodeData(
       .map((candidate) => ({
         panelId: candidate.id,
         title: candidate.title,
-        adapterConfig: candidate.adapterConfig,
+        adapterConfig: candidate.adapterConfig
       })),
     linkedKnowledgeBases: linkedPanels
       .filter((candidate) => candidate.type === 'knowledge')
       .map((candidate) => ({
         panelId: candidate.id,
         title: candidate.title,
-        adapterConfig: candidate.adapterConfig,
+        adapterConfig: candidate.adapterConfig
       })),
     linkedEvals: linkedPanels
       .filter((candidate) => candidate.type === 'evals')
       .map((candidate) => ({ panelId: candidate.id, title: candidate.title })),
     onFocus,
-    onClose,
+    onClose
   }
 }

@@ -40,11 +40,11 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       await fetch('/api/auth/logout', {
         method: 'POST',
-        credentials: 'include',
+        credentials: 'include'
       })
     } catch {
       // Clear state even if the request fails
     }
     set({ user: null, isAuthenticated: false })
-  },
+  }
 }))

@@ -39,8 +39,8 @@ def _profile(tmp_path: Path) -> Path:
 def _receipt(tmp_path: Path) -> Path:
     path = tmp_path / "handoff.md"
     path.write_text(
-        "---\nschema_version: \"bashgym.activity.v1\"\n"
-        "privacy: \"full-tier-only\"\n---\n\n# Safe handoff\n",
+        '---\nschema_version: "bashgym.activity.v1"\n'
+        'privacy: "full-tier-only"\n---\n\n# Safe handoff\n',
         encoding="utf-8",
     )
     return path
@@ -102,4 +102,6 @@ def test_bridge_full_rescans_the_bounded_source_after_atomic_publish():
     assert "'--full'" in bridge.REMOTE_GBRAIN
     assert "'--yes'" in bridge.REMOTE_GBRAIN
     assert "relative not in output" in bridge.REMOTE_VERIFY
-    assert bridge.PurePosixPath("handoffs/session.md").with_suffix("").as_posix() == "handoffs/session"
+    assert (
+        bridge.PurePosixPath("handoffs/session.md").with_suffix("").as_posix() == "handoffs/session"
+    )

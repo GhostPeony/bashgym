@@ -26,13 +26,13 @@ trace spans, read [session-distillation.md](session-distillation.md).
 
 ## Status Key
 
-| Status | Meaning |
-|---|---|
-| Ready | BashGym has implemented user-facing controls, API/CLI support, docs, and local tests or smoke evidence. |
-| Ready with evidence | The method is usable, but only when the user supplies valid data, verifiers, or release evidence. |
-| Backend-dependent | BashGym has contracts, adapters, replay, or launch planning, but an installed external backend must still prove execution. |
-| Diagnostic | Useful for investigation, curriculum, or auxiliary training, but not enough to approve routing by itself. |
-| Compute-gated | Local contracts exist; the remaining proof requires a configured private/cloud backend run. |
+| Status              | Meaning                                                                                                                    |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Ready               | BashGym has implemented user-facing controls, API/CLI support, docs, and local tests or smoke evidence.                    |
+| Ready with evidence | The method is usable, but only when the user supplies valid data, verifiers, or release evidence.                          |
+| Backend-dependent   | BashGym has contracts, adapters, replay, or launch planning, but an installed external backend must still prove execution. |
+| Diagnostic          | Useful for investigation, curriculum, or auxiliary training, but not enough to approve routing by itself.                  |
+| Compute-gated       | Local contracts exist; the remaining proof requires a configured private/cloud backend run.                                |
 
 ---
 
@@ -40,16 +40,16 @@ trace spans, read [session-distillation.md](session-distillation.md).
 
 Start with the least exotic method that can teach the missing behavior.
 
-| Situation | First method to try | Why |
-|---|---|---|
-| The student cannot follow the tool-call/chat format. | SFT | It teaches format, conventions, and basic action structure. |
-| You have same-prompt better/worse examples. | DPO | It sharpens preferences after SFT without needing an executable reward. |
-| The student cannot solve tasks at all. | SFT or distillation | RL needs attempts worth scoring; all-zero pass@k is usually not ready for RL. |
-| Executable tasks sometimes pass and sometimes fail. | GRPO/RLVR | Reward groups have contrast, so verifier-backed RL can learn. |
-| Failed traces contain a local mistake and later recovery. | Session Distillation | It repairs the same target action under a hint without replacing the trajectory. |
-| You have multi-step terminal rollouts with logprobs. | DPPO replay/backend path | Replay and trust-region masks can hand terminal trajectories to an RL backend. |
-| You want terminal-dynamics diagnostics or curriculum mining. | ECHO/RWML | World-model signals can explain or mine failures, but remain diagnostic. |
-| A broad run forgets domains. | Cascade/domain-staged training | Per-domain stages can isolate regressions and later distill/merge. |
+| Situation                                                    | First method to try            | Why                                                                              |
+| ------------------------------------------------------------ | ------------------------------ | -------------------------------------------------------------------------------- |
+| The student cannot follow the tool-call/chat format.         | SFT                            | It teaches format, conventions, and basic action structure.                      |
+| You have same-prompt better/worse examples.                  | DPO                            | It sharpens preferences after SFT without needing an executable reward.          |
+| The student cannot solve tasks at all.                       | SFT or distillation            | RL needs attempts worth scoring; all-zero pass@k is usually not ready for RL.    |
+| Executable tasks sometimes pass and sometimes fail.          | GRPO/RLVR                      | Reward groups have contrast, so verifier-backed RL can learn.                    |
+| Failed traces contain a local mistake and later recovery.    | Session Distillation           | It repairs the same target action under a hint without replacing the trajectory. |
+| You have multi-step terminal rollouts with logprobs.         | DPPO replay/backend path       | Replay and trust-region masks can hand terminal trajectories to an RL backend.   |
+| You want terminal-dynamics diagnostics or curriculum mining. | ECHO/RWML                      | World-model signals can explain or mine failures, but remain diagnostic.         |
+| A broad run forgets domains.                                 | Cascade/domain-staged training | Per-domain stages can isolate regressions and later distill/merge.               |
 
 ---
 
@@ -77,13 +77,13 @@ verification, and recovery behavior.
 
 **Key settings:**
 
-| Setting | Meaning | Starter |
-|---|---|---|
-| `learning_rate` | Optimizer step size. | Local LoRA SFT can start higher than DPO/RL; remote/full runs should be more conservative. |
-| `epochs` | Passes over the dataset. | Start with one smoke epoch, then increase only after heldout behavior is healthy. |
-| `max_seq_length` | Token budget per example. | Use the shortest value that preserves prompt, actions, observations, final fix, and verifier output. |
-| `use_lora` / `load_in_4bit` | Adapter and QLoRA memory controls. | Use for most local iteration. |
-| `lora_rank` / `lora_alpha` | Adapter capacity and scaling. | Rank 16-32 is a practical first range. |
+| Setting                     | Meaning                            | Starter                                                                                              |
+| --------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `learning_rate`             | Optimizer step size.               | Local LoRA SFT can start higher than DPO/RL; remote/full runs should be more conservative.           |
+| `epochs`                    | Passes over the dataset.           | Start with one smoke epoch, then increase only after heldout behavior is healthy.                    |
+| `max_seq_length`            | Token budget per example.          | Use the shortest value that preserves prompt, actions, observations, final fix, and verifier output. |
+| `use_lora` / `load_in_4bit` | Adapter and QLoRA memory controls. | Use for most local iteration.                                                                        |
+| `lora_rank` / `lora_alpha`  | Adapter capacity and scaling.      | Rank 16-32 is a practical first range.                                                               |
 
 **Metrics to watch:**
 
@@ -132,12 +132,12 @@ prefer better actions or completions, but it does not replace executable eval.
 
 **Key settings:**
 
-| Setting | Meaning | Starter |
-|---|---|---|
-| `dpo_beta` | Strength of reference-policy pull. | Start around `0.1`; lower if behavior regresses. |
-| `learning_rate` | Step size. | Lower than SFT in most cases. |
-| `max_seq_length` | Pair prompt/completion token budget. | Must preserve the decisive difference. |
-| Pair filters | Remove bad pairs. | Require same prompt and meaningful difference. |
+| Setting          | Meaning                              | Starter                                          |
+| ---------------- | ------------------------------------ | ------------------------------------------------ |
+| `dpo_beta`       | Strength of reference-policy pull.   | Start around `0.1`; lower if behavior regresses. |
+| `learning_rate`  | Step size.                           | Lower than SFT in most cases.                    |
+| `max_seq_length` | Pair prompt/completion token budget. | Must preserve the decisive difference.           |
+| Pair filters     | Remove bad pairs.                    | Require same prompt and meaningful difference.   |
 
 **Metrics to watch:**
 
@@ -203,13 +203,13 @@ they are trusted as RL rewards.
 
 **Key settings:**
 
-| Setting | Meaning | Starter |
-|---|---|---|
-| `reward_artifact` | JSONL reward examples to train/evaluate against. | `reward_examples.jsonl`, strict-validated. |
-| `reward_type` | Preference, outcome, or process reward target. | Preference/outcome first; process only with step labels. |
-| `reward_loss` | Pairwise, regression, or classification loss shape. | `pairwise_or_regression`. |
-| `reward_scale` | Explicit score range or label schema. | Keep declared in the artifact. |
-| `eval_split_required` | Heldout split requirement before serious claims. | `true`. |
+| Setting                      | Meaning                                                         | Starter                                                           |
+| ---------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `reward_artifact`            | JSONL reward examples to train/evaluate against.                | `reward_examples.jsonl`, strict-validated.                        |
+| `reward_type`                | Preference, outcome, or process reward target.                  | Preference/outcome first; process only with step labels.          |
+| `reward_loss`                | Pairwise, regression, or classification loss shape.             | `pairwise_or_regression`.                                         |
+| `reward_scale`               | Explicit score range or label schema.                           | Keep declared in the artifact.                                    |
+| `eval_split_required`        | Heldout split requirement before serious claims.                | `true`.                                                           |
 | `train_split` / `eval_split` | Which records the fixture smoke can learn from and evaluate on. | `train` and `eval`; never train from eval-only benchmark sources. |
 
 **Metrics to watch:**
@@ -348,13 +348,13 @@ attempts scored by verifiable rewards.
 
 **Key settings:**
 
-| Setting | Meaning | Starter |
-|---|---|---|
-| `training_profile=terminal_rl_tmax_like` | Terminal RL defaults. | Use for verifier-backed shell environments. |
-| `grpo_group_size` | Attempts sampled for one prompt. | 8 locally, 16-32 when hardware allows. |
-| `active_sampling` | Replaces zero-variance groups. | Enable for sparse rewards. |
-| `filter_zero_std_groups` | Drops groups with no reward contrast. | Enable for policy updates. |
-| `max_tool_calls_per_episode` | Action budget. | Enough for valid solutions; low enough to prevent loops. |
+| Setting                                  | Meaning                               | Starter                                                  |
+| ---------------------------------------- | ------------------------------------- | -------------------------------------------------------- |
+| `training_profile=terminal_rl_tmax_like` | Terminal RL defaults.                 | Use for verifier-backed shell environments.              |
+| `grpo_group_size`                        | Attempts sampled for one prompt.      | 8 locally, 16-32 when hardware allows.                   |
+| `active_sampling`                        | Replaces zero-variance groups.        | Enable for sparse rewards.                               |
+| `filter_zero_std_groups`                 | Drops groups with no reward contrast. | Enable for policy updates.                               |
+| `max_tool_calls_per_episode`             | Action budget.                        | Enough for valid solutions; low enough to prevent loops. |
 
 **Metrics to watch:**
 
@@ -486,14 +486,14 @@ behavioral than plain imitation.
 
 **Key settings:**
 
-| Setting | Meaning | Starter |
-|---|---|---|
-| `session_distillation_alpha` | Weight on hinted-context KL versus hard-label CE. | `0.7` |
-| `session_distillation_temperature` | Softness for the hinted-context distribution. | `1.0` |
-| `session_distillation_min_confidence` | Minimum reader confidence for accepted records. | `0.6` |
-| `session_distillation_mask_policy` | Which tokens receive loss. | `target_span_only` |
-| `session_distillation_context_mode` | How hints enter the context. | `hint_injected` |
-| `session_distillation_reader` | Heuristic or model reader for hint generation. | `heuristic` |
+| Setting                               | Meaning                                           | Starter            |
+| ------------------------------------- | ------------------------------------------------- | ------------------ |
+| `session_distillation_alpha`          | Weight on hinted-context KL versus hard-label CE. | `0.7`              |
+| `session_distillation_temperature`    | Softness for the hinted-context distribution.     | `1.0`              |
+| `session_distillation_min_confidence` | Minimum reader confidence for accepted records.   | `0.6`              |
+| `session_distillation_mask_policy`    | Which tokens receive loss.                        | `target_span_only` |
+| `session_distillation_context_mode`   | How hints enter the context.                      | `hint_injected`    |
+| `session_distillation_reader`         | Heuristic or model reader for hint generation.    | `heuristic`        |
 
 **Metrics to watch:**
 
@@ -595,13 +595,13 @@ and train-policy logprobs with trust-region masks.
 
 **Key settings:**
 
-| Setting | Meaning |
-|---|---|
-| `backend` | External backend target such as verl, SkyRL, OpenRLHF, or TMax/open-instruct style integration. |
-| `dppo_divergence` | `binary_tv` or `binary_kl` trust-region mask mode. |
-| Thresholds | Token mask cutoffs for divergence. |
-| Replay path | JSONL artifact carrying trajectories. |
-| Train-logprob enrichment | Adds train-policy logprobs before optimizer update. |
+| Setting                  | Meaning                                                                                         |
+| ------------------------ | ----------------------------------------------------------------------------------------------- |
+| `backend`                | External backend target such as verl, SkyRL, OpenRLHF, or TMax/open-instruct style integration. |
+| `dppo_divergence`        | `binary_tv` or `binary_kl` trust-region mask mode.                                              |
+| Thresholds               | Token mask cutoffs for divergence.                                                              |
+| Replay path              | JSONL artifact carrying trajectories.                                                           |
+| Train-logprob enrichment | Adds train-policy logprobs before optimizer update.                                             |
 
 **Metrics to watch:**
 
@@ -706,15 +706,15 @@ reward = 1 if predicted next state is close to actual next state
 
 BashGym should not promote a model from training metrics alone.
 
-| Signal | Role |
-|---|---|
-| Loss, KL, entropy, grad norm | Training health. |
-| Reward, reward_std, preference accuracy | Learning signal quality. |
-| Reward-model heldout accuracy, calibration, length bias | Learned-reward evidence. |
-| pass@1/pass@k, heldout trace delta, holdout comparison | Behavior evidence. |
-| Spurious controls, tamper canaries, verifier error rate | Safety/release gates. |
-| ECHO/RWML quality | Diagnostic until correlated with behavior. |
-| External benchmark ingest | Evidence for broad claims when leakage manifests exist. |
+| Signal                                                  | Role                                                    |
+| ------------------------------------------------------- | ------------------------------------------------------- |
+| Loss, KL, entropy, grad norm                            | Training health.                                        |
+| Reward, reward_std, preference accuracy                 | Learning signal quality.                                |
+| Reward-model heldout accuracy, calibration, length bias | Learned-reward evidence.                                |
+| pass@1/pass@k, heldout trace delta, holdout comparison  | Behavior evidence.                                      |
+| Spurious controls, tamper canaries, verifier error rate | Safety/release gates.                                   |
+| ECHO/RWML quality                                       | Diagnostic until correlated with behavior.              |
+| External benchmark ingest                               | Evidence for broad claims when leakage manifests exist. |
 
 Minimum promotion evidence:
 

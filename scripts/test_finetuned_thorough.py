@@ -10,7 +10,6 @@ Tests:
 """
 
 import json
-import sys
 import time
 from pathlib import Path
 
@@ -100,7 +99,7 @@ def main():
 
     # Load val examples
     with open(VAL_PATH) as f:
-        val_examples = [json.loads(l) for l in f if l.strip()]
+        val_examples = [json.loads(line) for line in f if line.strip()]
 
     # Get tools schema from a val example
     tools = val_examples[0].get("tools")
@@ -135,7 +134,7 @@ def main():
         print(f"\nPROMPT: {prompt}")
         print(f"RESPONSE ({elapsed:.1f}s, {n_tokens} tok):")
         print(f"  {response[:400]}")
-        print(f"  Format check:")
+        print("  Format check:")
         for k, v in check.items():
             mark = "✓" if v else "✗"
             print(f"    {mark} {k}: {v}")
@@ -162,7 +161,7 @@ def main():
         prefix = msgs[:cut_idx]
         gold_next = msgs[cut_idx]
 
-        print(f"PREFIX ends with tool output (showing last 200 chars):")
+        print("PREFIX ends with tool output (showing last 200 chars):")
         last = prefix[-1].get("content", "")[:200]
         print(f"  {last}")
 

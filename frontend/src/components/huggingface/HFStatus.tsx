@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useEffect } from 'react'
 import { Sparkles, Loader2 } from 'lucide-react'
-import { hfApi, HFStatus as HFStatusType } from '../../services/api'
 import { clsx } from 'clsx'
 import { GhostPeonyIcon } from '../common/GhostPeonyIcon'
+import { hfStatusResource } from '../../stores/hfResources'
+import { useSessionResource } from '../../stores/sessionResource'
 
 interface HFStatusProps {
   compact?: boolean
@@ -10,35 +11,25 @@ interface HFStatusProps {
 }
 
 export function HFStatus({ compact = false, onClick }: HFStatusProps) {
-  const [status, setStatus] = useState<HFStatusType | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const { data: status, loading, error } = useSessionResource(hfStatusResource)
 
   useEffect(() => {
-    const fetchStatus = async () => {
-      setLoading(true)
-      const result = await hfApi.getStatus()
-      if (result.ok && result.data) {
-        setStatus(result.data)
-        setError(null)
-      } else {
-        setError(result.error || 'Failed to fetch HuggingFace status')
-      }
-      setLoading(false)
-    }
-
-    fetchStatus()
-    // Refresh every 60 seconds
-    const interval = setInterval(fetchStatus, 60000)
+    // Refresh every 60 seconds while mounted
+    const interval = setInterval(() => {
+      void hfStatusResource.getState().refresh()
+    }, 60000)
     return () => clearInterval(interval)
   }, [])
 
   if (loading) {
     return (
-      <div className={clsx(
-        'flex items-center gap-2 text-text-secondary',
-        onClick && 'cursor-pointer hover:text-text-primary'
-      )} onClick={onClick}>
+      <div
+        className={clsx(
+          'flex items-center gap-2 text-text-secondary',
+          onClick && 'cursor-pointer hover:text-text-primary'
+        )}
+        onClick={onClick}
+      >
         <Loader2 className="w-4 h-4 animate-spin" />
         {!compact && <span className="text-sm font-mono">Loading...</span>}
       </div>
@@ -47,10 +38,13 @@ export function HFStatus({ compact = false, onClick }: HFStatusProps) {
 
   if (error || !status) {
     return (
-      <div className={clsx(
-        'flex items-center gap-2 text-text-secondary',
-        onClick && 'cursor-pointer hover:text-text-primary'
-      )} onClick={onClick}>
+      <div
+        className={clsx(
+          'flex items-center gap-2 text-text-secondary',
+          onClick && 'cursor-pointer hover:text-text-primary'
+        )}
+        onClick={onClick}
+      >
         <GhostPeonyIcon name="huggingface" size="xs" tone="neutral" muted />
         {!compact && <span className="text-sm font-mono">HF Offline</span>}
       </div>
@@ -59,10 +53,13 @@ export function HFStatus({ compact = false, onClick }: HFStatusProps) {
 
   if (!status.enabled) {
     return (
-      <div className={clsx(
-        'flex items-center gap-2 text-text-secondary',
-        onClick && 'cursor-pointer hover:text-text-primary'
-      )} onClick={onClick}>
+      <div
+        className={clsx(
+          'flex items-center gap-2 text-text-secondary',
+          onClick && 'cursor-pointer hover:text-text-primary'
+        )}
+        onClick={onClick}
+      >
         <GhostPeonyIcon name="huggingface" size="xs" tone="neutral" muted />
         {!compact && <span className="text-sm font-mono">HF Not Configured</span>}
       </div>
@@ -70,10 +67,10 @@ export function HFStatus({ compact = false, onClick }: HFStatusProps) {
   }
 
   return (
-    <div className={clsx(
-      'flex items-center gap-2',
-      onClick && 'cursor-pointer hover-press'
-    )} onClick={onClick}>
+    <div
+      className={clsx('flex items-center gap-2', onClick && 'cursor-pointer hover-press')}
+      onClick={onClick}
+    >
       <GhostPeonyIcon
         name="huggingface"
         size="xs"
@@ -83,7 +80,9 @@ export function HFStatus({ compact = false, onClick }: HFStatusProps) {
       />
       {!compact && (
         <>
-          <span className="text-sm text-text-primary font-mono">{status.username || 'Connected'}</span>
+          <span className="text-sm text-text-primary font-mono">
+            {status.username || 'Connected'}
+          </span>
           {status.pro_enabled && (
             <span className="tag">
               <span className="flex items-center gap-1">

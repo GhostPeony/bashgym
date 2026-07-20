@@ -363,9 +363,9 @@ The wrapper accepts `--host`, `--port`, `--reload`, `--workers`,
 9. If using terminal RL or DPPO, export replay and run
    `bashgym replay summarize <path> --json`.
 10. If using DPPO/ECHO/RWML, run
-   `bashgym training smoke-bundle --replay <path> --output-dir <dir> --json`.
+    `bashgym training smoke-bundle --replay <path> --output-dir <dir> --json`.
 11. Run `bashgym training analyze --run-id <run> --json` or pass explicit
-   `--metrics`, `--replay`, `--smoke-bundle`, and `--release-evidence` paths.
+    `--metrics`, `--replay`, `--smoke-bundle`, and `--release-evidence` paths.
 12. Read `tmax-terminal-rl-recipe.md` before a real terminal-RL run.
 13. Read `private-compute-eval-checklist.md` before moving artifacts to private/cloud compute.
 14. Read `metrics-runbook.md` when behavior does not improve.

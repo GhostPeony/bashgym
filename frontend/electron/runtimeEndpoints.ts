@@ -12,7 +12,9 @@ function loopbackHostname(hostname: string): boolean {
   return ['localhost', '127.0.0.1', '[::1]'].includes(hostname.toLowerCase())
 }
 
-function normalizeApiBase(value: string): Pick<DesktopRuntimeEndpoints, 'apiBase' | 'apiOrigin' | 'webSocketUrl'> {
+function normalizeApiBase(
+  value: string
+): Pick<DesktopRuntimeEndpoints, 'apiBase' | 'apiOrigin' | 'webSocketUrl'> {
   const url = new URL(value)
   if (url.protocol !== 'http:' || !loopbackHostname(url.hostname)) {
     throw new Error('Desktop BashGym API must use a loopback HTTP URL')
@@ -42,18 +44,16 @@ function normalizeDevServerUrl(value: string): string {
 }
 
 export function resolveDesktopRuntimeEndpoints(
-  environment: Record<string, string | undefined>,
+  environment: Record<string, string | undefined>
 ): DesktopRuntimeEndpoints {
   const api = normalizeApiBase(
-    environment.BASHGYM_API_BASE
-      || environment.BASHGYM_API_URL
-      || DEFAULT_API_BASE,
+    environment.BASHGYM_API_BASE || environment.BASHGYM_API_URL || DEFAULT_API_BASE
   )
   return {
     ...api,
     devServerUrl: normalizeDevServerUrl(
-      environment.BASHGYM_DEV_SERVER_URL || DEFAULT_DEV_SERVER_URL,
-    ),
+      environment.BASHGYM_DEV_SERVER_URL || DEFAULT_DEV_SERVER_URL
+    )
   }
 }
 

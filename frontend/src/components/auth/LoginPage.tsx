@@ -7,8 +7,10 @@ export function LoginPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <div className="w-full max-w-sm border-2 border-border bg-background-card relative"
-        style={{ boxShadow: '4px 4px 0 var(--border)' }}>
+      <div
+        className="w-full max-w-sm border-2 border-border bg-background-card relative"
+        style={{ boxShadow: '4px 4px 0 var(--border)' }}
+      >
         {/* Header */}
         <div className="p-8 pb-4 text-center">
           <img

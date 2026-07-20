@@ -108,15 +108,19 @@ def activate(core):
         idempotency_prefix="autoresearch-prepare",
     )
     actor = principal(core.repository)
-    return CampaignService(core.repository).transition(
-        "workspace-a",
-        "campaign-1",
-        CampaignTrigger.START,
-        expected_version=prepared.version,
-        principal=actor,
-        correlation_id="autoresearch-start",
-        idempotency_key="autoresearch-start",
-    ).campaign
+    return (
+        CampaignService(core.repository)
+        .transition(
+            "workspace-a",
+            "campaign-1",
+            CampaignTrigger.START,
+            expected_version=prepared.version,
+            principal=actor,
+            correlation_id="autoresearch-start",
+            idempotency_key="autoresearch-start",
+        )
+        .campaign
+    )
 
 
 def select_and_finish(repository, proposal_id: str, *, failed: bool = False):
@@ -235,9 +239,7 @@ def test_result_write_rejects_unbounded_candidate_references_before_lineage_look
     ).model_copy(
         update={
             "attempt_ids": tuple(f"attempt-{index:03d}" for index in range(101)),
-            "evidence_references": tuple(
-                f"artifact-{index:03d}" for index in range(101)
-            ),
+            "evidence_references": tuple(f"artifact-{index:03d}" for index in range(101)),
         }
     )
 
@@ -266,15 +268,19 @@ def test_fresh_draft_campaign_has_controller_owned_preparation_and_source_templa
     assert core.state("workspace-a", "campaign-1", now=NOW).next_action == (
         AutoResearchNextAction.START_CAMPAIGN
     )
-    started = CampaignService(repository).transition(
-        "workspace-a",
-        "campaign-1",
-        CampaignTrigger.START,
-        expected_version=prepared.version,
-        principal=principal(repository),
-        correlation_id="autoresearch-start",
-        idempotency_key="autoresearch-start",
-    ).campaign
+    started = (
+        CampaignService(repository)
+        .transition(
+            "workspace-a",
+            "campaign-1",
+            CampaignTrigger.START,
+            expected_version=prepared.version,
+            principal=principal(repository),
+            correlation_id="autoresearch-start",
+            idempotency_key="autoresearch-start",
+        )
+        .campaign
+    )
     assert started.status == CampaignStatus.ACTIVE
     assert started.version == 4
     assert core.state("workspace-a", "campaign-1", now=NOW).next_action == (
@@ -306,18 +312,19 @@ def test_fresh_draft_campaign_has_controller_owned_preparation_and_source_templa
     assert "template_id" not in registry["autoresearch-local-v1"]
     builtins = builtin_autoresearch_template_registry()
     assert list(builtins) == [AUTORESEARCH_CONTROL_SMOKE_TEMPLATE_ID]
-    assert builtins[AUTORESEARCH_CONTROL_SMOKE_TEMPLATE_ID]["manifest"][
-        "promotion_gates"
-    ]["quality_claim_eligible"] is False
+    assert (
+        builtins[AUTORESEARCH_CONTROL_SMOKE_TEMPLATE_ID]["manifest"]["promotion_gates"][
+            "quality_claim_eligible"
+        ]
+        is False
+    )
     assert all(
         not payload["manifest"]["promotion_gates"].get("quality_claim_eligible", False)
         for payload in builtins.values()
     )
 
 
-def test_authoritative_evaluation_derives_metric_cost_attempts_and_evidence(
-    tmp_path, monkeypatch
-):
+def test_authoritative_evaluation_derives_metric_cost_attempts_and_evidence(tmp_path, monkeypatch):
     _path, repository, core = fresh_core(tmp_path, evaluation_binding=True)
     activate(core)
     actor = principal(repository)
@@ -608,9 +615,7 @@ def test_code_candidate_registers_required_source_lineage(tmp_path):
         correlation_id="baseline-lineage-submit",
         idempotency_key="baseline-lineage-submit",
     )
-    baseline_study, baseline_attempt = select_and_finish(
-        repository, "baseline-lineage"
-    )
+    baseline_study, baseline_attempt = select_and_finish(repository, "baseline-lineage")
     core.record_result(
         result(
             "baseline-lineage",

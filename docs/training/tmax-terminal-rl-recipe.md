@@ -42,16 +42,16 @@ Read the `readiness_ladder` field before launching a long job and the
 Do not treat the recipe as one long command. Treat it as checkpoints with saved
 evidence at each stage.
 
-| Checkpoint | Proceed when | Stop when |
-|---|---|---|
-| Orientation | The goal is explicit: SFT format learning, DPO preference refinement, GRPO/RLVR verifier optimization, DPPO backend training, or ECHO/RWML diagnostics. | The run goal is only "improve the model" with no selected gate. |
-| Environment/data contract | Examples, pairs, environments, or replay records validate and preserve split/decontamination metadata. | Failed traces are mixed into SFT as wins, DPO pairs do not share prompts, or environments cannot materialize. |
-| Local smoke | A tiny local run writes metrics/logs/artifacts and analyzer output is not blocked. | Loader/template errors, high truncation, verifier errors, or OOM events appear. |
-| Behavior baseline | Base/SFT pass@k or heldout trace behavior is recorded before RL/DPPO changes. | There is no baseline to compare against. |
-| RL signal check | `reward_std` is non-zero for useful groups and `frac_reward_zero_std` is not dominating. | All attempts fail/pass, verifier errors are high, or reward can be hacked. |
-| Backend handoff | `bashgym training smoke-bundle` reports `contract_ready=true`; DPPO has train logprobs when needed. | Replay/logprob/world-model coverage is incomplete. |
-| Backend smoke | A one-step installed-backend run saves logs, metrics, and launch env artifacts. | Backend imports fail, CUDA/Triton mismatch appears, or artifacts cannot be synced back. |
-| Release evidence | Heldout, pass@k, holdout comparison, spurious controls, tamper canaries, and relevant public benchmarks are attached. | Loss/reward improved but behavior gates did not. |
+| Checkpoint                | Proceed when                                                                                                                                            | Stop when                                                                                                     |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Orientation               | The goal is explicit: SFT format learning, DPO preference refinement, GRPO/RLVR verifier optimization, DPPO backend training, or ECHO/RWML diagnostics. | The run goal is only "improve the model" with no selected gate.                                               |
+| Environment/data contract | Examples, pairs, environments, or replay records validate and preserve split/decontamination metadata.                                                  | Failed traces are mixed into SFT as wins, DPO pairs do not share prompts, or environments cannot materialize. |
+| Local smoke               | A tiny local run writes metrics/logs/artifacts and analyzer output is not blocked.                                                                      | Loader/template errors, high truncation, verifier errors, or OOM events appear.                               |
+| Behavior baseline         | Base/SFT pass@k or heldout trace behavior is recorded before RL/DPPO changes.                                                                           | There is no baseline to compare against.                                                                      |
+| RL signal check           | `reward_std` is non-zero for useful groups and `frac_reward_zero_std` is not dominating.                                                                | All attempts fail/pass, verifier errors are high, or reward can be hacked.                                    |
+| Backend handoff           | `bashgym training smoke-bundle` reports `contract_ready=true`; DPPO has train logprobs when needed.                                                     | Replay/logprob/world-model coverage is incomplete.                                                            |
+| Backend smoke             | A one-step installed-backend run saves logs, metrics, and launch env artifacts.                                                                         | Backend imports fail, CUDA/Triton mismatch appears, or artifacts cannot be synced back.                       |
+| Release evidence          | Heldout, pass@k, holdout comparison, spurious controls, tamper canaries, and relevant public benchmarks are attached.                                   | Loss/reward improved but behavior gates did not.                                                              |
 
 ---
 
@@ -156,11 +156,11 @@ bashgym training smoke-bundle \
 
 Interpretation:
 
-| Field | Meaning |
-|---|---|
-| `contract_ready` | Replay, behavior logprobs, ECHO spans, and RWML targets are shaped correctly. |
-| `optimizer_ready` | Train-policy logprobs are ready for DPPO optimizer updates. |
-| `backend_launch_ready` | A backend command/script is runnable from the current environment. |
+| Field                  | Meaning                                                                       |
+| ---------------------- | ----------------------------------------------------------------------------- |
+| `contract_ready`       | Replay, behavior logprobs, ECHO spans, and RWML targets are shaped correctly. |
+| `optimizer_ready`      | Train-policy logprobs are ready for DPPO optimizer updates.                   |
+| `backend_launch_ready` | A backend command/script is runnable from the current environment.            |
 
 If `contract_ready=false`, fix replay. If `optimizer_ready=false`, enrich
 train-policy logprobs. If only `backend_launch_ready=false`, move to backend or
@@ -223,18 +223,18 @@ Required release evidence:
 
 ## Starter Settings
 
-| Area | Starter |
-|---|---|
-| Training profile | `terminal_rl_tmax_like` |
-| GRPO group size | `8` for cheap smoke, `32` for serious terminal RL |
-| Loss | `dapo` or backend equivalent |
-| Active sampling | enabled |
-| Zero-std filtering | enabled for policy updates |
-| FP32 LM head | enabled when supported |
-| Max tool calls | `64` for serious runs, lower for smoke |
-| ECHO lambda | `0.05` |
-| RWML distance threshold | `0.2` |
-| RWML history window | `4` |
+| Area                    | Starter                                           |
+| ----------------------- | ------------------------------------------------- |
+| Training profile        | `terminal_rl_tmax_like`                           |
+| GRPO group size         | `8` for cheap smoke, `32` for serious terminal RL |
+| Loss                    | `dapo` or backend equivalent                      |
+| Active sampling         | enabled                                           |
+| Zero-std filtering      | enabled for policy updates                        |
+| FP32 LM head            | enabled when supported                            |
+| Max tool calls          | `64` for serious runs, lower for smoke            |
+| ECHO lambda             | `0.05`                                            |
+| RWML distance threshold | `0.2`                                             |
+| RWML history window     | `4`                                               |
 
 The defaults are starting points. The release gate decides whether they worked.
 
@@ -244,14 +244,14 @@ The defaults are starting points. The release gate decides whether they worked.
 
 Use larger compute only when the cheap evidence is already clean:
 
-| Evidence | Required before private/cloud compute |
-|---|---|
-| Environment pool | Materialization and verifier-only checks pass. |
-| Rollout contrast | Served attempts include both passing and failing groups, or the run is explicitly a contract-only smoke. |
-| Replay | `bashgym replay summarize <replay.jsonl> --json` shows records and behavior logprob coverage. |
-| Train logprobs | `train_logprob_replay_required_records` is zero, or enrichment has been run. |
-| World-model payloads | ECHO observation chars and RWML transitions are non-zero when enabled. |
-| Smoke bundle | `contract_ready=true`; `optimizer_ready=true` for real DPPO optimizer updates. |
+| Evidence             | Required before private/cloud compute                                                                    |
+| -------------------- | -------------------------------------------------------------------------------------------------------- |
+| Environment pool     | Materialization and verifier-only checks pass.                                                           |
+| Rollout contrast     | Served attempts include both passing and failing groups, or the run is explicitly a contract-only smoke. |
+| Replay               | `bashgym replay summarize <replay.jsonl> --json` shows records and behavior logprob coverage.            |
+| Train logprobs       | `train_logprob_replay_required_records` is zero, or enrichment has been run.                             |
+| World-model payloads | ECHO observation chars and RWML transitions are non-zero when enabled.                                   |
+| Smoke bundle         | `contract_ready=true`; `optimizer_ready=true` for real DPPO optimizer updates.                           |
 
 If only `backend_launch_ready=false`, the private/cloud target may still be the
 right next step because the backend can be installed there. If

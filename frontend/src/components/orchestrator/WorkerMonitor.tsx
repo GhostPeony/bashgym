@@ -13,7 +13,11 @@ export function WorkerMonitor() {
   if (!currentJob) return null
 
   const assignedTasks = Object.values(currentJob.tasks).filter(
-    t => taskAssignments[t.id] && t.status !== 'completed' && t.status !== 'failed' && t.status !== 'cancelled'
+    (t) =>
+      taskAssignments[t.id] &&
+      t.status !== 'completed' &&
+      t.status !== 'failed' &&
+      t.status !== 'cancelled'
   )
   const queuedCount = taskQueue.length
 
@@ -35,16 +39,21 @@ export function WorkerMonitor() {
 
       {assignedTasks.length === 0 ? (
         <p className="text-sm text-text-muted text-center py-4 font-mono">
-          {currentJob.status === 'completed' ? 'All done' :
-           currentJob.status === 'awaiting_approval' ? 'Awaiting dispatch' :
-           'No active terminals'}
+          {currentJob.status === 'completed'
+            ? 'All done'
+            : currentJob.status === 'awaiting_approval'
+              ? 'Awaiting dispatch'
+              : 'No active terminals'}
         </p>
       ) : (
         <div className="space-y-3">
           {assignedTasks.map((task) => {
             const terminalId = taskAssignments[task.id]
             return (
-              <div key={task.id} className="border border-border rounded-brutal p-3 bg-background-primary">
+              <div
+                key={task.id}
+                className="border border-border rounded-brutal p-3 bg-background-primary"
+              >
                 <div className="flex items-center gap-2 mb-1">
                   <Terminal className="w-3.5 h-3.5 text-status-warning" />
                   <span className="text-sm text-text-primary truncate flex-1">{task.title}</span>
@@ -61,7 +70,10 @@ export function WorkerMonitor() {
                   </div>
                 </div>
                 <div className="mt-2 h-1 bg-background-secondary rounded-full overflow-hidden">
-                  <div className="h-full bg-status-warning rounded-full animate-pulse" style={{ width: '60%' }} />
+                  <div
+                    className="h-full bg-status-warning rounded-full animate-pulse"
+                    style={{ width: '60%' }}
+                  />
                 </div>
               </div>
             )

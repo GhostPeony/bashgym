@@ -10,7 +10,11 @@
 import { create } from 'zustand'
 import type { AgentSessionSnapshot, SessionMatch } from '../services/agentSessions/types'
 import type { SessionAccountInfo, SessionFileInfo } from '../../electron/preload'
-import { ingestClaudeFile, resetClaudeFile, encodeClaudeProjectDir } from '../services/agentSessions/claudeSessionAdapter'
+import {
+  ingestClaudeFile,
+  resetClaudeFile,
+  encodeClaudeProjectDir
+} from '../services/agentSessions/claudeSessionAdapter'
 import { ingestCodexFile, resetCodexFile } from '../services/agentSessions/codexSessionAdapter'
 import { matchSessions, type MatchableTerminal } from '../services/agentSessions/matching'
 import { useTerminalStore } from './terminalStore'
@@ -147,7 +151,9 @@ export const useAgentSessionsStore = create<AgentSessionsState>((set, get) => ({
         set({ error: scan.error ?? 'Session scan failed' })
         return
       }
-      const liveTerminalIds = new Set(terminalInfos.filter((info) => !info.exited).map((info) => info.id))
+      const liveTerminalIds = new Set(
+        terminalInfos.filter((info) => !info.exited).map((info) => info.id)
+      )
       const registry = loadRegistry()
       const workspaceGroups = buildWorkspaceSessionIndex({
         workspaces: registry.workspaces,
@@ -212,7 +218,9 @@ export const useAgentSessionsStore = create<AgentSessionsState>((set, get) => ({
 
       for (const file of changed) {
         const snapshot =
-          file.kind === 'claude' ? await ingestClaudeFile(file, isHot(file)) : await ingestCodexFile(file)
+          file.kind === 'claude'
+            ? await ingestClaudeFile(file, isHot(file))
+            : await ingestCodexFile(file)
         if (snapshot) {
           snapshots.set(file.path, snapshot)
           knownSizes.set(file.path, file.size)

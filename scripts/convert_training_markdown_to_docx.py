@@ -7,13 +7,11 @@ import re
 from pathlib import Path
 
 from docx import Document
-from docx.enum.section import WD_SECTION
 from docx.enum.style import WD_STYLE_TYPE
-from docx.enum.text import WD_BREAK, WD_LINE_SPACING
+from docx.enum.text import WD_LINE_SPACING
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
-
 
 BODY_FONT = "Calibri"
 MONO_FONT = "Consolas"
@@ -34,7 +32,9 @@ def set_cell_shading(cell, fill: str) -> None:
     tc_pr.append(shd)
 
 
-def set_cell_margins(cell, top: int = 80, bottom: int = 80, start: int = 120, end: int = 120) -> None:
+def set_cell_margins(
+    cell, top: int = 80, bottom: int = 80, start: int = 120, end: int = 120
+) -> None:
     tc_pr = cell._tc.get_or_add_tcPr()
     tc_mar = tc_pr.first_child_found_in("w:tcMar")
     if tc_mar is None:
@@ -448,7 +448,9 @@ def parse_markdown(doc: Document, source_text: str) -> None:
 def convert_file(input_path: Path, output_dir: Path) -> Path:
     source_text = input_path.read_text(encoding="utf-8")
     title_match = re.search(r"^#\s+(.+)$", source_text, re.MULTILINE)
-    title = title_match.group(1).strip() if title_match else input_path.stem.replace("-", " ").title()
+    title = (
+        title_match.group(1).strip() if title_match else input_path.stem.replace("-", " ").title()
+    )
 
     doc = Document()
     configure_document(doc, title, input_path)

@@ -5,31 +5,26 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-import pytest
-
-
 CHATGPT_CONVERSATION = {
     "title": "Help with Python",
     "create_time": 1700000000.0,
     "update_time": 1700001000.0,
     "mapping": {
-        "root": {
-            "id": "root",
-            "message": None,
-            "parent": None,
-            "children": ["user1"]
-        },
+        "root": {"id": "root", "message": None, "parent": None, "children": ["user1"]},
         "user1": {
             "id": "user1",
             "message": {
                 "id": "msg_user1",
                 "author": {"role": "user"},
-                "content": {"content_type": "text", "parts": ["Write a fibonacci function in Python"]},
+                "content": {
+                    "content_type": "text",
+                    "parts": ["Write a fibonacci function in Python"],
+                },
                 "create_time": 1700000000.0,
-                "metadata": {}
+                "metadata": {},
             },
             "parent": "root",
-            "children": ["asst1"]
+            "children": ["asst1"],
         },
         "asst1": {
             "id": "asst1",
@@ -38,13 +33,15 @@ CHATGPT_CONVERSATION = {
                 "author": {"role": "assistant"},
                 "content": {
                     "content_type": "text",
-                    "parts": ["Here's a fibonacci function:\n```python\ndef fib(n):\n    if n <= 1:\n        return n\n    return fib(n-1) + fib(n-2)\n```"]
+                    "parts": [
+                        "Here's a fibonacci function:\n```python\ndef fib(n):\n    if n <= 1:\n        return n\n    return fib(n-1) + fib(n-2)\n```"
+                    ],
                 },
                 "create_time": 1700000010.0,
-                "metadata": {"model_slug": "gpt-4", "finish_details": {"type": "stop"}}
+                "metadata": {"model_slug": "gpt-4", "finish_details": {"type": "stop"}},
             },
             "parent": "user1",
-            "children": ["user2"]
+            "children": ["user2"],
         },
         "user2": {
             "id": "user2",
@@ -53,10 +50,10 @@ CHATGPT_CONVERSATION = {
                 "author": {"role": "user"},
                 "content": {"content_type": "text", "parts": ["Now add memoization"]},
                 "create_time": 1700000060.0,
-                "metadata": {}
+                "metadata": {},
             },
             "parent": "asst1",
-            "children": ["asst2"]
+            "children": ["asst2"],
         },
         "asst2": {
             "id": "asst2",
@@ -65,16 +62,18 @@ CHATGPT_CONVERSATION = {
                 "author": {"role": "assistant"},
                 "content": {
                     "content_type": "text",
-                    "parts": ["Here's the memoized version:\n```python\nfrom functools import lru_cache\n\n@lru_cache\ndef fib(n):\n    if n <= 1:\n        return n\n    return fib(n-1) + fib(n-2)\n```"]
+                    "parts": [
+                        "Here's the memoized version:\n```python\nfrom functools import lru_cache\n\n@lru_cache\ndef fib(n):\n    if n <= 1:\n        return n\n    return fib(n-1) + fib(n-2)\n```"
+                    ],
                 },
                 "create_time": 1700000070.0,
-                "metadata": {"model_slug": "gpt-4", "finish_details": {"type": "stop"}}
+                "metadata": {"model_slug": "gpt-4", "finish_details": {"type": "stop"}},
             },
             "parent": "user2",
-            "children": []
-        }
+            "children": [],
+        },
     },
-    "current_node": "asst2"
+    "current_node": "asst2",
 }
 
 
@@ -149,10 +148,8 @@ class TestChatGPTImporter:
             "title": "Empty",
             "create_time": 1700000000.0,
             "update_time": 1700000000.0,
-            "mapping": {
-                "root": {"id": "root", "message": None, "parent": None, "children": []}
-            },
-            "current_node": "root"
+            "mapping": {"root": {"id": "root", "message": None, "parent": None, "children": []}},
+            "current_node": "root",
         }
         steps, metadata = importer.parse_conversation(empty_convo)
         assert len(steps) == 0
@@ -170,43 +167,56 @@ class TestChatGPTImporter:
                 "u1": {
                     "id": "u1",
                     "message": {
-                        "id": "m1", "author": {"role": "user"},
+                        "id": "m1",
+                        "author": {"role": "user"},
                         "content": {"content_type": "text", "parts": ["Run print('hello')"]},
-                        "create_time": 1700000000.0, "metadata": {}
+                        "create_time": 1700000000.0,
+                        "metadata": {},
                     },
-                    "parent": "root", "children": ["a1"]
+                    "parent": "root",
+                    "children": ["a1"],
                 },
                 "a1": {
                     "id": "a1",
                     "message": {
-                        "id": "m2", "author": {"role": "assistant"},
+                        "id": "m2",
+                        "author": {"role": "assistant"},
                         "content": {"content_type": "code", "parts": ["print('hello')"]},
                         "create_time": 1700000010.0,
-                        "metadata": {"model_slug": "gpt-4"}
+                        "metadata": {"model_slug": "gpt-4"},
                     },
-                    "parent": "u1", "children": ["t1"]
+                    "parent": "u1",
+                    "children": ["t1"],
                 },
                 "t1": {
                     "id": "t1",
                     "message": {
-                        "id": "m3", "author": {"role": "tool"},
+                        "id": "m3",
+                        "author": {"role": "tool"},
                         "content": {"content_type": "execution_output", "parts": ["hello\n"]},
-                        "create_time": 1700000011.0, "metadata": {}
+                        "create_time": 1700000011.0,
+                        "metadata": {},
                     },
-                    "parent": "a1", "children": ["a2"]
+                    "parent": "a1",
+                    "children": ["a2"],
                 },
                 "a2": {
                     "id": "a2",
                     "message": {
-                        "id": "m4", "author": {"role": "assistant"},
-                        "content": {"content_type": "text", "parts": ["The code ran successfully."]},
+                        "id": "m4",
+                        "author": {"role": "assistant"},
+                        "content": {
+                            "content_type": "text",
+                            "parts": ["The code ran successfully."],
+                        },
                         "create_time": 1700000012.0,
-                        "metadata": {"model_slug": "gpt-4"}
+                        "metadata": {"model_slug": "gpt-4"},
                     },
-                    "parent": "t1", "children": []
-                }
+                    "parent": "t1",
+                    "children": [],
+                },
             },
-            "current_node": "a2"
+            "current_node": "a2",
         }
 
         importer = ChatGPTImporter()

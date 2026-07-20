@@ -1,12 +1,5 @@
 import { useEffect, useCallback } from 'react'
-import {
-  Home,
-  ArrowUp,
-  RefreshCw,
-  FolderTree,
-  Loader2,
-  AlertCircle
-} from 'lucide-react'
+import { Home, ArrowUp, RefreshCw, FolderTree, Loader2, AlertCircle } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useFileStore, initializeFileStore } from '../../stores/fileStore'
 import { useTerminalStore } from '../../stores/terminalStore'
@@ -19,16 +12,8 @@ interface FileBrowserProps {
 }
 
 export function FileBrowser({ id: _id, title, isActive: _isActive }: FileBrowserProps) {
-  const {
-    rootPath,
-    tree,
-    isLoading,
-    error,
-    refresh,
-    goUp,
-    setRootPath,
-    selectFile
-  } = useFileStore()
+  const { rootPath, tree, isLoading, error, refresh, goUp, setRootPath, selectFile } =
+    useFileStore()
 
   const { addPanel } = useTerminalStore()
 
@@ -38,19 +23,25 @@ export function FileBrowser({ id: _id, title, isActive: _isActive }: FileBrowser
   }, [])
 
   // Handle file selection
-  const handleSelect = useCallback((path: string) => {
-    selectFile(path)
-  }, [selectFile])
+  const handleSelect = useCallback(
+    (path: string) => {
+      selectFile(path)
+    },
+    [selectFile]
+  )
 
   // Handle file open (double-click)
-  const handleOpen = useCallback((path: string) => {
-    // Open in preview pane
-    addPanel({
-      type: 'preview',
-      title: path.split(/[/\\]/).pop() || 'Preview',
-      filePath: path
-    })
-  }, [addPanel])
+  const handleOpen = useCallback(
+    (path: string) => {
+      // Open in preview pane
+      addPanel({
+        type: 'preview',
+        title: path.split(/[/\\]/).pop() || 'Preview',
+        filePath: path
+      })
+    },
+    [addPanel]
+  )
 
   // Go to home directory
   const handleGoHome = useCallback(async () => {
@@ -61,9 +52,12 @@ export function FileBrowser({ id: _id, title, isActive: _isActive }: FileBrowser
   }, [setRootPath])
 
   // Navigate to a path from breadcrumbs
-  const handleBreadcrumbClick = useCallback((path: string) => {
-    setRootPath(path)
-  }, [setRootPath])
+  const handleBreadcrumbClick = useCallback(
+    (path: string) => {
+      setRootPath(path)
+    },
+    [setRootPath]
+  )
 
   // Parse path into breadcrumb segments
   const getBreadcrumbs = () => {
@@ -83,9 +77,7 @@ export function FileBrowser({ id: _id, title, isActive: _isActive }: FileBrowser
         currentPath = part + ':\\'
         breadcrumbs.push({ name: part + ':', path: currentPath })
       } else {
-        currentPath = isWindows
-          ? `${currentPath}${part}\\`
-          : `${currentPath}${part}/`
+        currentPath = isWindows ? `${currentPath}${part}\\` : `${currentPath}${part}/`
         breadcrumbs.push({ name: part, path: currentPath.slice(0, -1) })
       }
     }
@@ -134,10 +126,7 @@ export function FileBrowser({ id: _id, title, isActive: _isActive }: FileBrowser
 
       {/* Breadcrumbs */}
       <div className="flex items-center gap-1 px-3 py-1.5 bg-background-tertiary border-b border-border-subtle overflow-x-auto">
-        <button
-          onClick={handleGoHome}
-          className="text-xs text-text-muted hover:text-text-primary"
-        >
+        <button onClick={handleGoHome} className="text-xs text-text-muted hover:text-text-primary">
           ~
         </button>
         {breadcrumbs.map((crumb, index) => (
@@ -168,10 +157,7 @@ export function FileBrowser({ id: _id, title, isActive: _isActive }: FileBrowser
           <div className="flex flex-col items-center justify-center h-full text-center p-4">
             <AlertCircle className="w-8 h-8 text-status-error mb-2" />
             <p className="text-sm text-status-error">{error}</p>
-            <button
-              onClick={refresh}
-              className="mt-2 text-xs text-primary hover:underline"
-            >
+            <button onClick={refresh} className="mt-2 text-xs text-primary hover:underline">
               Try again
             </button>
           </div>

@@ -98,20 +98,20 @@ fine-tune followed by subjective acceptance.
 
 ## Current Capability Matrix
 
-| Area | Current capability | Status |
-|---|---|---|
-| SFT | Gold trace and curated JSONL training for tool-call format, repo conventions, command style, and first student baseline. | Ready |
-| DPO | Chosen/rejected pair training after SFT. | Ready |
-| GRPO/RLVR | Verifier-backed terminal RL with reward groups, pass@k, active sampling, and zero-std filtering. | Ready with evidence |
-| Distillation | Teacher-to-student behavior transfer when the student is too weak for RL. | Ready |
-| Session Distillation | Hint-injected self-distillation over failed trace spans with masked KL/CE. | Ready with evidence |
-| Cascade/domain-staged training | Domain-staged curriculum training with later merge/distillation path. | Ready with evidence |
-| DPPO replay | Terminal rollout replay with behavior/train logprobs and trust-region mask planning for external backends. | Backend-dependent, compute-gated |
-| ECHO/RWML | JEPA-style terminal world-model contracts, replay payloads, and adapter hooks. | Backend-dependent, diagnostic |
-| Heldout/eval gates | Heldout trace eval, environment pass@k, holdout gate, base-vs-candidate comparison. | Ready |
-| Safety/eval controls | Spurious-reward controls, reward-hacking canaries, tamper/protected-file checks. | Ready |
-| External benchmark ingest | Public benchmark evidence ingestion and release-manifest attachment. | Ready with evidence |
-| Private/cloud backend smoke | Local smoke bundle and launch contract exist; installed-backend proof is pending. | Partially proven |
+| Area                           | Current capability                                                                                                       | Status                           |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------ | -------------------------------- |
+| SFT                            | Gold trace and curated JSONL training for tool-call format, repo conventions, command style, and first student baseline. | Ready                            |
+| DPO                            | Chosen/rejected pair training after SFT.                                                                                 | Ready                            |
+| GRPO/RLVR                      | Verifier-backed terminal RL with reward groups, pass@k, active sampling, and zero-std filtering.                         | Ready with evidence              |
+| Distillation                   | Teacher-to-student behavior transfer when the student is too weak for RL.                                                | Ready                            |
+| Session Distillation           | Hint-injected self-distillation over failed trace spans with masked KL/CE.                                               | Ready with evidence              |
+| Cascade/domain-staged training | Domain-staged curriculum training with later merge/distillation path.                                                    | Ready with evidence              |
+| DPPO replay                    | Terminal rollout replay with behavior/train logprobs and trust-region mask planning for external backends.               | Backend-dependent, compute-gated |
+| ECHO/RWML                      | JEPA-style terminal world-model contracts, replay payloads, and adapter hooks.                                           | Backend-dependent, diagnostic    |
+| Heldout/eval gates             | Heldout trace eval, environment pass@k, holdout gate, base-vs-candidate comparison.                                      | Ready                            |
+| Safety/eval controls           | Spurious-reward controls, reward-hacking canaries, tamper/protected-file checks.                                         | Ready                            |
+| External benchmark ingest      | Public benchmark evidence ingestion and release-manifest attachment.                                                     | Ready with evidence              |
+| Private/cloud backend smoke    | Local smoke bundle and launch contract exist; installed-backend proof is pending.                                        | Partially proven                 |
 
 Status meanings:
 
@@ -128,18 +128,18 @@ Status meanings:
 
 ## Training Methods At A Glance
 
-| Method | BashGym role | Required data/artifacts | Evidence that matters |
-|---|---|---|---|
-| SFT | First student baseline. | Gold traces or curated `messages` JSONL. | Eval loss plus heldout behavior and executable pass@k. |
-| DPO | Preference refinement after SFT. | Same-prompt chosen/rejected pairs. | Reward margin, preference accuracy, no heldout regression. |
-| ORPO/KTO/IPO/SimPO | Ecosystem references. | Preference-style labels, method-specific format. | Heldout behavior; not first-class BashGym workflows yet. |
-| PPO/RLHF | External backend candidate. | Reward model/verifier, rollouts, KL telemetry. | Behavior gates plus reward-hacking controls. |
-| GRPO/RLVR | First-class verifier-backed terminal RL. | Executable environments with reward contrast. | `reward_std`, `frac_reward_zero_std`, pass@k, timeout/tamper. |
-| RLOO/REINFORCE-family | Possible future backend algorithm family. | Rollouts and rewards. | Same gates as GRPO/RLVR; not first-class today. |
-| Distillation | Bridge when student is too weak for RL. | Teacher outputs/traces. | Student pass@k and tool-format behavior. |
-| Cascade/domain-staged training | Curriculum and anti-forgetting path. | Domain-labeled data/envs. | Per-domain holdouts and final generalist holdout. |
-| DPPO replay | Backend handoff for terminal rollouts. | Replay JSONL with rewards and logprobs. | Smoke bundle, backend logs, mask telemetry, pass@k before/after. |
-| ECHO/RWML | Auxiliary terminal world-model diagnostics. | Replay with `world_model` payloads. | ECHO/RWML quality correlated with pass@k and safety, not standalone. |
+| Method                         | BashGym role                                | Required data/artifacts                          | Evidence that matters                                                |
+| ------------------------------ | ------------------------------------------- | ------------------------------------------------ | -------------------------------------------------------------------- |
+| SFT                            | First student baseline.                     | Gold traces or curated `messages` JSONL.         | Eval loss plus heldout behavior and executable pass@k.               |
+| DPO                            | Preference refinement after SFT.            | Same-prompt chosen/rejected pairs.               | Reward margin, preference accuracy, no heldout regression.           |
+| ORPO/KTO/IPO/SimPO             | Ecosystem references.                       | Preference-style labels, method-specific format. | Heldout behavior; not first-class BashGym workflows yet.             |
+| PPO/RLHF                       | External backend candidate.                 | Reward model/verifier, rollouts, KL telemetry.   | Behavior gates plus reward-hacking controls.                         |
+| GRPO/RLVR                      | First-class verifier-backed terminal RL.    | Executable environments with reward contrast.    | `reward_std`, `frac_reward_zero_std`, pass@k, timeout/tamper.        |
+| RLOO/REINFORCE-family          | Possible future backend algorithm family.   | Rollouts and rewards.                            | Same gates as GRPO/RLVR; not first-class today.                      |
+| Distillation                   | Bridge when student is too weak for RL.     | Teacher outputs/traces.                          | Student pass@k and tool-format behavior.                             |
+| Cascade/domain-staged training | Curriculum and anti-forgetting path.        | Domain-labeled data/envs.                        | Per-domain holdouts and final generalist holdout.                    |
+| DPPO replay                    | Backend handoff for terminal rollouts.      | Replay JSONL with rewards and logprobs.          | Smoke bundle, backend logs, mask telemetry, pass@k before/after.     |
+| ECHO/RWML                      | Auxiliary terminal world-model diagnostics. | Replay with `world_model` payloads.              | ECHO/RWML quality correlated with pass@k and safety, not standalone. |
 
 Detailed method notes are in
 [training-methods-reference.md](training-methods-reference.md).
@@ -151,16 +151,16 @@ Detailed method notes are in
 BashGym preserves artifacts because reproducibility depends on more than a
 checkpoint.
 
-| Artifact | Purpose |
-|---|---|
-| `training_examples.jsonl` | SFT/distillation examples with messages, tools, metadata, source trace, and quality score. |
-| `dpo_pairs.jsonl` | Same-prompt chosen/rejected preference data with pair provenance. |
-| `EnvironmentSpec` | Executable task contract: instruction, workspace/files, verifier, rollout limits, protected files. |
-| `metrics.jsonl` | Training/run telemetry: loss, reward, pass@k, timeout/tamper, world-model metrics, hardware health. |
-| `dppo_replay.jsonl` | Terminal rollout trajectories with reward, behavior/train logprobs, and optional world-model payloads. |
+| Artifact                             | Purpose                                                                                                |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| `training_examples.jsonl`            | SFT/distillation examples with messages, tools, metadata, source trace, and quality score.             |
+| `dpo_pairs.jsonl`                    | Same-prompt chosen/rejected preference data with pair provenance.                                      |
+| `EnvironmentSpec`                    | Executable task contract: instruction, workspace/files, verifier, rollout limits, protected files.     |
+| `metrics.jsonl`                      | Training/run telemetry: loss, reward, pass@k, timeout/tamper, world-model metrics, hardware health.    |
+| `dppo_replay.jsonl`                  | Terminal rollout trajectories with reward, behavior/train logprobs, and optional world-model payloads. |
 | `session_distillation_records.jsonl` | Original/hinted contexts, target span, loss mask, reader confidence, verifier outcome, and provenance. |
-| `backend_smoke_readiness.json` | Local DPPO/ECHO/RWML handoff status before private/cloud backend work. |
-| `release_evidence.json` | Heldout verdict, environment gates, external benchmarks, and diagnostic world-model quality. |
+| `backend_smoke_readiness.json`       | Local DPPO/ECHO/RWML handoff status before private/cloud backend work.                                 |
+| `release_evidence.json`              | Heldout verdict, environment gates, external benchmarks, and diagnostic world-model quality.           |
 
 Recommended addition before serious external review:
 
@@ -231,14 +231,14 @@ Minimum promotion package:
 
 ## Platform Surfaces To Inspect
 
-| Surface | What reviewers should inspect |
-|---|---|
-| Agent CLI | `bashgym manifest --json`, `bashgym training capabilities --json`, `bashgym training plan --strategy <strategy> --json`, `bashgym training analyze ... --json`, `bashgym training smoke-bundle ... --json`. |
-| Training API | Start, monitor, pause/resume/stop, export, inspect runs, managed submit. |
-| Environment API | Import/materialize terminal environments, local/model rollout, pass@k, holdouts, DPPO replay. |
-| Eval API | Heldout eval, verdicts, external benchmark ingest, reward-hacking controls, DPPO smoke planning. |
-| Device/hardware API | Private compute readiness, GPU/system/model-fit checks. |
-| UI | Training Config, Training Monitor, Training Guides, World-Model Quality panel, Environment Lab, Evaluator, Models, Settings/Devices. |
+| Surface             | What reviewers should inspect                                                                                                                                                                               |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Agent CLI           | `bashgym manifest --json`, `bashgym training capabilities --json`, `bashgym training plan --strategy <strategy> --json`, `bashgym training analyze ... --json`, `bashgym training smoke-bundle ... --json`. |
+| Training API        | Start, monitor, pause/resume/stop, export, inspect runs, managed submit.                                                                                                                                    |
+| Environment API     | Import/materialize terminal environments, local/model rollout, pass@k, holdouts, DPPO replay.                                                                                                               |
+| Eval API            | Heldout eval, verdicts, external benchmark ingest, reward-hacking controls, DPPO smoke planning.                                                                                                            |
+| Device/hardware API | Private compute readiness, GPU/system/model-fit checks.                                                                                                                                                     |
+| UI                  | Training Config, Training Monitor, Training Guides, World-Model Quality panel, Environment Lab, Evaluator, Models, Settings/Devices.                                                                        |
 
 ---
 
@@ -270,16 +270,16 @@ The honest current state:
 
 ## Known Risks And Recommended Fixes
 
-| Priority | Risk | Recommended fix before broad claims |
-|---|---|---|
-| P0 | Private/cloud backend proof is still pending for DPPO/ECHO/RWML. | Run one tiny installed-backend smoke with saved logs, metrics, launch env, and output listing. |
-| P0 | No canonical run card ties config, data, commit, hardware, thresholds, and outputs together. | Add run-card schema and require it for serious runs. |
-| P0 | ECHO/RWML claims could be overread as proven world-model gains. | Keep wording conservative: contracts/adapters implemented; behavior correlation pending. |
-| P1 | Eval rigor needs claim-tier thresholds. | Define local-smoke, narrow-routing, and broad-claim evidence tiers. |
-| P1 | External backend boundary is contract-based, not first-class integration. | Pick one primary backend, likely SkyRL or verl, and maintain one shim/integration test. |
-| P1 | Safety controls can be optional if evidence is not attached. | Make no tamper, no spurious pass, and verifier error thresholds mandatory for promotion. |
-| P1 | Dataset quality needs reviewer-friendly cards. | Add dataset cards for gold traces, failed traces, synthetic data, public data, and terminal environments. |
-| P2 | Metric thresholds are starter heuristics. | Separate observed metrics, warning thresholds, and release blockers; calibrate after real runs. |
+| Priority | Risk                                                                                         | Recommended fix before broad claims                                                                       |
+| -------- | -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| P0       | Private/cloud backend proof is still pending for DPPO/ECHO/RWML.                             | Run one tiny installed-backend smoke with saved logs, metrics, launch env, and output listing.            |
+| P0       | No canonical run card ties config, data, commit, hardware, thresholds, and outputs together. | Add run-card schema and require it for serious runs.                                                      |
+| P0       | ECHO/RWML claims could be overread as proven world-model gains.                              | Keep wording conservative: contracts/adapters implemented; behavior correlation pending.                  |
+| P1       | Eval rigor needs claim-tier thresholds.                                                      | Define local-smoke, narrow-routing, and broad-claim evidence tiers.                                       |
+| P1       | External backend boundary is contract-based, not first-class integration.                    | Pick one primary backend, likely SkyRL or verl, and maintain one shim/integration test.                   |
+| P1       | Safety controls can be optional if evidence is not attached.                                 | Make no tamper, no spurious pass, and verifier error thresholds mandatory for promotion.                  |
+| P1       | Dataset quality needs reviewer-friendly cards.                                               | Add dataset cards for gold traces, failed traces, synthetic data, public data, and terminal environments. |
+| P2       | Metric thresholds are starter heuristics.                                                    | Separate observed metrics, warning thresholds, and release blockers; calibrate after real runs.           |
 
 ---
 

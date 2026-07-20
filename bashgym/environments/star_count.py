@@ -86,9 +86,7 @@ def parse_star_count_prediction(prediction: str) -> dict[str, int] | None:
     return parsed if set(parsed) == set(STAR_COUNT_COLORS) else None
 
 
-def score_star_count_prediction(
-    prediction: str, expected_counts: dict[str, Any]
-) -> StarCountScore:
+def score_star_count_prediction(prediction: str, expected_counts: dict[str, Any]) -> StarCountScore:
     expected = _validated_counts(expected_counts)
     predicted = parse_star_count_prediction(prediction)
     if predicted is None:
@@ -127,9 +125,7 @@ def star_count_environment_spec() -> EnvironmentSpec:
                 RewardComponentSpec(
                     "count_accuracy", 0.95, "Fraction of colors counted correctly."
                 ),
-                RewardComponentSpec(
-                    "format_accuracy", 0.05, "Exact canonical response format."
-                ),
+                RewardComponentSpec("format_accuracy", 0.05, "Exact canonical response format."),
             ],
         ),
         build=BuildSpec(dockerfile=None, network_disabled=True),
@@ -164,9 +160,7 @@ def _star_points(
     for index in range(10):
         radius = outer_radius if index % 2 == 0 else outer_radius * 0.43
         angle = rotation - math.pi / 2 + index * math.pi / 5
-        points.append(
-            (center_x + radius * math.cos(angle), center_y + radius * math.sin(angle))
-        )
+        points.append((center_x + radius * math.cos(angle), center_y + radius * math.sin(angle)))
     return points
 
 
@@ -183,9 +177,7 @@ def _render_example(path: Path, counts: dict[str, int], rng: random.Random) -> t
     draw = ImageDraw.Draw(image)
     spacing = 36
     positions = [
-        (x, y)
-        for y in range(24, height - 20, spacing)
-        for x in range(24, width - 20, spacing)
+        (x, y) for y in range(24, height - 20, spacing) for x in range(24, width - 20, spacing)
     ]
     rng.shuffle(positions)
     cursor = 0
@@ -207,9 +199,7 @@ def _render_example(path: Path, counts: dict[str, int], rng: random.Random) -> t
     return width, height
 
 
-def _write_split(
-    root: Path, split: str, size: int, *, seed: int
-) -> list[dict[str, Any]]:
+def _write_split(root: Path, split: str, size: int, *, seed: int) -> list[dict[str, Any]]:
     rng = random.Random(f"star-count-v1:{seed}:{split}")
     records: list[dict[str, Any]] = []
     for index in range(size):
@@ -245,7 +235,9 @@ def _write_split(
         )
     jsonl = root / f"{split}.jsonl"
     jsonl.write_text(
-        "".join(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n" for record in records),
+        "".join(
+            json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n" for record in records
+        ),
         encoding="utf-8",
     )
     return records
@@ -305,7 +297,9 @@ def create_star_count_archive(dataset_dir: str | Path, output_path: str | Path) 
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.exists():
         raise FileExistsError(f"star-count archive already exists: {destination.name}")
-    with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
+    with zipfile.ZipFile(
+        destination, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6
+    ) as archive:
         for path in sorted(item for item in root.rglob("*") if item.is_file()):
             relative = path.relative_to(root).as_posix()
             info = zipfile.ZipInfo(relative, date_time=(1980, 1, 1, 0, 0, 0))
@@ -344,9 +338,7 @@ def _main(argv: list[str] | None = None) -> int:
         print(json.dumps(manifest, sort_keys=True))
         return 0
     expected = json.loads(Path(args.expected).read_text(encoding="utf-8"))
-    score = score_star_count_prediction(
-        Path(args.prediction).read_text(encoding="utf-8"), expected
-    )
+    score = score_star_count_prediction(Path(args.prediction).read_text(encoding="utf-8"), expected)
     components = score.reward_components()
     print(
         json.dumps(

@@ -49,18 +49,17 @@ export function SessionCard({
   const kind = session.agentKind ?? snapshot?.kind
   const topic = snapshot?.topic ?? session.taskSummary ?? snapshot?.title ?? session.title
   const projectName = folderNameFromPath(snapshot?.cwd ?? session.cwd, session.title)
-  const statusLabel = runtimeState === 'saved'
-    ? 'saved'
-    : session.isPaused
-      ? 'paused'
-      : session.status === 'tool_calling'
-        ? 'working'
-        : session.status.replace('_', ' ')
+  const statusLabel =
+    runtimeState === 'saved'
+      ? 'saved'
+      : session.isPaused
+        ? 'paused'
+        : session.status === 'tool_calling'
+          ? 'working'
+          : session.status.replace('_', ' ')
 
   return (
-    <article
-      className="w-full min-w-0 overflow-hidden rounded-brutal bg-background-secondary px-2.5 py-2 space-y-2 transition-colors hover:bg-accent/[0.06]"
-    >
+    <article className="w-full min-w-0 overflow-hidden rounded-brutal bg-background-secondary px-2.5 py-2 space-y-2 transition-colors hover:bg-accent/[0.06]">
       <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-2 min-w-0">
         <AgentBadge kind={kind} />
         <div className="min-w-0 space-y-1">
@@ -75,9 +74,13 @@ export function SessionCard({
           <div className="flex min-w-0 items-center gap-1.5 font-mono text-[9px] text-text-muted">
             <span className={clsx('status-dot flex-shrink-0', STATUS_DOT[session.status])} />
             <span className="min-w-0 truncate text-text-secondary">{projectName}</span>
-            <span aria-hidden="true" className="flex-shrink-0 text-border">·</span>
+            <span aria-hidden="true" className="flex-shrink-0 text-border">
+              ·
+            </span>
             <span className="flex-shrink-0">{statusLabel}</span>
-            <span aria-hidden="true" className="flex-shrink-0 text-border">·</span>
+            <span aria-hidden="true" className="flex-shrink-0 text-border">
+              ·
+            </span>
             <span className="flex-shrink-0">{timeAgo(session.lastActivity)}</span>
           </div>
         </div>

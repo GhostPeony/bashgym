@@ -14,53 +14,76 @@ const MAX_REQUEST_BYTES = 64 * 1024
 
 const identifier = z.string().regex(IDENTIFIER)
 const nullableIdentifier = identifier.nullable()
-const scopeSchema = z.object({
-  workspaceId: identifier,
-  campaignId: identifier,
-}).strict()
-const observationSchema = z.object({
-  schemaVersion: z.literal('campaign_agent_observation.v1'),
-  scope: scopeSchema,
-  campaign: z.object({
-    status: z.enum([
-      'draft', 'validating', 'ready', 'active', 'paused', 'awaiting_authority',
-      'cancelling', 'completed', 'exhausted', 'failed', 'cancelled',
-    ]),
-    version: z.number().int().safe().min(1),
-    manifestRevision: z.number().int().safe().min(1),
-    activeStudyId: nullableIdentifier,
-    activeActionId: nullableIdentifier,
-    latestEventCursor: z.number().int().safe().min(0),
-  }).strict(),
-  agent: z.object({
-    attachmentId: identifier,
-    attachmentVersion: z.number().int().safe().min(1),
-    agentFamily: z.enum(['codex', 'hermes']),
-    agentPrincipalId: identifier,
-    authorizedCapability: z.literal('campaign_observe'),
-  }).strict(),
-}).strict()
-const artifactItemSchema = z.object({
-  artifactId: identifier,
-  producerActionId: nullableIdentifier,
-  sha256: z.string().regex(SHA256),
-  sizeBytes: z.number().int().safe().min(0),
-  schemaName: identifier,
-  sealed: z.boolean(),
-  valid: z.boolean(),
-  createdAt: z.string().regex(CANONICAL_UTC_SECOND).datetime({ offset: false }),
-}).strict()
-const artifactPageSchema = z.object({
-  schemaVersion: z.literal('campaign_agent_artifact_page.v1'),
-  scope: scopeSchema,
-  items: z.array(artifactItemSchema).max(50),
-  nextCursor: z.string().regex(ARTIFACT_CURSOR).nullable(),
-  hasMore: z.boolean(),
-}).strict()
-const artifactArgsSchema = z.object({
-  afterCursor: z.string().regex(ARTIFACT_CURSOR).optional(),
-  limit: z.number().int().min(1).max(50).optional(),
-}).strict()
+const scopeSchema = z
+  .object({
+    workspaceId: identifier,
+    campaignId: identifier
+  })
+  .strict()
+const observationSchema = z
+  .object({
+    schemaVersion: z.literal('campaign_agent_observation.v1'),
+    scope: scopeSchema,
+    campaign: z
+      .object({
+        status: z.enum([
+          'draft',
+          'validating',
+          'ready',
+          'active',
+          'paused',
+          'awaiting_authority',
+          'cancelling',
+          'completed',
+          'exhausted',
+          'failed',
+          'cancelled'
+        ]),
+        version: z.number().int().safe().min(1),
+        manifestRevision: z.number().int().safe().min(1),
+        activeStudyId: nullableIdentifier,
+        activeActionId: nullableIdentifier,
+        latestEventCursor: z.number().int().safe().min(0)
+      })
+      .strict(),
+    agent: z
+      .object({
+        attachmentId: identifier,
+        attachmentVersion: z.number().int().safe().min(1),
+        agentFamily: z.enum(['codex', 'hermes']),
+        agentPrincipalId: identifier,
+        authorizedCapability: z.literal('campaign_observe')
+      })
+      .strict()
+  })
+  .strict()
+const artifactItemSchema = z
+  .object({
+    artifactId: identifier,
+    producerActionId: nullableIdentifier,
+    sha256: z.string().regex(SHA256),
+    sizeBytes: z.number().int().safe().min(0),
+    schemaName: identifier,
+    sealed: z.boolean(),
+    valid: z.boolean(),
+    createdAt: z.string().regex(CANONICAL_UTC_SECOND).datetime({ offset: false })
+  })
+  .strict()
+const artifactPageSchema = z
+  .object({
+    schemaVersion: z.literal('campaign_agent_artifact_page.v1'),
+    scope: scopeSchema,
+    items: z.array(artifactItemSchema).max(50),
+    nextCursor: z.string().regex(ARTIFACT_CURSOR).nullable(),
+    hasMore: z.boolean()
+  })
+  .strict()
+const artifactArgsSchema = z
+  .object({
+    afterCursor: z.string().regex(ARTIFACT_CURSOR).optional(),
+    limit: z.number().int().min(1).max(50).optional()
+  })
+  .strict()
 
 export interface CampaignAgentArtifactArgs {
   afterCursor?: string
@@ -93,7 +116,7 @@ function writeJson(res: ServerResponse, status: number, message: string): void {
   res.writeHead(status, {
     'Content-Type': 'application/json',
     'Content-Length': Buffer.byteLength(body),
-    'Cache-Control': 'no-store',
+    'Cache-Control': 'no-store'
   })
   res.end(body)
 }
@@ -120,7 +143,7 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
 function authorityUnavailable() {
   return {
     isError: true as const,
-    content: [{ type: 'text' as const, text: 'Campaign authority is unavailable.' }],
+    content: [{ type: 'text' as const, text: 'Campaign authority is unavailable.' }]
   }
 }
 
@@ -153,58 +176,84 @@ export class CampaignAgentMcpHost {
     if (typeof supplied !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(supplied)) return false
     const decoded = Buffer.from(supplied, 'base64url')
     try {
-      return decoded.length === this.launchSecret.length && timingSafeEqual(decoded, this.launchSecret)
+      return (
+        decoded.length === this.launchSecret.length && timingSafeEqual(decoded, this.launchSecret)
+      )
     } finally {
       decoded.fill(0)
     }
   }
 
   private sameScope(value: { workspaceId: string; campaignId: string }): boolean {
-    return value.workspaceId === this.scope.workspaceId && value.campaignId === this.scope.campaignId
+    return (
+      value.workspaceId === this.scope.workspaceId && value.campaignId === this.scope.campaignId
+    )
   }
 
   private makeMcpServer(): McpServer {
     const server = new McpServer({ name: 'bashgym-campaign-agent', version: '1.0.0' })
-    server.registerTool('campaign_observe', {
-      description: 'Read the bounded public state of the authorized AutoResearch campaign.',
-      inputSchema: z.object({}).strict(),
-      outputSchema: observationSchema,
-      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    }, async () => {
-      if (!this.authorityAvailable || this.closed) return authorityUnavailable()
-      try {
-        const value = observationSchema.parse(await this.options.observe())
-        if (!this.sameScope(value.scope)) return authorityUnavailable()
-        return {
-          content: [{ type: 'text' as const, text: JSON.stringify(value) }],
-          structuredContent: value,
+    server.registerTool(
+      'campaign_observe',
+      {
+        description: 'Read the bounded public state of the authorized AutoResearch campaign.',
+        inputSchema: z.object({}).strict(),
+        outputSchema: observationSchema,
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false
         }
-      } catch {
-        return authorityUnavailable()
-      }
-    })
-    server.registerTool('campaign_artifacts', {
-      description: 'Read one bounded, URI-free artifact page for the authorized AutoResearch campaign.',
-      inputSchema: artifactArgsSchema,
-      outputSchema: artifactPageSchema,
-      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    }, async (args) => {
-      if (!this.authorityAvailable || this.closed) return authorityUnavailable()
-      try {
-        const validatedArgs = artifactArgsSchema.parse(args)
-        const value = artifactPageSchema.parse(await this.options.artifacts(validatedArgs))
-        const limit = validatedArgs.limit ?? 20
-        if (!this.sameScope(value.scope)
-          || value.items.length > limit
-          || value.hasMore !== (value.nextCursor !== null)) return authorityUnavailable()
-        return {
-          content: [{ type: 'text' as const, text: JSON.stringify(value) }],
-          structuredContent: value,
+      },
+      async () => {
+        if (!this.authorityAvailable || this.closed) return authorityUnavailable()
+        try {
+          const value = observationSchema.parse(await this.options.observe())
+          if (!this.sameScope(value.scope)) return authorityUnavailable()
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify(value) }],
+            structuredContent: value
+          }
+        } catch {
+          return authorityUnavailable()
         }
-      } catch {
-        return authorityUnavailable()
       }
-    })
+    )
+    server.registerTool(
+      'campaign_artifacts',
+      {
+        description:
+          'Read one bounded, URI-free artifact page for the authorized AutoResearch campaign.',
+        inputSchema: artifactArgsSchema,
+        outputSchema: artifactPageSchema,
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false
+        }
+      },
+      async (args) => {
+        if (!this.authorityAvailable || this.closed) return authorityUnavailable()
+        try {
+          const validatedArgs = artifactArgsSchema.parse(args)
+          const value = artifactPageSchema.parse(await this.options.artifacts(validatedArgs))
+          const limit = validatedArgs.limit ?? 20
+          if (
+            !this.sameScope(value.scope) ||
+            value.items.length > limit ||
+            value.hasMore !== (value.nextCursor !== null)
+          )
+            return authorityUnavailable()
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify(value) }],
+            structuredContent: value
+          }
+        } catch {
+          return authorityUnavailable()
+        }
+      }
+    )
     return server
   }
 
@@ -222,8 +271,10 @@ export class CampaignAgentMcpHost {
       return
     }
     const suppliedSession = req.headers['mcp-session-id']
-    if (suppliedSession !== undefined
-      && (typeof suppliedSession !== 'string' || suppliedSession !== this.activeSessionId)) {
+    if (
+      suppliedSession !== undefined &&
+      (typeof suppliedSession !== 'string' || suppliedSession !== this.activeSessionId)
+    ) {
       writeJson(res, 404, 'session_unavailable')
       return
     }
@@ -243,7 +294,9 @@ export class CampaignAgentMcpHost {
         this.initializationClaimed = true
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomBytes(32).toString('base64url'),
-          onsessioninitialized: (sessionId) => { this.activeSessionId = sessionId },
+          onsessioninitialized: (sessionId) => {
+            this.activeSessionId = sessionId
+          }
         })
         const server = this.makeMcpServer()
         this.transport = transport
@@ -268,7 +321,9 @@ export class CampaignAgentMcpHost {
     }
     CampaignAgentMcpHost.activeGenerations.add(this.generationKey)
     this.generationClaimed = true
-    const server = createServer((req, res) => { void this.handle(req, res) })
+    const server = createServer((req, res) => {
+      void this.handle(req, res)
+    })
     this.httpServer = server
     try {
       await new Promise<void>((resolve, reject) => {
@@ -299,7 +354,7 @@ export class CampaignAgentMcpHost {
       url: `http://127.0.0.1:${address.port}/${this.route}`,
       headers: { [LAUNCH_HEADER]: this.launchSecret.toString('base64url') },
       terminalId: this.terminalId,
-      generation: this.generation,
+      generation: this.generation
     }
   }
 

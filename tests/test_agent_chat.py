@@ -1,7 +1,6 @@
-import json
-import pytest
 import tempfile
 from pathlib import Path
+
 from bashgym.agent.memory import PeonyMemory
 from bashgym.agent.skills.registry import SkillRegistry
 from bashgym.agent.tools import ToolRegistry
@@ -24,7 +23,13 @@ class TestAgentIntegration:
         assert len(tool_names) > 0
 
     def test_tool_registry_builds_dynamic_list(self):
-        skill_tools = [{"name": "hf_custom", "description": "Custom", "input_schema": {"type": "object", "properties": {}}}]
+        skill_tools = [
+            {
+                "name": "hf_custom",
+                "description": "Custom",
+                "input_schema": {"type": "object", "properties": {}},
+            }
+        ]
         reg = ToolRegistry()
         tools = reg.build_tools(skill_tools=skill_tools)
         names = [t["name"] for t in tools]

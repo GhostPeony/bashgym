@@ -220,9 +220,11 @@ class VerifierSpec:
             success_threshold=float(data.get("success_threshold", 1.0)),
             timeout_sec=int(data.get("timeout_sec", data.get("timeout", 120))),
             reward_components=[
-                item
-                if isinstance(item, RewardComponentSpec)
-                else RewardComponentSpec.from_dict(item)
+                (
+                    item
+                    if isinstance(item, RewardComponentSpec)
+                    else RewardComponentSpec.from_dict(item)
+                )
                 for item in (data.get("reward_components") or [])
             ],
             metadata=dict(data.get("metadata") or {}),

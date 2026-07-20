@@ -65,75 +65,6 @@ For a first model-training walkthrough rather than a durable campaign, use
 - **[docs/API.md](docs/API.md)** — REST API reference.
 - **[docs/FRONTEND_DESIGN_GUIDELINES.md](docs/FRONTEND_DESIGN_GUIDELINES.md)** — design tokens, components, and layout patterns.
 
----
-
-## Trace capture and training workflow
-
-```
-Use any AI coding tool (Claude Code, Gemini CLI, OpenCode, Codex, Copilot CLI)
-        ↓
-Adapters capture every session as structured traces
-        ↓
-Pipeline scores, classifies, and segments traces into training examples
-        ↓
-Fine-tune with SFT, DPO, GRPO, RLVR, Distillation, or Session Distillation (Unsloth + QLoRA)
-        ↓
-Export to LoRA adapter, merged weights, or GGUF → run via Ollama
-```
-
-| Stage          | What Happens                                                                                                                                                                                               |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Capture**    | Adapters record every tool call, file edit, and command from your AI coding sessions (Claude Code, Gemini CLI, OpenCode, Codex, Copilot CLI) as structured JSON. Historical sessions can be bulk-imported. |
-| **Curate**     | Traces are scored on 6 quality metrics. Good sessions become gold training data, bad ones become negative examples for DPO. PII is scrubbed.                                                               |
-| **Synthesize** | Gold traces are segmented into task-response pairs. Gaps are filled with synthetic augmentation via NVIDIA NeMo Data Designer or LLM-based generation.                                                     |
-| **Train**      | SFT, DPO, GRPO, RLVR, Distillation, or Session Distillation fine-tunes a model using Unsloth (2–5x faster, 50–80% less VRAM). Train locally, on a private compute target, or via HuggingFace cloud.        |
-| **Evaluate**   | 11 benchmarks (HumanEval, MBPP, BigCodeBench, SWE-bench, GSM8K, and more) score the result.                                                                                                                |
-| **Route**      | Confidence-based routing shifts simple tasks from Claude to your trained model over time.                                                                                                                  |
-
-The pipeline can run automatically — file watchers monitor session directories across all configured tools and trigger import → classify → train when thresholds are met.
-
----
-
-## Supported AI Coding Tools
-
-| Tool            | Live Capture | Historical Import | Hook Location                 |
-| --------------- | ------------ | ----------------- | ----------------------------- |
-| **Claude Code** | Yes          | Yes               | `~/.claude/hooks/`            |
-| **Gemini CLI**  | Yes          | Yes               | `~/.gemini/settings.json`     |
-| **OpenCode**    | Yes          | Yes               | `~/.config/opencode/plugins/` |
-| **Codex**       | Import only  | Yes               | `~/.codex/`                   |
-| **Copilot CLI** | Yes          | Yes               | `~/.copilot/hooks/`           |
-
-Live capture hooks run silently alongside your coding tool and record sessions in real time. Historical import harvests existing session data already on disk — no hooks needed.
-
-The dashboard **Settings > Agents** tab provides one-click installation for all detected tools.
-
----
-
-## Terminal Canvas
-
-The workspace is an infinite canvas where terminals, browsers, and integration nodes live side by side and connect with edges to share context.
-
-<img width="1744" height="915" alt="bgcanvas" src="https://github.com/user-attachments/assets/d30355b8-b64e-4122-902e-6f496b7be33a" />
-
-**Terminals** are real PTY sessions (xterm.js + WebGL rendering, 10k line scrollback). Agent status is detected live from output — idle, running, tool calling, waiting for input — with CWD extraction from shell prompts. Drag files from the built-in file browser or your OS directly into a terminal to insert the path.
-
-**Browsers** render live pages in a Chromium webview. Take full-page or element-level screenshots (crosshair picker to select a specific element) and route them to connected terminals — feed page screenshots directly to Claude as context.
-
-**Integration nodes** plug external services into the canvas:
-
-| Node        | What It Does                                                                                           |
-| ----------- | ------------------------------------------------------------------------------------------------------ |
-| **Context** | Freeform notes, file contents, URLs, or snippets. Reload files and fetch URLs on demand.               |
-| **Neon**    | Connect to a Postgres database. Introspect schema, run queries, send results to terminals as markdown. |
-| **Vercel**  | Monitor deployments, pull build logs, generate code with v0, push previews to browser nodes.           |
-
-**Edges are context channels.** Connect any two nodes and content flows between them — schema from Neon, build logs from Vercel, screenshots from browsers, notes from context nodes — all prefilled into linked terminal inputs for review before sending.
-
-**Shift+drag** to box-select nodes and auto-connect them in a full mesh. Three view modes: grid (all panels visible), single (one at a time), or canvas (click to open floating popups). Viewport, node positions, and all settings persist across sessions.
-
----
-
 ## Setup
 
 ### Prerequisites
@@ -286,6 +217,92 @@ contracts use generic v2 scorer and external-handoff identifiers.
 That's it. Work on your projects with Claude Code, Gemini CLI, OpenCode, Copilot CLI, or any other configured tool like you always do. Every session is captured automatically. Check the **Traces** tab in the dashboard to watch them accumulate.
 
 Once you have 20–30 gold traces, you're ready to train. See **[docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)** for the full walkthrough from first trace to first trained model.
+
+---
+
+## Trace capture and training workflow
+
+```
+Use any AI coding tool (Claude Code, Gemini CLI, OpenCode, Codex, Copilot CLI)
+        ↓
+Adapters capture every session as structured traces
+        ↓
+Pipeline scores, classifies, and segments traces into training examples
+        ↓
+Fine-tune with SFT, DPO, GRPO, RLVR, Distillation, or Session Distillation (Unsloth + QLoRA)
+        ↓
+Export to LoRA adapter, merged weights, or GGUF → run via Ollama
+```
+
+| Stage          | What Happens                                                                                                                                                                                               |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Capture**    | Adapters record every tool call, file edit, and command from your AI coding sessions (Claude Code, Gemini CLI, OpenCode, Codex, Copilot CLI) as structured JSON. Historical sessions can be bulk-imported. |
+| **Curate**     | Traces are scored on 6 quality metrics. Good sessions become gold training data, bad ones become negative examples for DPO. PII is scrubbed.                                                               |
+| **Synthesize** | Gold traces are segmented into task-response pairs. Gaps are filled with synthetic augmentation via NVIDIA NeMo Data Designer or LLM-based generation.                                                     |
+| **Train**      | SFT, DPO, GRPO, RLVR, Distillation, or Session Distillation fine-tunes a model using Unsloth (2–5x faster, 50–80% less VRAM). Train locally, on a private compute target, or via HuggingFace cloud.        |
+| **Evaluate**   | 11 benchmarks (HumanEval, MBPP, BigCodeBench, SWE-bench, GSM8K, and more) score the result.                                                                                                                |
+| **Route**      | Confidence-based routing shifts simple tasks from Claude to your trained model over time.                                                                                                                  |
+
+The pipeline can run automatically — file watchers monitor session directories
+across all configured tools and trigger import → classify → train when
+thresholds are met.
+
+---
+
+## Supported AI Coding Tools
+
+| Tool            | Live Capture | Historical Import | Hook Location                 |
+| --------------- | ------------ | ----------------- | ----------------------------- |
+| **Claude Code** | Yes          | Yes               | `~/.claude/hooks/`            |
+| **Gemini CLI**  | Yes          | Yes               | `~/.gemini/settings.json`     |
+| **OpenCode**    | Yes          | Yes               | `~/.config/opencode/plugins/` |
+| **Codex**       | Import only  | Yes               | `~/.codex/`                   |
+| **Copilot CLI** | Yes          | Yes               | `~/.copilot/hooks/`           |
+
+Live capture hooks run silently alongside your coding tool and record sessions
+in real time. Historical import harvests existing session data already on disk—no
+hooks needed.
+
+The dashboard **Settings > Agents** tab provides one-click installation for all
+detected tools.
+
+---
+
+## Terminal Canvas
+
+The workspace is an infinite canvas where terminals, browsers, and integration
+nodes live side by side and connect with edges to share context.
+
+<img width="1744" height="915" alt="bgcanvas" src="https://github.com/user-attachments/assets/d30355b8-b64e-4122-902e-6f496b7be33a" />
+
+**Terminals** are real PTY sessions (xterm.js + WebGL rendering, 10k line
+scrollback). Agent status is detected live from output—idle, running, tool
+calling, waiting for input—with CWD extraction from shell prompts. Drag files
+from the built-in file browser or your OS directly into a terminal to insert the
+path.
+
+**Browsers** render live pages in a Chromium webview. Take full-page or
+element-level screenshots (crosshair picker to select a specific element) and
+route them to connected terminals—feed page screenshots directly to Claude as
+context.
+
+**Integration nodes** plug external services into the canvas:
+
+| Node        | What It Does                                                                                           |
+| ----------- | ------------------------------------------------------------------------------------------------------ |
+| **Context** | Freeform notes, file contents, URLs, or snippets. Reload files and fetch URLs on demand.               |
+| **Neon**    | Connect to a Postgres database. Introspect schema, run queries, send results to terminals as markdown. |
+| **Vercel**  | Monitor deployments, pull build logs, generate code with v0, push previews to browser nodes.           |
+
+**Edges are context channels.** Connect any two nodes and content flows between
+them—schema from Neon, build logs from Vercel, screenshots from browsers, notes
+from context nodes—all prefilled into linked terminal inputs for review before
+sending.
+
+**Shift+drag** to box-select nodes and auto-connect them in a full mesh. Three
+view modes: grid (all panels visible), single (one at a time), or canvas (click
+to open floating popups). Viewport, node positions, and all settings persist
+across sessions.
 
 ---
 

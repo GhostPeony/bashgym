@@ -7,7 +7,7 @@
 ---
 
 AutoResearch gives training and evaluation experiments a durable, reviewable
-record—not a best-effort loop in a terminal. It preserves the exact bindings,
+record. It preserves the exact bindings,
 evidence, budgets, decisions, and human gates needed to improve a model safely
 over time. Trace capture and the training gym supply useful data and execution
 capabilities to that workflow; they are not the product's control plane.

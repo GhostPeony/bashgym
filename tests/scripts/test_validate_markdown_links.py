@@ -32,6 +32,18 @@ def test_validate_markdown_links_reports_missing_local_target(tmp_path, monkeypa
     assert issues == [f"{readme}:1: missing local target: missing.md"]
 
 
+def test_validate_markdown_links_ignores_fenced_code_examples(tmp_path, monkeypatch):
+    readme = tmp_path / "README.md"
+    readme.write_text(
+        "```markdown\n[Example](missing.md)\n```\n\n[Guide](guide.md)\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "guide.md").write_text("# Guide\n", encoding="utf-8")
+    monkeypatch.setattr(validate_markdown_links, "ROOT", tmp_path)
+
+    assert validate_markdown_links.validate_markdown_links([readme]) == []
+
+
 def test_validate_markdown_links_rejects_target_outside_repository_root(tmp_path, monkeypatch):
     repository_root = tmp_path / "repository"
     readme = repository_root / "docs" / "README.md"

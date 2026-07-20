@@ -10,6 +10,7 @@ from urllib.parse import unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 INLINE_LINK = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
+FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
 HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*#*\s*$", re.MULTILINE)
 HTML_TAG = re.compile(r"<[^>]+>")
 NON_SLUG = re.compile(r"[^\w\s-]")
@@ -61,24 +62,41 @@ def validate_markdown_links(paths: list[Path]) -> list[str]:
 
     for source in paths:
         text = source.read_text(encoding="utf-8")
-        for match in INLINE_LINK.finditer(text):
-            local = _local_destination(match.group(1))
-            if local is None:
+        fence: str | None = None
+        for line_number, line_text in enumerate(text.splitlines(), start=1):
+            if match := FENCE.match(line_text):
+                marker = match.group(1)
+                if fence is None:
+                    fence = marker[0]
+                elif marker[0] == fence:
+                    fence = None
                 continue
-            raw_target, anchor = local
-            target = source.resolve() if not raw_target else (source.parent / raw_target).resolve()
-            line = text.count("\n", 0, match.start()) + 1
+            if fence is not None:
+                continue
 
-            if not _is_within_repository(target):
-                issues.append(f"{source}:{line}: target escapes repository root: {raw_target}")
-                continue
-            if not target.exists():
-                issues.append(f"{source}:{line}: missing local target: {raw_target}")
-                continue
-            if anchor and target.is_file() and target.suffix.lower() == ".md":
-                anchors = anchor_cache.setdefault(target, _anchors(target))
-                if anchor not in anchors:
-                    issues.append(f"{source}:{line}: missing anchor: {raw_target}#{anchor}")
+            for match in INLINE_LINK.finditer(line_text):
+                local = _local_destination(match.group(1))
+                if local is None:
+                    continue
+                raw_target, anchor = local
+                target = (
+                    source.resolve() if not raw_target else (source.parent / raw_target).resolve()
+                )
+
+                if not _is_within_repository(target):
+                    issues.append(
+                        f"{source}:{line_number}: target escapes repository root: {raw_target}"
+                    )
+                    continue
+                if not target.exists():
+                    issues.append(f"{source}:{line_number}: missing local target: {raw_target}")
+                    continue
+                if anchor and target.is_file() and target.suffix.lower() == ".md":
+                    anchors = anchor_cache.setdefault(target, _anchors(target))
+                    if anchor not in anchors:
+                        issues.append(
+                            f"{source}:{line_number}: missing anchor: {raw_target}#{anchor}"
+                        )
     return issues
 
 

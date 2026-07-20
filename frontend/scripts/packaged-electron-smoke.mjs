@@ -12,6 +12,7 @@ const LAUNCH_TIMEOUT_MS = 30_000
 const WINDOW_TIMEOUT_MS = 20_000
 const IPC_TIMEOUT_MS = 10_000
 const CLOSE_TIMEOUT_MS = 10_000
+const PTY_REMOVAL_TIMEOUT_MS = 2_000
 const MAX_DIAGNOSTICS = 20
 
 function walk(directory, depth = 0) {
@@ -61,6 +62,21 @@ function withTimeout(promise, timeoutMs, label) {
       timer = setTimeout(() => reject(new Error(`${label} exceeded ${timeoutMs}ms`)), timeoutMs)
     })
   ]).finally(() => clearTimeout(timer))
+}
+
+async function waitForPtyRemoval(window, terminalId) {
+  const deadline = Date.now() + PTY_REMOVAL_TIMEOUT_MS
+  let sessions
+  do {
+    sessions = await withTimeout(
+      window.evaluate(() => globalThis.window.bashgym?.terminal.list()),
+      IPC_TIMEOUT_MS,
+      'post-kill PTY list'
+    )
+    if (!sessions?.some((session) => session.id === terminalId)) return
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  } while (Date.now() < deadline)
+  throw new Error(`Killed PTY remained in terminal.list(): ${JSON.stringify(sessions)}`)
 }
 
 export function buildSmokeEnvironment(profileDirectory, sourceEnvironment = process.env) {
@@ -168,14 +184,7 @@ export async function runPackagedElectronSmoke({
     )
     if (killed !== true) throw new Error(`PTY kill returned ${JSON.stringify(killed)}`)
 
-    const remaining = await withTimeout(
-      window.evaluate(() => globalThis.window.bashgym?.terminal.list()),
-      IPC_TIMEOUT_MS,
-      'post-kill PTY list'
-    )
-    if (remaining?.some((session) => session.id === terminalId)) {
-      throw new Error(`Killed PTY remained in terminal.list(): ${JSON.stringify(remaining)}`)
-    }
+    await waitForPtyRemoval(window, terminalId)
 
     passSummary = `${systemInfo.platform}/${systemInfo.arch} Electron ${systemInfo.electronVersion}; preload and PTY lifecycle verified offline`
   } catch (error) {

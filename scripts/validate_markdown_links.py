@@ -46,6 +46,14 @@ def _local_destination(destination: str) -> tuple[str, str] | None:
     return unquote(parsed.path), unquote(parsed.fragment)
 
 
+def _is_within_repository(path: Path) -> bool:
+    try:
+        path.resolve().relative_to(ROOT.resolve())
+    except ValueError:
+        return False
+    return True
+
+
 def validate_markdown_links(paths: list[Path]) -> list[str]:
     """Return one human-readable issue for every invalid local Markdown link."""
     issues: list[str] = []
@@ -58,9 +66,12 @@ def validate_markdown_links(paths: list[Path]) -> list[str]:
             if local is None:
                 continue
             raw_target, anchor = local
-            target = source if not raw_target else (source.parent / raw_target).resolve()
+            target = source.resolve() if not raw_target else (source.parent / raw_target).resolve()
             line = text.count("\n", 0, match.start()) + 1
 
+            if not _is_within_repository(target):
+                issues.append(f"{source}:{line}: target escapes repository root: {raw_target}")
+                continue
             if not target.exists():
                 issues.append(f"{source}:{line}: missing local target: {raw_target}")
                 continue

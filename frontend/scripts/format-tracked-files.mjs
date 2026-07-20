@@ -4,6 +4,10 @@ import path from 'node:path'
 
 const frontendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const repositoryRoot = path.resolve(frontendRoot, '..')
+const formatRunner = path
+  .relative(repositoryRoot, fileURLToPath(import.meta.url))
+  .split(path.sep)
+  .join('/')
 const supportedFrontendExtensions = new Set([
   '.css',
   '.html',
@@ -24,7 +28,11 @@ const trackedFiles = execFileSync('git', ['ls-files', '-z'], {
 
 const files = trackedFiles.filter((file) => {
   const extension = path.extname(file)
-  return file.endsWith('.md') || (file.startsWith('frontend/') && supportedFrontendExtensions.has(extension))
+  return (
+    file === formatRunner ||
+    file.endsWith('.md') ||
+    (file.startsWith('frontend/') && supportedFrontendExtensions.has(extension))
+  )
 })
 
 const prettier = path.join(frontendRoot, 'node_modules', 'prettier', 'bin', 'prettier.cjs')

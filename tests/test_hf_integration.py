@@ -21,7 +21,6 @@ import pytest
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
-sys.path.insert(0, str(Path(__file__).parent.parent / "bashgym"))
 
 
 # =============================================================================
@@ -314,7 +313,7 @@ class TestHuggingFaceClient:
         with patch("bashgym.integrations.huggingface.client.HfApi", return_value=mock_api):
             with patch("bashgym.integrations.huggingface.client.HF_HUB_AVAILABLE", True):
                 client = HuggingFaceClient(token="hf_test_token")
-        assert client.is_pro
+                assert client.is_pro
 
         reset_hf_client()
 
@@ -327,7 +326,7 @@ class TestHuggingFaceClient:
         with patch("bashgym.integrations.huggingface.client.HfApi", return_value=mock_api):
             with patch("bashgym.integrations.huggingface.client.HF_HUB_AVAILABLE", True):
                 client = HuggingFaceClient(token="hf_test_token")
-        assert client.is_pro
+                assert client.is_pro
 
         reset_hf_client()
 
@@ -340,7 +339,7 @@ class TestHuggingFaceClient:
         with patch("bashgym.integrations.huggingface.client.HfApi", return_value=mock_api):
             with patch("bashgym.integrations.huggingface.client.HF_HUB_AVAILABLE", True):
                 client = HuggingFaceClient(token="hf_test_token")
-        assert client.is_pro
+                assert client.is_pro
 
     def test_require_pro_raises(self):
         """Test require_pro raises when not Pro."""

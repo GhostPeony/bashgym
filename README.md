@@ -1,14 +1,53 @@
 # BashGym
 
-**Turn your AI coding sessions into fine-tuned models.**
+**A durable AutoResearch platform for controlled model-improvement campaigns.**
 
 <img width="1745" height="906" alt="autobashgym" src="https://github.com/user-attachments/assets/3ba9430e-e910-4d74-8860-d9e4c88161d3" />
 
 ---
 
-Every AI coding session is a chain-of-thought reasoning trace — step-by-step problem solving with verifiable outcomes. Every session from Claude Code, Gemini CLI, OpenCode, Codex, or Copilot CLI — tool calls, file edits, bash commands, multi-step reasoning — is a structured trace of expert coding behavior. BashGym captures these traces and uses them to train a reasoning language model with the same techniques behind frontier RLMs: GRPO for reinforcement learning, RLVR for verifiable reward signals from test results, and distillation to transfer reasoning from a large teacher into a small local model. The result is a personal RLM trained on how you actually think through code — your conventions, your repos, your patterns.
+AutoResearch gives training and evaluation experiments a durable, reviewable
+record—not a best-effort loop in a terminal. It preserves the exact bindings,
+evidence, budgets, decisions, and human gates needed to improve a model safely
+over time. Trace capture and the training gym supply useful data and execution
+capabilities to that workflow; they are not the product's control plane.
 
 ---
+
+## Platform at a glance
+
+- **AutoResearch** — the primary product: durable campaigns bind registered
+  model, data, evaluator, and local/private-compute profiles; establish a real
+  baseline before proposing one-variable candidates; enforce bounded budgets;
+  retain evaluation and artifact lineage; and require human oversight where it
+  applies. The restart-safe **Control Room** keeps the authoritative campaign
+  projection available across worker or backend interruptions. Creating a
+  `READY` campaign never launches work: **Start** is a separate, explicit,
+  server-revalidated approval.
+- **Trace capture and data factory** — capture supported AI coding sessions as
+  structured traces, curate them, scrub PII, and turn approved material into
+  training examples.
+- **Direct training and evaluation** — run a selected training job, evaluate it
+  against supported suites, and export the resulting model artifacts.
+- **Workspace** — inspect work in a desktop dashboard with terminal, browser,
+  and integration surfaces when those tools are useful to your workflow.
+
+## Start with AutoResearch
+
+1. Complete the local install in [Setup](#setup), then prove the control plane
+   without a GPU:
+
+   ```bash
+   bashgym campaign control-smoke --json
+   ```
+
+2. Follow the [durable AutoResearch campaign guide](docs/training/autoresearch-campaign.md)
+   to register the exact model, data, evaluator, and compute bindings; run
+   readiness checks; create a reviewable `READY` campaign; and make the later,
+   explicit **Start** decision.
+
+For a first model-training walkthrough rather than a durable campaign, use
+[Getting Started](docs/GETTING_STARTED.md).
 
 ## Documentation
 
@@ -28,7 +67,7 @@ Every AI coding session is a chain-of-thought reasoning trace — step-by-step p
 
 ---
 
-## How It Works
+## Trace capture and training workflow
 
 ```
 Use any AI coding tool (Claude Code, Gemini CLI, OpenCode, Codex, Copilot CLI)
@@ -511,25 +550,12 @@ mutation only when the authenticated projection proves that the registered
 consumer has a live controller lease; an acceptance receipt is never presented
 as an executed resume.
 
-Three earlier prototype loops remain behind the temporary
-`/api/autoresearch/*` compatibility API for hyperparameter, trace-curation, and
-schema exploration. These routes are hidden by default; set
-`BASHGYM_ENABLE_LEGACY_AUTORESEARCH=true` to re-expose them. They are not part
-of the official Control Room, have no renderer-owned state surface, and must
-not be presented as durable campaign evidence:
-
-| Mode                      | What It Evolves                | What It Searches                                                                                                         | How It Evaluates                                                                                   |
-| ------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
-| **Hyperparameter search** | Training configuration         | Learning rate, LoRA rank/alpha/dropout, batch size, sequence length, quantization, warmup ratio                          | Short training runs (50-100 steps) measuring validation loss                                       |
-| **Trace research**        | Data curation strategy         | Quality thresholds, segmentation boundaries, cognitive tag inclusion, silver trace ratio, dedup threshold, per-repo caps | End-to-end: filter traces → generate examples → micro-train → measure loss                         |
-| **Schema evolution**      | Data Designer pipeline configs | Temperatures, column toggles, judge rubrics, provider assignments, code validation, embedding dedup                      | Two-stage: judge scores filter bad candidates fast (25 examples), then micro-train validates top 5 |
-
-**Schema evolution** is the newest mode — the AutoCurriculum Compiler. Instead of tuning hyperparameters or data curation rules, it evolves the entire data generation pipeline. A `SchemaSearchSpace` mutates Data Designer configs (which models generate code vs judge quality, what temperature, how many judge dimensions, whether to include code validation), evaluates each mutant by generating real training data and measuring downstream training loss, and keeps winners. The template library maps failure patterns from your traces to starting templates — if your model keeps picking the wrong tool, the schema evolves toward tool-use-focused training data.
-
-The prototype hyperparameter loop uses the older `SearchSpace` ABC →
-`AutoResearcher` engine. Compatibility events may still enter the general
-Activity feed, but they never update durable campaign authority. New product
-work belongs under `/api/campaigns/*` and the AutoResearch sidebar destination.
+> **Legacy compatibility only:** the hidden `/api/autoresearch/*` endpoints
+> retain earlier hyperparameter, trace-curation, and schema-search experiments
+> for unsupported compatibility. They are disabled by default and can be
+> re-exposed only with `BASHGYM_ENABLE_LEGACY_AUTORESEARCH=true`. They are not
+> part of the Control Room or durable campaign authority; new work belongs under
+> `/api/campaigns/*`.
 
 **Embedding-based dedup** runs across all modes via NIM API: computes semantic similarity between training examples and removes near-duplicates (configurable threshold, default 0.95). Diversity scores are tracked in the quality dashboard.
 
@@ -578,7 +604,7 @@ bashgym/
 │   ├── factory/              # Data synthesis (trace processor, example generator, decision extractor)
 │   ├── gym/                  # Training (trainer, autoresearch, cascade, training goals)
 │   │   ├── trainer.py        # SFT, DPO, GRPO, RLVR, Distillation
-│   │   ├── autoresearch.py   # SearchSpace ABC + evolutionary hyperparameter search
+│   │   ├── autoresearch.py   # Unsupported legacy compatibility implementation
 │   │   ├── schema_search_space.py # Schema evolution for Data Designer configs
 │   │   ├── cascade_scheduler.py # Cascade RL + MOPD distillation
 │   │   ├── trace_researcher.py # Data curation optimization

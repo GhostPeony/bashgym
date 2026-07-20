@@ -233,24 +233,19 @@ guardrail block.
 
 ---
 
-## 8. Hyperparameter search (AutoResearch)
+## 8. Legacy AutoResearch compatibility (unsupported)
 
-This earlier in-process search loop is distinct from the authoritative durable
-campaign controller. The durable path applies the same baseline-first campaign,
-budget, lineage, evidence, and promotion contracts across registered models and
-trainers; this module remains an interactive search implementation beneath that
-broader product surface.
+The older in-process hyperparameter/search implementation is retained only for
+unsupported compatibility. Its `/api/autoresearch/*` routes are hidden by
+default and register only when
+`BASHGYM_ENABLE_LEGACY_AUTORESEARCH=true`. It is not a product path, has no
+authority over a campaign, and must not be used as durable experiment evidence.
 
-`bashgym/gym/autoresearch.py` runs a population-based evolutionary search over
-training hyperparameters (learning rate, LoRA rank/alpha, dropout, warmup ratio,
-gradient accumulation, batch size, max sequence length, 4-bit on/off):
-
-- **Simulate mode** — a cheap surrogate loss model for fast exploration of the
-  search space.
-- **Real mode** — trains each candidate and measures validation loss.
-- Mutation rate and scale are configurable; experiments stream to the dashboard.
-- The same `SearchSpace` abstraction backs both this and the data-pipeline
-  SchemaResearcher (§4.3).
+For all new AutoResearch work, use the
+[durable campaign guide](training/autoresearch-campaign.md): it binds registered
+model, data, evaluator, and compute profiles; requires a baseline before a
+one-variable candidate; retains budget and evidence lineage; and keeps **Start**
+as a separate explicit approval after campaign creation.
 
 ---
 

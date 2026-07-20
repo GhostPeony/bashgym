@@ -6,9 +6,10 @@ For the NVIDIA-facing capability comparison and integration roadmap, see
 [BashGym AutoResearch: Current Capability and NVIDIA NeMo Alignment](bashgym-autoresearch-nvidia-brief.md).
 
 This is BashGym's authoritative path for new AutoResearch work. The older
-`/api/autoresearch/*` endpoints are prototype compatibility surfaces, are
-explicitly non-durable, and are hidden by default; set
-`BASHGYM_ENABLE_LEGACY_AUTORESEARCH=true` to re-expose them.
+`/api/autoresearch/*` endpoints are hidden, unsupported compatibility surfaces:
+they are explicitly non-durable and only register when
+`BASHGYM_ENABLE_LEGACY_AUTORESEARCH=true`. They are not a product path and must
+not be used as campaign authority or evidence.
 
 ## Choose this path when the experiment needs a durable record
 
@@ -553,13 +554,12 @@ to the Control Room state model.
 
 The official product surface is the durable campaign path under
 `/api/campaigns/*` and the AutoResearch sidebar destination. The older
-`/api/autoresearch/*` hyperparameter/data/trace/schema research routes are a
-temporary, explicitly non-campaign compatibility API, hidden by default and
-only registered when `BASHGYM_ENABLE_LEGACY_AUTORESEARCH=true`; they are not
-rendered by the official Control Room, and the retired prototype
-renderer/store no longer ships as a competing state surface. Compatibility
-events can still appear in the ordinary Activity feed but are never treated as
-campaign authority. Legacy
+`/api/autoresearch/*` hyperparameter/data/trace/schema routes are hidden,
+unsupported compatibility code: they are explicitly non-campaign and register
+only when `BASHGYM_ENABLE_LEGACY_AUTORESEARCH=true`. They are not rendered by
+the official Control Room, and the retired prototype renderer/store no longer
+ships as a competing state surface. Compatibility events can still appear in
+the ordinary Activity feed but are never treated as campaign authority. Legacy
 `?view=autoresearch` desktop links are redirect-only aliases to
 the canonical `?view=training&tab=autoresearch` destination.
 
